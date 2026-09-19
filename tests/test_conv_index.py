@@ -712,15 +712,38 @@ class MigrationTests(unittest.TestCase):
         (self.sessions / f"{data['id']}.meta.json").write_text(
             json.dumps({"id": data["id"], "updated": data["updated"]}), encoding="utf-8")
 
-    def downgrade(self, path):
-        """Turn the database back into a v2 one: drop the v3 columns and the header entries."""
+    def downgrade(self, path, version=2):
+        """Turn the database back into an older one: drop the columns that version did not have
+        (and, below v3, the header entries it did not write)."""
         db = sqlite3.connect(str(path))
-        for name, _kind in conv_index.V3_COLUMNS:
+        dropped = conv_index.V4_COLUMNS if version >= 3 else conv_index.V3_COLUMNS + conv_index.V4_COLUMNS
+        for name, _kind in dropped:
             db.execute(f"ALTER TABLE conversations DROP COLUMN {name}")
-        db.execute("DELETE FROM entries WHERE kind IN ('title', 'summary')")
-        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '2')")
+        if version < 3:
+            db.execute("DELETE FROM entries WHERE kind IN ('title', 'summary')")
+        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(version),))
         db.commit()
         db.close()
+
+    def test_a_v3_index_gains_the_guest_columns_and_tables_in_place(self):
+        """v4 adds `raw_cwd` and the guest tables. A wipe would take the terminal history with it
+        — there is no file to rebuild that from — so it is an ALTER, like every version before."""
+        self.write(session("a" * 32, workspace="/tmp/alpha", branch="main"))
+        index = ConversationIndex(self.root / "index.db")
+        index.rebuild(self.root / "sessions")
+        index.record_commands("/tmp/alpha", [{"command": "rg needle", "status": 0}])
+        index.close()
+        self.downgrade(self.root / "index.db", version=3)
+
+        index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(index.close)
+        self.assertEqual(index.migrated_from, 3)
+        self.assertFalse(index.recovered, "migrated, not wiped")
+        items = {item["session_id"]: item for item in index.search("", scope="all")["items"]}
+        self.assertIn("term-" + conv_index.workspace_digest("/tmp/alpha"), items)
+        self.assertEqual("", items["a" * 32]["raw_cwd"])
+        self.assertEqual("main", items["a" * 32]["branch"], "the v3 columns are still there")
+        self.assertEqual(set(), index.forgotten())
 
     def test_a_v2_index_is_migrated_and_reconcile_backfills_the_new_columns(self):
         data = session("a" * 32, workspace="/tmp/alpha", branch="main", summary="the summary",
@@ -789,6 +812,166 @@ class MigrationTests(unittest.TestCase):
                            updated=3000.0))
         index.reconcile(self.root / "sessions")
         self.assertEqual(index.search("", scope="all")["items"][0]["summary"], "written by the session")
+
+
+class GuestRowTests(unittest.TestCase):
+    """The guest rows' own machinery in the index (protocol 26.7, GT7X): the meta store that
+    outlives the database, the forgotten set and the incremental cursors. `guest_sessions.py`
+    owns the parsing; this is what `conv_index` owes it."""
+
+    CLAUDE = "ea11ece1-7ec2-4597-8639-32fb1f43f073"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(lambda: self.index.close())
+
+    def record(self, session_id=None, *, source="claude", title="pane drag", workspace="/tmp/alpha",
+               raw_cwd=None, mtime=1000.0, entries=None, **extra):
+        rows = entries if entries is not None else [
+            {"turn": 1, "seq": 1, "kind": "prompt", "time": mtime, "text": "fix the pane drag"},
+            {"turn": 1, "seq": 2, "kind": "reply", "time": mtime, "text": "fixed it in Pane.h"}]
+        return {"source": source, "id": session_id or self.CLAUDE, "title": title, "workspace": workspace,
+                "raw_cwd": workspace if raw_cwd is None else raw_cwd, "created": mtime, "mtime": mtime,
+                "message_count": len(rows), "entries": rows, **extra}
+
+    def item(self, session_id=None):
+        rows = {item["session_id"]: item for item in
+                self.index.search("", scope="all", sources=list(conv_index.GUEST_SOURCES))["items"]}
+        return rows.get(session_id or self.CLAUDE)
+
+    # ----- the meta store ------------------------------------------------------------
+    def test_a_name_and_a_pin_are_written_beside_the_database(self):
+        self.index.update_guest(self.record())
+        self.index.rename(self.CLAUDE, "  the pane   drag one ")
+        self.index.set_pinned(self.CLAUDE, True)
+        self.assertEqual({"custom_title": "the pane drag one", "pinned": True},
+                         self.index.guest_meta("claude", self.CLAUDE))
+        self.assertEqual(conv_index.GUEST_META_NAME, self.index.store_path.name)
+        self.assertEqual(0o600, self.index.store_path.stat().st_mode & 0o777)
+
+    def test_the_store_is_what_a_rebuilt_row_takes_them_from(self):
+        self.index.update_guest(self.record())
+        self.index.rename(self.CLAUDE, "kept")
+        self.index.set_pinned(self.CLAUDE, True)
+        self.index.delete_guests()                       # as a wiped database leaves it
+        self.index.update_guest(self.record())
+        self.assertEqual(("kept", 1), (self.item()["title"], self.item()["pinned"]))
+
+    def test_the_row_wins_while_there_is_one(self):
+        """The two are written together, so they agree; where they cannot, the row is the live
+        one and the store is only its backup."""
+        self.index.update_guest(self.record())
+        self.index.set_pinned(self.CLAUDE, True)
+        self.index.update_guest({**self.record(), "pinned": False})
+        self.assertEqual(0, self.item()["pinned"])
+
+    def test_a_store_that_cannot_be_read_is_an_empty_one(self):
+        for text in ("{not json", "[]", '{"claude": 7}', '{"claude": {"x": "not a dict"}}'):
+            with self.subTest(text=text):
+                self.index.store_path.write_text(text, encoding="utf-8")
+                self.assertEqual({}, self.index.guest_meta())
+        self.index.store_path.write_text('{"gemini": {"x": {"pinned": true}}}', encoding="utf-8")
+        self.assertEqual({}, self.index.guest_meta(), "only the guest sources belong in it")
+
+    def test_only_guest_rows_reach_the_store(self):
+        self.index.update_session(session("a" * 32))
+        self.index.rename("a" * 32, "an agent session")
+        self.index.set_pinned("a" * 32, True)
+        self.assertEqual({}, self.index.guest_meta())
+
+    # ----- the forgotten set ---------------------------------------------------------
+    def test_deleting_a_guest_row_forgets_it_and_update_guest_refuses_it(self):
+        self.index.update_guest(self.record())
+        removed = self.index.delete_session(self.CLAUDE, remove_files=False)
+        self.assertEqual({"session_id": self.CLAUDE, "files": 0, "indexed": True, "forgotten": True},
+                         removed)
+        self.assertEqual({("claude", self.CLAUDE)}, self.index.forgotten())
+        self.assertEqual(0, self.index.update_guest(self.record()))
+        self.assertIsNone(self.item())
+        self.index.unforget("claude", self.CLAUDE)
+        self.assertEqual(2, self.index.update_guest(self.record()))
+        self.assertIsNotNone(self.item())
+
+    def test_a_deletion_that_is_not_the_users_does_not_forget(self):
+        self.index.update_guest(self.record())
+        self.index.delete_session(self.CLAUDE, remove_files=False, forget=False)
+        self.assertEqual(set(), self.index.forgotten())
+        self.assertEqual(2, self.index.update_guest(self.record()))
+
+    def test_the_forgotten_set_is_seeded_from_the_store_on_a_fresh_database(self):
+        self.index.update_guest(self.record())
+        self.index.delete_session(self.CLAUDE, remove_files=False)
+        self.index.close()
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(self.root / "index.db") + suffix).unlink(missing_ok=True)
+        self.index = ConversationIndex(self.root / "index.db")
+        self.assertEqual({("claude", self.CLAUDE)}, self.index.forgotten())
+        self.assertEqual(0, self.index.update_guest(self.record()))
+
+    def test_forgetting_ignores_everything_that_is_not_a_guest(self):
+        self.index.forget("agent", "a" * 32)
+        self.index.forget("claude", "")
+        self.assertEqual(set(), self.index.forgotten())
+        self.assertEqual(set(), self.index.forgotten(sources=["agent"]))
+
+    # ----- purging and the incremental cursors ---------------------------------------
+    def test_delete_guests_drops_the_rows_and_keeps_what_the_user_set(self):
+        self.index.update_guest(self.record())
+        self.index.update_guest(self.record("codex-1", source="codex"))
+        self.index.update_session(session("a" * 32))
+        self.index.set_pinned(self.CLAUDE, True)
+        self.assertEqual(1, self.index.delete_guests(sources=["codex"]))
+        self.assertEqual([self.CLAUDE], sorted(item["session_id"] for item in
+                                               self.index.search("", scope="all",
+                                                                 sources=["claude", "codex"])["items"]))
+        self.assertEqual(1, self.index.delete_guests())
+        self.assertEqual(0, self.index.delete_guests())
+        self.assertEqual(1, len(self.index.search("", scope="all")["items"]), "Relay's own row stays")
+        self.assertTrue(self.index.guest_meta("claude", self.CLAUDE)["pinned"])
+
+    def test_an_append_adds_entries_instead_of_rewriting_them(self):
+        self.index.update_guest(self.record(entries=[
+            {"turn": 1, "seq": 1, "kind": "prompt", "time": 1.0, "text": "first ask"}]))
+        self.index.update_guest({**self.record(entries=[
+            {"turn": 2, "seq": 2, "kind": "prompt", "time": 2.0, "text": "second ask"}]),
+            "append": True, "entry_base": 1, "message_count": 2, "mtime": 2000.0})
+        entries = self.index.conversation(self.CLAUDE)["items"]
+        self.assertEqual(["first ask", "second ask"], [entry["text"] for entry in entries])
+        self.assertEqual(2, self.item()["turns"])
+        self.assertEqual([self.CLAUDE], [item["session_id"] for item in
+                                         self.index.search("second", scope="all",
+                                                           sources=["claude"])["items"]])
+
+    def test_an_append_without_a_row_writes_nothing_and_drops_the_cursor(self):
+        """Entries added to a row that is not there would index a session starting in the middle."""
+        self.index.update_guest({**self.record(), "cursor": {"path": "/x.jsonl", "read_to": 10}})
+        self.assertEqual({self.CLAUDE: {"path": "/x.jsonl", "read_to": 10}}, self.index.guest_cursors())
+        self.index.delete_session(self.CLAUDE, remove_files=False, forget=False)
+        self.assertEqual(0, self.index.update_guest({**self.record(), "append": True, "entry_base": 2}))
+        self.assertIsNone(self.item())
+        self.assertEqual({}, self.index.guest_cursors())
+
+    def test_a_cursor_is_stored_with_the_entries_and_goes_with_the_row(self):
+        cursor = {"path": "/tmp/alpha/x.jsonl", "size": 40, "mtime_ns": 7, "read_to": 40,
+                  "parser": {"entries": 2}}
+        self.index.update_guest({**self.record(), "cursor": cursor})
+        self.assertEqual({self.CLAUDE: cursor}, self.index.guest_cursors())
+        self.assertEqual({}, self.index.guest_cursors(sources=["codex"]))
+        self.index.delete_session(self.CLAUDE, remove_files=False)
+        self.assertEqual({}, self.index.guest_cursors())
+
+    def test_the_raw_cwd_is_kept_beside_the_resolved_workspace(self):
+        link = self.root / "linked"
+        real = self.root / "real"
+        real.mkdir()
+        link.symlink_to(real, target_is_directory=True)
+        self.index.update_guest(self.record(workspace=str(link)))
+        item = self.item()
+        self.assertEqual((str(real), str(link)), (item["workspace"], item["raw_cwd"]))
+        self.assertEqual(str(real), self.index.conversation(self.CLAUDE)["workspace"])
 
 
 class StoreIntegrationTests(unittest.TestCase):

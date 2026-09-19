@@ -13,9 +13,10 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from relay_core import conv_index, guest, guest_sessions
-from relay_core.conv_index import ConversationIndex
+from relay_core.conv_index import GUEST_SOURCES, ConversationIndex
 
 CLAUDE_ID = "ea11ece1-7ec2-4597-8639-32fb1f43f073"
 CODEX_ID = "01a0b785-bca3-7b22-aa25-4c4c444a276d"
@@ -914,6 +915,520 @@ class LiveTail(unittest.TestCase):
     def test_guess_source_by_file_name(self):
         self.assertEqual("codex", guest_sessions.guess_source(CODEX_NAME))
         self.assertEqual("claude", guest_sessions.guess_source(f"{CLAUDE_ID}.jsonl"))
+
+
+# ----- the opt-out, the forgotten set and the meta store (GT7X review) ------------------------------
+
+class GuestIndexingSetting(unittest.TestCase):
+    """`RELAY_INDEX` turns the whole index off; this is the narrower switch behind the GUI's
+    "index my other agents' sessions", which may leave Relay's own search working."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.claude = write_claude(self.home, claude_lines())
+        self.rollout = write_codex(self.home, codex_lines())
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+
+    def test_switched_off_the_guests_files_are_not_read_and_the_rows_go(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(2, len(guest_sessions.list_sessions(self.index)))
+        outcome = guest_sessions.reconcile(self.index, str(self.home), enabled=False)
+        self.assertEqual((0, 0, 2, True), (outcome["added"], outcome["refreshed"], outcome["removed"],
+                                           outcome["skipped"]))
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+        self.assertEqual([], guest_sessions.search_sessions(self.index, "pane")["items"])
+        # And it stays that way however often the worker asks.
+        self.assertEqual(0, guest_sessions.reconcile(self.index, str(self.home), enabled=False)["removed"])
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+        # The guests' own files are the one thing this may never touch.
+        self.assertTrue(self.claude.is_file() and self.rollout.is_file())
+
+    def test_switched_on_again_the_rows_come_back_with_the_pins(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.index.rename(CLAUDE_ID, "kept name")
+        self.index.set_pinned(CLAUDE_ID, True)
+        guest_sessions.reconcile(self.index, str(self.home), enabled=False)
+        guest_sessions.reconcile(self.index, str(self.home))
+        rows = {record["id"]: record for record in guest_sessions.list_sessions(self.index)}
+        self.assertEqual(2, len(rows))
+        self.assertEqual("kept name", rows[CLAUDE_ID]["title"])
+        item = self.index.search("", scope="all", sources=["claude"])["items"][0]
+        self.assertEqual(1, item["pinned"])
+
+    def test_purge_is_the_same_thing_on_its_own(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(2, guest_sessions.purge(self.index))
+        self.assertEqual(0, guest_sessions.purge(self.index))
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+
+    def test_only_the_named_source_is_purged(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(1, guest_sessions.purge(self.index, sources=["codex"]))
+        self.assertEqual(["claude"], [r["source"] for r in guest_sessions.list_sessions(self.index)])
+
+    def test_the_environment_variable_is_the_default(self):
+        with mock.patch.dict(os.environ, {"RELAY_INDEX_GUESTS": "off"}):
+            self.assertFalse(guest_sessions.guests_enabled())
+            self.assertTrue(guest_sessions.reconcile(self.index, str(self.home))["skipped"])
+        self.assertTrue(guest_sessions.guests_enabled())
+        self.assertNotIn("skipped", guest_sessions.reconcile(self.index, str(self.home)))
+
+
+class ForgottenSessions(unittest.TestCase):
+    """Deleting a guest row has to stick: the transcript is the guest's and stays, so the next
+    reconcile reads the same file and finds the same session."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.claude = write_claude(self.home, claude_lines())
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+        guest_sessions.reconcile(self.index, str(self.home))
+
+    def test_a_deleted_guest_session_does_not_come_back(self):
+        removed = self.index.delete_session(CLAUDE_ID, remove_files=False)
+        self.assertTrue(removed["forgotten"])
+        self.assertEqual({("claude", CLAUDE_ID)}, self.index.forgotten())
+        outcome = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual((0, 0, 0), (outcome["added"], outcome["refreshed"], outcome["removed"]))
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+        self.assertEqual([], guest_sessions.search_sessions(self.index, "pane")["items"])
+        self.assertTrue(self.claude.is_file(), "the guest's own transcript is never deleted")
+
+    def test_update_guest_itself_refuses_a_forgotten_session(self):
+        """The reconcile does not even read the file, but the tail and any other writer come
+        through `update_guest`, so the refusal lives there too."""
+        self.index.delete_session(CLAUDE_ID, remove_files=False)
+        parsed = guest_sessions.parse_claude_transcript(self.claude)
+        self.assertEqual(0, self.index.update_guest(parsed))
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+
+    def test_unforget_brings_it_back_with_the_name_it_had(self):
+        self.index.rename(CLAUDE_ID, "the one I deleted")
+        self.index.delete_session(CLAUDE_ID, remove_files=False)
+        self.index.unforget("claude", CLAUDE_ID)
+        self.assertEqual(set(), self.index.forgotten())
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["added"])
+        self.assertEqual(["the one I deleted"],
+                         [record["title"] for record in guest_sessions.list_sessions(self.index)])
+
+    def test_a_row_pruned_because_its_file_is_gone_is_not_forgotten(self):
+        """A transcript that went away is not the user saying "never show me this again": a home
+        that was late, or a restored backup, must bring the session back."""
+        moved = self.claude.with_suffix(".away")
+        self.claude.rename(moved)
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["removed"])
+        self.assertEqual(set(), self.index.forgotten())
+        moved.rename(self.claude)
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["added"])
+
+    def test_forgetting_is_per_source_and_ignores_anything_else(self):
+        self.index.forget("codex", CLAUDE_ID)
+        self.index.forget("gemini", CLAUDE_ID)              # not a guest: nothing recorded
+        self.index.forget("claude", "")
+        self.assertEqual({("codex", CLAUDE_ID)}, self.index.forgotten())
+        self.assertEqual(1, len(guest_sessions.list_sessions(self.index)), "the claude row stays")
+
+
+class MetaStoreSurvival(unittest.TestCase):
+    """A guest row has no `<id>.meta.json` beside it, so the pin, the name and the forgotten set
+    live in `guest-meta.json` beside the index — the one thing here that outlives the database."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        write_claude(self.home, claude_lines())
+        write_codex(self.home, codex_lines())
+        self.index = index_in(self.root)
+        self.addCleanup(lambda: self.index.close())
+        guest_sessions.reconcile(self.index, str(self.home))
+
+    def reopen(self):
+        """Throw the database away, as a schema bump or a corruption does, and reconcile again."""
+        self.index.close()
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(self.root / "index.db") + suffix).unlink(missing_ok=True)
+        self.index = index_in(self.root)
+        guest_sessions.reconcile(self.index, str(self.home))
+
+    def test_a_pin_and_a_name_survive_the_database_being_discarded(self):
+        self.index.rename(CLAUDE_ID, "the pane drag one")
+        self.index.set_pinned(CLAUDE_ID, True)
+        self.reopen()
+        rows = {row["session_id"]: row for row in
+                self.index.search("", scope="all", sources=list(GUEST_SOURCES))["items"]}
+        item = rows[CLAUDE_ID]
+        self.assertEqual("the pane drag one", item["title"])
+        self.assertEqual(1, item["pinned"])
+        # Searchable under the name the user gave it, not only listed under it.
+        self.assertEqual([CLAUDE_ID], [item["session_id"] for item in
+                                       self.index.search("pane drag one", scope="all",
+                                                         sources=list(GUEST_SOURCES))["items"]])
+
+    def test_a_deletion_survives_it_too(self):
+        self.index.delete_session(CLAUDE_ID, remove_files=False)
+        self.reopen()
+        self.assertEqual({("claude", CLAUDE_ID)}, self.index.forgotten())
+        self.assertEqual([CODEX_ID], [record["id"] for record in guest_sessions.list_sessions(self.index)])
+
+    def test_unpinning_and_renaming_back_empty_the_store_again(self):
+        self.index.set_pinned(CLAUDE_ID, True)
+        self.index.rename(CLAUDE_ID, "a name")
+        self.index.set_pinned(CLAUDE_ID, False)
+        self.index.rename(CLAUDE_ID, "")
+        self.assertEqual({}, self.index.guest_meta("claude", CLAUDE_ID))
+        self.reopen()
+        rows = {record["id"]: record for record in guest_sessions.list_sessions(self.index)}
+        self.assertEqual("pane-drag-fix", rows[CLAUDE_ID]["title"], "back to the guest's own title")
+
+    def test_a_corrupt_store_is_an_empty_one_and_is_rewritten(self):
+        self.index.store_path.write_text("{not json at all", encoding="utf-8")
+        self.assertEqual({}, self.index.guest_meta())
+        self.index.set_pinned(CLAUDE_ID, True)
+        self.assertTrue(conv_index.read_guest_meta(self.index.store_path)["claude"][CLAUDE_ID]["pinned"])
+        self.assertEqual(0o600, self.index.store_path.stat().st_mode & 0o777)
+
+    def test_only_a_guest_row_reaches_the_store(self):
+        self.index.rename("term-" + "0" * 16, "terminal history")
+        self.assertEqual({}, self.index.guest_meta())
+
+
+# ----- the directory a guest resumes in (GT7X review, B4) -------------------------------------------
+
+class RawWorkingDirectory(unittest.TestCase):
+    """`resume_cwd` is the cwd the transcript names, not the resolved one.
+
+    The index resolves a workspace (`normalize_workspace` → `Path.resolve()`) so the same project
+    reached two ways groups as one. That is right for grouping and wrong for resuming: claude
+    files a transcript under the slug of the directory it was *started* in, so a workspace reached
+    through a symlink resumes in a real directory claude has no `<cwd-slug>` for, and
+    `claude -r <id>` reports an unknown session there.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.real = self.root / "real-project"
+        self.real.mkdir()
+        self.link = self.root / "linked-project"
+        self.link.symlink_to(self.real, target_is_directory=True)
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+
+    def test_the_record_and_the_row_both_resume_where_the_transcript_says(self):
+        write_claude(self.home, claude_lines(cwd=str(self.link)), cwd=str(self.link))
+        parsed = guest_sessions.scan_claude(str(self.home))[0]
+        self.assertEqual(str(self.link), parsed["raw_cwd"])
+        self.assertEqual(str(self.link), guest_sessions.to_record(parsed)["resume_cwd"])
+
+        guest_sessions.reconcile(self.index, str(self.home))
+        record = guest_sessions.list_sessions(self.index)[0]
+        self.assertEqual(str(self.link), record["resume_cwd"], "the directory claude knows it by")
+        self.assertEqual(str(self.real), record["workspace"], "resolved, for grouping and filters")
+        item = self.index.search("", scope="all", sources=["claude"])["items"][0]
+        self.assertEqual((str(self.real), str(self.link)), (item["workspace"], item["raw_cwd"]))
+        annotated = guest_sessions.annotate_items([item])[0]
+        self.assertEqual(str(self.link), annotated["resume_cwd"])
+        self.assertEqual({"argv": ["claude", "-r", CLAUDE_ID], "cwd": str(self.link)},
+                         guest_sessions.resume_spawn("claude", CLAUDE_ID, item["workspace"],
+                                                     raw_cwd=item["raw_cwd"]))
+        # Scoping by the project still finds it: that filter is on the resolved path.
+        self.assertEqual(1, len(guest_sessions.list_sessions(self.index, scope="project",
+                                                             workspace=str(self.link))))
+
+    def test_a_codex_rollout_keeps_its_own_cwd_too(self):
+        path = write_codex(self.home, codex_lines(cwd=str(self.link)))
+        write_state_db(self.home, [{"id": CODEX_ID, "rollout_path": str(path), "cwd": str(self.link)}])
+        guest_sessions.reconcile(self.index, str(self.home))
+        record = guest_sessions.list_sessions(self.index)[0]
+        self.assertEqual((str(self.link), str(self.real)), (record["resume_cwd"], record["workspace"]))
+
+    def test_without_a_cwd_line_the_project_directory_is_the_raw_one(self):
+        """claude's own directory name is its spelling of the cwd it was started in, so it is a
+        raw cwd as well — and the only one a transcript that never wrote a `cwd` line has."""
+        write_claude(self.home, [], cwd=str(self.link))
+        parsed = guest_sessions.scan_claude(str(self.home))[0]
+        self.assertEqual(str(self.link), parsed["raw_cwd"])
+        self.assertEqual(str(self.link), guest_sessions.to_record(parsed)["resume_cwd"])
+
+    def test_a_row_indexed_before_the_column_existed_still_resumes(self):
+        """`raw_cwd` is empty for every row a v3 index wrote; the resolved workspace is what those
+        had, and it is what they go on using until the next reconcile fills the column in."""
+        self.assertEqual(CWD, guest_sessions.item_to_record(
+            {"source": "claude", "session_id": CLAUDE_ID, "workspace": CWD})["resume_cwd"])
+
+
+# ----- an incremental reconcile (GT7X review, B5) ---------------------------------------------------
+
+class IncrementalReconcile(unittest.TestCase):
+    """jsonl is append-only, so a transcript that only grew is read from where the last run
+    stopped. Before this, any mtime change re-parsed the whole file and rewrote every entry —
+    the owner's largest transcript is 99 MB and caps out at 20 000 entries."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.path = write_claude(self.home, claude_lines(prompts=("first ask",), replies=("one answer",)))
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+        guest_sessions.reconcile(self.index, str(self.home))
+
+    def append(self, lines) -> None:
+        with open(self.path, "a", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(json.dumps(line) + "\n")
+        os.utime(self.path, None)
+
+    def entry_ids(self) -> list[int]:
+        """The rowids of the session's entries, straight out of the database: they change only if
+        the entries were deleted and written again."""
+        db = sqlite3.connect(str(self.root / "index.db"))
+        try:
+            return [row[0] for row in db.execute(
+                "SELECT id FROM entries WHERE session_id=? ORDER BY id", (CLAUDE_ID,)).fetchall()]
+        finally:
+            db.close()
+
+    def test_appended_lines_are_appended_not_rewritten(self):
+        before = self.entry_ids()
+        self.append([claude_prompt_line("second ask", index=1),
+                     claude_reply_line("two answer", index=1, tool_use=False)])
+        outcome = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual((0, 1, 0), (outcome["added"], outcome["refreshed"], outcome["removed"]))
+        after = self.entry_ids()
+        self.assertEqual(before, after[:len(before)], "the entries already indexed kept their rows")
+        self.assertEqual(len(before) + 2, len(after))
+        entries = self.index.conversation(CLAUDE_ID)["items"]
+        self.assertEqual(["prompt", "reply", "tool_call", "prompt", "reply"],
+                         [entry["kind"] for entry in entries])
+        self.assertEqual([1, 1, 1, 2, 2], [entry["turn"] for entry in entries])
+        self.assertEqual(4, self.index.search("", scope="all", sources=["claude"])["items"][0]["turns"])
+        self.assertEqual([CLAUDE_ID], [item["session_id"] for item in
+                                       self.index.search("two answer", scope="all",
+                                                         sources=["claude"])["items"]])
+
+    def test_the_parse_carries_on_where_it_stopped(self):
+        """Everything the first part of the file said — the workspace, the created stamp, the
+        title, the counts — is still the record's after an append that says none of it."""
+        first = guest_sessions.list_sessions(self.index)[0]
+        self.append([claude_prompt_line("second ask", index=1)])
+        guest_sessions.reconcile(self.index, str(self.home))
+        again = guest_sessions.list_sessions(self.index)[0]
+        self.assertEqual((first["workspace"], first["title"]), (again["workspace"], again["title"]))
+        self.assertEqual(first["message_count"] + 1, again["message_count"])
+
+    def test_a_shorter_file_is_read_from_the_start_again(self):
+        self.path.write_text("".join(json.dumps(line) + "\n" for line in
+                                     claude_lines(prompts=("rewritten",), replies=(),
+                                                  custom_title="compacted")), encoding="utf-8")
+        os.utime(self.path, None)
+        guest_sessions.reconcile(self.index, str(self.home))
+        entries = self.index.conversation(CLAUDE_ID)["items"]
+        self.assertEqual(["prompt"], [entry["kind"] for entry in entries])
+        self.assertEqual("rewritten", entries[0]["text"])
+        self.assertEqual("compacted", guest_sessions.list_sessions(self.index)[0]["title"])
+
+    def test_a_rewrite_of_the_same_size_is_caught_by_the_first_bytes(self):
+        """Neither the size nor the inode moves when a file is rewritten in place with something
+        the same length; the fingerprint of its first bytes does."""
+        old = self.path.read_text(encoding="utf-8")
+        new = old.replace("first ask", "third ask").replace("one answer", "two answer")
+        self.assertEqual(len(old), len(new), "the fixture rewrite has to be the same length")
+        self.path.write_text(new, encoding="utf-8")
+        os.utime(self.path, None)
+        guest_sessions.reconcile(self.index, str(self.home))
+        texts = [entry["text"] for entry in self.index.conversation(CLAUDE_ID)["items"]]
+        self.assertIn("third ask", texts)
+        self.assertNotIn("first ask", texts)
+
+    def test_a_replaced_file_under_the_same_name_is_read_whole(self):
+        other = self.root / "other.jsonl"
+        other.write_text("".join(json.dumps(line) + "\n" for line in
+                                 claude_lines(prompts=("a brand new session",), replies=(),
+                                              custom_title="replaced")), encoding="utf-8")
+        other.replace(self.path)                     # a different inode under the same name
+        os.utime(self.path, None)
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(["a brand new session"],
+                         [entry["text"] for entry in self.index.conversation(CLAUDE_ID)["items"]])
+
+    def test_a_cursor_without_its_row_reads_the_file_whole_next_time(self):
+        """The row and the cursor are written in one transaction, so they cannot drift — but if
+        they ever did, half a session is the one thing that must not be indexed."""
+        self.append([claude_prompt_line("second ask", index=1)])
+        parsed = guest_sessions.parse_claude_transcript(
+            self.path, state=self.index.guest_cursors()[CLAUDE_ID])
+        self.assertTrue(parsed["append"])
+        self.index.delete_session(CLAUDE_ID, remove_files=False, forget=False)
+        self.assertEqual(0, self.index.update_guest(parsed))
+        self.assertEqual({}, self.index.guest_cursors())
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["added"])
+        self.assertEqual(["prompt", "reply", "tool_call", "prompt"],
+                         [entry["kind"] for entry in self.index.conversation(CLAUDE_ID)["items"]])
+
+
+# ----- naming the live session (GT7X review, B7) ---------------------------------------------------
+
+class NamedLiveSessions(unittest.TestCase):
+    """Two guests in one working directory write two transcripts side by side. "The newest file"
+    is then whichever of them typed last, so each pane tailed the other's session."""
+
+    OTHER = "b" * 8 + "-0000-4000-8000-00000000000b"
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+
+    def two_claudes(self):
+        mine = write_claude(self.home, claude_lines(prompts=("mine",), custom_title="mine"))
+        theirs = write_claude(self.home, claude_lines(prompts=("theirs",), custom_title="theirs",
+                                                      session_id=self.OTHER), session_id=self.OTHER)
+        os.utime(mine, (1000, 1000))
+        os.utime(theirs, (2000, 2000))
+        return mine, theirs
+
+    def test_a_named_claude_session_is_its_own_file_however_new_the_other_is(self):
+        mine, theirs = self.two_claudes()
+        self.assertEqual(theirs, guest_sessions.claude_live_transcript(CWD, str(self.home)))
+        self.assertEqual(mine, guest_sessions.claude_live_transcript(CWD, str(self.home),
+                                                                     session_id=CLAUDE_ID))
+        self.assertEqual(mine, guest_sessions.live_transcript("claude", CWD, str(self.home),
+                                                              session_id=CLAUDE_ID))
+        # Without the workspace the id is still enough: the file is named after the session.
+        self.assertEqual(mine, guest_sessions.claude_live_transcript(None, str(self.home),
+                                                                     session_id=CLAUDE_ID))
+        # An id with no transcript is None, never "the newest one instead".
+        self.assertIsNone(guest_sessions.claude_live_transcript(CWD, str(self.home),
+                                                                session_id="9" * 8))
+
+    def test_a_named_codex_thread_is_its_own_rollout(self):
+        older = write_codex(self.home, codex_lines(prompt="mine"))
+        other = "7" * 8 + "-0000-4000-8000-000000000007"
+        newer = write_codex(self.home, codex_lines(prompt="theirs", session_id=other),
+                            name=f"rollout-2026-09-19T01-00-00-{other}.jsonl")
+        os.utime(older, (1000, 1000))
+        os.utime(newer, (2000, 2000))
+        write_state_db(self.home, [{"id": CODEX_ID, "rollout_path": str(older), "cwd": CWD},
+                                   {"id": other, "rollout_path": str(newer), "cwd": CWD}])
+        self.assertEqual(newer, guest_sessions.codex_live_rollout(CWD, str(self.home)))
+        self.assertEqual(older, guest_sessions.codex_live_rollout(CWD, str(self.home),
+                                                                  thread_id=CODEX_ID))
+        self.assertEqual(older, guest_sessions.live_transcript("codex", CWD, str(self.home),
+                                                               session_id=CODEX_ID))
+        self.assertIsNone(guest_sessions.codex_live_rollout(CWD, str(self.home), thread_id="nobody"))
+
+    def test_a_named_codex_thread_is_found_without_the_database(self):
+        """The rollout's name ends in the thread id, so `codex resume <id>` and this agree even
+        when the threads database is missing or too old to have the row."""
+        path = write_codex(self.home, codex_lines())
+        self.assertEqual(CODEX_ID, guest_sessions.rollout_thread_id(path))
+        self.assertEqual("", guest_sessions.rollout_thread_id(f"{CLAUDE_ID}.jsonl"))
+        self.assertEqual(path, guest_sessions.codex_live_rollout(CWD, str(self.home),
+                                                                 thread_id=CODEX_ID))
+
+    def test_a_tail_can_be_built_from_the_session_id(self):
+        mine, _theirs = self.two_claudes()
+        tail = guest_sessions.LiveTail.for_session("claude", CWD, session_id=CLAUDE_ID,
+                                                   home=str(self.home))
+        self.assertEqual(mine, tail.path)
+        self.assertEqual("mine", tail.record()["title"])
+        self.assertIsNone(guest_sessions.LiveTail.for_session("claude", CWD, session_id="nobody",
+                                                              home=str(self.home)))
+
+
+class GuestTailTests(unittest.TestCase):
+    """The worker's live session: the tail the pane follows, written into the index as it grows."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.path = write_claude(self.home, claude_lines(prompts=("first ask",), replies=(),
+                                                         custom_title="live one"))
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+        self.tail = guest_sessions.GuestTail(str(self.home), min_poll=0)
+        self.addCleanup(self.tail.stop)
+
+    def append(self, lines) -> None:
+        with open(self.path, "a", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(json.dumps(line) + "\n")
+
+    def test_the_live_session_is_in_the_index_before_any_reconcile(self):
+        self.assertTrue(self.tail.start(self.index, "claude", CWD, CLAUDE_ID))
+        self.assertEqual(self.path, self.tail.path)
+        record = {row["id"]: row for row in guest_sessions.list_sessions(self.index)}[CLAUDE_ID]
+        self.assertEqual(("live one", 1), (record["title"], record["message_count"]))
+        self.assertEqual(CWD, record["resume_cwd"])
+
+    def test_poll_says_when_there_is_something_new(self):
+        self.tail.start(self.index, "claude", CWD, CLAUDE_ID)
+        self.assertFalse(self.tail.poll(), "nothing appended, nothing to redraw")
+        self.append([claude_reply_line("an answer", tool_use=False)])
+        self.assertTrue(self.tail.poll())
+        self.assertEqual(2, guest_sessions.list_sessions(self.index)[0]["message_count"])
+        self.assertFalse(self.tail.poll())
+
+    def test_poll_appends_rather_than_rewriting_the_session(self):
+        self.tail.start(self.index, "claude", CWD, CLAUDE_ID)
+        db = sqlite3.connect(str(self.root / "index.db"))
+        self.addCleanup(db.close)
+        before = [row[0] for row in db.execute("SELECT id FROM entries WHERE session_id=? AND kind='prompt'",
+                                               (CLAUDE_ID,)).fetchall()]
+        self.append([claude_reply_line("an answer", tool_use=False)])
+        self.assertTrue(self.tail.poll())
+        after = [row[0] for row in db.execute("SELECT id FROM entries WHERE session_id=? AND kind='prompt'",
+                                              (CLAUDE_ID,)).fetchall()]
+        self.assertEqual(before, after, "the prompt already indexed was not written again")
+        self.assertEqual(["prompt", "reply"],
+                         [entry["kind"] for entry in self.index.conversation(CLAUDE_ID)["items"]])
+
+    def test_a_guest_that_has_not_written_yet_is_not_followed(self):
+        self.assertFalse(self.tail.start(self.index, "claude", "/tmp/nowhere", CLAUDE_ID))
+        self.assertFalse(self.tail.poll())
+        self.assertIsNone(self.tail.path)
+        self.assertIsNone(self.tail.record)
+        with self.assertRaises(ValueError):
+            self.tail.start(self.index, "gemini", CWD, CLAUDE_ID)
+
+    def test_a_forgotten_session_is_not_written_back_by_the_tail(self):
+        """The pane may well be running a session the user deleted from the list; following it
+        is fine, putting it back in the index behind their back is not."""
+        self.index.forget("claude", CLAUDE_ID)
+        self.assertTrue(self.tail.start(self.index, "claude", CWD, CLAUDE_ID))
+        self.append([claude_reply_line("an answer", tool_use=False)])
+        self.tail.poll()
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+
+    def test_the_tail_never_rebuilds_a_row_from_the_middle(self):
+        """If the row goes while the pane is running, the tail holds only the entries since its
+        last write: half a session in the list is worse than none, and the next reconcile reads
+        the transcript whole."""
+        self.tail.start(self.index, "claude", CWD, CLAUDE_ID)
+        self.index.delete_session(CLAUDE_ID, remove_files=False, forget=False)
+        self.append([claude_reply_line("an answer", tool_use=False)])
+        self.assertFalse(self.tail.poll())
+        self.assertEqual([], guest_sessions.list_sessions(self.index))
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["added"])
+        self.assertEqual(["prompt", "reply"],
+                         [entry["kind"] for entry in self.index.conversation(CLAUDE_ID)["items"]])
+
+    def test_stop_leaves_what_it_wrote_and_polls_no_more(self):
+        self.tail.start(self.index, "claude", CWD, CLAUDE_ID)
+        self.tail.stop()
+        self.append([claude_reply_line("after the pane closed", tool_use=False)])
+        self.assertFalse(self.tail.poll())
+        self.assertEqual(1, guest_sessions.list_sessions(self.index)[0]["message_count"])
 
 
 # ----- the fixtures are the real formats ------------------------------------------------------------

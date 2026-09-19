@@ -22,9 +22,13 @@ pane — ``claude -r <id> [--fork-session]``, ``codex resume <id>`` / ``codex fo
 **The spawner must chdir to `resume_cwd` before running `resume_command`.** Both guests look a
 session up under the working directory they were started in — claude by the `<cwd-slug>`
 directory its transcripts live in — so `claude -r <id>` run from another directory reports an
-unknown session. `resume_cwd` is the session's own workspace (empty when the transcript never
-named one, and then the pane's own directory is as good a guess as any);
-:func:`resume_spawn` hands the argv and the directory back as one payload.
+unknown session. `resume_cwd` is the working directory the transcript itself names, **as it is
+written there** (`raw_cwd`), not the resolved `workspace`: the index resolves a workspace so that
+the same project reached two ways groups as one, and a workspace reached through a symlink
+resolves to a directory claude never made a `<cwd-slug>` for — `claude -r <id>` then runs in a
+real directory that does not hold the session (GT7X). It is empty when the transcript never named
+a directory at all, and then the pane's own is as good a guess as any; :func:`resume_spawn` hands
+the argv and the directory back as one payload.
 
 Search spans all sources because the rows share the one index; the default listing still shows
 Relay's own conversations only, and a query names ``claude``/``codex`` in `sources` to see the
@@ -37,10 +41,12 @@ into the guests' own directories at all.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,7 +96,7 @@ def resume_command(source: str, session_id: str, *, fork: bool = False) -> list[
 
 
 def resume_spawn(source: str, session_id: str, workspace: str | None = None, *,
-                 fork: bool = False) -> dict:
+                 fork: bool = False, raw_cwd: str | None = None) -> dict:
     """`{argv, cwd}`: what a pane needs to respawn a guest session, in one payload.
 
     The argv alone is not enough. Both guests resolve a session id against the directory they
@@ -98,8 +104,13 @@ def resume_spawn(source: str, session_id: str, workspace: str | None = None, *,
     chdir to `cwd` first, or ``claude -r <id>`` reports an unknown session from anywhere but the
     directory the session was held in. `cwd` is "" when the transcript named no workspace, and
     the spawner then keeps the pane's own directory.
+
+    `raw_cwd` — the directory the transcript names, before Relay resolved it — wins over
+    `workspace` when it is known, because that is the spelling the guest filed the session under
+    (see the module docstring).
     """
-    return {"argv": resume_command(source, session_id, fork=fork), "cwd": str(workspace or "")}
+    return {"argv": resume_command(source, session_id, fork=fork),
+            "cwd": str(raw_cwd or workspace or "")}
 
 
 def to_record(data: dict, *, fork: bool = False) -> dict:
@@ -112,7 +123,7 @@ def to_record(data: dict, *, fork: bool = False) -> dict:
             "workspace": workspace,
             "message_count": int(data.get("message_count") or 0),
             "resume_command": resume_command(data.get("source") or "", data.get("id") or "", fork=fork),
-            "resume_cwd": workspace}
+            "resume_cwd": str(data.get("raw_cwd") or "") or workspace}
 
 
 def item_to_record(item: dict, *, fork: bool = False) -> dict:
@@ -130,7 +141,9 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
             "message_count": int(item.get("turns") or 0),
             "resume_command": resume_command(source, item.get("session_id") or item.get("id") or "",
                                              fork=fork),
-            "resume_cwd": workspace}
+            # The row keeps both: `workspace` resolved, for grouping and filters, and the cwd the
+            # transcript wrote, which is the one the guest resumes by (see the module docstring).
+            "resume_cwd": str(item.get("raw_cwd") or "") or workspace}
 
 
 def annotate_items(items, *, fork: bool = False) -> list[dict]:
@@ -143,7 +156,8 @@ def annotate_items(items, *, fork: bool = False) -> list[dict]:
     item comes back exactly as the index gave it.
 
     `workspace` is restated from the record rather than left to the row so the spawn payload is
-    complete on its own: a caller that reads only the record fields still knows where to run.
+    complete on its own: a caller that reads only the record fields still knows where to run, and
+    `resume_cwd` is the unresolved one the guest filed the session under.
     """
     out = []
     for item in items or ():
@@ -196,18 +210,32 @@ def _one_line(text, cap: int) -> str:
 
 
 class _Parser:
-    """Fields accumulated from one guest transcript. Subclasses take JSON lines."""
+    """Fields accumulated from one guest transcript. Subclasses take JSON lines.
+
+    A parser can be stopped and picked up again: `state()` is everything it learned that is not
+    already in the index (the counters, the titles, the workspace, how many entries it has
+    written), and `restore()` puts it back, so the next run feeds it only the bytes the guest
+    appended. `entries` then holds the *new* entries alone — their `seq` continues past the ones
+    the index already has, and the per-session entry cap counts both.
+    """
 
     source = ""
 
     def __init__(self):
         self.session_id = ""
         self.workspace = ""
+        # The working directory the transcript itself names, exactly as it is written there.
+        # `workspace` is the same path, but the index resolves it (`normalize_workspace`), and a
+        # resolved path is the wrong directory to resume a guest in: claude files a session under
+        # the slug of the cwd it was *started* in, so a workspace reached through a symlink
+        # resumes into a directory where `claude -r <id>` does not know the session (GT7X, B4).
+        self.raw_cwd = ""
         self.created: float | None = None
         self.first_prompt = ""
         self.message_count = 0
         self.entries: list[dict] = []
         self._turn = 0
+        self._base = 0                  # entries already in the index before this run
 
     # The title a guest gave the session, by precedence; subclasses fill `titles`.
     titles: dict[str, str]
@@ -218,11 +246,11 @@ class _Parser:
 
     def _add(self, kind: str, text: str, when) -> None:
         text = (text or "").strip()
-        if not text or len(self.entries) >= conv_index.MAX_ENTRIES_PER_SESSION:
+        if not text or self._base + len(self.entries) >= conv_index.MAX_ENTRIES_PER_SESSION:
             return
         cap = conv_index.MAX_PROMPT if kind == "prompt" else conv_index.MAX_TEXT
-        self.entries.append({"turn": max(self._turn, 1), "seq": len(self.entries) + 1, "kind": kind,
-                             "time": when, "text": text[:cap]})
+        self.entries.append({"turn": max(self._turn, 1), "seq": self._base + len(self.entries) + 1,
+                             "kind": kind, "time": when, "text": text[:cap]})
 
     def title(self) -> tuple[str, str]:
         for key in self.TITLE_KEYS:
@@ -233,13 +261,41 @@ class _Parser:
             return _one_line(self.first_prompt, MAX_PROMPT_PREVIEW), "prompt"
         return "", ""
 
+    def state(self) -> dict:
+        """What a later run needs to carry on where this one stopped. Small on purpose: it is
+        stored per transcript in the index, and the entries themselves are already rows there.
+        `first_prompt` is kept only as far as the title fallback reads it."""
+        return {"session_id": self.session_id, "workspace": self.workspace, "raw_cwd": self.raw_cwd,
+                "created": self.created, "first_prompt": _one_line(self.first_prompt, MAX_PROMPT_PREVIEW),
+                "message_count": self.message_count, "turn": self._turn,
+                "entries": self._base + len(self.entries), "titles": dict(self.titles)}
+
+    def restore(self, state: dict) -> bool:
+        """Adopt a `state()` from a previous run. False when there is nothing usable to adopt."""
+        if not isinstance(state, dict) or not state:
+            return False
+        self.session_id = str(state.get("session_id") or "")
+        self.workspace = str(state.get("workspace") or "")
+        self.raw_cwd = str(state.get("raw_cwd") or "")
+        created = state.get("created")
+        self.created = (float(created) if isinstance(created, (int, float))
+                        and not isinstance(created, bool) else None)
+        self.first_prompt = str(state.get("first_prompt") or "")
+        self.message_count = max(0, int(state.get("message_count") or 0))
+        self._turn = max(0, int(state.get("turn") or 0))
+        self._base = max(0, int(state.get("entries") or 0))
+        titles = state.get("titles") if isinstance(state.get("titles"), dict) else {}
+        self.titles = {str(key): str(value) for key, value in titles.items()}
+        self.entries = []
+        return True
+
     def finish(self, path, mtime: float) -> dict:
         title, title_kind = self.title()
         return {"source": self.source, "id": self.session_id, "file": str(path), "title": title,
-                "title_kind": title_kind, "workspace": self.workspace,
+                "title_kind": title_kind, "workspace": self.workspace, "raw_cwd": self.raw_cwd,
                 "created": self.created if self.created is not None else mtime,
                 "mtime": float(mtime), "message_count": self.message_count,
-                "entries": self.entries}
+                "entries": self.entries, "entry_base": self._base}
 
 
 class _ClaudeParser(_Parser):
@@ -265,7 +321,7 @@ class _ClaudeParser(_Parser):
         if not isinstance(data, dict):
             return
         if not self.workspace and isinstance(data.get("cwd"), str) and data["cwd"]:
-            self.workspace = data["cwd"]
+            self.workspace = self.raw_cwd = data["cwd"]
         if not self.session_id and isinstance(data.get("sessionId"), str) and data["sessionId"]:
             self.session_id = data["sessionId"]
         when = _epoch(data.get("timestamp"))
@@ -354,10 +410,10 @@ class _CodexParser(_Parser):
             if not self.session_id and isinstance(identifier, str) and identifier:
                 self.session_id = identifier
             if not self.workspace:
-                self.workspace = str(payload.get("cwd") or "")
+                self.workspace = self.raw_cwd = str(payload.get("cwd") or "")
         elif kind == "turn_context":
             if not self.workspace:
-                self.workspace = str(payload.get("cwd") or "")
+                self.workspace = self.raw_cwd = str(payload.get("cwd") or "")
         elif kind == "response_item":
             ptype = payload.get("type")
             if ptype == "message":
@@ -393,16 +449,191 @@ def _codex_text(content) -> str:
     return "\n".join(parts)
 
 
-def _parse_file(path: Path, parser: _Parser) -> dict | None:
-    """One whole transcript through a parser, or None when it cannot be read at all."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                parser.feed(line)
-        mtime = path.stat().st_mtime
-    except OSError:
+def _new_parser(source: str) -> _Parser:
+    guest.spec(source)
+    return _ClaudeParser() if source == "claude" else _CodexParser()
+
+
+class _Cursor:
+    """How far one guest transcript has been read, and the parser that got there.
+
+    Both readers of a transcript want the same four things — where the last read stopped, whether
+    the file is still the file it stopped in, a partial trailing line left for next time, and a
+    parser carried across reads — so they share this instead of each keeping their own. The pane's
+    :class:`LiveTail` holds one in memory between refreshes; `reconcile` stores one per transcript
+    in the index (`ConversationIndex.guest_cursors`) and picks it up on the next run.
+
+    That is what makes a reconcile cheap. Before it, any change to a transcript's mtime re-read
+    the whole file and rewrote every entry: the largest transcript on the machine this was written
+    on is 99 MB and caps out at 20 000 entries, and a guest that had just answered one prompt paid
+    for all of it. jsonl is append-only, so a file that only grew is read from where the last run
+    stopped.
+
+    A file that did **not** only grow starts again from zero: it shrank (truncated, or a compacted
+    history rewritten shorter), it is a different file under the same name (`st_dev`/`st_ino`), or
+    its first bytes are not the ones we read last time (a rewrite that happened to keep the size
+    and the inode — a copy back over it, a checkout, `claude -r` rewriting a compacted history).
+    """
+
+    HEAD_BYTES = 4096            # of the file's start, fingerprinted to catch a same-size rewrite
+
+    def __init__(self, path: str | Path, source: str | None = None):
+        self.path = Path(path)
+        self.source = source or guess_source(self.path)
+        self.parser = _new_parser(self.source)
+        # `offset` is the first byte not yet fed to the parser; a partial trailing line stays below
+        # it, so it is read again (not twice) once its newline arrives.
+        self.offset = 0
+        self.size = -1
+        self.mtime: float | None = None
+        self.mtime_ns = 0
+        self.identity: tuple[int, int] | None = None     # (st_dev, st_ino): which file this is
+        self.head = ""                                   # fingerprint of the first HEAD_BYTES
+        self.resumed = False                             # started from a stored state
+        self.restarted = False                           # …and that state did not fit the file
+        self.added = 0                                   # entries the last advance() appended
+        self._verify = False                             # a restored state still to be proven
+
+    # ----- saved state ---------------------------------------------------------------
+    def state(self) -> dict:
+        return {"path": str(self.path), "source": self.source, "size": int(max(self.size, 0)),
+                "mtime_ns": int(self.mtime_ns), "read_to": int(self.offset), "head": self.head,
+                "identity": list(self.identity) if self.identity else None,
+                "parser": self.parser.state()}
+
+    def restore(self, state) -> bool:
+        """Pick up where a stored `state()` stopped. The file is not touched here: whether the
+        state still fits it is decided by the next `advance()`, which has the stat in hand."""
+        if not isinstance(state, dict) or not state.get("read_to"):
+            return False
+        if str(state.get("path") or "") != str(self.path):
+            return False                      # the same session id under a different file
+        if not self.parser.restore(state.get("parser") or {}):
+            return False
+        self.offset = max(0, int(state.get("read_to") or 0))
+        self.size = int(state.get("size") or 0)
+        self.mtime_ns = int(state.get("mtime_ns") or 0)
+        self.head = str(state.get("head") or "")
+        identity = state.get("identity")
+        named = isinstance(identity, list) and len(identity) == 2
+        self.identity = (int(identity[0]), int(identity[1])) if named else None
+        self.resumed = True
+        self._verify = True
+        return True
+
+    def _rewind(self) -> None:
+        self.parser = _new_parser(self.source)
+        self.offset = 0
+        self.size = -1
+        self.head = ""
+        self.restarted = True
+
+    @staticmethod
+    def _fingerprint(head: bytes) -> str:
+        """`<length>:<digest>` of a file's first bytes. The length is part of it because the
+        window is only as long as the file was when we first read it: a short transcript
+        fingerprinted whole would not match itself once the guest had written another line."""
+        return f"{len(head)}:{hashlib.sha256(head).hexdigest()[:16]}"
+
+    def _head_now(self) -> str:
+        want = self.head.split(":", 1)[0]
+        try:
+            with open(self.path, "rb") as handle:
+                return self._fingerprint(handle.read(int(want)))
+        except (OSError, ValueError):
+            return ""
+
+    # ----- reading -------------------------------------------------------------------
+    def advance(self, stat=None):
+        """Feed the parser whatever the guest appended. Returns the file's stat, or None when it
+        could not be read at all (and then nothing about the cursor has moved).
+
+        `added` and `restarted` describe **this** read, not the cursor's whole life: a tail that
+        had to start over once may still append on its next tick."""
+        self.added = 0
+        self.restarted = False
+        try:
+            stat = self.path.stat() if stat is None else stat
+        except OSError:
+            return None
+        identity = (stat.st_dev, stat.st_ino)
+        if self._verify:
+            self._verify = False
+            if (stat.st_size < self.offset or (self.identity is not None and identity != self.identity)
+                    or (self.head and self._head_now() != self.head)):
+                self._rewind()
+        elif self.offset and (stat.st_size < self.offset
+                              or (self.identity is not None and identity != self.identity)):
+            self._rewind()
+        self.identity = identity
+        if self.offset and stat.st_mtime == self.mtime and stat.st_size == self.size:
+            return stat                                  # nothing appended
+        started = self.offset
+        try:
+            with open(self.path, "rb") as handle:
+                handle.seek(started)
+                buffer = handle.read()
+        except OSError:
+            return None
+        cut = buffer.rfind(b"\n") + 1                    # a partial last line waits for its newline
+        complete = buffer[:cut]
+        before = len(self.parser.entries)
+        if complete:
+            for line in complete.decode("utf-8", "replace").splitlines():
+                self.parser.feed(line)
+            self.offset += len(complete)
+        self.added = len(self.parser.entries) - before
+        self.size, self.mtime, self.mtime_ns = stat.st_size, stat.st_mtime, stat.st_mtime_ns
+        if not started:
+            self.head = self._fingerprint(buffer[:self.HEAD_BYTES])
+        return stat
+
+    @property
+    def appending(self) -> bool:
+        """The entries the parser holds are new ones to add to a row, not the whole session."""
+        return self.resumed and not self.restarted
+
+    def record(self, mtime: float | None = None, *, meta: dict | None = None) -> dict:
+        """The parsed session as it stands, with the fixups that belong to each guest.
+
+        The file's name is the session id both guests resume by (see `parse_claude_transcript`);
+        a claude transcript that never named a working directory takes it from its project
+        directory, and a codex rollout takes its name from the threads database.
+        """
+        stamp = self.mtime if mtime is None else mtime
+        finished = self.parser.finish(self.path, stamp if stamp is not None else 0.0)
+        finished["id"] = _file_id(self.path) or finished["id"]
+        finished["append"] = self.appending
+        finished["cursor"] = self.state()
+        if self.source == "claude":
+            if not finished["workspace"]:
+                finished["workspace"] = claude_workspace_from_slug(self.path.parent.name)
+            # The project directory's name is claude's own spelling of the cwd it was started in,
+            # so it is a raw cwd too — and the only one a transcript without a `cwd` line has.
+            if not finished["raw_cwd"]:
+                finished["raw_cwd"] = finished["workspace"]
+            return finished
+        return _apply_codex_meta(finished, meta)
+
+
+def parse_transcript(path: str | Path, source: str | None = None, *, state: dict | None = None,
+                     meta: dict | None = None) -> dict | None:
+    """One transcript as a parsed record, continuing from `state` when it still fits the file.
+
+    This is the one parse in the module: the whole-file callers below, `reconcile` and the live
+    tail all come through here, so "what a guest transcript means" is written once. The record
+    carries two keys the index reads and nobody else needs: `append` (its `entries` are the ones
+    added since `entry_base`, not the session's whole history) and `cursor` (where this read
+    stopped, stored with the entries so the two can never drift apart).
+
+    None when the file cannot be read at all — which is not the same as "the session is gone".
+    """
+    cursor = _Cursor(path, source)
+    if state:
+        cursor.restore(state)
+    if cursor.advance() is None:
         return None
-    return parser.finish(path, mtime)
+    return cursor.record(meta=meta)
 
 
 def _file_id(path: Path) -> str:
@@ -419,7 +650,7 @@ def _file_id(path: Path) -> str:
     return match.group(1) if match else stem
 
 
-def parse_claude_transcript(path: str | Path) -> dict | None:
+def parse_claude_transcript(path: str | Path, *, state: dict | None = None) -> dict | None:
     """One claude session as a parsed record.
 
     The file's name is the session id: claude writes ``<slug>/<session-id>.jsonl`` and resolves
@@ -427,15 +658,11 @@ def parse_claude_transcript(path: str | Path) -> dict | None:
     keyed by. It wins over a `sessionId` line that disagrees (a copied or hand-edited
     transcript): keyed any other way, the row the last run indexed is not the one `_walk` looks
     up, its mtime skip never fires and every reconcile re-parses the file. An empty transcript
-    is still a session the picker should show, and it has nothing but its name."""
-    path = Path(path)
-    parsed = _parse_file(path, _ClaudeParser())
-    if parsed is None:
-        return None
-    parsed["id"] = _file_id(path) or parsed["id"]
-    if not parsed["workspace"]:
-        parsed["workspace"] = claude_workspace_from_slug(path.parent.name)
-    return parsed
+    is still a session the picker should show, and it has nothing but its name.
+
+    `state` carries a previous read's position (`parse_transcript`); without one the whole file
+    is read, which is what a caller that has never seen it before wants."""
+    return parse_transcript(path, "claude", state=state)
 
 
 def _apply_codex_meta(parsed: dict, meta: dict | None) -> dict:
@@ -454,10 +681,15 @@ def _apply_codex_meta(parsed: dict, meta: dict | None) -> dict:
         parsed["title_kind"] = "title"
     if not parsed["workspace"] and meta.get("workspace"):
         parsed["workspace"] = str(meta["workspace"])
+    # The database's `cwd` is the directory codex was started in, written as the user gave it —
+    # a raw cwd like the rollout's own, and the only one a rollout with no `session_meta` has.
+    if not parsed.get("raw_cwd") and parsed["workspace"]:
+        parsed["raw_cwd"] = parsed["workspace"]
     return parsed
 
 
-def parse_codex_rollout(path: str | Path, *, meta: dict | None = None) -> dict | None:
+def parse_codex_rollout(path: str | Path, *, meta: dict | None = None,
+                        state: dict | None = None) -> dict | None:
     """One codex rollout as a parsed record. `meta` is the session's row from the threads
     database (see `codex_thread_meta`); without one the record is the rollout alone.
 
@@ -465,12 +697,7 @@ def parse_codex_rollout(path: str | Path, *, meta: dict | None = None) -> dict |
     so it is the record's id (and the index's key) whenever the name carries one — the same rule
     as claude's, and for the same reason: `_walk` looks a file up by its name before reading it
     (see `parse_claude_transcript`)."""
-    path = Path(path)
-    parsed = _parse_file(path, _CodexParser())
-    if parsed is None:
-        return None
-    parsed["id"] = _file_id(path) or parsed["id"]
-    return _apply_codex_meta(parsed, meta)
+    return parse_transcript(path, "codex", state=state, meta=meta)
 
 
 # ----- claude's directory naming -----------------------------------------------------------------
@@ -635,7 +862,9 @@ def _codex_paths(home: str | None) -> list[Path]:
 
 
 def _walk(paths: list[Path], parse, *, limit: int | None = None,
-          known: dict[str, float | None] | None = None) -> tuple[list[dict], set[str]]:
+          known: dict[str, float | None] | None = None,
+          skip: set[str] | None = None,
+          cursors: dict[str, dict] | None = None) -> tuple[list[dict], set[str]]:
     """Newest-first, at most `limit` transcripts through `parse`; a transcript whose indexed
     mtime (`known`, keyed by session id) already matches the file's is not read at all.
 
@@ -648,6 +877,13 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
     puts on the record and the index keys the row by, so the lookup finds the row the last run
     wrote.
 
+    `skip` names session ids the user deleted (`ConversationIndex.forget`): they are on disk and
+    stay there, but they are not read and not indexed, so a delete is not undone by the next scan.
+
+    `cursors` maps a session id to where the last run stopped reading its transcript, so a file
+    that only grew is parsed from there (`parse_transcript`). The `parse` callable takes
+    `(path, state)`.
+
     `limit` is a count of files: `None` is every one of them, and a limit of zero or less reads
     none. `[:limit or None]` read *everything* at zero and silently dropped the oldest file at -1.
     """
@@ -658,6 +894,9 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
         ordered = ordered[:max(int(limit), 0)]
     for path in ordered:
         identifier = _file_id(path)
+        if skip and identifier in skip:
+            kept.add(identifier)      # forgotten on purpose: seen, deliberately not read
+            continue
         try:
             mtime = path.stat().st_mtime
         except OSError:
@@ -667,7 +906,7 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
         if indexed is not None and abs(mtime - float(indexed)) < 1e-6:
             kept.add(identifier)
             continue
-        record = parse(path)
+        record = parse(path, (cursors or {}).get(identifier))
         if record is None:
             kept.add(identifier)      # unreadable or unparsable, but not gone
             continue
@@ -676,20 +915,23 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
 
 
 def _scan(source: str, home: str | None, *, limit: int | None,
-          known: dict[str, float | None] | None) -> tuple[list[dict], set[str]]:
+          known: dict[str, float | None] | None, skip: set[str] | None = None,
+          cursors: dict[str, dict] | None = None) -> tuple[list[dict], set[str]]:
     """One guest's transcripts (newest first) and the session ids skipped as unchanged."""
     guest.spec(source)
     if source == "claude":
-        return _walk(_claude_paths(home), parse_claude_transcript, limit=limit, known=known)
+        return _walk(_claude_paths(home),
+                     lambda path, state: parse_claude_transcript(path, state=state),
+                     limit=limit, known=known, skip=skip, cursors=cursors)
     meta: dict[str, dict] | None = None
 
-    def parse(path: Path) -> dict | None:
+    def parse(path: Path, state: dict | None) -> dict | None:
         nonlocal meta
         if meta is None:
             meta = codex_thread_meta(guest.codex_state_db(home))
-        return parse_codex_rollout(path, meta=meta.get(_file_id(path)))
+        return parse_codex_rollout(path, meta=meta.get(_file_id(path)), state=state)
 
-    return _walk(_codex_paths(home), parse, limit=limit, known=known)
+    return _walk(_codex_paths(home), parse, limit=limit, known=known, skip=skip, cursors=cursors)
 
 
 def scan_claude(home: str | None = None, *, limit: int | None = None,
@@ -720,12 +962,45 @@ def scan(source: str, home: str | None = None, *, limit: int | None = None) -> l
 # ----- the index cache ---------------------------------------------------------------------------
 
 
+def guests_enabled() -> bool:
+    """Whether Relay indexes the guests' sessions at all — the library-level default for
+    `reconcile(enabled=…)`.
+
+    `RELAY_INDEX=off` turns the whole index off (`conv_index.enabled`); this is the narrower
+    switch behind the GUI's "Index my other agents' sessions" (`sessions/index_guests`, on by
+    default), for someone who wants Relay's own search without Relay reading `~/.claude` and
+    `~/.codex` at all. The worker passes the setting explicitly; the environment variable is what
+    a headless run, a test or a launcher has.
+    """
+    return os.environ.get("RELAY_INDEX_GUESTS", "").lower() not in ("0", "off", "no", "false")
+
+
+def purge(index: conv_index.ConversationIndex, *, sources=GUEST_SOURCES) -> int:
+    """Drop every guest row from Relay's index and return how many went.
+
+    Index rows only: the guests' own transcripts are never touched (the rule this whole module
+    is built on), and neither are the pins, the names and the forgotten set in the guest meta
+    store — turn indexing back on and a reconcile brings the rows back with them.
+    """
+    return index.delete_guests(sources=tuple(s for s in sources if s in GUEST_SOURCES))
+
+
 def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
-              *, sources=GUEST_SOURCES, limit: int | None = None) -> dict:
+              *, sources=GUEST_SOURCES, limit: int | None = None,
+              enabled: bool | None = None) -> dict:
     """Bring the guest rows of `index` in line with the guests' own files: index sessions that
     are new or whose transcript changed (its mtime), drop rows whose file is gone. A transcript
-    whose mtime matches the indexed one is not even read, so a worker that reconciles on first
-    use pays for the guests' history once and then only for the sessions that changed.
+    whose mtime matches the indexed one is not even read, and one that only grew is read from
+    where the last run stopped (`parse_transcript`), so a worker that reconciles on first use
+    pays for the guests' history once and then only for what a guest actually wrote.
+
+    `enabled` is the user's "index my other agents' sessions" setting (default: `guests_enabled()`).
+    Switched off, nothing under `~/.claude` or `~/.codex` is read **and** the guest rows are
+    purged, so the listing and the search show none of them from the next call on. It purges on
+    every disabled call rather than only on the transition: the setting can change while this
+    worker is not the one that hears about it, and a `DELETE` over rows that are already gone is
+    one indexed lookup. Turning it back on re-indexes, pins and names and all (the meta store
+    outlives the rows).
 
     `limit` caps each source at its N newest files — the first run over a long claude history
     is minutes of parsing, and a pane that only wants to list recent sessions can say so. **A
@@ -734,17 +1009,34 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
     did not read, and dropping every id it did not see would empty the pane of everything but
     the N newest. Only a full reconcile — the one that stats every file — prunes.
 
-    Returns `{added, refreshed, removed, ms}` like `ConversationIndex.reconcile()`.
+    Returns `{added, refreshed, removed, ms}` like `ConversationIndex.reconcile()`, plus
+    `skipped: True` when indexing the guests is switched off.
     """
     sources = tuple(source for source in sources if source in GUEST_SOURCES)
     started = time.time()
+    if not (guests_enabled() if enabled is None else enabled):
+        removed = purge(index, sources=sources)
+        if removed:
+            logs.event(log, "guest sessions not indexed; rows dropped", removed=removed,
+                       sources=",".join(sources))
+        return {"added": 0, "refreshed": 0, "removed": removed, "skipped": True,
+                "ms": int((time.time() - started) * 1000)}
     known = index.guest_file_stamps(sources)
+    # Only for sessions that still have a row: appending entries to a row that is not there would
+    # index a session that starts in the middle (`update_guest` refuses, but not reading the file
+    # twice is better than being refused).
+    cursors = {identifier: state for identifier, state in index.guest_cursors(sources).items()
+               if identifier in known}
+    forgotten = index.forgotten(sources)
     seen: set[str] = set()
     prunable: set[str] = set()
     added = refreshed = 0
     for source in sources:
         records, kept = _scan(source, home, limit=limit,
-                             known={identifier: row[2] for identifier, row in known.items()})
+                             known={identifier: row[2] for identifier, row in known.items()},
+                             skip={identifier for guest_source, identifier in forgotten
+                                   if guest_source == source},
+                             cursors=cursors)
         seen |= kept
         # A source whose directory is not there has not "lost every session": `$HOME` can be
         # wrong, a network home can be late, the guest can be uninstalled with its history intact.
@@ -767,7 +1059,9 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
     removed = 0
     if limit is None:                    # a capped scan saw only the newest N: it may not prune
         for identifier in sorted(prunable - seen):
-            index.delete_session(identifier, remove_files=False)       # rows only, never files
+            # Rows only, never files — and not forgotten either: the transcript is gone, which is
+            # not the user saying "never show me this again" (see `ConversationIndex.forget`).
+            index.delete_session(identifier, remove_files=False, forget=False)
             removed += 1
     outcome = {"added": added, "refreshed": refreshed, "removed": removed,
                "ms": int((time.time() - started) * 1000)}
@@ -809,11 +1103,30 @@ def search_sessions(index: conv_index.ConversationIndex, query: str, *,
 # ----- the active pane's live transcript -----------------------------------------------------------
 
 
-def claude_live_transcript(workspace: str | None = None, home: str | None = None) -> Path | None:
-    """The transcript claude is writing in `workspace` right now: the newest ``.jsonl`` in its
-    project directory (`claude_slug`); the newest anywhere when no workspace is given."""
+def claude_live_transcript(workspace: str | None = None, home: str | None = None, *,
+                           session_id: str | None = None) -> Path | None:
+    """The transcript claude is writing in `workspace` right now.
+
+    With a `session_id` it is exactly ``<projects>/<cwd-slug>/<session-id>.jsonl`` — claude names
+    the file after the session, so the id *is* the path. Ask for it whenever the caller knows it:
+    two claudes running in one directory write two transcripts in the same slug, and "the newest
+    file" is then whichever of the two typed last, so each pane tailed the other's session as soon
+    as the other answered. Relay passes ``--session-id`` on the sessions it launches, and the
+    headless harness knows its own, precisely so this is answerable.
+
+    Without one — a claude the user started themselves, in a shell Relay only watches — it falls
+    back to the newest ``.jsonl`` in the project directory (`claude_slug`), or the newest
+    anywhere when no workspace is given either.
+    """
     root = Path(guest.claude_projects_dir(home))
     if not root.is_dir():
+        return None
+    if session_id:
+        if workspace:
+            named = root / claude_slug(workspace) / f"{session_id}.jsonl"
+            return named if named.is_file() else None
+        for path in _by_age(root.glob(f"*/{session_id}.jsonl")):
+            return path
         return None
     folder = root / claude_slug(workspace or "")
     paths = folder.glob("*.jsonl") if workspace else root.glob("*/*.jsonl")
@@ -822,11 +1135,28 @@ def claude_live_transcript(workspace: str | None = None, home: str | None = None
     return None
 
 
-def codex_live_transcript(workspace: str | None = None, home: str | None = None) -> Path | None:
-    """The rollout codex is writing in `workspace` right now: of the threads the database says
-    belong to that directory, the one whose file was written last; without a database (or without
-    a match) the rollouts are walked newest-first and their `session_meta` line names the working
-    directory.
+def rollout_thread_id(path: str | Path) -> str:
+    """The thread id a rollout's name carries — what ``codex resume`` takes and what the threads
+    database keys a row by. Empty when the name ends in no UUID at all."""
+    path = Path(path)
+    if not CODEX_ROLLOUT.match(path.name):
+        return ""
+    identifier = _file_id(path)
+    return identifier if UUID_TAIL.search(identifier) else ""
+
+
+def codex_live_rollout(cwd: str | None = None, home: str | None = None, *,
+                       thread_id: str | None = None) -> Path | None:
+    """The rollout codex is writing in `cwd` right now.
+
+    With a `thread_id` it is that thread's rollout and no other: the threads database is asked
+    for its file, and failing that the rollout whose own name ends in that UUID. Two codexes in
+    one directory otherwise share every rule below and the newer one wins both tails (the same
+    trouble claude has — see `claude_live_transcript`).
+
+    Without one: of the threads the database says belong to that directory, the one whose file
+    was written last; without a database (or without a match) the rollouts are walked newest-first
+    and their `session_meta` line names the working directory.
 
     `SELECT … FROM threads` has no `ORDER BY`, so taking the first row whose `cwd` matched handed
     back whichever thread sqlite happened to return first — in practice the *oldest* one the user
@@ -835,20 +1165,34 @@ def codex_live_transcript(workspace: str | None = None, home: str | None = None)
     root = Path(guest.codex_sessions_dir(home))
     if not root.is_dir():
         return None
-    if workspace:
+    rollouts = [path for path in root.rglob("*.jsonl") if CODEX_ROLLOUT.match(path.name)]
+    if thread_id:
+        meta = codex_thread_meta(guest.codex_state_db(home)).get(thread_id) or {}
+        named = Path(meta.get("file") or "")
+        if str(named) != "." and named.is_file():
+            return named
+        for path in _by_age(rollouts):
+            if rollout_thread_id(path) == thread_id:
+                return path
+        return None
+    if cwd:
         candidates = [Path(meta.get("file") or "")
                       for meta in codex_thread_meta(guest.codex_state_db(home)).values()
-                      if meta.get("workspace") == workspace]
+                      if meta.get("workspace") == cwd]
         matched = _by_age(path for path in candidates if path.is_file())
         if matched:
             return matched[0]
-    newest = _by_age(path for path in root.rglob("*.jsonl") if CODEX_ROLLOUT.match(path.name))
-    if not workspace:
+    newest = _by_age(rollouts)
+    if not cwd:
         return newest[0] if newest else None
     for path in newest:
-        if _rollout_cwd(path) == workspace:
+        if _rollout_cwd(path) == cwd:
             return path
     return None
+
+
+# The name this had before a session could be named (GT7X, B7); one guest, one spelling.
+codex_live_transcript = codex_live_rollout
 
 
 def _rollout_cwd(path: Path) -> str:
@@ -862,14 +1206,15 @@ def _rollout_cwd(path: Path) -> str:
     return str((payload or {}).get("cwd") or "") if isinstance(payload, dict) else ""
 
 
-def live_transcript(source: str, workspace: str | None = None,
-                    home: str | None = None) -> Path | None:
-    """The transcript a guest is writing right now in `workspace`; an unknown source is a
-    ValueError."""
+def live_transcript(source: str, workspace: str | None = None, home: str | None = None, *,
+                    session_id: str | None = None) -> Path | None:
+    """The transcript a guest is writing right now in `workspace`, or — when the caller knows
+    which session it is after — that session's own file, whatever else is being written in the
+    same directory. An unknown source is a ValueError."""
     guest.spec(source)
     if source == "claude":
-        return claude_live_transcript(workspace, home)
-    return codex_live_transcript(workspace, home)
+        return claude_live_transcript(workspace, home, session_id=session_id)
+    return codex_live_rollout(workspace, home, thread_id=session_id)
 
 
 def guess_source(path: str | Path) -> str:
@@ -890,6 +1235,9 @@ class LiveTail:
     stays current) without a rescan. Nothing is written anywhere: not the transcript, not the
     guests' directories, not the guest event spool (that channel belongs to the hooks phase).
 
+    The reading itself is a :class:`_Cursor`, which `reconcile` uses too: "how far have we read
+    this transcript, and is it still the same file" is one piece of code, tested once.
+
     A codex tail also wants the thread's name, which lives in the threads database rather than
     in the rollout. Reading it is a fresh sqlite connection, a `PRAGMA table_info` and a full
     `SELECT` over every thread the user has ever had, so it is cached for `META_REFRESH` seconds
@@ -904,50 +1252,35 @@ class LiveTail:
         self.source = source or guess_source(self.path)
         guest.spec(self.source)
         self.home = home
-        self._parser = _ClaudeParser() if self.source == "claude" else _CodexParser()
-        # `_offset` is the first byte not yet fed to the parser; a partial trailing line stays
-        # below it, so it is read again (not twice) once its newline arrives.
-        self._offset = 0
-        self._size = -1
-        self._mtime: float | None = None
-        self._identity: tuple[int, int] | None = None   # (st_dev, st_ino): which file this is
+        self._cursor = _Cursor(self.path, self.source)
         self._record: dict | None = None
         # codex's threads database, read at most every `META_REFRESH` seconds (see the class).
         self._meta: dict[str, dict] = {}
         self._meta_at: float | None = None
         self.refresh()
 
+    @classmethod
+    def for_session(cls, source: str, workspace: str | None = None, *,
+                    session_id: str | None = None, home: str | None = None) -> "LiveTail | None":
+        """A tail of the named session's transcript — or, with no id, of whatever the guest is
+        writing in `workspace` (`live_transcript`). None when there is no such transcript yet.
+
+        This is the constructor a caller that knows *which* session it wants should use: two
+        guests in one directory write two transcripts, and only the id tells them apart.
+        """
+        path = live_transcript(source, workspace, home, session_id=session_id)
+        return cls(path, source=source, home=home) if path else None
+
     def refresh(self) -> dict | None:
         """Consume what the guest appended and return the record as it now stands."""
-        try:
-            stat = self.path.stat()
-        except OSError:
+        stat = self._cursor.advance()
+        if stat is None:
             return self._record
-        # Rotation is not only truncation: a transcript replaced by one of the *same* size (a copy
-        # back over it, a checkout, `claude -r` rewriting a compacted history) kept the old parser
-        # state and read the new file from the old offset. The inode says so where the size cannot.
-        identity = (stat.st_dev, stat.st_ino)
-        if stat.st_size < self._offset or (self._identity is not None and identity != self._identity):
-            self._parser = _ClaudeParser() if self.source == "claude" else _CodexParser()
-            self._offset = 0
-            self._record = None
-        self._identity = identity
-        if stat.st_mtime == self._mtime and stat.st_size == self._size and self._offset:
+        if self._record is not None and not self._cursor.added and not self._cursor.restarted \
+                and self._cursor.mtime == self._record.get("mtime"):
             return self._record                      # nothing appended
-        try:
-            with open(self.path, "rb") as handle:
-                handle.seek(self._offset)
-                buffer = handle.read()
-        except OSError:
-            return self._record
-        cut = buffer.rfind(b"\n") + 1                # a partial last line waits for its newline
-        complete = buffer[:cut]
-        if complete:
-            for line in complete.decode("utf-8", "replace").splitlines():
-                self._parser.feed(line)
-            self._offset += len(complete)
-        self._size, self._mtime = stat.st_size, stat.st_mtime
-        self._record = self._parsed(stat.st_mtime)
+        self._record = self._parsed(self._cursor.mtime if self._cursor.mtime is not None
+                                    else stat.st_mtime)
         return self._record
 
     def _thread_meta(self) -> dict[str, dict]:
@@ -966,22 +1299,164 @@ class LiveTail:
         meta = None
         if self.source == "codex":
             # The rollout's name carries the thread id before its first line has been read.
-            meta = self._thread_meta().get(_file_id(self.path) or self._parser.session_id)
-        parser = self._parser
-        finished = parser.finish(self.path, mtime)
-        # The file's name is the session id both guests resume by (see `parse_claude_transcript`).
-        finished["id"] = _file_id(self.path) or finished["id"]
-        if self.source == "claude":
-            if not finished["workspace"]:
-                finished["workspace"] = claude_workspace_from_slug(self.path.parent.name)
-            return finished
-        return _apply_codex_meta(finished, meta)
+            meta = self._thread_meta().get(_file_id(self.path) or self._cursor.parser.session_id)
+        return self._cursor.record(mtime, meta=meta)
 
     @property
     def parsed(self) -> dict | None:
         """The tailed session in the parser's own shape (what `update_guest` takes)."""
         return self._record
 
+    @property
+    def entries_read(self) -> int:
+        """How many entries this tail has parsed so far — what a writer uses to send only the
+        new ones."""
+        return self._cursor.parser._base + len(self._cursor.parser.entries)
+
+    @property
+    def restarted(self) -> bool:
+        """The transcript was replaced or truncated under the tail, so everything read before it
+        is no longer what the file says."""
+        return self._cursor.restarted
+
     def record(self, *, fork: bool = False) -> dict | None:
         """The protocol 26.7 record as it stands; `fork` spells the resume command's fork form."""
         return to_record(self._record, fork=fork) if self._record else None
+
+
+# ----- the live session in the index --------------------------------------------------------------
+
+
+class GuestTail:
+    """The worker's live guest session: a :class:`LiveTail` whose record is kept in the index.
+
+    A reconcile is a scan — it finds out that a transcript changed by stat'ing it, and it runs on
+    a timer behind the listing. While a guest is answering in the pane in front of the user, that
+    is both too slow and too much: this follows the one transcript that matters and writes only
+    what the guest appended.
+
+    The worker calls it like this::
+
+        tail = guest_sessions.GuestTail()                    # once per pane
+        tail.start(index, "claude", workspace, session_id)   # when the pane's guest starts
+        if tail.poll():                                      # on the background loop's tick
+            emit the conversations event again
+        tail.stop()                                          # when the guest exits
+
+    `poll()` is cheap enough to call on a timer: below `MIN_POLL` seconds apart it does nothing
+    at all, and otherwise it is one `stat` plus whatever bytes the guest wrote. It answers True
+    only when rows actually changed, so the pane redraws when there is something to redraw. It
+    never raises on the guests' own files: an unreadable transcript is a False, not an error on
+    a listing the user already has (the reconcile path has the same rule).
+    """
+
+    MIN_POLL = 0.5                 # seconds; a tick sooner than this is free
+
+    def __init__(self, home: str | None = None, *, min_poll: float | None = None):
+        self.home = home
+        self.min_poll = self.MIN_POLL if min_poll is None else max(0.0, float(min_poll))
+        self._lock = threading.Lock()
+        self._tail: LiveTail | None = None
+        self._index = None
+        self._source = ""
+        self._session_id = ""
+        self._written = 0            # entries already in the index for this session
+        self._mtime: float | None = None   # the mtime the index row was written at
+        self._at: float | None = None
+
+    # ----- lifecycle -----------------------------------------------------------------
+    def start(self, index: conv_index.ConversationIndex, source: str, workspace: str | None = None,
+              session_id: str | None = None) -> bool:
+        """Follow the named session's transcript (or whatever `source` is writing in `workspace`).
+
+        False when there is no transcript to follow yet — a guest that has not written its first
+        line — and the caller may simply try again on the next tick.
+        """
+        guest.spec(source)
+        with self._lock:
+            self._reset()
+            tail = LiveTail.for_session(source, workspace, session_id=session_id, home=self.home)
+            if tail is None:
+                return False
+            self._tail, self._index, self._source = tail, index, source
+            self._session_id = str(session_id or "")
+            self._at = None
+            self._write()          # what the guest has written so far, before the first tick
+            return True
+
+    def stop(self) -> None:
+        """Stop following. The last state is already in the index; the next reconcile owns it."""
+        with self._lock:
+            self._reset()
+
+    def _reset(self) -> None:
+        self._tail = self._index = None
+        self._source = self._session_id = ""
+        self._written = 0
+        self._mtime = None
+        self._at = None
+
+    @property
+    def path(self) -> Path | None:
+        tail = self._tail
+        return tail.path if tail else None
+
+    @property
+    def record(self) -> dict | None:
+        """The protocol 26.7 record of the session being followed, as it stands."""
+        tail = self._tail
+        return tail.record() if tail else None
+
+    # ----- polling -------------------------------------------------------------------
+    def poll(self) -> bool:
+        """Read what the guest appended and put it in the index. True when rows changed."""
+        with self._lock:
+            if self._tail is None or self._index is None:
+                return False
+            now = time.monotonic()
+            if self._at is not None and now - self._at < self.min_poll:
+                return False
+            self._at = now
+            return self._write()
+
+    def _write(self) -> bool:
+        """The tail's record into the index — appending the new entries where it can."""
+        tail, index = self._tail, self._index
+        if tail is None or index is None:
+            return False
+        try:
+            parsed = tail.refresh()
+        except OSError:
+            return False
+        if not parsed or not parsed.get("id"):
+            return False
+        appended = tail.entries_read - self._written
+        if (self._mtime is not None and not tail.restarted and appended <= 0
+                and parsed.get("mtime") == self._mtime):
+            return False                       # the row already says what the file says
+        record = dict(parsed)
+        # Only the entries the guest added since the last write: a session that has been going
+        # for an hour is not rewritten line by line every time it answers.
+        record["append"] = self._mtime is not None and not tail.restarted
+        if record["append"]:
+            record["entries"] = [row for row in parsed.get("entries") or []
+                                 if int(row.get("seq") or 0) > self._written]
+            # Which entries the row is expected to already hold: if it does not hold them (the
+            # row went while the pane was running), `update_guest` refuses rather than index a
+            # session that starts in the middle.
+            record["entry_base"] = self._written
+        try:
+            written = index.update_guest(record)
+        except (ValueError, sqlite3.Error, OSError) as error:
+            logs.event(log, "live guest session not indexed", level_name="error",
+                       source=self._source, error=type(error).__name__)
+            return False
+        if not written and record.get("entries"):
+            # Entries handed over and none written: the index refused the session (the user
+            # deleted it, or the row it would append to is gone). Nothing changed, and saying so
+            # keeps the pane from redrawing a list that is the same as the one it has.
+            return False
+        self._written = tail.entries_read
+        self._mtime = parsed.get("mtime")
+        return True
+

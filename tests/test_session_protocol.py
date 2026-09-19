@@ -528,12 +528,16 @@ class GuestSessionRows(unittest.TestCase):
         self.cmds.handle('conversation_delete', {'session_id': session})
         event = self.rec.wait(lambda e: e['event'] == 'conversation_deleted' and e['session_id'] == session)
         self.assertEqual(0, event['files'])
-        self.assertTrue(path.exists())
-        # The row is gone until the next full reconcile finds the transcript again — which is
-        # what the pane's confirmation says will happen.
-        with mock.patch('relay_core.guest_sessions.reconcile', lambda *a, **k: {'added': 0, 'refreshed': 0,
-                                                                               'removed': 0, 'ms': 0}):
-            self.assertNotIn(session, self.listed(self.ask()))
+        self.assertTrue(path.exists(), 'the transcript belongs to the guest')
+        # The row stays gone. The transcript is still there and still parses, so before the
+        # forgotten record (GT7X review, B2) the next reconcile put the session the user had
+        # just deleted straight back into the pane.
+        from relay_core import guest_sessions
+        self.assertNotIn(session, self.listed(self.ask()))
+        guest_sessions.reconcile(self.cmds.index())
+        self.assertNotIn(session, self.listed(self.ask()))
+        # …until it is asked for again, which is what a "show forgotten" listing would do.
+        self.cmds.index().unforget('claude', session)
         self.assertIn(session, self.settled(lambda rows: session in rows))
 
     def test_a_row_whose_transcript_went_away_is_pruned(self):

@@ -46,6 +46,19 @@ rows are read-only for everyone else, and a rebuild cannot recreate them from th
 so `delete_session()` on a guest drops index rows only. Guests are left out of a search unless
 `sources` names them, the same way subagent threads are (the sessions pane asks for them).
 
+A guest row has no file of Relay's beside it, so since v4 three things live outside the tables
+that would otherwise be lost with them:
+
+* `guest-meta.json` beside the database (`GUEST_META_NAME`, 0600) holds the pin, the custom title
+  and the forgotten flag the user set on a guest row, `{source: {id: {...}}}`. The database is a
+  cache that a schema bump or a corruption throws away; a guest row cannot be rebuilt from a file
+  of Relay's, so without this the pin and the name the user gave it went with it.
+* `guest_forgotten` is the same forgotten set as a table, seeded from that file whenever the
+  database is (re)created, so `update_guest()` can skip a deleted session without a file read.
+* `guest_files` is where each transcript has been read to — `(path, size, mtime_ns, read_to)` plus
+  the parser's own state — so a reconcile parses only the bytes a guest appended instead of the
+  whole file (the largest transcript on the machine this was written on is 99 MB).
+
 The index holds message text, so it stays on this machine: same 0700 directory as the sessions,
 never synced, and deleting a conversation deletes its rows.
 """
@@ -63,7 +76,10 @@ from pathlib import Path
 # v2 (2026-09-18, cards #Y63Z/#R6J0): subagent threads, owner/parent links, models and usage totals.
 # v3 (2026-09-18): summary/first_prompt/last_prompt/files/branch/unfinished/mode columns, title and
 # summary indexed as entries, query operators.
-SCHEMA_VERSION = 3
+# v4 (2026-09-19, GT7X): `raw_cwd` (the working directory a guest transcript names, as written —
+# what `claude -r` has to be run in), the `guest_forgotten` and `guest_files` tables, and the
+# `guest-meta.json` store beside the database. v1/v2/v3 all migrate in place.
+SCHEMA_VERSION = 4
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -90,6 +106,7 @@ CREATE TABLE IF NOT EXISTS conversations(
     session_id   TEXT PRIMARY KEY,
     source       TEXT NOT NULL DEFAULT 'agent',
     workspace    TEXT NOT NULL DEFAULT '',
+    raw_cwd      TEXT NOT NULL DEFAULT '',
     project      TEXT NOT NULL DEFAULT '',
     title        TEXT NOT NULL DEFAULT '',
     custom_title TEXT,
@@ -147,6 +164,21 @@ CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
     INSERT INTO entries_fts(entries_fts, rowid, text) VALUES ('delete', old.id, old.text);
     INSERT INTO entries_fts(rowid, text) VALUES (new.id, new.text);
 END;
+CREATE TABLE IF NOT EXISTS guest_forgotten(
+    source     TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    at         REAL,
+    PRIMARY KEY(source, session_id)
+);
+CREATE TABLE IF NOT EXISTS guest_files(
+    session_id TEXT PRIMARY KEY,
+    source     TEXT NOT NULL DEFAULT '',
+    path       TEXT NOT NULL DEFAULT '',
+    size       INTEGER NOT NULL DEFAULT 0,
+    mtime_ns   INTEGER NOT NULL DEFAULT 0,
+    read_to    INTEGER NOT NULL DEFAULT 0,
+    state      TEXT NOT NULL DEFAULT '{}'
+);
 """
 
 KINDS = ("title", "summary", "prompt", "reply", "tool_call", "tool_output", "command", "command_output")
@@ -180,8 +212,14 @@ V3_COLUMNS = (("summary", "TEXT NOT NULL DEFAULT ''"), ("first_prompt", "TEXT NO
               ("branch", "TEXT NOT NULL DEFAULT ''"), ("unfinished", "INTEGER NOT NULL DEFAULT 0"),
               ("mode", "TEXT NOT NULL DEFAULT ''"), ("todos", "TEXT NOT NULL DEFAULT '[]'"),
               ("indexed_version", "INTEGER NOT NULL DEFAULT 0"))
+# Columns added by v4 (GT7X). `raw_cwd` is filled by the next guest reconcile; an agent row never
+# has one (its `workspace` is already the directory Relay runs it in).
+V4_COLUMNS = (("raw_cwd", "TEXT NOT NULL DEFAULT ''"),)
 MAX_MATCHES_LIMIT = 20
 THREAD_KIND = "relay_subagent_thread"
+# The guest rows' `<id>.meta.json` (see the module docstring): one file beside the database for
+# every guest row, because there is nowhere else to put a guest session's pin.
+GUEST_META_NAME = "guest-meta.json"
 
 # ----- query operators (v3) -------------------------------------------------------------------
 # `key:value` pairs parsed out of the query before anything reaches FTS5. An unknown key is not an
@@ -727,7 +765,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -751,17 +789,36 @@ class ConversationIndex:
         except OSError:
             pass
         self._db = db
+        # The forgotten guest sessions outlive the database (see the module docstring): whatever the
+        # store holds is put back into the table every time the tables are (re)created, so a wipe
+        # cannot make a session the user deleted walk back into the listing at the next reconcile.
+        self._seed_forgotten(db)
+
+    def _seed_forgotten(self, db) -> None:
+        rows = [(source, session_id, entry.get("forgotten_at"))
+                for source, sessions in self._guest_store().items()
+                for session_id, entry in sessions.items() if entry.get("forgotten")]
+        if not rows:
+            return
+        try:
+            db.executemany("INSERT OR IGNORE INTO guest_forgotten(source, session_id, at)"
+                           " VALUES(?,?,?)", rows)
+            db.commit()
+        except sqlite3.DatabaseError:
+            pass
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1/v2 -> v3 in place, because terminal-history rows have no file to be rebuilt from.
+        """v1/v2/v3 -> v4 in place, because terminal-history rows have no file to be rebuilt from —
+        and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
         they are safe from a cache wipe. v2 -> v3 adds the overview columns; they stay empty until
-        the next `reconcile()`, which re-reads every row whose `indexed_version` is behind.
+        the next `reconcile()`, which re-reads every row whose `indexed_version` is behind. v3 -> v4
+        adds `raw_cwd`, which the next guest reconcile fills the same way.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
-        for name, kind in V2_COLUMNS + V3_COLUMNS:
+        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS:
             if name not in columns:
                 db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
         if version < 2:
@@ -810,6 +867,157 @@ class ConversationIndex:
                 raise
             self._reset()
             return work(self._db)
+
+    # ----- the guest meta store (v4) ----------------------------------------------------
+    #
+    # Relay's own sessions keep the user's title and pin in `<id>.meta.json` beside the session,
+    # so throwing the cache away costs nothing but the time to read them back. A guest row has no
+    # such file — Relay may not write into `~/.claude` or `~/.codex` (protocol 26.7) — and until
+    # v4 its pin, its name and the fact that the user had deleted it lived only in the database
+    # that `_connect()` discards on a schema change. This is the one file that holds them instead.
+
+    @property
+    def store_path(self) -> Path:
+        """`guest-meta.json` beside the index database."""
+        return self.path.with_name(GUEST_META_NAME)
+
+    def _guest_store(self) -> dict:
+        """The store as `{source: {id: {...}}}`, re-read when the file changed under us.
+
+        Another worker process writes the same file, so the cache is keyed by its (mtime_ns, size)
+        rather than trusted for the life of the connection.
+        """
+        cache = getattr(self, "_store_cache", None)
+        try:
+            stat = self.store_path.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            stamp = None
+        if cache is not None and cache[0] == stamp:
+            return cache[1]
+        data = read_guest_meta(self.store_path)
+        self._store_cache = (stamp, data)
+        return data
+
+    def guest_meta(self, source: str | None = None, session_id: str | None = None) -> dict:
+        """The store, or one source's part of it, or one guest row's `{custom_title, pinned,
+        forgotten}` — whatever is set. Always a fresh dict: the caller may not edit the cache."""
+        data = self._guest_store()
+        if source is None:
+            return {name: {key: dict(value) for key, value in rows.items()} for name, rows in data.items()}
+        rows = data.get(str(source)) or {}
+        if session_id is None:
+            return {key: dict(value) for key, value in rows.items()}
+        return dict(rows.get(str(session_id)) or {})
+
+    def _write_guest_meta(self, source: str, session_id: str, **fields) -> None:
+        """Merge `fields` into one guest row's entry and rewrite the store (0600, atomic).
+
+        A key set to its empty value (no custom title, unpinned, not forgotten) is dropped rather
+        than written as `false`, so an entry with nothing left in it goes away and the file stays
+        the size of what the user actually set.
+        """
+        if source not in GUEST_SOURCES or not session_id:
+            return
+        data = self._guest_store()
+        data = {name: {key: dict(value) for key, value in rows.items()} for name, rows in data.items()}
+        entry = dict(data.get(source, {}).get(session_id) or {})
+        if "custom_title" in fields:
+            title = " ".join(str(fields["custom_title"] or "").split())[:200]
+            entry["custom_title"] = title
+            if not title:
+                entry.pop("custom_title", None)
+        if "pinned" in fields:
+            entry["pinned"] = True
+            if not fields["pinned"]:
+                entry.pop("pinned", None)
+        if "forgotten" in fields:
+            if fields["forgotten"]:
+                entry["forgotten"] = True
+                entry.setdefault("forgotten_at", time.time())
+            else:
+                entry.pop("forgotten", None)
+                entry.pop("forgotten_at", None)
+        rows = data.setdefault(source, {})
+        if entry:
+            rows[session_id] = entry
+        else:
+            rows.pop(session_id, None)
+        if not rows:
+            data.pop(source, None)
+        write_guest_meta(self.store_path, data)
+        self._store_cache = None                 # the next read stats the file we just wrote
+
+    def forget(self, source: str, session_id: str) -> None:
+        """Remember that the user deleted this guest session, so the next reconcile leaves it out.
+
+        The transcript is the guest's and stays where it is (protocol 26.7): "delete" here means
+        "stop indexing and stop listing it". Without this record the row came straight back at the
+        next reconcile, which reads the same file and finds the same session — the delete looked
+        like it had failed. It stays forgotten until `unforget()`, even if the user resumes the
+        session through Relay again: the alternative is a row the user deleted reappearing because
+        something touched the file, and the "show forgotten" listing is how it comes back.
+        """
+        if source not in GUEST_SOURCES or not session_id:
+            return
+
+        def work(db):
+            db.execute("INSERT OR REPLACE INTO guest_forgotten(source, session_id, at) VALUES(?,?,?)",
+                       (source, session_id, time.time()))
+            db.commit()
+        self._run(work)
+        self._write_guest_meta(source, session_id, forgotten=True)
+
+    def unforget(self, source: str, session_id: str) -> None:
+        """Undo `forget()`: the next reconcile indexes the session again if its file is still there."""
+        if source not in GUEST_SOURCES or not session_id:
+            return
+
+        def work(db):
+            db.execute("DELETE FROM guest_forgotten WHERE source=? AND session_id=?", (source, session_id))
+            db.commit()
+        self._run(work)
+        self._write_guest_meta(source, session_id, forgotten=False)
+
+    def forgotten(self, sources=GUEST_SOURCES) -> set[tuple[str, str]]:
+        """`{(source, id)}` the user deleted. Read from the table, which `_connect()` seeds from
+        the store, so it is one query however the database got here."""
+        wanted = [source for source in sources if source in GUEST_SOURCES]
+        if not wanted:
+            return set()
+        placeholders = ",".join("?" * len(wanted))
+        return self._run(lambda db: {
+            (row["source"], row["session_id"]) for row in
+            db.execute(f"SELECT source, session_id FROM guest_forgotten WHERE source IN ({placeholders})",
+                       wanted).fetchall()})
+
+    def delete_guests(self, sources=GUEST_SOURCES) -> int:
+        """Drop every guest row of these sources from the index — and only from the index.
+
+        This is what "do not index my other agents' sessions" turns off (`guest_sessions.purge`):
+        the guests' own transcripts are untouched, and so are the store and the forgotten set, so
+        turning the setting back on restores the pins and the names with the rows.
+        """
+        wanted = [source for source in sources if source in GUEST_SOURCES]
+        if not wanted:
+            return 0
+        placeholders = ",".join("?" * len(wanted))
+
+        def work(db):
+            rows = db.execute(f"SELECT session_id FROM conversations WHERE source IN ({placeholders})",
+                              wanted).fetchall()
+            if not rows:
+                return 0
+            ids = [row["session_id"] for row in rows]
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                db.execute(f"DELETE FROM entries WHERE session_id IN ({marks})", chunk)
+                db.execute(f"DELETE FROM conversations WHERE session_id IN ({marks})", chunk)
+                db.execute(f"DELETE FROM guest_files WHERE session_id IN ({marks})", chunk)
+            db.commit()
+            return len(ids)
+        return self._run(work)
 
     # ----- writing ---------------------------------------------------------------------
     def update_session(self, data: dict, session_dir: str | Path | None = None) -> int:
@@ -892,6 +1100,21 @@ class ConversationIndex:
         `custom_title` and `pinned` in `data` override what the row holds, **one key at a time**:
         a caller that renames a session says only `custom_title` and the pin it did not mention
         stays on, and a caller that pins says only `pinned` and keeps the name the user gave.
+        Where there is no row — a first index, or the first one after the database was thrown
+        away — the guest meta store is what they come from, which is how a pin and a name survive
+        a schema bump (see the module docstring).
+
+        A session the user deleted (`forget()`) is not indexed at all: 0 rows, no row written. The
+        transcript is still there and still parses, so without that check the next reconcile put
+        the session the user had just deleted straight back into the pane.
+
+        `data["append"]` says the entries are only the ones the guest appended since
+        `data["entry_base"]`: the row's existing entries stay where they are and the new ones are
+        inserted after them, so a 99 MB transcript that grew by a line costs a line. It needs the
+        row those entries belong to; asked to append to a row that is not there, this writes
+        nothing and forgets where the transcript was read to, so the next pass reads it whole. `data["cursor"]`
+        is where the transcript has been read to; it is stored in the same transaction as the
+        entries, because an offset that moved without its entries would skip them forever.
         """
         source = str(data.get("source") or "")
         session_id = str(data.get("id") or "")
@@ -900,38 +1123,76 @@ class ConversationIndex:
         if not session_id:
             raise ValueError("A guest session has no id.")
         workspace = normalize_workspace(str(data.get("workspace") or ""))
+        raw_cwd = str(data.get("raw_cwd") or "")
         title = _one_line(data.get("title"), 200)
         rows = [row for row in data.get("entries") or [] if isinstance(row, dict) and row.get("text")]
         mtime = data.get("mtime")
         mtime = float(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else None
+        cursor = data.get("cursor") if isinstance(data.get("cursor"), dict) else None
+        saved = self.guest_meta(source, session_id)
+        if saved.get("forgotten"):
+            return 0
 
         def work(db):
             stored = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?",
                                 (session_id,)).fetchone()
             # Merge per key: whichever of the two `data` does not mention keeps the stored value,
-            # so a rename does not clear the pin and a pin does not clear the rename.
-            custom_title = stored["custom_title"] if stored else None
-            pinned = int(stored["pinned"] or 0) if stored else 0
+            # so a rename does not clear the pin and a pin does not clear the rename. With no row
+            # to keep them in, the store is what the user set the last time there was one.
+            custom_title = stored["custom_title"] if stored else (saved.get("custom_title") or None)
+            pinned = int(stored["pinned"] or 0) if stored else int(bool(saved.get("pinned")))
             if "custom_title" in data:
                 custom_title = data.get("custom_title") or None
             if "pinned" in data:
                 pinned = 1 if data.get("pinned") else 0
-            db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
-            db.execute(
-                "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
-                " model, preset, created, updated, turns, open_requests, session_dir, pinned, file_mtime,"
-                " indexed_version)"
-                " VALUES(?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?)",
-                (session_id, source, workspace, project_name(workspace), title, custom_title,
-                 data.get("created") or mtime, mtime or time.time(),
-                 max(0, int(data.get("message_count") or 0)),
-                 pinned, mtime, SCHEMA_VERSION))
-            written = header_entries(custom_title or title, "") + rows
+            appending = bool(data.get("append")) and stored is not None
+            if bool(data.get("append")) and stored is None and int(data.get("entry_base") or 0) > 0:
+                # Entries to add to a row that is not there: the caller read only the tail of the
+                # transcript, so writing it would make a session that starts in the middle. Drop
+                # the stale cursor instead — with no row and no cursor, the next reconcile reads
+                # the file from the beginning, which is the only way to get this right.
+                db.execute("DELETE FROM guest_files WHERE session_id=?", (session_id,))
+                db.commit()
+                return 0
+            if appending:
+                db.execute(
+                    "UPDATE conversations SET workspace=?, raw_cwd=?, project=?, title=?, custom_title=?,"
+                    " updated=?, turns=?, pinned=?, file_mtime=?, indexed_version=? WHERE session_id=?",
+                    (workspace, raw_cwd, project_name(workspace), title, custom_title,
+                     mtime or time.time(), max(0, int(data.get("message_count") or 0)),
+                     pinned, mtime, SCHEMA_VERSION, session_id))
+                # The searchable title entry is rewritten only when the name changed; the rest of
+                # the entries are left exactly where they are, which is the point of appending.
+                shown = custom_title or title
+                current = db.execute("SELECT text FROM entries WHERE session_id=? AND kind='title'",
+                                     (session_id,)).fetchone()
+                written = rows
+                if (current["text"] if current else "") != (shown or ""):
+                    db.execute("DELETE FROM entries WHERE session_id=? AND kind='title'", (session_id,))
+                    written = header_entries(shown, "") + rows
+            else:
+                db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+                db.execute(
+                    "INSERT OR REPLACE INTO conversations(session_id, source, workspace, raw_cwd, project, title,"
+                    " custom_title, model, preset, created, updated, turns, open_requests, session_dir, pinned,"
+                    " file_mtime, indexed_version)"
+                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?)",
+                    (session_id, source, workspace, raw_cwd, project_name(workspace), title, custom_title,
+                     data.get("created") or mtime, mtime or time.time(),
+                     max(0, int(data.get("message_count") or 0)),
+                     pinned, mtime, SCHEMA_VERSION))
+                written = header_entries(custom_title or title, "") + rows
             db.executemany(
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
                 [(session_id, int(row.get("turn") or 0), int(row.get("seq") or 0),
                   str(row.get("kind") or "reply"), row.get("time"),
                   _clean(str(row.get("text") or ""), MAX_PROMPT)) for row in written])
+            if cursor is not None:
+                db.execute("INSERT OR REPLACE INTO guest_files(session_id, source, path, size, mtime_ns,"
+                           " read_to, state) VALUES(?,?,?,?,?,?,?)",
+                           (session_id, source, str(cursor.get("path") or ""),
+                            int(cursor.get("size") or 0), int(cursor.get("mtime_ns") or 0),
+                            int(cursor.get("read_to") or 0), json.dumps(cursor, ensure_ascii=False)))
             db.commit()
             return len(rows)
         return self._run(work)
@@ -947,6 +1208,28 @@ class ConversationIndex:
             row["session_id"]: (row["source"], row["updated"] or 0, row["file_mtime"])
             for row in db.execute("SELECT session_id, source, updated, file_mtime FROM conversations"
                                   f" WHERE source IN ({placeholders})", wanted).fetchall()})
+
+    def guest_cursors(self, sources=GUEST_SOURCES) -> dict[str, dict]:
+        """`{session_id: cursor state}` — where each transcript was read to, for an incremental
+        reconcile (`guest_sessions.parse_transcript`). A row with no cursor, or one whose state
+        does not fit the file any more, simply costs a full re-parse."""
+        wanted = [source for source in sources if source in GUEST_SOURCES]
+        if not wanted:
+            return {}
+        placeholders = ",".join("?" * len(wanted))
+
+        def work(db):
+            out: dict[str, dict] = {}
+            for row in db.execute(f"SELECT session_id, state FROM guest_files WHERE source IN ({placeholders})",
+                                  wanted).fetchall():
+                try:
+                    state = json.loads(row["state"] or "{}")
+                except ValueError:
+                    continue
+                if isinstance(state, dict):
+                    out[row["session_id"]] = state
+            return out
+        return self._run(work)
 
     def update_thread(self, data: dict, session_dir: str | Path | None = None, file_mtime: float | None = None) -> int:
         """Index (or re-index) one subagent thread. Returns the number of entries written."""
@@ -1167,16 +1450,24 @@ class ConversationIndex:
             return len(payload)
         return self._run(work)
 
-    def delete_session(self, session_id: str, *, remove_files: bool = True) -> dict:
+    def delete_session(self, session_id: str, *, remove_files: bool = True, forget: bool = True) -> dict:
         """Remove a conversation's index rows and, for agent sessions, its files and blobs.
 
         A guest session (protocol 26.7) has no Relay file to delete: its rows go and the
-        transcript the guest owns stays, so `remove_files` never touches it.
+        transcript the guest owns stays, so `remove_files` never touches it. Because the file
+        stays, the row is also written into the forgotten set (`forget()`), or the next reconcile
+        reads the same transcript and puts the session the user just deleted back in the list.
+
+        `forget=False` is for the reconcile's own pruning: a row whose transcript is *gone* is
+        dropped because there is nothing left to index, not because the user said so, and
+        remembering it would keep a session out of the pane for good if its file came back (a
+        network home that was late, a restored backup).
         """
         def work(db):
             row = db.execute("SELECT source, session_dir FROM conversations WHERE session_id=?", (session_id,)).fetchone()
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
             db.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
+            db.execute("DELETE FROM guest_files WHERE session_id=?", (session_id,))
             # A session's subagent threads go with it (their files sit in its .threads folder).
             db.execute("DELETE FROM entries WHERE session_id IN"
                        " (SELECT session_id FROM conversations WHERE owner_session=?)", (session_id,))
@@ -1185,6 +1476,10 @@ class ConversationIndex:
             return dict(row) if row else None
         row = self._run(work)
         removed = {"session_id": session_id, "files": 0, "indexed": row is not None}
+        if row is not None and row["source"] in GUEST_SOURCES:
+            removed["forgotten"] = bool(forget)
+            if forget:
+                self.forget(row["source"], session_id)
         if not remove_files or row is None or row["source"] != "agent" or not row["session_dir"]:
             return removed
         directory = Path(row["session_dir"])
@@ -1209,9 +1504,16 @@ class ConversationIndex:
         return removed
 
     def rename(self, session_id: str, title: str) -> None:
+        """Give a conversation the name the user typed (or clear it with "").
+
+        For a guest row the name also goes into the meta store, which is the only place it can
+        survive the database being discarded: there is no `<id>.meta.json` beside a guest
+        transcript, and Relay may not make one (protocol 26.7).
+        """
         title = " ".join(str(title or "").split())[:200]
 
         def work(db):
+            source = db.execute("SELECT source FROM conversations WHERE session_id=?", (session_id,)).fetchone()
             db.execute("UPDATE conversations SET custom_title=? WHERE session_id=?", (title or None, session_id))
             # The searchable title entry follows the name the list shows, so a renamed conversation
             # is found under its new name straight away.
@@ -1222,13 +1524,22 @@ class ConversationIndex:
                 db.execute("INSERT INTO entries(session_id, turn, seq, kind, time, text)"
                            " VALUES(?,0,0,'title',NULL,?)", (session_id, shown[:MAX_SUMMARY]))
             db.commit()
-        self._run(work)
+            return source["source"] if source else ""
+        source = self._run(work)
+        if source in GUEST_SOURCES:
+            self._write_guest_meta(source, session_id, custom_title=title)
 
     def set_pinned(self, session_id: str, pinned: bool) -> None:
+        """Pin (or unpin) a conversation; a guest row's pin is mirrored into the meta store, for
+        the same reason its name is (see `rename`)."""
         def work(db):
+            source = db.execute("SELECT source FROM conversations WHERE session_id=?", (session_id,)).fetchone()
             db.execute("UPDATE conversations SET pinned=? WHERE session_id=?", (1 if pinned else 0, session_id))
             db.commit()
-        self._run(work)
+            return source["source"] if source else ""
+        source = self._run(work)
+        if source in GUEST_SOURCES:
+            self._write_guest_meta(source, session_id, pinned=bool(pinned))
 
     # ----- reading ---------------------------------------------------------------------
     def _filters(self, *, scope: str, workspace: str | None, model: str | None, has_open: bool,
@@ -1552,6 +1863,10 @@ def _item(row) -> dict:
             "title": (row["custom_title"] or row["title"] or "Untitled"),
             "generated_title": row["title"] or "",
             "workspace": row["workspace"], "project": row["project"],
+            # v4: the working directory a guest transcript named, as written. `workspace` is that
+            # path resolved, which is the one grouping and filters use — and the wrong one to
+            # resume a guest in when it reached its own cwd through a symlink (GT7X).
+            "raw_cwd": row["raw_cwd"] or "",
             "model": row["model"], "preset": row["preset"],
             "created": row["created"], "updated": row["updated"],
             "turns": row["turns"], "open_requests": row["open_requests"],
@@ -1656,6 +1971,54 @@ def write_user_fields(directory: Path, session_id: str, **fields) -> bool:
         if os.path.exists(temp):
             os.unlink(temp)
     return True
+
+
+# ----- the guest rows' meta store (since v4) ---------------------------------------------------
+
+def read_guest_meta(path: str | Path) -> dict:
+    """`{source: {id: {custom_title?, pinned?, forgotten?, forgotten_at?}}}` from `guest-meta.json`.
+
+    Anything unreadable — missing, truncated by a crash mid-write, a JSON array where an object
+    belongs — is an empty store, not an error: this file is what makes a pin survive a cache wipe,
+    and refusing to open the index because it is corrupt would be a worse failure than losing the
+    pin. The next write rewrites it whole. Entries that are not dicts are dropped the same way, so
+    one bad row cannot take the others with it.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for source, rows in data.items():
+        if source not in GUEST_SOURCES or not isinstance(rows, dict):
+            continue
+        kept = {str(key): dict(value) for key, value in rows.items()
+                if key and isinstance(value, dict)}
+        if kept:
+            out[source] = kept
+    return out
+
+
+def write_guest_meta(path: str | Path, data: dict) -> None:
+    """Write the whole store back (0600, atomic replace), creating its directory if need be.
+
+    Atomic because the reader treats a half-written file as an empty store: a rename of a session
+    interrupted by a crash must lose that rename, never every pin in the file.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".guest-meta-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            os.fchmod(out.fileno(), 0o600)
+            json.dump(data, out, ensure_ascii=False)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
 
 
 def _meta_updated(path: Path) -> float | None:
