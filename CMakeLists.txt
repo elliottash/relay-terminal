@@ -395,7 +395,7 @@ if(RELAY_BUILD_APP)
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
     add_executable(relay src/main.cpp
-        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
+        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
@@ -489,6 +489,11 @@ if(BUILD_TESTING)
     add_executable(relay-runtimedirs-tests tests/runtimedirs_test.cpp)
     target_link_libraries(relay-runtimedirs-tests PRIVATE relay-runtimedirs ${RELAY_QT}::Test)
     add_test(NAME runtimedirs COMMAND relay-runtimedirs-tests)
+    # The IDE bridge's C++ rules (GT7X, 26.5), header-only beside the pane: which reply files the
+    # GUI may write, and the shell environment a claude pane injects.
+    add_executable(relay-guestbridge-tests tests/guestbridge_test.cpp)
+    target_link_libraries(relay-guestbridge-tests PRIVATE relay-logging relay-runtimedirs ${RELAY_QT}::Test)
+    add_test(NAME guestbridge COMMAND relay-guestbridge-tests)
     add_executable(relay-slash-tests tests/slashcommands_test.cpp)
     target_link_libraries(relay-slash-tests PRIVATE relay-slash ${RELAY_QT}::Test)
     add_test(NAME slash COMMAND relay-slash-tests)
