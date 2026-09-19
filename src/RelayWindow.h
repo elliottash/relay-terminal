@@ -1822,6 +1822,22 @@ private:
         // folder is something you do, so it is in Actions (Relay › Open the log folder).
         general.rows << headingRow(QStringLiteral("Diagnostics"));
         {
+            // Which build this window is running, and whether the one on disk has moved on (owner,
+            // 2026-09-19). A rebuild never reaches a running Relay, nor the windows it opens.
+            const relay::buildinfo::Running &build = relay::buildinfo::running();
+            const QString onDisk = relay::buildinfo::idOnDisk();
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:build");
+            info.label = QStringLiteral("Build %1 · version %2 · running since %3 · %4")
+                             .arg(build.id, QStringLiteral(RELAY_VERSION), build.started.toString(QStringLiteral("HH:mm")),
+                                  QCoreApplication::applicationFilePath());
+            if (onDisk != build.id)
+                info.label += QStringLiteral("\nA newer build is on disk: %1. Quit and reopen Relay to run it; New window "
+                                             "stays on this one, a launch from the taskbar starts the new one.").arg(onDisk);
+            general.rows << info;
+        }
+        {
             QStringList ids, labels;
             QString about;
             const QString current = relay::log::levelName(relay::log::level());
