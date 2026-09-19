@@ -1,7 +1,7 @@
 ---
 id: W5N2
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature]
 component: [gui, worker, terminal engine]
 milestone: desktop-alpha
@@ -106,94 +106,66 @@ python3 -m remote.cli share --tls    # prints a QR; scan it, confirm the five-di
 | The guest's web client, a separate session from the owner's phone | `app/guest.js`, `app/rrp.js`, `/join` |
 | The audit log of 10.6 | `remote/audit.py` |
 
-## What is left (refreshed 2026-09-18, after the end-to-end run)
+## What is left (refreshed 2026-09-18, 21:45, at close-out)
 
-Everything the acceptance line names is built and was watched working in one session. What is
-below is what that run and the reading around it found: six things worth fixing, three that are
-a decision rather than a patch, and two that need the owner.
+Everything the acceptance line names is built and was watched working in one session. The seven
+findings of the end-to-end run were fixed the same evening, and the card moves to the QA lane on
+that; what QA has to do first is re-run the drive.
 
-**Why this card has not moved to `needs_qa_llm`.** Finding 1: the prompt box a person actually
-sees on the phone sends every command to the agent. The routing underneath is fine and the run
-shows it working through the client's own box, but the sentence the card promises — "what you type
-is routed: a command runs in the shell" — is not true of the phone as it stands this evening. When
-that one line lands in the pane view's host callback, this card has nothing left between it and
-the QA lane.
+**Fixed since the run** (each with a test; the re-drive that shows them in shots has not been run
+yet, and is the first item for QA):
 
-**Found by running it, 2026-09-18** (`docs/qa_evidence/2026-09-18-remote-end-to-end/`, which has
-the shot for each)
+- The phone's prompt box routed every command to the agent: `app/pane.js` now sends `agent:false`
+  when the published state says the device may route, and the two prompt boxes, the hidden voice
+  transcript and the `guest:<hex>` attribution went with it (`5a81e7e`).
+- The owner's own phone is in the one control book, loses the keyboard when the owner types, the
+  phone's UI follows `control`, and `participants` reaches the owner's devices (`113d5ab`).
+- A GUI pane reports `waiting_input` and `failed`, so all five notification triggers can fire
+  (`bbbece2`).
+- The security review of push, password entry, voice and multiplayer: nine findings, eight fixed
+  (`38fc7e1`, `7009547`, tests in `tests/test_remote_security.py`).
+- A warning-free address: the share window prefers `https://<machine>.<tailnet>.ts.net` via
+  `tailscale serve` (real certificate; the service worker registers there, so Web Push is testable
+  on a real device), and a public `trycloudflare.com` link for people off the network (`8b5e3a3`,
+  `73ee433`, `9e4b5c7`, `5a81e7e`). Public-link invites may admit several people (owner's
+  decision, 2026-09-18) and the owner is emailed the first time each guest joins (`2391e40`).
+- Running a remote test module directly no longer overwrites the profile's identity key
+  (`cbba6c2`). **Devices paired before 2026-09-18 21:00 must be paired again**: their pinned key
+  was overwritten by test runs earlier that day.
 
-1. **A command typed into the prompt box on the phone goes to the agent, not the shell.** The pane
-   view (§16, landed the same day) draws the pane's own box over the client's, and `compose()` in
-   `app/pane.js` sends `{t: 'compose', pane, text, when}` with no `agent` field; the hub reads a
-   missing `agent` as `true`. So `printf "…"` from the box a thumb reaches for is handed to the
-   agent, which runs it as a tool call on the owner's key, and "one prompt box — a command runs in
-   the shell" stops being true on the phone. The client's own box still sends `agent: false` for a
-   `full` device and routes correctly, which is the one line the pane view's host callback in
-   `ensurePaneView` needs.
-2. **Two prompt boxes on the phone.** `ensurePaneView` hides the client's composer; `updateDriveUi`
-   sets `$('composer').hidden` back from its own rule on the next pane update, and both are drawn.
-3. **A voice transcript can land out of sight.** `voiceDone` appends the words to `#composer-text`,
-   the box the pane view hides. The microphone moves into the pane's strip and records; what comes
-   back has nowhere to be read.
-4. **Two of the five notification triggers cannot fire from the app.** `Pane::shareStatus()`
-   returns only `password`, `running` or `idle` and is the only source of a pane's status on the
-   sidecar line, so `remote/notify.py`'s `waiting_input` and `failed` transitions are unreachable
-   from a GUI pane. They work from `python3 -m remote.cli share`, where the terminal source
-   answers with the full vocabulary.
-5. **A guest's name does not reach the turn's attribution line.** `submitRemote` puts the display
-   name on `QueueEntry::author`, which is drawn for a *queued* row; a prompt that starts at once
-   goes through `startAgentEntry`, which carries `entry.why` and not `entry.author`, so the pane
-   prints `guest:<hex>` under the text. §10.4 asks for the name.
+**For QA**
 
-6. **Scrollback paging on the phone is slow enough under load to look broken.** Four runs of the
-   same drive, the same code, the same 150 s of dragging: two paged 383 rows back and joined the
-   column 1..400 with no gap and no repeat, two paged nothing inside that window — and in one of
-   those, a shot taken a minute later has `scrollback-1` onward on the phone. The pages arrive;
-   the page-ahead is just slower than a finger when the machine is busy, and until they do the
-   phone shows an empty space where the history will be.
+1. Re-run `docs/qa_evidence/2026-09-18-remote-end-to-end/drive.sh` on current `main` (its `run.py`
+   already asserts the fixed behaviour: the owner's keystroke flips the phone to Watching and
+   refuses its next line; a command from the phone's box runs in the shell with no agent turn; a
+   `full` device downgraded to `agent` mid-session sends its next command to the agent). Also the
+   password-entry step (the drive now aims at the first device row) and a `waiting_input` push.
+2. Scrollback paging under load: two of four runs paged nothing inside 150 s (the pages did
+   arrive later). Not broken; slow when the machine is busy.
 
-**Needs a decision, not a patch**
+**Needs a decision**
 
-6. **The owner's own phone is not in the one control book.** §10.3 lists "a `full` device typing"
-   among the changes that go through `remote/control.py`, but `Host._on_control_request` sends an
-   empty keystroke for a device and never calls `ControlBook.claim_device` — which exists and is
-   documented for exactly this. So `panes[].control` never reads `remote:<device>` while a phone
-   drives, `Pane::takeBackFromGuest()` sends no `control_take` because no guest is named as the
-   driver, and `app/app.js` follows no `control`: the phone goes on saying "You have the keyboard"
-   after the owner types, and both can type at once. Making it one driver per pane touches
-   `remote/host.py`, `src/Pane.h` and `app/app.js` together, and whether a phone should lose the
-   keyboard to its own owner's keystroke is the owner's call, not a bug fix.
-7. **A participant list never reaches the owner's own devices.** §10.3 says `participants` goes to
-   "everyone on the pane"; `Host.send_participants` skips every channel with no `participant_id`,
-   so a phone cannot show who else is on the pane it is watching. Either the spec or the fan-out
-   should move.
-8. **WebAuthn binding**: bind user verification to the desktop, or drop it from the threat table.
-   Recommendation unchanged: drop it for v1; the per-device password switch covers the case.
+3. **WebAuthn binding**: bind user verification to the desktop, or drop it from the threat table.
+   Recommendation: drop it for v1; the per-device password switch covers the case.
+4. **Per-device connect tokens** at the rendezvous: anyone who ever held a pairing or invite link
+   knows the `desktop_id` and can fill every channel slot for that desktop (capped per peer
+   address in `38fc7e1`, which limits one attacker, not the rule). The real fix is a token minted
+   at pairing, a section 5 change.
 
 **Needs the owner**
 
-9. **Hosting**: `app.relay-terminal.ai` and the `rv.` cloudflared ingress rule. Until then it is
-   LAN or tailnet with a certificate warning, and a real phone cannot be reached by a push service.
-10. **Native apps (P5)**: Android then iOS. Not in the acceptance line; better as a card of its own
-    so this one can close on what it promises.
+5. **Hosting**: `app.relay-terminal.ai` and the `rv.` cloudflared ingress rule, for a stable
+   public address and a named tunnel; the tailnet address already gives a real certificate.
+6. **Native apps (P5)**: Android then iOS. Not in the acceptance line; better as a card of its own.
 
-**Not shown by the run, and why**
+**What a real phone still has to confirm.** A notification arriving on a lock screen through a
+real push service (now reachable over the tailnet address), the microphone with a real microphone,
+and the installed-PWA path iOS needs before it delivers Web Push. Everything else in the acceptance
+line was watched working here.
 
-- **Password entry from a phone.** The switch is per device and the drive clicked the middle of a
-  two-row device list, so it went to the viewing device rather than the phone (shot 22 says
-  `· view · passwords`) and no field appeared on the phone. The prompt itself, the refusal of
-  ordinary typing and the absence of a field on a device that was never allowed one are all in
-  shots 20-23; the rest is covered by `SecretInputTests`. The drive now aims at the first row.
-- **A notification arriving.** `push_subscribe` reaches the desktop and comes back with its five
-  kinds, and the presence rule was satisfied (the run checks that the focus left Relay's window),
-  but nothing reached the local push service. The hub's own decision is unit-tested end to end in
-  `tests/test_remote_push.py`, including a real delivery to a local service; what this run cannot
-  yet say is that a GUI pane's password prompt reaches it.
-
-**What a real phone still has to confirm.** Four things this machine cannot: a notification
-arriving on a lock screen through a real push service, the microphone with a real microphone, the
-certificate warning on iOS Safari, and the installed-PWA path iOS needs before it delivers Web
-Push at all. Everything else in the acceptance line was watched working here.
+**Landed beside this card the same evening, by other sessions:** the phone pane view
+(`docs/REMOTE-PROTOCOL.md` section 16), Relay-to-Relay viewing (`remote/viewer.py`,
+`src/RemotePane.*`), meeting code + PIN joining (`#97EG`), and tab-scoped sharing.
 
 ## Delivery plan (Opus subagents, this checkout, `main`) — all ten waves ran
 

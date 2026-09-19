@@ -589,29 +589,95 @@ class Run:
              f"Take over puts the phone on the keyboard ({mode!r}) and its line reached the"
              " program (shots 12, 13)")
 
-        # Section 10.3 says the owner's own keystroke takes the keyboard back from whoever holds
-        # it and that "a `full` device typing" is one of the changes that goes through the one
-        # control book. This is that rule's device case, and it is recorded rather than judged:
-        # what the phone says afterwards, and whether a line it sends still lands.
+        # Section 10.3: the owner's own keystroke takes the keyboard back from whoever holds it,
+        # the phone's own device included, and anything of theirs that arrives afterwards is
+        # refused `not_driving`. Half a line is left in the phone's box first, because losing the
+        # keyboard must not lose the words — the same rule the guest keeps in shot 43.
+        await phone.evaluate(
+            "(() => { const box = document.getElementById('composer-text');"
+            " box.value = 'rm -r bui';"
+            " box.dispatchEvent(new Event('input', { bubbles: true })); return true; })()")
         at_prompt("the owner types while the phone is driving", enter=False)
         await asyncio.sleep(6)
         after = await phone.evaluate("""
             (() => ({ mode: document.getElementById('term-mode').textContent,
                       note: document.getElementById('term-note').textContent,
-                      handBack: !document.getElementById('term-release').hidden }))()
+                      said: document.getElementById('thread-note').textContent,
+                      kept: document.getElementById('composer-text').value,
+                      handBack: !document.getElementById('term-release').hidden,
+                      takeOver: !document.getElementById('term-take').hidden }))()
         """)
         await compose(phone, "echo the phone typed after the owner did", prefer_view=False)
-        still = await terminal_has(phone, "the phone typed after the owner did", timeout=30)
+        still = await terminal_has(phone, "the phone typed after the owner did", timeout=20)
         await browser_shot(self.phone, "phone", "13a-after-the-owner-typed-in-the-pane")
         desk("13b-the-owner-typing-while-the-phone-held-the-keyboard")
-        note("NOTE", f"after the owner's keystroke the phone still says {after['mode']!r}"
-                     f" / {after['note']!r}, Hand back is still offered ({after['handBack']}),"
-                     f" and a line it sends still reaches the program ({still})."
-                     " Section 10.3 puts “a `full` device typing” in the one control"
-                     " book; this desktop does not, so the phone and the owner share the keyboard"
-                     " rather than taking turns (shots 13a, 13b)")
+        flipped = after["mode"] == "Watching" and not after["handBack"] and after["takeOver"]
+        note("PASS" if (flipped and not still and after["kept"] == "rm -r bui") else "FAIL",
+             f"the owner's keystroke took the keyboard back from the phone: it says"
+             f" {after['mode']!r}, Hand back is offered ({after['handBack']}), Take over is"
+             f" ({after['takeOver']}), it kept the half-typed line ({after['kept']!r}), it was"
+             f" told {after['said']!r}, and a line it sent afterwards still reached the program"
+             f" ({still}) (shots 13a, 13b)")
         key("ctrl+a", "BackSpace")
+        await phone.evaluate(
+            "(() => { document.getElementById('composer-text').value = ''; return true; })()")
+        # And one tap gets it back, because the owner's phone is the owner: the take-back is not
+        # a lock-out, it is a turn.
+        await press(phone, 'term-take')
+        await asyncio.sleep(3)
+        again = await phone.evaluate("document.getElementById('term-mode').textContent")
+        await compose(phone, "echo the phone asked for the keyboard again", prefer_view=False)
+        back = await terminal_has(phone, "the phone asked for the keyboard again", timeout=30)
+        note("PASS" if back else "FAIL",
+             f"asking for it again puts the phone back on the keyboard ({again!r}) and its line"
+             f" reaches the program ({back})")
         await press(phone, 'term-release')
+        await asyncio.sleep(2)
+
+    async def the_pane_waits_for_input(self) -> None:
+        """A pane's status has six words (section 6.3) and the phone acts on three of them.
+
+        `Pane::shareStatus()` answered with `password`, `running` or `idle`, so `waiting_input`
+        and `failed` — two of the five notification triggers in `remote/notify.py` — could not be
+        reached from a GUI pane at all. This is the first of the two, end to end: a real program
+        blocked reading the terminal, and the word that reaches the phone's inbox.
+        """
+        phone = self.phone
+        await wait_idle(phone)
+        at_prompt("python3 -c \"print('answered', input('Your name: '))\"")
+        await asyncio.sleep(6)
+        desk("63-the-program-waiting-for-a-line")
+        await press(phone, 'thread-back')
+        await phone.wait_for(shown('screen-inbox'), timeout=30)
+        chip = ("(() => { const n = document.querySelector('.pane-row .chip');"
+                " return n ? n.textContent : ''; })()")
+        said = ""
+        try:
+            said = await phone.wait_for(
+                f"(() => {{ const t = {chip};"
+                " return t === 'Waiting for input' ? t : null; }})()", timeout=60)
+        except AssertionError:
+            said = await phone.evaluate(chip)
+        await browser_shot(self.phone, "phone", "62-the-pane-says-it-is-waiting-for-you")
+        note("PASS" if said == "Waiting for input" else "FAIL",
+             f"a program blocked reading the terminal reaches the phone as a status: the inbox"
+             f" chip reads {said!r} (shots 62, 63)")
+
+        # Answer it from the desktop, the way section 9 says the prompt box does, and the pane
+        # goes back to idle: a status nothing clears is not a status.
+        at_prompt("Ada")
+        await asyncio.sleep(6)
+        cleared = ""
+        try:
+            cleared = await phone.wait_for(
+                f"(() => {{ const t = {chip}; return t && t !== 'Waiting for input' ? t : null;"
+                " }})()", timeout=60)
+        except AssertionError:
+            cleared = await phone.evaluate(chip)
+        note("PASS" if cleared and cleared != "Waiting for input" else "FAIL",
+             f"answering it clears the status: the chip now reads {cleared!r}")
+        await phone.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+        await phone.wait_for(shown('terminal-pane'), timeout=40)
         await asyncio.sleep(2)
 
     # -- notifications ------------------------------------------------------------------------------
