@@ -1090,5 +1090,102 @@ class SearchFilesTests(BoardToolsTest):
             self.search(pattern="x")
 
 
+class UninitializedTests(unittest.TestCase):
+    """A project with no Switchboard yet (protocol 19.12): one tool, one line, nothing on disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.project = Path(self.tmp.name).resolve()
+        self.events = []
+        self.init = T.BoardInit(self.events.append)
+        self.tools = T.BoardTools(T.board_at(self.project / "switchboard"),
+                                  emit=self.events.append, state="uninitialized", init=self.init)
+
+    def test_it_offers_only_the_tool_that_can_create_one(self):
+        self.assertEqual([s["function"]["name"] for s in self.tools.tool_specs()],
+                         ["board_create_card"])
+        self.assertFalse(self.tools.exists())
+
+    def test_the_prompt_block_is_one_line_and_not_the_policy(self):
+        note = T.prompt_section(self.tools)
+        self.assertIn("this project has no Switchboard yet", note)
+        self.assertNotIn("board_rate_limited", note)
+        self.assertEqual(note.strip().count("\n"), 0)
+
+    def test_every_other_board_tool_says_there_is_nothing_to_read(self):
+        for name in ("board_list", "board_read", "board_update_card", "board_move_card",
+                     "board_comment"):
+            result = self.tools.run(name, {"id": "AAAA"})
+            self.assertEqual(result.get("code"), "board_not_initialized", name)
+        self.assertEqual(list(self.project.rglob("*")), [])
+
+    def test_a_declined_project_answers_without_asking_again(self):
+        self.init.declined = True
+        result = self.tools.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                      "title": "T", "request": "r"})
+        self.assertEqual(result["code"], "board_not_initialized")
+        self.assertEqual([e for e in self.events if e["event"] == "board_init_request"], [])
+        self.assertEqual(list(self.project.rglob("*")), [])
+
+    def test_creating_the_board_announces_it_and_promotes_the_tools(self):
+        followed = []
+        self.tools.on_created = lambda: followed.append(True)
+        files = self.tools.create_board()
+        self.assertEqual(files[0], "switchboard/board.yaml")
+        created = [e for e in self.events if e["event"] == "board_created"][0]
+        self.assertEqual(created["root"], str(self.project / "switchboard"))
+        self.assertEqual(created["workspace"], str(self.project))
+        self.assertEqual(created["project"], str(self.project))
+        self.assertEqual(self.tools.state, "ready")
+        self.assertTrue(self.tools.exists())
+        self.assertTrue(set(T.TOOL_NAMES) <=
+                        {s["function"]["name"] for s in self.tools.tool_specs()})
+        self.assertEqual(followed, [True])
+
+
+class BoardFolderResolutionTests(unittest.TestCase):
+    """What `board.dir` and a workspace walk resolve to, which `relay::boardRootFor` mirrors."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def board(self, *parts) -> Path:
+        folder = self.dir.joinpath(*parts)
+        folder.mkdir(parents=True)
+        (folder / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        return folder
+
+    def test_a_dir_that_holds_no_board_is_where_a_new_one_would_go(self):
+        self.assertEqual(T.named_board_root(self.dir), self.dir / "switchboard")
+        self.assertEqual(T.named_board_root(self.dir / "switchboard"), self.dir / "switchboard")
+        self.assertEqual(T.named_board_root(self.dir / "issues"), self.dir / "issues")
+        self.assertIsNone(T.find_board_root(self.dir))
+
+    def test_an_existing_board_is_found_under_either_name_from_the_project_or_the_folder(self):
+        for name in ("switchboard", "issues"):
+            project = self.dir / name[0]
+            folder = self.board(name[0], name)
+            self.assertEqual(T.named_board_root(project), folder, name)
+            self.assertEqual(T.named_board_root(folder), folder, name)
+            self.assertEqual(T.find_board_root(project), folder, name)
+            self.assertEqual(T.board_at(folder).repo, project, name)
+
+    def test_switchboard_wins_in_a_project_that_has_both(self):
+        self.board("both", "issues")
+        newer = self.board("both", "switchboard")
+        self.assertEqual(T.find_board_root(self.dir / "both"), newer)
+        self.assertEqual(T.named_board_root(self.dir / "both"), newer)
+
+    def test_the_nearest_ancestor_wins_whatever_its_spelling(self):
+        self.board("outer", "switchboard")
+        inner = self.board("outer", "inner", "issues")
+        deep = self.dir / "outer" / "inner" / "src" / "deep"
+        deep.mkdir(parents=True)
+        self.assertEqual(T.find_board_root(deep), inner)
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

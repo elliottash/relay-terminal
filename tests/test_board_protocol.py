@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,7 @@ class StubTurns:
         self.submitted = []
         self.resets = 0
         self.agent = None
+        self.busy = False
 
     def reset(self):
         self.resets += 1
@@ -43,6 +45,10 @@ class StubTurns:
     def submit(self, prompt, when="now", request_id=None, context=None, attachments=None, **kw):
         self.submitted.append({"prompt": prompt, "when": when, "id": request_id})
         return "q1"
+
+    def now_or_later(self, now, later):
+        """`TurnSupervisor.now_or_later`: the deferral `set_agent_role` and `set_board` share."""
+        return later() if self.busy else now()
 
 
 def boardless_dir(case) -> Path:
@@ -936,6 +942,402 @@ class WorkerWorkspaceTests(unittest.TestCase):
         self.assertNotIn("board", configured[0])
         self.assertEqual(configured[1]["board"]["root"], str(project / "issues"))
         self.assertEqual(configured[1]["board"]["workspace"], str(project))
+
+
+# ------------------------------------- attaching a project to a pane that is already talking
+
+class AttachTest(unittest.TestCase):
+    """The harness for protocol 19.12: a pane, a live Agent, and projects to point it at."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        self.events = []
+        self.turns = StubTurns()
+        self.commands = P.BoardCommands(self.turns, self.events.append)
+        self.config = ProviderConfig("https://example.invalid/v1", "test-model", "k", {}, 1024)
+
+    # ---- fixtures
+    def project(self, name: str, folder: str | None = None) -> Path:
+        """A project directory, with a board in `folder` when one is named."""
+        root = self.dir / name
+        root.mkdir(parents=True, exist_ok=True)
+        if folder:
+            (root / folder).mkdir(parents=True)
+            (root / folder / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        return root
+
+    def agent(self, workspace: Path, request: dict | None = None):
+        """A live Agent wired to this worker, as `configure` wires one."""
+        agent = Agent(self.config, str(workspace), lambda event: None, provider=object(),
+                      board=self.commands.agent_tools(str(workspace), request or {}),
+                      session_dir=str(self.dir / ".sessions"))
+        self.turns.agent = agent
+        self.commands.bind_agent(agent)
+        return agent
+
+    # ---- helpers
+    def send(self, **request):
+        self.events.clear()
+        self.commands.dispatch(request)
+        return self.events
+
+    def of(self, name):
+        return [e for e in self.events if e["event"] == name]
+
+    @staticmethod
+    def board_tools(agent):
+        return sorted(t["function"]["name"] for t in agent.tools()
+                      if t["function"]["name"].startswith("board_"))
+
+    @staticmethod
+    def tree(root: Path) -> list[str]:
+        """Every path under `root`, with the bytes of each file: a snapshot to compare against."""
+        out = []
+        for path in sorted(root.rglob("*")):
+            rel = str(path.relative_to(root))
+            out.append(rel if path.is_dir() else f"{rel}:{path.read_bytes()!r}")
+        return out
+
+
+class SetBoardTests(AttachTest):
+    """`set_board`: the board changes, the conversation does not (protocol 19.12)."""
+
+    def test_a_tab_gains_a_board_mid_conversation_and_keeps_its_conversation(self):
+        here = self.project("nowhere")
+        there = self.project("project", "switchboard")
+        self.commands.configure(str(here), {})
+        agent = self.agent(here)
+        agent.messages.append({"role": "user", "content": "a question from before"})
+        identity = (id(agent), id(agent.messages), len(agent.messages), agent.session_id)
+        self.assertEqual(self.board_tools(agent), [])
+        self.assertNotIn("Switchboard", agent.system_prompt())
+
+        self.events.clear()
+        self.commands.set_board({"type": "set_board", "id": "s1", "board": {"dir": str(there)}})
+        state = self.of("board_state")[0]
+        self.assertEqual(state["id"], "s1")
+        self.assertEqual(state["applies"], "now")
+        self.assertEqual(state["board"]["root"], str(there / "switchboard"))
+        self.assertEqual(state["board"]["project"], str(there))
+        self.assertTrue(state["board"]["exists"])
+        self.assertEqual(state["board"]["state"], "ready")
+        # The tools and the policy arrive; the conversation is the same object, unshortened.
+        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertIn("board_rate_limited", agent.system_prompt())
+        self.assertEqual((id(agent), id(agent.messages), len(agent.messages), agent.session_id),
+                         identity)
+        self.assertEqual(agent.messages[-1]["content"], "a question from before")
+
+    def test_board_null_detaches_and_the_tools_and_the_policy_go_with_it(self):
+        there = self.project("project", "issues")
+        self.commands.configure(str(there), {})
+        agent = self.agent(there)
+        agent.messages.append({"role": "user", "content": "still here"})
+        identity = (id(agent.messages), len(agent.messages))
+        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+
+        self.events.clear()
+        self.commands.set_board({"type": "set_board", "id": "s2", "board": None})
+        self.assertEqual(self.of("board_state")[0], {"event": "board_state", "id": "s2",
+                                                     "board": None, "applies": "now"})
+        self.assertEqual(self.board_tools(agent), [])
+        self.assertNotIn("Switchboard", agent.system_prompt())
+        self.assertEqual((id(agent.messages), len(agent.messages)), identity)
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_open"})
+
+    def test_attach_false_is_no_board_even_where_one_is_found(self):
+        there = self.project("project", "issues")
+        self.assertIsNone(self.commands.configure(str(there), {"board": {"attach": False}}))
+        self.assertIsNone(self.commands.agent_tools(str(there), {"board": {"attach": False}}))
+        agent = self.agent(there, {"board": {"attach": False}})
+        self.assertEqual(self.board_tools(agent), [])
+        self.assertNotIn("Switchboard", agent.system_prompt())
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_open"})
+
+    def test_a_set_board_mid_turn_lands_when_the_turn_ends(self):
+        here = self.project("nowhere")
+        there = self.project("project", "switchboard")
+        self.commands.configure(str(here), {})
+        agent = self.agent(here)
+        self.turns.busy = True
+
+        self.events.clear()
+        self.commands.set_board({"type": "set_board", "id": "s3", "board": {"dir": str(there)}})
+        said = self.of("board_state")[0]
+        self.assertEqual(said["applies"], "turn_end")
+        self.assertEqual(said["board"]["root"], str(there / "switchboard"))
+        # The running turn keeps the tool set it started with.
+        self.assertEqual(self.board_tools(agent), [])
+        self.assertIsNone(self.commands.tools)
+
+        self.turns.busy = False
+        self.events.clear()
+        self.commands.observe({"event": "done", "turn_id": "t-1"})
+        landed = self.of("board_state")[0]
+        self.assertEqual((landed["id"], landed["applies"], landed["at"]), ("s3", "now", "turn_end"))
+        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+
+    def test_dir_may_name_the_project_or_the_board_folder(self):
+        there = self.project("project", "issues")
+        for named in (there, there / "issues"):
+            block = self.commands.configure(str(self.dir), {"board": {"dir": str(named)}})
+            self.assertEqual(block["root"], str(there / "issues"), named)
+            self.assertEqual(block["workspace"], str(there), named)
+            self.assertEqual(block["folder"], "issues", named)
+
+    def test_a_board_folder_is_switchboard_first_then_issues_nearest_ancestor_winning(self):
+        both = self.project("both", "issues")
+        (both / "switchboard").mkdir()
+        (both / "switchboard" / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        self.assertEqual(T.find_board_root(both), both / "switchboard")
+        outer = self.project("outer", "switchboard")
+        inner = outer / "inner"
+        (inner / "issues").mkdir(parents=True)
+        (inner / "issues" / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        deep = inner / "src"
+        deep.mkdir()
+        self.assertEqual(T.find_board_root(deep), inner / "issues")
+
+
+class InitTests(AttachTest):
+    """Nothing is created until the user says yes (protocol 19.12)."""
+
+    def uninitialized(self, name: str = "fresh"):
+        project = self.project(name)
+        request = {"board": {"project": str(project), "state": "uninitialized"}}
+        block = self.commands.configure(str(project), request)
+        return project, request, block
+
+    def test_an_uninitialized_project_attaches_but_nothing_is_on_disk(self):
+        project, request, block = self.uninitialized()
+        self.assertEqual(block["root"], str(project / "switchboard"))
+        self.assertEqual(block["state"], "uninitialized")
+        self.assertFalse(block["exists"])
+        self.assertEqual(block["cards"], 0)
+        self.assertEqual(self.tree(project), [])
+
+    def test_board_open_answers_an_empty_board_and_creates_nothing(self):
+        project, _, _ = self.uninitialized()
+        opened = [e for e in self.send(type="board_open", id="o1") if e["event"] == "board"][0]
+        self.assertEqual(opened["cards"], [])
+        self.assertFalse(opened["exists"])
+        self.assertEqual(opened["state"], "uninitialized")
+        self.assertEqual(opened["config"]["columns"], B.DEFAULT_CONFIG["columns"])
+        self.assertEqual(opened["problems"], [])
+        # Reading never creates: not the open, not a refresh, not the checks, not a card read.
+        self.send(type="board_refresh", id="o2")
+        self.send(type="board_check", id="o3")
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_card_get", "id": "o4", "card": "AAAA"})
+        self.assertEqual(self.tree(project), [])
+
+    def test_the_agent_gets_the_creating_tool_and_a_one_line_note(self):
+        project, request, _ = self.uninitialized()
+        agent = self.agent(project, request)
+        self.assertEqual(self.board_tools(agent), ["board_create_card"])
+        prompt = agent.system_prompt()
+        self.assertIn("this project has no Switchboard yet", prompt)
+        self.assertNotIn("board_rate_limited", prompt)          # not the full policy block
+
+    def test_the_owners_first_card_asks_first_and_lands_on_a_yes(self):
+        project, _, _ = self.uninitialized()
+        events = self.send(type="board_create", id="w1", tab="features", status="inbox",
+                           text="the first card of this project")
+        asked = [e for e in events if e["event"] == "board_init_request"]
+        self.assertEqual(len(asked), 1, events)
+        self.assertEqual(asked[0]["reason"], "card-command")
+        self.assertEqual(asked[0]["project"], str(project))
+        self.assertEqual(asked[0]["dir"], str(project / "switchboard"))
+        self.assertEqual(asked[0]["root"], asked[0]["dir"])
+        self.assertEqual(asked[0]["request_id"], "w1")
+        self.assertIn("the first card", asked[0]["title"])
+        self.assertEqual(self.tree(project), [])                # still nothing, waiting on the user
+
+        self.events.clear()
+        self.commands.dispatch({"type": "board_init_answer", "id": asked[0]["id"], "accept": True})
+        created = self.of("board_created")
+        self.assertEqual(created[0]["root"], str(project / "switchboard"))
+        self.assertEqual(created[0]["workspace"], str(project))
+        self.assertEqual(created[0]["project"], str(project))
+        self.assertEqual(created[0]["files"], ["switchboard/board.yaml", "switchboard/.gitignore",
+                                               "switchboard/threads/.gitkeep", ".gitattributes"])
+        # The card the user typed is not lost: the parked write is replayed.
+        written = self.of("board_written")
+        self.assertEqual(written[0]["id"], "w1")
+        card = B.Board(project / "switchboard", project).card_by_id(written[0]["card_id"])
+        self.assertIn("the first card of this project", card.body)
+        self.assertEqual(self.commands.state_block()["state"], "ready")
+
+    def test_the_owners_first_card_is_refused_on_a_no_and_nothing_is_written(self):
+        project, _, _ = self.uninitialized()
+        events = self.send(type="board_create", id="w1", tab="features", status="inbox", text="a card")
+        init_id = [e for e in events if e["event"] == "board_init_request"][0]["id"]
+        self.events.clear()
+        self.commands.dispatch({"type": "board_init_answer", "id": init_id, "accept": False})
+        error = self.of("error")[0]
+        self.assertEqual((error["id"], error["code"]), ("w1", "board_not_initialized"))
+        self.assertEqual(self.of("board_created"), [])
+        self.assertEqual(self.tree(project), [])
+        # The no is remembered: a second card does not reopen the dialog.
+        events = self.send(type="board_create", id="w2", tab="features", status="inbox", text="another")
+        self.assertEqual([(e["event"], e.get("code")) for e in events],
+                         [("error", "board_not_initialized")])
+        self.assertEqual(self.tree(project), [])
+
+    def test_the_agents_first_card_asks_on_the_turn_thread_and_lands_on_a_yes(self):
+        project, request, _ = self.uninitialized()
+        agent = self.agent(project, request)
+        before = self.tree(project)
+        result = self.answer_from_another_thread(
+            lambda: agent.board.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                          "title": "Voice mode", "request": "add it"}),
+            accept=True)
+        asked = [e for e in self.events if e["event"] == "board_init_request"][0]
+        self.assertEqual((asked["reason"], asked["title"]), ("agent-card", "Voice mode"))
+        self.assertEqual(before, [])
+        self.assertNotIn("error", result)
+        self.assertEqual(agent.board.state, "ready")
+        # The full tools and the full policy arrive in the same turn, and so does the owner's half.
+        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertIn("board_rate_limited", agent.system_prompt())
+        self.assertEqual(self.commands.tools.state, "ready")
+        self.assertEqual(len(B.Board(project / "switchboard", project).cards()), 1)
+
+    def test_the_agents_first_card_is_told_no_and_does_not_ask_again(self):
+        project, request, _ = self.uninitialized()
+        agent = self.agent(project, request)
+        result = self.answer_from_another_thread(
+            lambda: agent.board.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                          "title": "Voice mode", "request": "add it"}),
+            accept=False)
+        self.assertEqual(result["code"], "board_not_initialized")
+        self.assertIn("declined", result["error"])
+        self.assertEqual(self.tree(project), [])
+        # No second dialog, and the same plain result.
+        self.events.clear()
+        again = agent.board.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                      "title": "Again", "request": "x"})
+        self.assertEqual(again["code"], "board_not_initialized")
+        self.assertEqual([e for e in self.events if e["event"] == "board_init_request"], [])
+
+    def test_stopping_the_turn_while_the_dialog_is_open_ends_the_tool_call(self):
+        project, request, _ = self.uninitialized()
+        agent = self.agent(project, request)
+        outcome = {}
+
+        def work():
+            try:
+                agent.board.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                      "title": "Voice mode", "request": "add it"})
+            except BaseException as exc:                 # Cancelled, as every blocking tool raises
+                outcome["raised"] = type(exc).__name__
+
+        worker = threading.Thread(target=work)
+        worker.start()
+        self.wait_for_ask()
+        agent.cancel_event.set()
+        worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome.get("raised"), "Cancelled")
+        self.assertEqual(self.tree(project), [])
+
+    def test_board_init_creates_the_board_outright_because_the_gui_already_asked(self):
+        project, _, _ = self.uninitialized()
+        events = self.send(type="board_init", id="i1", project=str(project))
+        created = [e for e in events if e["event"] == "board_created"][0]
+        self.assertEqual(created["root"], str(project / "switchboard"))
+        state = [e for e in events if e["event"] == "board_state"][0]
+        self.assertEqual((state["id"], state["applies"]), ("i1", "now"))
+        self.assertTrue(state["board"]["exists"])
+        self.assertEqual(state["board"]["state"], "ready")
+        self.assertEqual(sorted(p.name for p in (project / "switchboard").iterdir()),
+                         [".gitignore", "board.yaml", "threads"])
+        # It is safe to send twice: a board that exists is not scaffolded again.
+        events = self.send(type="board_init", id="i2", project=str(project))
+        self.assertEqual([e["event"] for e in events], ["board_state"])
+
+    def test_the_project_tree_is_untouched_until_a_yes(self):
+        """The whole read-only surface of the worker, against a byte-for-byte snapshot."""
+        project, request, _ = self.uninitialized()
+        (project / "src").mkdir()
+        (project / "src" / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+        agent = self.agent(project, request)
+        before = self.tree(project)
+        self.send(type="board_open", id="o1")
+        self.send(type="board_refresh", id="o2")
+        self.send(type="board_check", id="o3")
+        self.commands.state_block()
+        agent.system_prompt()
+        agent.tools()
+        for name in ("board_list", "board_read"):
+            self.assertIn("code", agent.board.run(name, {"id": "AAAA"}))
+        self.assertEqual(self.tree(project), before)
+        self.assertEqual(before, ["src", "src/main.c:b'int main(void) { return 0; }\\n'"])
+
+    # ---- driving the blocking half
+    def wait_for_ask(self, timeout: float = 5.0) -> dict:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            asked = [e for e in list(self.events) if e["event"] == "board_init_request"]
+            if asked:
+                return asked[0]
+            time.sleep(0.01)
+        raise AssertionError(f"no board_init_request in {self.events}")
+
+    def answer_from_another_thread(self, call, *, accept: bool):
+        """Run a blocking tool call on a turn thread and answer its dialog from this one."""
+        self.events.clear()
+        out = {}
+        worker = threading.Thread(target=lambda: out.update(result=call()))
+        worker.start()
+        try:
+            asked = self.wait_for_ask()
+            self.commands.dispatch({"type": "board_init_answer", "id": asked["id"], "accept": accept})
+        finally:
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        return out["result"]
+
+
+class LegacyConfigureTests(AttachTest):
+    """A `configure` with no `board` block behaves exactly as it did in 384fac4."""
+
+    def test_a_configure_with_no_board_block_walks_up_and_finds_the_project_board(self):
+        project = self.project("project", "issues")
+        deep = project / "backend" / "relay_core"
+        deep.mkdir(parents=True)
+        block = self.commands.configure(str(deep), {})
+        self.assertEqual(block["root"], str(project / "issues"))
+        self.assertEqual(block["workspace"], str(project))
+        self.assertEqual(block["cards"], 0)
+        self.assertEqual(self.commands.tools.state, "ready")
+        self.assertEqual(self.commands.tools.rate.path, project / ".relay" / "board-rate.json")
+
+    def test_a_configure_with_no_board_block_and_no_board_creates_nothing_and_attaches_nothing(self):
+        project = self.project("bare")
+        self.assertIsNone(self.commands.configure(str(project), {}))
+        self.assertIsNone(self.commands.agent_tools(str(project), {}))
+        self.assertEqual(self.tree(project), [])
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_open"})
+
+    def test_a_configure_with_no_workspace_still_has_no_board(self):
+        for workspace in ("", None):
+            self.assertIsNone(self.commands.configure(workspace, {}), workspace)
+
+    def test_the_configured_block_gained_fields_and_kept_the_old_ones(self):
+        project = self.project("project", "issues")
+        block = self.commands.configure(str(project), {})
+        for key in ("dir", "root", "workspace", "autonomy", "limits", "cards"):
+            self.assertIn(key, block)                   # everything 384fac4 sent
+        self.assertEqual(block["project"], str(project))
+        self.assertEqual(block["folder"], "issues")
+        self.assertEqual(block["state"], "ready")
+        self.assertTrue(block["exists"])
 
 
 if __name__ == "__main__":       # pragma: no cover

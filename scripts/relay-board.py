@@ -19,21 +19,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from relay_core import board as board_mod
 
 
-def default_issues_dir() -> Path:
+def default_board_dir() -> Path:
+    """The board of the checkout this is run in: `switchboard/`, else `issues/`.
+
+    `board.BOARD_FOLDERS` is the one list of spellings, newest first, and this walks it in the
+    same order as the worker, so the command line and Relay agree about which board a project has.
+    """
     here = Path.cwd()
+    names = board_mod.BOARD_FOLDERS
     try:
         top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True,
                              text=True, timeout=10)
         if top.returncode == 0 and top.stdout.strip():
-            candidate = Path(top.stdout.strip()) / 'issues'
-            if candidate.is_dir():
-                return candidate
+            for name in names:
+                candidate = Path(top.stdout.strip()) / name
+                if candidate.is_dir():
+                    return candidate
     except (OSError, subprocess.SubprocessError):
         pass
     for folder in [here, *here.parents]:
-        if (folder / 'issues').is_dir():
-            return folder / 'issues'
-    return here / 'issues'
+        for name in names:
+            if (folder / name).is_dir():
+                return folder / name
+    return here / board_mod.DEFAULT_BOARD_FOLDER
 
 
 def cmd_check(args, board: board_mod.Board) -> int:
@@ -84,8 +92,9 @@ def cmd_migrate(args, board: board_mod.Board) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--issues', type=Path, default=None,
-                        help='the issues/ directory (default: the git checkout it is run in)')
+    parser.add_argument('--issues', '--board', dest='issues', type=Path, default=None,
+                        help='the board directory, switchboard/ or issues/ '
+                             '(default: the git checkout it is run in)')
     sub = parser.add_subparsers(dest='command', required=True)
 
     check = sub.add_parser('check', help='verify the card, task and thread format')
@@ -94,19 +103,19 @@ def main(argv=None) -> int:
     check.add_argument('--strict', action='store_true', help='warnings fail too')
     check.set_defaults(func=cmd_check)
 
-    index = sub.add_parser('index', help='regenerate issues/BOARD.md')
+    index = sub.add_parser('index', help="regenerate the board's BOARD.md")
     index.add_argument('--stdout', action='store_true', help='print instead of writing')
     index.add_argument('--private', action='store_true', help='include private cards')
     index.set_defaults(func=cmd_index)
 
-    migrate = sub.add_parser('migrate', help='convert a pre-board issues/ tree to cards')
+    migrate = sub.add_parser('migrate', help='convert a pre-board card tree to cards')
     migrate.add_argument('--apply', action='store_true', help='write the changes (default: dry run)')
     migrate.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args(argv)
-    issues = args.issues or default_issues_dir()
+    issues = args.issues or default_board_dir()
     if not issues.is_dir():
-        print(f"no issues directory at {issues}", file=sys.stderr)
+        print(f"no board directory at {issues}", file=sys.stderr)
         return 2
     board = board_mod.Board(issues)
     try:

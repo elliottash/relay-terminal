@@ -171,6 +171,9 @@ def main():
                 if "max_auto_turns" in agents_request:
                     subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)
+                # Protocol 19.12: the "initialize a Switchboard here?" round trip watches this
+                # agent's cancel_event, so Stop ends a turn that is waiting on the dialog.
+                board.bind_agent(agent)
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
                 # --- end subagents ---
@@ -196,6 +199,15 @@ def main():
                 # follows only when a role fell back, so its warnings reach the pane.
                 if resolver.warnings:
                     emit(resolver.event(agent_role))
+            elif kind == "set_board":
+                # Protocol 19.11: attach this pane to a project's Switchboard, or detach it,
+                # **without** ending the conversation. `configure` cannot do it — it builds a new
+                # Agent, and with it a new conversation — so attaching a tab that is already
+                # talking comes through here: the agent object, its messages and its session id
+                # are untouched, and only its board tools and the Switchboard block of its system
+                # prompt change. Mid-turn it lands when the turn ends, so a running turn keeps the
+                # tool set it started with.
+                board.set_board(request)
             elif kind == "keybindings":
                 # Refresh the catalog after the GUI reloads keybindings.json; keeps the conversation.
                 catalog = KeybindingCatalog(request.get("path"), request.get("actions"))

@@ -1593,41 +1593,60 @@ than that is one `conversation_summarize` away.
 ## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
 
 Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
-Switchboard **is** the repository's `issues/` tree: `backend/relay_core/board.py` owns the bytes
+Switchboard **is** a folder in the project: `switchboard/` on a board created from 2026-09-18 on,
+`issues/` on one filed before that (19.12). `backend/relay_core/board.py` owns the bytes
 (format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
 tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
 `backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
 card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
 `tests/test_board_protocol.py`, `tests/test_board.py`.
 
-Everything here is inert unless the workspace has an `issues/board.yaml`. The file's presence is
-the switch.
+Everything here is inert unless the pane has a board. `switchboard/board.yaml`, else
+`issues/board.yaml`, is the marker; its presence is the switch, and 19.12 is the one path that
+ever creates one.
 
 ### 19.1 `configure` additions
 
-`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` names the board's `issues/`
-directory outright, `autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`;
-a per-user local override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
-`max_creates_per_hour`. When a board is found, `configured` gains
+`configure` gains an optional `board {dir?, project?, state?, attach?, autonomy?, limits?}`.
+Every field is optional and **every default is what Relay did before the field existed**, so a
+`configure` that sends no `board` at all behaves exactly as it did in `384fac4`.
+
+| field | meaning |
+|---|---|
+| `dir` | the board folder, **or** the project that holds one. Both spellings are accepted because the GUI has both in hand: an existing `board.yaml` decides it (the folder's own, then `switchboard/`, then `issues/`), and with none present a directory already called `switchboard` or `issues` is the folder and anything else is a project whose board would be `<project>/switchboard`. Wins over `project`. |
+| `project` | the project this board belongs to. Carried through onto `configured.board`, `board`, `board_state`, `board_created` and `board_init_request` as `project`, for a GUI with several projects open to route by; **no file is ever searched for under it**. Used as `dir` when no `dir` is given. Defaults to the directory that holds the board. |
+| `state` | `"uninitialized"` says the GUI is willing to offer creating a board here, so a project that has none still attaches (19.12). Default `"ready"`: no board on disk means no board. |
+| `attach` | `false` means this pane has no board whatever else is in the block — no tools, no policy block, and `board_*` messages answer the usual no-board error. Default `true`. |
+| `autonomy` | overrides `board.yaml`'s `agent.autonomy` (`off` \| `suggest` \| `auto`; a per-user local override). |
+| `limits` | lowers `max_creates_per_turn`, `max_writes_per_turn` or `max_creates_per_hour`. |
+
+When the pane has a board, `configured` gains the block below, and is absent otherwise, so the GUI
+knows whether to offer the pane. It is the same block `board_state` and `board_init` answer with.
 
 ```json
-"board": {"dir": "/repo/issues", "root": "/repo/issues", "workspace": "/repo",
+"board": {"dir": "/repo/switchboard", "root": "/repo/switchboard", "workspace": "/repo",
+          "project": "/repo", "folder": "switchboard", "state": "ready", "exists": true,
           "autonomy": "auto", "limits": {}, "cards": 86}
 ```
 
-and is absent otherwise, so the GUI knows whether to offer the pane.
+`root` is the board folder, `workspace` the project root holding it, `folder` the folder's name
+(`switchboard` or `issues`), `state` `"ready"` or `"uninitialized"` and `exists` whether the board
+is on disk — `false` only in the uninitialized state (19.12). `dir`, `root`, `workspace`, `autonomy`,
+`limits` and `cards` are unchanged since `384fac4`; the rest are additions.
 
 **Which board, and only that board** (2026-09-18; owner: the Switchboard "behaves as global rather
-than per project"). Without `board.dir`, the worker walks up from the workspace it was given to the
-nearest ancestor holding `issues/board.yaml` — the GUI's rule, `relay::boardRootFor` — so a pane
-standing in `backend/relay_core` gets the project's board rather than none. `root` is that `issues/`
-directory and `workspace` the project root holding it; the project root is what
-`.relay/board-rate.json`, the cleanup changelogs and every event `path` hang off, so neither is the
+than per project"). Without `board.dir` or `board.project`, the worker walks up from the workspace
+it was given to the nearest ancestor holding a board — the GUI's rule, `relay::boardRootFor` — so a
+pane standing in `backend/relay_core` gets the project's board rather than none. **At each directory
+of the walk the candidates are tried in order, `switchboard/board.yaml` then `issues/board.yaml`, and
+the first hit wins**: the nearest ancestor beats a further one whatever its spelling, and a single
+directory holding both folders is its `switchboard/` one. The project root is what
+`.relay/board-rate.json`, the cleanup changelogs and every event `path` hang off, so it is never the
 subdirectory the pane happened to be open in. A `configure` that names **no** workspace, or an empty
 one, has **no** board: the worker's own current directory is never consulted for it. It used to be
 (`Path("") / "issues"` is relative), so a window pointing elsewhere quietly opened the board of the
 directory Relay was launched from. Re-pointing a worker at another board forgets the card
-conversation and the row snapshot of the one it left.
+conversation, the row snapshot and the initialize-this-project answer of the one it left.
 
 **Every `board_*` event carries `root`**, the string of that `issues/` directory: `board`,
 `board_changed`, `board_card`, `board_written`, `board_undone`, `board_problems`,
@@ -1649,7 +1668,7 @@ no key — that window used to show "Loading the Switchboard…" forever.
 
 | Message | Reply |
 |---|---|
-| `board_open {id?}` | `board {id, rev, root, workspace, config, cards: [row], problems}` |
+| `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], problems}` |
 | `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
 | `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
@@ -1688,7 +1707,9 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
 
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
-is its first line (shortened) unless one is given. `patch` holds the `board_update_card` arguments
+is its first line (shortened) unless one is given. On a project with no Switchboard yet it answers
+`board_init_request` first and lands once the user accepts (19.12); the other three name a card, so
+a project with no board has nothing for them and they answer the ordinary no-board error. `patch` holds the `board_update_card` arguments
 (`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
 a drag dropped this card between; the worker computes the fractional rank. `author` names the
 person, and defaults to `owner`.
@@ -1981,6 +2002,89 @@ progress with `board_comment`, and to land in `needs-qa-llm` per the policy. Pan
 board tools whenever the workspace has a board (19.7), so this is the whole link-back mechanism:
 the commit message carries the id for `git log --grep '#ID'`, and the card carries the hashes.
 A card with neither a `## Plan` nor an `acceptance` asks once, on the card, before it goes.
+
+### 19.11 `set_board`: attaching a project without ending the conversation (v3.0, 2026-09-18)
+
+A tab is attached to no project by default; an explicit action attaches it, and the panes of an
+attached tab must then **gain the card tools without losing what they were talking about**.
+`configure` cannot do that — it builds a new `Agent`, and with it a new conversation — so attaching
+comes through its own message.
+
+| Message | Reply |
+|---|---|
+| `set_board {id?, board: {…}}` | `board_state {id, board, applies}` |
+| `set_board {id?, board: null}` | `board_state {id, board: null, applies}` |
+
+`board` is the same block as `configure`'s (19.1) and is a **replacement**, not a patch: a field
+left out is that field's default. `board: null` detaches, which is not the same as a `configure`
+with no `board` block at all — that one still walks up from the workspace.
+
+What changes: the worker's own `BoardTools` (the owner half, for the messages of 19.2–19.3) and
+`agent.board` plus the Switchboard block of `agent.messages[0]`. What does not: the `Agent` object,
+its message list, its session id, its model, its queue. `Agent.tools()` is read per step, so the
+tool list follows by itself.
+
+`applies` says when: `"now"`, or `"turn_end"` when a turn was running — a running turn keeps the
+tool set it started with, exactly as `set_agent_role` defers a model switch (`now_or_later`). A
+deferred one answers `board_state {applies: "turn_end"}` at once with the board it *will* be on —
+`dir`, `root`, `workspace`, `project`, `folder`, `state`, `exists`, since `autonomy`, `limits` and
+`cards` are only known once it is pointed there — and again as `board_state {id, applies: "now",
+at: "turn_end"}`, with the full block, when it lands. **The `board_state` that says `applies:
+"now"` is the one in force.** An unsolicited `board_state` (no `id`) is also sent when a board is
+created under the pane (19.12).
+
+`set_board` is worker-facing only: it is not in `remote/wire.py`'s `CLIENT_TYPES`, which is
+denied-by-default, so no remote participant can re-point a pane. Neither is `board_init`.
+
+### 19.12 Where a board lives, and initializing one (v3.0, 2026-09-18)
+
+Owner, 2026-09-18: a project's board lives **in the project**, in a folder named `switchboard/`,
+and it is created **only after the user confirms** — "Initialize a project and create a Switchboard
+here?" Nothing is ever created silently, and opening a board never leaves a folder behind.
+
+* **The folder.** A new board is `<project>/switchboard/`, marker `switchboard/board.yaml`. An
+  existing `<project>/issues/board.yaml` keeps working untouched and is never converted. Both names
+  are in `board.BOARD_FOLDERS`, newest first, and every lookup — the workspace walk, a named `dir`,
+  `aliases.local_root`, `scripts/relay-board.py` — walks that one list in that one order (19.1).
+* **The uninitialized state.** `configure`/`set_board` with `board {project, state:
+  "uninitialized"}` on a project that has no board attaches anyway: `configured.board` says
+  `"state": "uninitialized"`, `"exists": false`, `"root"` the folder that *would* be created.
+  `board_open` answers an ordinary empty board — zero cards, `"exists": false`, the default columns
+  — so the Switchboard pane can show a board ready for its first card. **Reading creates nothing**:
+  not `board_open`, `board_refresh`, `board_check` or `board_card_get`, and not `board_list` or
+  `board_read` from the agent.
+* **What the agent gets there.** `board_create_card` and nothing else, plus one line in the system
+  prompt in place of the policy block: "Switchboard: this project has no Switchboard yet; creating a
+  card with board_create_card will ask the user to initialize one." Any other board tool answers
+  `code: "board_not_initialized"`.
+
+**The round trip.**
+
+| Message | Direction | Meaning |
+|---|---|---|
+| `board_init_request {id, request_id?, root, dir, project, reason, title?}` | worker → GUI | ask the user. `dir` is the folder that would be created and `root` is the same path; `reason` is `"agent-card"` (a tool call) or `"card-command"` (a `board_create` message); `title` is the card that is waiting; `request_id` is the message that caused it, when there was one. |
+| `board_init_answer {id, accept}` | GUI → worker | the user's yes or no, `id` being the request's. |
+| `board_init {id?, project?, dir?}` | GUI → worker | create it outright, for the paths where the GUI has already asked (`/init`, opening the Switchboard, the project picker). `project`/`dir` default to the board this pane is already pointed at. Answers `board_created` then `board_state {id, applies: "now"}`; on a board that already exists it answers `board_state` alone, so sending it twice is safe. It is refused mid-turn only when it names a *different* project, which would be a re-point; creating the board this pane already has only ever adds tools. |
+| `board_created {root, workspace, project, files}` | worker → GUI | a board was created. `files` are the paths written, relative to the project. |
+
+On **accept** the board is scaffolded, `board_created` goes out, the tools and the prompt block
+become the full ones in place (no new conversation), and **the create that caused the question is
+completed** — the card the user typed is never lost. On **decline** nothing is written, the worker
+remembers the no until the pane is re-pointed or a `board_init` arrives, and the caller is told:
+the agent gets a plain tool result ("This project has no Switchboard and the user declined to
+create one. Do not call the board tools again in this conversation…"), and a `board_create` message
+gets `error {code: "board_not_initialized"}`.
+
+The two callers wait differently, and have to. The agent's tool call is on the turn thread, so it
+**blocks** there, watching the agent's `cancel_event` the way `terminal_command` does (21/22): Stop
+raises `Cancelled` out of the tool and nothing is created. No timeout — the pane owns the dialog and
+always answers it. The owner's `board_create` arrives on the protocol thread, which is the thread
+the answer has to come in on, so it cannot block: the write is **parked** and replayed on the yes.
+
+`board_created`'s `files` is `["switchboard/board.yaml", "switchboard/.gitignore",
+"switchboard/threads/.gitkeep", ".gitattributes"]`. The last is the project's own, appended (the
+union-merge rule for the card threads, named against this board's folder) and is the only file
+written outside the board folder; it is listed so the GUI can say so.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

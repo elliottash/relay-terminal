@@ -888,5 +888,50 @@ class ConfigWriteTests(TempBoardTest):
         self.assertEqual(B.parse_yaml(text)["tabs"][0]["filter"], "status:done,dropped")
 
 
+class BoardFolderTests(unittest.TestCase):
+    """`switchboard/` is where a new board goes; `issues/` is still read (protocol 19.12)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def make(self, name: str) -> Path:
+        folder = self.dir / name
+        folder.mkdir(parents=True)
+        (folder / B.BOARD_CONFIG).write_text(B.CONFIG_TEXT, encoding="utf-8")
+        return folder
+
+    def test_a_new_board_goes_in_switchboard_and_the_older_spelling_is_still_read(self):
+        self.assertEqual(B.DEFAULT_BOARD_FOLDER, "switchboard")
+        self.assertEqual(B.BOARD_FOLDERS, ("switchboard", "issues"))
+        self.assertIsNone(B.board_folder(self.dir))
+        issues = self.make("issues")
+        self.assertEqual(B.board_folder(self.dir), issues)
+
+    def test_a_project_with_both_folders_is_its_switchboard_one(self):
+        self.make("issues")
+        board = self.make("switchboard")
+        self.assertEqual(B.board_folder(self.dir), board)
+
+    def test_scaffold_writes_the_board_and_names_its_own_folder_in_gitattributes(self):
+        board = B.Board(self.dir / "switchboard", self.dir)
+        files = B.scaffold(board)
+        self.assertEqual(files, ["switchboard/board.yaml", "switchboard/.gitignore",
+                                 "switchboard/threads/.gitkeep", ".gitattributes"])
+        self.assertIn("version: 1", (board.root / B.BOARD_CONFIG).read_text())
+        self.assertIn(".private/", (board.root / ".gitignore").read_text())
+        self.assertTrue((board.root / "threads").is_dir())
+        self.assertIn("switchboard/threads/*.md merge=union",
+                      (self.dir / ".gitattributes").read_text())
+        # Called again it writes nothing: the board is already there.
+        self.assertEqual(B.scaffold(board), [])
+
+    def test_scaffold_on_the_older_spelling_keeps_naming_issues(self):
+        board = B.Board(self.dir / "issues", self.dir)
+        B.scaffold(board)
+        self.assertIn("issues/threads/*.md merge=union", (self.dir / ".gitattributes").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

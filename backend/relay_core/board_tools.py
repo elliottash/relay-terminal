@@ -34,6 +34,7 @@ import os
 import re
 import secrets
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -41,11 +42,40 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import board as B
+from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
 
-#: The folder a project keeps its Switchboard in: `<project>/issues/board.yaml`.
-BOARD_FOLDER = "issues"
+#: The folders a project may keep its Switchboard in, newest spelling first (`board.BOARD_FOLDERS`).
+BOARD_FOLDERS = B.BOARD_FOLDERS
+
+#: The folder a *new* board is created in: `<project>/switchboard/board.yaml`.
+BOARD_FOLDER = B.DEFAULT_BOARD_FOLDER
+
+#: What a pane's board is, at any moment (protocol 19.12):
+#:   "ready"          - the board exists; the full tools and the full policy block.
+#:   "uninitialized"  - the project has no board and the GUI says one may be offered: the agent
+#:                      gets `board_create_card` alone and a one-line note, and the first card
+#:                      asks the user "Initialize a project and create a Switchboard here?".
+#: A pane with no board at all has no `BoardTools` and neither state.
+BOARD_STATES = ("ready", "uninitialized")
+
+#: Why the worker is asking to initialize a project (`board_init_request.reason`).
+INIT_REASONS = ("agent-card", "card-command")
+
+#: What the agent is told when there is no Switchboard and the user has said not to make one.
+#: A tool result, not an exception: the turn carries on without the board.
+NO_BOARD_TEXT = ("This project has no Switchboard and the user declined to create one. Do not "
+                 "call the board tools again in this conversation; say what you would have "
+                 "filed, in your reply, and carry on with the work.")
+
+#: The one-line note an uninitialized board puts in the system prompt, in place of the policy.
+UNINITIALIZED_NOTE = ("\n\nSwitchboard: this project has no Switchboard yet; creating a card with "
+                      "board_create_card will ask the user to initialize one.\n")
+
+#: What an uninitialized board offers: creating a card, and nothing else.  There is nothing to
+#: read, move or comment on until the first card exists.
+UNINITIALIZED_TOOLS = ("board_create_card",)
 
 #: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may lower the create ceiling.
 DEFAULT_LIMITS = {
@@ -109,7 +139,7 @@ _ID_ARG = {"type": "string", "description": "Card id, four characters (e.g. K7Q2
 
 TOOL_SPECS = [
     spec("board_list",
-         "List Switchboard cards (the repository's issues/ tracker). One row per card: id, title, "
+         "List Switchboard cards (the project's switchboard/ tracker). One row per card: id, title, "
          "type, status, tab, labels, assignee, waiting_on and thread size. Search here before "
          "creating a card, so a request that already has one updates it instead.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
@@ -233,7 +263,7 @@ CLEANUP_TOOL_SPECS = [
                     "description": "Close the original as `dropped` because every piece moved out."}},
          ["id", "parts", "reason"]),
     spec("board_sections",
-         "Change the board's own structure in issues/board.yaml: which sections (columns) the one "
+         "Change the board's own structure in the board's board.yaml: which sections (columns) the one "
          "list is divided into and in what order, and which category folders (tabs) a card's file "
          "can live in. Dropping a column does not hide its cards — a status no column collects gets "
          "a section of its own — but a tab whose folder still holds cards cannot be dropped. Use "
@@ -775,25 +805,29 @@ class ToolContext:
 
 def find_board_root(workspace: str | os.PathLike | None,
                     explicit_dir: str | os.PathLike | None = None) -> Path | None:
-    """The `issues/` directory that governs `workspace`, or None when there is none.
+    """The board directory that governs `workspace`, or None when there is none.
 
     The one place the backend decides which board a message is about, so the worker, the agent's
     tools and `#K7Q2` attachments all land on the same tree, and so does the GUI, which has always
-    walked up to the nearest ancestor holding `issues/board.yaml`.  Before 2026-09-18 the backend
-    took `<workspace>/issues` literally, so a pane opened in a subdirectory of a project saw no
-    board at all while the window's Switchboard showed one.
+    walked up to the nearest ancestor holding a board.  Before 2026-09-18 the backend took
+    `<workspace>/issues` literally, so a pane opened in a subdirectory of a project saw no board
+    at all while the window's Switchboard showed one.
 
-    An explicit `board.dir` (protocol 19.1) always wins.  Otherwise the walk starts at the resolved
-    workspace and climbs to the filesystem root.  **An absent or empty workspace has no board**:
-    the process's cwd, the environment and this file's location are never consulted.  A worker
-    started from the directory Relay was launched in must not adopt *that* project's board because
-    the `configure` it was sent named no workspace — which is exactly what `workspace: ""` used to
-    do, quietly opening the launch directory's 186 cards in a window that pointed somewhere else.
+    **The rule, and the C++ `relay::boardRootFor` must match it exactly:** an explicit `board.dir`
+    (protocol 19.1) always wins.  Otherwise the walk starts at the resolved workspace and climbs to
+    the filesystem root; at each directory the candidates are tried in `B.BOARD_FOLDERS` order —
+    `switchboard/board.yaml` first, then `issues/board.yaml` — and the first hit wins.  So the
+    **nearest ancestor** wins over a further one whatever its spelling, and a single directory
+    holding both folders is its `switchboard/` one.
+
+    **An absent or empty workspace has no board**: the process's cwd, the environment and this
+    file's location are never consulted.  A worker started from the directory Relay was launched in
+    must not adopt *that* project's board because the `configure` it was sent named no workspace —
+    which is exactly what `workspace: ""` used to do, quietly opening the launch directory's 186
+    cards in a window that pointed somewhere else.
     """
     if explicit_dir is not None and str(explicit_dir).strip():
-        # Resolved, like the walk's answer, because `root` is what a GUI routes events by: two
-        # spellings of one directory must not look like two boards.
-        root = Path(explicit_dir).expanduser().resolve()
+        root = named_board_root(explicit_dir)
         return root if (root / B.BOARD_CONFIG).is_file() else None
     if workspace is None or not str(workspace).strip():
         return None
@@ -802,22 +836,148 @@ def find_board_root(workspace: str | os.PathLike | None,
     except OSError:                                     # pragma: no cover - unreadable path
         return None
     for directory in (here, *here.parents):
-        root = directory / BOARD_FOLDER
-        if (root / B.BOARD_CONFIG).is_file():
+        root = B.board_folder(directory)
+        if root is not None:
             return root
     return None
 
 
-def board_for(workspace: str | os.PathLike | None,
-              explicit_dir: str | os.PathLike | None = None) -> B.Board | None:
-    """`find_board_root`, as a `Board` whose `repo` is the directory that holds `issues/`.
+def named_board_root(explicit_dir: str | os.PathLike) -> Path:
+    """The board directory a `board.dir` (or a `project`) names, whether or not it exists yet.
+
+    It may name the board folder itself or the project that holds one, because the GUI has both in
+    hand and should not have to guess which spelling the worker wants.  An existing `board.yaml`
+    decides it — the folder's own, then `switchboard/`, then `issues/`.  With none of them present
+    the name decides: a directory already called `switchboard` or `issues` is taken as the board
+    folder, and anything else is a project, whose board would be `<project>/switchboard`.
+
+    Resolved, like the walk's answer in `find_board_root`, because `root` is what a GUI routes
+    events by: two spellings of one directory must not look like two boards.
+    """
+    here = Path(explicit_dir).expanduser().resolve()
+    if (here / B.BOARD_CONFIG).is_file():
+        return here
+    found = B.board_folder(here)
+    if found is not None:
+        return found
+    return here if here.name in B.BOARD_FOLDERS else here / B.DEFAULT_BOARD_FOLDER
+
+
+def board_at(root: str | os.PathLike) -> B.Board:
+    """A `Board` on `root`, with `repo` the project directory that holds it.
 
     The repo is where `.relay/board-rate.json`, the cleanup changelogs and every path in a
-    `board_activity` are relative to, so it must be the project root rather than whichever
-    subdirectory the pane happens to be open in.
+    `board_activity` are relative to, so it is the project root rather than whichever subdirectory
+    the pane happens to be open in.
     """
+    root = Path(root)
+    return B.Board(root, root.parent)
+
+
+def board_for(workspace: str | os.PathLike | None,
+              explicit_dir: str | os.PathLike | None = None) -> B.Board | None:
+    """`find_board_root`, as a `Board`.  None when no board exists for this workspace."""
     root = find_board_root(workspace, explicit_dir)
-    return None if root is None else B.Board(root, root.parent)
+    return None if root is None else board_at(root)
+
+
+class BoardInit:
+    """"Initialize a project and create a Switchboard here?" — the one round trip (protocol 19.12).
+
+    One instance per worker, shared by the owner's tools and the agent's, so a yes or a no is the
+    pane's and not one instance's.  The shape is `terminal_handoff.TerminalHandoff`'s, for the same
+    reason: the request goes out as an event, the GUI answers on the protocol thread, and whoever
+    is waiting is woken.  Two callers use it differently and both are here so the difference is
+    visible:
+
+    * the **agent's** tool call runs on the turn thread, so `ask_and_wait` blocks it until the
+      answer arrives.  There is no timeout — the pane owns the dialog and always answers it — and
+      Stop raises `Cancelled` out of the tool, which is how every other blocking tool ends;
+    * the **owner's** `board_create` arrives on the protocol thread, which is the very thread that
+      would have to read the answer, so it cannot block.  `ask` parks a callback instead and
+      `board_protocol` replays the write when the answer comes.
+    """
+
+    def __init__(self, emit: Callable[[dict], None], cancel: threading.Event | None = None):
+        self.emit = emit
+        #: The agent's `cancel_event`, set by the worker once there is an agent.  Stop while the
+        #: dialog is open must end the turn, not leave a thread parked on it.
+        self.cancel = cancel
+        #: The user said no: nothing asks again until the board is re-pointed or initialized.
+        self.declined = False
+        self._lock = threading.Lock()
+        self._pending: dict[str, list] = {}
+        self._next = 0
+
+    def ask(self, *, project: str, directory: str | os.PathLike, reason: str,
+            title: str = "", request_id=None, callback: Callable[[bool], None] | None = None) -> str:
+        """Emit `board_init_request` and return its id.  `callback(accepted)` runs when answered."""
+        if reason not in INIT_REASONS:                   # pragma: no cover - callers pass a constant
+            reason = "agent-card"
+        with self._lock:
+            self._next += 1
+            init_id = f"bi-{self._next}"
+            self._pending[init_id] = [threading.Event(), None, callback]
+        event = {"event": "board_init_request", "id": init_id, "root": str(directory),
+                 "project": str(project), "dir": str(directory), "reason": reason}
+        if title:
+            event["title"] = str(title)[:200]
+        if request_id is not None:
+            event["request_id"] = request_id
+        self.emit(event)
+        return init_id
+
+    def ask_and_wait(self, *, project: str, directory: str | os.PathLike, reason: str,
+                     title: str = "") -> bool:
+        """`ask`, then block this (turn) thread until the user answers or stops the turn."""
+        init_id = self.ask(project=project, directory=directory, reason=reason, title=title)
+        done = self._pending[init_id][0]
+        while not done.wait(0.05):
+            if self.cancel is not None and self.cancel.is_set():
+                self._take(init_id)
+                raise Cancelled("Stopped.")
+        return bool(self._take(init_id))
+
+    def _take(self, init_id: str) -> bool:
+        with self._lock:
+            entry = self._pending.pop(init_id, None)
+        return bool(entry and entry[1])
+
+    def answer(self, reply: dict) -> dict:
+        """`board_init_answer {id, accept}` from the GUI, on the protocol thread."""
+        if not isinstance(reply, dict):                  # pragma: no cover - dispatch checks first
+            raise ValueError("board_init_answer must be an object.")
+        init_id = reply.get("id")
+        accept = reply.get("accept")
+        if type(accept) is not bool:
+            raise ValueError("board_init_answer needs accept: true or false.")
+        with self._lock:
+            entry = self._pending.get(init_id) if isinstance(init_id, str) else None
+            if entry is None:
+                # The turn was stopped, or the answer is late: nothing is waiting for it. The no
+                # is still remembered, so a second card does not reopen the dialog.
+                if not accept:
+                    self.declined = True
+                return {"id": init_id, "accept": accept, "pending": False}
+            entry[1] = accept
+            callback = entry[2]
+            if callback is not None:
+                self._pending.pop(init_id, None)
+            entry[0].set()
+        if not accept:
+            self.declined = True
+        if callback is not None:
+            callback(accept)                              # the owner's parked write, replayed
+        return {"id": init_id, "accept": accept, "pending": True}
+
+    def fail_pending(self) -> None:
+        """Answer everything still waiting with a no (the turn ended, or the pane went away)."""
+        with self._lock:
+            entries = list(self._pending.values())
+            self._pending.clear()
+        for entry in entries:
+            entry[1] = False
+            entry[0].set()
 
 
 class BoardTools:
@@ -827,8 +987,20 @@ class BoardTools:
                  autonomy: str | None = None, limits: dict | None = None,
                  context: ToolContext | None = None, state_path: Path | str | None = None,
                  clock: Callable[[], float] = time.time, enforce_limits: bool = True,
-                 duplicate_check: bool = True):
+                 duplicate_check: bool = True, state: str = "ready", project: str | None = None,
+                 init=None):
         self.board = board
+        #: "ready" or "uninitialized" (protocol 19.12).  An uninitialized board is not on disk:
+        #: these tools offer `board_create_card` alone, and creating a card asks the user first.
+        self.state = state if state in BOARD_STATES else "ready"
+        #: The project this board belongs to, carried through from `configure`/`set_board` onto
+        #: the events.  It is a label for the GUI: no file is ever looked for under it.
+        self.project = str(project) if project else str(board.repo)
+        #: The shared `BoardInit` round trip, or None when nothing may be initialized here.
+        self.init = init
+        #: Called after this board is created, so the worker can re-point and the agent's system
+        #: prompt can go from the one-line note to the full policy block.
+        self.on_created: Callable[[], None] | None = None
         self.emit = emit or (lambda event: None)
         self.clock = clock
         self.context = context or ToolContext()
@@ -878,6 +1050,50 @@ class BoardTools:
         receives belong to whatever board it asked about last.
         """
         self.emit({"root": str(self.board.root), **event})
+
+    # ---- initialization, with the user's consent (protocol 19.12) --------------
+    def exists(self) -> bool:
+        """Whether this board is on disk yet.  An `uninitialized` one is not."""
+        return self.board.config_path.is_file()
+
+    def create_board(self) -> list[str]:
+        """Scaffold this board and announce it.  The caller has the user's yes.
+
+        Nothing else writes `board.yaml`: the owner's rule of 2026-09-18 is that a project gets a
+        Switchboard only when the user answers "Initialize a project and create a Switchboard
+        here?", so every path to this method runs through `board_init` (the GUI asked) or a
+        `board_init_request` the user accepted.
+        """
+        files = B.scaffold(self.board)
+        self.state = "ready"
+        self._emit_board({"event": "board_created", "workspace": str(self.board.repo),
+                          "project": self.project, "files": files})
+        if self.on_created is not None:
+            self.on_created()
+        return files
+
+    def ensure_board(self, *, title: str = "", reason: str = "agent-card") -> bool:
+        """Before a write: make sure there is a board, asking the user once.  True if it created one.
+
+        The agent's instance runs this on the turn thread, so it blocks on the round trip exactly
+        as `terminal_handoff` does — the user's answer arrives on the protocol thread, a Stop
+        raises `Cancelled`, and no timeout is needed because the pane always answers a dialog it
+        opened.  The owner's instance never reaches here in the uninitialized state: a
+        `board_create` message is parked by `board_protocol` instead, because the protocol thread
+        is the one that would have to read the answer.
+        """
+        if self.state != "uninitialized" or self.exists():
+            return False
+        if self.init is None:                            # pragma: no cover - always wired in the worker
+            raise BoardToolError(NO_BOARD_TEXT, code="board_not_initialized")
+        if self.init.declined:
+            raise BoardToolError(NO_BOARD_TEXT, code="board_not_initialized")
+        accepted = self.init.ask_and_wait(project=self.project, directory=self.board.root,
+                                          reason=reason, title=title)
+        if not accepted:
+            raise BoardToolError(NO_BOARD_TEXT, code="board_not_initialized")
+        self.create_board()
+        return True
 
     # ---- lifecycle ------------------------------------------------------------
     @classmethod
@@ -930,6 +1146,11 @@ class BoardTools:
         return int(self.limits[key])
 
     def tool_specs(self) -> list[dict]:
+        if self.state == "uninitialized":
+            # Nothing to read, move or comment on until a board exists; the one tool that can
+            # bring one into being is offered, and calling it asks the user (protocol 19.12).
+            return [dict(s) for s in TOOL_SPECS
+                    if s["function"]["name"] in UNINITIALIZED_TOOLS]
         specs = list(TOOL_SPECS) + (list(CLEANUP_TOOL_SPECS) if self.cleanup is not None else [])
         return [dict(s) for s in specs]
 
@@ -997,8 +1218,16 @@ class BoardTools:
             self._check_card_scope(name, args)
             if name == "search_files":
                 return search_workspace(Path(self.board.repo), dict(args))
+            if self.state == "uninitialized" and name not in UNINITIALIZED_TOOLS:
+                raise BoardToolError(
+                    "This project has no Switchboard yet, so there is nothing to read or change. "
+                    "board_create_card is the only board tool here: calling it asks the user "
+                    "whether to create one.", code="board_not_initialized")
             if name in WRITE_TOOLS:
                 self._check_write_budget(name, args)
+                # Last, and only once the budget and the dry run have had their say: a refused
+                # call must not open a dialog, and a dry run must not create anything.
+                self.ensure_board(title=str(args.get("title") or "")[:200])
             handler = {"board_list": self._list, "board_read": self._read,
                        "board_create_card": self._create, "board_update_card": self._update,
                        "board_move_card": self._move, "board_comment": self._comment,
@@ -1921,6 +2150,10 @@ def _task_items(raw, card: B.Card) -> list[B.TaskItem]:
 
 
 def _tracked_by_git(repo: Path, path: Path) -> bool:
+    if not B.in_git_checkout(repo):
+        # A board in Relay's data directory has no repository around it: nothing there is
+        # committed, and running git would answer about an unrelated ancestor checkout.
+        return False
     try:
         result = subprocess.run(["git", "-C", str(repo), "ls-files", "--error-unmatch", str(path)],
                                 capture_output=True, timeout=10)
@@ -1949,8 +2182,11 @@ def prompt_section(tools: "BoardTools | None") -> str:
     text = policy_text()
     if not text:
         return ""
+    if tools.state == "uninitialized":
+        return UNINITIALIZED_NOTE
     tabs = ", ".join(t for t in tools._tab_map())
-    header = (f"\n\nSwitchboard: this repository has one (issues/board.yaml). Tabs: {tabs}. "
+    folder = tools.board.root.name
+    header = (f"\n\nSwitchboard: this project has one ({folder}/board.yaml). Tabs: {tabs}. "
               f"Autonomy: {tools.autonomy}"
               + (" — your card writes are proposals the user accepts in the Switchboard pane."
                  if tools.autonomy == "suggest" else "") + "\n")

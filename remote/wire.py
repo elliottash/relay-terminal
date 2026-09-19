@@ -311,6 +311,12 @@ WITHHELD_EVENTS: dict[str, str] = {
     "todo_subagent": "reply to the desktop's own request",
     # A board made in a repo: the workspace path is a local file path (Switchboard).
     "board_created": "desktop-local administration; carries a local file path",
+    # Which project a pane is attached to, and the question that creating a board asks
+    # (protocol 19.11 and 19.12). Both carry local directory paths, and the question can only be
+    # answered by the desktop: `set_board`, `board_init` and `board_init_answer` are not in
+    # CLIENT_TYPES, so a remote participant has no way to take part in either.
+    "board_state": "desktop-local administration; carries local file paths",
+    "board_init_request": "desktop-local administration; the desktop's own dialog",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",

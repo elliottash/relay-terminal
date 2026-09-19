@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Switchboard file format: cards, tasks, threads, ids, ranks (phase 0).
 
-The board *is* `issues/`: one Markdown file per card (YAML front matter plus a
-Markdown body), one append-only thread per card under `issues/threads/`, and a
-generated index in `issues/BOARD.md`.  See `docs/SWITCHBOARD-FORMAT.md`.
+The board *is* a folder in the project -- `switchboard/` on a board created from
+2026-09-18 on, `issues/` on one filed before that (`BOARD_FOLDERS`): one Markdown
+file per card (YAML front matter plus a Markdown body), one append-only thread
+per card under `threads/`, and a generated index in `BOARD.md`.  Nothing here
+picks the folder; it is given one.  See `docs/SWITCHBOARD-FORMAT.md`.
 
 This module never calls a model and never talks to the network.  It owns
 parsing, ids, ranks, task markers, thread appends, atomic hash-checked writes
@@ -902,12 +904,39 @@ agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
 """
 
-GITATTRIBUTES_LINE = "issues/threads/*.md merge=union"
+#: Where a project keeps its Switchboard, newest spelling first.  A board created from 2026-09-18
+#: on is `<project>/switchboard/`; `issues/` is the original spelling and is still read wherever it
+#: is found, so the boards that exist keep working untouched.  A project holding **both** is the
+#: `switchboard/` one: the list is in precedence order and every lookup walks it in order.
+BOARD_FOLDERS = ("switchboard", "issues")
+
+#: The folder a *new* board is created in.
+DEFAULT_BOARD_FOLDER = BOARD_FOLDERS[0]
+
+
+def board_folder(directory: str | os.PathLike) -> Path | None:
+    """The board directory inside `directory` (`switchboard/`, else `issues/`), or None."""
+    here = Path(directory)
+    for name in BOARD_FOLDERS:
+        if (here / name / BOARD_CONFIG).is_file():
+            return here / name
+    return None
+
+
+def gitattributes_line(folder: str = DEFAULT_BOARD_FOLDER) -> str:
+    """The union-merge rule for a board's threads, written against its own folder name."""
+    return f"{folder}/threads/*.md merge=union"
+
+
+#: The `issues/` spelling, kept because it is what the repositories that already have a board
+#: carry in their `.gitattributes`.
+GITATTRIBUTES_LINE = gitattributes_line("issues")
 GITIGNORE_TEXT = "# Private cards, plans, threads and memory (Switchboard private root).\n.private/\n"
 
 
 class Board:
-    """The `issues/` tree: cards, threads, config and the check rules."""
+    """The board tree (`switchboard/`, or `issues/` on a board filed before 2026-09-18):
+    cards, threads, config and the check rules.  `repo` is the project that holds it."""
 
     def __init__(self, root: str | os.PathLike, repo: str | os.PathLike | None = None):
         self.root = Path(root)
@@ -1187,6 +1216,10 @@ class Board:
         private = self.private_root()
         if not private.exists():
             return []
+        if not in_git_checkout(self.repo):
+            # A board in Relay's data directory has no repository to be tracked by; asking git
+            # here would answer about whatever checkout the data directory happens to sit under.
+            return []
         try:
             tracked = subprocess.run(["git", "-C", str(self.repo), "ls-files", "--", str(private)],
                                      capture_output=True, text=True, timeout=30)
@@ -1199,7 +1232,7 @@ class Board:
             return []
         return [Problem("private_tracked", f"{PRIVATE_FOLDER}/",
                         f"{len(files)} private file(s) are tracked by git: {', '.join(files[:3])}"
-                        f"{'…' if len(files) > 3 else ''}; add .private/ to issues/.gitignore and "
+                        f"{'…' if len(files) > 3 else ''}; add .private/ to {self.root.name}/.gitignore and "
                         "`git rm --cached` them")]
 
     # ---- index
@@ -1527,7 +1560,7 @@ def migrate(issues_dir: str | os.PathLike, apply: bool = False,
         report.migrations.append(Migration(rel, card_id, status, ranks[path], "convert", note))
         writes.append((path, new.to_text()))
 
-    scaffold = _scaffold(board)
+    scaffold = scaffold_files(board)
     for target, _ in scaffold:
         try:
             report.created.append(str(Path(target).relative_to(board.repo)))
@@ -1566,8 +1599,27 @@ def _status_from_folder(board: Board, path: Path) -> str:
     return ""
 
 
-def _scaffold(board: Board) -> list[tuple[str, str]]:
-    """The files `migrate` adds beside the cards, as (path, content) pairs."""
+def in_git_checkout(path: str | os.PathLike) -> bool:
+    """Whether `path` is inside a git working tree, decided without running git.
+
+    A project that is not a checkout has nothing for `.gitattributes` to configure and nothing for
+    "is this card already committed?" to be true of, and running git there answers about whatever
+    repository happens to be an ancestor of it.  Everything git-specific asks this first.
+    """
+    here = Path(path)
+    for directory in (here, *here.parents):
+        if (directory / ".git").exists():
+            return True
+    return False
+
+
+def scaffold_files(board: Board) -> list[tuple[str, str]]:
+    """The files a new board needs beside its cards, as (path, content) pairs.
+
+    `.gitignore` goes inside the board folder; `.gitattributes` goes beside it in the project and
+    names this board's own folder (`switchboard/` or `issues/`), so a project that adopts the new
+    spelling gets the union-merge rule for the folder it actually has.
+    """
     out: list[tuple[str, str]] = []
     if not board.config_path.exists():
         out.append((str(board.config_path), CONFIG_TEXT))
@@ -1579,12 +1631,35 @@ def _scaffold(board: Board) -> list[tuple[str, str]]:
     keep = board.root / THREADS_FOLDER / ".gitkeep"
     if not keep.exists():
         out.append((str(keep), ""))
+    line = gitattributes_line(board.root.name)
     attributes = board.repo / ".gitattributes"
     existing = attributes.read_text(encoding="utf-8") if attributes.exists() else ""
-    if GITATTRIBUTES_LINE not in existing:
+    if line not in existing:
         header = "# Card threads are append-only; a union merge keeps both sides' entries.\n"
         out.append((str(attributes), (existing.rstrip("\n") + "\n\n" if existing.strip() else "")
-                    + header + GITATTRIBUTES_LINE + "\n"))
+                    + header + line + "\n"))
+    return out
+
+
+def scaffold(board: Board) -> list[str]:
+    """Create an empty board on disk and return the files it wrote, relative to `board.repo`.
+
+    Nothing calls this on its own: a project gets a Switchboard only after the user has said yes
+    (protocol 19.12), either through `board_init` — the GUI already asked — or through the
+    `board_init_request` round trip that the first card raises.  Reading a project that has no
+    board creates nothing at all, so opening the Switchboard never leaves a folder behind.
+    Safe to call on a board that already exists: it writes only what is missing.
+    """
+    files = scaffold_files(board)
+    for target, text in files:
+        _atomic_write(Path(target), text)
+    (board.root / THREADS_FOLDER).mkdir(parents=True, exist_ok=True)
+    out = []
+    for target, _ in files:
+        try:
+            out.append(str(Path(target).relative_to(board.repo)))
+        except ValueError:                          # pragma: no cover - repo outside the board dir
+            out.append(target)
     return out
 
 
