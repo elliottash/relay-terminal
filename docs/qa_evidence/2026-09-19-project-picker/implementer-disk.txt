@@ -1,0 +1,40 @@
+
+== Downloads after Initialize new project here ==
+/tmp/claude-1000/v-916b-x/evidence/h/Downloads:
+.
+..
+.git
+.gitattributes
+.switchboard
+
+/tmp/claude-1000/v-916b-x/evidence/h/Downloads/.switchboard:
+.
+..
+.gitignore
+board.yaml
+threads
+
+== git in Downloads ==
+true
+
+== registry after Remove ==
+[('widgetworks', 'switchboard'), ('notes', 'card-command')]
+declined ['/tmp/claude-1000/v-916b-x/evidence/h/widgetworks-old']
+
+== Downloads' files are untouched by Remove (the first row, most recently attached) ==
+.
+..
+.git
+.gitattributes
+.switchboard
+
+== widgetworks after Show this board's folder ==
+.
+..
+.git
+sub
+switchboard
+
+== git status of widgetworks ==
+R  .switchboard/board.yaml -> switchboard/board.yaml
+R  .switchboard/features/AAAA.md -> switchboard/features/AAAA.md
