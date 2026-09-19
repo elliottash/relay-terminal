@@ -395,7 +395,7 @@ if(RELAY_BUILD_APP)
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
     add_executable(relay src/main.cpp
-        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
+        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp

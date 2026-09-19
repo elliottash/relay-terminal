@@ -40,6 +40,7 @@
 #include "Conversations.h"
 #include "SessionInfo.h"
 #include "Logging.h"
+#include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"
@@ -268,6 +269,11 @@ public:
     ~Pane() override {
         m_closing = true;
         qApp->removeEventFilter(this);
+        // The bridge: this pane is gone, so its registration ends here — and so does any diff it
+        // still owes claude an answer to. Rejecting is the only honest answer once nobody can
+        // show the change (26.5).
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("pane closed"));
+        unregisterFromBridge();
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
@@ -364,6 +370,23 @@ public:
     // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
     // Classified from the command line on every program poll (issue GT7X, protocol 26).
     QString guest() const { return m_guest; }
+    // One `bridge` event from this pane's guest channel (26.3, 26.5): what the IDE bridge's
+    // sidecar learned from a claude connected to it. Public because the guest channel's reader is
+    // headed for the hooks phase's plumbing, which will call this in place of the seam below.
+    // `openDiff` is the one that asks for Relay surfaces of its own (the diff view, and the
+    // banner that decides it); `openFile` opens the preview pane. Everything else — a selection,
+    // a dirty flag, the diagnostics Relay does not have — was answered by the sidecar, which is
+    // the only side that can answer it.
+    void guestBridgeEvent(const QJsonObject &data) {
+        const QString tool = data.value(QStringLiteral("tool")).toString();
+        if (tool == QStringLiteral("openDiff")) { showGuestDiff(data); return; }
+        if (tool == QStringLiteral("openFile")) {
+            const QString path = data.value(QStringLiteral("filePath")).toString();
+            if (!path.isEmpty() && onOpenPath) onOpenPath(path, 0);
+            return;
+        }
+        relay::log::debug(QStringLiteral("guest_bridge_tool pane=%1 tool=%2").arg(paneLogId(), tool));
+    }
     bool sharedWithPhone() const { return relay::RemoteShare::instance().isSharing(m_token); }
     bool processBusy() const {
         if (!m_backend) return false;
@@ -931,6 +954,115 @@ private:
         m_guest = guest;
         sendProgramState();
         changed();
+        // The bridge follows the guest (26.5): a claude in the foreground means this pane must be
+        // routable before the first request can arrive, and a claude that exited means the pane is
+        // nobody's target again until another one starts. Codex has no IDE bridge and never
+        // registers — bridge_env("codex") is empty, so there is nothing to be found.
+        if (m_guest == QStringLiteral("claude")) registerWithBridge();
+        else if (m_guest.isEmpty()) unregisterFromBridge();
+    }
+
+    // ----- the Claude IDE bridge: this pane's registration, and its diffs (GT7X, 26.5) --------
+    //
+    // The sidecar routes a request by the longest workspace/cwd prefix of the paths it names, so
+    // every pane tells it where it is — once at shell start (the shell carries the port; a claude
+    // started in it connects back), again when the cwd or the workspace moves, and again when a
+    // claude turns up in the foreground. Rewrites that would say exactly what the last one said
+    // are dropped by the bridge itself, so this is cheap enough to ask for on every change.
+    void registerWithBridge() {
+        auto &bridge = relay::guestbridge::Bridge::instance();
+        if (!bridge.started()) return;   // nothing to register with yet
+        bridge.setDataRoot(m_data);
+        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python);
+    }
+
+    void unregisterFromBridge() {
+        if (!relay::guestbridge::Bridge::started()) return;
+        relay::guestbridge::Bridge::instance().unregisterPane(m_token);
+    }
+
+    // The pane's answer to a blocking openDiff (26.5): the diff view shows the change, this is
+    // what the user decided. FILE_SAVED makes the *sidecar* write the file — the GUI never writes
+    // a user's file from a bridge event — and either answer returns the waiting tool call.
+    void settleGuestDiff(const QString &outcome, const QString &why) {
+        if (!m_guestDiff.pending) return;
+        const GuestDiff diff = m_guestDiff;
+        m_guestDiff = GuestDiff();
+        relay::guestbridge::Bridge::instance().answerDiff(diff.replyPath, outcome);
+        const QString name = QFileInfo(diff.file).fileName();
+        const bool saved = outcome == relay::guestbridge::fileSaved();
+        relay::log::info(QStringLiteral("guest_bridge_diff pane=%1 saved=%2 reason=%3")
+                             .arg(paneLogId()).arg(saved ? 1 : 0).arg(why));
+        // A closing pane settles its debt without staging a toast nobody will ever see.
+        if (!m_closing)
+            toast(saved ? QStringLiteral("Saved claude's changes to %1").arg(name)
+                        : QStringLiteral("Kept the file as it was · claude's changes to %1 were not applied").arg(name));
+    }
+
+    // `openDiff` from the bridge: Relay's diff view beside this pane, and the banner that decides.
+    // The decision is the banner's action (save) or its dismissal (reject), because claude's call
+    // blocks until one of them — an unanswered diff is a claude left waiting forever.
+    void showGuestDiff(const QJsonObject &data) {
+        const QString reply = data.value(QStringLiteral("reply")).toString();
+        const QString file = data.value(QStringLiteral("file")).toString();
+        const QString diff = data.value(QStringLiteral("diff")).toString();
+        const QString tabName = data.value(QStringLiteral("tab_name")).toString();
+        if (reply.isEmpty()) {
+            // Not a protocol event a pane can answer, so it is not answered: logged and dropped.
+            relay::log::error(QStringLiteral("guest_bridge_diff_no_reply pane=%1").arg(paneLogId()));
+            return;
+        }
+        // A second openDiff while one waits: claude replaced its proposal, and the first call
+        // cannot be answered any more. Rejecting it is the only honest answer.
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("replaced"));
+        m_guestDiff.replyPath = reply;
+        m_guestDiff.file = file;
+        m_guestDiff.pending = true;
+        const QString name = QFileInfo(file).fileName();
+        if (diff.isEmpty() || !onOpenDiff) {
+            // Nowhere to show the change is nowhere to decide it: refuse rather than leave claude
+            // waiting on a question this pane cannot put to anyone.
+            relay::log::error(QStringLiteral("guest_bridge_diff_unshowable pane=%1").arg(paneLogId()));
+            settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("no diff view"));
+            return;
+        }
+        onOpenDiff(tabName.isEmpty() ? name : tabName, diff);
+        const QString where = m_workspace.isEmpty() ? name : QStringLiteral("%1 · %2").arg(name, m_workspace);
+        showBanner(QStringLiteral("claude proposes changes to %1").arg(where), QStringLiteral("Save"),
+                   [this] {
+                       settleGuestDiff(relay::guestbridge::fileSaved(), QStringLiteral("saved"));
+                       hideBanner();
+                   });
+        // The banner's action is Ctrl+Shift+R's too (restartStopped runs the visible banner's
+        // action); teaching that once is cheaper than a claude left waiting on a decision nobody
+        // knows is one keystroke away.
+        if (const QString key = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell")); !key.isEmpty())
+            hint(QStringLiteral("guest.diffSave"),
+                QStringLiteral("Next time: %1 saves claude's change").arg(key));
+    }
+
+    // The guest channel's one event kind this phase needs (26.3). TEMPORARY BRIDGE-ONLY SEAM: the
+    // hooks phase owns guest.json's polling plumbing in the pane; until it lands, this is the
+    // smallest reader that can carry `bridge` and nothing else — the same stat, read, token and
+    // sequence checks as state.json above, on the same tick. Fold it into the hooks plumbing (and
+    // delete this comment) when that lands; do not grow a second reader here.
+    void pollGuestEvent() {
+        const QString path = m_runtime.filePath(QStringLiteral("guest.json"));
+        struct stat info;
+        if (::stat(QFile::encodeName(path).constData(), &info) != 0) return;
+        if (m_guestEventSeen && info.st_ino == m_guestEventInode && info.st_size == m_guestEventSize
+            && info.st_mtim.tv_sec == m_guestEventMtime.tv_sec && info.st_mtim.tv_nsec == m_guestEventMtime.tv_nsec) return;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
+        m_guestEventSeen = true;
+        m_guestEventInode = info.st_ino; m_guestEventSize = info.st_size; m_guestEventMtime = info.st_mtim;
+        const auto event = QJsonDocument::fromJson(file.readAll()).object();
+        if (event.value(QStringLiteral("token")).toString() != m_token) return;
+        const auto sequence = event.value(QStringLiteral("sequence")).toString();
+        if (sequence.isEmpty() || sequence == m_guestSequence) return;
+        m_guestSequence = sequence;
+        if (event.value(QStringLiteral("event")).toString() != QStringLiteral("bridge")) return;
+        guestBridgeEvent(event.value(QStringLiteral("data")).toObject());
     }
 
     // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
@@ -1226,6 +1358,7 @@ public:
         if (!m_currentPreset.isEmpty()) configurePreset(m_currentPreset, false);
         updatePaths();
         changed();
+        registerWithBridge();   // the bridge routes by workspace too (26.5)
     }
 
     // ----- the terminal pane's right-click menu (issue #X2F1) -------------------------------------
@@ -6295,6 +6428,23 @@ private:
         }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
+        // The Claude IDE bridge (GT7X, 26.2): the first claude pane starts the sidecar and every
+        // shell after it carries the port, so a `claude` started in this pane finds Relay instead
+        // of no editor at all. Codex has no IDE bridge, so it gets nothing; when the bridge is off
+        // or failed to start, `bridge_env` is empty and both keys are removed.
+        {
+            auto &bridge = relay::guestbridge::Bridge::instance();
+            bridge.setDataRoot(m_data);
+            const int port = bridge.portFor(m_python);
+            const QJsonObject env = relay::guestbridge::bridgeEnv(QStringLiteral("claude"), port);
+            for (auto it = env.constBegin(); it != env.constEnd(); ++it) {
+                if (it.value().toString().isEmpty()) qunsetenv(it.key().toUtf8().constData());
+                else qputenv(it.key().toUtf8().constData(), it.value().toString().toUtf8());
+            }
+        }
+        // Registered now, not at the first prompt: the port is already in this shell's
+        // environment, so a claude started at that prompt must find a routable pane (26.5).
+        registerWithBridge();
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
@@ -7165,7 +7315,14 @@ private:
         m_banner->show();
     }
 
-    void hideBanner() { if (m_banner) m_banner->hide(); m_bannerCallback = nullptr; }
+    void hideBanner() {
+        if (m_banner) m_banner->hide();
+        m_bannerCallback = nullptr;
+        // The guest-diff banner's dismissal is its decision (26.5): once the banner is gone there
+        // is nothing left to answer claude with, so × — or anything else that clears the banner —
+        // rejects the change rather than leaving the tool call waiting forever.
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("dismissed"));
+    }
 
 public:
     // Ctrl+Shift+R: restart whatever stopped in this pane.
@@ -10585,6 +10742,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
+        // The guest channel (26.3): one more atomically-replaced file, read on this same tick by
+        // the bridge seam below.
+        pollGuestEvent();
         // This runs 12 times a second in every pane, and the file changes a few times per
         // command. shell/event.py replaces it atomically, so a new event is a new inode: one
         // stat() says whether there is anything to read, in place of an open, a read and a JSON
@@ -10605,7 +10765,12 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         const QString stage = event.value(QStringLiteral("event")).toString();
         if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) m_shellPid = reported;
         const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
-        if (newCwd != m_cwd) { m_cwd = newCwd; updatePaths(); changed(); }
+        if (newCwd != m_cwd) {
+            m_cwd = newCwd; updatePaths(); changed();
+            // The bridge routes by the longest workspace/cwd prefix (26.5): a pane that moved must
+            // say so before a request names a place it is no longer in.
+            registerWithBridge();
+        }
         if (stage == QStringLiteral("ready")) {
             m_promptReported = true;
             refreshShellReady();
@@ -11012,7 +11177,9 @@ private:
                   {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
                   {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
                   {"keybindings", Keymap::instance().catalog()}}));
-            updatePaths(); dialog.accept();
+            updatePaths();
+            registerWithBridge();   // the bridge routes by workspace too (26.5)
+            dialog.accept();
         });
         dialog.exec();
     }
@@ -11026,6 +11193,14 @@ private:
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
+    // guest.json as the bridge seam's reader (pollGuestEvent) last read it, and the last sequence
+    // it handled — the same dedupe state.json keeps above it, for the same reason.
+    bool m_guestEventSeen = false; ino_t m_guestEventInode = 0; off_t m_guestEventSize = 0; timespec m_guestEventMtime{};
+    QString m_guestSequence;
+    // A bridge diff this pane still owes claude an answer to (GT7X, 26.5): where the sidecar is
+    // waiting for the decision, and the file the decision is about.
+    struct GuestDiff { bool pending = false; QString replyPath, file; };
+    GuestDiff m_guestDiff;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;

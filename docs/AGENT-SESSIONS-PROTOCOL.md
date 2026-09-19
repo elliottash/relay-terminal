@@ -3066,6 +3066,35 @@ tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJE
 A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
 server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
 
+**Implementation (claude-bridge phase).** The server is a spawned sidecar,
+`backend/relay_core/guest_bridge.py serve --state-dir <dir>`, one per GUI run, started lazily by
+the first pane's `startTerminal` through `src/GuestBridge.h` (the GUI's whole end of the bridge:
+spawn, registration, answers); the sidecar prints one ready line on stdout
+(`{"ready": true, "port": N, "lock": path}`) and the port comes from there. The bridge is off by
+default (`guests/claude_bridge`, Options › Guests); a failed start is never retried — a pane works
+without the bridge. Every claude pane registers itself as one JSON file in the run's state dir
+(`{token, runtime_dir, helper, python, workspace, cwd}`), rewritten when the cwd or workspace
+moves and removed when the claude exits or the pane closes; the sidecar routes by the longest
+workspace/cwd prefix of the paths a request names, newest file breaking a tie.
+
+**The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface and
+the lock file, and it is the only side that can answer claude — including `getDiagnostics`
+(empty, documented). The GUI decides what only a person can decide. `openDiff` crosses the seam
+as one `bridge` event over the guest channel (26.3): the pane opens Relay's diff view and shows
+the banner whose action (Save) — also Ctrl+Shift+R, the visible banner's action — or whose
+dismissal (×) is the answer; on `FILE_SAVED` the *sidecar* writes the file, so the GUI never
+writes a user's file from a bridge event. `openFile` opens the preview pane; everything else
+the twelve tools ask for was answered sidecar-side already. Until the hooks phase's plumbing
+lands, the pane's `bridge`-only seam (`pollGuestEvent` → `guestBridgeEvent`) reads `guest.json`
+on `pollShell()`'s tick; the hooks phase folds that read into the shared channel plumbing and
+calls the (public) `guestBridgeEvent` directly.
+
+**The fallback writer.** The channel's writer is `shell/guest-event.py` (26.3). While that helper
+does not exist yet, the sidecar writes the same envelope itself — one clearly-marked function
+(`write_bridge_event`), byte-identical to what the helper will write, atomic tmp+rename. The
+envelope is the contract; the helper is the writer, and the fallback disappears with the phase
+that makes the helper real.
+
 ### 26.6 Codex attach
 
 Codex has no IDE bridge (section 26.2): its attach is hooks (`notify`, `tui.notification_condition`
