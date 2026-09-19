@@ -56,6 +56,7 @@ private slots:
     void theWindowsRuleAsksThePaneAndNothingElse();
     void attachTabIsTheOnlyWriterOfTheTabsProject();
     void theConfigureFunnelAlwaysSendsABoardBlock();
+    void theBoardPanePaintsFromTheBoardMaterials();
 };
 
 // A pane deep inside a project finds the project's board, and the answer is the project root
@@ -260,6 +261,38 @@ void BoardWorkspaceTests::theConfigureFunnelAlwaysSendsABoardBlock()
              text.count(QStringLiteral("withSessionFields(QJsonObject{{\"type\", \"configure\"}")));
     // Re-pointing an attached pane is `set_board`, not another configure: the conversation lives.
     QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"set_board\")")));
+}
+
+// The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4, owner 2026-09-19 "yeah build
+// that out"): the pane is painted on the board's face, and its hardware — the engraved rule over a
+// section name, the jack rings of an empty board — in the board's brass. src/BoardPane.cpp needs a
+// whole worker and a project on disk to run, so the plumbing is pinned here as text, the way
+// theWindowsRuleAsksThePaneAndNothingElse() above reads RelayWindow.h.
+//
+// What must not come back: `theme::Background` under the rows. The board's ground is its face, and
+// a row's hover band, the drag image and the empty board all have to be mixed from that face, or
+// the board goes back to being the window with a list on it.
+void BoardWorkspaceTests::theBoardPanePaintsFromTheBoardMaterials()
+{
+    QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/BoardPane.cpp"));
+    QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+    const QString text = QString::fromUtf8(source.readAll());
+    // The rule over a section name is the board's hardware, lit only under the pointer.
+    QVERIFY2(text.contains(QStringLiteral("hover ? theme::BoardMetal : theme::BoardMetalDim")),
+             "the section rule no longer lights the board's brass");
+    // The hover band and the drag image are the face, not the window.
+    QVERIFY2(text.contains(QStringLiteral("mix(theme::BoardFace, theme::Text, 0.05)")), "the hover band left the face");
+    QVERIFY2(text.contains(QStringLiteral("pixmap.fill(theme::BoardFace)")), "the drag image left the face");
+    QVERIFY2(!text.contains(QStringLiteral("theme::Background")),
+             "something in the Switchboard is painted on the window's ground again, not the board's face");
+    // The empty board is the doc's unpatched board: one unlit jack per section.
+    QVERIFY2(text.contains(QStringLiteral("class EmptyBoard final : public QLabel")), "EmptyBoard is gone");
+    QVERIFY2(text.contains(QStringLiteral("setSections(titles)")), "the empty board is no longer told the sections");
+    const QString jacks = bodyOf(text, QStringLiteral("    void paintEvent(QPaintEvent *) override\n    {"));
+    QVERIFY2(jacks.contains(QStringLiteral("drawEllipse")), qPrintable(jacks.left(200)));
+    QVERIFY2(jacks.contains(QStringLiteral("theme::BoardMetalDim")), "the jack rings are not unlit brass");
+    // And its words stay on the legible text tokens: no material behind anything read (2.2).
+    QVERIFY2(jacks.contains(QStringLiteral("theme::TextMuted")), "the empty board's words left the text tokens");
 }
 
 QTEST_MAIN(BoardWorkspaceTests)

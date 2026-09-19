@@ -156,6 +156,67 @@ private Q_SLOTS:
         QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
     }
 
+    // The Switchboard's materials are live tokens like the rest (owner, 2026-09-19: "yeah build
+    // that out"): the board pane's face is a stylesheet rule and its brass is read at paint time by
+    // RowDelegate and the empty board, so a theme switch has to move all three.
+    void theBoardMaterialsFollowTheTheme() {
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        QVERIFY(app);
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+        QVERIFY(BoardMaterial);
+        QCOMPARE(BoardFace.name(), QStringLiteral("#17140f"));
+        QCOMPARE(BoardMetal.name(), QStringLiteral("#c8a45c"));
+        QCOMPARE(BoardMetalDim.name(), QStringLiteral("#6b5637"));
+        QVERIFY2(app->styleSheet().contains(QStringLiteral("QWidget#boardView { background: #17140f; }")),
+                 "the board pane is not painted on the board's face");
+        QVERIFY(setActiveTheme(QStringLiteral("ibm-beige")));
+        QCOMPARE(BoardFace.name(), QStringLiteral("#e0d6bd"));
+        QCOMPARE(BoardMetal.name(), QStringLiteral("#63492b"));
+        QCOMPARE(BoardMetalDim.name(), QStringLiteral("#8a7550"));
+        QVERIFY(app->styleSheet().contains(QStringLiteral("QWidget#boardView { background: #e0d6bd; }")));
+        // `@boardMetalDim` has to be substituted before `@boardMetal`, or the dim rule comes out as
+        // the lit colour with "Dim" left after it. Nothing may be left unsubstituted either way.
+        QVERIFY(app->styleSheet().contains(QStringLiteral("border-bottom: 1px solid #8a7550")));
+        QVERIFY(!app->styleSheet().contains(QStringLiteral("@board")));
+        QVERIFY(setActiveTheme(QStringLiteral("dark-copper")));
+        QCOMPARE(BoardFace.name(), QStringLiteral("#1a1210"));
+        QCOMPARE(BoardMetal.name(), QStringLiteral("#c08556"));
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+    }
+
+    // `[flags] board_material = false` (docs/SWITCHBOARD-AESTHETIC.md 3.4): the board degrades to
+    // hairlines — the face becomes the text surface, lit hardware the accent, unlit hardware the
+    // resting border — and the substitution is made once, in adoptTokens(), so no painter and no
+    // stylesheet rule has to know which form the theme asked for. Nothing moves, only fills.
+    void aThemeThatRefusesTheMaterialGetsHairlines() {
+        const QString dir = m_config.path() + QStringLiteral("/relay/themes");
+        QVERIFY(QDir().mkpath(dir));
+        QFile file(dir + QStringLiteral("/plainboard.toml"));
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write(
+            "[theme]\nname = \"Plain Board\"\nvariant = \"dark\"\n"
+            "[ui]\nbackground = \"#101014\"\nsurface = \"#181820\"\nsurface_raised = \"#20202a\"\n"
+            "border = \"#2a2a34\"\nborder_strong = \"#4a4a58\"\ntext = \"#e8e8ee\"\n"
+            "text_muted = \"#9a9aa6\"\naccent = \"#4ab8e0\"\naccent_text = \"#04161e\"\n"
+            "[board]\nface = \"#2b1d10\"\nmetal = \"#d8a24a\"\nmetal_dim = \"#7a5b2c\"\n"
+            "[flags]\nboard_material = false\n");
+        file.close();
+        refreshThemes();
+        QVERIFY(setActiveTheme(QStringLiteral("plainboard")));
+        QVERIFY(!BoardMaterial);
+        // Its own [board] colours are still read — the theme may turn the material back on — but
+        // nothing paints them while the flag is false.
+        QCOMPARE(active().boardColor(QStringLiteral("face")).name(), QStringLiteral("#2b1d10"));
+        QCOMPARE(BoardFace.name(), Surface.name());
+        QCOMPARE(BoardMetal.name(), Accent.name());
+        QCOMPARE(BoardMetalDim.name(), Border.name());
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        QVERIFY(app->styleSheet().contains(QStringLiteral("QWidget#boardView { background: ")
+                                           + Surface.name() + QStringLiteral("; }")));
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+        QVERIFY(BoardMaterial);
+    }
+
 private:
     QTemporaryDir m_config;
 };

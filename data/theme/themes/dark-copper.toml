@@ -88,9 +88,11 @@ palette = [
 ]
 
 [board]
-# The switchboard materials (docs/SWITCHBOARD-AESTHETIC.md 3.4). Nothing paints these yet; they
-# ride along in ThemeSpec::extra so the board widgets can read them when they are built. Brass
-# becomes copper here, straight off the reference: 5.91:1 metal on face, legible as enamel text.
+# The switchboard materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted since 2026-09-19: `face`
+# is the ground of the Switchboard pane, `metal` a lit piece of its hardware and `metal_dim` the
+# same hardware unlit. Brass becomes copper here, straight off the reference: 5.91:1 metal on face,
+# legible as enamel text. This is the one theme whose chrome and board are the same material, so
+# check the board widgets against it first.
 face = "#1a1210"
 metal = "#c08556"
 metal_dim = "#6b4a33"

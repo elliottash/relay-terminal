@@ -315,8 +315,12 @@ private:
         const SectionShape shape = sectionShape(option.font, rect.width(), first, canAdd);
         const QPoint origin = rect.topLeft();
         const bool hover = option.state & QStyle::State_MouseOver;
+        // The engraved rule over a section name is the board's hardware, not a border
+        // (docs/SWITCHBOARD-AESTHETIC.md 3.1: brass is permitted on 1px rules): unlit brass on the
+        // face, lit under the pointer, so exactly one rule in the pane is ever lit. On a theme with
+        // `[flags] board_material = false` both tokens are the plain hairline pair.
         if (!first) {
-            painter->setPen(QPen(theme::Border, 1.0));
+            painter->setPen(QPen(hover ? theme::BoardMetal : theme::BoardMetalDim, 1.0));
             painter->drawLine(rect.left() + kRowPadX, origin.y() + 4,
                               rect.left() + rect.width() - kRowPadX, origin.y() + 4);
         }
@@ -366,7 +370,7 @@ private:
         if (selected || hover) {
             painter->setPen(Qt::NoPen);
             painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
-                                       : mix(theme::Background, theme::Text, 0.05));
+                                       : mix(theme::BoardFace, theme::Text, 0.05));
             painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
         }
         if (selected) {
@@ -560,7 +564,7 @@ protected:
         const qreal ratio = devicePixelRatioF();
         QPixmap pixmap(rect.size() * ratio);
         pixmap.setDevicePixelRatio(ratio);
-        pixmap.fill(theme::Background);
+        pixmap.fill(theme::BoardFace);
         {
             QPainter painter(&pixmap);
             QStyleOptionViewItem option;
@@ -723,6 +727,106 @@ private:
 
 QString RowList::dragging;
 
+
+// The empty Switchboard: a board with nothing patched through (docs/SWITCHBOARD-AESTHETIC.md
+// intervention 5, "DO"). One unlit jack per section over its engraved name, then the words the label
+// was given. These rings are the only brass circles in Relay, and what lets them past the taste
+// guard in §6 ("at most two brass circles and one cord in a default window") is that the widget
+// carrying them disappears the moment there is a card.
+//
+// It is a QLabel so that setText(), setVisible() and hide() keep working on it unchanged; only the
+// painting is its own.
+class EmptyBoard final : public QLabel {
+public:
+    explicit EmptyBoard(QWidget *parent = nullptr) : QLabel(parent) {}
+
+    // The section names, in board order. Empty until the first `board` event arrives, which is what
+    // keeps the rings off "Loading the Switchboard…": an unpatched board is a fact, not a guess.
+    void setSections(const QStringList &names)
+    {
+        if (names == m_names)
+            return;
+        m_names = names;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QStringList lines = text().split(QLatin1Char('\n'));
+        const QFont body = theme::legible(font(), theme::SecondaryPt);
+        const QFontMetrics metrics(body);
+        QFont enamel = monoFont(font(), 0.8);        // uppercase, letter-spaced: an enamel label
+        enamel.setLetterSpacing(QFont::AbsoluteSpacing, 1);
+        const QFontMetrics enamelMetrics(enamel);
+
+        constexpr int kRing = 14, kRingGap = 12, kNameGap = 7, kBandGap = 26;
+        // The names go under the rings when they fit; a pane 300px wide with ten sections gets the
+        // rings alone rather than a row of stubs. Whichever it is, nothing wraps and nothing is
+        // half drawn: the columns that do not fit are simply not there.
+        int column = 0;
+        for (const QString &name : m_names)
+            column = qMax(column, enamelMetrics.horizontalAdvance(name.toUpper()) + 10);
+        column = qBound(kRing + kRingGap, column, 110);
+        const int room = qMax(0, width() - 24);
+        int count = m_names.size();
+        bool named = column > 0 && room / qMax(1, column) >= 3;
+        if (named)
+            count = qMin(count, room / column);
+        const int pitch = named ? column : kRing + kRingGap;
+        const int bandHeight = m_names.isEmpty() ? 0 : kRing + (named ? kNameGap + enamelMetrics.height() : 0);
+        int textHeight = 0;
+        for (const QString &line : lines)
+            textHeight += line.isEmpty() ? metrics.height() / 2 : metrics.lineSpacing();
+
+        int y = qMax(12, (height() - (bandHeight + (bandHeight ? kBandGap : 0) + textHeight)) / 2);
+        if (bandHeight) {
+            int x = (width() - pitch * count) / 2;
+            for (int i = 0; i < count; ++i) {
+                // A jack: an unlit brass ring, the collar's shade inside it, and the hole itself
+                // as a small dark disc — small, or on a light theme the hole swallows the ring and
+                // the jack reads as a bullet. The hole is mixed out of whichever of the face and
+                // the metal is already the darker, so it is darker than both in every theme.
+                // Nothing here is ever lit: a board with no cards has no line patched through it.
+                const QRectF ring(x + (pitch - kRing) / 2.0, y, kRing, kRing);
+                const QColor deeper = qGray(theme::BoardFace.rgb()) <= qGray(theme::BoardMetalDim.rgb())
+                                          ? theme::BoardFace : theme::BoardMetalDim;
+                painter.setPen(QPen(theme::BoardMetalDim, 1.4));
+                painter.setBrush(mix(theme::BoardFace, theme::BoardMetalDim, 0.15));
+                painter.drawEllipse(ring);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(mix(deeper, QColor(Qt::black), 0.45));
+                painter.drawEllipse(ring.center(), 2.6, 2.6);
+                if (named) {
+                    painter.setFont(enamel);
+                    painter.setPen(theme::TextMuted);
+                    const QString name = m_names.at(i).toUpper();
+                    painter.drawText(QRect(x, y + kRing + kNameGap, pitch, enamelMetrics.height()),
+                                     Qt::AlignCenter,
+                                     enamelMetrics.elidedText(name, Qt::ElideRight, pitch - 4));
+                }
+                x += pitch;
+            }
+            y += bandHeight + kBandGap;
+        }
+        painter.setFont(body);
+        painter.setPen(theme::TextMuted);
+        for (const QString &line : lines) {
+            if (line.isEmpty()) {
+                y += metrics.height() / 2;
+                continue;
+            }
+            painter.drawText(QRect(12, y, qMax(0, width() - 24), metrics.lineSpacing()), Qt::AlignCenter,
+                             metrics.elidedText(line, Qt::ElideRight, qMax(0, width() - 24)));
+            y += metrics.lineSpacing();
+        }
+    }
+
+private:
+    QStringList m_names;
+};
 
 // --------------------------------------------------------------------- card detail
 
@@ -1936,7 +2040,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_splitter->hide();                 // until the first `board` event: the loading line instead
     layout->addWidget(m_splitter, 1);
 
-    m_empty = new QLabel(QStringLiteral("Loading the Switchboard…"), this);
+    auto *empty = new EmptyBoard(this);
+    empty->setText(QStringLiteral("Loading the Switchboard…"));
+    m_empty = empty;
     m_empty->setObjectName(QStringLiteral("boardEmpty"));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setWordWrap(true);
@@ -2258,9 +2364,13 @@ void BoardView::layoutListTools()
 void BoardView::syncSectionChecks()
 {
     const QList<board::Column> sections = m_model.sections();
-    QStringList ids;
-    for (const board::Column &section : sections)
+    QStringList ids, titles;
+    for (const board::Column &section : sections) {
         ids << section.id;
+        titles << section.title;
+    }
+    // The empty board draws one unlit jack per section under these names (EmptyBoard, above).
+    static_cast<EmptyBoard *>(m_empty)->setSections(titles);
     if (ids == m_checkIds)
         return;
     m_checkIds = ids;

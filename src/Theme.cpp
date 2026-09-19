@@ -275,6 +275,17 @@ void adoptTokens(const ThemeSpec &spec) {
     Shell = ui("shell", Accent);
     Agent = ui("agent", Agent);
 
+    // The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4). parseTheme() always fills
+    // `[board]`, deriving it from this theme's own chrome when the file is silent. `[flags]
+    // board_material = false` asks for the hairline form instead, and that substitution is made
+    // here, once: the face becomes the text surface, lit hardware the accent, unlit hardware the
+    // resting border. Everything downstream — the `@board*` rules below, RowDelegate, the empty
+    // board — then reads the same three tokens whichever form the theme asked for.
+    BoardMaterial = spec.flag(QStringLiteral("board_material"), true);
+    BoardFace = BoardMaterial ? spec.boardColor(QStringLiteral("face"), Surface) : Surface;
+    BoardMetal = BoardMaterial ? spec.boardColor(QStringLiteral("metal"), Accent) : Accent;
+    BoardMetalDim = BoardMaterial ? spec.boardColor(QStringLiteral("metal_dim"), Border) : Border;
+
     const auto syntax = [&spec](const char *name, const QColor &fallback) {
         return spec.syntaxColor(QString::fromLatin1(name), fallback);
     };
@@ -614,11 +625,20 @@ QWidget#fileExplorer QToolButton, QWidget#filePreview QToolButton { color: @mute
 QWidget#fileExplorer QToolButton:hover, QWidget#filePreview QToolButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBorder; }
 
-/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): one list of
-   rows on the pane's @bg, with engraved (uppercase, mono, letter-spaced) section headers. The
-   rows themselves are painted by RowDelegate from the same tokens, so they follow a theme
-   switch; only the chrome around the list is styled here. */
-QWidget#boardView, QWidget#boardListPane { background: @bg; }
+/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md interventions 3 and 5): one list
+   of rows on the board's own face, with engraved (uppercase, mono, letter-spaced) section headers.
+   The rows themselves are painted by RowDelegate from the same tokens, so they follow a theme
+   switch; only the chrome around the list is styled here.
+
+   The face (`@boardFace`, 3.4) is the one ground in Relay that is a material rather than a
+   surface: the pane is a board, the cards are mounted on it. It is set once, on #boardView, and
+   everything stacked on it is transparent so the sheet runs behind the whole pane unbroken — the
+   way the metal theme clears the tab row. `@boardMetalDim` is the unlit brass of the board's own
+   hardware, and it replaces @border on the two rules that frame the list, so the frame reads as
+   engraved into the face rather than drawn on top of it. Card and thread text stay on @surface and
+   @text throughout (2.2): no material ever goes behind words a person reads. */
+QWidget#boardView { background: @boardFace; }
+QWidget#boardListPane, QWidget#boardHead, QWidget#boardDetail { background: transparent; }
 QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton, QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
@@ -638,7 +658,7 @@ QTextBrowser#boardCleanupBody { background: transparent; color: @text; border: n
 QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
 /* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
    a hairline over the rows; the pane's header carries nothing but the way back from a card. */
-QWidget#boardListTools { background: @bg; border-bottom: 1px solid @border; }
+QWidget#boardListTools { background: transparent; border-bottom: 1px solid @boardMetalDim; }
 QToolButton#boardBack { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; }
 QToolButton#boardBack:hover { color: @text; border-color: @border; background: @raised; }
 /* Engraved, like the section headers they switch on and off (SWITCHBOARD-AESTHETIC 3.1). The
@@ -656,8 +676,7 @@ QToolButton#boardTextButton { color: @muted; background: transparent; border: 1p
 QToolButton#boardTextButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#boardTextButton:disabled { color: @disabled; }
 QLabel#boardEmpty { color: @muted; }
-QLabel#boardKeys { color: @muted; font-size: 9pt; padding: 4px 10px; border-top: 1px solid @border; }
-QWidget#boardDetail { background: @bg; }
+QLabel#boardKeys { color: @muted; font-size: 9pt; padding: 4px 10px; border-top: 1px solid @boardMetalDim; }
 QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
 /* Editing the card's own words: the title in place, and `## Issue` where the document was. */
@@ -708,6 +727,8 @@ QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
         {QStringLiteral("@shellSoft"), rgba(withAlpha(Shell, 56))}, {QStringLiteral("@shell"), hex(Shell)},
         {QStringLiteral("@agentSoft"), rgba(withAlpha(Agent, 56))}, {QStringLiteral("@agent"), hex(Agent)},
         {QStringLiteral("@link"), hex(Link)},
+        {QStringLiteral("@boardFace"), hex(BoardFace)},
+        {QStringLiteral("@boardMetalDim"), hex(BoardMetalDim)}, {QStringLiteral("@boardMetal"), hex(BoardMetal)},
         {QStringLiteral("@remoteFill"), hex(blend(Error, Background, 0.26))},
         {QStringLiteral("@remoteLine"), hex(blend(Error, Background, 0.8))},
         {QStringLiteral("@mono"), mono},

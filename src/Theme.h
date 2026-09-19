@@ -60,6 +60,23 @@ inline QColor Link{0x12, 0xa4, 0x57};
 inline QColor Shell{0x3e, 0xc5, 0xf0};
 inline QColor Agent{0xb4, 0x8e, 0xf7};
 
+// --- the Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.1-3.4) -------------------------
+// The board is the one surface in Relay that is allowed to be a physical object: a face with
+// hardware on it. `BoardFace` is that face — the ground of the Switchboard pane, and the ground a
+// card row's text is measured against (tests/theme_test.cpp) — `BoardMetal` is a lit piece of
+// hardware (the engraved rule under the section the pointer is on), and `BoardMetalDim` is the same
+// hardware unlit (every other rule, and the jack rings of an empty board). Brass is structure,
+// never state: it may never be read as the amber that means something is waiting on you.
+//
+// A theme that sets `[flags] board_material = false` gets the hairline form of every one of those
+// (SWITCHBOARD-AESTHETIC 3.4) and `BoardMaterial` says so, but the substitution is made once, in
+// adoptTokens(): the face becomes `Surface`, lit hardware the accent and unlit hardware `Border`.
+// Painting code reads these three whatever the theme said, so nothing paints two ways.
+inline QColor BoardFace{0x17, 0x14, 0x0f};
+inline QColor BoardMetal{0xc8, 0xa4, 0x5c};
+inline QColor BoardMetalDim{0x6b, 0x56, 0x37};
+inline bool BoardMaterial = true;
+
 // The composer's syntax colours (src/ShellHighlighter.cpp).
 inline QColor SyntaxCommand{0x3e, 0xc5, 0xf0};
 inline QColor SyntaxUnknown{0xf0, 0x71, 0x78};

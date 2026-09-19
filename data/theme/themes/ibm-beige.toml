@@ -118,8 +118,10 @@ light = "#f0e4d4"
 dark = "#8e785d"
 
 [board]
-# The switchboard materials. Brass does not survive a light ground (#c8a45c is 2.35:1 on white),
-# so it is oxidised rather than inverted: phenolic cream face, dark bronze metal.
+# The switchboard materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted since 2026-09-19. Brass
+# does not survive a light ground (#c8a45c is 2.35:1 on white), so it is oxidised rather than
+# inverted: phenolic cream face, dark bronze metal at 5.77:1 on it, and an unlit bronze for the
+# hardware that is not under the pointer.
 face = "#e0d6bd"
 metal = "#63492b"
 metal_dim = "#8a7550"
