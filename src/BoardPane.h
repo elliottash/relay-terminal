@@ -68,8 +68,8 @@ public:
     // can read the list without walking widgets.
     const QList<board::Row> &rows() const { return m_rows; }
 
-    // Which sections are folded, for the layout node: `["deferred", "done"]`. Saved and
-    // restored with the rest of the window's state.
+    // Which sections are folded, for the layout node. A new pane starts with every section
+    // folded; saved panes restore their exact set with the rest of the window's state.
     QJsonArray collapsedSections() const;
     void setCollapsedSections(const QJsonArray &state);
     // By value, not by reference: every caller names a section out of `m_rows`, which the

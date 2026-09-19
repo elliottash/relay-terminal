@@ -3010,12 +3010,12 @@ void BoardView::refill()
 {
     const bool hadFocus = m_list->hasFocus();
     const int scroll = m_list->verticalScrollBar()->value();
-    // Done (and anything parked) starts folded: the list is the live work, and the closed cards
-    // are a count at the bottom that opens on demand.
+    // A new pane starts as a compact overview: every section is a count that opens on demand.
+    // Restored panes skip this seed and keep exactly the folds saved in their layout.
     if (!m_collapsedSeeded) {
         m_collapsedSeeded = true;
-        m_collapsed.insert(board::doneSection());
-        m_collapsed.insert(QStringLiteral("deferred"));
+        for (const board::Column &section : m_model.sections())
+            m_collapsed.insert(section.id);
     }
     m_rows = m_model.rows(m_collapsed, m_hidden);
 
@@ -3087,8 +3087,7 @@ void BoardView::rebuild()
     m_keys->setVisible(m_open && !empty);
 }
 
-// A section folds and unfolds; which sections are folded is saved with the window's layout, so
-// Done stays folded across a restart.
+// A section folds and unfolds; which sections are folded is saved with the window's layout.
 void BoardView::toggleSection(QString columnId)
 {
     if (columnId.isEmpty())
