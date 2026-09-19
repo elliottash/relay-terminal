@@ -94,7 +94,7 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
   `{"token", "sequence", "event", "guest", "data"}` envelope, one file per event in the pane's
   `guest-events/` spool (`mkstemp` + `os.replace`), no-op without `RELAY_GUEST_EVENT`.
 - `backend/relay_core/guest_hook.py` + `guest_install.py` — the claude hook/statusline shim and its marked,
-  additive installer for `.claude/settings.json` (`--relay-guest` marker; off removes exactly the marked entries;
+  additive installer for `.claude/settings.local.json` (`--relay-guest` marker; off removes exactly the marked entries;
   a user's own statusline is kept). PreToolUse is a Relay question on the pane, never auto-approved.
 - `backend/relay_core/guest_codex.py` — the marked `notify` + `[tui] notification_condition` entries in
   `~/.codex/config.toml` (byte-for-byte TOML document model; user-owned keys are a hard `SettingsConflict`) and
@@ -111,7 +111,8 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
   `guest_busy`), the `/` popup's badged guest rows, the openDiff banner, composer → guest input routing.
 - `src/RelayWindow.h` — Settings › Guests, the two installers' front end (status re-read on show; JSON answers;
   no reset rows; PYTHONPATH appended, never prepended).
-- `remote/wire.py` — `WITHHELD_EVENTS`: all five guest event kinds are local-only, one regression test.
+- `remote/wire.py` — `GUEST_CHANNEL_EVENTS`: all five guest event kinds are local-only, written down
+  beside the worker lists rather than inside them, one regression test.
 - Tests: `tests/test_guest{,_hook,_install,_codex,_bridge,_sessions,_slash}.py`, `tests/guestbridge_test.cpp`,
   the wire withholding regression in `tests/test_remote_wire.py`.
 
@@ -139,7 +140,8 @@ verdicts. Each track's drive script and run log sits beside its shots.
 - [ ] A claude edit arrives as openDiff: Relay's diff view with the "claude proposes changes to …" banner;
       Save writes the file (claude sees FILE_SAVED), Reject answers DIFF_REJECTED; `guest.diffSave` saves from
       the keyboard; a diff naming a path outside the pane's workspace is rejected.
-- [ ] Options › Guests: the project toggle writes only `--relay-guest`-marked entries to `.claude/settings.json`
+- [ ] Options › Guests: the project toggle writes only `--relay-guest`-marked entries to
+      `.claude/settings.local.json` (and never the shared `.claude/settings.json`)
       and off removes exactly those; the global toggle is refused unless the project one is on; a user's own
       statusline in the file is kept and reported as kept.
 - [ ] The Codex toggle writes the marked `notify` + `[tui] notification_condition` entries to
