@@ -235,13 +235,18 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 
 }  // namespace relay::ask
 
-// The bold "Relaying…" line above the prompt box (card #4E13): one verb, the colour saying whose
+// The "Relaying…" line above the prompt box (cards #4E13, #HQ2B): one verb, the colour saying whose
 // work it is — the agent's violet while a turn runs or subagents it started still work, the
 // terminal's blue while a program runs, amber when the turn is blocked on your answer (#MQ9C).
-// Painted rather than a QLabel for the same reason the header's state word is (PaneStateWord,
-// src/PaneChrome.h): the colour follows the state, and the theme can change under it. Elided
-// from the middle so a long action ("Relaying reading src/deep/path…") never pushes the composer
-// wide, and Ignored like the prompt box itself so a narrow pane clips it instead (#G152).
+// Left-aligned with the prompt text and in the normal weight, the caption Warp and Claude carry
+// above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
+// more like how warp . claude does it. and not in bold."): the row belongs to the box under it,
+// so it starts where that box's own text starts, and it speaks quietly while the prompt is the
+// loud thing. Painted rather than a QLabel for the same reason the header's state word is
+// (PaneStateWord, src/PaneChrome.h): the colour follows the state, and the theme can change under
+// it. Elided from the middle so a long action ("Relaying reading src/deep/path…") never pushes
+// the composer wide, and Ignored like the prompt box itself so a narrow pane clips it instead
+// (#G152).
 class PaneBusyLine final : public QWidget {
 public:
     explicit PaneBusyLine(QWidget *parent) : QWidget(parent) {
@@ -250,6 +255,11 @@ public:
         setMinimumWidth(1);   // a narrow pane clips the line rather than growing for it
         hide();
     }
+    // The prompt box this row captions, so its left edge can sit on the prompt *text's* edge
+    // rather than the frame's. Read live at paint time rather than once at build: the padding
+    // that places the text arrives with the theme's polish (theme::polishWindow), after this
+    // widget is constructed, and a theme switch can change it again.
+    void setPromptEditor(const QPlainTextEdit *editor) { m_prompt = editor; }
     void setBusy(relay::panestatus::State state, const QString &text, const QString &tip) {
         m_state = state; m_text = text;
         setToolTip(tip);
@@ -265,8 +275,7 @@ public:
         hide();
     }
     QSize sizeHint() const override {
-        QFont bold = font(); bold.setWeight(QFont::DemiBold);
-        return {QFontMetrics(bold).horizontalAdvance(m_text) + 2, 18};
+        return {leftInset() + QFontMetrics(font()).horizontalAdvance(m_text) + 2, 18};
     }
 protected:
     void paintEvent(QPaintEvent *) override {
@@ -277,18 +286,24 @@ protected:
                                           relay::theme::Shell, relay::theme::Agent, relay::theme::Success,
                                           relay::theme::Warning, relay::theme::Error, relay::theme::Action,
                                           relay::theme::Tool};
-        QFont bold = font(); bold.setWeight(QFont::DemiBold);
         QPainter p(this);
-        p.setFont(bold);
         // A word is text: the state's own ink, lifted to at least 4.5:1 on the pane's ground
         // (panestatus::stateText), so the line reads in every shipped theme.
         p.setPen(relay::panestatus::stateText(m_state, relay::theme::Background, t));
-        p.drawText(rect().adjusted(0, 0, -2, 0), Qt::AlignRight | Qt::AlignVCenter,
-                   QFontMetrics(bold).elidedText(m_text, Qt::ElideMiddle, std::max(1, width() - 2)));
+        p.drawText(rect().adjusted(leftInset(), 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter,
+                   QFontMetrics(font()).elidedText(m_text, Qt::ElideMiddle,
+                                                    std::max(1, width() - leftInset() - 2)));
     }
 private:
+    // Where the prompt text starts inside its editor: the stylesheet's padding moves the viewport
+    // in, the document's margin moves the text in from that (measured, not assumed: 4 + 4 px with
+    // the shipped theme). Zero with no editor set, so a bare PaneBusyLine still paints.
+    int leftInset() const {
+        return m_prompt ? m_prompt->viewport()->x() + int(m_prompt->document()->documentMargin()) : 0;
+    }
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     QString m_text;
+    const QPlainTextEdit *m_prompt = nullptr;
 };
 
 // One terminal pane: a shell behind relay::TerminalBackend (Relay's own engine, engine/), its
@@ -3088,13 +3103,15 @@ private:
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
-        // The bold "Relaying…" line (card #4E13), the first row of the composer frame so native
+        // The "Relaying…" line (cards #4E13, #HQ2B), the first row of the composer frame so native
         // mode hides it with the prompt box: agent work in the agent's violet, saying what it is
         // doing right now ("Relaying reading src/Pane.h… · 12 s · Esc stops"), a terminal program
-        // in the terminal's blue ("Relaying sleep…"), right-aligned above the prompt. The turn
-        // clock lived in the strip under the box until this card; it moved up here and was
-        // restyled into this line — one place, one verb, the colour saying whose work it is.
+        // in the terminal's blue ("Relaying sleep…"), left-aligned with the prompt text and in the
+        // normal weight above the prompt. The turn clock lived in the strip under the box until
+        // #4E13; it moved up here and was restyled into this line — one place, one verb, the
+        // colour saying whose work it is.
         m_busyLine = new PaneBusyLine(composer);
+        m_busyLine->setPromptEditor(m_editor);   // the row's left edge is the prompt text's (#HQ2B)
         composerLayout->addWidget(m_busyLine);
         composerLayout->addLayout(inputRow);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
@@ -9050,7 +9067,7 @@ private:
                           : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
     }
 
-    // "Relaying reading src/Pane.h… · 48 s · Esc stops", bold above the prompt box (m_busyLine,
+    // "Relaying reading src/Pane.h… · 48 s · Esc stops", above the prompt box (m_busyLine,
     // card #4E13), so a silent turn is never indistinguishable from a hung one. Not a toast: a
     // clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
@@ -13491,13 +13508,13 @@ private:
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;
     QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;
-    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the bold "Relaying…" line
+    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the "Relaying…" line
     // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
-    PaneBusyLine *m_busyLine = nullptr;   // the bold "Relaying…" line above the prompt (#4E13)
+    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying…" line above the prompt (#4E13, #HQ2B)
     // "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.

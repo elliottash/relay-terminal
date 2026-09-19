@@ -14,7 +14,8 @@
 //    is running"). Running, Working and Subagents are work happening now: their glyph is the
 //    Relay mark itself, blinking (pulseScale, card #4E13), in the work's own colour — blue for
 //    terminal work, violet for agent work — with the state's word beside the title (stateText).
-//    The same word sits bold above the prompt box: "Relaying <action>…", the action a gerund of
+//    The same word sits above the prompt box, left-aligned with the prompt text and in the normal
+//    weight (#HQ2B): "Relaying <action>…", the action a gerund of
 //    what the agent is doing ("thinking", "reading src/Pane.h"), or the program's name for
 //    terminal work. A tab with anything live carries a blinking dot in that colour (liveMarker),
 //    whatever news its icon is showing. The desktop's reduce-motion signal (a cursor flash time

@@ -1,0 +1,3 @@
+2026-09-19T15:46:33.200Z INFO relay.worker pane=3b69edb7 worker_start version=0.1.0 pid=183159 level=info
+2026-09-19T15:46:33.234Z INFO relay.worker pane=3b69edb7 configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=c74718b0b13b40fdb29dcb8f0f3a1c89
+2026-09-19T15:46:46.081Z INFO relay.worker pane=3b69edb7 worker_stop pid=183159

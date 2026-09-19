@@ -159,6 +159,11 @@ private slots:
     void theExecuteTaskCarriesTheBoardsConventions();
     void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
     void aViewIgnoresEventsFromAnotherProjectsBoard();
+    // Cross-provider QA (#T71W)
+    void theVerifyLineNamesTheRecommendedVerifierAndWhatItSkipped();
+    void theExecuteTaskAsksForTheImplementedByTrailer();
+    void theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTrailer();
+    void aQaLaneCardOffersVerifyOnTheRecommendedRunner();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -757,7 +762,7 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
                                  {"thread", QJsonArray{}}, {"thread_total", 0}});
     QVERIFY(view.detailOpen());
     QVERIFY(!head->isHidden());
-    QCOMPARE(back->text(), QStringLiteral("←  Back to board"));
+    QCOMPARE(back->text(), QStringLiteral("←  Back to board (Esc)"));
     QVERIFY(listPane->isHidden());
 
     // Clicking it goes back, the same place Esc goes, and hints that Esc was the fast way.
@@ -1335,7 +1340,9 @@ QPushButton *button(relay::BoardView &view, const QString &text)
 {
     const auto buttons = view.findChildren<QPushButton *>();
     for (QPushButton *candidate : buttons)
-        if (candidate->text() == text)
+        // Buttons carry their shortcut in parentheses (#QG60): "Execute (x)". A query matches
+        // a bare label ("Stop", while a run is going) or the suffixed one.
+        if (candidate->text() == text || candidate->text().startsWith(text + QStringLiteral(" (")))
             return candidate;
     return nullptr;
 }
@@ -1352,6 +1359,11 @@ void BoardModelTests::aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode()
     QVERIFY(button(view, QStringLiteral("Plan")));
     QVERIFY(button(view, QStringLiteral("Execute")));
     QVERIFY(!button(view, QStringLiteral("Ask the agent")));
+    // Every button that has a key shows it in parentheses (#QG60).
+    QCOMPARE(button(view, QStringLiteral("Comment"))->text(), QStringLiteral("Comment (Ctrl+Shift+Enter)"));
+    QCOMPARE(button(view, QStringLiteral("Discuss"))->text(), QStringLiteral("Discuss (Enter)"));
+    QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
+    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute (x)"));
 
     // Enter in the reply box discusses.
     auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));

@@ -1,0 +1,33 @@
+=== idle ===
+  idle control: no "Relaying" row — pass (1 coloured band(s) in the composer, none of them the line)
+=== relaying ===
+  busy row y 133..146, x 38..339, 197 px, violet(agent/working)
+  busy row OCR: '|| Relaying thinking... - 6 s - step 1/256 - Esc stops ||'
+  busy left x=38, prompt text left x=36 (frame border x=0, line sits 38 px inside it)
+  |prompt_x - busy_x| = 2 px -> PASS (acceptance: same pen origin, ±2 px of glyph bearing)
+  (the first prompt column is 18 px tall — the caret, i.e. the prompt's own pen origin, not a glyph edge)
+=== running ===
+  busy row y 130..143, x 38..139, 139 px, blue(shell/running)
+  busy row OCR: '| Relaying sleep...'
+  busy left x=38, prompt text left x=36 (frame border x=0, line sits 38 px inside it)
+  |prompt_x - busy_x| = 2 px -> PASS (acceptance: same pen origin, ±2 px of glyph bearing)
+  (the first prompt column is 18 px tall — the caret, i.e. the prompt's own pen origin, not a glyph edge)
+=== spawn ===
+  busy row y 68..82, x 38..242, 139 px, violet(agent/working)
+  busy row OCR: '|| _ Relaying waiting for 1 subagent... ||'
+  busy left x=38, prompt text left x=36 (frame border x=5, line sits 33 px inside it)
+  |prompt_x - busy_x| = 2 px -> PASS (acceptance: same pen origin, ±2 px of glyph bearing)
+=== question ===
+  busy row y 132..146, x 38..439, 325 px, amber(needs you)
+  busy row OCR: '|| Relaying waiting for your answer... - 7s - step 1/256 - Esc stops ||'
+  busy left x=38, prompt text left x=37 (frame border x=0, line sits 38 px inside it)
+  |prompt_x - busy_x| = 1 px -> PASS (acceptance: same pen origin, ±2 px of glyph bearing)
+=== narrow ===
+  busy row y 133..146, x 38..383, 236 px, violet(agent/working)
+  busy row OCR: '|| Relaying running sleep +1......5 - step 1/256- Esc stops | |'
+  busy left x=38, prompt text left x=37 (frame border x=0, line sits 38 px inside it)
+  |prompt_x - busy_x| = 1 px -> PASS (acceptance: same pen origin, ±2 px of glyph bearing)
+=== weight (scene relaying, the word 'Relaying') ===
+  captured ink ratio 0.205; renders: normal 0.243, demibold 0.396
+  -> the captured line is nearest normal (PASS; acceptance: normal weight)
+=== overall: PASS ===

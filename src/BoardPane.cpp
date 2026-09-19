@@ -741,11 +741,11 @@ public:
         m_ref->setObjectName(QStringLiteral("boardCardRef"));
         top->addWidget(m_ref);
         top->addStretch();
-        m_edit = textButton(QStringLiteral("Edit"),
+        m_edit = textButton(QStringLiteral("Edit (e)"),
                             QStringLiteral("Edit the title and the issue text (e)"));
-        m_toPrompt = textButton(QStringLiteral("#ID → prompt"),
+        m_toPrompt = textButton(QStringLiteral("#ID → prompt (t)"),
                                 QStringLiteral("Insert this card's #ID in the terminal's prompt (t)"));
-        m_openFile = textButton(QStringLiteral("Open file"),
+        m_openFile = textButton(QStringLiteral("Open file (o)"),
                                 QStringLiteral("Open the card's Markdown file in a pane (o)"));
         top->addWidget(m_edit);
         top->addWidget(m_toPrompt);
@@ -823,10 +823,10 @@ public:
         auto *editButtons = new QHBoxLayout;
         editButtons->setSpacing(6);
         editButtons->addStretch(1);
-        m_cancelEdit = new QPushButton(QStringLiteral("Cancel"), m_editFrame);
+        m_cancelEdit = new QPushButton(QStringLiteral("Cancel (Esc)"), m_editFrame);
         m_cancelEdit->setObjectName(QStringLiteral("boardReplyButton"));
         m_cancelEdit->setToolTip(QStringLiteral("Leave the card as it is (Esc)"));
-        m_saveEdit = new QPushButton(QStringLiteral("Save"), m_editFrame);
+        m_saveEdit = new QPushButton(QStringLiteral("Save (Ctrl+Enter)"), m_editFrame);
         m_saveEdit->setObjectName(QStringLiteral("primary"));
         m_saveEdit->setToolTip(QStringLiteral("Write the title and the issue to the card file (Ctrl+Enter)"));
         editButtons->addWidget(m_cancelEdit);
@@ -857,16 +857,16 @@ public:
         auto *buttons = new QHBoxLayout;
         buttons->setSpacing(6);
         buttons->addStretch(1);
-        m_comment = new QPushButton(QStringLiteral("Comment"), reply);
+        m_comment = new QPushButton(QStringLiteral("Comment (Ctrl+Shift+Enter)"), reply);
         m_comment->setObjectName(QStringLiteral("boardReplyButton"));
         m_comment->setToolTip(QStringLiteral("Append to the thread without calling a model (Ctrl+Shift+Enter)"));
         // The three things the agent can do with a card (#XS6Q, owner 2026-09-18): talk it
         // through and change it, write its plan, or take it to a terminal pane and build it.
-        m_discuss = new QPushButton(QStringLiteral("Discuss"), reply);
+        m_discuss = new QPushButton(QStringLiteral("Discuss (Enter)"), reply);
         m_discuss->setObjectName(QStringLiteral("primary"));
-        m_plan = new QPushButton(QStringLiteral("Plan"), reply);
+        m_plan = new QPushButton(QStringLiteral("Plan (p)"), reply);
         m_plan->setObjectName(QStringLiteral("boardReplyButton"));
-        m_execute = new QPushButton(QStringLiteral("Execute"), reply);
+        m_execute = new QPushButton(QStringLiteral("Execute (x)"), reply);
         m_execute->setObjectName(QStringLiteral("boardExecute"));
         for (QPushButton *button : {m_comment, m_discuss, m_plan, m_execute})
             button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
@@ -1344,10 +1344,10 @@ private:
             button->setToolTip(running ? QStringLiteral("Stop the Switchboard agent") : tip);
             button->setEnabled(!m_busy || running);
         };
-        set(m_discuss, QStringLiteral("discuss"), QStringLiteral("Discuss"),
+        set(m_discuss, QStringLiteral("discuss"), QStringLiteral("Discuss (Enter)"),
             QStringLiteral("Talk the card through with the agent; it may edit the title, the issue, "
                            "the labels or the status as you go (Enter)"));
-        set(m_plan, QStringLiteral("plan"), QStringLiteral("Plan"),
+        set(m_plan, QStringLiteral("plan"), QStringLiteral("Plan (p)"),
             QStringLiteral("The agent reads the code and writes the card's plan; it changes no code "
                            "and no other card. Anything typed goes with it (p, or Ctrl+Enter)"));
         m_execute->setEnabled(!m_busy);
@@ -1615,7 +1615,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_tools->setSpacing(6);
     m_back = new QToolButton(m_head);
     m_back->setObjectName(QStringLiteral("boardBack"));
-    m_back->setText(QStringLiteral("←  Back to board"));
+    m_back->setText(QStringLiteral("←  Back to board (Esc)"));
     m_back->setToolTip(QStringLiteral("Close the card and go back to the list (Esc)"));
     m_back->setCursor(Qt::PointingHandCursor);
     m_back->setFocusPolicy(Qt::NoFocus);
@@ -1655,7 +1655,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     noticeLayout->addWidget(m_noticeText, 1);
     m_noticeUndo = new QToolButton(m_notice);
     m_noticeUndo->setObjectName(QStringLiteral("boardTextButton"));
-    m_noticeUndo->setText(QStringLiteral("Undo"));
+    m_noticeUndo->setText(QStringLiteral("Undo (Ctrl+Z)"));
     m_noticeUndo->setToolTip(QStringLiteral("Put it back (Ctrl+Z)"));
     m_noticeUndo->setCursor(Qt::PointingHandCursor);
     m_noticeUndo->setFocusPolicy(Qt::NoFocus);
@@ -1911,7 +1911,7 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_listTools->addWidget(m_filter, 1);
     m_add = new QToolButton(tools);
     m_add->setObjectName(QStringLiteral("boardAddButton"));
-    m_add->setText(QStringLiteral("+  New card"));
+    m_add->setText(QStringLiteral("+  New card (n)"));
     m_add->setToolTip(QStringLiteral("New card in the focused section (n)"));
     m_add->setCursor(Qt::PointingHandCursor);
     m_add->setFocusPolicy(Qt::NoFocus);

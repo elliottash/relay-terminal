@@ -1,0 +1,9 @@
+2026-09-19T15:48:57.423Z INFO relay.gui gui_start version=0.1.0 pid=228945 level=info
+2026-09-19T15:48:57.473Z INFO relay.gui worker_start pane=a9e6d168 workspace_set=1
+2026-09-19T15:48:57.562Z INFO relay.gui event type=ready pane=a9e6d168
+2026-09-19T15:48:57.597Z INFO relay.gui event type=configured pane=a9e6d168 model=stub
+2026-09-19T15:49:09.813Z INFO relay.gui event type=agent_started pane=a9e6d168 turn_id=010d5c73b3334d47a80b6c6e7aea87da
+2026-09-19T15:49:18.622Z INFO relay.gui gui_quit reason=signal
+2026-09-19T15:49:18.632Z INFO relay.gui event type=turn_summary pane=a9e6d168 turn_id=010d5c73b3334d47a80b6c6e7aea87da outcome=cancelled ms=8819
+2026-09-19T15:49:18.635Z INFO relay.gui event type=agent_finished pane=a9e6d168 outcome=cancelled
+2026-09-19T15:49:18.707Z ERROR relay.gui worker_exit pane=a9e6d168 code=11 crashed=1
