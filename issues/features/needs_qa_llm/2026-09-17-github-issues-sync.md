@@ -12,7 +12,7 @@ rank: 3h
 created: '2026-09-17'
 acceptance: a shared work card and its GitHub issue stay in sync both ways (body, comments, status, labels) across edits on either side, with conflicts surfaced rather than lost
 source: '`issues/feature_intake.txt`, 2026-09-17: "set up syncing the switchboar with github issues."'
-links: {plans: [], commits: [f878b6a, a17a262, ae206932, ac7abe64, 9e628ce3, 1377a65a], evidence: [docs/qa_evidence/2026-09-19-github-issues-sync/], related: [ZKR0], github: null}
+links: {commits: [f878b6a, a17a262, ae206932, ac7abe64, 9e628ce3, 1377a65a, df68276a], evidence: [docs/qa_evidence/2026-09-19-github-issues-sync/], github: null, plans: [], related: [ZKR0]}
 ---
 # Two-way sync between the Switchboard and GitHub Issues
 

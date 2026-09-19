@@ -58,3 +58,6 @@ Execute · `1377a65a`: the acceptance walked end to end through the worker messa
 
 <!-- relay:entry 20260919T234757Z-n4 author=agent kind=event model=glm-5.3 pane=ca8c73f6 turn=81c1314277944122976845ef2c2ad1e4/45608b52a6c642e5929418ca47a023a3 -->
 - ✦ agent moved this card · In progress → Needs QA (LLM) · The worker half is built, wired and now proven by an acceptance-level walk through the worker messages; the walk's own finding (the post-conflict lost write) is fixed in 1377a65a with a regression test. The person-facing surface stays on #ZKR0. · evidence docs/qa_evidence/2026-09-19-github-issues-sync/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260919T234821Z-zf author=agent kind=event model=glm-5.3 pane=ca8c73f6 turn=81c1314277944122976845ef2c2ad1e4/45608b52a6c642e5929418ca47a023a3 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["f878b6a", "a17a262", "ae206932", "ac7abe64", "9e628ce… → {"commits": ["f878b6a", "a17a262", "ae206932", "ac7abe64", "9e628ce3", "1377a65a…
