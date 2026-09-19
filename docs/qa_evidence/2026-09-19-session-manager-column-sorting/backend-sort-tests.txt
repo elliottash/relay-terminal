@@ -1,0 +1,36 @@
+test_shortest_title_and_model_sorts (tests.test_conv_index.IndexTests.test_shortest_title_and_model_sorts)
+The Sessions pane's header clicks (#EV45): fewest turns, and A→Z / Z→A over the title ... ok
+test_build_and_search_finds_prompts_replies_and_tool_output (tests.test_conv_index.IndexTests.test_build_and_search_finds_prompts_replies_and_tool_output) ... ok
+test_conversation_preview_highlights_and_filters_by_turn (tests.test_conv_index.IndexTests.test_conversation_preview_highlights_and_filters_by_turn) ... ok
+test_corrupt_database_found_while_querying_is_recreated (tests.test_conv_index.IndexTests.test_corrupt_database_found_while_querying_is_recreated) ... ok
+test_corrupt_database_is_discarded_and_recreated (tests.test_conv_index.IndexTests.test_corrupt_database_is_discarded_and_recreated) ... ok
+test_database_file_is_private (tests.test_conv_index.IndexTests.test_database_file_is_private) ... ok
+test_delete_removes_rows_files_and_blobs (tests.test_conv_index.IndexTests.test_delete_removes_rows_files_and_blobs) ... ok
+test_highlight_ranges_point_at_the_match (tests.test_conv_index.IndexTests.test_highlight_ranges_point_at_the_match) ... ok
+test_incremental_update_adds_turns_without_duplicating_rows (tests.test_conv_index.IndexTests.test_incremental_update_adds_turns_without_duplicating_rows) ... ok
+test_index_off_by_environment (tests.test_conv_index.IndexTests.test_index_off_by_environment) ... ok
+test_long_output_is_capped (tests.test_conv_index.IndexTests.test_long_output_is_capped) ... ok
+test_prefix_and_phrase_queries (tests.test_conv_index.IndexTests.test_prefix_and_phrase_queries) ... ok
+test_project_filter_takes_a_folder_and_everything_below_it (tests.test_conv_index.IndexTests.test_project_filter_takes_a_folder_and_everything_below_it)
+The Sessions pane's "Project" chooser (#916B): a project is its folder and every ... ok
+test_rebuild_from_session_files (tests.test_conv_index.IndexTests.test_rebuild_from_session_files) ... ok
+test_rebuild_keeps_terminal_history (tests.test_conv_index.IndexTests.test_rebuild_keeps_terminal_history) ... ok
+test_rename_and_pin_survive_reindexing (tests.test_conv_index.IndexTests.test_rename_and_pin_survive_reindexing) ... ok
+test_schema_version_change_wipes_the_cache (tests.test_conv_index.IndexTests.test_schema_version_change_wipes_the_cache) ... ok
+test_scope_and_filters (tests.test_conv_index.IndexTests.test_scope_and_filters) ... ok
+test_shortest_title_and_model_sorts (tests.test_conv_index.IndexTests.test_shortest_title_and_model_sorts)
+The Sessions pane's header clicks (#EV45): fewest turns, and A→Z / Z→A over the title ... ok
+test_sources_filter_separates_terminal_from_agent (tests.test_conv_index.IndexTests.test_sources_filter_separates_terminal_from_agent) ... ok
+test_store_delete_removes_index_rows (tests.test_conv_index.IndexTests.test_store_delete_removes_index_rows) ... ok
+test_terminal_history_rows_are_searchable_and_labelled (tests.test_conv_index.IndexTests.test_terminal_history_rows_are_searchable_and_labelled) ... ok
+test_a_rename_is_searchable_under_the_new_name (tests.test_conv_index.RankingTests.test_a_rename_is_searchable_under_the_new_name) ... ok
+test_a_title_or_summary_hit_is_a_match_line_of_its_own_kind (tests.test_conv_index.RankingTests.test_a_title_or_summary_hit_is_a_match_line_of_its_own_kind) ... ok
+test_relevance_breaks_ties_by_recency (tests.test_conv_index.RankingTests.test_relevance_breaks_ties_by_recency) ... ok
+test_relevance_puts_title_over_summary_over_prompt_over_reply_over_tool_output (tests.test_conv_index.RankingTests.test_relevance_puts_title_over_summary_over_prompt_over_reply_over_tool_output) ... ok
+test_set_summary_updates_the_column_and_the_searchable_entry (tests.test_conv_index.RankingTests.test_set_summary_updates_the_column_and_the_searchable_entry) ... ok
+test_sort_and_paging (tests.test_session_threads.ThreadStoreTests.test_sort_and_paging) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.738s
+
+OK

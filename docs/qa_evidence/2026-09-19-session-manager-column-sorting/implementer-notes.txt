@@ -1,0 +1,46 @@
+#EV45 session manager column sorting — implementer notes (2026-09-19)
+
+What landed (commit ddbcdc4c091f7248b335d34634d7e916ce463068):
+
+- backend/relay_core/conv_index.py: SORTS gains shortest, title/title_desc,
+  model/model_desc; the order map in search() keys title on
+  COALESCE(NULLIF(c.custom_title, ''), c.title, '') COLLATE NOCASE and model on
+  a CASE that mirrors what the GUI's Model column shows (terminal / Claude Code
+  / Codex / the model). Ties break newest first; pinned stays ahead of every
+  order. session_protocol.py needed no change (sort passes through; search()
+  validates).
+- docs/AGENT-SESSIONS-PROTOCOL.md 14.3: the sort value list and the sentence
+  describing the orders.
+- src/Conversations.{h,cpp}: pure helpers nextHeaderSort (each column toggles
+  its pair, a click elsewhere takes the column's first order), headerSortColumn
+  (-1 for relevance) and headerSortOrder. The Sort combo lists all nine orders
+  so it never names an order the list is not in. The header's sectionClicked
+  goes through the combo's own chain (setCurrentIndex → requery +
+  m_sortChosen), so a click counts as the user's own sort and typing keeps it.
+  updateSortIndicator() shows the arrow from the helpers; it is called on every
+  sort change, including the QSignalBlocker'd recent↔relevance switch while
+  typing, and hides the arrow for relevance. QTreeWidget's own sort stays off
+  (it would reorder the Continue/date group rows and sort display text).
+- tests: conversations_test.cpp gains headerClickSortsByThatColumn (helpers,
+  request sort ids on click + toggle, combo follows, indicator column/order,
+  typing keeps the clicked sort, relevance hides the arrow);
+  test_conv_index.py gains test_shortest_title_and_model_sorts (all five new
+  orders, NOCASE tie-break by recency, rename re-keys, the terminal CASE,
+  pinned first); test_session_threads.py's test_sort_and_paging asserts the
+  five new orders end to end and that an unknown sort still raises ValueError.
+
+Verification (outputs captured in this folder):
+
+- PYTHONPATH=$PWD/backend python3 -m unittest tests.test_conv_index.IndexTests
+  tests.test_conv_index.RankingTests
+  tests.test_session_threads.ThreadStoreTests.test_sort_and_paging -v
+  → 28 tests, OK (backend-sort-tests.txt)
+- scripts/relay-build → clean build; land.py's verify rebuilt the exact landed
+  tree ("the exact tree builds").
+- QT_QPA_PLATFORM=offscreen ./build/relay-conversations-tests
+  → 36 passed, 0 failed (conversations-tests.txt); ctest --test-dir build
+  -R conversations also passed.
+- The interactive sweep (open the manager with Ctrl+Shift+Y, click each header,
+  watch the arrow and the order, page with "Show more") is left to QA; every
+  step of that chain is covered by headerClickSortsByThatColumn against the
+  real widgets.
