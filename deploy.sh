@@ -36,6 +36,9 @@ for url in "https://relay-terminal.ai/" "https://www.relay-terminal.ai/"; do
   printf '  %-34s %s\n' "$url" "$code"
   [[ "$code" == "200" ]] || { echo "FAILED: $url returned $code"; exit 1; }
 done
-curl -sS https://relay-terminal.ai/ | grep -qi "relay" \
+# Fetch first, then search: `curl | grep -q` fails under pipefail even on a match, because grep
+# exits at the first hit and curl dies writing to the closed pipe (curl: (23)).
+page=$(curl -sS https://relay-terminal.ai/)
+grep -qi "relay" <<<"$page" \
   || { echo "FAILED: homepage missing expected content"; exit 1; }
 echo "Verified at https://relay-terminal.ai"
