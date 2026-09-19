@@ -6,24 +6,52 @@ size-capped text so the call cannot exceed the model window by itself.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
 
 TRANSCRIPT_MESSAGE_CAP = 4000
+# How long a side call may spend being told "not now" before it gives up. A title, a recap,
+# compaction and route_assist stream nothing to the pane and have nowhere to show a wait, so the
+# transport's default retry budget — twice the first-token deadline, because a turn is worth
+# waiting for — is far too generous here: a provider answering 429 with ``Retry-After: 60`` used
+# to hold one of these for six minutes (review of #VMZP).
+RETRY_BUDGET_S = 20.0
 
 
-def call(provider, system: str, user: str, cancel: threading.Event | None = None) -> tuple[str, dict | None]:
-    """Run one no-tools completion. Returns (text, usage)."""
+def call(provider, system: str, user: str, cancel: threading.Event | None = None,
+         retry_budget_s: float | None = RETRY_BUDGET_S) -> tuple[str, dict | None]:
+    """Run one no-tools completion. Returns (text, usage).
+
+    ``retry_budget_s`` caps the wall clock the transport's HTTP retries may spend; None leaves the
+    provider's own budget alone.
+    """
     usage: dict = {}
 
     def quiet(event: dict) -> None:
         if event.get("event") == "usage" and isinstance(event.get("usage"), dict):
             usage.update(event["usage"])
 
-    message = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
-                                [], quiet, cancel or threading.Event())
+    with _retry_budget(provider, retry_budget_s):
+        message = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                    [], quiet, cancel or threading.Event())
     return (message.get("content") or "").strip(), (usage or None)
+
+
+@contextlib.contextmanager
+def _retry_budget(provider, seconds: float | None):
+    """Narrow the transport's retry budget for the block.
+
+    Matched by type rather than by ``hasattr``: half the callers here are given a test double, and
+    a bare ``Mock`` answers every attribute with another Mock.
+    """
+    from .provider import ChatProvider
+    if seconds is None or not isinstance(provider, ChatProvider):
+        yield
+        return
+    with provider.limit_retry_budget(seconds):
+        yield
 
 
 def render_transcript(messages: list[dict], max_chars: int = 200_000,

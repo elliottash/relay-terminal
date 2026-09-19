@@ -22,6 +22,10 @@ USER = "ping"
 # thinking off at all, so a tight budget makes the answer come back truncated. 1024 is still a few
 # tenths of a cent, and a truncated answer counts as a pass anyway (see ProviderTruncated below).
 MAX_TOKENS = 1024
+# The wall clock the transport's HTTP retries may spend on this call. The Test button shows a
+# spinner and nothing else: it has no status line for "asking again in 60 s", and its thread is
+# not cancellable, so a provider answering 429 with ``Retry-After: 60`` six times over left the
+# button spinning for six minutes (review of #VMZP). Past this, the refusal is the answer.
 TIMEOUT_S = 30
 # provider.py raises ProviderTruncated when the model hit the output limit. For an ordinary turn that
 # is a real failure; for the key test it is a pass, because the request was authenticated, routed and
@@ -60,7 +64,7 @@ def check(preset_id: str, key: str, factory=_provider) -> dict:
     started = time.monotonic()
     result = {"preset": preset_id, "model": preset.model}
     try:
-        reply, _ = sidecall.call(factory(preset_id, key), SYSTEM, USER)
+        reply, _ = sidecall.call(factory(preset_id, key), SYSTEM, USER, retry_budget_s=TIMEOUT_S)
         result["ok"] = True
         # A model that answers anything at all proves the key and endpoint; the text is not checked.
         result["reply_chars"] = len(reply)

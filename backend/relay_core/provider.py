@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import email.utils
 import json
+import math
 import os
 import random
 import socket
@@ -77,6 +79,21 @@ def loopback_http(base_url) -> bool:
         return url.scheme == "http" and url.hostname in LOCAL_HOSTS
     except ValueError:
         return False
+
+
+def _finite(raw) -> float | None:
+    """A header's number, or None when it is not a finite one: ``soon``, ``nan``, ``inf``.
+
+    ``float()`` accepts "nan" and "inf" happily, and both survived the clamp below as themselves:
+    ``min(max(nan, 0.0), 60.0)`` is ``nan``. A nan wait is a hot loop of zero-delay retries and a
+    status line reading "asking again in nan s" (review of #VMZP), so a non-finite header is no
+    hint at all and the backoff decides.
+    """
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def env_stall_timeout() -> float | None:
@@ -478,6 +495,9 @@ class ChatProvider:
         self._produced = False
         self._progress = 0.0
         self._streaming = False     # a usable chunk has arrived: the idle deadline applies from here
+        self._retry_budget = None   # an explicit wall-clock cap on the retry loop, else derived
+        self._retry_origin = None   # monotonic start of the logical call the budget is measured from
+        self._retries_used = 0      # retries already spent by this logical call
         self._lock = threading.Lock()
 
     @property
@@ -508,6 +528,52 @@ class ChatProvider:
         exactly that case (owner reports, 2026-09-17).
         """
         return max(CONNECT_TIMEOUT, self.first_token_timeout)
+
+    @property
+    def retry_budget(self) -> float:
+        """Wall clock the whole retry loop of one call may take, waits and refusals together.
+
+        The count alone did not bound anything: six retries each honouring a ``Retry-After: 60``
+        is six minutes, and every retry calls ``_note_progress``, so the stall watchdog never fires
+        either. A call that has been refused for twice as long as the first token was ever allowed
+        to take is not going to be answered by asking a seventh time, so it fails with the
+        provider's own status instead of holding the pane, the Test button or a side call.
+        """
+        if self._retry_budget is not None:
+            return self._retry_budget
+        return self.first_token_timeout * self.HTTP_RETRY_BUDGET_FACTOR
+
+    @contextlib.contextmanager
+    def limit_retry_budget(self, seconds: float):
+        """Narrow the retry budget for the calls made inside the block; never widen it.
+
+        A side call (a title, a recap, compaction, route_assist) and the keys modal's Test button
+        have no streamed answer to protect and, in the Test button's case, nowhere to show a wait:
+        they take a small budget so a provider answering "not now" cannot park them for minutes.
+        """
+        previous = self._retry_budget
+        self._retry_budget = float(seconds) if previous is None else min(previous, float(seconds))
+        try:
+            yield
+        finally:
+            self._retry_budget = previous
+
+    def _begin_retries(self) -> bool:
+        """Start the retry count and clock for one logical call; True when this frame owns them.
+
+        A transport that makes more than one HTTP call for the same request — the hosted one, which
+        refreshes its token after a 401 — calls this around the lot, so the second call continues
+        the first's count and clock instead of starting six fresh retries with a fresh budget.
+        """
+        if self._retry_origin is not None:
+            return False
+        self._retry_origin = time.monotonic()
+        self._retries_used = 0
+        return True
+
+    def _end_retries(self, owned: bool) -> None:
+        if owned:
+            self._retry_origin = None
 
     def set_stall_timeout(self, seconds) -> float:
         self._stall_timeout = validate_stall_timeout(seconds)
@@ -599,6 +665,7 @@ class ChatProvider:
         if cancel.is_set():
             raise Cancelled("Stopped.")
         started = time.monotonic()
+        owns_retries = self._begin_retries()
         self._stalled = False
         self._produced = False
         self._streaming = False
@@ -710,6 +777,7 @@ class ChatProvider:
                 raise Cancelled("Stopped.") from None
             raise ProviderError(f"Malformed provider response ({type(exc).__name__}).") from None
         finally:
+            self._end_retries(owns_retries)
             if watchdog is not None:
                 watchdog.set()
             with self._lock:
@@ -737,12 +805,18 @@ class ChatProvider:
     # that answer. A local model server is left out of the generic policy: its 5xx are
     # deterministic (the prompt no longer fits), so a retry would only delay the sentence that
     # explains it, and its 503-while-loading has the fixed wait of its own below.
-    HTTP_RETRY_STATUSES = frozenset({408, 409, 429})
+    #
+    # The retried 5xx are named one by one rather than taken as "anything from 500 up": 501 (the
+    # endpoint does not implement this route) and 505 (it refuses this HTTP version) are as final
+    # as a 404, and asking six more times only delays the sentence that says so (review of #VMZP).
+    # 529 is Anthropic's "overloaded", which is exactly a transient refusal.
+    HTTP_RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
     HTTP_RETRY_ATTEMPTS = 6             # retries after the first refusal
     HTTP_RETRY_BASE_S = 0.5
     HTTP_RETRY_CEILING_S = 8.0
     HTTP_RETRY_JITTER = 0.25            # each backoff waits 75-100 % of the computed delay
     RETRY_AFTER_MAX_S = 60.0            # a Retry-After header is honoured up to a minute
+    HTTP_RETRY_BUDGET_FACTOR = 2.0      # default wall-clock budget: twice the first-token deadline
 
     def _open(self, opener, request, emit, cancel: threading.Event, started: float):
         """Open the response, asking again when the provider's answer is "not now".
@@ -754,7 +828,8 @@ class ChatProvider:
         is raised at once.
         """
         loading_announced = False
-        retries = 0
+        origin = self._retry_origin if self._retry_origin is not None else started
+        retries = self._retries_used
         while True:
             try:
                 return opener.open(request, timeout=self.open_timeout)
@@ -770,7 +845,8 @@ class ChatProvider:
                         emit({"event": "status", "text": "The local server is loading its model…"})
                         loading_announced = True
                 else:
-                    delay = None if cancel.is_set() else self._http_retry_wait(exc, retries + 1)
+                    delay = None if cancel.is_set() else self._http_retry_wait(
+                        exc, retries + 1, time.monotonic() - origin)
                     if delay is not None:
                         note = (f"Provider HTTP {exc.code} · asking again in {self._wait_text(delay)} s "
                                 f"(retry {retries + 1} of {self.HTTP_RETRY_ATTEMPTS})")
@@ -781,6 +857,7 @@ class ChatProvider:
                 if delay is None:
                     raise
                 retries += 1
+                self._retries_used = retries
                 logs.event(_log, "provider_http_retry", level_name="error",
                            model=self.config.model, host=_host(self.config.base_url),
                            status=exc.code, attempt=retries, wait_s=round(delay, 2))
@@ -790,12 +867,32 @@ class ChatProvider:
                 if cancel.wait(delay):
                     raise Cancelled("Stopped.") from None
 
-    def _http_retry_wait(self, exc: urllib.error.HTTPError, attempt: int) -> float | None:
+    def _http_retry_wait(self, exc: urllib.error.HTTPError, attempt: int,
+                         elapsed: float = 0.0) -> float | None:
         """Seconds to wait before sending this request again, or None when the refusal is final.
 
-        ``attempt`` is the retry being considered, 1-based. A Retry-After header wins over the
-        backoff, because it is the provider naming its own window. ``HostedChatProvider`` reads
-        the refusal body before deciding (a spent allowance lifts at midnight, not in seconds).
+        ``attempt`` is the retry being considered, 1-based, and ``elapsed`` is how long this
+        logical call has been going. Both caps apply: the count, and the wall clock, because six
+        waits a provider named itself can add up to six minutes of a pane, a Test button or a side
+        call showing nothing.
+        """
+        delay = self._http_retry_delay(exc, attempt)
+        if delay is None:
+            return None
+        if elapsed + delay > self.retry_budget:
+            logs.event(_log, "provider_retry_budget_spent", level_name="error",
+                       model=self.config.model, host=_host(self.config.base_url),
+                       status=exc.code, attempt=attempt, elapsed_s=round(elapsed, 2),
+                       wait_s=round(delay, 2), budget_s=round(self.retry_budget, 2))
+            return None
+        return delay
+
+    def _http_retry_delay(self, exc: urllib.error.HTTPError, attempt: int) -> float | None:
+        """The wait this refusal asks for, before the budget is applied, or None when it is final.
+
+        A Retry-After header wins over the backoff, because it is the provider naming its own
+        window. ``HostedChatProvider`` reads the refusal body before deciding (a spent allowance
+        lifts at midnight, not in seconds).
         """
         if self.config.local:
             # A local server's failures are deterministic (the loading 503 has its own wait in
@@ -803,7 +900,7 @@ class ChatProvider:
             return None
         if attempt > self.HTTP_RETRY_ATTEMPTS:
             return None
-        if exc.code not in self.HTTP_RETRY_STATUSES and exc.code < 500:
+        if exc.code not in self.HTTP_RETRY_STATUSES:
             return None
         hinted = self._retry_after_s(exc)
         if hinted is not None:
@@ -823,22 +920,30 @@ class ChatProvider:
             return None
         raw = headers.get("retry-after-ms")
         if raw is not None:
-            try:
-                return min(max(float(raw.strip()) / 1000.0, 0.0), self.RETRY_AFTER_MAX_S)
-            except ValueError:
-                pass
+            value = _finite(raw)
+            if value is not None:
+                return self._clamp_wait(value / 1000.0)
         raw = headers.get("Retry-After")
         if raw is None:
             return None
         raw = raw.strip()
-        try:
-            return min(max(float(raw), 0.0), self.RETRY_AFTER_MAX_S)
-        except ValueError:
-            parsed = email.utils.parsedate_tz(raw)
-            if parsed is None:
-                return None
-            return min(max(email.utils.mktime_tz(parsed) - time.time(), 0.0),
-                       self.RETRY_AFTER_MAX_S)
+        value = _finite(raw)
+        if value is not None:
+            return self._clamp_wait(value)
+        parsed = email.utils.parsedate_tz(raw)
+        if parsed is None:
+            return None
+        return self._clamp_wait(email.utils.mktime_tz(parsed) - time.time())
+
+    def _clamp_wait(self, seconds: float) -> float | None:
+        """A named wait, clamped to 0…``RETRY_AFTER_MAX_S``, or None when it is not a number.
+
+        The clamp keeps a misconfigured or hostile endpoint from parking a turn for an hour, and
+        the finite check keeps a nan through it: ``min(max(nan, 0.0), 60.0)`` is nan.
+        """
+        if not math.isfinite(seconds):
+            return None
+        return min(max(float(seconds), 0.0), self.RETRY_AFTER_MAX_S)
 
     @staticmethod
     def _wait_text(seconds: float) -> str:
@@ -1117,23 +1222,31 @@ class HostedChatProvider(ChatProvider):
     def complete(self, messages: list[dict], tools: list[dict],
                  emit: Callable[[dict], None], cancel: threading.Event) -> dict:
         from . import hosted
+        # The refresh below makes a second HTTP call for the same request. Owning the retry count
+        # and clock here means it continues this one's instead of starting six fresh retries with
+        # a fresh budget: a gateway answering 401 and then 429 was worth 14 requests (review of
+        # #VMZP), and each of those retries could wait a minute.
+        owns_retries = self._begin_retries()
         try:
-            self.config.api_key = self.session.token()
-        except hosted.HostedUnavailable as exc:
-            raise ProviderError(str(exc), exc.code, exc.resets_at) from None
-        try:
+            try:
+                self.config.api_key = self.session.token()
+            except hosted.HostedUnavailable as exc:
+                raise ProviderError(str(exc), exc.code, exc.resets_at) from None
+            try:
+                return self._call(messages, tools, emit, cancel)
+            except ProviderError as exc:
+                if exc.code != "token_expired" or cancel.is_set():
+                    raise
+            # Once: the token the clock thought was good was refused, so take a fresh one and try
+            # again. A second refusal is reported as it is; retrying further would loop on a gateway
+            # that has stopped accepting this installation.
+            try:
+                self.config.api_key = self.session.token(force=True)
+            except hosted.HostedUnavailable as exc:
+                raise ProviderError(str(exc), exc.code, exc.resets_at) from None
             return self._call(messages, tools, emit, cancel)
-        except ProviderError as exc:
-            if exc.code != "token_expired" or cancel.is_set():
-                raise
-        # Once: the token the clock thought was good was refused, so take a fresh one and try
-        # again. A second refusal is reported as it is; retrying further would loop on a gateway
-        # that has stopped accepting this installation.
-        try:
-            self.config.api_key = self.session.token(force=True)
-        except hosted.HostedUnavailable as exc:
-            raise ProviderError(str(exc), exc.code, exc.resets_at) from None
-        return self._call(messages, tools, emit, cancel)
+        finally:
+            self._end_retries(owns_retries)
 
     def _call(self, messages, tools, emit, cancel) -> dict:
         self._quota_headers = None      # a call that never opens must not report the last one's quota
@@ -1173,19 +1286,22 @@ class HostedChatProvider(ChatProvider):
         self._refusal = (exc, body)
         return body
 
-    def _http_retry_wait(self, exc, attempt: int) -> float | None:
+    def _http_retry_delay(self, exc, attempt: int) -> float | None:
         """The gateway names its refusal in a body only it sends, and that decides the wait:
         ``quota_exhausted`` lifts at midnight, not in seconds, so it is final here and the pane
         gets its sentence at once; ``rate_limited`` carries the moment its window reopens
-        (``resets_at``), which is exactly how long to wait."""
+        (``resets_at``), which is exactly how long to wait. The budget in ``_http_retry_wait``
+        applies to the answer either way."""
         from . import hosted
         _, code, resets_at = hosted.describe_error(exc.code, self._refusal_body(exc))
         if code == "quota_exhausted":
             return None
-        wait = super()._http_retry_wait(exc, attempt)
+        wait = super()._http_retry_delay(exc, attempt)
         if wait is not None and code == "rate_limited" and isinstance(resets_at, (int, float)) \
                 and not isinstance(resets_at, bool):
-            wait = min(max(resets_at - time.time(), 0.0), self.RETRY_AFTER_MAX_S)
+            window = self._clamp_wait(resets_at - time.time())
+            if window is not None:
+                wait = window
         return wait
 
     def _http_error(self, exc) -> ProviderError:

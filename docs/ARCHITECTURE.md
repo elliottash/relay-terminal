@@ -1373,16 +1373,20 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   become reasoning, and a context overflow is named without quoting the body. Saved endpoints
   (`local:<id>`), the probe and the worker messages are `backend/relay_core/localmodels.py`; a
   hosted provider's request is unchanged. See [LOCAL-MODELS.md](LOCAL-MODELS.md).
-- A request refused with HTTP 408, 409, 429 or any 5xx by a provider that is not a local model
-  server is sent again, at most six times, the way Claude Code's transport retries: after the
-  delay a `Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute),
-  else an exponential backoff from 0.5 s doubling to 8 s with jitter. The status arrives before
-  anything streams, so a retry repeats nothing the user has seen; each wait emits
-  `provider_retry {reason: "http"}` and a `status`, and the refusal becomes the failure only when
-  the attempts run out. Every caller of `complete()` inherits it — pane turns, side calls, the key
-  test. The hosted gateway decides from its own error body (a rate limit is waited out until its
-  window reopens; a spent allowance is never waited out), and a local model server is excluded:
-  its 5xx are deterministic and its loading 503 has its own fixed wait. A provider that still
+- A request refused with HTTP 408, 409, 429, 500, 502, 503, 504 or 529 by a provider that is not a
+  local model server is sent again, the way Claude Code's transport retries: after the delay a
+  `Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute; a
+  non-finite value is ignored), else an exponential backoff from 0.5 s doubling to 8 s with
+  jitter. Other statuses — 501, 505, every other 4xx — are final at once. Two caps bound the loop:
+  at most six retries, and a wall-clock budget for the whole call (twice the first-token deadline;
+  20 s for a side call, 30 s for the key test), so six minute-long `Retry-After` waits cannot hold
+  a pane while the stall watchdog sees progress. The status arrives before anything streams, so a
+  retry repeats nothing the user has seen; each wait emits `provider_retry {reason: "http"}` and a
+  `status`, and the refusal becomes the failure when either cap is reached. Every caller of
+  `complete()` inherits it — pane turns, side calls, the key test. The hosted gateway decides from
+  its own error body (a rate limit is waited out until its window reopens; a spent allowance is
+  never waited out) and its token refresh continues the same count and budget, and a local model
+  server is excluded: its 5xx are deterministic and its loading 503 has its own fixed wait. A provider that still
   fails a step hands the turn to another one (`agent.py` `_begin_failover`, card #G9VE): the same
   tier's model on the next keyed preset — never a second key on the same host, never after part of
   an answer has been streamed — then Relay Free, at most two, for that turn only. The move converts

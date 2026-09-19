@@ -445,6 +445,14 @@ class RetryTests(unittest.TestCase):
                     return self.refuse(429, '2')
                 if mount == '/server/v1' and seen == 1:
                     return self.refuse(500)
+                if mount == '/notimpl/v1':
+                    return self.refuse(501)
+                if mount == '/nan/v1' and seen == 1:
+                    return self.refuse(429, 'nan')
+                if mount == '/budget/v1':
+                    return self.refuse(429, '5')
+                if mount == '/creep/v1':
+                    return self.refuse(429, '1')
                 if mount == '/auth/v1':
                     return self.refuse(401, body=b'SECRET_ECHO')
                 if mount == '/overflow/v1':
@@ -546,14 +554,16 @@ class RetryTests(unittest.TestCase):
             self.complete(provider, cancel)
         self.assertFalse(provider.response_open())
 
+    @staticmethod
+    def refusal(headers: dict, status: int = 429):
+        message = email.message.Message()
+        for name, value in headers.items():
+            message[name] = value
+        return urllib.error.HTTPError('http://x/', status, 'Too Many Requests', message, None)
+
     def test_retry_after_header_parsing(self):
         provider = self.provider('/rate/v1')
-
-        def refusal(headers: dict):
-            message = email.message.Message()
-            for name, value in headers.items():
-                message[name] = value
-            return urllib.error.HTTPError('http://x/', 429, 'Too Many Requests', message, None)
+        refusal = self.refusal
         self.assertEqual(provider._retry_after_s(refusal({'Retry-After': '2.5'})), 2.5)
         self.assertEqual(provider._retry_after_s(refusal({'retry-after-ms': '250'})), 0.25)
         self.assertEqual(provider._retry_after_s(refusal({'Retry-After': '3600'})), 60.0)
@@ -565,6 +575,111 @@ class RetryTests(unittest.TestCase):
         self.assertLessEqual(waited, 3.0)
         self.assertIsNone(provider._retry_after_s(refusal({'Retry-After': 'soon'})))
         self.assertIsNone(provider._retry_after_s(refusal({})))
+        # nan and inf go through float() and used to survive the clamp as themselves: nan is a hot
+        # loop of zero-delay retries and a status line reading "asking again in nan s".
+        for header in ('nan', 'NaN', 'inf', '-inf', 'Infinity'):
+            self.assertIsNone(provider._retry_after_s(refusal({'Retry-After': header})), header)
+            self.assertIsNone(provider._retry_after_s(refusal({'retry-after-ms': header})), header)
+        # An unusable retry-after-ms still lets a sane Retry-After decide.
+        self.assertEqual(provider._retry_after_s(
+            refusal({'retry-after-ms': 'nan', 'Retry-After': '3'})), 3.0)
+
+    def test_a_non_finite_retry_after_falls_back_to_the_backoff(self):
+        provider = self.provider('/nan/v1')
+        provider.HTTP_RETRY_BASE_S = provider.HTTP_RETRY_CEILING_S = 0.01
+        started = time.monotonic()
+        result, events = self.complete(provider)
+        self.assertEqual(result['content'], 'RETRY_OK')
+        self.assertEqual(self.seen('/nan/v1'), 2)
+        self.assertLess(time.monotonic() - started, 5.0)
+        note = next(e for e in events if e['event'] == 'provider_retry')
+        self.assertNotIn('nan', note['text'])
+
+    def test_a_status_the_endpoint_will_not_change_its_mind_about_is_not_retried(self):
+        # 501 (no such route here) and 505 (not this HTTP version) are as final as a 404: only the
+        # 5xx that mean "not now" are asked again.
+        provider = self.provider('/notimpl/v1')
+        with self.assertRaises(ProviderError) as caught:
+            self.complete(provider)
+        self.assertIn('501', str(caught.exception))
+        self.assertEqual(self.seen('/notimpl/v1'), 1)
+        for final in (501, 505, 404, 401, 400):
+            self.assertNotIn(final, provider.HTTP_RETRY_STATUSES)
+        for transient in (408, 409, 429, 500, 502, 503, 504, 529):
+            self.assertIn(transient, provider.HTTP_RETRY_STATUSES)
+
+    def test_a_wait_that_does_not_fit_the_budget_is_not_waited(self):
+        # Six retries each honouring a Retry-After of a minute is six minutes of a pane, a side
+        # call or the Test button showing nothing. The wall clock caps the loop too.
+        provider = self.provider('/budget/v1')
+        started = time.monotonic()
+        with provider.limit_retry_budget(1.0):      # the server names 5 s: it does not fit
+            with self.assertRaises(ProviderError) as caught:
+                self.complete(provider)
+        self.assertIn('429', str(caught.exception))
+        self.assertEqual(self.seen('/budget/v1'), 1)
+        self.assertLess(time.monotonic() - started, 5.0)
+
+    def test_the_budget_counts_the_waits_already_spent(self):
+        provider = self.provider('/creep/v1')
+        started = time.monotonic()
+        with provider.limit_retry_budget(2.5):      # two 1 s waits fit; the third does not
+            with self.assertRaises(ProviderError):
+                self.complete(provider)
+        elapsed = time.monotonic() - started
+        self.assertEqual(self.seen('/creep/v1'), 3)
+        self.assertGreaterEqual(elapsed, 2.0)
+        self.assertLess(elapsed, 6.0)
+
+    def test_the_budget_is_derived_from_the_deadline_and_only_ever_narrowed(self):
+        provider = self.provider('/rate/v1')
+        self.assertEqual(provider.retry_budget, provider.first_token_timeout * 2)
+        exc = self.refusal({'Retry-After': '10'})
+        self.assertEqual(provider._http_retry_wait(exc, 1, 0.0), 10.0)
+        self.assertIsNone(provider._http_retry_wait(exc, 1, provider.retry_budget - 5.0))
+        with provider.limit_retry_budget(5.0):
+            self.assertEqual(provider.retry_budget, 5.0)
+            self.assertIsNone(provider._http_retry_wait(exc, 1, 0.0))
+            with provider.limit_retry_budget(600.0):
+                self.assertEqual(provider.retry_budget, 5.0)     # narrows, never widens
+        self.assertEqual(provider.retry_budget, provider.first_token_timeout * 2)
+
+
+class SideCallBudgetTests(unittest.TestCase):
+    """A side call (a title, a recap, compaction, route_assist) streams nothing and shows no wait,
+    so it runs inside a small retry budget instead of the turn's."""
+
+    def provider(self):
+        return ChatProvider(ProviderConfig('http://127.0.0.1:1234/v1', 'mock', ''))
+
+    def test_a_side_call_narrows_the_budget_for_that_call_only(self):
+        from relay_core import sidecall
+        provider, seen = self.provider(), []
+        with mock.patch.object(ChatProvider, 'complete',
+                               side_effect=lambda *a, **k: (seen.append(provider.retry_budget),
+                                                            {'content': 'title'})[1]):
+            text, _ = sidecall.call(provider, 'sys', 'user')
+        self.assertEqual(text, 'title')
+        self.assertEqual(seen, [sidecall.RETRY_BUDGET_S])
+        self.assertLess(sidecall.RETRY_BUDGET_S, provider.retry_budget)   # restored afterwards
+        self.assertEqual(provider.retry_budget, provider.first_token_timeout * 2)
+
+    def test_a_caller_may_name_its_own_budget_or_keep_the_provider_s(self):
+        from relay_core import sidecall
+        provider, seen = self.provider(), []
+        with mock.patch.object(ChatProvider, 'complete',
+                               side_effect=lambda *a, **k: (seen.append(provider.retry_budget),
+                                                            {'content': 'ok'})[1]):
+            sidecall.call(provider, 'sys', 'user', retry_budget_s=7.5)
+            sidecall.call(provider, 'sys', 'user', retry_budget_s=None)
+        self.assertEqual(seen, [7.5, provider.first_token_timeout * 2])
+
+    def test_a_provider_double_without_the_budget_still_works(self):
+        # Most callers pass a real transport; the tests around them pass a Mock.
+        from relay_core import sidecall
+        double = mock.Mock()
+        double.complete.return_value = {'content': 'ok'}
+        self.assertEqual(sidecall.call(double, 'sys', 'user')[0], 'ok')
 
 
 class OpenRouterReasoningTests(unittest.TestCase):

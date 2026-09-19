@@ -991,17 +991,30 @@ emits without knowing the turn. `"http"` is the transport's retry of a refused r
 `"failover"` and `"failover_ended"` are the move to another provider and the return from it
 (15.2.2), and name the model and preset they move from and to.
 
-Since 2026-09-19 the transport itself also retries a *refused* request — HTTP 408, 409, 429 or any
-5xx from a provider that is not a local model server — up to six times, waiting what a
-`Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute) and
-otherwise backing off exponentially (0.5 s doubling to 8 s, with jitter); this is the policy
-Claude Code's transport uses. The status arrives before anything streams, so the retry repeats
-nothing the user has seen. Each wait emits the same event with `reason: "http"` and no `turn_id`
-(the transport does not know the turn), plus a `status`; the refusal becomes an `error` only when
-the attempts run out. Relay's own gateway decides from its error body: a `rate_limited` window is
-waited out until it reopens, a spent `quota_exhausted` allowance is never waited out. A local
-model server is excluded — its 5xx are deterministic, and its loading 503 keeps its own fixed
-wait inside the first-token budget.
+Since 2026-09-19 the transport itself also retries a *refused* request from a provider that is not
+a local model server: HTTP 408, 409, 429, 500, 502, 503, 504 and 529, and only those. A status the
+endpoint will not change its mind about — 501 (no such route), 505 (not this HTTP version), every
+other 4xx — is final at once, because asking again cannot change the answer. A retry waits what a
+`Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute; a
+non-finite value such as `nan` or `inf` is no hint at all and the backoff decides) and otherwise
+backs off exponentially (0.5 s doubling to 8 s, with jitter); this is the policy Claude Code's
+transport uses. The status arrives before anything streams, so the retry repeats nothing the user
+has seen. Each wait emits the same event with `reason: "http"` and no `turn_id` (the transport
+does not know the turn), plus a `status`; the refusal becomes an `error` only when the retries
+run out.
+
+Two caps, not one: at most six retries, **and** a wall-clock budget for the whole call, waits and
+refusals together. Without the clock, six waits a provider named itself is six minutes, and the
+idle-stall watchdog does not fire during them. The budget is twice the first-token deadline (120 s
+at the 60 s default); a side call — a title, a recap, compaction, `route_assist` — takes 20 s
+(`sidecall.RETRY_BUDGET_S`) and the keys modal's Test button 30 s (`keytest.TIMEOUT_S`), because
+neither has anywhere to show a wait. A wait that would not fit in what is left is not taken: the
+refusal becomes the answer there and then, and the transport logs `provider_retry_budget_spent`.
+Relay's own gateway decides the wait from its error body: a `rate_limited` window is waited out
+until it reopens, a spent `quota_exhausted` allowance is never waited out; the 401 token refresh
+(13.9) makes a second HTTP call for the same request and continues the first's count and budget
+rather than starting a fresh six. A local model server is excluded — its 5xx are deterministic,
+and its loading 503 keeps its own fixed wait inside the first-token budget.
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 

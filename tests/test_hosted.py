@@ -55,6 +55,8 @@ class FakeGateway:
         self.always_unauthorized = False
         self.exhausted = False               # answer every chat call 429 quota_exhausted
         self.rate_limited_once = False       # answer the next chat call 429 rate_limited, then behave
+        self.always_rate_limited = False     # answer every chat call 429 rate_limited
+        self.chat_script: list[str] = []     # "unauthorized"/"rate_limited"/"ok" per call, then the knobs
         self.lock = threading.Lock()
         outer = self
 
@@ -127,10 +129,13 @@ class FakeGateway:
                 if self.path == "/v1/chat/completions":
                     with outer.lock:
                         outer.chat_calls += 1
+                        scripted = outer.chat_script.pop(0) if outer.chat_script else ""
                         refuse = outer.always_unauthorized or outer.unauthorized_once
                         outer.unauthorized_once = False
-                        limited = outer.rate_limited_once
+                        limited = outer.rate_limited_once or outer.always_rate_limited
                         outer.rate_limited_once = False
+                        if scripted:
+                            refuse, limited = scripted == "unauthorized", scripted == "rate_limited"
                     if refuse or self._bearer() is None:
                         return self._refuse(401, "token_expired", "register again")
                     if limited:
@@ -183,7 +188,8 @@ class HostedCase(unittest.TestCase):
         gateway = self.gateway
         with gateway.lock:
             gateway.unauthorized_once = gateway.always_unauthorized = gateway.exhausted = False
-            gateway.rate_limited_once = False
+            gateway.rate_limited_once = gateway.always_rate_limited = False
+            gateway.chat_script.clear()
             gateway.registrations = gateway.chat_calls = 0
             gateway.tokens.clear()
             gateway.requests.clear()
@@ -346,6 +352,33 @@ class TransportTests(HostedCase):
         self.assertEqual(self.gateway.chat_calls, 2)
         self.assertTrue(any(e["event"] == "provider_retry" and e.get("reason") == "http"
                             for e in events))
+
+    def test_a_token_refresh_does_not_hand_the_gateway_a_fresh_set_of_retries(self):
+        """The 401 retry makes a second HTTP call for the same request; it continues the first
+        call's retry count and clock rather than starting six more (review of #VMZP: a gateway
+        answering 401 and then 429 was worth 14 requests)."""
+        self.session.token()
+        self.gateway.chat_script = ["rate_limited", "rate_limited", "unauthorized"]
+        self.gateway.always_rate_limited = True
+        with self.assertRaises(ProviderError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.code, "rate_limited")
+        # One first try and six retries in all, wherever the refresh fell.
+        self.assertEqual(self.gateway.chat_calls, 1 + HostedChatProvider.HTTP_RETRY_ATTEMPTS + 1)
+        self.assertEqual(self.gateway.registrations, 2)
+
+    def test_the_retry_budget_is_shared_across_the_refresh_too(self):
+        self.session.token()
+        self.gateway.chat_script = ["unauthorized"]
+        self.gateway.always_rate_limited = True
+        provider = self.provider()
+        started = time.monotonic()
+        with provider.limit_retry_budget(0.0):     # nothing at all may be waited out
+            with self.assertRaises(ProviderError) as caught:
+                self.complete(provider)
+        self.assertEqual(caught.exception.code, "rate_limited")
+        self.assertEqual(self.gateway.chat_calls, 2)      # the 401, the refresh, then no retries
+        self.assertLess(time.monotonic() - started, 5.0)
 
     def test_an_exhausted_allowance_is_a_provider_error_with_its_code_and_reset_time(self):
         self.gateway.exhausted = True
