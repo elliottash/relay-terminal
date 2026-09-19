@@ -13,9 +13,10 @@ under a realistic `sessions/YYYY/MM/DD/` layout and with mtimes the tests choose
 `tests/fixtures/codex/README.md`). Nothing here reads the live `~/.codex`: the tests state the
 machine instead, exactly as `tests/test_guest.py` does.
 
-The channel is exercised against the real `shell/guest-event.py` when it is in the tree and
-against the fixture that mirrors its contract otherwise, so this phase's tests never depend on
-another phase's branch — and stop being a copy the moment the real helper lands.
+The channel is exercised against the real `shell/guest-event.py`, the one writer of protocol
+26.3: a real child process, a real spool file, a real token check. (This phase carried a fixture
+copy of the helper while the hooks branch was unmerged; the helper is in the tree now, so the
+copy is gone.)
 """
 import contextlib
 import io
@@ -34,9 +35,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "codex"
 SESSIONS = FIXTURES / "sessions"
 REAL_CONFIG = FIXTURES / "config.toml"                  # copied from a real ~/.codex/config.toml
 COMMENTED_CONFIG = FIXTURES / "config-with-comments.toml"
-HELPER = ROOT / "shell" / "guest-event.py"              # the hooks phase's helper, once it lands
-if not HELPER.is_file():
-    HELPER = FIXTURES / "guest-event.py"                # ... and the fixture that mirrors it
+HELPER = ROOT / "shell" / "guest-event.py"              # the channel's one writer (26.3)
 
 # The workspace the fixture session was started in, and the three sessions under `SESSIONS`.
 WORKSPACE = "/home/elliott/repos/relay-terminal"
@@ -96,9 +95,22 @@ def pane_environment(runtime: str, token: str = "tok-1"):
                 os.environ[key] = value
 
 
+def spool(runtime: str) -> list[dict]:
+    """Every envelope on the pane's event spool, oldest first (26.3). The channel is a directory
+    of one file per event since the review of 51587e3; nothing deletes them here, so a test that
+    emits twice sees both."""
+    events = os.path.join(runtime, "guest-events")
+    names = sorted(name for name in os.listdir(events) if name.endswith(".json"))
+    envelopes = []
+    for name in names:
+        with open(os.path.join(events, name), encoding="utf-8") as handle:
+            envelopes.append(json.load(handle))
+    return envelopes
+
+
 def envelope(runtime: str) -> dict:
-    with open(os.path.join(runtime, "guest.json"), encoding="utf-8") as handle:
-        return json.load(handle)
+    """The last event written to the spool — what the pane would handle last."""
+    return spool(runtime)[-1]
 
 
 class Recorder:

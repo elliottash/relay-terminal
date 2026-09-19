@@ -14,8 +14,8 @@ Two kinds of truth live here:
   command line as that guest, and the well-known paths under its config directory
   (`~/.claude`, `~/.codex`). `classify_command` encodes the *rule* the C++ pane mirrors
   (`guestProgram` in `src/Pane.h`): the first token's basename, or — when that is a known
-  launcher such as `node` or `npx` — the first non-flag token after it, matched by leaf name
-  or by an exact path component (`node …/@anthropic-ai/claude-code/cli.js`).
+  launcher such as `node` or `npx` — the first non-flag token after it, matched by its own
+  basename or by the npm package it lives in (`node …/@anthropic-ai/claude-code/cli.js`).
 * **This machine** — `detect_installations()` resolves the binaries on PATH, their versions
   and the config dirs that actually exist. It is a probe, never a requirement: an absent
   guest is reported as absent, and an unknown guest id is a `ValueError`, not a guess.
@@ -44,12 +44,14 @@ class GuestSpec:
     id: str                      # the id in `program_state.guest`: "claude" / "codex"
     name: str                    # display name: "Claude Code" / "Codex"
     binaries: tuple[str, ...]    # argv basenames that classify a command line as this guest
+    packages: tuple[str, ...]    # npm package names, scoped as published
     config_dir: str              # its directory under the user's home
 
 
 GUESTS: tuple[GuestSpec, ...] = (
-    GuestSpec("claude", "Claude Code", ("claude", "claude-code"), ".claude"),
-    GuestSpec("codex", "Codex", ("codex", "codex-cli"), ".codex"),
+    GuestSpec("claude", "Claude Code", ("claude", "claude-code"),
+              ("@anthropic-ai/claude-code",), ".claude"),
+    GuestSpec("codex", "Codex", ("codex", "codex-cli"), ("@openai/codex",), ".codex"),
 )
 
 # Launchers whose argv[0] never names the guest even when it runs one: the guest is the
@@ -83,25 +85,53 @@ def classify_command(argv) -> str | None:
     found = _guest_named(first)
     if found or first not in LAUNCHERS:
         return found
-    # A launcher: the guest is its script or package — the first token that is not one of
-    # the launcher's own flags. Match its leaf (`codex.js` → codex) or an exact component
-    # of its path (`…/@anthropic-ai/claude-code/cli.js` → claude).
+    # A launcher: the guest is its script or package — the first token that is not one of the
+    # launcher's own flags. Only two things in that token may name a guest: the script's own
+    # basename (`codex.js` → codex) or the npm package it lives in
+    # (`…/node_modules/@anthropic-ai/claude-code/cli.js`). *Any* path component used to count,
+    # which made `node /home/codex/server.js` a codex session (review of 51587e3).
     for token in argv[1:]:
         if token.startswith("-"):
             continue
-        leaf = os.path.basename(token)
-        for extension in _SCRIPT_EXTENSIONS:
-            if leaf.endswith(extension):
-                leaf = leaf[: -len(extension)]
-                break
-        found = _guest_named(leaf)
-        if found:
-            return found
-        components = token.split(os.sep)
-        for candidate in GUESTS:
-            if any(component in candidate.binaries for component in components):
-                return candidate.id
-        return None      # only the launcher's target decides; its arguments are the guest's own
+        return _guest_named(_script_leaf(token)) or _guest_packaged(token)
+    return None
+
+
+def _script_leaf(token: str) -> str:
+    """A launcher target's own name: its basename with a script extension stripped."""
+    leaf = os.path.basename(token)
+    for extension in _SCRIPT_EXTENSIONS:
+        if leaf.endswith(extension):
+            return leaf[: -len(extension)]
+    return leaf
+
+
+def _guest_packaged(token: str) -> str | None:
+    """The guest whose npm package this path lies in, or None.
+
+    Two shapes count, and nothing else: a scoped package directory anywhere in the path
+    (`@anthropic-ai/claude-code`), and the package directory immediately under a
+    `node_modules` (`…/node_modules/codex/bin/index.js`). A directory that merely shares a
+    guest's name (`/home/codex`, `/var/www/claude`) is not a package and never matches.
+    """
+    components = [component for component in token.split(os.sep) if component]
+    for index, component in enumerate(components[:-1]):
+        following = components[index + 1]
+        if component.startswith("@"):
+            found = _guest_with_package(component + "/" + following)
+            if found:
+                return found
+        elif component == "node_modules":
+            found = _guest_named(following) or _guest_with_package(following)
+            if found:
+                return found
+    return None
+
+
+def _guest_with_package(package: str) -> str | None:
+    for candidate in GUESTS:
+        if package in candidate.packages:
+            return candidate.id
     return None
 
 

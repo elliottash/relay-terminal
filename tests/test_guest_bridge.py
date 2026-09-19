@@ -61,9 +61,35 @@ def make_bridge(root: str, relay_version: str = "9.9",
     return bridge, state, lock_dir
 
 
+def spool_events(runtime: str) -> list[dict]:
+    """Every envelope on the pane's event spool, oldest first (26.3).
+
+    The channel is a directory of one file per event since the review of 51587e3 — the single
+    `guest.json` slot it replaced lost the first of two events written back to back. Nothing
+    deletes the files here (the pane does that), so a test that emits twice sees both.
+    """
+    events = os.path.join(runtime, "guest-events")
+    try:
+        names = sorted(name for name in os.listdir(events) if name.endswith(".json"))
+    except OSError:
+        return []
+    envelopes = []
+    for name in names:
+        try:
+            with open(os.path.join(events, name), "r", encoding="utf-8") as stream:
+                envelopes.append(json.load(stream))
+        except (OSError, ValueError):
+            pass
+    return envelopes
+
+
 def read_guest_json(runtime: str) -> dict:
-    with open(os.path.join(runtime, "guest.json"), "r", encoding="utf-8") as stream:
-        return json.load(stream)
+    """The last event on the spool. Raises like the old single-slot read when there is none, so
+    a caller that polls can keep catching OSError."""
+    events = spool_events(runtime)
+    if not events:
+        raise FileNotFoundError(os.path.join(runtime, "guest-events"))
+    return events[-1]
 
 
 # ----- the lock file ------------------------------------------------------------------------------
@@ -430,14 +456,14 @@ class EventChannel(unittest.TestCase):
         self.bridge.refresh_registrations()
         pane = next(iter(self.bridge.panes.values()))
         self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
-        self.assertFalse(os.path.exists(os.path.join(runtime, "guest.json")))
+        self.assertEqual([], spool_events(runtime))
 
     def test_a_missing_helper_is_a_failed_emit(self):
         _, runtime = register_pane(self.state, self.workspace, helper="")
         self.bridge.refresh_registrations()
         pane = next(iter(self.bridge.panes.values()))
         self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
-        self.assertFalse(os.path.exists(os.path.join(runtime, "guest.json")))
+        self.assertEqual([], spool_events(runtime))
 
     def test_a_vanished_runtime_dir_is_a_logged_failure_not_a_crash(self):
         _, runtime = register_pane(self.state, self.workspace)
@@ -451,10 +477,12 @@ class EventChannel(unittest.TestCase):
         that runs once per bridge event gets six variables and no more."""
         helper = os.path.join(self.root, "guest-event.py")
         Path(helper).write_text(
-            "import json, os, sys\n"
+            "import json, os, sys, time\n"
             "event = json.load(sys.stdin)\n"
             "event['env'] = dict(os.environ)\n"
-            "path = os.path.join(os.environ['RELAY_RUNTIME_DIR'], 'guest.json')\n"
+            "spool = os.path.join(os.environ['RELAY_RUNTIME_DIR'], 'guest-events')\n"
+            "os.makedirs(spool, exist_ok=True)\n"
+            "path = os.path.join(spool, '%020d.json' % time.time_ns())\n"
             "open(path + '.tmp', 'w').write(json.dumps(event))\n"
             "os.replace(path + '.tmp', path)\n")
         token, runtime = register_pane(self.state, self.workspace, helper=helper)
@@ -554,7 +582,7 @@ class OpenDiff(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(reply, dict)
         self.assertEqual(guest_bridge.DIFF_REJECTED, reply["result"]["content"][0]["text"])
         self.assertEqual({}, self.bridge.pending)
-        self.assertFalse(os.path.exists(os.path.join(self.runtime, "guest.json")),
+        self.assertEqual([], spool_events(self.runtime),
                          "a refused diff is never shown to the user either")
 
     async def test_a_new_file_path_outside_the_pane_is_refused(self):
@@ -812,19 +840,17 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("keep\nold\n", stream.read())
 
     async def _wait_for_event(self, timeout: float = 5.0, seen: set | None = None) -> dict:
-        """guest.json as the pane's poll would read it: written by the bridge's own tick. The
-        channel is one slot per pane, so a second diff overwrites the first; `seen` skips the
-        reply paths this test has already collected."""
+        """The spool as the pane's poll would read it: written by the bridge's own tick. The
+        pane deletes each file as it handles it and nothing does that here, so every event of the
+        test is still on the spool; `seen` skips the reply paths this test has already
+        collected."""
         seen = seen or set()
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
-            try:
-                event = read_guest_json(self.runtime)
+            for event in spool_events(self.runtime):
                 reply = event.get("data", {}).get("reply")
                 if event.get("data", {}).get("tool") == "openDiff" and reply and reply not in seen:
                     return event
-            except (OSError, ValueError):
-                pass
             await asyncio.sleep(0.02)
         self.fail("the bridge never wrote the openDiff event")
 

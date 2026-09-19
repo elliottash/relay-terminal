@@ -3033,7 +3033,7 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   file; on a thread, Enter opens its history in the ⓘ pane.
 - `reset` now carries the new conversation's `session_id`.
 
-## 26. Guest agent panes: Claude Code and Codex (v3.2, 2026-09-19)
+## 26. Guest agent panes: Claude Code and Codex (v3.3, 2026-09-19)
 
 Issue GT7X (`issues/features/2026-09-19-claude-codex-guest-integration.md`). A **guest** is an
 agent CLI — Claude Code or Codex — the user starts in a pane's shell, exactly as they would in
@@ -3044,12 +3044,22 @@ extend; everything here is additive.
 
 ### 26.1 Detection and `guest`
 
-The pane classifies the foreground command line on its program poll (`guestProgram`,
-`src/Pane.h`): the first token's leaf (`claude`, `claude-code`, `codex`, `codex-cli`), or —
-when the first token is a launcher (`node`, `nodejs`, `bun`, `bunx`, `deno`, `npx`) — the first
-non-flag token after it, matched by leaf name (script extensions `.js`/`.mjs`/`.cjs`/`.ts`
-stripped) or by an exact path component (`node …/@anthropic-ai/claude-code/cli.js`). This is
-one rule in two languages; `guest.classify_command` and `guestProgram` change together.
+The pane classifies the foreground **argv** on its program poll (`guestProgram`, `src/Pane.h`),
+reading it from `/proc/<pgid>/cmdline` through `foregroundArgv()` — not the space-joined
+`foregroundCommandLine()`, which comes apart on a path with a space in it. The first token's leaf
+decides (`claude`, `claude-code`, `codex`, `codex-cli`); when it is a launcher (`node`, `nodejs`,
+`bun`, `bunx`, `deno`, `npx`) the first non-flag token after it decides instead, by its own
+basename (script extensions `.js`/`.mjs`/`.cjs`/`.ts` stripped) or by the npm package it lies in.
+
+A package is one of exactly two shapes, and nothing else counts: a scoped package directory
+anywhere in the path (`node …/@anthropic-ai/claude-code/cli.js`), or the package directory
+immediately under a `node_modules` (`node …/node_modules/codex/bin/index.js`). Any path
+*component* used to count, which made `node /home/codex/server.js` a codex session.
+
+This is one rule in two languages, and the ids, display names, binary names and package names are
+one table on each side (`guest.GUESTS`; `Pane::guestSpecs()`). `guest.classify_command` and
+`guestProgram` change together, and `tests/test_guest.py` reads the C++ table out of `src/Pane.h`
+and fails when the two drift apart.
 
 The pane publishes the result as `guest` in `program_state` (21.4) and, while a grant is live,
 in `context.program_control` (21.2): the guest id, or `""`. The worker keeps it in the program
@@ -3072,22 +3082,41 @@ The phases below are built in parallel (bridge, hooks, codex, sessions, composer
 between them are fixed here first and each phase codes against this section, not against another
 phase's implementation.
 
-**The guest event channel.** Everything a guest or its shim learns reaches the pane through one
-file, never a listener. The GUI writes `shell/guest-event.py` into the pane's data dir beside
-`shell/event.py` and exports `RELAY_GUEST_EVENT` beside `RELAY_RUNTIME_DIR` (section 26.2's
-injection point). The helper is called as `guest-event.py <event>` with the event's JSON on stdin
-and atomically replaces `guest.json` in the pane's runtime dir:
+**The guest event channel.** Everything a guest or its shim learns reaches the pane through
+files, never a listener. It is a **spool directory**, not a slot — one `guest.json` that each
+write replaced lost a permission question to the statusline tick 100 ms behind it, and stranded
+the first of two parallel tool calls.
+
+The pane creates `<runtime dir>/guest-events/` (mode 0700) before it starts its shell and exports
+its path as `RELAY_GUEST_EVENT`, beside `RELAY_RUNTIME_DIR` (section 26.2's injection point).
+A writer adds one file per event, named
+
+    <time_ns, 20 digits, zero-padded>-<pid>-<counter>.json
+
+written with `mkstemp` in that same directory and moved into place with `os.replace`, so the pane
+never reads half of one. Each file holds one envelope:
 
 ```json
 {"token": "<pane token>", "sequence": "<fresh uuid4>", "event": "<name>", "guest": "claude|codex", "data": {}}
 ```
 
-The pane stats `guest.json` exactly as `pollShell()` stats `state.json` (new inode -> read, token
-check, sequence check), on the same tick. `sequence` must change on every write. Events, v1:
+The pane lists the directory on the same tick as `state.json`, sorts by name — which is the order
+the events were written — handles each file and **deletes it**. Nothing of a tool input, with its
+file paths and contents, is left in the runtime dir after the pane has read it. A file larger than
+**256 KiB** is deleted and logged, never parsed; a writer caps what it forwards well below that
+(`relay_core.guest_hook` truncates long strings in the payload with a visible marker, and drops
+`tool_input` altogether rather than exceed the cap, marking the payload `relay_truncated`). The
+pane handles at most 64 files per tick so a burst cannot freeze the UI; the rest keep their order
+and are handled on the next one. `sequence` must be fresh on every write, and — because it names a
+file (see the answers below) — must be `[A-Za-z0-9_-]`, at most 64 characters.
+
+Answers travel the same way, one file per question: `<runtime dir>/guest-answers/<sequence>.json`.
+The pane writes it; the shim waiting on that exact question reads it and deletes it. The pane keeps
+a queue of pending questions and shows them one at a time. Events, v1:
 
 | event | data | from | effect |
 |---|---|---|---|
-| `hook` | `{name, payload}` - the raw hook JSON under `payload` | claude/codex hooks | pane state, notifications, permission prompts |
+| `hook` | `{name, payload}` - the hook JSON under `payload`, capped as above | claude/codex hooks | pane state, notifications, permission prompts |
 | `statusline` | `{model, context_pct, ...}` - the fields the shim could parse | statusline shim | `guest_model`, `guest_context_pct` chips |
 | `state` | `{busy, turn?}` | rollout tail, bridge | `guest_busy`, composer routing |
 | `bridge` | `{tool, args}` | the IDE bridge sidecar | diff view, file opens, guest notifications |
@@ -3101,15 +3130,20 @@ in a user's global settings must therefore be harmless in every other terminal.
 `guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
 `guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
 
-**Settings the shims live in.** Guest integration is per project and off by default (Options >
-Guests). Turning it on writes hooks into that project's `.claude/settings.json` /
-`~/.codex/config.toml` additively - existing entries are preserved verbatim, Relay's carry a
-`relay-guest` marker - and turning it off removes exactly the marked entries. The user's global
-`~/.claude/settings.json` is touched only by an explicit second opt-in.
+**Settings the shims live in.** Guest integration is per project and off by default. There is no
+Options surface for it yet: the entry point today is `python -m relay_core.guest_install --project
+<dir> --on|--off|--status`, and a GUI toggle calling that library is still to be built. Turning it
+on writes hooks into that project's **`.claude/settings.local.json`** (never `settings.json`,
+which is the shared, source-controlled file: a commit of Relay's entries would give every
+teammate a hook that only fails on their machine) / `~/.codex/config.toml`, additively — existing
+entries are preserved, Relay's carry a `--relay-guest` marker, and turning it off removes exactly
+the marked entries. The user's global `~/.claude/settings.json` is touched only by an explicit
+second opt-in. The file is re-serialised rather than patched, with the indentation and the mode it
+already had; every *entry* survives, but the bytes are not promised.
 
 **File ownership** (phases may read anything, but only their own files change):
-`guest.py` is shared and changes only through the lead; hooks own `shell/` helper generation,
-`backend/relay_core/guest_hook.py` and the Pane.h/PaneState plumbing for `guest.json`; the bridge
+`guest.py` is shared and changes only through the lead; hooks own `backend/relay_core/guest_hook.py`,
+`backend/relay_core/guest_install.py` and the Pane.h/PaneState plumbing for the spool; the bridge
 owns `backend/relay_core/guest_bridge.py` and the diff-view glue; codex owns
 `backend/relay_core/guest_codex.py`; sessions own `backend/relay_core/guest_sessions.py` and the
 conv_index source listing; the composer owns the router/`program_input` routing and the slash
@@ -3117,52 +3151,87 @@ registry.
 
 ### 26.4 Claude hooks and the statusline shim
 
-Hooks call the shim as `"$RELAY_PYTHON" -m relay_core.guest_hook <event>` (JSON on stdin), which
-forwards a `hook` event through the channel. The statusline command is the same shim in
-`statusline` mode: it emits the `statusline` channel event and prints one passthrough line, so
-claude still renders its own statusline unchanged. Permission decisions hook-side are Relay
-questions on the pane, answered through the shim's exit code / decision JSON (claude's contract),
-never auto-approved.
+Hooks call the shim as one shell command, which the installer writes into
+`.claude/settings.local.json`:
 
-**How a hook reaches the shim.** `-m relay_core.guest_hook` needs the backend on `sys.path`, so
-the pane appends its own backend directory to `PYTHONPATH` in `startTerminal`, beside
-`RELAY_GUEST_EVENT` (26.2's injection point): appended, never prepended, so the user's own
-`PYTHONPATH` keeps its order and their cwd still wins. `RELAY_PYTHON` is the interpreter the
-pane's shell already exports.
+```
+[ -n "$RELAY_GUEST_EVENT" ] && [ -n "$RELAY_BACKEND_DIR" ] || exit 0;
+exec "${RELAY_PYTHON:-python3}" "$RELAY_BACKEND_DIR/relay_core/guest_hook.py" <event> --relay-guest
+```
 
-**The channel helper's arguments.** `guest-event.py <event> [guest] [sequence]`: the shim names
-its own guest and, for a question it must recognize the answer to, the uuid4 sequence it wants
-the envelope to carry. Without them the helper picks its own fresh uuid4.
+with the hook's JSON on stdin. Three things about that line are the contract, not taste:
 
-**The permission question, in full.** The shim writes the `hook` event for `PreToolUse` with its
-own uuid4 sequence and then waits (up to `RELAY_GUEST_PERMISSION_TIMEOUT`, default 120 s) for
-`guest-answer.json` in the pane's runtime dir:
+* **The guard comes first.** A settings file is read by every claude started in that project,
+  including ones with no Relay around them. Without the guard the command's variables expand to
+  nothing, which is an empty command: exit 127, and an error on the user's screen at every single
+  tool call. With it, a claude outside a pane runs the hook and it exits 0 having done nothing.
+* **The shim is run by absolute path**, from `$RELAY_BACKEND_DIR` (exported in `startTerminal`
+  beside `RELAY_GUEST_EVENT`), so nothing depends on `PYTHONPATH`. The pane still appends its
+  backend directory to `PYTHONPATH` for a user's own scripts, but only when it is not already a
+  component — `qputenv` writes Relay's own environment and `startTerminal` runs once per pane and
+  once per shell restart, so a plain append grew the variable by a copy every time.
+* **The `--relay-guest` token** is the marker the installer looks for when removing its entries.
+  The shim ignores it.
+
+The statusline command is the same line with `statusline`: it emits the `statusline` channel event
+and prints one passthrough line, so claude still renders its own statusline unchanged.
+
+**Which hooks are installed.** `PermissionRequest`, `UserPromptSubmit`, `Stop` and `Notification`,
+plus `statusLine`. `PreToolUse` is deliberately **not** installed: it fires before *every* tool
+call, including the ones the user's own permission rules allow without asking, and a shim that
+held each of those open would stall the guest on tools it never needed permission for. The pane
+still reads a `PreToolUse` that some other install sends, as a busy signal.
+
+Claude Code's default hook timeout is **600 s**, which is not a wait to inherit, so every entry
+carries an explicit `timeout`: 180 s for `PermissionRequest` — comfortably above the shim's own
+`RELAY_GUEST_PERMISSION_TIMEOUT` (default 120 s), so the shim and not claude decides when to give
+up — and 10 s for the rest, which return at once.
+
+**The permission question, in full.** The shim writes the `hook` event for `PermissionRequest`
+with its own uuid4 sequence and then waits for `<runtime dir>/guest-answers/<that sequence>.json`:
 
 ```json
 {"token": "<pane token>", "sequence": "<the question's sequence>", "decision": "allow|deny"}
 ```
 
-The pane writes it atomically when the user clicks Allow or Deny on the question bar, which is
-the same envelope discipline as `guest.json`: a token check and a sequence check, so an answer
-can only ever be for the question it names. The shim then prints claude's own
-`hookSpecificOutput.permissionDecision` JSON and exits 0. **An unanswered question prints nothing
-and exits 0** — claude then asks exactly as it would without Relay — so a permission is never
-granted on the user's behalf, and a pane that has gone away costs only the wait.
+The pane writes it atomically when the user answers the question bar, and the shim deletes it as
+it reads it. One file per question is what makes a stale answer impossible — it is not addressed
+to this question, so it is never even looked at — and what lets two questions be open at once. The
+pane queues pending questions (at most eight; past that the shim's own timeout is the fallback)
+and shows them one at a time.
 
-**The statusline passthrough.** The shim always prints exactly one line, in every terminal with
-or without Relay: `RELAY_GUEST_STATUSLINE` (fields `{model}`, `{dir}`, `{cwd}`, `{session}`),
-default `"{model} · {dir}"`. The `statusline` event's data carries only the fields the shim could
+The shim then prints claude's `PermissionRequest` output — note that its shape is **not**
+`PreToolUse`'s:
+
+```json
+{"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+```
+
+and exits 0. **An unanswered question prints nothing and exits 0** — claude then asks exactly as
+it would without Relay — so a permission is never granted on the user's behalf, and a pane that
+has gone away costs only the wait.
+
+**The question bar.** It floats over the terminal's top-left, opposite the program banner. While
+it is up it holds the keyboard: `Y` or `Enter` allows, `N` or `Esc` denies, and any other key
+hands the keyboard straight back to the pane's own input with the key delivered there, so nothing
+is swallowed. It is not a global shortcut: with the bar closed the terminal keeps every key. Each
+question also goes to the notification centre (and the desktop, when Relay is not in front) and
+counts as `programAsking`, so a background tab shows its "needs you" glyph — a guest blocked on a
+question in a tab nobody is looking at used to say nothing at all.
+
+**The statusline passthrough.** The shim always prints exactly one line whenever it runs:
+`RELAY_GUEST_STATUSLINE` (fields `{model}`, `{dir}`, `{cwd}`, `{session}`), default
+`"{model} · {dir}"`. The `statusline` event's data carries only the fields the shim could
 parse — `model`, and `context_pct` when the input says it (`context_pct`,
 `context_window.used_percentage` or `context.used_percentage`; `exceeds_200k_tokens` reads as
 100) — so `guest_context_pct` is absent rather than zero when nothing is known.
 
-**What the installer writes.** `relay_core.guest_install` adds one matcher group per event for
-`PreToolUse`, `UserPromptSubmit`, `Stop` and `Notification`, plus `statusLine`, each command
-ending in the `--relay-guest` token that marks it as Relay's. Existing entries are preserved
-verbatim; `statusLine` is a single slot, so a user's own line is kept rather than replaced (the
-chip then simply shows nothing). `remove` deletes exactly the marked entries, byte-for-byte
-leaving everything else as it was; the installer refuses to touch a file that is not a JSON
-object.
+**What the installer writes.** `relay_core.guest_install` adds one matcher group per event, plus
+`statusLine`, each command carrying the `--relay-guest` token that marks it as Relay's. Existing
+entries are preserved; `statusLine` is a single slot, so a user's own line is kept rather than
+replaced (the chip then simply shows nothing). `remove` deletes exactly the marked entries; the
+installer refuses to touch a file that is not a JSON object, and re-serialises the rest with the
+file's own indentation and mode (26.3).
 
 ### 26.5 The Claude IDE bridge
 
@@ -3237,7 +3306,7 @@ branch calls the pane's `guestBridgeEvent`.
 **The channel's writer.** `shell/guest-event.py` (26.3) is the only writer, for the bridge as
 for the shim: the sidecar calls it as `guest-event.py bridge claude` with the event's data on
 stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
-the §26.3 envelope and replaces `guest.json` atomically. A helper that is missing, fails, or
+the §26.3 envelope and drops it on the pane's spool as its own file. A helper that is missing, fails, or
 has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
 `DIFF_REJECTED` — never a second writer beside the channel's own. It is run with a minimal
 environment — `PATH`, `HOME`, `PYTHONPATH`, the locale and `RELAY_RUNTIME_DIR` /

@@ -25,7 +25,7 @@ guests (the same rule that keeps subagent threads out unless asked for).
 
 The active pane's live transcript is tailed read-only by :class:`LiveTail`, so a session the
 guest is writing right now appears (and stays current) without a rescan. Nothing here writes
-``guest.json`` — the guest event channel belongs to the hooks phase — and nothing here writes
+onto the guest event spool — that channel belongs to the hooks phase — and nothing here writes
 into the guests' own directories at all.
 """
 from __future__ import annotations
@@ -719,7 +719,7 @@ class LiveTail:
     bytes appended since last time — a trailing line still being written waits for its newline —
     and `record()` is the session as it stands, so a running session is in the listing (and
     stays current) without a rescan. Nothing is written anywhere: not the transcript, not the
-    guests' directories, not `guest.json` (the event channel belongs to the hooks phase).
+    guests' directories, not the guest event spool (that channel belongs to the hooks phase).
     """
 
     def __init__(self, path: str | Path, *, source: str | None = None, home: str | None = None):

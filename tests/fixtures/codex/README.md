@@ -37,12 +37,3 @@ Written by hand in the same shape, for the things a config can hold that the cop
 comments (including one after a value and one containing a `#`), a multi-line array, an inline
 table, a table that is not last in the file, and a user's own `[tui] notification_condition` —
 the value Relay has to replace and put back.
-
-## `guest-event.py`
-
-The channel helper's contract (protocol 26.3) as a fixture: `guest-event.py <event> [guest]
-[sequence]` with the event's JSON on stdin, replacing `guest.json` in the pane's runtime dir with
-the token/sequence envelope. `shell/guest-event.py` is the real thing and belongs to the hooks
-phase; the test prefers it as soon as it is in the tree, so this copy is only here so the Codex
-phase's tests do not depend on another phase's branch. Delete it once the real helper has landed
-in the same tree.

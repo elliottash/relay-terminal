@@ -60,6 +60,29 @@ MAX_CONFIG_BYTES = 1024 * 1024       # a config.toml larger than this is not one
 
 # The channel helper's variable, written into the pane's environment by the GUI (26.3).
 GUEST_EVENT_VAR = "RELAY_GUEST_EVENT"
+# The channel's one writer, beside the backend directory this file lives in: an installed Relay
+# and a checkout both have `shell/` and `backend/` as siblings. `RELAY_GUEST_EVENT` named this
+# script itself in the first cut of 26.3; since the spool replaced the single `guest.json` slot
+# the pane exports the spool *directory* there, so the writer's path is resolved here and the
+# variable is only what says there is a pane to write to at all.
+WRITER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                      "shell", "guest-event.py")
+
+
+def helper_path(environment) -> str:
+    """`shell/guest-event.py`, or "" when this process is not inside a Relay pane.
+
+    `RELAY_GUEST_WRITER` overrides the path, which is how a test points at another checkout; a
+    pane that still exports the script itself rather than the spool directory is taken at its
+    word, because the two conventions have to coexist while the guest phases land separately.
+    """
+    exported = environment.get(GUEST_EVENT_VAR) or ""
+    if not exported:
+        return ""
+    override = environment.get("RELAY_GUEST_WRITER") or ""
+    if override:
+        return override
+    return exported if exported.endswith(".py") else WRITER
 
 
 class CodexError(Exception):
@@ -705,13 +728,13 @@ def emit(event: str, data: dict, env: dict | None = None,
     """Hand one event to the channel helper. False when there is no helper to hand it to.
 
     The event's JSON goes on the helper's stdin, which is where `shell/guest-event.py` reads it;
-    the helper adds the pane token and a fresh `sequence` itself. A shim with no
-    `RELAY_GUEST_EVENT` is a no-op (26.3) — it exits 0, prints nothing and writes nowhere — so
-    this returns False rather than raising: a terminal that is not Relay must be able to run the
-    same code paths without a sound or a message.
+    the helper adds the pane token and a fresh `sequence` itself and drops the file on the pane's
+    spool. A shim with no `RELAY_GUEST_EVENT` is a no-op (26.3) — it exits 0, prints nothing and
+    writes nowhere — so this returns False rather than raising: a terminal that is not Relay must
+    be able to run the same code paths without a sound or a message.
     """
     environment = os.environ if env is None else env
-    helper = environment.get(GUEST_EVENT_VAR)
+    helper = helper_path(environment)
     if not helper:
         return False
     interpreter = environment.get("RELAY_PYTHON") or shutil.which("python3") or sys.executable

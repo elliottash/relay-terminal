@@ -414,7 +414,11 @@ public:
         facts.agentBusy = m_agentBusy;
         facts.liveSubagents = m_subagents.liveCount();
         facts.processBusy = processBusy();
-        facts.programAsking = facts.processBusy && (m_waiting || m_secretMode || m_screenPrompt.actionable());
+        // A guest's permission question blocks the guest exactly as a program's own prompt
+        // blocks the terminal, so it reaches the tab glyph the same way (GT7X, 26.4).
+        facts.programAsking = facts.processBusy
+                              && (m_waiting || m_secretMode || m_screenPrompt.actionable()
+                                  || !m_guestQuestions.isEmpty());
         const bool boxHoldsIt = m_handoffOffered && !m_editor->toPlainText().trimmed().isEmpty();
         facts.handoffWaiting = boxHoldsIt && m_handoffPrefill && !m_agentBusy;
         facts.handoffOffered = boxHoldsIt && !m_handoffPrefill;
@@ -925,6 +929,14 @@ private:
     static constexpr int kMaxProgramWrites = 20;
     static constexpr int kScreenSnapshotChars = 8000;
     static constexpr int kGuestModelMax = 64;   // program_state.guest_model's ceiling (26.3)
+    // The guest event spool (26.3). A file past kGuestEventMax is deleted unread: a hook payload
+    // that large is a bug or an attack, never a question worth showing, and the shim caps what it
+    // forwards far below it. kGuestEventsPerTick keeps a burst from freezing the UI; the names
+    // sort, so the rest are handled in order on the next tick.
+    static constexpr qint64 kGuestEventMax = 256 * 1024;
+    static constexpr int kGuestEventsPerTick = 64;
+    static constexpr int kGuestQuestionsMax = 8;            // permission questions pending at once
+    static constexpr int kGuestAnswerKeepSeconds = 15 * 60; // an answer whose shim died first
 
     relay::screen::Signals screenSignals() const {
         relay::screen::Signals sig;
@@ -1132,30 +1144,54 @@ private:
     }
 
     // ----- the guest event channel (issue GT7X, protocol 26.3) ---------------------------------
-    // Everything a guest or its shim learns arrives as guest.json in the runtime dir, written
-    // atomically by shell/guest-event.py, and is polled exactly as pollShell() polls state.json:
-    // a new inode means a new event, then a token check and a sequence check, on the same tick.
-    void pollGuestEvent() {
-        const QString guestPath = m_runtime.filePath(QStringLiteral("guest.json"));
-        struct stat info;
-        if (::stat(QFile::encodeName(guestPath).constData(), &info) != 0) return;
-        if (m_guestSeen && info.st_ino == m_guestInode && info.st_size == m_guestSize
-            && info.st_mtim.tv_sec == m_guestMtime.tv_sec && info.st_mtim.tv_nsec == m_guestMtime.tv_nsec) return;
-        QFile file(guestPath);
-        if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
-        m_guestSeen = true; m_guestInode = info.st_ino; m_guestSize = info.st_size; m_guestMtime = info.st_mtim;
-        const auto envelope = QJsonDocument::fromJson(file.readAll()).object();
-        if (envelope.value(QStringLiteral("token")).toString() != m_token) return;
-        const auto sequence = envelope.value(QStringLiteral("sequence")).toString();
-        if (sequence.isEmpty() || sequence == m_guestSequence) return;
-        m_guestSequence = sequence;
-        handleGuestEvent(sequence, envelope.value(QStringLiteral("event")).toString(),
-                         envelope.value(QStringLiteral("data")).toObject());
+    // Everything a guest or its shim learns arrives as one file in `guest-events/` under the
+    // pane's runtime dir: relay_core.guest_hook writes it with mkstemp and renames it into place,
+    // named `<time_ns>-<pid>-<counter>.json` so the names sort into the order they were written.
+    // The pane lists the directory on the same tick as state.json, handles the files in that
+    // order, and deletes each one — a tool input, with its file paths and contents, is never left
+    // lying in the runtime dir.
+    //
+    // It was a single `guest.json` slot until the review of 51587e3: a statusline tick landing
+    // 100 ms after a permission question replaced the question, and the shim then waited out its
+    // whole timeout for an answer to a question nobody was ever shown.
+    static QString guestEventsDirName() { return QStringLiteral("guest-events"); }
+    static QString guestAnswersDirName() { return QStringLiteral("guest-answers"); }
+    QString guestEventsDir() const { return m_runtime.filePath(guestEventsDirName()); }
+    QString guestAnswersDir() const { return m_runtime.filePath(guestAnswersDirName()); }
+
+    void pollGuestEvents() {
+        QDir spool(guestEventsDir());
+        if (!spool.exists()) return;
+        const QStringList names = spool.entryList(QStringList{QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+        int handled = 0;
+        for (const QString &name : names) {
+            // A burst must not freeze the UI; the names sort, so the rest keep their order and
+            // are handled on the next tick.
+            if (++handled > kGuestEventsPerTick) break;
+            QFile file(spool.filePath(name));
+            const qint64 size = file.size();
+            QByteArray raw;
+            if (size > kGuestEventMax)
+                relay::log::info(QStringLiteral("guest_event_oversize pane=%1 bytes=%2").arg(paneLogId()).arg(size));
+            else if (file.open(QIODevice::ReadOnly))
+                raw = file.read(kGuestEventMax);
+            file.close();
+            file.remove();   // read or refused, it is gone: see the note on tool inputs above
+            if (raw.isEmpty()) continue;
+            const auto envelope = QJsonDocument::fromJson(raw).object();
+            if (envelope.value(QStringLiteral("token")).toString() != m_token) continue;
+            handleGuestEvent(envelope.value(QStringLiteral("sequence")).toString(),
+                             envelope.value(QStringLiteral("guest")).toString(),
+                             envelope.value(QStringLiteral("event")).toString(),
+                             envelope.value(QStringLiteral("data")).toObject());
+        }
     }
 
     // One event off the channel: the hooks phase's own events (26.3), the bridge phase's (26.5),
-    // and `slash`, Relay's own scanned fallback catalog (26.8).
-    void handleGuestEvent(const QString &sequence, const QString &name, const QJsonObject &data) {
+    // and `slash`, Relay's own scanned fallback catalog (26.8). `guest` is the envelope's own id:
+    // a guest inside tmux is not detected, so m_guest can be empty while its hooks arrive, and a
+    // question is still labelled from the envelope rather than called Claude Code by default.
+    void handleGuestEvent(const QString &sequence, const QString &guest, const QString &name, const QJsonObject &data) {
         if (name == QStringLiteral("statusline")) {
             m_guestModel = data.value(QStringLiteral("model")).toString().simplified().left(kGuestModelMax);
             const QJsonValue share = data.value(QStringLiteral("context_pct"));
@@ -1166,7 +1202,7 @@ private:
         } else if (name == QStringLiteral("state")) {
             setGuestBusy(data.value(QStringLiteral("busy")).toBool());
         } else if (name == QStringLiteral("hook")) {
-            handleGuestHook(sequence, data.value(QStringLiteral("name")).toString(),
+            handleGuestHook(sequence, guest, data.value(QStringLiteral("name")).toString(),
                             data.value(QStringLiteral("payload")).toObject());
         } else if (name == QStringLiteral("bridge")) {
             guestBridgeEvent(data);
@@ -1192,15 +1228,18 @@ private:
         if (!m_guestBusy) pumpQueue();
     }
 
-    // A hook the guest's shim forwarded (26.4). A permission request becomes a Relay question
-    // on the pane; a notification reaches the notification centre; the rest only moves state.
-    void handleGuestHook(const QString &sequence, const QString &name, const QJsonObject &payload) {
-        if (name == QStringLiteral("PreToolUse")) {
-            showGuestQuestion(sequence, payload);
+    // A hook the guest's shim forwarded (26.4). `PermissionRequest` — the hook claude sends only
+    // when it is really about to ask — becomes a Relay question on the pane; a notification
+    // reaches the notification centre; the rest only move state. `PreToolUse` is not installed
+    // (it fires before every tool call, including the auto-allowed ones), but an install that
+    // carries one is still read as the busy signal it is.
+    void handleGuestHook(const QString &sequence, const QString &guest, const QString &name, const QJsonObject &payload) {
+        if (name == QStringLiteral("PermissionRequest")) {
+            queueGuestQuestion(sequence, guest, payload);
         } else if (name == QStringLiteral("Notification")) {
             const QString message = payload.value(QStringLiteral("message")).toString().simplified();
-            if (!message.isEmpty()) notify(guestDisplayName(m_guest), message);
-        } else if (name == QStringLiteral("UserPromptSubmit")) {
+            if (!message.isEmpty()) notify(guestDisplayName(guest), message);
+        } else if (name == QStringLiteral("UserPromptSubmit") || name == QStringLiteral("PreToolUse")) {
             setGuestBusy(true);   // a guest turn has begun; Stop ends it
         } else if (name == QStringLiteral("Stop")) {
             setGuestBusy(false);
@@ -1208,41 +1247,140 @@ private:
     }
 
     // The permission question: the guest asks before a tool run, the shim holds the hook open,
-    // and Relay answers through guest-answer.json. It is never answered on the guest's behalf —
-    // the bar stays until the user clicks, and a shim that times out falls back to the guest's
-    // own asking, so nothing is auto-approved.
-    void showGuestQuestion(const QString &sequence, const QJsonObject &payload) {
-        if (!m_guestBar) return;
-        m_guestQuestionSeq = sequence;
+    // and Relay answers by writing `guest-answers/<question>.json`. It is never answered on the
+    // guest's behalf — the bar stays until the user says, and a shim that times out falls back to
+    // the guest's own asking, so nothing is auto-approved.
+    //
+    // Questions queue. Two tool calls in flight, or a second question arriving while the first is
+    // up, each get their turn rather than the first being stranded (review of 51587e3).
+    struct GuestQuestion {
+        QString sequence;   // the shim's uuid4; it also names the answer file it waits on
+        QString guest;      // the envelope's guest id, which need not be m_guest
+        QString label;      // the sentence the bar and the notification show
+    };
+
+    // A question id names a file this pane writes, so only a uuid4's own alphabet is taken: a
+    // shim that sent anything else could otherwise aim the answer at another path.
+    static bool validGuestSequence(const QString &sequence) {
+        if (sequence.isEmpty() || sequence.size() > 64) return false;
+        for (const QChar c : sequence) {
+            const bool plain = (c >= QLatin1Char('a') && c <= QLatin1Char('z'))
+                               || (c >= QLatin1Char('A') && c <= QLatin1Char('Z'))
+                               || (c >= QLatin1Char('0') && c <= QLatin1Char('9'))
+                               || c == QLatin1Char('-') || c == QLatin1Char('_');
+            if (!plain) return false;
+        }
+        return true;
+    }
+
+    void queueGuestQuestion(const QString &sequence, const QString &guest, const QJsonObject &payload) {
+        if (!m_guestBar || !validGuestSequence(sequence)) return;
+        for (const GuestQuestion &pending : std::as_const(m_guestQuestions))
+            if (pending.sequence == sequence) return;   // one envelope, one question
+        if (m_guestQuestions.size() >= kGuestQuestionsMax) {
+            // Anything past this would wait behind eight others. The shim's own timeout is the
+            // fallback, and it leaves the guest asking in the terminal, which is never wrong.
+            relay::log::info(QStringLiteral("guest_question_dropped pane=%1 pending=%2")
+                                 .arg(paneLogId()).arg(m_guestQuestions.size()));
+            return;
+        }
+        m_guestQuestions.append(GuestQuestion{sequence, guest, guestQuestionLabel(guest, payload)});
+        // Away from the pane too: the bell, and the desktop when Relay is not in front. A blocked
+        // guest that only drew a small bar in a background tab said nothing at all.
+        notify(guestDisplayName(guest), m_guestQuestions.constLast().label,
+               relay::NotificationCenter::kindWarning);
+        if (m_guestQuestions.size() == 1) showGuestQuestion();
+        else refreshGuestBar();      // the one on screen now says how many are behind it
+        changed();   // the tab's "needs you" glyph: statusFacts() counts a pending question
+    }
+
+    static QString guestQuestionLabel(const QString &guest, const QJsonObject &payload) {
         const QString tool = payload.value(QStringLiteral("tool_name")).toString();
         const QJsonObject input = payload.value(QStringLiteral("tool_input")).toObject();
         QString detail = input.value(QStringLiteral("command")).toString();
         for (const char *field : {"file_path", "path", "url", "pattern"})
             if (detail.isEmpty()) detail = input.value(QLatin1String(field)).toString();
-        QString label = guestDisplayName(m_guest)
+        QString label = guestDisplayName(guest)
                         + QStringLiteral(" wants to run %1").arg(tool.isEmpty() ? QStringLiteral("a tool") : tool);
         if (!detail.isEmpty()) label += QStringLiteral(" · ") + detail.simplified().left(80);
+        return label;
+    }
+
+    // The front of the queue, on screen, with the count of the ones behind it. Called again
+    // whenever the queue changes, so a second question arriving does not leave the bar claiming
+    // to be the only one.
+    void refreshGuestBar() {
+        if (!m_guestBar) return;
+        if (m_guestQuestions.isEmpty()) { m_guestBar->hide(); return; }
+        QString label = m_guestQuestions.constFirst().label;
+        if (m_guestQuestions.size() > 1)
+            label = QStringLiteral("%1 of %2 · %3").arg(1).arg(m_guestQuestions.size()).arg(label);
         m_guestBarLabel->setText(m_guestBarLabel->fontMetrics().elidedText(label, Qt::ElideMiddle,
                                                                            std::max(200, width() - 420)));
-        m_guestBarLabel->setToolTip(label);
+        m_guestBarLabel->setToolTip(label + QStringLiteral("\nY or Enter to allow · N or Esc to deny"));
         m_guestBar->adjustSize();
         m_guestBar->show();
         m_guestBar->raise();
         placeGuestBar();
     }
 
-    void hideGuestQuestion() {
-        m_guestQuestionSeq.clear();
-        if (m_guestBar) m_guestBar->hide();
+    // ...and the bar takes the keyboard while it is up: the guest is blocked on this answer, and
+    // a question nobody can answer without a mouse is one a touch-typist cannot answer at all
+    // (review of 51587e3).
+    void showGuestQuestion() {
+        refreshGuestBar();
+        if (m_guestAllow && !m_guestQuestions.isEmpty()) m_guestAllow->setFocus(Qt::OtherFocusReason);
     }
 
-    // The clicked answer, written atomically beside the events for the shim waiting on this
-    // exact sequence; the shim turns it into the hook's decision (claude's contract, 26.4).
+    // Y / Enter allow, N / Esc deny, while the bar has the keyboard. Any other key was meant for
+    // the guest: the keyboard goes back and the key is delivered there, so nothing is swallowed.
+    bool guestBarKey(QKeyEvent *event) {
+        if (m_guestQuestions.isEmpty()) return false;
+        switch (event->key()) {
+        case Qt::Key_Y: case Qt::Key_Return: case Qt::Key_Enter:
+            answerGuestPermission(true);
+            return true;
+        case Qt::Key_N: case Qt::Key_Escape:
+            answerGuestPermission(false);
+            return true;
+        case Qt::Key_Tab: case Qt::Key_Backtab: case Qt::Key_Left: case Qt::Key_Right:
+        case Qt::Key_Space:
+            return false;    // ordinary focus and button handling inside the bar
+        default:
+            break;
+        }
+        focusInput();
+        if (QWidget *target = focusWidget(); target && target != m_guestBar && !m_guestBar->isAncestorOf(target))
+            QApplication::sendEvent(target, event);
+        return true;
+    }
+
+    bool guestBarOwns(QObject *object) const {
+        auto *widget = qobject_cast<QWidget *>(object);
+        return m_guestBar && widget && (widget == m_guestBar || m_guestBar->isAncestorOf(widget));
+    }
+
+    // The answer, written atomically as the file the waiting shim names, then the next question.
     void answerGuestPermission(bool allow) {
-        const QString sequence = m_guestQuestionSeq;
-        hideGuestQuestion();
-        if (sequence.isEmpty() || m_runtime.path().isEmpty()) return;
-        QSaveFile file(m_runtime.filePath(QStringLiteral("guest-answer.json")));
+        if (m_guestQuestions.isEmpty()) return;
+        const GuestQuestion question = m_guestQuestions.takeFirst();
+        writeGuestAnswer(question.sequence, allow);
+        status(allow ? QStringLiteral("Allowed in Relay.") : QStringLiteral("Denied in Relay."));
+        if (m_guestQuestions.isEmpty()) {
+            if (m_guestBar) m_guestBar->hide();
+            focusInput();          // the keyboard goes back where it came from
+        } else {
+            showGuestQuestion();
+        }
+        changed();
+    }
+
+    void writeGuestAnswer(const QString &sequence, bool allow) {
+        if (!validGuestSequence(sequence) || m_runtime.path().isEmpty()) return;
+        QDir answers(guestAnswersDir());
+        if (!answers.exists() && !QDir().mkpath(answers.path())) return;
+        QFile::setPermissions(answers.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QSaveFile file(answers.filePath(sequence + QStringLiteral(".json")));
         if (!file.open(QIODevice::WriteOnly)) return;
         file.write(QJsonDocument(QJsonObject{{QStringLiteral("token"), m_token},
                                              {QStringLiteral("sequence"), sequence},
@@ -1250,14 +1388,30 @@ private:
                                                                                  : QStringLiteral("deny")}})
                        .toJson(QJsonDocument::Compact));
         file.commit();
-        status(allow ? QStringLiteral("Allowed in Relay.") : QStringLiteral("Denied in Relay."));
+        sweepGuestAnswers(answers);
+    }
+
+    // The shim deletes its answer as it reads it. One whose shim died first would otherwise stay
+    // until the pane closes, so anything older than the longest wait a shim can make is removed.
+    void sweepGuestAnswers(const QDir &answers) const {
+        const QDateTime cutoff = QDateTime::currentDateTime().addSecs(-kGuestAnswerKeepSeconds);
+        const auto stale = answers.entryInfoList(QStringList{QStringLiteral("*.json")}, QDir::Files);
+        for (const QFileInfo &info : stale)
+            if (info.lastModified() < cutoff) QFile::remove(info.absoluteFilePath());
+    }
+
+    void clearGuestQuestions() {
+        const bool had = !m_guestQuestions.isEmpty();
+        m_guestQuestions.clear();
+        if (m_guestBar) m_guestBar->hide();
+        if (had) focusInput();
     }
 
     void clearGuestState() {
         m_guestModel.clear();
         m_guestContextPct = -1;
         m_guestBusy = false;
-        hideGuestQuestion();
+        clearGuestQuestions();
         updateGuestChip();
     }
 
@@ -1288,10 +1442,6 @@ private:
         const int barWidth = std::min(size.width(), std::max(240, host.width() - 20));
         m_guestBar->setGeometry(host.left() + 10, host.top() + 8, barWidth, size.height());
         m_guestBar->raise();
-    }
-
-    static QString guestDisplayName(const QString &guest) {
-        return guest == QStringLiteral("codex") ? QStringLiteral("Codex") : QStringLiteral("Claude Code");
     }
 
     // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
@@ -2242,6 +2392,11 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        // A guest's permission question has the keyboard while it is up (GT7X, 26.4). Only the
+        // bar's own widgets are filtered, so the terminal keeps every key when it is not.
+        if (event->type() == QEvent::KeyPress && guestBarOwns(object)
+            && guestBarKey(static_cast<QKeyEvent *>(event)))
+            return true;
         // Moving the pane by its header comes first: once a drag is under way it owns the mouse,
         // so the folder line below cannot open an explorer when the drag happens to end on it.
         if (headerDragEvent(object, event)) return true;
@@ -2775,20 +2930,30 @@ private:
         m_guestBarLabel->setObjectName(QStringLiteral("programBannerLabel"));
         m_guestBarLabel->setTextFormat(Qt::PlainText);
         questionRow->addWidget(m_guestBarLabel, 1);
-        auto *allowTool = new QPushButton(m_guestBar);
-        allowTool->setObjectName(QStringLiteral("delegateChip"));
-        allowTool->setCursor(Qt::PointingHandCursor);
-        allowTool->setFocusPolicy(Qt::NoFocus);
-        allowTool->setText(QStringLiteral("Allow"));
-        connect(allowTool, &QPushButton::clicked, this, [this] { answerGuestPermission(true); });
-        questionRow->addWidget(allowTool);
-        auto *denyTool = new QPushButton(m_guestBar);
-        denyTool->setObjectName(QStringLiteral("takeControlChip"));
-        denyTool->setCursor(Qt::PointingHandCursor);
-        denyTool->setFocusPolicy(Qt::NoFocus);
-        denyTool->setText(QStringLiteral("Deny"));
-        connect(denyTool, &QPushButton::clicked, this, [this] { answerGuestPermission(false); });
-        questionRow->addWidget(denyTool);
+        // Unlike the program banner's chips these take the keyboard: the guest is blocked on the
+        // answer, and a question that can only be answered with the mouse is one a touch-typist
+        // cannot answer at all. showGuestQuestion() focuses Allow; guestBarKey() adds Y/N/Enter/Esc
+        // and hands any other key straight back to the pane's own input.
+        m_guestAllow = new QPushButton(m_guestBar);
+        m_guestAllow->setObjectName(QStringLiteral("delegateChip"));
+        m_guestAllow->setCursor(Qt::PointingHandCursor);
+        m_guestAllow->setFocusPolicy(Qt::StrongFocus);
+        m_guestAllow->setText(QStringLiteral("Allow"));
+        m_guestAllow->setToolTip(QStringLiteral("Allow this tool call · Y or Enter"));
+        m_guestAllow->installEventFilter(this);
+        connect(m_guestAllow, &QPushButton::clicked, this, [this] { answerGuestPermission(true); });
+        questionRow->addWidget(m_guestAllow);
+        m_guestDeny = new QPushButton(m_guestBar);
+        m_guestDeny->setObjectName(QStringLiteral("takeControlChip"));
+        m_guestDeny->setCursor(Qt::PointingHandCursor);
+        m_guestDeny->setFocusPolicy(Qt::StrongFocus);
+        m_guestDeny->setText(QStringLiteral("Deny"));
+        m_guestDeny->setToolTip(QStringLiteral("Deny this tool call · N or Esc"));
+        m_guestDeny->installEventFilter(this);
+        connect(m_guestDeny, &QPushButton::clicked, this, [this] { answerGuestPermission(false); });
+        questionRow->addWidget(m_guestDeny);
+        m_guestBar->setFocusPolicy(Qt::StrongFocus);
+        m_guestBar->installEventFilter(this);
         m_guestBar->hide();
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
@@ -6942,15 +7107,29 @@ private:
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
         qputenv("RELAY_SHELL_EVENT", (m_data + QStringLiteral("/shell/event.py")).toUtf8());
-        // The guest event channel's writer (GT7X, protocol 26.3): the shims a guest's settings
-        // call (relay_core.guest_hook) reach it through this, beside the runtime dir above.
-        qputenv("RELAY_GUEST_EVENT", (m_data + QStringLiteral("/shell/guest-event.py")).toUtf8());
-        // `$RELAY_PYTHON -m relay_core.guest_hook` (26.4) needs the backend importable. The
-        // same directory the worker is spawned from (startWorker) is appended, never prepended:
-        // the user's own PYTHONPATH keeps its order and cwd still wins over both.
+        // The guest event channel (GT7X, protocol 26.3): the spool directory the shims a guest's
+        // settings call (relay_core.guest_hook) write their events into, beside the runtime dir
+        // above. Its presence in the environment is also what the installed hook commands test
+        // before they run anything at all, so a claude started outside a pane costs nothing.
+        const QString events = guestEventsDir();
+        QDir().mkpath(events);
+        QFile::setPermissions(events, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QDir().mkpath(guestAnswersDir());
+        QFile::setPermissions(guestAnswersDir(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        qputenv("RELAY_GUEST_EVENT", events.toUtf8());
+        // The hook commands run the shim by absolute path (26.4), so no PYTHONPATH is needed for
+        // them: "$RELAY_BACKEND_DIR/relay_core/guest_hook.py".
         const QString backendDir = m_data + QStringLiteral("/backend");
+        qputenv("RELAY_BACKEND_DIR", backendDir.toUtf8());
+        // PYTHONPATH still carries the backend so a user's own script can `import relay_core`.
+        // It is appended, never prepended: the user's own PYTHONPATH keeps its order and cwd
+        // still wins over both. Appended **only when it is not already there**: qputenv writes
+        // Relay's own environment and startTerminal runs once per pane and once per shell
+        // restart, so the plain append grew the variable by one copy every time (review of
+        // 51587e3) — a hundred shell restarts, a hundred copies, in every child process.
         const QString pythonPath = qEnvironmentVariable("PYTHONPATH");
-        qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QLatin1Char(':') + backendDir).toUtf8());
+        if (!pythonPath.split(QLatin1Char(':'), Qt::SkipEmptyParts).contains(backendDir))
+            qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QLatin1Char(':') + backendDir).toUtf8());
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
         // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
@@ -10850,37 +11029,95 @@ private:
     }
 
     // Claude Code or Codex in the foreground (issue GT7X, protocol 26): the id
-    // backend/relay_core/guest.py gives the same command line, or empty. The CLI may be the
-    // native binary or a script a launcher runs (`node …/bin/codex` for the shebang install,
-    // `npx -y claude`, `node …/claude-code/cli.js` for the npm shim), so when the first token
-    // is a known launcher the first non-flag token after it decides, matched by leaf name or
-    // by an exact path component. One rule in two languages: change classify_command with this.
+    // backend/relay_core/guest.py gives the same argv, or empty. One rule in two languages —
+    // change `guest.classify_command` and this together; tests/test_guest.py reads this table
+    // out of this file and fails when the two drift apart.
+    //
+    // Everything the rule knows about a guest lives in this one table: the ids, the display
+    // names, the binary names and the npm packages. guestIdFor, guestIdForPackage and
+    // guestDisplayName all read it, so a third guest is one row and nothing else.
+    struct GuestSpec {
+        const char *id;
+        const char *name;
+        QStringList binaries;
+        QStringList packages;   // as published on npm, scope and all
+    };
+    static const QList<GuestSpec> &guestSpecs() {
+        static const QList<GuestSpec> specs{
+            {"claude", "Claude Code", {QStringLiteral("claude"), QStringLiteral("claude-code")},
+             {QStringLiteral("@anthropic-ai/claude-code")}},
+            {"codex", "Codex", {QStringLiteral("codex"), QStringLiteral("codex-cli")},
+             {QStringLiteral("@openai/codex")}},
+        };
+        return specs;
+    }
     static QString guestIdFor(const QString &name) {
-        if (name == QStringLiteral("claude") || name == QStringLiteral("claude-code")) return QStringLiteral("claude");
-        if (name == QStringLiteral("codex") || name == QStringLiteral("codex-cli")) return QStringLiteral("codex");
+        for (const GuestSpec &candidate : guestSpecs())
+            if (candidate.binaries.contains(name)) return QString::fromLatin1(candidate.id);
         return {};
     }
-    static QString guestProgram(const QString &line) {
-        const QStringList tokens = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        if (tokens.isEmpty()) return {};
-        const QString first = QFileInfo(tokens.first()).fileName();
+    static QString guestIdForPackage(const QString &package) {
+        for (const GuestSpec &candidate : guestSpecs())
+            if (candidate.packages.contains(package)) return QString::fromLatin1(candidate.id);
+        return {};
+    }
+    // The name a person reads. An id the table does not know — including the empty one, which is
+    // what a guest running inside tmux gives, since the pane cannot see it — is "the guest agent"
+    // rather than a guess at Claude Code (review of 51587e3).
+    static QString guestDisplayName(const QString &guest) {
+        for (const GuestSpec &candidate : guestSpecs())
+            if (guest == QLatin1String(candidate.id)) return QString::fromLatin1(candidate.name);
+        return QStringLiteral("The guest agent");
+    }
+
+    // The guest `argv` runs, or empty. The CLI may be the native binary or a script a launcher
+    // runs (`node …/bin/codex` for the shebang install, `npx -y claude`, `node …/claude-code/cli.js`
+    // for the npm shim), so when the first token is a known launcher the first non-flag token
+    // after it decides — by its own basename, or by the npm package it lies in. *Any* path
+    // component used to count, which made `node /home/codex/server.js` a codex session.
+    static QString guestProgram(const QStringList &argv) {
+        if (argv.isEmpty()) return {};
+        const QString first = QFileInfo(argv.constFirst()).fileName();
         if (const QString id = guestIdFor(first); !id.isEmpty()) return id;
         static const QSet<QString> launchers{QStringLiteral("node"), QStringLiteral("nodejs"), QStringLiteral("bun"),
                                              QStringLiteral("bunx"), QStringLiteral("deno"), QStringLiteral("npx")};
         if (!launchers.contains(first)) return {};
+        for (int i = 1; i < argv.size(); ++i) {
+            const QString &token = argv.at(i);
+            if (token.startsWith(QLatin1Char('-'))) continue;   // the launcher's own flags: npx -y claude
+            // Only the launcher's target decides; what follows are the guest's own arguments.
+            const QString id = guestIdFor(guestScriptLeaf(token));
+            return id.isEmpty() ? guestPackaged(token) : id;
+        }
+        return {};
+    }
+
+    // A launcher target's own name: its basename with a script extension stripped.
+    static QString guestScriptLeaf(const QString &token) {
         static const QStringList extensions{QStringLiteral(".js"), QStringLiteral(".mjs"),
                                             QStringLiteral(".cjs"), QStringLiteral(".ts")};
-        for (int i = 1; i < tokens.size(); ++i) {
-            const QString &token = tokens.at(i);
-            if (token.startsWith(QLatin1Char('-'))) continue;   // the launcher's own flags: npx -y claude
-            QString leaf = QFileInfo(token).fileName();
-            for (const QString &extension : extensions)
-                if (leaf.endsWith(extension)) { leaf.chop(extension.size()); break; }
-            if (const QString id = guestIdFor(leaf); !id.isEmpty()) return id;
-            const QStringList components = token.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-            for (const QString &component : components)
-                if (const QString id = guestIdFor(component); !id.isEmpty()) return id;
-            return {};   // only the launcher's target decides; what follows are the guest's own arguments
+        QString leaf = QFileInfo(token).fileName();
+        for (const QString &extension : extensions)
+            if (leaf.endsWith(extension)) { leaf.chop(extension.size()); break; }
+        return leaf;
+    }
+
+    // The guest whose npm package this path lies in, or empty. Two shapes count and nothing
+    // else: a scoped package directory anywhere in the path (`@anthropic-ai/claude-code`), and
+    // the package directory immediately under a `node_modules`. A directory that merely shares a
+    // guest's name (`/home/codex`, `/var/www/claude`) is not a package and never matches.
+    static QString guestPackaged(const QString &token) {
+        const QStringList components = token.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        for (int i = 0; i + 1 < components.size(); ++i) {
+            const QString &component = components.at(i), &following = components.at(i + 1);
+            if (component.startsWith(QLatin1Char('@'))) {
+                if (const QString id = guestIdForPackage(component + QLatin1Char('/') + following); !id.isEmpty())
+                    return id;
+            } else if (component == QStringLiteral("node_modules")) {
+                QString id = guestIdFor(following);
+                if (id.isEmpty()) id = guestIdForPackage(following);
+                if (!id.isEmpty()) return id;
+            }
         }
         return {};
     }
@@ -10939,7 +11176,9 @@ private:
                 m_waitTicks = 0;
             }
         }
-        setGuest(guestProgram(foregroundCommandLine()));   // GT7X: claude / codex, or "" again
+        // foregroundArgv(), not foregroundCommandLine(): the latter joins the NUL-separated
+        // cmdline with spaces, so `/opt/my tools/claude` split into two tokens (GT7X).
+        setGuest(guestProgram(foregroundArgv()));   // GT7X: claude / codex, or "" again
         updateTakeControl();
     }
 
@@ -11425,7 +11664,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
         // The guest channel is polled on the same tick (26.3), before state.json's own checks
         // below can return: a guest event must land even in a tick where the shell did not.
-        pollGuestEvent();
+        pollGuestEvents();
         // This runs 12 times a second in every pane, and the file changes a few times per
         // command. shell/event.py replaces it atomically, so a new event is a new inode: one
         // stat() says whether there is anything to read, in place of an open, a read and a JSON
@@ -11874,11 +12113,11 @@ private:
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
-    // guest.json as pollShell() last read it (GT7X, 26.3): the same stat/token/sequence dance
-    // as state.json above, on the same tick. Then the guest's live facts and the PreToolUse
-    // question whose answer the waiting shim still needs.
-    bool m_guestSeen = false; ino_t m_guestInode = 0; off_t m_guestSize = 0; timespec m_guestMtime{};
-    QString m_guestSequence, m_guestModel, m_guestQuestionSeq;
+    // The guest's live facts and the queue of permission questions the shims are waiting on
+    // (GT7X, 26.3/26.4). The events themselves are files in guest-events/, deleted as they are
+    // handled, so nothing about them is cached here.
+    QString m_guestModel;
+    QList<GuestQuestion> m_guestQuestions;   // pending, oldest first; the front one is on screen
     int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
     bool m_guestBusy = false;
     QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
@@ -12177,6 +12416,8 @@ private:
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
     QFrame *m_guestBar = nullptr;      // the guest's permission question, floating over the terminal
     QLabel *m_guestBarLabel = nullptr;
+    QPushButton *m_guestAllow = nullptr;   // focused while a question is up; Y/Enter presses it
+    QPushButton *m_guestDeny = nullptr;
     QLabel *m_guestChip = nullptr;     // the guest's model/context chip in the prompt-box strip
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it

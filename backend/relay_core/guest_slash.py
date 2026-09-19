@@ -74,9 +74,30 @@ def commands(guest: str, cwd: str | os.PathLike[str] | None = None,
     raise ValueError(f"unknown guest {guest!r}")
 
 
+# The channel's one writer (26.3), beside the backend directory this package lives in.
+WRITER = Path(__file__).resolve().parents[2] / "shell" / "guest-event.py"
+
+
+def helper_path(environment=None) -> str:
+    """`shell/guest-event.py`, or "" outside a Relay pane.
+
+    ``RELAY_GUEST_EVENT`` is the pane's spool *directory* since the single ``guest.json`` slot was
+    replaced (26.3); it named this script in the first cut, so a value that still ends in ``.py``
+    is taken at its word. Either way the variable is what says there is a pane at all.
+    """
+    environment = os.environ if environment is None else environment
+    exported = environment.get("RELAY_GUEST_EVENT") or ""
+    if not exported:
+        return ""
+    override = environment.get("RELAY_GUEST_WRITER") or ""
+    if override:
+        return override
+    return exported if exported.endswith(".py") else str(WRITER)
+
+
 def emit(guest: str, cwd: str | os.PathLike[str] | None = None) -> bool:
-    """Publish the catalog through ``RELAY_GUEST_EVENT``; absent Relay is a quiet no-op."""
-    helper = os.environ.get("RELAY_GUEST_EVENT")
+    """Publish the catalog onto the pane's guest event spool; absent Relay is a quiet no-op."""
+    helper = helper_path()
     if not helper:
         return False
     payload = json.dumps({"commands": commands(guest, cwd)}, separators=(",", ":"))

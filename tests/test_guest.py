@@ -1,3 +1,4 @@
+import re
 import stat
 import tempfile
 import unittest
@@ -30,9 +31,12 @@ class ClassifyCommand(unittest.TestCase):
         # The shebang install: the kernel rewrites `codex` into node + the script path.
         (["node", "/home/u/.npm-global/bin/codex"],                       "codex"),
         (["/usr/bin/nodejs", "/opt/claude/bin/claude.js"],                "claude"),
-        # The npm shim: the script leaf is cli.js; the package directory names the guest.
+        # The npm shim: the script leaf is cli.js; the *package* directory names the guest.
         (["node", "/home/u/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"], "claude"),
+        (["node", "/home/u/.nvm/versions/node/v22.3.0/lib/node_modules/@anthropic-ai/claude-code/cli.js"], "claude"),
         (["node", "/home/u/.npm-global/lib/node_modules/@openai/codex/bin/codex.js"],       "codex"),
+        # An unscoped package directory, immediately under a node_modules.
+        (["node", "/srv/app/node_modules/codex/bin/index.js"],            "codex"),
         (["npx", "-y", "claude"],                                         "claude"),
         (["bunx", "--bun", "codex"],                                      "codex"),
         (["deno", "run", "-A", "/opt/tools/claude.mjs"],                  None),  # "run" is the target
@@ -41,8 +45,14 @@ class ClassifyCommand(unittest.TestCase):
         (["cloud"],                                                       None),
         (["claude-not"],                                                  None),
         (["node", "server.js"],                                           None),
-        (["node", "/home/u/src/claude-utils/build.js"],                   None),  # no exact component
+        (["node", "/home/u/src/claude-utils/build.js"],                   None),  # not a package
         (["python", "-m", "claude"],                                      None),  # python is not a launcher
+        # A plain directory that happens to be named after a guest is not a package: this is the
+        # case the "any path component" rule got wrong (review of 51587e3).
+        (["node", "/home/codex/server.js"],                               None),
+        (["node", "/var/www/claude/index.js"],                            None),
+        (["node", "/srv/claude-code/server.js"],                          None),
+        (["node", "/opt/@anthropic-ai/other-thing/cli.js"],               None),
         ([],                                                              None),
     )
 
@@ -50,6 +60,54 @@ class ClassifyCommand(unittest.TestCase):
         for argv, wanted in self.CASES:
             with self.subTest(argv=argv):
                 self.assertEqual(wanted, guest.classify_command(argv))
+
+
+class MirroredInCxx(unittest.TestCase):
+    """One rule in two languages (26.1). `guestProgram` in src/Pane.h classifies the same argv
+    the pane already has, and `guest.classify_command` classifies what the backend is handed.
+    Nothing links them but this test: it reads the C++ table out of the header and fails when a
+    guest, a binary name or a package name exists on one side only."""
+
+    PANE = Path(__file__).resolve().parents[1] / "src" / "Pane.h"
+    ROW = re.compile(r'\{"(?P<id>[a-z-]+)",\s*"(?P<name>[^"]+)",\s*\{(?P<binaries>[^}]*)\},\s*'
+                     r'\n?\s*\{(?P<packages>[^}]*)\}\},')
+    LITERAL = re.compile(r'QStringLiteral\("([^"]+)"\)')
+
+    def cxx_table(self):
+        text = self.PANE.read_text(encoding="utf-8")
+        start = text.index("static const QList<GuestSpec> &guestSpecs()")
+        body = text[start:text.index("return specs;", start)]
+        rows = [(row["id"], row["name"], tuple(self.LITERAL.findall(row["binaries"])),
+                 tuple(self.LITERAL.findall(row["packages"])))
+                for row in self.ROW.finditer(body)]
+        self.assertTrue(rows, "the C++ guest table could not be read out of src/Pane.h")
+        return rows
+
+    def test_the_two_tables_are_the_same(self):
+        self.assertEqual([(spec.id, spec.name, spec.binaries, spec.packages) for spec in guest.GUESTS],
+                         self.cxx_table())
+
+    def test_the_launchers_are_the_same(self):
+        text = self.PANE.read_text(encoding="utf-8")
+        block = text[text.index("static const QSet<QString> launchers"):]
+        found = tuple(self.LITERAL.findall(block[:block.index("};")]))
+        self.assertEqual(guest.LAUNCHERS, found)
+
+    def test_the_pane_classifies_argv_not_a_joined_command_line(self):
+        """foregroundCommandLine() flattens the NUL-separated cmdline to spaces, so a path with a
+        space in it came apart before it reached the classifier (review of 51587e3)."""
+        text = self.PANE.read_text(encoding="utf-8")
+        self.assertIn("setGuest(guestProgram(foregroundArgv()))", text)
+        self.assertNotIn("guestProgram(foregroundCommandLine())", text)
+
+    def test_the_backend_directory_is_appended_to_pythonpath_only_once(self):
+        """startTerminal runs per pane and per shell restart and qputenv mutates Relay's own
+        environment, so an unguarded append grew PYTHONPATH without bound (review of 51587e3)."""
+        text = self.PANE.read_text(encoding="utf-8")
+        guard = text.index('if (!pythonPath.split(QLatin1Char(\':\'), Qt::SkipEmptyParts).contains(backendDir))')
+        append = text.index('qputenv("PYTHONPATH"', guard)
+        self.assertLess(guard, append)
+        self.assertEqual(1, text.count('qputenv("PYTHONPATH"'))
 
 
 class Spec(unittest.TestCase):

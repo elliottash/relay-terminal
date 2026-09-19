@@ -4,10 +4,11 @@
 
 The channel is a file the pane polls, so this harness is deliberately outside the GUI: it starts
 the built `relay` under Xvfb with an isolated HOME/XDG_CONFIG_HOME/TMPDIR, waits for a pane's
-runtime directory to appear, and then speaks the protocol the way a guest's shim does — through
-`shell/guest-event.py` with `RELAY_RUNTIME_DIR` / `RELAY_SESSION_TOKEN` / `RELAY_GUEST_EVENT` set.
-Two of the writes go through `relay_core.guest_hook` itself, which is what the installer puts in a
-project's settings, so the shim is exercised rather than the helper alone.
+runtime directory to appear, and then speaks the protocol the way a guest's shim does — event files
+dropped into the pane's `guest-events/` spool, with `RELAY_RUNTIME_DIR` / `RELAY_SESSION_TOKEN` /
+`RELAY_GUEST_EVENT` / `RELAY_BACKEND_DIR` set. Most of the writes go through
+`relay_core.guest_hook` itself, run by absolute path exactly as the installed settings entry runs
+it, so the shim is exercised and not only the file format.
 
 A pane only grows a guest chip when its foreground program classifies as `claude` (Pane.h,
 `guestProgram`). Real Claude Code is not installed here, so the harness puts a stand-in of that
@@ -31,11 +32,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 REPO = Path(__file__).resolve().parents[3]
 RELAY = REPO / "build" / "relay"
-HELPER = REPO / "shell" / "guest-event.py"
 BACKEND = REPO / "backend"
+SHIM = BACKEND / "relay_core" / "guest_hook.py"
 # The prompt-box strip (the row of chips under the terminal) in the 1600x1000 screen this harness
 # asks xvfb-run for. The chip is small and the whole-screen OCR mangles it, so it is read alone.
 STRIP_ROWS = (804, 840)
@@ -117,34 +119,42 @@ def token_for(directory: Path) -> str:
 
 def pane_env(directory: Path, environment: dict) -> dict:
     """The environment a hook or statusline running in this pane's shell has: the pane's runtime
-    dir, its token, the channel helper, and the backend on PYTHONPATH (startTerminal sets all of
-    these, PYTHONPATH by appending to whatever the user had)."""
+    dir, its token, the event spool and the backend directory (startTerminal exports all four).
+    No PYTHONPATH — the installed command runs the shim by absolute path and must not need one."""
     child = dict(environment)
+    child.pop("PYTHONPATH", None)
     child.update({
         "RELAY_RUNTIME_DIR": str(directory),
         "RELAY_SESSION_TOKEN": token_for(directory),
-        "RELAY_GUEST_EVENT": str(HELPER),
+        "RELAY_GUEST_EVENT": str(directory / "guest-events"),
+        "RELAY_BACKEND_DIR": str(BACKEND),
         "RELAY_PYTHON": sys.executable,
-        "PYTHONPATH": str(BACKEND),
     })
     return child
 
 
 def shim(directory: Path, environment: dict, *args: str, stdin: str = "",
          timeout: float = 60) -> subprocess.CompletedProcess:
-    """`$RELAY_PYTHON -m relay_core.guest_hook <args>`, exactly the command the installer writes."""
-    return subprocess.run([sys.executable, "-m", "relay_core.guest_hook", *args],
+    """The shim by absolute path with the installer's marker argument, which is exactly the
+    command `.claude/settings.local.json` holds (26.4)."""
+    return subprocess.run([sys.executable, str(SHIM), *args, "--relay-guest"],
                           input=stdin, text=True, env=pane_env(directory, environment),
                           capture_output=True, timeout=timeout)
 
 
-def helper(directory: Path, environment: dict, event: str, data: dict) -> None:
-    child = pane_env(directory, environment)
-    result = subprocess.run([sys.executable, str(HELPER), event, "claude"],
-                            input=json.dumps(data), text=True, env=child,
-                            capture_output=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"helper failed for {event}: {result.stderr}")
+def spool_event(directory: Path, event: str, data: dict) -> None:
+    """One envelope written straight onto the spool, the way any other writer on the channel does
+    it (26.3): mkstemp in `guest-events/`, then rename to `<time_ns>-<pid>-<counter>.json`."""
+    events = directory / "guest-events"
+    events.mkdir(mode=0o700, exist_ok=True)
+    envelope = {"token": token_for(directory), "sequence": str(uuid.uuid4()), "event": event,
+                "guest": "claude", "data": data}
+    temporary = events / f".drive-{os.getpid()}"
+    temporary.write_text(json.dumps(envelope), encoding="utf-8")
+    os.replace(temporary, events / f"{time.time_ns():020d}-{os.getpid()}-{next(_counter)}.json")
+
+
+_counter = iter(range(1, 1_000_000))
 
 
 # ----- driving the window -------------------------------------------------------------------
@@ -329,16 +339,17 @@ def main() -> int:
         screenshot(chip)
         report("01-statusline-chip", strip_text(chip, STRIP_ROWS), ["Claude Sonnet", "42%"])
 
-        # 2. A PreToolUse hook: the shim forwards it and holds on the answer, the pane asks the
-        #    user, and the click is what answers. Claude hands a hook its JSON on stdin and closes
-        #    it, so the harness does the same with a file rather than a pipe it has to remember to
-        #    close: the shim reads to EOF before it forwards anything.
-        hook = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+        # 2. A PermissionRequest hook — the one claude sends only when it is really about to ask
+        #    (26.4) — the shim forwards it and holds on the answer, the pane asks the user, and the
+        #    click is what answers. Claude hands a hook its JSON on stdin and closes it, so the
+        #    harness does the same with a file rather than a pipe it has to remember to close: the
+        #    shim reads to EOF before it forwards anything.
+        hook = {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
                 "tool_input": {"command": "rm -rf build/ && cmake -S . -B build"}}
-        hook_file = isolation["root"] / "hook-pretooluse.json"
+        hook_file = isolation["root"] / "hook-permissionrequest.json"
         hook_file.write_text(json.dumps(hook), encoding="utf-8")
         with hook_file.open("r", encoding="utf-8") as hook_input:
-            held = subprocess.Popen([sys.executable, "-m", "relay_core.guest_hook", "PreToolUse"],
+            held = subprocess.Popen([sys.executable, str(SHIM), "PermissionRequest", "--relay-guest"],
                                     stdin=hook_input, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True,
                                     env=dict(pane_env(pane, environment),
@@ -354,7 +365,7 @@ def main() -> int:
             # the bar's right end in that order with 8 px between them (buildUi's questionRow), so
             # Deny's box gives Allow's.
             deny = find_word(question, "deny")
-            answer_file = pane / "guest-answer.json"
+            answers = pane / "guest-answers"
             answered = False
             if deny is None:
                 log("no Deny button found on the question bar")
@@ -365,15 +376,16 @@ def main() -> int:
                 xdo("mousemove", str(at[0]), str(at[1]))
                 xdo("click", "1")
                 time.sleep(1.0)
-                answered = answer_file.exists()
+                # The shim deletes the answer as it reads it, so "was there one" is racy on
+                # purpose: what the held hook prints below is the real proof.
+                answered = True
             time.sleep(1.0)
             answered_pic = output / "claude-hooks-03-answered.png"
             screenshot(answered_pic)
             report("03-answered", ocr(answered_pic), [], forbid=["wants to run"])
-            if answered:
-                log(f"the pane wrote {answer_file.read_text(encoding='utf-8')}")
-            else:
-                log("no answer file: the click did not land on the button")
+            if not answered:
+                log("no click landed on the button")
+            log(f"guest-answers/ now holds {sorted(p.name for p in answers.glob('*.json'))}")
             try:
                 held.wait(timeout=30)
             except subprocess.TimeoutExpired:
@@ -381,17 +393,51 @@ def main() -> int:
             out = held.stdout.read() if held.stdout else ""
             log(f"the held hook returned {out.strip()!r}")
 
-        # 3. A share past the warn line, through the helper: the same envelope and the same poll,
-        #    written without the shim. `state` moves the third field the channel carries.
-        helper(pane, environment, "statusline", {"model": "Claude Opus 4.6", "context_pct": 94})
+        # 3. Two questions at once, answered from the keyboard. The spool keeps both — the slot
+        #    it replaced lost the first — and the bar says how many are waiting; Y answers the one
+        #    on screen and the next takes its place, N denies that one (26.4).
+        holds = []
+        for index, command in enumerate(("git push --force", "rm -rf /tmp/relay-qa-two")):
+            queued = isolation["root"] / f"hook-queued-{index}.json"
+            queued.write_text(json.dumps({"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                          "tool_input": {"command": command}}), encoding="utf-8")
+            with queued.open("r", encoding="utf-8") as handle:
+                holds.append(subprocess.Popen([sys.executable, str(SHIM), "PermissionRequest"],
+                                              stdin=handle, stdout=subprocess.PIPE,
+                                              stderr=subprocess.PIPE, text=True,
+                                              env=dict(pane_env(pane, environment),
+                                                       RELAY_GUEST_PERMISSION_TIMEOUT="90")))
+            time.sleep(1.5)
+        time.sleep(2)
+        queued_pic = output / "claude-hooks-06-two-questions-queued.png"
+        report("06-two-questions-queued", screenshot(queued_pic), ["1 of 2", "git push"])
+        press(window, "y")          # the bar has the keyboard: Y allows the one on screen
+        time.sleep(2)
+        second_pic = output / "claude-hooks-07-second-question.png"
+        report("07-second-question", screenshot(second_pic), ["rm -rf /tmp/relay-qa-two"],
+               forbid=["git push"])
+        press(window, "n")          # ...and N denies the next
+        time.sleep(2)
+        report("08-queue-empty", screenshot(output / "claude-hooks-08-queue-empty.png"), [],
+               forbid=["wants to run"])
+        for index, held_two in enumerate(holds):
+            try:
+                held_two.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                held_two.kill()
+            log(f"queued hook {index} returned {(held_two.stdout.read() if held_two.stdout else '').strip()!r}")
+
+        # 4. A share past the warn line, written straight onto the spool: the same envelope and the
+        #    same poll, without the shim. `state` moves the third field the channel carries.
+        spool_event(pane, "statusline", {"model": "Claude Opus 4.6", "context_pct": 94})
         time.sleep(1.5)
-        helper(pane, environment, "state", {"busy": True})
+        spool_event(pane, "state", {"busy": True})
         time.sleep(2)
         warn = output / "claude-hooks-04-context-warn.png"
         screenshot(warn)
         report("04-context-warn", strip_text(warn, STRIP_ROWS), ["Claude Opus", "94%"])
 
-        # 4. The guest leaves: the chip goes with it, because the pane's program poll sees the
+        # 5. The guest leaves: the chip goes with it, because the pane's program poll sees the
         #    foreground program is no longer a guest (setGuest("")).
         os.kill(guest_pid, 15)
         time.sleep(4)

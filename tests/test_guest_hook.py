@@ -1,3 +1,10 @@
+"""The Claude guest shim (GT7X, protocol 26.3/26.4).
+
+The channel is a spool directory, not a slot: `relay_core.guest_hook` writes one file per event
+into `$RELAY_GUEST_EVENT` and the pane deletes each as it handles it. These tests speak the pane's
+side of that contract directly — list the directory, sort by name, read, answer — so they fail for
+the same reasons the pane would.
+"""
 import contextlib
 import io
 import json
@@ -13,7 +20,9 @@ from unittest import mock
 
 from relay_core import guest_hook
 
-HELPER = Path(__file__).resolve().parents[1] / "shell" / "guest-event.py"
+BACKEND = str(Path(__file__).resolve().parents[1] / "backend")
+SHIM = Path(BACKEND) / "relay_core" / "guest_hook.py"
+WRITER = Path(__file__).resolve().parents[1] / "shell" / "guest-event.py"
 RELAY_VARS = ("RELAY_GUEST_EVENT", "RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN",
               "RELAY_GUEST_ID", "RELAY_GUEST_PERMISSION_TIMEOUT", "RELAY_GUEST_STATUSLINE")
 
@@ -34,6 +43,21 @@ def relay_env(**values):
 
 
 @contextlib.contextmanager
+def pane(token="tok-1", **extra):
+    """A pane's runtime directory and the environment a shell started in it inherits.
+
+    Yields (runtime, events); the spool is the directory the pane exports as RELAY_GUEST_EVENT,
+    exactly as Pane::startTerminal does.
+    """
+    with tempfile.TemporaryDirectory() as root:
+        runtime = Path(root)
+        events = runtime / "guest-events"
+        with relay_env(RELAY_GUEST_EVENT=str(events), RELAY_RUNTIME_DIR=str(runtime),
+                       RELAY_SESSION_TOKEN=token, **extra):
+            yield runtime, events
+
+
+@contextlib.contextmanager
 def io_for(payload: str):
     """stdin holding `payload`, stdout captured. Both are process-wide, which is fine: the
     suite runs one test at a time."""
@@ -48,89 +72,170 @@ def call(argv, payload: str) -> tuple[int, str]:
     return code, out.getvalue()
 
 
-def read_envelope(runtime: Path) -> dict:
-    with (runtime / "guest.json").open(encoding="utf-8") as handle:
-        return json.load(handle)
+def spooled(events: Path) -> list[Path]:
+    """What the pane would read, in the order it would read it: the directory sorted by name."""
+    if not events.exists():
+        return []
+    return sorted((path for path in events.iterdir() if path.suffix == ".json"), key=lambda p: p.name)
 
 
-# ----- the helper the GUI writes into every pane (protocol 26.3) -----------------------------
+def envelopes(events: Path) -> list[dict]:
+    return [json.loads(path.read_text(encoding="utf-8")) for path in spooled(events)]
 
 
-class GuestEventHelper(unittest.TestCase):
-    """shell/guest-event.py: the writer the shims reach the pane through."""
+def one_envelope(test: unittest.TestCase, events: Path) -> dict:
+    found = envelopes(events)
+    test.assertEqual(1, len(found), found)
+    return found[0]
 
-    def run_helper(self, runtime: Path, argv, payload: str, token="tok-1", env=None):
-        environment = {"PATH": os.environ.get("PATH", os.defpath), "RELAY_RUNTIME_DIR": str(runtime),
-                       "RELAY_SESSION_TOKEN": token}
+
+# ----- the channel's one writer (protocol 26.3) -----------------------------------------------
+
+
+class Writer(unittest.TestCase):
+    """`shell/guest-event.py` is where the spool's naming, its atomicity and its size cap live,
+    for every surface on the channel: this shim, the IDE bridge sidecar, the codex tail."""
+
+    def run_writer(self, runtime: Path, argv, payload: str, token="tok-1", env=None):
+        environment = {"PATH": os.environ.get("PATH", os.defpath),
+                       "RELAY_GUEST_EVENT": str(runtime / "guest-events"),
+                       "RELAY_RUNTIME_DIR": str(runtime), "RELAY_SESSION_TOKEN": token}
         environment.update(env or {})
-        return subprocess.run([sys.executable, str(HELPER), *argv], input=payload, text=True,
+        return subprocess.run([sys.executable, str(WRITER), *argv], input=payload, text=True,
                               capture_output=True, env=environment)
 
-    def test_envelope_is_written_with_a_fresh_sequence_each_time(self):
+    def test_the_command_line_still_works_for_a_caller_that_is_not_python(self):
         with tempfile.TemporaryDirectory() as root:
             runtime = Path(root)
-            first = self.run_helper(runtime, ["statusline", "claude"], '{"model": "M"}')
-            self.assertEqual(0, first.returncode, first.stderr)
-            self.assertEqual("", first.stdout)
-            one = read_envelope(runtime)
-            self.assertEqual({"token": "tok-1", "event": "statusline", "guest": "claude",
-                              "data": {"model": "M"}}, {k: v for k, v in one.items() if k != "sequence"})
-            # A new inode every write, so the pane's stat() sees the change: that is the whole
-            # reason the poll can be one stat() instead of an open/read/parse.
-            inode = os.stat(runtime / "guest.json").st_ino
-            second = self.run_helper(runtime, ["state", "claude"], '{"busy": true}')
+            first = self.run_writer(runtime, ["statusline", "claude"], '{"model": "M"}')
+            self.assertEqual((0, "", ""), (first.returncode, first.stdout, first.stderr))
+            second = self.run_writer(runtime, ["state", "codex", "seq-42"], '{"busy": true}')
             self.assertEqual(0, second.returncode, second.stderr)
-            two = read_envelope(runtime)
-            self.assertEqual("state", two["event"])
-            self.assertTrue(two["data"]["busy"])
-            self.assertNotEqual(inode, os.stat(runtime / "guest.json").st_ino)
-            self.assertNotEqual(one["sequence"], two["sequence"])
+            found = envelopes(runtime / "guest-events")
+        self.assertEqual(["statusline", "state"], [e["event"] for e in found])
+        self.assertEqual(["claude", "codex"], [e["guest"] for e in found])
+        self.assertEqual("seq-42", found[1]["sequence"])   # a caller may pin its own
+        self.assertNotEqual(found[0]["sequence"], found[1]["sequence"])
 
-    def test_the_shim_can_pin_the_sequence(self):
+    def test_without_a_pane_it_writes_nowhere(self):
+        with tempfile.TemporaryDirectory() as root:
+            run = subprocess.run([sys.executable, str(WRITER), "hook", "claude"], input="{}",
+                                 text=True, capture_output=True,
+                                 env={"PATH": os.environ.get("PATH", os.defpath)})
+            self.assertEqual((0, "", ""), (run.returncode, run.stdout, run.stderr))
+            self.assertEqual([], list(Path(root).iterdir()))
+
+    def test_an_envelope_past_the_panes_cap_is_written_without_its_data(self):
+        """The pane deletes a file over 256 KiB unread, so the writer never makes one: a question
+        the user can still answer beats a file that is refused."""
         with tempfile.TemporaryDirectory() as root:
             runtime = Path(root)
-            self.run_helper(runtime, ["hook", "claude", "seq-42"], '{"name": "PreToolUse"}')
-            self.assertEqual("seq-42", read_envelope(runtime)["sequence"])
+            self.run_writer(runtime, ["hook", "claude"], json.dumps({"payload": "y" * 400_000}))
+            spool = spooled(runtime / "guest-events")
+            self.assertEqual(1, len(spool))
+            self.assertLess(spool[0].stat().st_size, 256 * 1024)
+            self.assertEqual({"relay_truncated": True}, envelopes(runtime / "guest-events")[0]["data"])
 
-    def test_malformed_or_missing_stdin_is_an_empty_event_not_a_crash(self):
-        with tempfile.TemporaryDirectory() as root:
-            runtime = Path(root)
-            for payload in ("", "not json", "[1, 2]", "null"):
-                with self.subTest(payload=payload):
-                    run = self.run_helper(runtime, ["hook", "claude"], payload)
-                    self.assertEqual(0, run.returncode, run.stderr)
-                    self.assertEqual({}, read_envelope(runtime)["data"])
+    def test_the_shim_writes_through_it_rather_than_spawning_it(self):
+        """Two processes per statusline tick to write one small file was half the shim's cost."""
+        with pane() as (_runtime, events), mock.patch.object(guest_hook, "_writer", None):
+            with mock.patch.dict(os.environ, {"RELAY_GUEST_WRITER": str(WRITER)}):
+                call(["Stop"], "{}")
+            self.assertEqual(1, len(spooled(events)))
+        self.assertEqual("guest-event.py", Path(guest_hook.WRITER).name)
 
-    def test_without_the_pane_environment_it_is_a_no_op(self):
-        """The hard invariant (26.3): no RELAY_* environment, no output and no write anywhere."""
-        with tempfile.TemporaryDirectory() as root:
-            runtime = Path(root)
-            run = subprocess.run([sys.executable, str(HELPER), "hook", "claude"], input="{}", text=True,
-                                 capture_output=True, env={"PATH": os.environ.get("PATH", os.defpath)})
-            self.assertEqual(0, run.returncode)
-            self.assertEqual("", run.stdout)
-            self.assertEqual("", run.stderr)
-            self.assertEqual([], list(runtime.iterdir()))
+    def test_a_missing_writer_never_breaks_the_guest_run(self):
+        with pane() as (_runtime, events), mock.patch.object(guest_hook, "_writer", None), \
+                mock.patch.dict(os.environ, {"RELAY_GUEST_WRITER": "/nowhere/guest-event.py"}):
+            self.assertEqual((0, ""), call(["Stop"], "{}"))
+            self.assertEqual((0, ""), call(["PermissionRequest"], '{"tool_name": "Bash"}'))
+            self.assertEqual([], spooled(events))
+        guest_hook._writer = None
 
-    def test_a_vanished_runtime_directory_is_not_an_error(self):
+
+# ----- the spool (protocol 26.3) --------------------------------------------------------------
+
+
+class Spool(unittest.TestCase):
+    def test_the_shim_creates_a_private_spool_and_writes_one_file_per_event(self):
+        with pane() as (_runtime, events):
+            call(["Stop"], "{}")
+            call(["statusline"], '{"model": "M"}')
+            call(["UserPromptSubmit"], "{}")
+            self.assertEqual(0o700, os.stat(events).st_mode & 0o777)
+            names = [path.name for path in spooled(events)]
+            self.assertEqual(3, len(names))
+            self.assertEqual(["hook", "statusline", "hook"], [e["event"] for e in envelopes(events)])
+        # The name carries the write time first, so sorting the directory replays the order.
+        self.assertEqual(sorted(names), names)
+        for name in names:
+            stamp, pid, rest = name.split("-", 2)
+            self.assertEqual(20, len(stamp))
+            self.assertEqual(str(os.getpid()), pid)
+            self.assertTrue(rest.endswith(".json"))
+
+    def test_a_statusline_tick_no_longer_overwrites_a_question(self):
+        """The whole reason for the spool: with one `guest.json` slot, a statusline landing just
+        after a permission request replaced it, and the shim waited out its timeout for an answer
+        to a question the pane had never been shown (review of 51587e3)."""
+        with pane(RELAY_GUEST_PERMISSION_TIMEOUT="0.3") as (_runtime, events):
+            call(["PermissionRequest"], '{"tool_name": "Bash", "tool_input": {"command": "ls"}}')
+            call(["statusline"], '{"model": "Opus"}')
+            found = envelopes(events)
+        self.assertEqual(["hook", "statusline"], [e["event"] for e in found])
+        self.assertEqual("PermissionRequest", found[0]["data"]["name"])
+
+    def test_the_envelope_is_the_protocol_one(self):
+        with pane(token="tok-9") as (_runtime, events):
+            call(["Notification"], '{"session_id": "abc", "message": "waiting for input"}')
+            envelope = one_envelope(self, events)
+        self.assertEqual({"token", "sequence", "event", "guest", "data"}, set(envelope))
+        self.assertEqual(("hook", "claude", "tok-9"),
+                         (envelope["event"], envelope["guest"], envelope["token"]))
+        self.assertEqual({"name": "Notification",
+                          "payload": {"session_id": "abc", "message": "waiting for input"}},
+                         envelope["data"])
+
+    def test_every_event_gets_its_own_sequence(self):
+        with pane() as (_runtime, events):
+            call(["Stop"], "{}")
+            call(["Stop"], "{}")
+            found = envelopes(events)
+        self.assertEqual(2, len({e["sequence"] for e in found}))
+
+    def test_the_guest_id_can_be_another_guest(self):
+        with pane(RELAY_GUEST_ID="codex") as (_runtime, events):
+            call(["Stop"], "{}")
+            self.assertEqual("codex", one_envelope(self, events)["guest"])
+
+    def test_malformed_or_missing_stdin_is_an_empty_payload_not_a_crash(self):
+        for payload in ("", "not json", "[1, 2]", "null"):
+            with self.subTest(payload=payload), pane() as (_runtime, events):
+                code, out = call(["Stop"], payload)
+                self.assertEqual((0, ""), (code, out))
+                self.assertEqual({}, one_envelope(self, events)["data"]["payload"])
+
+    def test_a_spool_that_cannot_be_written_never_breaks_the_guest_run(self):
         with tempfile.TemporaryDirectory() as root:
-            run = self.run_helper(Path(root) / "gone", ["hook", "claude"], "{}")
-            self.assertEqual(0, run.returncode)
-            self.assertEqual("", run.stdout)
+            blocked = Path(root) / "not-a-directory"
+            blocked.write_text("")
+            with relay_env(RELAY_GUEST_EVENT=str(blocked / "events"), RELAY_RUNTIME_DIR=root,
+                           RELAY_SESSION_TOKEN="tok-1"):
+                self.assertEqual((0, ""), call(["Stop"], "{}"))
+                # …and a question whose write failed falls back to claude's own asking at once.
+                self.assertEqual((0, ""), call(["PermissionRequest"], '{"tool_name": "Bash"}'))
 
 
 # ----- the shim's no-op invariant (protocol 26.3) --------------------------------------------
 
 
 class NoOpInvariant(unittest.TestCase):
-    """Hooks installed in a settings file are read by every terminal on the machine, so with no
-    channel they must do nothing at all."""
+    """The hooks live in a settings file every claude started in that project reads, so with no
+    channel in the environment they must do nothing at all."""
 
     def test_hook_prints_nothing_and_writes_nowhere(self):
-        # The runtime dir is the one thing a shim could write to; with no helper in the
-        # environment it stays empty.
         with tempfile.TemporaryDirectory() as root, relay_env(RELAY_RUNTIME_DIR=root):
-            code, out = call(["PreToolUse"], '{"tool_name": "Bash"}')
+            code, out = call(["PermissionRequest"], '{"tool_name": "Bash"}')
             self.assertEqual(0, code)
             self.assertEqual("", out)
             self.assertEqual([], list(Path(root).iterdir()))
@@ -139,6 +244,12 @@ class NoOpInvariant(unittest.TestCase):
         with relay_env():
             code, out = call([], "{}")
         self.assertEqual((0, ""), (code, out))
+
+    def test_the_installers_marker_argument_is_not_an_event(self):
+        """The settings command ends in `--relay-guest`; the shim must read the event, not it."""
+        with pane() as (_runtime, events):
+            call(["Stop", "--relay-guest"], "{}")
+            self.assertEqual("Stop", one_envelope(self, events)["data"]["name"])
 
     def test_statusline_still_prints_its_passthrough_line(self):
         payload = json.dumps({"model": {"display_name": "Claude Opus 4.6"}, "workspace": {"current_dir": "/w/proj"}})
@@ -153,107 +264,157 @@ class NoOpInvariant(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertTrue(out.strip())
 
-
-# ----- hook forwarding (protocol 26.4) --------------------------------------------------------
-
-
-class HookForwarding(unittest.TestCase):
-    def test_a_hook_becomes_one_channel_event(self):
-        with tempfile.TemporaryDirectory() as root, relay_env(
-                RELAY_GUEST_EVENT=str(HELPER), RELAY_RUNTIME_DIR=root, RELAY_SESSION_TOKEN="tok-1"):
-            payload = json.dumps({"session_id": "abc", "message": "waiting for input"})
-            code, out = call(["Notification"], payload)
-            self.assertEqual(0, code)
-            self.assertEqual("", out)          # the hook itself stays quiet
-            envelope = read_envelope(Path(root))
-        self.assertEqual(("hook", "claude", "tok-1"), (envelope["event"], envelope["guest"], envelope["token"]))
-        self.assertEqual({"name": "Notification", "payload": {"session_id": "abc", "message": "waiting for input"}},
-                         envelope["data"])
-
-    def test_a_missing_helper_never_breaks_the_guest_run(self):
-        with tempfile.TemporaryDirectory() as root, relay_env(
-                RELAY_GUEST_EVENT=str(Path(root) / "not-there.py"), RELAY_RUNTIME_DIR=root,
-                RELAY_SESSION_TOKEN="tok-1"):
-            code, out = call(["Stop"], "{}")
-        self.assertEqual((0, ""), (code, out))
-
-    def test_the_guest_id_can_be_another_guest(self):
-        with tempfile.TemporaryDirectory() as root, relay_env(
-                RELAY_GUEST_EVENT=str(HELPER), RELAY_RUNTIME_DIR=root, RELAY_SESSION_TOKEN="tok-1",
-                RELAY_GUEST_ID="codex"):
-            call(["Stop"], "{}")
-            envelope = read_envelope(Path(root))
-        self.assertEqual("codex", envelope["guest"])
+    def test_the_shim_runs_as_a_script_without_pythonpath(self):
+        """The installed command is `"$RELAY_PYTHON" "$RELAY_BACKEND_DIR/relay_core/guest_hook.py"`,
+        by absolute path: nothing may make it depend on PYTHONPATH or on a package import."""
+        environment = {"PATH": os.environ.get("PATH", os.defpath)}
+        run = subprocess.run([sys.executable, str(SHIM), "statusline", "--relay-guest"],
+                             input='{"model": "Opus", "cwd": "/tmp/x"}', text=True,
+                             capture_output=True, env=environment)
+        self.assertEqual((0, "Opus · x\n", ""), (run.returncode, run.stdout, run.stderr))
 
 
 # ----- the permission question (protocol 26.4) ------------------------------------------------
 
 
 class PermissionDecision(unittest.TestCase):
-    """PreToolUse is answered by the user, never by the shim: the shim asks, waits for an answer
-    that matches this exact question, and prints claude's own decision JSON."""
+    """`PermissionRequest` — the hook claude sends only when it is really about to ask — is
+    answered by the user, never by the shim: the shim asks, waits for the answer file its own
+    question names, and prints claude's own decision JSON."""
 
     def run_question(self, answer: dict | None, timeout: str = "5", token: str = "tok-1"):
         """Ask one permission question in a thread; answer it (or not) from here."""
-        with tempfile.TemporaryDirectory() as root:
-            runtime = Path(root)
-            payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf build"}})
-            with relay_env(RELAY_GUEST_EVENT=str(HELPER), RELAY_RUNTIME_DIR=root,
-                           RELAY_SESSION_TOKEN=token, RELAY_GUEST_PERMISSION_TIMEOUT=timeout), io_for(payload) as out:
+        with pane(RELAY_GUEST_PERMISSION_TIMEOUT=timeout) as (runtime, events):
+            payload = json.dumps({"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                  "tool_input": {"command": "rm -rf build"}})
+            with io_for(payload) as out:
                 result: list[int] = []
-                thread = threading.Thread(target=lambda: result.append(guest_hook.main(["PreToolUse"])))
+                thread = threading.Thread(target=lambda: result.append(guest_hook.main(["PermissionRequest"])))
                 thread.start()
+                sequence = self._wait_for_question(events)
                 if answer is not None:
-                    self._answer_when_asked(runtime, answer)
+                    self._answer(runtime, sequence, {"token": token, **answer})
                 thread.join(10)
                 self.assertFalse(thread.is_alive(), "the shim did not return")
-                return result[0], out.getvalue()
+                answered = not (runtime / "guest-answers" / (sequence + ".json")).exists()
+                return result[0], out.getvalue(), answered
 
-    def _answer_when_asked(self, runtime: Path, answer: dict) -> None:
-        """Wait for the shim's own write, then answer its exact sequence."""
+    def _wait_for_question(self, events: Path) -> str:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if (runtime / "guest.json").exists():
-                envelope = read_envelope(runtime)
-                if envelope["event"] == "hook":
-                    break
+            found = envelopes(events)
+            if found and found[0]["event"] == "hook":
+                self.assertEqual("PermissionRequest", found[0]["data"]["name"])
+                return found[0]["sequence"]
             time.sleep(0.02)
-        else:
-            self.fail("the shim never asked")
-        with (runtime / "guest-answer.json").open("w", encoding="utf-8") as handle:
-            json.dump({"token": "tok-1", "sequence": envelope["sequence"], **answer}, handle)
+        self.fail("the shim never asked")
+
+    def _answer(self, runtime: Path, sequence: str, answer: dict) -> None:
+        answers = runtime / "guest-answers"
+        answers.mkdir(mode=0o700, exist_ok=True)
+        (answers / (sequence + ".json")).write_text(json.dumps(answer), encoding="utf-8")
 
     def test_the_user_allows_it(self):
-        code, out = self.run_question({"decision": "allow"})
+        code, out, answered = self.run_question({"decision": "allow"})
         self.assertEqual(0, code)
-        self.assertEqual({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                                 "permissionDecision": "allow",
-                                                 "permissionDecisionReason": "Allowed in Relay."}},
+        # Claude Code's PermissionRequest shape: decision.behavior, not PreToolUse's
+        # permissionDecision. The two hooks do not share an output schema.
+        self.assertEqual({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+                                                 "decision": {"behavior": "allow"}}},
                          json.loads(out))
+        self.assertTrue(answered, "the shim must delete the answer file it read")
 
     def test_the_user_denies_it(self):
-        code, out = self.run_question({"decision": "deny"})
+        code, out, _answered = self.run_question({"decision": "deny"})
         self.assertEqual(0, code)
-        self.assertEqual("deny", json.loads(out)["hookSpecificOutput"]["permissionDecision"])
+        self.assertEqual("deny", json.loads(out)["hookSpecificOutput"]["decision"]["behavior"])
 
     def test_an_unanswered_question_falls_back_to_claude(self):
         """No answer: no decision JSON at all, so claude asks the way it always does. Nothing is
         ever approved on the user's behalf."""
-        code, out = self.run_question(None, timeout="0.3")
+        code, out, _answered = self.run_question(None, timeout="0.3")
         self.assertEqual((0, ""), (code, out))
 
-    def test_an_answer_for_another_question_is_ignored(self):
-        with tempfile.TemporaryDirectory() as root, relay_env(
-                RELAY_GUEST_EVENT=str(HELPER), RELAY_RUNTIME_DIR=root, RELAY_SESSION_TOKEN="tok-1",
-                RELAY_GUEST_PERMISSION_TIMEOUT="0.3"):
-            # A stale answer from an earlier question, and one for another pane's token: neither
-            # may be taken for this question's.
-            for answer in ({"token": "tok-1", "sequence": "someone-elses", "decision": "allow"},
-                           {"token": "another-pane", "sequence": "x", "decision": "allow"}):
-                with (Path(root) / "guest-answer.json").open("w", encoding="utf-8") as handle:
-                    json.dump(answer, handle)
-                code, out = call(["PreToolUse"], '{"tool_name": "Bash"}')
-                self.assertEqual((0, ""), (code, out))
+    def test_an_answer_from_another_pane_is_ignored(self):
+        code, out, _answered = self.run_question({"decision": "allow"}, timeout="0.6", token="another-pane")
+        self.assertEqual((0, ""), (code, out))
+
+    def test_an_answer_for_another_question_is_not_read(self):
+        """Answers are one file per question id, so a stale one cannot be taken for this one."""
+        with pane(RELAY_GUEST_PERMISSION_TIMEOUT="0.3") as (runtime, _events):
+            answers = runtime / "guest-answers"
+            answers.mkdir()
+            (answers / "someone-elses.json").write_text(
+                json.dumps({"token": "tok-1", "decision": "allow"}), encoding="utf-8")
+            code, out = call(["PermissionRequest"], '{"tool_name": "Bash"}')
+            self.assertEqual((0, ""), (code, out))
+            self.assertTrue((answers / "someone-elses.json").exists())
+
+    def test_the_other_hooks_never_wait(self):
+        """Only PermissionRequest holds claude up; a Stop or a Notification with no pane
+        answering it must return at once, not after the permission timeout."""
+        with pane(RELAY_GUEST_PERMISSION_TIMEOUT="30") as (_runtime, _events):
+            started = time.monotonic()
+            for event in ("Stop", "UserPromptSubmit", "Notification", "PreToolUse"):
+                self.assertEqual((0, ""), call([event], '{"tool_name": "Bash"}'))
+            self.assertLess(time.monotonic() - started, 5)
+
+
+# ----- what one event may carry (protocol 26.3) ------------------------------------------------
+
+
+class PayloadCap(unittest.TestCase):
+    """The pane deletes an event file over 256 KiB unread, so a `Write` holding a whole file — or
+    a hook payload anywhere near the shim's 1 MiB stdin limit — must arrive cut down rather than
+    not at all (review of 51587e3)."""
+
+    LIMIT = 256 * 1024
+
+    def send(self, payload: dict) -> tuple[dict, int]:
+        with pane() as (_runtime, events):
+            call(["Stop"], json.dumps(payload))
+            path = spooled(events)[0]
+            return json.loads(path.read_text(encoding="utf-8"))["data"]["payload"], path.stat().st_size
+
+    def test_a_long_field_is_cut_with_a_marker(self):
+        data, size = self.send({"tool_name": "Write",
+                                "tool_input": {"file_path": "/w/x.py", "content": "y" * 900_000}})
+        self.assertLess(size, self.LIMIT)
+        self.assertEqual("/w/x.py", data["tool_input"]["file_path"])
+        self.assertTrue(data["tool_input"]["content"].endswith(guest_hook.TRUNCATED))
+        self.assertLess(len(data["tool_input"]["content"]), guest_hook.MAX_FIELD_CHARS + 64)
+        self.assertEqual("Write", data["tool_name"])
+
+    def test_many_long_fields_cost_the_tool_input_but_not_the_question(self):
+        huge = {"field-%d" % index: "z" * 40_000 for index in range(60)}
+        data, size = self.send({"hook_event_name": "PermissionRequest", "tool_name": "Edit",
+                                "session_id": "s-1", "tool_input": huge})
+        self.assertLess(size, self.LIMIT)
+        self.assertNotIn("tool_input", data)
+        self.assertTrue(data["relay_truncated"])
+        self.assertEqual(("Edit", "s-1"), (data["tool_name"], data["session_id"]))
+
+    def test_a_small_payload_is_untouched(self):
+        payload = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "cwd": "/w"}
+        data, _size = self.send(payload)
+        self.assertEqual(payload, data)
+
+    def test_a_payload_past_the_stdin_ceiling_is_still_a_question(self):
+        """Whatever the ceiling is, a payload above it arrives as half a JSON document and parses
+        as nothing. The question must still appear — with nothing in it — rather than the guest
+        blocking on a request the pane never shows."""
+        with pane() as (_runtime, events), mock.patch.object(guest_hook, "MAX_STDIN", 64):
+            code, out = call(["Stop"], json.dumps({"tool_name": "Write", "tool_input": {"c": "y" * 4000}}))
+            self.assertEqual((0, ""), (code, out))
+            self.assertEqual({"relay_truncated": True}, one_envelope(self, events)["data"]["payload"])
+
+    def test_deep_nesting_does_not_recurse_without_end(self):
+        nested: dict = {"leaf": 1}
+        for _ in range(200):
+            nested = {"down": nested}
+        data, size = self.send({"tool_name": "X", "tool_input": nested})
+        self.assertLess(size, self.LIMIT)
+        self.assertIn("tool_name", data)
 
 
 # ----- the statusline fields (protocol 26.3) --------------------------------------------------
@@ -261,10 +422,9 @@ class PermissionDecision(unittest.TestCase):
 
 class StatuslineFields(unittest.TestCase):
     def fields(self, payload: dict) -> dict:
-        with tempfile.TemporaryDirectory() as root, relay_env(
-                RELAY_GUEST_EVENT=str(HELPER), RELAY_RUNTIME_DIR=root, RELAY_SESSION_TOKEN="tok-1"):
+        with pane() as (_runtime, events):
             call(["statusline"], json.dumps(payload))
-            return read_envelope(Path(root))["data"]
+            return one_envelope(self, events)["data"]
 
     def test_model_and_context_share(self):
         data = self.fields({"model": {"display_name": "Claude Sonnet 4.5"},

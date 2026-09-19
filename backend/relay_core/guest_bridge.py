@@ -23,10 +23,10 @@ Shape of the thing, one process:
   directory (a pane's cwd moves; its registration is rewritten). A registration whose runtime
   dir has vanished is a closed pane and is dropped.
 * **The channel out** — everything the sidecar learns reaches its pane the one way protocol
-  26.3 allows: a `bridge` event that atomically replaces `guest.json` in the pane's runtime dir.
-  The writer is the hooks phase's `shell/guest-event.py`, called as `guest-event.py bridge
-  claude` with the event's data on stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its
-  environment — the same single writer the shim's own events use, so the pane reads one file
+  26.3 allows: a `bridge` event dropped on the pane's event spool (`guest-events/` under its
+  runtime dir). The writer is the hooks phase's `shell/guest-event.py`, called as
+  `guest-event.py bridge claude` with the event's data on stdin and
+  `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment — the same single writer the shim's own events use, so the pane reads one file
   one way, and the §26.3 envelope (token, fresh sequence, event, guest) is built in one place.
 * **Blocking tools** — `openDiff` carries `old_file_path`, `new_file_path`,
   `new_file_contents`; the sidecar computes the unified diff (difflib, `a/`-`b/` headers, the
@@ -533,10 +533,10 @@ class Bridge:
     # ----- the guest event channel (protocol 26.3) ------------------------------------------------
 
     def emit(self, pane: PaneRegistration, tool: str, args: dict, reply_path: str | None = None) -> bool:
-        """One `bridge` event into the pane's runtime dir, written by `shell/guest-event.py` —
+        """One `bridge` event onto the pane's event spool, written by `shell/guest-event.py` —
         the channel's one writer (26.3): the helper builds the §26.3 envelope (token, fresh
-        sequence, event, guest) and replaces `guest.json` atomically; the bridge supplies only
-        the event's data on stdin. A helper that is missing, fails, or has nowhere to write is
+        sequence, event, guest) and drops it into `guest-events/` as its own file; the bridge
+        supplies only the event's data on stdin. A helper that is missing, fails, or has nowhere to write is
         a failed emit, and the caller tells claude so."""
         if not (pane.helper and os.path.isfile(pane.helper)):
             self.log(f"helper_missing tool={tool} helper={pane.helper!r}")

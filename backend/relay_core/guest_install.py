@@ -1,27 +1,47 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The marked settings installer for guest agents (GT7X, protocol 26.3).
 
-Guest integration is **per project and off by default**. Turning it on writes Relay's hook and
-statusline commands into that project's `.claude/settings.json` *additively*: every entry already
-in the file is preserved verbatim, and Relay's own entries carry a marker — the trailing
-`--relay-guest` token on the command — so turning it off removes exactly those and nothing else.
-The user's global `~/.claude/settings.json` is touched only by an explicit second opt-in.
+Guest integration is **per project and off by default**; today the only way to turn it on is this
+module's own command line (there is no Options pane for it yet):
+
+    python -m relay_core.guest_install --project <dir> --on|--off|--status [--global --global-opt-in]
+
+Turning it on writes Relay's hook and statusline commands into that project's
+`.claude/settings.local.json` *additively*. **Local, never `settings.json`**: that file is the
+shared, source-controlled one, and a commit of it would hand every teammate a hook command whose
+`$RELAY_BACKEND_DIR` is empty on their machine. `settings.local.json` is the per-developer file
+Claude Code keeps out of git, which is what a Relay pane's wiring is. Every entry already in the
+file is preserved, and Relay's own entries carry a marker — the `--relay-guest` token on the
+command — so turning it off removes exactly those and nothing else. The user's global
+`~/.claude/settings.json` is touched only by an explicit second opt-in.
+
+The file is re-serialised, not patched: the JSON is read, changed and written back with the
+indentation it already used (tabs or n spaces, detected from the file) and its original mode. So
+"everything else is preserved" means every *entry*, with its value and its order — not the file's
+bytes. Comments, which JSON does not have and Claude Code does not read, would not survive.
 
 What is installed, and why (protocol 26.4):
 
-* `hooks.PreToolUse`, `hooks.UserPromptSubmit`, `hooks.Stop`, `hooks.Notification` — one matcher
-  group each, calling `"$RELAY_PYTHON" -m relay_core.guest_hook <event>` with the hook JSON on
-  stdin. The shim forwards each as a `hook` channel event; PreToolUse is answered as a Relay
-  question on the pane, never auto-approved.
+* `hooks.PermissionRequest` — the hook Claude Code fires only when it is actually about to ask
+  the user for permission. The shim forwards it and holds it open while the pane asks; nothing is
+  ever auto-approved. `PreToolUse` is *not* installed: it fires before every tool call, including
+  the ones the user's own permission rules allow silently, and holding each of those open would
+  stall the guest on tools it never needed to ask about.
+* `hooks.UserPromptSubmit`, `hooks.Stop`, `hooks.Notification` — the turn brackets and the
+  guest's own notifications. Each returns immediately; they only move pane state.
 * `statusLine` — the same module in statusline mode, so the pane's guest chip gets the model and
   the context share while claude still renders its own statusline (the shim prints one
   passthrough line). `statusLine` holds a single command, so a user's own statusline is *kept*
   rather than overwritten; the chip then simply has nothing to show.
 
-The installer is a library (the Options › Guests toggle calls it) and a command line, so the
-GUI can wire it with one `QProcess` call:
+Every command starts with a shell guard, because a settings file is read by every claude started
+in that project, including ones with no Relay around them: with `RELAY_GUEST_EVENT` or
+`RELAY_BACKEND_DIR` unset the command exits 0 having done nothing. Without the guard the old
+`"$RELAY_PYTHON" -m …` form expanded to an empty command — exit 127, and an error on the user's
+screen at every tool call. It is also run by absolute path, so no `PYTHONPATH` is needed.
 
-    python -m relay_core.guest_install --project <dir> --on|--off|--status [--global ...]
+Claude Code's own default hook timeout is 600 s, so each entry carries an explicit `timeout`: the
+permission question a little above the shim's own wait, the rest a few seconds.
 """
 from __future__ import annotations
 
@@ -29,14 +49,31 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 
 MARKER = "--relay-guest"          # the token that marks a Relay-installed entry, in the command
-HOOK_EVENTS = ("PreToolUse", "UserPromptSubmit", "Stop", "Notification")
-HOOK_COMMAND = '"$RELAY_PYTHON" -m relay_core.guest_hook {event} ' + MARKER
-STATUSLINE_COMMAND = '"$RELAY_PYTHON" -m relay_core.guest_hook statusline ' + MARKER
-SETTINGS_RELATIVE = Path(".claude") / "settings.json"
+HOOK_EVENTS = ("PermissionRequest", "UserPromptSubmit", "Stop", "Notification")
+# Seconds Claude Code waits for each. The permission question outlives the shim's own wait
+# (guest_hook.PERMISSION_TIMEOUT_DEFAULT, 120 s) so the shim, not claude, decides when to give up.
+HOOK_TIMEOUTS: dict[str, int] = {"PermissionRequest": 180}
+HOOK_TIMEOUT_DEFAULT = 10
+# The guard, then the shim by absolute path. `$RELAY_BACKEND_DIR` and `$RELAY_GUEST_EVENT` are
+# exported by the pane that started the shell (Pane::startTerminal, 26.2).
+GUARD = '[ -n "$RELAY_GUEST_EVENT" ] && [ -n "$RELAY_BACKEND_DIR" ] || exit 0'
+RUN = 'exec "${RELAY_PYTHON:-python3}" "$RELAY_BACKEND_DIR/relay_core/guest_hook.py"'
+STATUSLINE_COMMAND = GUARD + "; " + RUN + " statusline " + MARKER
+# The per-developer file, which Claude Code keeps out of git. `settings.json` is shared.
+SETTINGS_RELATIVE = Path(".claude") / "settings.local.json"
+# The global file has no ".local" variant: ~/.claude/settings.json *is* the user's own.
+GLOBAL_SETTINGS_RELATIVE = Path(".claude") / "settings.json"
+
+
+def hook_command(event: str) -> str:
+    """The command one hook entry runs. Not a `.format` template: the command itself holds
+    `${RELAY_PYTHON:-python3}`, and braces in a format string are not braces."""
+    return GUARD + "; " + RUN + " " + event + " " + MARKER
 
 
 class SettingsError(Exception):
@@ -48,7 +85,7 @@ def project_settings_path(project_dir) -> Path:
 
 
 def global_settings_path(home=None) -> Path:
-    return Path(home if home is not None else os.path.expanduser("~")) / SETTINGS_RELATIVE
+    return Path(home if home is not None else os.path.expanduser("~")) / GLOBAL_SETTINGS_RELATIVE
 
 
 # ----- reading and writing ------------------------------------------------------------------
@@ -69,17 +106,51 @@ def load(path: Path) -> dict:
 
 
 def save(path: Path, settings: dict) -> None:
-    """Replace the file atomically, so a claude reading it never sees half a settings object."""
+    """Replace the file atomically, so a claude reading it never sees half a settings object.
+
+    The file's own indentation and its mode are carried over: mkstemp makes a 0600 file, and
+    dropping a settings file to 0600 (or re-indenting a two-space file to four) is a change the
+    user never asked for and would find in `git status` — or, worse, would not.
+    """
+    indent, newline, mode = _format_of(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=path.name + "-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(settings, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
+            json.dump(settings, handle, indent=indent, ensure_ascii=False)
+            if newline:
+                handle.write("\n")
+        os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+_INDENT = re.compile(r'^([ \t]+)"', re.MULTILINE)
+
+
+def _format_of(path: Path) -> tuple[int | str, bool, int]:
+    """(indent for json.dump, trailing newline, mode) of the file as it is now.
+
+    A file that is not there yet is two-space, newline-terminated and 0666 minus the umask — the
+    mode any other tool would have given it.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+        mode = os.stat(path).st_mode & 0o7777
+    except OSError:
+        umask = os.umask(0o077)
+        os.umask(umask)
+        return 2, True, 0o666 & ~umask
+    match = _INDENT.search(text)
+    if match is None:
+        indent: int | str = 2
+    elif "\t" in match.group(1):
+        indent = "\t"
+    else:
+        indent = len(match.group(1))
+    return indent, text.endswith("\n"), mode
 
 
 # ----- the marker ---------------------------------------------------------------------------
@@ -144,7 +215,8 @@ def install(path: Path) -> dict:
             raise SettingsError(f"{path}: \"hooks.{event}\" is not a list; Relay left it alone.")
         # Drop a marked group from an earlier install, then append the current command.
         hooks[event] = [group for group in groups if not _group_is_ours(group)]
-        hooks[event].append({"hooks": [{"type": "command", "command": HOOK_COMMAND.format(event=event)}]})
+        hooks[event].append({"hooks": [{"type": "command", "command": hook_command(event),
+                                        "timeout": HOOK_TIMEOUTS.get(event, HOOK_TIMEOUT_DEFAULT)}]})
         added.append(f"hooks.{event}")
     statusline = settings.get("statusLine")
     if statusline is None or marked(statusline):
@@ -161,7 +233,8 @@ def install(path: Path) -> dict:
 
 
 def remove(path: Path) -> dict:
-    """Remove exactly Relay's marked entries; leave every other entry byte-for-byte as it was.
+    """Remove exactly Relay's marked entries; leave every other entry as it was (the file is
+    re-serialised, see `save`, so entries survive and formatting is reproduced, not preserved).
 
     A group that holds only marked commands goes whole; a marked command inside a group that
     also holds the user's own is dropped from it, and the group is kept.
