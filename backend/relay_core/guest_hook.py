@@ -65,6 +65,10 @@ MAX_DEPTH = 8                        # nesting kept before the subtree becomes t
 TRUNCATED = "… [truncated by Relay]"
 # The channel's one writer, beside the backend directory this file is run from: an installed
 # Relay and a checkout both have `shell/` and `backend/` as siblings.
+# Three shims carry this constant (guest_hook, guest_codex, guest_slash) and they must not
+# be folded into one: two of them are run by absolute path with no PYTHONPATH, so they may
+# not import from `relay_core` at all. `tests/test_guest.py` (OneChannelInThreeLanguages) is what
+# keeps the copies in step.
 WRITER = Path(__file__).resolve().parents[2] / "shell" / "guest-event.py"
 
 

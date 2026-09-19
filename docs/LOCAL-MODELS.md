@@ -212,7 +212,7 @@ PrismML fork passes 1, 2, 3 and 5 and **fails 4** — asked to explain the tags,
 turns them into a `lookup_number` call and the answer never arrives. `muse-glimmer:latest` through
 Ollama passes all five.
 
-## Worker protocol (section 23)
+## Worker protocol
 
 Four messages, handled by `localmodels.handle`. Each gets exactly one event back. All four events
 are withheld from a remote client (`remote/wire.py`), like `presets`: what serves on the desktop's

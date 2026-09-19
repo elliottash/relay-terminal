@@ -21,8 +21,20 @@ The two Qt counts exclude Qt Test's `initTestCase`/`cleanupTestCase` entries. Th
 from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all three.
 
 **Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
-`ctest --test-dir build` **29/29**, both clean. The three rows above are the 2026-09-17 snapshot and
-the per-suite tables below have not been re-counted since; the two commands are the source of truth.
+`ctest --test-dir build` **29/29**, both clean. `ctest` now registers **56** tests, not 29
+(`grep -c add_test CMakeLists.txt engine/CMakeLists.txt`) — `guestbridge`, `projectinit`,
+`striplayout`, `pulsepaint`, `panestatus`, `boardworkspace`, `diffview` and `sharing` among
+them — and neither total has been re-taken since the 2026-09-19 merge, so both numbers above
+are stale. The three rows above are the 2026-09-17 snapshot and the per-suite tables below
+have not been re-counted since; the two commands are the source of truth.
+
+The per-suite inventory below is also **partial**, and knowingly so: it names about 16 of the
+~90 modules under `tests/`, and its hand-summed `**Total**` row is arithmetic over those 16
+only. The whole guest family (`test_guest*.py`), `test_plan_turns.py`, `test_project_probe.py`,
+`test_forge_sync.py`, `test_update.py`, `test_board_*.py`, `test_pane_view.py`, the
+`test_remote_*.py` family, and the C++ `projectinit`/`striplayout`/`pulsepaint`/`panestatus`/
+`guestbridge` suites have no row. Whether to extend the table or replace it with a generated
+inventory is a call for the owner; until then, read the two commands, not the table.
 `tests/modelsettings_test.cpp` (the API-keys and model-roles modals, 8 cases) joined the ctest set on
 2026-09-18 and is not yet in the Qt table below.
 

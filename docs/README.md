@@ -16,7 +16,10 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [F-KEYS.md](F-KEYS.md) | Proposal: what belongs on an F-key versus a Ctrl chord, which four keys to assign, and what each would cost vim, nano and mc |
 | [ENGINE.md](ENGINE.md) | Relay's own terminal engine: cores, PTY, view, `TerminalBackend`, status and plans (spike history folded in) |
 | [ENGINE-PERF.md](ENGINE-PERF.md) | Terminal engine and emulator-core benchmarks (2026-09-17 measurements) |
-| [AGENT-SESSIONS-PROTOCOL.md](AGENT-SESSIONS-PROTOCOL.md) | GUI ↔ worker message contract: sessions, planning, subagents, suggestions |
+| [AGENT-SESSIONS-PROTOCOL.md](AGENT-SESSIONS-PROTOCOL.md) | GUI ↔ worker message contract: sessions, planning, subagents, suggestions, model roles and tiers, the Switchboard, SSH, guest agents, questions |
+| [LOCAL-MODELS.md](LOCAL-MODELS.md) | Running the agent on a model served on this machine: the endpoint registry, probing, the `local` tier and role, and the `local_*` messages (`#24XJ`) |
+| [SSH-AND-MOSH.md](SSH-AND-MOSH.md) | How Relay wraps `ssh` and `mosh` in its pane shells, per-host policy, connection sharing, and what a remote pane can do (`#S5SH`) |
+| [THEMES.md](THEMES.md) | Theme design rather than the theme system: the rules a theme must follow, how contrast is measured, and the Dark Copper / IBM Beige audition (`#0JA7`) |
 | [RELAY-FREE.md](RELAY-FREE.md) | Relay Free: the included hosted allowance for a fresh install — identity, token, gateway contract, quotas, privacy posture, operating notes and what exists so far (`#HG7K`) |
 | [RELAY-FREE-HANDOFF.md](RELAY-FREE-HANDOFF.md) | Handoff for the three open Relay Free items: the allowance chip in the phone and Relay-to-Relay views, tuning the Lite output cap from measured replies, and moving Lite to Gemini direct (`#HG7K`) |
 | [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md) | RRP/1: the wire contract for phone access and multiplayer — Noise handshake, pairing, messages, sequencing, the rendezvous API, and what is built so far |
@@ -41,14 +44,23 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette, since 2026-09-18 the Actions tab and search of the Settings pane |
 | [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Warp Remote Control, Blink, sshx and others compared; the phone-first design, phases, threat model and owner decisions behind `#W5N2` |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
+| [SWITCHBOARD-AESTHETIC.md](SWITCHBOARD-AESTHETIC.md) | Proposal: the switchboard aesthetic inside Relay — design only, nothing implemented (`#8E4Q`) |
 | [RESEARCH.md](RESEARCH.md) | Historical: primary sources checked for the first build (KonsolePart, Qt editor, Warp licensing, Kimi and Z.AI endpoints) |
 
 ## Evidence
 
 [`qa_evidence/`](qa_evidence/) holds screenshots, dumps and driver scripts, one folder per
 feature (`YYYY-MM-DD-slug/`). Files named `implementer-*` come from the implementing session,
-not from independent QA. The index of folders is in [VALIDATION.md](VALIDATION.md#verified-live-implementer-checks).
+not from independent QA. A **partial** index of folders is in
+[VALIDATION.md](VALIDATION.md#verified-live-implementer-checks) — it stops at 2026-09-18 and
+names about a quarter of the folders, so the directory listing is the complete one.
 
 ## Issues
 
 The tracker lives in [`../issues/`](../issues/README.md).
+
+## Superseded
+
+[ENGINE-SPIKE.md](ENGINE-SPIKE.md) is a stub: the spike report was folded into
+[ENGINE.md](ENGINE.md) and its benchmarks into [ENGINE-PERF.md](ENGINE-PERF.md). It is kept
+because [VALIDATION.md](VALIDATION.md) and [ROADMAP.md](ROADMAP.md) still link to it.

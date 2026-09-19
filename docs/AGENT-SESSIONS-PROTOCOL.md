@@ -112,9 +112,13 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 ## 8. Subagents
 
 - Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
-- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`.
+- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
+  `subagent_handoff {id, handoff: "next_model_call"|"wake"|"pending", wakeups, max_auto_turns, tools?, tokens?, elapsed_ms?}`
+  — how a finished background subagent's result reaches the main agent: at its next model call, as a
+  wake-up turn Relay queued, or `pending` because the auto-turn budget is spent.
 - `agent_subscribe {id, on: bool}` → while on, the worker also sends `subagent_event {id, event: {...}}` wrapping that subagent's delta/tool_started/tool_output/tool_result events.
-- `agent_message {id, text}` (user → subagent), `agent_stop {id | "all"}`.
+- `agent_message {id, text}` (user → subagent) → `agent_message_delivered {id, delivered: "next_step"|"resumed", status}`;
+  `agent_stop {id | "all"}` → `agent_stopped {ids}`, the subagent ids that were actually stopped.
 - `agent_set_model {id | "all", model}` moves one subagent, or every listed one, to another model (`model` as in the `agent` tool: `inherit`, a preset id or an alias). The worker emits `subagent_model {id, model, applies: "now"|"next_step", warnings?}` for each: a running subagent switches before its next model call, a waiting or finished one at once.
 - Background completion: the result is delivered to the main agent before its next model call; if the main agent is idle, the worker enqueues a main turn "Background agent <id> finished: <summary>" (owner decision 4).
 - **A main agent blocked on its subagents** (card #V7QD; jobs are the same, section "Commands as jobs") needs no event of its own; the GUI derives it from what is already here, and shows "waiting for N subagents . . ." in the prompt box. It is blocked when subagents are live *and* any of: its running tool call is `agent_wait` (`tool_started {tool: "agent_wait", call_id}` until the matching `tool_result`); a live subagent has `background: false`, because `run_tool` waits on a foreground `agent` call before it returns; or no turn of its own is running (after `agent_finished`) while background subagents go on. A turn that started background subagents and kept working is *not* blocked.
@@ -1035,18 +1039,6 @@ until it reopens, a spent `quota_exhausted` allowance is never waited out; the 4
 rather than starting a fresh six. A local model server is excluded — its 5xx are deterministic,
 and its loading 503 keeps its own fixed wait inside the first-token budget.
 
-Since 2026-09-19 the transport itself also retries a *refused* request — HTTP 408, 409, 429 or any
-5xx from a provider that is not a local model server — up to six times, waiting what a
-`Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute) and
-otherwise backing off exponentially (0.5 s doubling to 8 s, with jitter); this is the policy
-Claude Code's transport uses. The status arrives before anything streams, so the retry repeats
-nothing the user has seen. Each wait emits the same event with `reason: "http"` and no `turn_id`
-(the transport does not know the turn), plus a `status`; the refusal becomes an `error` only when
-the attempts run out. Relay's own gateway decides from its error body: a `rate_limited` window is
-waited out until it reopens, a spent `quota_exhausted` allowance is never waited out. A local
-model server is excluded — its 5xx are deterministic, and its loading 503 keeps its own fixed
-wait inside the first-token budget.
-
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 
 #### 15.2.1 A step cut off at the output limit
@@ -1177,7 +1169,7 @@ additionally accepts `{"tier": "main"|"flash"|"lite"|"local", "effort"?}`, which
 LLM (make that as a 4th category with main, flash, lite, local)") is the one tier that belongs to no
 provider, so it has no row in `TIER_DEFAULTS` and the per-provider table stays three wide
 (`presets.PROVIDER_TIERS`). `tiers.local` accepts **only** a model server on this machine — a saved
-`local:<slug>` endpoint id (section 23), or a plain `http://` loopback `base_url` with its `model` — and a
+`local:<slug>` endpoint id (`docs/LOCAL-MODELS.md`, "Worker protocol"), or a plain `http://` loopback `base_url` with its `model` — and a
 hosted preset there is an error. With no override it is the first endpoint in the registry, so one saved
 server just works. A local endpoint needs no key and none is looked up; a server that is simply not
 running is not a fallback case, and the turn fails with the transport's "No model server is answering

@@ -65,6 +65,10 @@ GUEST_EVENT_VAR = "RELAY_GUEST_EVENT"
 # script itself in the first cut of 26.3; since the spool replaced the single `guest.json` slot
 # the pane exports the spool *directory* there, so the writer's path is resolved here and the
 # variable is only what says there is a pane to write to at all.
+# Three shims carry this constant (guest_hook, guest_codex, guest_slash) and they must not
+# be folded into one: two of them are run by absolute path with no PYTHONPATH, so they may
+# not import from `relay_core` at all. `tests/test_guest.py` (OneChannelInThreeLanguages) is what
+# keeps the copies in step.
 WRITER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "shell", "guest-event.py")
 

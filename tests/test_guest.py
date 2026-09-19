@@ -1,3 +1,5 @@
+import importlib.util
+import os
 import re
 import stat
 import tempfile
@@ -189,6 +191,74 @@ class BridgeEnv(unittest.TestCase):
                 guest.bridge_env("claude", port)
         with self.assertRaises(ValueError):
             guest.bridge_env("gemini", 45678)
+
+
+class OneChannelInThreeLanguages(unittest.TestCase):
+    """The guest event channel (26.3) is spelled out in five places and linked by nothing but
+    this test.
+
+    Three Python shims name `shell/guest-event.py` themselves — `relay_core.guest_hook`,
+    `relay_core.guest_codex` and `relay_core.guest_slash` — and each has its own copy of the
+    path. That is not an oversight to be tidied away: the hook shim and the codex notify entry
+    are both run **by absolute path with no PYTHONPATH** (see `guest_install.RUN` and
+    `guest_codex.notify_command`), so neither may import anything from `relay_core`, and a
+    shared constant would turn every hook into an ImportError. What the copies must do is
+    agree, and until 2026-09-19 nothing said so: the three landed from two branches on the same
+    day, two of them spelling the path with `os.path` and one with `pathlib`.
+
+    The same goes across the language line. `src/Pane.h` reads the spool, names the two
+    directories and dispatches the five event names; `shell/guest-event.py` and
+    `guest_hook.ANSWERS_DIR` name the directories on the Python side; `remote.wire`
+    classifies the five names so no worker event can be pre-classified by accident. A name
+    added on one side only is a dead branch or a lost event, and it is silent.
+    """
+
+    PANE = Path(__file__).resolve().parents[1] / "src" / "Pane.h"
+    WRITER = Path(__file__).resolve().parents[1] / "shell" / "guest-event.py"
+
+    def writer_module(self):
+        spec = importlib.util.spec_from_file_location("relay_guest_event_under_test", self.WRITER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def pane_text(self):
+        return self.PANE.read_text(encoding="utf-8")
+
+    def test_the_three_shims_name_the_same_writer(self):
+        from relay_core import guest_codex, guest_hook, guest_slash
+        wanted = os.path.realpath(str(self.WRITER))
+        for module in (guest_hook, guest_codex, guest_slash):
+            with self.subTest(module=module.__name__):
+                self.assertEqual(wanted, os.path.realpath(str(module.WRITER)))
+
+    def test_the_writer_is_there_and_runnable(self):
+        """Two of the three shims exec it as `[writer, event, guest]` with no interpreter
+        (`guest_slash.emit`), so the executable bit is part of the contract, not packaging."""
+        self.assertTrue(self.WRITER.is_file(), self.WRITER)
+        self.assertTrue(os.access(self.WRITER, os.X_OK), f"{self.WRITER} is not executable")
+
+    def test_the_two_directory_names_are_the_same_in_cxx_and_python(self):
+        text = self.pane_text()
+        names = re.findall(r'guest(?:Events|Answers)DirName\(\) \{ return QStringLiteral\("([a-z-]+)"\)', text)
+        self.assertEqual(["guest-events", "guest-answers"], names,
+                         "src/Pane.h no longer names the spool and answer directories where this "
+                         "test reads them")
+        self.assertEqual("guest-events", self.writer_module().EVENTS_DIR_NAME)
+        from relay_core import guest_hook
+        self.assertEqual("guest-answers", guest_hook.ANSWERS_DIR)
+
+    def test_the_pane_handles_exactly_the_classified_channel_events(self):
+        from remote import wire
+        body = self.pane_text()
+        body = body[body.index("void handleGuestEvent("):]
+        body = body[:body.index("\n    void setGuestBusy")]
+        branches = re.findall(r'name == QStringLiteral\("([a-z_]+)"\)', body)
+        self.assertTrue(branches, "handleGuestEvent's branches could not be read out of src/Pane.h")
+        self.assertEqual(sorted(wire.GUEST_CHANNEL_EVENTS), sorted(branches),
+                         "src/Pane.h and remote.wire.GUEST_CHANNEL_EVENTS disagree about the "
+                         "guest channel's events")
+        self.assertEqual(len(branches), len(set(branches)))
 
 
 if __name__ == "__main__":

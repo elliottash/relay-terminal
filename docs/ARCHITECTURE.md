@@ -1,6 +1,6 @@
 # Relay architecture
 
-Current as of 2026-09-17 (commit `10819d9`). Every
+Current as of 2026-09-19 (commit `ab8f37e`). Every
 statement points at code; paths are relative to the repository root. Planned work is in
 [ROADMAP.md](ROADMAP.md), test status in [VALIDATION.md](VALIDATION.md).
 
@@ -16,14 +16,18 @@ Contents:
 8. [Inline agent output](#8-inline-agent-output)
 9. [Human and agent control](#9-human-and-agent-control)
 10. [File panes and `relay open`](#10-file-panes-and-relay-open)
+10a. [The Switchboard pane](#10a-the-switchboard-pane)
 11. [Agent backend](#11-agent-backend)
-12. [Keys, keyring and Warp import](#12-keys-keyring-and-warp-import)
+11a. [Guest agents: Claude Code and Codex in a pane](#11a-guest-agents-claude-code-and-codex-in-a-pane)
+12. [Keys, keyring and imports](#12-keys-keyring-and-imports)
 13. [Per-pane isolation](#13-per-pane-isolation)
+13a. [Logs](#13a-logs)
 14. [Theme](#14-theme)
 15. [Packaging layout](#15-packaging-layout)
-16. [Engine spike and `TerminalBackend`](#16-engine-spike-and-terminalbackend)
+16. [The terminal: `TerminalBackend` and Relay's engine](#16-the-terminal-terminalbackend-and-relays-engine)
 17. [Fragile dependencies and limits](#17-fragile-dependencies-and-limits)
 18. [Source map](#18-source-map)
+19. [Sharing a pane with a phone](#19-sharing-a-pane-with-a-phone)
 
 ## 1. Overview
 
@@ -1387,20 +1391,24 @@ history in the same view with "↑ owner session" (and "↑ parent thread"); a t
 holds also links to `RelayWindow::openSubagentTab`. `ToolPane` hosts both views through
 `relay::PaneView` (`src/PaneView.h`): a title, focus and the header inset.
 
-### Model roles and the Main / Flash / Lite tiers
+### Model roles and the Main / Flash / Lite / Local tiers
 
 `backend/relay_core/roles.py` and the tier table in `presets.py`, protocol sections 13 and 13.7.
-Eleven roles — `main`, `terminal_use`, `subagent`, `switchboard`, `flash`, `summaries`, `suggestions`,
-`chores`, `audit`, `vision`, `route_assist` — but only **three** knobs, because every role follows a
-tier:
+Thirteen roles — `main`, `terminal_use`, `subagent`, `switchboard`, `flash`, `local`, `planning`,
+`summaries`, `suggestions`, `chores`, `audit`, `vision`, `route_assist` — but only **four** knobs,
+because every tiered role follows a tier:
 
 | Tier | Roles | Default |
 |---|---|---|
 | Main | `main`, `subagent`, `switchboard` | the pane's own model |
 | Flash | `terminal_use`, `flash`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | Lite | `chores`, `audit` | `TIER_DEFAULTS[<main preset>]["lite"]` |
+| Local | `local` | the first endpoint in the local registry; no provider preset, so
+  `presets.PROVIDER_TIERS` stays three wide (`main`, `flash`, `lite`) |
 
-`vision` and `route_assist` are outside the tiers: vision uses the provider's image model, and route
+`vision`, `route_assist` and `planning` are outside the tiers (`roles.py`'s tier map gives all three
+`None`): vision uses the provider's image model, plan mode runs on the pane's own model pushed to max
+reasoning (protocol 13.11), and route
 assist is pinned to `google/gemini-3.5-flash-lite` because routing has a sub-second budget (0.5–0.6 s
 measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not move it.
 
@@ -1773,7 +1781,7 @@ the user confirms — Relay never reaches into a project on its own. The referen
 `docs/AGENT-SESSIONS-PROTOCOL.md` section 26, whose contracts (§26.3–26.8) are binding; every
 deviation from this section is written down there. Guests are **local-only**: none of the pane's
 `guest_model` / `guest_context_pct` / `guest_busy` state or the five guest event kinds crosses the
-wire to a remote host (`WITHHELD_EVENTS` in `remote/wire.py`, one regression test). The module
+wire to a remote host (`GUEST_CHANNEL_EVENTS` in `remote/wire.py`, one regression test). The module
 root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no exceptions).
 
 - **Detection** (`guest.py`, and the pane's foreground watch): one `GuestSpec` per tool and
@@ -1787,21 +1795,30 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
 - **One event channel** (§26.3): everything a guest phase learns reaches its pane as one
   envelope — `{"token", "sequence", "event", "guest", "data"}`, the event one of `hook`,
   `statusline`, `state`, `bridge`, `slash` — written by the single `shell/guest-event.py`
-  helper as a whole-file atomic replace of `guest.json` in the pane's runtime dir, which the
-  pane polls **by inode** beside `state.json` and dispatches in `Pane::pollGuestEvent`. The
+  helper as **one file per event** in the pane's `guest-events/` spool directory
+  (`<time_ns>-<pid>-<counter>.json`, `mkstemp`ed then `os.replace`d into place), which the
+  pane lists beside `state.json` on the same tick, handles in name order and then deletes,
+  in `Pane::pollGuestEvents`. It was a single `guest.json` slot until the review of 51587e3:
+  a statusline tick landing on top of a permission question replaced the question, and the
+  shim then waited out its whole timeout for an answer nobody had been shown. The
   pane accepts only its own pane token and a fresh sequence, and a missing `RELAY_GUEST_EVENT`
   makes the helper a no-op that writes nowhere, so the entries Relay leaves in a tool's
   settings are inert in an ordinary terminal. All five kinds are withheld from the wire, and
   any future one is refused by the same regression test until an explicit owner decision adds
-  it to `KNOWN_EVENTS`.
+  it to `GUEST_CHANNEL_EVENTS`.
 - **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`):
-  marked, additive entries in the project's `.claude/settings.json` — hooks `PreToolUse`,
-  `UserPromptSubmit`, `Stop` and `Notification` calling `"$RELAY_PYTHON" -m relay_core.guest_hook
-  <event>`, plus a `statusLine` shim that feeds the pane's guest chip while claude still
+  marked, additive entries in the project's `.claude/settings.local.json` (never the shared,
+  source-controlled `settings.json`) — hooks `PermissionRequest`, `UserPromptSubmit`, `Stop`
+  and `Notification` calling `"${RELAY_PYTHON:-python3}"
+  "$RELAY_BACKEND_DIR/relay_core/guest_hook.py" <event> --relay-guest` behind a
+  `$RELAY_GUEST_EVENT` guard (§26.4; the `-m relay_core.guest_hook` form expanded to an empty
+  command and exited 127), plus a `statusLine` shim that feeds the pane's guest chip while claude still
   renders its own line. Every Relay command carries the `--relay-guest` marker, and turning
   Guests off removes exactly the marked entries and nothing else. A statusline the user wrote
   themselves is kept, not overwritten (the chip then simply has nothing to show), and a
-  `PreToolUse` is answered as a Relay question on the pane — never auto-approved. The global
+  `PermissionRequest` is answered as a Relay question on the pane — never auto-approved, and
+  `PreToolUse` is deliberately **not** installed, because it fires before every tool call
+  including the ones the user's own rules already allow. The global
   `~/.claude/settings.json` gets the same entries only behind a second, explicit opt-in, and
   only ever in addition to the project install.
 - **Codex: `notify` and the rollout tail** (§26.6, `guest_codex.py`): Codex has no IDE bridge
