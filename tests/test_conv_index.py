@@ -189,6 +189,22 @@ class HelperTests(unittest.TestCase):
         self.assertNotEqual(first, conv_index.terminal_id("/tmp/beta"))
         self.assertTrue(conv_index.TERMINAL_ID.match(first))
 
+    def test_workspace_digest_matches_the_gui_project_key(self):
+        """The GUI derives the same key in C++ (`relay::projects::keyFor()`, src/Projects.cpp), and
+        a project's conversations are found by it, so the two implementations have to agree
+        character for character. One literal pins them: it is absolute, it does not exist and
+        nothing above it is a symlink, so neither side's canonicalisation can wander. The same pair
+        is asserted in tests/projects_test.cpp — change one and the other fails."""
+        self.assertEqual(conv_index.workspace_digest("/nonexistent/relay-projects-key-test"),
+                         "9cfae240c229914d")
+        # And the canonicalisation the C++ side mirrors: a trailing slash, a `.` and a `..` are not
+        # a different project.
+        for spelling in ("/nonexistent/relay-projects-key-test/",
+                         "/nonexistent/./relay-projects-key-test",
+                         "/nonexistent/x/../relay-projects-key-test"):
+            self.assertEqual(conv_index.workspace_digest(spelling), "9cfae240c229914d", spelling)
+        self.assertEqual(len(conv_index.workspace_digest("/nonexistent/relay-projects-key-test")), 16)
+
 
 class IndexTests(unittest.TestCase):
     def setUp(self):

@@ -58,6 +58,15 @@ target_include_directories(relay-board PUBLIC src)
 target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
+# Which project a pane is in, where that project's Switchboard folder is (or would be), and the
+# removable registry of known projects under `$XDG_DATA_HOME/relay/state/projects.json`. QtCore only
+# and deliberately not part of relay-board, which links Widgets: candidateFor() is called on every
+# cwd change and must stay a filesystem walk with no git subprocess and no GUI behind it.
+add_library(relay-projects STATIC src/Projects.cpp src/Projects.h)
+target_include_directories(relay-projects PUBLIC src)
+target_link_libraries(relay-projects PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-projects PRIVATE -Wall -Wextra -Wpedantic)
+
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
 # The two provider modals (API keys, model roles): a static library so the roles dialog's lists can be
 # tested headlessly, exactly like the settings pane below.
@@ -389,7 +398,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels)
+    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
@@ -591,6 +600,11 @@ if(BUILD_TESTING)
     target_compile_definitions(relay-boardworkspace-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME boardworkspace COMMAND relay-boardworkspace-tests)
     set_tests_properties(boardworkspace PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The project model: candidate projects, the board folder, the key the backend's workspace
+    # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
+    add_executable(relay-projects-tests tests/projects_test.cpp)
+    target_link_libraries(relay-projects-tests PRIVATE relay-projects ${RELAY_QT}::Test)
+    add_test(NAME projects COMMAND relay-projects-tests)
     # Copy on highlight is header-only (src/CopyOnSelect.h); relay-diffview gives the test one
     # real pane surface that installs it.
     add_executable(relay-copyonselect-tests tests/copyonselect_test.cpp)
