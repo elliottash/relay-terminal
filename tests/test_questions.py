@@ -408,9 +408,11 @@ class PaneCardTests(unittest.TestCase):
 
     def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
         # An empty id or no questions used to `return` and leave the worker blocked for good.
+        # The check itself is `unreadableCard()` (its own method since the approval card, #K2FV,
+        # needed a different notion of readable); this is the branch that answers such a card.
         show = self.block("void showQuestion(const QJsonObject &event) {",
                           "// The worker took the card away")
-        malformed = show.split("if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) {", 1)[1]
+        malformed = show.split("if (unreadableCard()) {", 1)[1]
         malformed = malformed.split("return;", 1)[0]
         self.assertIn("Ink::Error", malformed)                       # the pane says so
         self.assertIn('{"type", "question_answer"}', malformed)      # and the turn carries on

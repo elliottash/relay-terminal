@@ -466,7 +466,10 @@ def main():
                 # A guest's approval or question card is the same round trip (protocol 29.3), so
                 # the harness provider gets first refusal on the id before the agent's own tool.
                 if not guest_harness_provider.answer_question(agent.provider, request):
-                    agent.executor.questions.resolve(request)
+                    # The card may be this agent's or one of its subagents' (card #K2FV); the id
+                    # pending says whose, and a late answer nobody holds is ignored either way.
+                    if not (agent.subagents is not None and agent.subagents.resolve_question(request)):
+                        agent.executor.questions.resolve(request)
             elif kind == "terminal_command_result":
                 # The pane's answer to a `terminal_command` (protocol 22).
                 agent = turns.agent

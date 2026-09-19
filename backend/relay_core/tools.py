@@ -36,7 +36,7 @@ from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable
-from . import remote_files, remote_session, security
+from . import approvals, remote_files, remote_session, security
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
@@ -46,6 +46,13 @@ MAX_OUTPUT = 32768
 DEFAULT_WAIT = 30
 MAX_WAIT = 1800
 SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.I)
+
+
+def _subject(payload: dict) -> str:
+    """What a type_into_program approval card shows (card #K2FV): the intent line, then the text
+    or key it would type, so the card is about the actual keystrokes and not their excuse."""
+    typed = payload["text"] if "text" in payload else f"<{payload.get('key', '')}>"
+    return f"{payload.get('intent', '')} · {typed}"
 
 
 def looks_secret(part: str) -> bool:
@@ -304,6 +311,9 @@ class Prepared:
     # which is what `path` above being a real local Path still means.
     host: str | None = None
     remote_path: str | None = None
+    # Card #K2FV: the capabilities this call already drew its approval card for, so the re-check at
+    # execution time asks only about what the policy added since — one card per action.
+    approved: tuple[str, ...] = ()
 
 
 class Workspace:
@@ -391,6 +401,14 @@ class ToolExecutor:
         # run_command, which has no path to resolve.
         self.policy = policy
         self.workspace = Workspace(root, policy)
+        # Card #K2FV: which capabilities stop and ask before they happen (relay_core/approvals.py).
+        # Allow-all unless the pane says otherwise: the cautious set belongs to a fresh install's
+        # first-launch choice, which the GUI's configure always carries (approvals_chosen: false).
+        self.approvals = approvals.ALLOW_ALL
+        # Whether a card may be drawn at all. Distinct from `can_ask` on purpose: a subagent cannot
+        # ask a question (nobody knows it exists) but its actions still draw approval cards in the
+        # pane it belongs to, named as the subagent's.
+        self.may_approve = True
         # Skill folders are read only through the index, which confines paths to each skill.
         self.skills = skills if skills is not None and skills.skills else None
         # Replaced wholesale by the worker's "keybindings" message; read once per call.
@@ -420,6 +438,27 @@ class ToolExecutor:
         self.jobs = JobTable(on_change=self._announce_jobs)
         self._waiting = None
         self._lock = threading.Lock()
+
+    def _approval(self, name: str, args: dict, *, exists: bool = False, outside_workspace: bool = False,
+                  subject: str = "", already: tuple[str, ...] = ()) -> tuple[str, ...]:
+        """Card #K2FV: put the approval card up for a call the checklist asks about.
+
+        Checked while preparing, so nothing has run when the card goes up — and again at execution
+        for run_command, whose policy may change while a card sits unanswered. A capability already
+        approved for this call (`already`) or for the rest of the turn is not asked for again. Deny
+        raises the refusal the model reads and carries on; Stop still stops the turn, exactly as it
+        does under a question (questions.ask_approval shares the round trip).
+        """
+        if not self.may_approve:
+            return already
+        wanted = [capability for capability
+                  in approvals.needed(self.approvals, name, args, exists=exists,
+                                      outside_workspace=outside_workspace)
+                  if capability not in already and not self.questions.turn_allows(capability)]
+        for capability in wanted:
+            if self.questions.ask_approval(capability, subject) == "deny":
+                raise ValueError(approvals.refusal(capability))
+        return already + tuple(wanted)
 
     def set_default_cwd(self, path: str | None) -> None:
         """Follow the user's terminal. Anything outside the workspace falls back to its root."""
@@ -500,9 +539,11 @@ class ToolExecutor:
             return Prepared(name, {"name": skill.id, "path": args["path"]}, f"READ SKILL FILE\n\n{skill.id}/{args['path']}")
         if name == "type_into_program":
             payload, preview = self.program.prepare(args)
+            self._approval(name, payload, subject=_subject(payload))
             return Prepared(name, payload, preview)
         if name == "run_in_terminal":
             payload, preview = self.terminal.prepare(args)
+            self._approval(name, payload, subject=payload["command"])
             return Prepared(name, payload, preview)
         if name == "ask_user":
             if not self.can_ask:
@@ -540,6 +581,8 @@ class ToolExecutor:
             # not unevadable — see relay_core/security.py.
             if rule := security.denied_command(self.policy, command):
                 raise ValueError(security.refusal(rule))
+            # Card #K2FV: the card goes up while preparing, before anything runs.
+            approved = self._approval(name, args, subject=command)
             background = args.get("background", False)
             if not isinstance(background, bool):
                 raise ValueError("background must be true or false.")
@@ -548,7 +591,7 @@ class ToolExecutor:
             args["timeout_seconds"] = timeout
             wait = "Background" if background else f"Waits: {timeout}s, then continues as a job"
             if host:
-                return self._prepare_remote(args, command, host, wait)
+                return self._prepare_remote(args, command, host, wait, approved=approved)
             args["cwd"] = args.get("cwd") or self.default_cwd
             cwd = self.workspace.resolve(args["cwd"])
             if not cwd.is_dir():
@@ -558,15 +601,20 @@ class ToolExecutor:
             # of which changes between prepare and execute.
             if message := walk_cost_refusal(command, cwd):
                 raise ValueError(message)
-            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd)
+            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd,
+                            approved=approved)
         if host:
             return self._prepare_remote_file(name, args, host)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096),
                                       allow_missing=name in ("write_file", "edit_file"),
                                       for_read=name in ("read_file", "list_directory"))
         if name == "read_file":
+            self._approval(name, args, outside_workspace=not path.is_relative_to(self.workspace.root),
+                           subject=str(path))
             return Prepared(name, args, f"READ FILE\n\n{path}", path)
         if name == "list_directory":
+            self._approval(name, args, outside_workspace=not path.is_relative_to(self.workspace.root),
+                           subject=str(path))
             return Prepared(name, args, f"LIST DIRECTORY\n\n{path}", path)
         existed = path.exists()
         if name == "edit_file":
@@ -579,6 +627,7 @@ class ToolExecutor:
             if not path.parent.is_dir():
                 raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
             old = self.workspace.read_bytes(path) if existed else b""
+        self._approval(name, args, exists=existed, subject=str(path))
         return self._write_prepared(name, args, str(path), old, content, existed, replacements, path=path)
 
     def _write_prepared(self, name: str, args: dict, shown: str, old: bytes, content: str, existed: bool,
@@ -621,6 +670,9 @@ class ToolExecutor:
         user = session.get("user")
         header = f"Host: {f'{user}@{host}' if user else host} (over the user's ssh connection)\n"
         if name == "read_file":
+            # No read_outside card here: that row is about the folders Options › Security adds for
+            # reads on this machine (#3KB7). On the host there are no extra folders — anything the
+            # user's account can read there is the read tools' stated contract (card #S5SH).
             return Prepared(name, args, f"READ FILE ON {host}\n\n{header}{path}", host=host, remote_path=path)
         if name == "list_directory":
             return Prepared(name, args, f"LIST DIRECTORY ON {host}\n\n{header}{path}", host=host,
@@ -632,10 +684,14 @@ class ToolExecutor:
             content, replacements = self._edited(args, old)
         else:
             content, replacements = self._text(args, "content"), 0
+        # The edit/create card (card #K2FV) travels: a file on the ssh host is still a file the
+        # user may want asked about, and the card names the host in its subject line.
+        self._approval(name, args, exists=existed, subject=f"{path} on {host}")
         return self._write_prepared(name, args, path, old, content, existed, replacements, host=host,
                                     header=header + "\n")
 
-    def _prepare_remote(self, args: dict, command: str, host: str, wait: str) -> Prepared:
+    def _prepare_remote(self, args: dict, command: str, host: str, wait: str,
+                        approved: tuple[str, ...] = ()) -> Prepared:
         """run_command with `host`: the same call, run over the user's ssh connection (card #S5SH).
 
         cwd is a path on the host, so it is not resolved against the workspace; it defaults to the
@@ -652,7 +708,7 @@ class ToolExecutor:
         who = f"{user}@{host}" if user else host
         preview = (f"RUN COMMAND ON {host}\n\nHost: {who} (over the user's ssh connection)\n"
                    f"Working directory: {cwd or 'the remote home directory'}\n{wait}\n\n{command}")
-        return Prepared("run_command", args, preview)
+        return Prepared("run_command", args, preview, approved=approved)
 
     # ----- the file tools on the ssh host (card #S5SH) -----------------------------------
 
@@ -776,6 +832,8 @@ class ToolExecutor:
         if name == "run_command" and args.get("host"):
             # Recheck the session at execution time: the user may have logged out since.
             session = self._remote_ready(args["host"])
+            self._approval("run_command", args, subject=f"{args['command']} (on {args['host']})",
+                           already=prepared.approved)
             argv = remote_session.ssh_argv(session, args["command"], args.get("cwd"))
             return self._run(args["command"], self.workspace.root, args["timeout_seconds"],
                              args.get("background", False), argv=argv, host=session["host"])
@@ -784,6 +842,9 @@ class ToolExecutor:
             # since prepare, and a path may have become a symlink.
             if rule := security.denied_command(self.policy, args["command"]):
                 raise ValueError(security.refusal(rule))
+            # Card #K2FV: the checklist may have changed while the card sat unanswered; the
+            # capabilities approved at prepare are not asked for again (Prepared.approved).
+            self._approval("run_command", args, subject=args["command"], already=prepared.approved)
             cwd = self.workspace.resolve(args.get("cwd", "."))
             return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False))
         if name == "command_output":

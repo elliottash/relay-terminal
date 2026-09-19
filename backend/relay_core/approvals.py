@@ -80,6 +80,11 @@ class Policy:
 
 ALLOW_ALL = Policy(ask=frozenset(), chosen=True)
 
+# What the card offers (protocol 27.6), in the order the pane prints them. `once` allows this one
+# call, `turn` the rest of the turn, `always` also unticks the row in Options › Security, and `deny`
+# refuses the call and tells the model — the turn carries on.
+DECISIONS = ("once", "turn", "always", "deny")
+
 
 def validate(request: dict) -> dict:
     """The approval keys of `configure` / `set_agent_options` (protocol 12.1). Only keys present are

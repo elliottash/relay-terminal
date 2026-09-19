@@ -27,10 +27,13 @@ options to satisfy a schema asks a worse question than one that just asks.
 
 Both modes carry it (owner, 2026-09-19: "let the non-plan agent use the questions as well (like
 warp / claude)"), which is what opencode does for its `build` and `plan` agents and what Warp does
-with a per-profile permission. A subagent never gets it: it cannot see the pane and the user has no
-idea it exists (`subagents.RestrictedExecutor`).
+with a per-profile permission. A subagent never gets the tool itself: it cannot see the pane and the
+user has no idea it exists (`subagents.RestrictedExecutor`). An **approval card** (card #K2FV,
+`ask_approval` below) is a second *kind* of question on the same round trip rather than a second
+mechanism — and a subagent's actions do draw one, named as the subagent's, because it is the same
+worker and the same pane.
 
-Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.
+Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27 (approvals: 27.6).
 """
 from __future__ import annotations
 
@@ -38,6 +41,7 @@ import threading
 import uuid
 from typing import Callable
 
+from . import approvals
 from .provider import Cancelled
 
 MAX_QUESTIONS = 4          # one screenful; a model that needs more should ask again after the answers
@@ -253,6 +257,9 @@ class Questions:
         self._lock = threading.Lock()
         self._pending: dict[str, list] = {}
         self.asks = 0
+        # Card #K2FV: capabilities the user allowed "for the rest of this turn". Cleared when the
+        # turn begins, so a decision lasts exactly as long as it says.
+        self._approved: set[str] = set()
         # Stop is what ends a wait the user never ends, so it has to wake the wait rather than be
         # noticed by it. Hooked here and not at the first question, so that anything which takes
         # its own reference to `cancel.set` afterwards takes the hooked one.
@@ -261,6 +268,7 @@ class Questions:
     # ----- turn boundaries -------------------------------------------------------------------
     def begin_turn(self) -> None:
         self.asks = 0
+        self._approved.clear()
 
     def end_turn(self) -> None:
         """A turn cannot end with a card still up: the user would be answering nobody."""
@@ -329,7 +337,56 @@ class Questions:
                               "do not ask them again.")
         return result
 
+    # ----- approvals (card #K2FV) --------------------------------------------------------------
+    def turn_allows(self, capability: str) -> bool:
+        """Whether the user already allowed this capability for the rest of the turn."""
+        with self._lock:
+            return capability in self._approved
+
+    def ask_approval(self, capability: str, subject: str) -> str:
+        """Put the approval card up and wait for the decision (protocol 27.6).
+
+        The same round trip as `execute` — same event, same reply shape, same Stop semantics — so
+        an approval needs no second mechanism: the turn blocks until the user answers, and only
+        Stop, the turn ending or the pane going away ends the wait otherwise. Returns one of
+        `approvals.DECISIONS` (an unreadable reply counts as a deny: the safe side of a question
+        the user never actually answered). Raises Cancelled when the turn was stopped under it.
+        """
+        if self.cancel.is_set():
+            raise Cancelled("Stopped.")
+        call_id = _call_id()
+        header, question = approvals.prompt(capability, subject)
+        done = threading.Event()
+        with self._lock:
+            self._pending[call_id] = [done, None]
+        self.emit({"event": "question", "kind": "approval", "id": call_id, "capability": capability,
+                  "header": header, "question": question, "subject": subject})
+        if self.cancel.is_set():               # Stop between registering and emitting, as in execute
+            self.fail_pending("cancelled")
+        if self._hooked:
+            done.wait()
+        else:                                            # pragma: no cover - fallback, see wake_on_set
+            while not done.wait(0.25):
+                if self.cancel.is_set():
+                    self.fail_pending("cancelled")
+        reply = self._take(call_id) or {}
+        if reply.get("code") == "cancelled":
+            self.emit({"event": "question_closed", "id": call_id, "reason": "cancelled"})
+            raise Cancelled("Stopped.")
+        decision = reply.get("decision")
+        if decision not in approvals.DECISIONS:
+            decision = "deny"
+        if decision == "turn":
+            with self._lock:
+                self._approved.add(capability)
+        return decision
+
     # ----- replies from the GUI ----------------------------------------------------------------
+    def handles(self, call_id) -> bool:
+        """Whether a card with this id is waiting here (the worker routes replies by it, #K2FV)."""
+        with self._lock:
+            return call_id in self._pending
+
     def resolve(self, message: dict) -> None:
         """The pane's `question_answer`. Unknown ids are ignored: a card answered after its turn
         was stopped is the user's click landing late, not an error to report."""
