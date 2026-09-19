@@ -125,7 +125,7 @@ that floor "…/x" says nothing a stub could be worth; (2) the title elides (Eli
 own floor; (3) the state's word goes to its short form (`stateLabelShort`: "Running", "Subagents")
 and then goes, leaving the glyph, which says it too; (4) the ssh chip is squeezed to its 150 px
 floor and then drops the `user@` for the host alone — that is what going *below* the floor buys —
-and below the host's own width elides the host; (5) the usage meter collapses to CPU alone, with
+and below the host's own width elides the host; (5) the usage meter collapses to CPU alone (`cpu 12%`), with
 neither the memory half nor the separator; (6) nothing else gives: the subagent badge stays whole
 and the glyph stays, always. Nothing is ever drawn as a partial glyph or cut mid-letter: each step
 either elides by whole glyphs or leaves its element out, and both labels are elided by hand rather
@@ -412,17 +412,28 @@ so a tab names the tab's busiest processes and not each pane's. The two roots ar
 lines — "shell" and "agent worker" — and everything else by its `comm`. A child that has already
 exited still counts toward the sum, through its parent's `cutime`/`cstime`, and has no line of its
 own: there is no longer a process to name. The breakdown shows in the two places with room for it,
-one `<name> · <cpu>% cpu · <mem>% mem` per line: the usage chip's tooltip (written when the tooltip
+one `<name> · cpu <cpu>% · mem <mem>%` per line: the usage chip's tooltip (written when the tooltip
 is asked for, since the lines move faster than the number the chip paints) and the usage section of
 the tab's tooltip. The chip and the label stay the sum alone.
 
-It shows three ways: a chip in the pane's header row right of the state's word
-(`PaneChrome::PaneUsageChip`, a die and a memory-module glyph, muted ink that only warns at
-60 %/85 %), a `· 12% / 3%` suffix on the tab label (tooltip spells out which is which, summed
-over the tab's panes), and a `cpu 12% · mem 3%` tag on the conversation's row in the Sessions
-pane (`SessionManager::setLiveUsage`, fed by the poll like `setOpenSessions`; it is the row's last
-badge, since it is the only one whose width moves while the row sits there). A half with nothing
-to say is left out rather than drawn as "0%", and a lone number is named (`· 20% cpu`). CPU
+**One wording, everywhere** (card #6BGA, owner 2026-09-19 on the mock-ups in
+`docs/qa_evidence/2026-09-19-usage-meter-numbers/`: *"the cpu / mem bar things are ugly and
+unintuitive. i think it should be numbers"*). A reading is written in exactly one place,
+`relay::usage::readingText()`: **`cpu 12% · mem 3%`**, plain words and whole percents. The three
+surfaces print that same string — a chip in the pane's header row right of the state's word
+(`PaneChrome::PaneUsageChip`, the body face, the words in the header's muted ink and each number
+warning at 60 % and erroring at 85 %; `readingParts()` is the same string cut into the pieces it
+colours separately), a `  ·  cpu 12% · mem 3%` suffix on the tab label (summed over the tab's
+panes), and the tag on the conversation's row in the Sessions pane
+(`SessionManager::setLiveUsage`, fed by the poll like `setOpenSessions`; it is the row's last
+badge, since it is the only one whose width moves while the row sits there) — and so do the
+tooltips, whose first line is `describe()`: the same words with the byte figure added,
+`cpu 12% · mem 3% (2.1 GiB)`. Before #6BGA the chip drew a 13 px processor die and a 13 px memory
+module before two bare percentages and the tab carried its own `· 12% / 3%`, so the two surfaces
+disagreed about how to say the same thing and neither said which number was which; at that size
+the die's pins and the module's legs read as bars, which is the complaint. A half with nothing
+to say is left out rather than drawn as "0%", and what is left is the same grammar shortened
+(`· cpu 20%`), never a bare number. CPU
 speaks from half a percent; memory has to clear 256 MiB *and* half a percent, so an agent worker
 idling on 60 MB leaves the chip off a small machine as well as a large one. A pane using nothing
 shows nothing anywhere: an idle terminal looks exactly as it did before, and the meters are local

@@ -182,14 +182,28 @@ private Q_SLOTS:
         QCOMPARE(combined({full, more}).ramPercent, 100.0);
     }
 
-    void tabSuffixOnlyWhenWorthShowing() {
+    // One wording, everywhere (issue #6BGA). The owner, on the mock-ups: "the cpu / mem bar
+    // things are ugly and unintuitive. i think it should be numbers" — so the glyphs are gone and
+    // the chip, the tab suffix and the Sessions tag all print the same words.
+    void oneWordingInEveryPlace() {
         const qint64 gib = qint64(1) << 30;
         Sample idle; idle.valid = true;
+        QVERIFY(readingText(idle).isEmpty());
         QVERIFY(tabSuffix(idle).isEmpty());
         QVERIFY(tabSuffix(Sample{}).isEmpty());
+        QVERIFY(liveTag(idle).isEmpty());
+        QVERIFY(liveTag(Sample{}).isEmpty());
+        QVERIFY(readingParts(idle).isEmpty());
+
         Sample busy; busy.valid = true; busy.cpuPercent = 12.4; busy.ramBytes = 2 * gib; busy.ramPercent = 3.4;
-        QCOMPARE(tabSuffix(busy), QStringLiteral("  ·  12% / 3%"));
-        QCOMPARE(liveTag(busy), QStringLiteral("cpu 12% · mem 3%"));
+        const QString one = QStringLiteral("cpu 12% · mem 3%");
+        QCOMPARE(readingText(busy), one);
+        // The chip's string, the tab's suffix and the Sessions row's tag are that one string.
+        QCOMPARE(liveTag(busy), one);
+        QCOMPARE(tabSuffix(busy), QStringLiteral("  ·  ") + one);
+        QVERIFY(describe(busy).startsWith(one));
+        // No slash, no bare pair, and nothing that has to be learned before it can be read.
+        QVERIFY(!tabSuffix(busy).contains(QLatin1Char('/')));
         // The separator is one middle dot. Written as escaped UTF-8 bytes it used to come
         // out as the two characters "Â·" — QStringLiteral makes a UTF-16 literal of the
         // bytes it is given — and the tab label read "src Â· 5% cpu" on screen.
@@ -197,17 +211,18 @@ private Q_SLOTS:
         QVERIFY(!tabSuffix(busy).contains(QChar(0x00c2)));
         QVERIFY(!liveTag(busy).contains(QChar(0x00c2)));
         QVERIFY(!describe(busy).contains(QChar(0x00c2)));
-        QVERIFY(liveTag(idle).isEmpty());
-        QVERIFY(liveTag(Sample{}).isEmpty());
-        // A half with nothing to say is left out rather than printed as "0%" — and a lone number
-        // is named, because "· 20%" alone does not say whether it is CPU or memory.
+
+        // A half with nothing to say is left out rather than printed as "0%", and what is left
+        // is the same grammar shortened, not a different one.
         Sample cpuOnly; cpuOnly.valid = true; cpuOnly.cpuPercent = 20.0;
         cpuOnly.ramBytes = 60 << 20; cpuOnly.ramPercent = 0.2;
-        QCOMPARE(tabSuffix(cpuOnly), QStringLiteral("  ·  20% cpu"));
+        QCOMPARE(readingText(cpuOnly), QStringLiteral("cpu 20%"));
+        QCOMPARE(tabSuffix(cpuOnly), QStringLiteral("  ·  cpu 20%"));
         QCOMPARE(liveTag(cpuOnly), QStringLiteral("cpu 20%"));
         Sample memOnly; memOnly.valid = true; memOnly.cpuPercent = 0.1;
         memOnly.ramBytes = 3 * gib; memOnly.ramPercent = 9.4;
-        QCOMPARE(tabSuffix(memOnly), QStringLiteral("  ·  9% mem"));
+        QCOMPARE(readingText(memOnly), QStringLiteral("mem 9%"));
+        QCOMPARE(tabSuffix(memOnly), QStringLiteral("  ·  mem 9%"));
         QCOMPARE(liveTag(memOnly), QStringLiteral("mem 9%"));
         // No section anywhere reads "0%": the evidence screenshot's "· 20% / 0%" cannot recur.
         QVERIFY(!tabSuffix(cpuOnly).contains(QStringLiteral(" 0%")));
@@ -215,6 +230,46 @@ private Q_SLOTS:
         QVERIFY(!liveTag(cpuOnly).contains(QStringLiteral(" 0%")));
         QVERIFY(!tabSuffix(memOnly).contains(QStringLiteral(" 0%")));
         QVERIFY(!liveTag(memOnly).contains(QStringLiteral(" 0%")));
+    }
+
+    // The header ladder's last rung (relay::panes::UsageForm::CpuOnly): the memory half and its
+    // separator go together, and what is left is still "cpu 12%" and not a bare number.
+    void theNarrowRungKeepsTheGrammar() {
+        const qint64 gib = qint64(1) << 30;
+        Sample busy; busy.valid = true; busy.cpuPercent = 12.4; busy.ramBytes = 2 * gib; busy.ramPercent = 3.4;
+        QCOMPARE(readingText(busy, true), QStringLiteral("cpu 12%"));
+        QVERIFY(!readingText(busy, true).contains(QChar(0x00b7)));
+        QVERIFY(!readingText(busy, true).contains(QStringLiteral("mem")));
+        // Narrow and already memory-only: nothing is left, so the chip takes no room at all.
+        Sample memOnly; memOnly.valid = true; memOnly.cpuPercent = 0.1;
+        memOnly.ramBytes = 3 * gib; memOnly.ramPercent = 9.4;
+        QVERIFY(readingText(memOnly, true).isEmpty());
+        QVERIFY(readingParts(memOnly, true).isEmpty());
+    }
+
+    // What the chip paints: the words in the muted ink, each number in the ink its own value
+    // earns. Joining the pieces has to be exactly the string every other surface prints.
+    void thePaintedPiecesSpellTheSameString() {
+        const qint64 gib = qint64(1) << 30;
+        Sample busy; busy.valid = true; busy.cpuPercent = 91.0; busy.ramBytes = 30 * gib; busy.ramPercent = 62.0;
+        const QList<ReadingPart> parts = readingParts(busy);
+        QCOMPARE(int(parts.size()), 5);
+        QString joined;
+        for (const ReadingPart &part : parts) joined += part.text;
+        QCOMPARE(joined, readingText(busy));
+        QCOMPARE(parts.at(0).text, QStringLiteral("cpu "));
+        QCOMPARE(parts.at(0).value, false);
+        QCOMPARE(parts.at(1).text, QStringLiteral("91%"));
+        QCOMPARE(parts.at(1).value, true);
+        QCOMPARE(parts.at(1).percent, 91.0);
+        QCOMPARE(parts.at(2).value, false);       // the separator
+        QCOMPARE(parts.at(3).text, QStringLiteral("mem "));
+        QCOMPARE(parts.at(4).percent, 62.0);      // the ink the memory half earns is its own
+        // One half alone is two pieces, word then number: no separator left dangling.
+        Sample cpuOnly; cpuOnly.valid = true; cpuOnly.cpuPercent = 20.0;
+        cpuOnly.ramBytes = 60 << 20; cpuOnly.ramPercent = 0.2;
+        QCOMPARE(int(readingParts(cpuOnly).size()), 2);
+        QCOMPARE(readingParts(cpuOnly).at(1).text, QStringLiteral("20%"));
     }
 
     void aLabelHoldsStillUntilTheReadingMoves() {
@@ -239,10 +294,16 @@ private Q_SLOTS:
         Sample s; s.valid = true; s.cpuPercent = 12.4; s.ramPercent = 3.2;
         s.ramBytes = qint64(2.06 * (1024.0 * 1024.0 * 1024.0));
         const QString text = describe(s);
-        QVERIFY(text.contains(QStringLiteral("CPU 12%")));
-        QVERIFY(text.contains(QStringLiteral("2.1 GiB")));
-        QVERIFY(text.contains(QStringLiteral("(3%)")));
+        // The tooltip's first line opens with the same words as the chip and the tab, and then
+        // adds the byte figure a percent of an unknown total cannot give (issue #6BGA).
+        QVERIFY(text.startsWith(QStringLiteral("cpu 12% · mem 3%")));
+        QVERIFY(text.contains(QStringLiteral("(2.1 GiB)")));
+        QVERIFY(!text.contains(QStringLiteral("CPU ")));
         QVERIFY(describe(Sample{}).isEmpty());
+        // Both halves print here whatever the floors say: a quiet pane's tooltip still answers.
+        Sample quiet; quiet.valid = true; quiet.cpuPercent = 0.1; quiet.ramBytes = 60 << 20; quiet.ramPercent = 0.2;
+        QVERIFY(readingText(quiet).isEmpty());
+        QCOMPARE(describe(quiet), QStringLiteral("cpu 0% · mem 0% (60 MiB)"));
     }
 
     void meterNeedsABaselineBeforeAPercentage() {
@@ -470,14 +531,14 @@ private Q_SLOTS:
         QCOMPARE(topProcesses(tied).at(0).pid, qint64(4));
 
         QCOMPARE(processLine(row(2, QStringLiteral("cc1plus"), 40.4, 2.4)),
-                 QStringLiteral("cc1plus · 40% cpu · 2% mem"));
+                 QStringLiteral("cc1plus · cpu 40% · mem 2%"));
         QVERIFY(!processLine(row(1, QStringLiteral("shell"), 1.0, 0.2)).contains(QChar(0x00c2)));
         Sample sample;
         sample.valid = true;
         sample.processes = topProcesses(rows, 3);
         QCOMPARE(int(processLines(sample).size()), 3);
         QCOMPARE(processBreakdown(sample).split(QLatin1Char('\n')).first(),
-                 QStringLiteral("cc1plus · 40% cpu · 2% mem"));
+                 QStringLiteral("cc1plus · cpu 40% · mem 2%"));
         // A sample with no baseline has nothing to break down.
         Sample noBaseline;
         noBaseline.processes = sample.processes;

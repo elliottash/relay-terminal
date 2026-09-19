@@ -1087,10 +1087,18 @@ private:
         bool m_alarm = false;
     };
 
-    // The pane's resource meter (issue #D03W): "12% 3%" with a die and a memory-module glyph,
-    // right of the phone chip in the header row. Quiet on purpose — plain ink, no band, colours
-    // only when a value is high — and absent while the pane costs nothing worth reading, so an
-    // idle terminal looks exactly as it did before.
+    // The pane's resource meter (issues #D03W, #6BGA): "cpu 12% · mem 3%" in words, right of the
+    // phone chip in the header row. Quiet on purpose — the body face, the header's muted ink for
+    // the words, no band, colour only when a value is high — and absent while the pane costs
+    // nothing worth reading, so an idle terminal looks exactly as it did before.
+    //
+    // It used to draw a 13 px processor die and a 13 px memory module before two bare percentages.
+    // The owner, 2026-09-19: "the cpu / mem bar things are ugly and unintuitive. i think it should
+    // be numbers." At that size the die's pins read as two stacks of bars and the module's legs as
+    // a tiny bar chart, so the eye saw graphics where the meaning was entirely in the digits — and
+    // the glyphs carried the only clue to which digit was which. The words say it instead, and
+    // they are relay::usage::readingText(), the one string the tab label and the Sessions row and
+    // the tooltips print too.
     class PaneUsageChip final : public QWidget {
     public:
         // `owner` is the pane whose header this chip sits in. It is passed in because the chip's
@@ -1169,84 +1177,40 @@ private:
             const relay::panestatus::Tokens t = relay::chrome::tokens();
             QPainter p(this);
             p.setFont(font());
-            p.setRenderHint(QPainter::Antialiasing);
             const QFontMetrics metrics(font());
-            int x = 7;
-            for (int i = 0; i < 2; ++i) {
-                // A half with nothing to say is left out entirely rather than drawn as "0%":
-                // an idle pane's agent worker used to hold the chip open reading "0% / 1%".
-                const QString label = section(i);
-                if (label.isEmpty()) continue;
-                if (x > 7) x += 10;
-                // Same guard as the state's word: a half that has no room is left out whole.
-                if (x + kGlyph + 4 + metrics.horizontalAdvance(label) > width()) break;
-                const double value = i == 0 ? m_sample.cpuPercent : m_sample.ramPercent;
-                const QColor ink = value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
-                p.setPen(QPen(ink, 1.2));
-                if (i == 0) paintDie(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
-                else paintModule(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
-                x += kGlyph + 4;
-                p.setPen(ink);
-                p.drawText(QRectF(x, 0, metrics.horizontalAdvance(label) + 2, height()),
-                           Qt::AlignLeft | Qt::AlignVCenter, label);
-                x += metrics.horizontalAdvance(label);
+            const QList<relay::usage::ReadingPart> parts = relay::usage::readingParts(m_sample, m_cpuOnly);
+            if (parts.isEmpty()) return;
+            // Same guard as the state's word: a reading that has no room is left out whole
+            // rather than clipped mid-digit. The ladder normally gets there first.
+            int x = kPad;
+            if (x + metrics.horizontalAdvance(relay::usage::readingText(m_sample, m_cpuOnly)) > width())
+                return;
+            for (const relay::usage::ReadingPart &part : parts) {
+                const int advance = metrics.horizontalAdvance(part.text);
+                p.setPen(part.value ? ink(t, part.percent) : t.muted);
+                p.drawText(QRectF(x, 0, advance + 2, height()),
+                           Qt::AlignLeft | Qt::AlignVCenter, part.text);
+                x += advance;
             }
         }
     private:
-        static constexpr int kGlyph = 13;
-        // A processor die: a square with a smaller square inside, pins on the sides.
-        static void paintDie(QPainter &p, const QRectF &r, const QColor &ink) {
-            p.setPen(QPen(ink, 1.1));
-            p.setBrush(Qt::NoBrush);
-            p.drawRoundedRect(QRectF(r.center().x() - 3, r.center().y() - 3, 6, 6), 1.5, 1.5);
-            for (int k = -1; k <= 1; ++k) {
-                const qreal y = r.center().y() + k * 2.4;
-                p.drawLine(QPointF(r.left() + 0.5, y), QPointF(r.center().x() - 3, y));
-                p.drawLine(QPointF(r.center().x() + 3, y), QPointF(r.right() - 0.5, y));
-            }
+        // The chip's own padding, left and right of the words.
+        static constexpr int kPad = 7;
+        // The warning and error inks at the thresholds, unchanged: a word stays muted whatever
+        // it names, and only the number it labels warns.
+        static QColor ink(const relay::panestatus::Tokens &t, double value) {
+            return value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
         }
-        // A memory module: a body with pins along its bottom edge.
-        static void paintModule(QPainter &p, const QRectF &r, const QColor &ink) {
-            p.setPen(QPen(ink, 1.1));
-            p.setBrush(Qt::NoBrush);
-            const QRectF body(r.left() + 1, r.top() + 1.5, r.width() - 2, r.height() - 5.5);
-            p.drawRoundedRect(body, 1.2, 1.2);
-            for (int k = 0; k < 4; ++k) {
-                const qreal x = body.left() + 1.5 + k * 2.6;
-                if (x >= body.right() - 0.5) break;
-                p.drawLine(QPointF(x, body.bottom()), QPointF(x, r.bottom() - 0.5));
-            }
-        }
-        // Either half may be absent, so the text carries the separator either way: "12%/3%",
-        // "12%/" for CPU alone, "/3%" for memory alone. Collapsed by the ladder, the memory half is
-        // absent too — and it is not drawn in a width that has no room for it, which is what would
-        // print half a digit.
-        QString section(int i) const {
-            if (i == 1 && m_cpuOnly) return {};
-            return i == 0 ? m_text.section(QLatin1Char('/'), 0, 0) : m_text.section(QLatin1Char('/'), 1, 1);
-        }
-        // What the chip measures with the halves it would then show. A collapsed chip with nothing
-        // in its CPU half has nothing left to show, so it takes no room rather than an empty box.
+        // What the chip measures with the halves it would then show. Collapsed to CPU alone with
+        // nothing in that half, there is nothing left to show, so it takes no room rather than
+        // an empty box.
         int widthFor(bool cpuOnly) const {
             if (m_text.isEmpty()) return 0;
-            const QString cpu = m_text.section(QLatin1Char('/'), 0, 0);
-            const QString memory = cpuOnly ? QString() : m_text.section(QLatin1Char('/'), 1, 1);
-            if (cpu.isEmpty() && memory.isEmpty()) return 0;
-            const QFontMetrics metrics(font());
-            int width = 7;
-            if (!cpu.isEmpty()) width += kGlyph + 4 + metrics.horizontalAdvance(cpu);
-            if (!memory.isEmpty()) width += (cpu.isEmpty() ? 0 : 10) + kGlyph + 4 + metrics.horizontalAdvance(memory);
-            return width + 7;
+            const QString shown = relay::usage::readingText(m_sample, cpuOnly);
+            if (shown.isEmpty()) return 0;
+            return kPad + QFontMetrics(font()).horizontalAdvance(shown) + kPad;
         }
-        QString text() const {
-            QString out;
-            if (relay::usage::showsCpu(m_sample))
-                out = relay::usage::formatPercent(m_sample.cpuPercent) + QLatin1Char('%');
-            out += QLatin1Char('/');
-            if (relay::usage::showsMemory(m_sample))
-                out += relay::usage::formatPercent(m_sample.ramPercent) + QLatin1Char('%');
-            return out == QLatin1String("/") ? QString() : out;
-        }
+        QString text() const { return relay::usage::readingText(m_sample); }
         // Which colour band each half is in, as one comparable value.
         int inkBucket() const {
             const auto band = [](double v) { return v >= 85 ? 2 : v >= 60 ? 1 : 0; };
@@ -1254,7 +1218,7 @@ private:
         }
         Pane *m_owner = nullptr;
         relay::usage::Sample m_sample;
-        QString m_text;      // "12%/3%"; empty when the chip is hidden
+        QString m_text;      // "cpu 12% · mem 3%"; empty when the chip is hidden
         bool m_shown = false; // what this chip was last told, not the recursive isVisible()
         bool m_cpuOnly = false;  // the ladder's last rung: the CPU half and nothing else
         int m_inkBucket = 0;
