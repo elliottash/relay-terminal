@@ -260,6 +260,8 @@ void adoptTokens(const ThemeSpec &spec) {
     Error = ui("error", Error);
     // Always present: parseTheme() turns one out of the theme's own red when the file is silent.
     Action = ui("action", Action);
+    // Always present too: parseTheme() dulls one out of the theme's own amber when it is silent.
+    Tool = ui("tool", Tool);
     Shell = ui("shell", Accent);
     Agent = ui("agent", Agent);
 
@@ -375,7 +377,13 @@ QLabel#queueTitle { color: @muted; font-weight: 600; letter-spacing: 1px; }
 QLabel#queueRunning { color: @accent; }
 QLabel#queueItem { color: @text; }
 QLabel#queueSteer { color: @agent; }
-QLabel#opaqueHint { color: @warning; }
+/* Who owns the terminal, in the colour of what it is saying: amber only when a program is waiting
+   for the person, violet while the agent is driving one, the terminal's blue while one merely
+   runs. Its `state` property is set in Pane::refreshProgramHint. */
+QLabel#opaqueHint { color: @muted; }
+QLabel#opaqueHint[state="needs-you"] { color: @warning; }
+QLabel#opaqueHint[state="agent"] { color: @agent; }
+QLabel#opaqueHint[state="running"] { color: @shell; }
 /* Agent sessions: plan chip, context indicator, plan editor */
 QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 9pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
@@ -490,10 +498,15 @@ QToolButton#popupTextButton:disabled { color: @disabled; }
 QToolButton#newTabButton, QToolButton#tabCloseButton { background: transparent; border: none; padding: 0; }
 QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }
 QToolButton#tabDetachButton:hover { color: @accent; }
-/* Composer prefix chip (! terminal, * agent) */
+/* Composer prefix chip (! terminal, * agent). It is a destination, so it wears the destination
+   pair — cyan for the terminal, violet for the agent — the same as the mode chip, the caret and
+   the syntax colouring. It did not until 2026-09-19: the chip landed in 004a74f on 2026-09-17 with
+   an amber terminal and a cyan agent, hours before b473d45 defined `shell`/`agent` as the two
+   destinations, and nothing reconciled them. It was the one surface in the app saying "terminal is
+   amber, agent is cyan", which is both meanings wrong. */
 QLabel#prefixChip { border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; letter-spacing: 1px; }
-QLabel#prefixChip[kind="shell"] { color: @onWarning; background: @warning; }
-QLabel#prefixChip[kind="agent"] { color: @onShell; background: @shell; }
+QLabel#prefixChip[kind="shell"] { color: @onShell; background: @shell; }
+QLabel#prefixChip[kind="agent"] { color: @onAgent; background: @agent; }
 /* Prompt-box-only input: masked password field and the take-control button over the terminal */
 QLabel#secretChip { color: @onCaution; background: @caution; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; letter-spacing: 1px; }
 QLineEdit#secretEditor { background: @bg; color: @text; border: 1px solid @caution; border-radius: 6px; padding: 8px; font-family: "@mono"; font-size: 10pt; }
@@ -588,8 +601,10 @@ QToolButton#boardAddButton:hover, QToolButton#boardCleanup:hover { border-color:
 QToolButton#boardCleanup { color: @muted; }
 /* While a cleanup runs the same button is Stop. Colour and border only: a rule that changed the
    font here would paint one width and measure another (tests/buttonfit_test.cpp). */
-QToolButton#boardCleanup[running="true"] { color: @warning; border-color: @warningBorder; }
-QToolButton#boardCleanup[running="true"]:hover { border-color: @warning; }
+/* Violet, not amber: this is the Switchboard's agent working, and amber is reserved for what is
+   waiting on a person (docs/ARCHITECTURE.md, "What the colours mean"). */
+QToolButton#boardCleanup[running="true"] { color: @agent; border-color: @agentBorder; }
+QToolButton#boardCleanup[running="true"]:hover { border-color: @agent; }
 /* The cleanup's result, in the list page under its tools — not a floating strip. */
 QWidget#boardCleanupPanel { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
 QWidget#boardCleanupPanel[failed="true"] { border-color: @error; }
@@ -662,6 +677,7 @@ QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
         {QStringLiteral("@text"), hex(Text)}, {QStringLiteral("@bg"), hex(Background)},
         {QStringLiteral("@successBorder"), hex(blend(Success, Background, 0.5))},
         {QStringLiteral("@warningBorder"), hex(blend(Warning, Background, 0.5))},
+        {QStringLiteral("@agentBorder"), hex(blend(Agent, Background, 0.5))},
         {QStringLiteral("@success"), hex(Success)}, {QStringLiteral("@warning"), hex(Warning)},
         {QStringLiteral("@error"), hex(Error)}, {QStringLiteral("@caution"), hex(caution)},
         {QStringLiteral("@shellSoft"), rgba(withAlpha(Shell, 56))}, {QStringLiteral("@shell"), hex(Shell)},

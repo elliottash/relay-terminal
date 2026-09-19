@@ -44,6 +44,11 @@ inline QColor Error{0xe0, 0x6c, 0x75};
 // 2026-09-18, "make actions red-orange"). A fifth meaning hue between `Warning` and `Error`; a
 // theme file that omits `[ui] action` gets one derived from its own `error` (src/Theme.cpp).
 inline QColor Action{0xe5, 0x84, 0x4f};
+// The brass a tool pane's header band wears (the Switchboard and its neighbours). Its own token
+// since 2026-09-19: it used to be `Warning`, so amber said both "this pane is a tool" and "this is
+// waiting on you", and only the second may ever be missed. A theme file that omits `[ui] tool`
+// gets one dulled out of its own amber (src/ThemeFile.cpp, brassFrom).
+inline QColor Tool{0xc8, 0xa4, 0x5c};
 // The two input destinations: the mode chip, the caret and the prefix chips.
 inline QColor Shell{0x3e, 0xc5, 0xf0};
 inline QColor Agent{0xb4, 0x8e, 0xf7};

@@ -276,6 +276,10 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
         kind.label.replace(QLatin1Char('-'), QLatin1Char(' '));
         if (!kind.label.isEmpty()) kind.label[0] = kind.label.at(0).toUpper();
     }
+    // The brass is `tokens.tool`, its own colour since 2026-09-19. It was `warning` until then,
+    // which made one amber mean both "this pane is a tool" and "this is waiting on you"; the second
+    // is the one signal that must never be missed, so it keeps the amber and this took a token
+    // (src/ThemeFile.cpp, brassFrom, dulls one out of each theme's own amber).
     // By type: brass for the Switchboard (docs/SWITCHBOARD-AESTHETIC.md), green for Options,
     // red-orange for Actions, the terminal's own blue for Sessions (they are the terminals'
     // conversations), violet for everything the agent does. Options and Actions were one Settings
@@ -289,11 +293,11 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
     QColor hue;
     if (mode == ColourMode::Off) hue = tokens.muted;
     else if (kind.group == QStringLiteral("agents")) hue = tokens.agent;
-    else if (mode == ColourMode::ByGroup) hue = tokens.warning;
+    else if (mode == ColourMode::ByGroup) hue = tokens.tool;
     else if (kind.glyph == Glyph::Actions) hue = tokens.action;
     else if (kind.glyph == Glyph::Options) hue = tokens.success;
     else if (kind.type == QStringLiteral("sessions")) hue = tokens.shell;
-    else hue = tokens.warning;
+    else hue = tokens.tool;
     TypeStyle style = tinted(hue, tokens, mode == ColourMode::Off ? 0.06 : tintStrength(tokens));
     style.label = label.isEmpty() ? kind.label : label;
     style.glyph = kind.glyph;

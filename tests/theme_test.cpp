@@ -364,7 +364,7 @@ private Q_SLOTS:
                 {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")}};
             QList<std::tuple<QString, QColor, QString, QColor>> pairs;
             for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error",
-                                   "action"})
+                                   "action", "tool"})
                 for (const auto &ground : grounds)
                     pairs.append({QString::fromLatin1(fg), ui(fg), QString::fromLatin1(ground.first), ground.second});
             QList<QColor> terminal{spec.terminalBackground};
@@ -460,6 +460,54 @@ private Q_SLOTS:
         QVERIFY(files.contains(QStringLiteral("relay-dark")));
         // The theme a stale setting lands on has to be whole, or the fallback is an empty palette.
         QVERIFY(isComplete(shipped(QStringLiteral("relay-dark"))));
+    }
+
+    // Owner, 2026-09-19, on amber carrying two meanings at once: "agree, address that". A tool
+    // pane's header band was drawn in `warning`, the same token as the "needs you" glyph, the
+    // question card and every other mark that says a person is blocked. It has its own `[ui] tool`
+    // now — brass, the same family, dulled — and this holds the two apart in every shipped theme:
+    // the band's brass is never the flag's amber, and it stays as legible as everything else.
+    void theToolBandIsBrassAndNotTheAmberOfAFlag() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(!files.isEmpty());
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+            const QColor tool = ui("tool"), warning = ui("warning");
+            QVERIFY2(tool.isValid(), qPrintable(it.key()));
+            QVERIFY2(tool != warning, qPrintable(QStringLiteral("%1: tool is still the warning token")
+                                                     .arg(it.key())));
+            // Far enough to read as another colour rather than a shade of the same one. The bar is
+            // lower than the dE 20 two *flags* are held to: these are never side by side, and the
+            // band carries a glyph and the pane's name besides.
+            const double d = deltaE(tool, warning);
+            QVERIFY2(d >= 10.0, qPrintable(QStringLiteral("%1: tool %2 vs warning %3 is dE %4 < 10")
+                                               .arg(it.key(), tool.name(), warning.name()).arg(d, 0, 'f', 1)));
+        }
+    }
+
+    // A theme that says nothing about `[ui] tool` gets one dulled out of its *own* amber, never
+    // Relay Dark's, for the reason `action` is derived rather than inherited: it has to keep a
+    // measured distance from a colour of the theme it lands in.
+    void aThemeThatNamesNoToolColourGetsOneFromItsOwnAmber() {
+        QString error;
+        const ThemeSpec spec = parseTheme(QStringLiteral(
+            "[theme]\nname = \"Silent\"\nvariant = \"dark\"\n"
+            "[ui]\nbackground = \"#101014\"\nsurface = \"#181820\"\nsurface_raised = \"#20202a\"\n"
+            "border = \"#2a2a34\"\nborder_strong = \"#4a4a58\"\ntext = \"#e8e8ee\"\n"
+            "text_muted = \"#9a9aa6\"\naccent = \"#4ab8e0\"\naccent_text = \"#04161e\"\n"
+            "warning = \"#d8a23c\"\n"),
+            QStringLiteral("silent"), builtinDark(), &error);
+        const QColor tool = spec.uiColor(QStringLiteral("tool"));
+        const QColor amber = spec.uiColor(QStringLiteral("warning"));
+        QCOMPARE(amber.name(), QStringLiteral("#d8a23c"));
+        QVERIFY2(tool != amber, qPrintable(tool.name()));
+        QVERIFY2(tool != QColor(0xc8, 0xa4, 0x5c), "inherited Relay Dark's brass instead of deriving one");
+        QVERIFY2(deltaE(tool, amber) >= 10.0, qPrintable(QStringLiteral("dE %1").arg(deltaE(tool, amber), 0, 'f', 1)));
+        // Derived at the amber's own luminance, so it inherits every contrast the amber passed.
+        QVERIFY2(std::abs(contrast(tool, spec.uiColor(QStringLiteral("background")))
+                          - contrast(amber, spec.uiColor(QStringLiteral("background")))) < 0.35,
+                 "the brass did not land on the amber's luminance");
     }
 
     // Owner, 2026-09-18: "make actions red-orange". The Actions pane's band, glyph and title-bar

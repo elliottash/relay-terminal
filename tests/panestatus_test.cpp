@@ -26,6 +26,7 @@ Tokens tokensOf(const relay::theme::ThemeSpec &spec) {
     t.warning = spec.uiColor(QStringLiteral("warning"));
     t.error = spec.uiColor(QStringLiteral("error"));
     t.action = spec.uiColor(QStringLiteral("action"));
+    t.tool = spec.uiColor(QStringLiteral("tool"));
     return t;
 }
 

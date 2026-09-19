@@ -1842,6 +1842,59 @@ stylesheet or rebuild on that signal. Setting: `theme/name`.
 
 `polishWindow()` still tags unnamed widgets by object name.
 
+### What the colours mean
+
+Chrome carries a theme's personality; **the meaning colours do not move**. Dark Copper says so in
+its own header — "warning and error are Relay Dark's, unchanged" — while its accent, borders and
+surfaces go copper, and IBM Beige takes Windows 95's navy the same way. A light theme cannot keep
+the dark values, so it **derives** rather than inverts: same hue, luminance dropped until it clears
+4.5:1 on the darkest ground it is painted on (the beige amber becomes ochre `#684800` at 4.65:1,
+the tightest in the set).
+
+There are three channels, and one meaning per colour:
+
+| | Means | Where it shows |
+|---|---|---|
+| `shell` (cyan) | the terminal — as a **destination** and as **terminal work** | mode chip, caret, syntax, the `!` prefix chip, `Ink::User`, the Running glyph and its live dot, the Sessions band |
+| `agent` (violet) | the agent — destination and agent work | the same list for the agent: the `*` prefix chip, `Ink::UserAgent`, the plan chip, Working/Subagents, every agent pane's band, a cleanup while it runs |
+| `success` (green) | finished | the Done glyph, `**Done:**`, diff additions, the Options band |
+| `warning` (amber) | **something is waiting on a person** | the NeedsYou glyph and tab icon, the question card (`Ink::Ask`), `**Need:**`, the notification, the work chip's attention state, a context or quota chip near its limit, the board's problems, the composer hint *only* while a program waits for input |
+| `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, diff removals, the ssh band |
+| `action` (red-orange) | the Actions pane | its band, glyph and title-bar button |
+| `tool` (brass) | this pane is a tool | the Switchboard's band and its neighbours' |
+
+**Amber has one job.** Until 2026-09-19 it also drew a tool pane's header band, the `!` terminal
+prefix chip and a Switchboard cleanup *while it ran* — none of which is waiting on anybody — so the
+one signal that must never be missed was the busiest colour in the app. The band took `[ui] tool`
+(brass: the same family, dulled, derived from each theme's own amber by `brassFrom()` when a file
+is silent, so it inherits the amber's contrast); the cleanup went violet, because it is the agent
+working; and the composer hint now wears the colour of the state it is describing. The `[syntax]`
+palette is a separate language — a shell flag is amber there and means nothing about state.
+
+**The prefix chips were wrong.** `! terminal` was amber and `* agent` was cyan: the chip landed in
+`004a74f` on 2026-09-17, hours before `b473d45` defined `shell`/`agent` as the destination pair, and
+nothing reconciled them. Fixed 2026-09-19 — they are destinations, so they wear the destination
+pair like the mode chip, the caret and the syntax.
+
+**Colour is never the only channel.** Every pane state has its own silhouette (ring, the Relay mark,
+a chevron, a tick, a filled disc with a cut cross, a diamond with an exclamation), so the state reads
+in greyscale; only *live* states move, and they move by `pulseScale` — a scale, never an opacity, so
+the ink keeps its contrast at every step — while news states stay still. The ssh band is held apart
+from the Actions red-orange by strength, a hatch texture, a glyph and the host's name, not by hue
+alone. That redundancy is why the warm end of the wheel can carry four meanings at once.
+
+**The rules are tests, not taste** (`tests/theme_test.cpp`): every text token ≥ 4.5:1 on every
+ground in every shipped theme; `action` at hue 12–30 and ≥ dE 20 from both `error` and `warning`;
+`tool` never equal to `warning` and ≥ dE 10 from it; Dark Copper's structural copper at least twice
+as dim as its warning, so a border can never read as a lit flag; and the destination pair always two
+distinguishable colours.
+
+**Scrollback cannot be recoloured.** Anything printed into the terminal keeps the colour it was
+written in, so `Pane::printInline` uses 24-bit RGB and accepts the freeze — except `Ink::Ask`, which
+is written with the *indexed* palette (bold yellow) because a question is the one piece of inline
+output still actionable after a theme switch. `MarkdownAnsi` is indexed throughout for the same
+reason. The rule: **inline output that stays actionable uses the indexed palette.**
+
 **The terminal.** Nothing is generated and nothing is checked in: `EngineBackend::applyThemeColors()`
 reads the active `ThemeSpec` straight into the view, on `themeChanged()`, so a running pane
 recolours in place. `data/theme/terminal.conf` holds what is not colour — font, line spacing,

@@ -115,7 +115,7 @@ enum class Glyph { None, Switchboard, Options, Actions, Sessions, Subagent, Turn
 // `action` is the Actions pane's red-orange (owner, 2026-09-18); every theme file names it, and
 // src/Theme.cpp derives one for a user theme that does not.
 struct Tokens {
-    QColor background, text, muted, shell, agent, success, warning, error, action;
+    QColor background, text, muted, shell, agent, success, warning, error, action, tool;
 };
 
 struct TypeStyle {

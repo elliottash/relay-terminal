@@ -32,6 +32,11 @@ error = "#e06c75"
 # the red `error` an ssh pane is banded in, and CIELAB dE 30.9 / 32.3 from them. A theme that
 # leaves it out gets its own `error` turned to a red-orange at the same luminance.
 action = "#e5844f"
+# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
+# you. Relay's own brass (docs/SWITCHBOARD-AESTHETIC.md). Deeper and duller than the amber
+# above it: a material the Switchboard's band is made of, not a flag. 7.01:1 on the darkest ground.
+tool = "#c8a45c"
 # The two input destinations; the mode chip, the caret and the prefix chips take these.
 shell = "#3ec5f0"
 agent = "#b48ef7"

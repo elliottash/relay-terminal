@@ -31,7 +31,12 @@ const QStringList &optionalUi() {
         QStringLiteral("shell"), QStringLiteral("agent"),
         // The Actions pane's red-orange (owner, 2026-09-18). Unlike the rest of this list, a theme
         // that is silent about it does not inherit Relay Dark's: see redOrangeFrom() below.
-        QStringLiteral("action")};
+        QStringLiteral("action"),
+        // The brass a tool pane's header band is drawn in (the Switchboard and its neighbours).
+        // It used to *be* `warning`, which made amber mean both "this pane is a tool" and "this is
+        // waiting on you" — the second of which must never be missed (owner, 2026-09-19). Derived
+        // from the theme's own amber when the file is silent, not inherited: see brassFrom().
+        QStringLiteral("tool")};
     return names;
 }
 
@@ -110,6 +115,21 @@ double relativeLuminance(const QColor &c) {
 // luminance matches the red's exactly, which hands it every contrast `error` already passed (at
 // an unchanged HSL lightness an orange is the brighter of the two, and on paper that costs
 // contrast). Saturation has a floor so a theme whose red is nearly grey still gets a colour.
+// Brass from this theme's own amber: the same hue family, dulled, at exactly the amber's relative
+// luminance so it inherits every contrast that `warning` already passed on this theme's grounds.
+// A material, not a flag — which is the whole distinction the token exists to draw.
+QColor brassFrom(const QColor &amber) {
+    const QColor hsl = amber.toHsl();
+    const int saturation = qMax(int(hsl.hslSaturation() * 0.72), 90);
+    const double want = relativeLuminance(amber);
+    QColor best = QColor::fromHsl(36, saturation, hsl.lightness()).toRgb();
+    for (int lightness = 0; lightness <= 255; ++lightness) {
+        const QColor tried = QColor::fromHsl(36, saturation, lightness).toRgb();
+        if (std::abs(relativeLuminance(tried) - want) < std::abs(relativeLuminance(best) - want)) best = tried;
+    }
+    return best;
+}
+
 QColor redOrangeFrom(const QColor &red) {
     const QColor hsl = red.toHsl();
     const int saturation = qMax(hsl.hslSaturation(), 150);
@@ -225,6 +245,7 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("warning"), QColor(0xe5, 0xc0, 0x7b)},
             {QStringLiteral("error"), QColor(0xe0, 0x6c, 0x75)},
             {QStringLiteral("action"), QColor(0xe5, 0x84, 0x4f)},
+            {QStringLiteral("tool"), QColor(0xc8, 0xa4, 0x5c)},
             {QStringLiteral("shell"), QColor(0x3e, 0xc5, 0xf0)},
             {QStringLiteral("agent"), QColor(0xb4, 0x8e, 0xf7)},
         };
@@ -287,13 +308,22 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     };
     readColors(QStringLiteral("ui"), uiTokenNames(), fallback.ui, spec.ui);
     readColors(QStringLiteral("syntax"), syntaxTokenNames(), fallback.syntax, spec.syntax);
-    // `ui.action` is derived from this theme's own red rather than inherited (redOrangeFrom).
+    // `ui.action` is derived from this theme's own red rather than inherited (redOrangeFrom), and
+    // `ui.tool` from its own amber (brassFrom), for the same reason: a colour that has to stay a
+    // measured distance from another of *this* theme's colours cannot be borrowed from Relay Dark.
     {
         bool named = false;
         const QString raw = scalar(QStringLiteral("ui.action"));
         if (!raw.isEmpty()) parseColor(raw, &named);
         const auto red = spec.ui.constFind(QStringLiteral("error"));
         if (!named && red != spec.ui.constEnd()) spec.ui.insert(QStringLiteral("action"), redOrangeFrom(*red));
+    }
+    {
+        bool named = false;
+        const QString raw = scalar(QStringLiteral("ui.tool"));
+        if (!raw.isEmpty()) parseColor(raw, &named);
+        const auto amber = spec.ui.constFind(QStringLiteral("warning"));
+        if (!named && amber != spec.ui.constEnd()) spec.ui.insert(QStringLiteral("tool"), brassFrom(*amber));
     }
 
     const auto readOne = [&](const QString &key, const QColor &fallbackColor) {

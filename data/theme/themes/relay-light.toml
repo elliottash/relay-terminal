@@ -34,6 +34,11 @@ error = "#c0273a"
 # Actions (owner, 2026-09-18). A burnt orange deep enough for paper: 4.96:1 on the darkest ground
 # it is painted on, dE 29.9 from the red and 26.6 from the ochre warning.
 action = "#a8450c"
+# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
+# you. Bronze for the page: the brass darkened until it reads as metal on paper rather than as a
+# highlighter. 8.08:1 on the lightest ground, dE 28.4 from this theme's amber.
+tool = "#5a3f1a"
 # The two destinations, matched in lightness (CIELAB L 43.5 and 43.4) so neither reads as the
 # louder one, and pushed to the chroma each hue allows at 4.5:1 on the chip face: 44.8 and 102.3,
 # up from 29.3 and 82.2. They are dE 72 apart and dE 51 / 103 from the near-black text, which is

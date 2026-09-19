@@ -46,6 +46,11 @@ error = "#e06c75"
 # of: the copper accent is itself an orange. A vermilion — redder in hue and half again as
 # saturated — keeps dE 27.1 from the copper, 36.6 from the red and 47.0 from the amber.
 action = "#e56a30"
+# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
+# you. The switchboard metal from [board] below — this theme's brass is copper, straight off the
+# reference. dE 23.7 from the amber, which is what keeps a band clear of a flag.
+tool = "#c08556"
 shell = "#45c8ee"
 # About 8 degrees bluer than Relay Dark's #b48ef7: on a copper-chromed ground the eye adapts
 # warm and a red-leaning violet drifts toward brown. Moving it away from red keeps it clear of

@@ -10447,6 +10447,12 @@ private:
     void refreshProgramHint() {
         if (!m_opaqueHint) return;
         QString text;
+        // The line said all four of its things in amber. Three of them are not waiting on the
+        // person — the agent driving is agent work, a program merely running is terminal work —
+        // and amber is reserved for what is (docs/ARCHITECTURE.md, "What the colours mean"). So
+        // the hint now wears the colour of the state it is describing, which is the same map the
+        // pane's own status glyph uses.
+        QString state;
         if (!m_native && !m_secretMode) {
             const QString program = foregroundProgramName();
             const QString who = program.isEmpty() ? QStringLiteral("The program") : program;
@@ -10455,16 +10461,26 @@ private:
                                        : program.isEmpty() ? QStringLiteral("the program") : program;
                 text = QStringLiteral("The agent is driving %1 · %2 takes it back")
                            .arg(driven, Keymap::instance().shortcutText(QStringLiteral("control.human")));
-            } else if (m_screenPrompt.actionable())
+                state = QStringLiteral("agent");
+            } else if (m_screenPrompt.actionable()) {
                 // Read off the screen, so it names the question: "apt is asking: … [Y/n]".
                 text = relay::screen::waitingLine(program, m_screenPrompt);
-            else if (m_waiting)
+                state = QStringLiteral("needs-you");
+            } else if (m_waiting) {
                 text = QStringLiteral("%1 is waiting for input · Enter sends your line to it").arg(who);
-            else if (!m_opaqueProgram.isEmpty())
+                state = QStringLiteral("needs-you");
+            } else if (!m_opaqueProgram.isEmpty()) {
                 text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
                            .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")));
+                state = QStringLiteral("running");
+            }
         }
         m_opaqueHint->setText(text);
+        if (m_opaqueHint->property("state").toString() != state) {
+            m_opaqueHint->setProperty("state", state);
+            m_opaqueHint->style()->unpolish(m_opaqueHint);
+            m_opaqueHint->style()->polish(m_opaqueHint);
+        }
         m_opaqueHint->setVisible(!text.isEmpty());
         // m_routeLabel is not shown here: it is the mode chip's tooltip, not a widget on the row.
     }

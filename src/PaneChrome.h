@@ -51,7 +51,8 @@ namespace ps = relay::panestatus;
 
 inline ps::Tokens tokens() {
     namespace t = relay::theme;
-    return {t::Background, t::Text, t::TextMuted, t::Shell, t::Agent, t::Success, t::Warning, t::Error, t::Action};
+    return {t::Background, t::Text,    t::TextMuted, t::Shell, t::Agent,
+            t::Success,    t::Warning, t::Error,     t::Action, t::Tool};
 }
 
 // "appearance/pane_colours": type (default), group or off. Read once and cached; the Options pane
