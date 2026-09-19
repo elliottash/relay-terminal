@@ -248,6 +248,14 @@ class LandingHunks(LandCase):
         self.assertNotIn("f.txt", names)
         self.assertIn("moved/f.txt", names)
 
+    def test_a_file_edited_before_begin_says_so_instead_of_landing_nothing(self):
+        edit_line(self.repo / "f.txt", 2, "EARLY")          # edited first...
+        self.land("begin", "mine", "f.txt")                    # ...claimed second: snapshot == file
+        out = self.land("commit", "mine", "-m", "x")
+        self.assertIn("no change since your snapshot", out.stdout + out.stderr)
+        self.assertIn("--base main", out.stdout + out.stderr)
+        self.assertNotIn("EARLY", self.tip_text("f.txt"))     # nothing landed, as before
+
     def test_a_path_without_begin_is_refused_until_whole(self):
         edit_line(self.repo / "f.txt", 3, "UNCLAIMED")
         out = self.land("commit", "mine", "-m", "x", "--paths", "f.txt", expect=1)

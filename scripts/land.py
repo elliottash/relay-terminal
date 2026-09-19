@@ -1292,6 +1292,12 @@ def cmd_commit(args, log):
                 working = work_bytes(repo, path)
                 info.snapshot = snapshot_bytes(root, args.session, path, record)
                 info.hunks = path_hunks(info.snapshot, working)
+                if not info.hunks and path not in whole:
+                    # Two sessions were caught by this: a file edited BEFORE `begin` snapshots as
+                    # already-edited, so there is nothing to land and the silence looked like success.
+                    log("  %s: no change since your snapshot. If you edited it before `begin`, run "
+                        "`begin %s --base main %s` to snapshot it from the tip instead."
+                        % (path, args.session, path))
                 numbers = set(range(1, len(info.hunks) + 1))
                 asked = onlys.get(path) or excludes.get(path) or set()
                 unknown = sorted(asked - numbers)
