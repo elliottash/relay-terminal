@@ -146,6 +146,19 @@ class ToolTests(unittest.TestCase):
         result = self.tools.execute(self.tools.prepare('list_directory', {'path': '.'}))
         self.assertEqual(result['entries'][0]['name'], 'created.txt')
 
+    def test_write_file_makes_missing_parent_directories(self):
+        # Card #NC17: a write into a directory tree that is not there yet creates it, instead of
+        # refusing and costing the model a round trip on mkdir.
+        result = self.tools.execute(self.tools.prepare(
+            'write_file', {'path': 'deep/deeper/new.txt', 'content': 'hi\n'}))
+        self.assertTrue(result['created'])
+        self.assertEqual((self.root / 'deep/deeper/new.txt').read_text(), 'hi\n')
+        # A file in the way of the directories is an error the model can act on, not a traceback.
+        (self.root / 'blocked').write_text('a file, not a directory\n')
+        with self.assertRaisesRegex(ValueError, 'could not be created'):
+            self.tools.execute(self.tools.prepare(
+                'write_file', {'path': 'blocked/under.txt', 'content': 'hi\n'}))
+
     def test_write_file_reports_created_and_diff_counts(self):
         created = self.tools.execute(self.tools.prepare('write_file', {'path': 'new.txt', 'content': 'a\nb\n'}))
         self.assertTrue(created['created'])

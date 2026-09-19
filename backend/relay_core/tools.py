@@ -623,9 +623,9 @@ class ToolExecutor:
             old = self.workspace.read_bytes(path)
             content, replacements = self._edited(args, old)
         else:
+            # Missing parent directories are made at execute time (card #NC17): refusing here cost
+            # the model a whole round trip on mkdir for what is the common case.
             content, replacements = self._text(args, "content"), 0
-            if not path.parent.is_dir():
-                raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
             old = self.workspace.read_bytes(path) if existed else b""
         self._approval(name, args, exists=existed, subject=str(path))
         return self._write_prepared(name, args, str(path), old, content, existed, replacements, path=path)
@@ -879,6 +879,13 @@ class ToolExecutor:
         # edit_file computed its whole new text while preparing; write_file carries the model's.
         data = (prepared.content if prepared.content is not None else args["content"]).encode("utf-8")
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+        try:
+            # write_file creates the directories its path needs (card #NC17); for edit_file the
+            # file exists, so this is a no-op.
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ValueError(f"The directories above {path} could not be created "
+                             f"({error.strerror or error}). Check the path, then try again.") from None
         fd, tempname = tempfile.mkstemp(prefix=".relay-write-", dir=path.parent)
         try:
             with os.fdopen(fd, "wb") as out:

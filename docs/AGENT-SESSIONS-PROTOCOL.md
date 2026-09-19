@@ -208,7 +208,8 @@ and it is not a job until the worker hands it back. Subagents and jobs share one
 the kinds actually waited on: "waiting for 2 subagents, 1 job . . .".
 
 **File writes and their previews (`edit_file`, v2.3, 2026-09-18).** Two tools change files.
-`write_file {path, content}` creates a file or replaces one in full; `edit_file {path, old_string,
+`write_file {path, content}` creates a file or replaces one in full, making any parent
+directories its path needs; `edit_file {path, old_string,
 new_string, replace_all?}` replaces an exact string in a file that already exists, and is what a
 model should use to change a file it has read — before it, every edit resent the whole file. Both
 run under the same guards (workspace resolution and the secret-file guard, regular UTF-8 files of

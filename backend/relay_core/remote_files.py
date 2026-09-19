@@ -9,7 +9,8 @@ edits files on the host as comfortably as locally, with nothing installed there.
 Everything here is a small POSIX shell script handed to the host through the same argv builder
 `run_command` uses (`ssh -S <control socket> … -T <host> -- …`), wrapped in `sh -c` so it means the
 same thing under a login shell that is bash, zsh, dash or ksh. The scripts use only `cat`, `head`,
-`printf`, `dirname`, `chmod`, `cp`, `mv` and `rm`; a host missing one of them says so in the error.
+`printf`, `dirname`, `mkdir`, `chmod`, `cp`, `mv` and `rm`; a host missing one of them says so in
+the error.
 
 The rules the scripts keep, because the host has no workspace to confine the agent to:
 
@@ -50,7 +51,6 @@ LIST_LIMIT = 200
 OUTSIDE = 78
 UNREADABLE = 65
 MISSING = 66
-NO_PARENT = 68
 WRITE_FAILED = 70
 SYMLINK = 77
 WRONG_TYPE = 79
@@ -78,16 +78,13 @@ def _guard(path: str, cwd: str | None, *, contain: bool) -> str:
 
 def read_script(path: str, cwd: str | None, *, cap: int, optional: bool = False,
                 contain: bool = False) -> str:
-    """`cat` the file, capped at `cap` bytes. `optional`: a missing file is exit 66 (and a missing
-    parent directory 68) rather than an error — what a write's before-picture needs, which is also
-    the one read that is contained, since it is a write that is about to happen."""
+    """`cat` the file, capped at `cap` bytes. `optional`: a missing file is exit 66 rather than an
+    error — what a write's before-picture needs, which is also the one read that is contained,
+    since it is a write that is about to happen. A missing parent is simply a missing file:
+    write_file makes the directories it needs (card #NC17)."""
     body = _guard(path, cwd, contain=contain)
     if optional:
-        body += ('if [ ! -e "$p" ] && [ ! -L "$p" ]; then\n'
-                 '  d=$(dirname -- "$p")\n'
-                 f'  [ -d "$d" ] || exit {NO_PARENT}\n'
-                 f'  exit {MISSING}\n'
-                 'fi\n')
+        body += f'[ -e "$p" ] || [ -L "$p" ] || exit {MISSING}\n'
     else:
         body += f'[ -e "$p" ] || [ -L "$p" ] || exit {MISSING}\n'
     return (body
@@ -118,10 +115,11 @@ def list_script(path: str, cwd: str | None, *, limit: int = LIST_LIMIT) -> str:
 
 def write_script(path: str, cwd: str | None) -> str:
     """Read the new content from stdin into a temp file beside the target, with the target's mode,
-    and `mv` it into place. The file is never seen half written, and never truncated on failure."""
+    and `mv` it into place. The file is never seen half written, and never truncated on failure.
+    Missing parent directories are made, as the local write_file makes them (card #NC17)."""
     return (_guard(path, cwd, contain=True)
             + 'd=$(dirname -- "$p")\n'
-            + f'[ -d "$d" ] || exit {NO_PARENT}\n'
+            + f'mkdir -p -- "$d" || exit {WRITE_FAILED}\n'
             + f'[ -L "$p" ] && exit {SYMLINK}\n'
             + f'if [ -e "$p" ] && [ ! -f "$p" ]; then exit {WRONG_TYPE}; fi\n'
             + 't=$p.relay-new.$$\n'
@@ -181,9 +179,6 @@ def output(proc: subprocess.CompletedProcess, session: dict, path: str, *,
     if code == UNREADABLE:
         raise ValueError(f"`{path}` on {host} cannot be read with the user's own permissions "
                          f"({first or 'permission denied'}). Nothing is run as root over this connection.")
-    if code == NO_PARENT:
-        raise ValueError("Parent directory must already exist. Relay does not create directory trees "
-                         f"automatically, on {host} any more than locally.")
     if code == WRITE_FAILED:
         raise ValueError(f"Writing `{path}` on {host} failed, and the file was left as it was"
                          + (f": {first}." if first else " (the directory may not be writable, or the disk full)."))
@@ -192,8 +187,8 @@ def output(proc: subprocess.CompletedProcess, session: dict, path: str, *,
                          f"written{': ' + first if first else ''}. The user's session may have ended; ask them.")
     if code in (126, 127):
         raise ValueError(f"{host} is missing a command this needed ({first or 'command not found'}). "
-                         "Relay's remote file tools need cat, head, printf, dirname, chmod, cp, mv and rm "
-                         "on the host; use run_command host instead.")
+                         "Relay's remote file tools need cat, head, printf, dirname, mkdir, chmod, cp, "
+                         "mv and rm on the host; use run_command host instead.")
     raise ValueError(f"The file operation on {host} failed (exit {code}){': ' + first if first else '.'}")
 
 

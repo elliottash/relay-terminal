@@ -406,12 +406,15 @@ class RemoteFileToolTests(unittest.TestCase):
         # Nothing left beside it: the temp file is moved, never abandoned.
         self.assertEqual(sorted(p.name for p in (self.home / "sub").iterdir()), ["run.sh"])
 
-    def test_a_new_file_is_private_and_needs_its_parent(self):
+    def test_a_new_file_is_private_and_its_parents_are_made(self):
         result = self.call("write_file", path="sub/fresh.txt", content="hi\n")
         self.assertTrue(result["created"])
         self.assertEqual(oct((self.home / "sub/fresh.txt").stat().st_mode & 0o777), oct(0o600))
-        with self.assertRaisesRegex(ValueError, "Parent directory must already exist"):
-            self.call("write_file", path="sub/deeper/tree.txt", content="hi\n")
+        # Card #NC17: missing parent directories are created, on the host as locally, instead of
+        # costing the model a round trip on mkdir.
+        result = self.call("write_file", path="sub/deeper/tree.txt", content="hi\n")
+        self.assertTrue(result["created"])
+        self.assertEqual((self.home / "sub/deeper/tree.txt").read_text(), "hi\n")
 
     def test_edit_matches_the_local_tool(self):
         text = "alpha\nbeta\nalpha\n"
