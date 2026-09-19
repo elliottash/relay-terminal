@@ -336,6 +336,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "project_probe_result": "desktop-local administration; local file paths",
     "board_import_proposals": "desktop-local administration; local file paths",
     "board_imported": "desktop-local administration; local file paths",
+    "board_folder_changed": "desktop-local administration; the board folder was renamed on disk (19.17)",
     # Syncing the board with its GitHub repository (protocol 19.14). Started from the desktop
     # (`forge_sync_plan`/`forge_sync_run` are not in CLIENT_TYPES), and the plan, the per-card
     # progress and the summary all name the repository, the local card paths and whatever the
