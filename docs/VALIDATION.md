@@ -22,7 +22,7 @@ from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all 
 
 **Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
 `ctest --test-dir build` **29/29**, both clean. Neither is current: `python3 -m unittest discover
--s tests` **collects 2,960 cases in 96 modules** as of 2026-09-19 (how many pass is what the command
+-s tests` **collects 3,052 cases in 99 modules** as of 2026-09-19 (how many pass is what the command
 reports, and it has not been re-run here). `ctest` registers **56** tests, not 29
 (`grep -c add_test CMakeLists.txt engine/CMakeLists.txt`) — `guestbridge`, `projectinit`,
 `striplayout`, `pulsepaint`, `panestatus`, `boardworkspace`, `diffview` and `sharing` among
@@ -30,7 +30,7 @@ them. The three rows above are the 2026-09-17 snapshot; the two commands are the
 truth for pass/fail.
 
 The per-suite inventory below now names **every** module under `tests/` and `engine/tests/`
-(2026-09-19): 92 Python modules, 54 Qt suites and 7 engine suites, no module left out. It is
+(2026-09-19): 99 Python modules, 54 Qt suites and 7 engine suites, no module left out. It is
 generated rather than hand-kept, so it can be re-taken instead of edited:
 
 - a Python module's count is what `unittest` collects from it (`loadTestsFromName`), which is what
@@ -97,8 +97,10 @@ Backend tests by module:
 | `tests/test_project_probe.py` | 89 | `relay_core.project_probe`: what Relay can see in a project before it may do anything |
 | `tests/test_provider.py` | 45 | Local HTTP fixture: text and Unicode, fragmented tool arguments and reasoning, multiple tool calls, truncated and malformed streams, cancel, configuration guards, JSON fallback, redirect refusal, sanitized HTTP errors, OpenRouter `reasoning` kept but not displayed |
 | `tests/test_provider_local.py` | 22 | The transport against a model server on this machine (ProviderConfig.local), and the proof that a hosted provider is treated exactly as before |
+| `tests/test_qa_verifiers.py` | 39 | Cross-provider QA (card #T71W): the verifier signature, the family table, the lineage and the ranking. Availability is passed in, so nothing reads PATH, the keyring or the local-endpoint registry |
 | `tests/test_questions.py` | 31 | `ask_user`: validation, open and multiple-choice questions, the round trip, skipping, Stop |
 | `tests/test_queue.py` | 23 | Ordered turns without overlap, `now` refused while busy, remove and clear, interrupt while streaming, idle and during a tool, FIFO interrupts, cancel pauses until resume, `now` while paused, cancel drops pending interrupts, configure/reset rules, validation, protocol errors, failed turn pauses |
+| `tests/test_relay_build.py` | 6 | `scripts/relay-build`: the build lock (a second session waits and is told whose build it is, with a `--wait-seconds` cap), the artifacts stamped back to the build's start, and the header edited mid-compile that plain `cmake --build` misses and the wrapper then rebuilds. Throwaway CMake projects with a deliberately slow compile; the shared `build/` is never touched |
 | `tests/test_relay_free_e2e.py` | 4 | Relay Free end to end: the desktop's own client against the real gateway in one process |
 | `tests/test_remote_audit.py` | 5 | The remote-share audit log (remote/audit.py): capped parts, nothing rotated away |
 | `tests/test_remote_browser.py` | 7 | The real web client, in a real browser, against the real rendezvous and host |
@@ -124,6 +126,7 @@ Backend tests by module:
 | `tests/test_roles.py` | 51 | Model roles (protocol 13): validation, per-provider defaults, fallbacks and wiring |
 | `tests/test_router.py` | 43 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, that parsing and validity checks never execute input, and a 99-input table of commands that are also English words (sentence vs. command) with false-positive sweeps |
 | `tests/test_routing_thinking_skills.py` | 29 | Protocol section 11: routing assist, thinking events, turn records, skill refine/import. Fake providers and local git repositories only (no network) |
+| `tests/test_security.py` | 33 | The Security section's policy (card #3KB7): the command denylist, extra readable folders and extra secret patterns, as the worker enforces them |
 | `tests/test_session_protocol.py` | 25 | Presets/effort table, provider usage, instruction files, and the worker protocol handlers for sessions (docs/AGENT-SESSIONS-PROTOCOL.md). Fake providers and local servers only |
 | `tests/test_session_threads.py` | 13 | Session and subagent-thread index, and the session info view's data (cards #Y63Z, #R6J0) |
 | `tests/test_sessions.py` | 35 | Agent sessions: model/effort switching, context and compaction, checkpoints, rewind, fork, sessions and recaps, plan mode, attachments. Fake providers only; no network |

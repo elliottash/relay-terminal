@@ -101,6 +101,49 @@ version, which loses nothing. Staged content that is *not* in history is somebod
 work: it reports that and leaves it alone, and the same goes for stray branches, extra worktrees,
 `*.orig` files and a checkout that is not on `main`. It exits non-zero when it found something.
 
+## Build through `scripts/relay-build`
+
+`src/main.cpp` is one translation unit and takes minutes to compile, and every session builds the
+same `build/` directory. On 2026-09-19 that produced a green build of code nobody had written: a
+compile that had already read `src/Pane.h` wrote its object **35 seconds after** another session
+edited that header, so the next `cmake --build` saw an object newer than every source, rebuilt
+nothing, printed "Built target relay", and `./build/relay` went on running the code from before the
+edit. Nothing reports this. The change simply appears not to work, and the session that made it
+starts debugging code that was never compiled.
+
+So build through the wrapper, from any directory inside the checkout:
+
+```
+scripts/relay-build                            # configure if needed, then build
+scripts/relay-build --target relay-editor-tests   # extra args go to `cmake --build`
+scripts/relay-build --check "Fold thinking"    # fail unless build/relay holds that literal
+```
+
+It does three things:
+
+- **One build at a time.** It holds an exclusive `flock` on `build/.relay-build.lock` around the
+  whole configure-and-build. A session that has to wait is told whose build it is waiting for
+  (pid, and `RELAY_SESSION` if you set it); `--wait-seconds N` caps the wait and exits 2.
+- **Configure only when `build/` is not configured**, and stop on a non-zero cmake exit rather than
+  build whatever the last good configure left behind. `--reconfigure` and `--cmake-arg=-DFOO=bar`
+  force it.
+- **No object newer than the header it was compiled from.** After a successful build it sets every
+  object, archive and ELF binary it produced back to the time the build *started*. A header edited
+  while the compile was running is then newer than the object built from it, so the next build
+  recompiles it — which is what make would have done if compiling were instantaneous. Everything
+  gets the *same* timestamp, so no binary looks older than the objects it was linked from.
+
+`RELAY_JOBS` (default 8) is the parallelism and `scripts/build.sh` goes through the wrapper too.
+`tests/test_relay_build.py` reproduces the incident in throwaway CMake projects: plain
+`cmake --build` misses the mid-compile edit, the wrapper rebuilds it.
+
+If you suspect a stale object anyway — your change is not in the binary and the build says there is
+nothing to do — delete the object and build again:
+
+```
+rm build/CMakeFiles/relay.dir/src/main.cpp.o
+```
+
 ## Fix clear gaps; do not list them
 
 Owner's rule, 2026-09-18: **when you find a clear gap in your own work, fix it rather than list
