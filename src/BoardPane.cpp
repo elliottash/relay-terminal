@@ -256,6 +256,10 @@ public:
     {
     }
 
+    // Which cards have an agent turn running on them (protocol 19.16). Several can, and the one
+    // on screen is not necessarily one of them, so the list is where you see the others working.
+    std::function<QString(const QString &)> turnMode;
+
     // The row's width comes from the list with room for its scrollbar kept whether or not the
     // scrollbar is showing: measured at one width and painted at another, the elision would be
     // computed for a row wider than the one drawn.
@@ -391,9 +395,14 @@ private:
         }
 
         painter->setFont(option.font);
-        painter->setPen(glyphInk(card->status));
+        // A card being planned or discussed right now wears the agent's mark in place of its
+        // status glyph, in the agent's colour: the one place the board shows that #B is working
+        // while you are reading #A.
+        const QString working = turnMode ? turnMode(row.cardId) : QString();
+        painter->setPen(working.isEmpty() ? glyphInk(card->status) : theme::Agent);
         painter->drawText(shape.glyphRect.translated(origin), Qt::AlignCenter,
-                          board::statusGlyph(card->status));
+                          working.isEmpty() ? board::statusGlyph(card->status)
+                                            : QStringLiteral("✦"));
 
         painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
         painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
@@ -999,7 +1008,15 @@ public:
         busyRow->setSpacing(6);
         m_busyLabel = new QLabel(m_busyStrip);
         m_busyLabel->setObjectName(QStringLiteral("boardBusyLabel"));
-        busyRow->addWidget(m_busyLabel, 1);
+        busyRow->addWidget(m_busyLabel, 0);
+        // What it is doing this second — "reading Pane.h", "step 4/256". A Plan turn is minutes
+        // of silent tool calls before its first word, and a card that only said "thinking…" for
+        // all of it read as stuck (owner, 2026-09-19: "the planning agent was getting stuck").
+        // The cleanup strip has said this since 19.9; a card said nothing.
+        m_busyWhat = new QLabel(m_busyStrip);
+        m_busyWhat->setObjectName(QStringLiteral("boardBusyWhat"));
+        m_busyWhat->setTextInteractionFlags(Qt::NoTextInteraction);
+        busyRow->addWidget(m_busyWhat, 1);
         m_stop = new QToolButton(m_busyStrip);
         m_stop->setObjectName(QStringLiteral("boardStop"));
         m_stop->setCursor(Qt::PointingHandCursor);
@@ -1319,15 +1336,41 @@ public:
 
     // While a Discuss or a Plan runs, the strip over the reply box names it and stops it, and the
     // buttons that would start another turn wait (#VZ69).
-    void setBusy(bool busy, const QString &mode = QString())
+    //
+    // `streamed` and `progress` are how a card that was already running gets its turn back when
+    // you come back to it: turns run per card now (protocol 19.16), so the board can be showing
+    // #A while #B is planning, and #B's answer so far and its current step are held by the view
+    // rather than lost when the card was closed.
+    void setBusy(bool busy, const QString &mode = QString(), const QString &streamed = QString(),
+                 const QString &progress = QString())
     {
         m_busy = busy;
         m_busyMode = busy ? (mode.isEmpty() ? QStringLiteral("discuss") : mode) : QString();
+        if (busy)
+            m_streaming = streamed;
+        setProgress(busy ? progress : QString());
         setModeTips();
         if (!busy)
             m_streaming.clear();
         render(busy ? Scroll::Bottom : Scroll::Keep);
     }
+
+    // One line of what the turn is doing now. Elided rather than wrapped: the strip is one row
+    // over the reply box, and a tool call's own line ("read 4 cards · 120 lines") is already short.
+    void setProgress(const QString &line)
+    {
+        m_progress = line;
+        if (m_busyWhat == nullptr)
+            return;
+        const int room = qMax(60, m_busyWhat->width());
+        m_busyWhat->setText(QFontMetrics(m_busyWhat->font()).elidedText(line, Qt::ElideRight, room));
+        m_busyWhat->setToolTip(line);
+        m_busyWhat->setVisible(m_busy && !line.isEmpty());
+    }
+
+    // The answer so far, kept by the view while another card is on screen.
+    QString streaming() const { return m_streaming; }
+    QString progress() const { return m_progress; }
 
     void showError(const QString &text)
     {
@@ -1579,6 +1622,8 @@ private:
                                : QStringLiteral("Stop the agent's reply. Anything it has already "
                                                 "written to the card stays."));
         m_busyStrip->setVisible(m_busy);
+        if (m_busyWhat != nullptr)
+            m_busyWhat->setVisible(m_busy && !m_progress.isEmpty());
         fitButtons();
     }
 
@@ -1902,6 +1947,7 @@ private:
     // The strip over the reply box while a turn runs: "✦ Agent is planning…" and the ✕ that
     // stops it (#VZ69). Hidden the rest of the time.
     QWidget *m_busyStrip = nullptr;
+    QLabel *m_busyWhat = nullptr;
     QLabel *m_busyLabel = nullptr;
     QToolButton *m_stop = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
@@ -1920,6 +1966,7 @@ private:
     QString m_statusValue;
     QStringList m_sections;           // the body's `## ` headings, for "has it a plan?"
     QString m_busyMode;               // "discuss" or "plan" while a turn runs
+    QString m_progress;               // what this card's turn is doing now (19.16)
     QString m_executeArmed;           // the card that was warned it has no plan or acceptance
     int m_threadTotal = 0;
     bool m_loading = false, m_busy = false, m_editing = false;
@@ -2032,6 +2079,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list = new RowList(&m_rows, m_listPane);
     auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
     delegate->adds = [this](const QString &columnId) { return sectionTakesNewCards(columnId); };
+    delegate->turnMode = [this](const QString &cardId) {
+        return m_cardTurns.value(cardId).mode;
+    };
     m_list->setItemDelegate(delegate);
     m_list->addRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->addRectOf(rowIndex, itemRect);
@@ -2190,8 +2240,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                 QTimer::singleShot(0, this, [this] { placeNotice(); });
                 return;
             }
-            m_askCard = card;
-            m_askText = text;
+            m_cardTurns.insert(card, CardTurn{mode, text, QString(), QString()});
             m_detail->setBusy(true, mode);
             // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be wordless.
             QJsonObject ask{{QStringLiteral("type"), QStringLiteral("board_ask")},
@@ -2205,7 +2254,15 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                   {QStringLiteral("kind"), QStringLiteral("note")}});
         }
     };
-    m_detail->onCancel = [this] { send({{QStringLiteral("type"), QStringLiteral("cancel")}}); };
+    // `cancel` is the worker's own turn — here, a cleanup. A card turn runs on that card's own
+    // agent (protocol 19.16), so stopping it names the card, and stopping #A leaves #B planning.
+    m_detail->onCancel = [this] {
+        const QString card = m_detail->cardId();
+        if (card.isEmpty())
+            return;
+        send({{QStringLiteral("type"), QStringLiteral("board_cancel")},
+              {QStringLiteral("card"), card}});
+    };
     m_detail->onExecute = [this](const QString &note) { executeCard(note); };
     m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
     m_detail->onModeHint = [this](const QString &mode) {
@@ -2647,6 +2704,20 @@ void BoardView::placeNotice()
 
 // ------------------------------------------------------------------------- events
 
+// One line for the strip over the reply box: "reading Pane.h", "read 4 cards · 120 lines",
+// "Requesting model · step 4/256". The same `toollabel` the cleanup notice and the terminal
+// pane's tool lines use, so a card turn is described in the words the rest of Relay uses.
+static QString turnProgressLine(const QString &type, const QJsonObject &event)
+{
+    if (type == QStringLiteral("status"))
+        return event.value(QStringLiteral("text")).toString();
+    const toollabel::Label label = toollabel::fromEvent(event);
+    const QString line = type == QStringLiteral("tool_started")
+                             ? (label.runningLine().isEmpty() ? label.line() : label.runningLine())
+                             : label.line();
+    return line.isEmpty() ? event.value(QStringLiteral("tool")).toString() : line;
+}
+
 void BoardView::handleEvent(const QJsonObject &event)
 {
     const QString type = event.value(QStringLiteral("event")).toString();
@@ -2740,6 +2811,16 @@ void BoardView::handleEvent(const QJsonObject &event)
                 tabs << qMakePair(item.id, item.title);
         m_detail->setChoices(statuses, tabs);
         m_detail->show(event);
+        // Turns run per card (19.16), so the card you open may already be working: give it back
+        // its strip, the answer so far and the step it is on. A card with no turn is idle, even
+        // if the one you came from is still planning.
+        if (const QString id = event.value(QStringLiteral("card_id")).toString();
+            m_cardTurns.contains(id)) {
+            const CardTurn &turn = m_cardTurns.value(id);
+            m_detail->setBusy(true, turn.mode, turn.streamed, turn.progress);
+        } else {
+            m_detail->setBusy(false);
+        }
         const bool wasOpen = detailOpen();
         m_detail->setVisible(true);
         if (!wasOpen)
@@ -2814,17 +2895,23 @@ void BoardView::handleEvent(const QJsonObject &event)
     // card id (19.9), and an open card's thread must never see one of them.
     if (handleCleanupEvent(type, event))
         return;
-    // The worker runs one turn at a time, and a cleanup and a card's ask refuse each other rather
-    // than queue (19.9): say which it is, and put back whatever this pane had started.
+    // Cards run in parallel with each other but not with a cleanup, and never two turns on one
+    // card (19.16): say which of those it was, and put back whatever this pane had started.
     if (type == QStringLiteral("error")
         && event.value(QStringLiteral("code")).toString() == QStringLiteral("board_busy")) {
         const bool cleanupRuns = event.value(QStringLiteral("cleanup_running")).toBool();
         const QString busyCard = event.value(QStringLiteral("card_id")).toString();
+        QStringList running;
+        for (const QJsonValue &value : event.value(QStringLiteral("cards")).toArray())
+            running << QStringLiteral("#") + value.toString();
         const QString what = cleanupRuns
             ? QStringLiteral("A cleanup is running on this board.")
-            : (busyCard.isEmpty()
-                   ? QStringLiteral("The Switchboard agent is busy.")
-                   : QStringLiteral("The agent is answering on #%1.").arg(busyCard));
+            : (running.size() > 1
+                   ? QStringLiteral("The agent is already working on %1.")
+                         .arg(running.join(QStringLiteral(", ")))
+                   : (busyCard.isEmpty()
+                          ? QStringLiteral("The Switchboard agent is busy.")
+                          : QStringLiteral("The agent is answering on #%1.").arg(busyCard)));
         if (!m_cleanupRequest.isEmpty() && requestId == m_cleanupRequest) {
             endCleanup();
             m_notice->hide();
@@ -2832,42 +2919,63 @@ void BoardView::handleEvent(const QJsonObject &event)
                                              "Try again when it has finished."), true);
             return;
         }
-        if (!m_askCard.isEmpty()) {
-            const bool here = m_askCard == m_detail->cardId();
-            const QString unsent = m_askText;
+        // The refused ask is this pane's own: the card it was typed on is the open one.
+        const QString asked = m_detail->cardId();
+        if (m_cardTurns.contains(asked)) {
+            const QString unsent = m_cardTurns.take(asked).unsent;
             m_detail->setBusy(false);
-            m_askCard.clear();
-            m_askText.clear();
-            if (here) {
-                // The worker checks before it writes, so the question never reached the thread.
-                if (cleanupRuns)
-                    m_busyCard = m_detail->cardId();
-                m_detail->restoreReply(unsent);
-                m_detail->showError(what + QStringLiteral(" The agent answers one thing at a time, "
-                                                          "so your message was not sent and is not "
-                                                          "in the thread — it is back in the reply "
-                                                          "box. Try again when it has finished."));
-                QTimer::singleShot(0, this, [this] { placeNotice(); });
-                return;
-            }
+            // The worker checks before it writes, so the question never reached the thread.
+            if (cleanupRuns)
+                m_busyCard = asked;
+            m_detail->restoreReply(unsent);
+            m_detail->showError(what + QStringLiteral(" Your message was not sent and is not in "
+                                                      "the thread — it is back in the reply box. "
+                                                      "Try again when that one has finished, or "
+                                                      "stop it on its own card."));
+            QTimer::singleShot(0, this, [this] { placeNotice(); });
+            return;
         }
         showNotice(what, true);
         return;
     }
-    // A board_ask turn: the answer streams into the open card.
+    // A board_ask turn (19.16): every event carries the card it belongs to, and the board may be
+    // showing another one. The open card's view is updated; every card's turn is followed here,
+    // so coming back to it finds the answer so far and what it is doing now.
     const QString card = event.value(QStringLiteral("card_id")).toString();
-    if (!card.isEmpty() && card == m_detail->cardId()) {
+    if (!card.isEmpty() && m_cardTurns.contains(card)) {
+        const bool here = card == m_detail->cardId();
+        CardTurn &turn = m_cardTurns[card];
         if (type == QStringLiteral("delta")) {
-            m_detail->appendDelta(event.value(QStringLiteral("text")).toString());
+            turn.streamed += event.value(QStringLiteral("text")).toString();
+            if (here)
+                m_detail->appendDelta(event.value(QStringLiteral("text")).toString());
+            return;
+        }
+        // What the turn is doing this second. A Plan reads the repository for minutes before it
+        // says a word, and a card that only said "thinking…" for all of it read as stuck
+        // (owner, 2026-09-19). The cleanup's notice has drawn these lines since 19.9.
+        if (type == QStringLiteral("status") || type == QStringLiteral("tool_started")
+            || type == QStringLiteral("tool_result")) {
+            const QString line = turnProgressLine(type, event);
+            if (!line.isEmpty()) {
+                turn.progress = line;
+                if (here)
+                    m_detail->setProgress(line);
+            }
             return;
         }
         if (type == QStringLiteral("done") || type == QStringLiteral("error")
             || type == QStringLiteral("cancelled")) {
-            m_detail->setBusy(false);
-            m_askCard.clear();
-            m_askText.clear();
-            if (type == QStringLiteral("error"))
-                m_detail->showError(event.value(QStringLiteral("text")).toString());
+            m_cardTurns.remove(card);
+            m_list->viewport()->update();       // the row stops saying it is working
+            if (here) {
+                m_detail->setBusy(false);
+                if (type == QStringLiteral("error"))
+                    m_detail->showError(event.value(QStringLiteral("text")).toString());
+            } else if (type == QStringLiteral("error")) {
+                showNotice(QStringLiteral("#%1: %2").arg(card, event.value(QStringLiteral("text")).toString()),
+                           true);
+            }
             return;
         }
     }
@@ -2889,18 +2997,16 @@ void BoardView::handleEvent(const QJsonObject &event)
                   {QStringLiteral("card"), m_detail->cardId()}});
             return;
         }
-        if (!m_askCard.isEmpty()) {
-            // A question the agent could not take (no provider key, say): the question itself is
-            // already in the thread, so say that under it rather than over the board.
-            const bool here = m_askCard == m_detail->cardId();
+        // A question the agent could not take (no provider key, say): the question itself is
+        // already in the thread, so say that under it rather than over the board. An error with
+        // no card of its own belongs to the card this pane just asked on, which is the open one.
+        if (const QString asked = m_detail->cardId(); m_cardTurns.contains(asked)) {
+            m_cardTurns.remove(asked);
+            m_list->viewport()->update();
             m_detail->setBusy(false);
-            m_askCard.clear();
-            m_askText.clear();
-            if (here) {
-                m_detail->showError(QStringLiteral("The Switchboard agent could not answer: %1 "
-                                                   "Your message is kept in the thread.").arg(text));
-                return;
-            }
+            m_detail->showError(QStringLiteral("The Switchboard agent could not answer: %1 "
+                                               "Your message is kept in the thread.").arg(text));
+            return;
         }
         showNotice(text, true);
     }

@@ -198,8 +198,17 @@ private:
     // handleEvent). Empty while no event has carried one — older workers send none.
     QString m_root;
     board::Model m_model;
-    QString m_selected, m_askCard;
-    QString m_askText;                  // the question in flight, to put back if it is refused
+    QString m_selected;
+    // The card turns running right now, by card id (protocol 19.16). Several cards can be
+    // planning or discussing at once, and only one of them is on screen, so what each turn has
+    // said so far and what it is doing this second are held here rather than in the card view.
+    struct CardTurn {
+        QString mode;                   // "discuss" or "plan"
+        QString unsent;                 // the question in flight, to put back if it is refused
+        QString streamed;               // the answer so far
+        QString progress;               // the tool or step line the strip shows
+    };
+    QHash<QString, CardTurn> m_cardTurns;
     QString m_busyCard;                 // the card told "a cleanup is running", to un-tell it
     bool m_open = false;
 

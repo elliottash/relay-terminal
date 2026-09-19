@@ -160,6 +160,7 @@ private slots:
     void theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker();
     void anEditIsKeptWhenTheCardChangedUnderIt();
     void theBoxDiscussesAndTheRowPlansOrLeavesTheBoard();
+    void aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen();
     void executeHandsTheCardToAPaneAndMovesItToInProgress();
     void theExecuteTaskCarriesTheBoardsConventions();
     void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
@@ -1505,7 +1506,11 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop planning"));
     QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     stop->click();
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
+    // It stops *this card's* turn by name (protocol 19.16): the worker-wide `cancel` would stop
+    // whichever turn the worker's own agent is running, which is a cleanup, and would leave the
+    // other cards' turns going.
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cancel"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
     view.handleEvent(QJsonObject{{"event", "cancelled"}, {"card_id", "K7Q2"}});
     QVERIFY(strip->isHidden());
 
@@ -1549,6 +1554,72 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(rule.blockFormat().lineHeightType(), int(QTextBlockFormat::FixedHeight));
     QCOMPARE(relay::board::modeTitle(QStringLiteral("plan")), QStringLiteral("Plan"));
     QVERIFY(relay::board::modeTitle(QStringLiteral("comment")).isEmpty());
+}
+
+
+// Protocol 19.16: turns run per card, so the board can be showing #A while #B is planning. Each
+// card keeps its own strip, its own answer so far and its own progress line; a `done` for one
+// card does not end the other's turn, and the list marks the cards that are working.
+void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
+    auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
+    auto *busy = view.findChild<QLabel *>(QStringLiteral("boardBusyLabel"));
+    auto *what = view.findChild<QLabel *>(QStringLiteral("boardBusyWhat"));
+    QVERIFY(strip && busy && what);
+
+    // Plan #K7Q2, and watch it read the repository: the strip says what it is doing, which is
+    // what a Plan does for minutes before it says a word.
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    view.cardAction(QStringLiteral("plan"));
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
+    view.handleEvent(QJsonObject{{"event", "status"}, {"card_id", "K7Q2"}, {"mode", "plan"},
+                                 {"text", "Requesting model · step 4/256"}});
+    QVERIFY(!strip->isHidden());
+    QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 4/256"));
+    view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"mode", "plan"},
+                                 {"text", "Reading the completion code."}});
+
+    // Open #M3XJ while that one runs: this card is idle, and its own Plan is offered.
+    view.handleEvent(card("M3XJ", "M3XJ card", "another issue", "h2"));
+    QVERIFY(strip->isHidden());
+    QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
+    view.cardAction(QStringLiteral("plan"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("M3XJ"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+
+    // #K7Q2 finishing does not end the turn on the card being shown.
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "plan"}});
+    QVERIFY(!strip->isHidden());
+
+    // Back to #K7Q2: it finished while it was off screen, so it is idle again — and its answer
+    // is in the thread, which the worker appended.
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(strip->isHidden());
+
+    // Back to #M3XJ: still planning, and the strip has its answer so far and its step back.
+    view.handleEvent(QJsonObject{{"event", "status"}, {"card_id", "M3XJ"}, {"mode", "plan"},
+                                 {"text", "Requesting model · step 2/256"}});
+    view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "M3XJ"}, {"mode", "plan"},
+                                 {"text", "Looking at the header."}});
+    view.handleEvent(card("M3XJ", "M3XJ card", "another issue", "h2"));
+    QVERIFY(!strip->isHidden());
+    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+    QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 2/256"));
+
+    // A fourth card refused while three run says which cards are working, and keeps the text.
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    reply->setPlainText(QStringLiteral("what about this one?"));
+    QTest::keyClick(reply, Qt::Key_Return);
+    view.handleEvent(QJsonObject{{"event", "error"}, {"code", "board_busy"},
+                                 {"cleanup_running", false}, {"card_id", "K7Q2"},
+                                 {"cards", QJsonArray{"K7Q2", "R4TT"}},
+                                 {"text", "The Switchboard agent is busy with turns on #K7Q2 and #R4TT."}});
+    QCOMPARE(reply->toPlainText(), QStringLiteral("what about this one?"));
+    QVERIFY(strip->isHidden());
 }
 
 void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToInProgress()
