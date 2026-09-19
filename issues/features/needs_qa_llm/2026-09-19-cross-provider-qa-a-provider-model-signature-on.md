@@ -12,7 +12,7 @@ rank: zzzzzzy
 created: '2026-09-19'
 acceptance: a card that lands in the QA lane carries a canonical provider/model signature set by the worker, not typed; its commits carry the same signature as a trailer; the card shows one recommended verifier chosen from a ranked list that skips the implementer's family and anything not installed or keyed; Verify opens a pane on that verifier with the QA brief; and a same-family close is still refused
 source: 'owner, in the terminal, 2026-09-19 (pasted brief), plus mid-turn: "i''d like your input on this feature as well, and do research to see if this exists in other harnesses/systems"'
-links: {plans: [], commits: [eba4fed, d1d96b7, 2906807, a738b5e, 940438c, 83f2a1f, bc785fc, '0144880'], evidence: [docs/qa_evidence/2026-09-19-cross-provider-qa/], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
+links: {plans: [], commits: [eba4fed, d1d96b7, 2906807, a738b5e, 940438c, 83f2a1f, bc785fc, '0144880', b65d061], evidence: [docs/qa_evidence/2026-09-19-cross-provider-qa/], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
 ---
 # Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier
 
@@ -181,8 +181,9 @@ escaped-defect rates, so that log would be the first evidence).
 - **Card detail:** a card in `needs-qa-llm` shows a line under the fields — *"Verify with
   Codex (installed) · then GLM-5.3 · Claude skipped: it implemented this"* — and a **Verify (v)**
   button beside Execute. The button opens a terminal pane beside the board on the recommended
-  runner: a guest runner launches that guest in the pane and gives it the brief as its first
-  prompt; a preset runner creates the pane on that preset (`createPane {preset}`) and
+  runner: a guest runner goes through the pane's own harness-or-terminal decision (the wrapped
+  guest as the pane's agent when the worker can run it, its TUI with the brief as the first prompt
+  only when it cannot; fixed in `b65d061` after the owner saw Verify open the bare Codex CLI); a preset runner creates the pane on that preset (`createPane {preset}`) and
   `startBoardTask`s the brief. The row's key `v` and a shortcut hint (`board.verify`) follow the
   WARP rule; the label carries its key in parentheses like the other buttons (#QG60).
 - **The Verify brief** (`relay::board::verifyTask`): read the card, run its `## QA checklist`,
@@ -224,6 +225,7 @@ escaped-defect rates, so that log would be the first evidence).
 | `d1d96b7` | the verify line, **Verify (v)**, `verifyTask`, the `Implemented-By:` bullet in the Execute brief, a pane on the recommended runner |
 | `940438c` | the derived **Verified** section, signature labels, the amber note |
 | `0144880` | the line takes the worker's `available` word, so a local model does not read "(key)" |
+| `b65d061` | Verify opens a guest verifier through the harness, like the model picker, with the TUI only as the fallback |
 
 Implemented by Claude Opus 5 subagents (backend and GUI), orchestrated and reviewed by Claude
 Fable 5.1 in Claude Code; research by a third Opus agent. Tests at landing: `tests/test_qa_verifiers.py`
@@ -249,7 +251,7 @@ Codex). Evidence under `docs/qa_evidence/2026-09-19-cross-provider-qa/`, files p
 - [ ] `recommend()` by hand, with availability passed in: implementer `openai/codex` gets Claude when `claude` is installed, else GLM when keyed, else Kimi, else DeepSeek; implementer `glm/glm-5.3` gets Codex or Claude first and Kimi / DeepSeek last with `same_lineage: true` and a `note`; implementer `relay-free/relay-main` is treated as GLM; nothing available gives `recommended: null` and the Relay Free note.
 - [ ] Family mapping: `openrouter` + `deepseek/deepseek-v4.1-flash` signs as DeepSeek, not OpenRouter; `Claude Opus 5 (pane 2)` and `anthropic/claude-opus-5` are one family; `anthropic/claude-opus-5 via claude-code` parses.
 - [ ] In a scratch board: a pane agent moving a card to `in-progress` gets `implemented_by` stamped from the worker's preset and model whatever it typed; closing from a QA lane with a different family stamps `verified_by`; the same family is refused (`independent_model`); a `relay-free/...` closer is refused.
-- [ ] Live under Xvfb (isolated `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR` under a short path, `RELAY_KEYRING=off`): a `needs-qa-llm` card shows the verify line and **Verify (v)**; `v` and the click open a pane beside the board on the recommended runner with the brief (a guest gets it as its first prompt); the thread gets one progress comment and the card does not move; the hint shows once.
+- [ ] Live under Xvfb (isolated `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR` under a short path, `RELAY_KEYRING=off`): a `needs-qa-llm` card shows the verify line and **Verify (v)**; `v` and the click open a pane beside the board on the recommended runner with the brief (a Codex or Claude Code verifier runs through Relay's harness as the pane's agent, not as the bare CLI in the shell, whenever the model picker offers it that way); the thread gets one progress comment and the card does not move; the hint shows once.
 - [ ] A `done` card with `verified_by` sits in **Verified** with a `✓ <verifier>` badge, one without stays in Done, and a drag or `Alt+Shift+→` into Verified is refused with the sentence in design §4.11.
 - [ ] With no keys and no guest CLI on PATH the line is the amber Relay Free note, Verify is disabled and its tooltip says why.
 - [ ] The docs say what the code does: `docs/SWITCHBOARD-FORMAT.md` (`verified_by`), protocol §19.15, design §4.10 and §4.11, and the ranking table's row comments cite the research report.

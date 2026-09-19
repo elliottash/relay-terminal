@@ -447,11 +447,16 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   verifier's own verdict moves it, and the implementer stays the implementer.
 - **The pane.** A `preset:<id>` runner is an ordinary Relay agent pane created on that preset
   (`createPane {preset}`) and handed the brief with `startBoardTask`, so the card travels with it as
-  `ask {cards: [id]}`. A `guest:<id>` runner is Claude Code or Codex launched in the pane's own
-  shell with the brief as its **first positional prompt** — both CLIs take one, and
-  `relay_core.guest_launch` passes a launch's `extra` through after the flags — so the guest starts
-  on the card instead of at an empty prompt. A guest has no `board_*` tools, so the brief says where
-  the card and its thread live and what to do without them.
+  `ask {cards: [id]}`. A `guest:<id>` runner is Claude Code or Codex through the same
+  door the model picker uses (`Pane::startGuestBoardTask`, owner 2026-09-19: "with verify, it opened
+  the codex cli, not our wrapper"): when the worker can run the guest through its harness (protocol
+  29.4) the pane goes onto the `guest:<id>` preset and the brief is its first `ask` with the card
+  attached, exactly like a preset runner; only when it cannot does the guest's own TUI start in the
+  pane's shell with the brief as its **first positional prompt** (both CLIs take one, and
+  `relay_core.guest_launch` passes a launch's `extra` through after the flags). A pane that was just
+  created does not know which until the worker's presets arrive, so the task waits for them. A
+  guest has no `board_*` tools on either route, so the brief says where the card and its thread
+  live and what to do without them.
 - **The brief** (`board::verifyTask`): read the card and its `## QA checklist`, run every item and
   write down what was actually seen, put the evidence under the card's
   `docs/qa_evidence/<date>-<slug>/` in files named `qa-…`, write `## Verdict` with
