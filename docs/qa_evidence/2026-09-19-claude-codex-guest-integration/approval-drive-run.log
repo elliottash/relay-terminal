@@ -1,0 +1,11 @@
+[approval] ===== claude
+[approval] claude started: session=abcbb004-df5 model=''
+[approval] approval raised: kind='patch' detail='Write: /tmp/claude-1000/relay-approval-claude-n9xhvjst/approval-probe.txt'
+[approval] card: header='Apply edit' options=['Allow', 'Allow for session', 'Deny', 'Deny and stop']
+[approval] answering {'behavior': 'allow', 'scope': 'once'}
+[approval] turn ended: stop_reason=end text='Done. The file `approval-probe.txt` now exists in the working directory with the'
+[approval] events: started, delta, delta, delta, tool_started, approval, tool_result, delta, delta, delta, delta, delta, delta, delta, delta, usage, done
+[approval] approval-probe.txt written: True
+[approval] scratch directory kept for the record: /tmp/claude-1000/relay-approval-claude-n9xhvjst
+[approval] claude: passed in 6 s
+[approval] RESULT: {"claude": true}

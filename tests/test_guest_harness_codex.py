@@ -953,5 +953,45 @@ class RobustnessTest(HarnessCase):
         self.assertEqual(diff, "--- a/x.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n")
 
 
+class ApprovalDetail(unittest.TestCase):
+    """What the card says a file change is about (protocol 29.3).
+
+    v1's `applyPatchApproval` carried the paths; v2's `item/fileChange/requestApproval` carries
+    only `itemId`, `reason` and `grantRoot`, so a card built from the request alone could only
+    quote codex's reason — "command failed; retry without sandbox?" — and never name the file the
+    guest was about to write. Seen live on 2026-09-19 (`approval-drive.py`): the card read "Apply
+    edit · command failed; retry without sandbox?". The paths come from the item instead, which
+    the adapter already records from `item/started` and `patchUpdated` for the diff.
+    """
+
+    METHOD = "item/fileChange/requestApproval"
+
+    def test_the_item_names_the_file_when_the_request_cannot(self):
+        detail = gh._approval_detail(
+            self.METHOD, {"itemId": "fc-1", "reason": "command failed; retry without sandbox?"},
+            {"changes": [{"path": "notes.txt", "kind": {"type": "add"}}]})
+        self.assertEqual("edit notes.txt (command failed; retry without sandbox?)", detail)
+
+    def test_several_files_are_named_up_to_three(self):
+        item = {"changes": [{"path": f"f{n}.txt"} for n in range(5)]}
+        detail = gh._approval_detail(self.METHOD, {"itemId": "fc-1"}, item)
+        self.assertEqual("edit f0.txt, f1.txt, f2.txt…", detail)
+
+    def test_the_v1_shape_still_carries_its_own_paths(self):
+        detail = gh._approval_detail(
+            "applyPatchApproval", {"changes": {"b.txt": {}, "a.txt": {}}}, None)
+        self.assertEqual("edit a.txt, b.txt", detail)
+
+    def test_with_neither_it_says_what_codex_said(self):
+        self.assertEqual("command failed; retry without sandbox?", gh._approval_detail(
+            self.METHOD, {"itemId": "fc-1", "reason": "command failed; retry without sandbox?"}, {}))
+        self.assertEqual("apply its file changes",
+                         gh._approval_detail(self.METHOD, {"itemId": "fc-1"}, {}))
+
+    def test_a_command_approval_is_unaffected(self):
+        self.assertEqual("rm -rf build", gh._approval_detail(
+            "item/commandExecution/requestApproval", {"command": ["rm", "-rf", "build"]}, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

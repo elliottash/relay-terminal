@@ -747,7 +747,14 @@ class CodexHarness:
                 questions.append(one)
             record.update(kind="question", questions=questions, question_ids=ids)
         elif method in _APPROVAL_METHODS:
-            record.update(kind=_APPROVAL_METHODS[method], detail=_approval_detail(method, params))
+            # The item the approval is about, when the adapter is already following one: a v2
+            # file-change approval names only its `itemId`, so the paths come from what
+            # `item/started` and `patchUpdated` recorded for the diff.
+            with self._lock:
+                turn = self._turn
+            item = (turn.items.get(str(params.get("itemId") or "")) or {}) if turn is not None else {}
+            record.update(kind=_APPROVAL_METHODS[method],
+                          detail=_approval_detail(method, params, item))
             if method == "item/permissions/requestApproval":
                 record["permissions"] = params.get("permissions") or {}
         else:
@@ -1169,18 +1176,37 @@ def _diff_counts(diff: str) -> tuple[int, int]:
     return added, removed
 
 
-def _approval_detail(method: str, params: dict) -> str:
+def _approval_detail(method: str, params: dict, item: dict | None = None) -> str:
+    """What the guest wants to do, in its own words, for the card the pane draws (29.3).
+
+    `item` is what the adapter has recorded about the item the approval is about. It matters for a
+    file change: v1's `applyPatchApproval` carried a `changes` map, but v2's
+    `item/fileChange/requestApproval` carries only `itemId`, `reason` and `grantRoot`, so without
+    the item the card could only quote codex's reason ("command failed; retry without sandbox?")
+    and never say which file was about to be written. The user is deciding whether to let a guest
+    write outside its sandbox; which file is the thing they need to know.
+    """
     if method in ("item/commandExecution/requestApproval", "execCommandApproval"):
         command = params.get("command")
         if isinstance(command, list):
             command = " ".join(str(x) for x in command)
         return _short(str(command or "run a command"))
     if method in ("item/fileChange/requestApproval", "applyPatchApproval"):
-        reason = params.get("reason")
+        reason = str(params.get("reason") or "").strip()
         changes = params.get("changes")
-        if isinstance(changes, dict) and changes:
-            return _short("edit " + ", ".join(sorted(changes)))
-        return _short(str(reason or "apply its file changes"))
+        paths: list[str] = []
+        if isinstance(changes, dict) and changes:                       # v1 carried them here
+            paths = sorted(changes)
+        elif isinstance(changes, list) and changes:
+            paths = [str(c.get("path") or "") for c in changes if isinstance(c, dict)]
+        if not paths:                                                   # v2: from the tracked item
+            tracked = (item or {}).get("changes") or []
+            paths = [str(c.get("path") or "") for c in tracked if isinstance(c, dict)]
+        paths = [p for p in paths if p]
+        if paths:
+            edit = "edit " + ", ".join(paths[:3]) + ("…" if len(paths) > 3 else "")
+            return _short(f"{edit} ({reason})" if reason else edit)
+        return _short(reason or "apply its file changes")
     if method == "item/permissions/requestApproval":
         return _short(str(params.get("reason") or "widen its permissions"))
     if method == "mcpServer/elicitation/request":
