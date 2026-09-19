@@ -187,6 +187,20 @@ class CodePhaseTests(unittest.TestCase):
         self.assertEqual(lookups["offline"], {"kind": "unreachable"})
         self.assertTrue(all(url == "https://relay.example/v1/codes/BQRT" for url in lookups["asked"]))
 
+    def test_a_room_that_never_opens_gives_up_instead_of_hanging(self):
+        """A socket nobody answers fires no event at all: `openCodeRoom` used to wait for ever, so
+        the join sat on "Checking the code and PIN…" with the form disabled and nothing to press.
+        It has a deadline of its own now (CONNECT_WAIT), it closes the socket on the way out, and
+        the sentence it fails with is the one that says to try again — which app/guest.js shows
+        with Join enabled behind it."""
+        case = self.cases["connectTimeout"]
+        self.assertFalse(case["ok"], case)
+        self.assertEqual(case["kind"], "unreachable")
+        self.assertIn("try again", case["sentence"])
+        self.assertTrue(case["waited"], "it gave up before its own deadline")
+        self.assertTrue(case["closed"], "the socket was left connecting")
+        self.assertEqual(case["url"], "wss://relay.example/v1/connect?room=code-room-1")
+
     def test_no_sentence_is_empty(self):
         for kind, sentence in self.cases["sentences"].items():
             self.assertGreater(len(sentence), 20, kind)

@@ -34,6 +34,14 @@ const LABEL_SEAL = utf8('relay/meet/v1 seal');
 // its two answers longer than that only postpones the same news.
 export const ANSWER_WAIT = 20000;
 
+// And a deadline for the socket itself. A WebSocket that is never answered — a captive portal, a
+// dropped Wi-Fi, a rendezvous whose TCP connection is accepted and then goes quiet — fires neither
+// `open` nor `error` nor `close`, so `openCodeRoom` never settled: the join sat on "Checking the
+// code and PIN with their desktop…" for as long as the page was open, with the form disabled and
+// nothing to press. Past this it fails `unreachable`, which app/guest.js shows with the form back
+// and Join enabled — the same "try again" a dropped link gets.
+export const CONNECT_WAIT = 10000;
+
 // ---- what the person typed ----------------------------------------------------------------------
 
 // Case-insensitive on input, and anything outside the alphabet is simply not typed, so the field
@@ -185,7 +193,7 @@ export async function lookupCode(code, { origin = location.origin, fetcher = fet
 // A code room, opened the way rrp.js opens any room, carrying the card's JSON frames. They go as
 // binary frames holding UTF-8 JSON: the rendezvous forwards a client's binary frames to the desktop
 // and drops text frames (rendezvous/server.py, `_client_socket`).
-export function openCodeRoom(room, { origin = location.origin } = {}) {
+export function openCodeRoom(room, { origin = location.origin, connectWait = CONNECT_WAIT } = {}) {
   const url = `${origin.replace(/^http/, 'ws')}/v1/connect?room=${encodeURIComponent(room)}`;
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url);
@@ -194,6 +202,15 @@ export function openCodeRoom(room, { origin = location.origin } = {}) {
     const waiters = [];
     let closed = null;
     let opened = false;
+    // The socket's own deadline (CONNECT_WAIT). Closing it is part of giving up: a socket left
+    // connecting would open later into a room nobody is listening to.
+    let connectTimer = connectWait > 0 ? setTimeout(() => {
+      connectTimer = 0;
+      closed = new MeetError('unreachable');
+      try { socket.close(1000, 'timeout'); } catch { /* already closing */ }
+      reject(closed);                 // nothing can be waiting yet: `next` exists only once open
+    }, connectWait) : 0;
+    const arrived = () => { if (connectTimer) { clearTimeout(connectTimer); connectTimer = 0; } };
 
     const settle = () => {
       while (waiters.length && (queue.length || closed)) {
@@ -205,6 +222,8 @@ export function openCodeRoom(room, { origin = location.origin } = {}) {
     };
 
     socket.onopen = () => {
+      if (closed) { try { socket.close(1000, 'bye'); } catch { /* already closing */ } return; }
+      arrived();
       opened = true;
       resolve({
         send(message) {
@@ -246,12 +265,16 @@ export function openCodeRoom(room, { origin = location.origin } = {}) {
       }
     };
     socket.onerror = () => {
-      if (!opened) reject(new MeetError('unreachable'));
+      if (opened) return;
+      arrived();
+      reject(new MeetError('unreachable'));
     };
     socket.onclose = (event) => {
+      arrived();
       // 4404 is the rendezvous saying the room or its desktop is gone: the code outlived it, or
-      // the desktop that made it is asleep or offline.
-      closed = new MeetError(event.code === 4404 ? 'no_answer' : 'closed');
+      // the desktop that made it is asleep or offline. A close after the deadline has already been
+      // reported keeps the deadline's answer: the socket never opened.
+      if (!closed) closed = new MeetError(event.code === 4404 ? 'no_answer' : 'closed');
       if (!opened) reject(closed);
       settle();
     };
@@ -259,12 +282,13 @@ export function openCodeRoom(room, { origin = location.origin } = {}) {
 }
 
 // The whole code phase from two typed strings: find the room, run the exchange, close the room.
-export async function joinWithCode(code, pin, { origin = location.origin, fetcher } = {}) {
+export async function joinWithCode(code, pin, { origin = location.origin, fetcher,
+                                                 connectWait = CONNECT_WAIT } = {}) {
   const clean = cleanCode(code);
   if (!validCode(clean)) throw new MeetError('bad_code');
   if (!validPin(pin)) throw new MeetError('bad_pin');
   const room = await lookupCode(clean, { origin, ...(fetcher ? { fetcher } : {}) });
-  const channel = await openCodeRoom(room, { origin });
+  const channel = await openCodeRoom(room, { origin, connectWait });
   try {
     return await codePhase({ code: clean, pin, room, channel });
   } catch (error) {

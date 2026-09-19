@@ -78,9 +78,37 @@ class WebThemeTest(unittest.TestCase):
                 self.assertIn(f"{var}: {ui[key].lower()};", css)
         self.assertIn(f"--term-bg: {term['background'].lower()};", css)
         self.assertIn(f"--term-fg: {term['foreground'].lower()};", css)
+        # …and those two are only the fallback. Inside the pane view the terminal is a descendant
+        # of `.relay-pane`, so it takes the generated theme's own terminal colours and follows a
+        # theme chosen on the page; the hand-typed pair is what a terminal outside a pane gets, so
+        # the fallback must be the same value.
+        self.assertIn(f"--term-bg: var(--rt-term-background, {term['background'].lower()});", css)
+        self.assertIn(f"--term-fg: var(--rt-term-foreground, {term['foreground'].lower()});", css)
+        self.assertIn("var(--rt-term-cursor,", css)
         self.assertIn(f'"theme_color": "{ui["background"].lower()}"', (ROOT / "app/manifest.webmanifest").read_text())
         self.assertIn(f'<meta name="theme-color" content="{ui["background"].lower()}">',
                       (ROOT / "app/index.html").read_text())
+
+    def test_the_web_terminal_paints_the_generated_palette(self):
+        """app/screen.js paints the sixteen ANSI colours from the generated theme.
+
+        The grid used to hold xterm's own sixteen, so the phone's terminal stayed xterm-red on a
+        desktop whose theme said otherwise, and a theme chosen on the page (pane.js `setTheme`)
+        left it behind. They are now `var(--rt-ansi-N, <xterm's>)`: themed where a theme is in
+        scope, unchanged where none is.
+        """
+        screen = (ROOT / "app/screen.js").read_text()
+        # The sixteen, and only those: 16-255 are the cube and the greys, which the escape sequence
+        # fixes and no theme owns. The fallback is the xterm value the file already held.
+        self.assertIn("n < 16 ? `var(--rt-ansi-${n}, ${hex})` : hex", screen)
+        self.assertIn("THEMED[value & 0xff]", screen,
+                      "app/screen.js still paints an indexed colour from the unthemed palette")
+        # The generated file defines all sixteen for every theme it writes.
+        props = defined_properties(self.fresh)
+        for n in range(16):
+            self.assertIn(f"--rt-ansi-{n}", props)
+        for name in ("--rt-term-background", "--rt-term-foreground", "--rt-term-cursor"):
+            self.assertIn(name, props)
 
     def test_qt_colour_arithmetic(self):
         """QColor's own arithmetic, printed by a Qt 5.15 program on 2026-09-18:

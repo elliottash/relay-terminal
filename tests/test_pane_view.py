@@ -244,6 +244,115 @@ class PaneViewTests(unittest.TestCase):
         self.drive(main())
 
 
+    def test_a_chip_too_long_for_the_strip_ellipsizes_instead_of_being_cut(self):
+        """A chip is a flex box, and a flex box never ellipsizes text of its own: the words go in
+        as an anonymous item, which `text-overflow` does not reach, so at 330 px the clock and the
+        folder chip were cut straight through a glyph. The words are in a block child with
+        `min-width: 0` now — the one box that can shrink and can end in an ellipsis."""
+        state = fixture("busy_queue")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                # A tablet's width — the folder chip is the desktop's and a phone does not draw it
+                # (pane.css) — with labels longer than any chip can hold at any size.
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": 700, "height": 700, "deviceScaleFactor": 1, "mobile": False})
+                await self.open(browser, "busy_queue")
+                long_state = {
+                    **state, "seq": state["seq"] + 1,
+                    "turn": {**state.get("turn", {}),
+                             "clock": "running · 1 min 12 s · step 4/256 · Esc stops · and a turn "
+                                      "clock long enough that no strip on any screen could hold "
+                                      "the whole of it in one chip"},
+                    "folder": {"label": "~/repos/relay-terminal/backend/relay_core/providers/openrouter"},
+                }
+                self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(long_state)})"))
+                for selector, label in ((".rp-clock", long_state["turn"]["clock"]),
+                                        (".rp-folder", long_state["folder"]["label"])):
+                    with self.subTest(chip=selector):
+                        seen = json.loads(await browser.evaluate(
+                            "JSON.stringify((c => { const t = c.querySelector('.rp-chip-text');"
+                            " if (!t) return {text: c.textContent, present: false};"
+                            " const s = getComputedStyle(t); return {text: c.textContent,"
+                            " present: true, overflowing: t.scrollWidth > t.clientWidth,"
+                            " fits: t.getBoundingClientRect().right <= c.getBoundingClientRect().right + 1,"
+                            " ellipsis: s.textOverflow, minWidth: s.minWidth};})"
+                            f"(document.querySelector('{selector}')))"))
+                        # The desktop's label, character for character, is still what it holds.
+                        self.assertEqual(seen["text"], label)
+                        self.assertTrue(seen["present"],
+                                        f"{selector}'s words are the flex box's own, which cannot ellipsize")
+                        # It is too long for the chip — which is the case that used to be cut —
+                        # and the box that overflows is the one with the ellipsis on it.
+                        self.assertTrue(seen["overflowing"], f"{selector} is not the narrow case")
+                        self.assertTrue(seen["fits"], f"{selector}'s words run outside the chip")
+                        self.assertEqual(seen["ellipsis"], "ellipsis")
+                        self.assertEqual(seen["minWidth"], "0px")
+                # And the strip itself does not run off the side of the pane.
+                self.assertTrue(await browser.evaluate(
+                    "(s => s.scrollWidth <= s.clientWidth + 1)(document.querySelector('.rp-strip'))"))
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_refused_edit_drops_what_was_typed_on_the_row_and_says_so(self):
+        """`queue_edit` carries an id, and the desktop's refusal comes back with it (§6.1).
+
+        The keys typed on a selected row are held for the text the desktop is about to send back.
+        When it refuses instead, nothing ever cleared them, so the next row taken back arrived with
+        a stray letter in front of its text. The refusal is shown the way the view shows anything:
+        the toast over the terminal."""
+        state = fixture("busy_queue")
+        # The first row the list selects when it takes focus, and another one to be given back.
+        row = next(r for r in state["queue"]["rows"] if r["actions"])
+        self.assertIn("edit", row["actions"])
+        other = next(r for r in state["queue"]["rows"] if "edit" in r["actions"] and r["id"] != row["id"])
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "busy_queue")
+                # ↑ on an empty prompt box selects the first row (the one below), and typing on a
+                # selected row asks for it back and holds the letter for its text.
+                await browser.evaluate(
+                    "document.querySelector('.rp-input').dispatchEvent("
+                    "new KeyboardEvent('keydown', {key: 'ArrowUp', bubbles: true, cancelable: true}))")
+                await browser.evaluate(
+                    "document.querySelector('.rp-rows').dispatchEvent("
+                    "new KeyboardEvent('keydown', {key: 'y', bubbles: true, cancelable: true}))")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = await self.sent(browser)
+                self.assertEqual(sent[-1]["t"], "queue_edit")
+                self.assertEqual(sent[-1]["row"], row["id"])
+                edit_id = sent[-1]["id"]
+                self.assertTrue(edit_id, "queue_edit carries no id, so its refusal cannot be told")
+                # An error for something else is not this view's to swallow.
+                self.assertFalse(await browser.evaluate(
+                    "window.paneDemo.refuse({code: 'internal', message: 'elsewhere'})"))
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.refuse(%s)" % json.dumps(
+                        {"t": "error", "code": "not_permitted", "id": edit_id,
+                         "message": "that row is running now."})))
+                self.assertEqual(await browser.evaluate("window.paneDemo.toast()"),
+                                 "that row is running now.")
+                # The letter is gone: the next row the desktop does give back arrives clean.
+                await browser.evaluate(
+                    "window.paneDemo.editText(%s)" % json.dumps(
+                        {"t": "queue_edit_text", "pane": state["pane"], "row": other["id"],
+                         "text": "the words that were in the row"}))
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-input').value"),
+                                 "the words that were in the row")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_an_owner_opens_a_past_conversation_by_the_desktops_token(self):
         state = fixture("sessions_50")
         row = next(r for r in state["sessions"]["rows"] if not r.get("current"))

@@ -5,6 +5,7 @@
 //   const view = mountPane(container, { send, keymap });
 //   view.update(paneState);        // every pane_state for this pane
 //   view.onEditText(message);      // the desktop's queue_edit_text answer
+//   view.onRefused(message);       // an `error` answering one of the view's own requests
 //   view.terminalSlot              // where the host puts the terminal canvas
 //   view.destroy();
 //
@@ -136,6 +137,7 @@ export function mountPane(container, options = {}) {
   let staged = null;          // the three-step Enter: {text, stage, at, rowId, steerId, known}
   let typedAhead = '';        // keys typed on a selected row, for when its text comes back
   let editRow = '';           // the row whose text is in the prompt box
+  let editRequest = '';       // the id of the queue_edit waiting for its text or a refusal
   let toastTimer = 0;
   const hintLast = new Map();
   let hintLastAny = -Infinity;
@@ -312,7 +314,13 @@ export function mountPane(container, options = {}) {
   function act(row, action, how) {
     if (!row || !actionsOf(row).includes(action)) return;   // only what the desktop offered
     if (action === 'remove') emit('queue_remove', { row: row.id });
-    else if (action === 'edit') { editRow = row.id; emit('queue_edit', { row: row.id }); }
+    else if (action === 'edit') {
+      // With an id, so the desktop's refusal can be told from any other error (§6.1: a
+      // reply carries the request's id) and the keys typed on the row can be dropped.
+      editRow = row.id;
+      editRequest = messageId();
+      emit('queue_edit', { row: row.id, id: editRequest });
+    }
     else if (action === 'send_now') emit('queue_send_now', { row: row.id });
     else emit('queue_move', { row: row.id, to: action });
     if (how === 'mouse') {
@@ -639,6 +647,18 @@ export function mountPane(container, options = {}) {
     node.hidden = !text;
   }
 
+  // The same, for a chip. A chip is a flex box (its dot or icon beside its words), and a flex box
+  // never ellipsizes text of its own: the words go in as an anonymous item that `text-overflow`
+  // does not reach, so a clock or a folder name too long for the chip was cut straight through a
+  // glyph. The words go in a child instead — .rp-chip-text, `min-width: 0`, which is a box that
+  // can shrink and can end in an ellipsis. `textContent` still reads exactly the desktop's label.
+  function showChip(chip, text) {
+    let label = chip.querySelector(':scope > .rp-chip-text');
+    if (!label) { label = el('span', 'rp-chip-text'); chip.append(label); }
+    label.textContent = text;
+    chip.hidden = !text;
+  }
+
   function selectionInside(node) {
     const selection = window.getSelection && window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
@@ -699,24 +719,24 @@ export function mountPane(container, options = {}) {
       const placeholder = str(c.placeholder);
       if (box.placeholder !== placeholder) { box.placeholder = placeholder; fitBox(); }
       const mode = str(c.mode);
-      show(modeChip, mode);
+      showChip(modeChip, mode);
       composer.dataset.mode = mode;
       modeChip.dataset.dest = mode;
     }
     const folder = obj(state.folder);
-    show(folderChip, folder ? str(folder.label) : '');
+    showChip(folderChip, folder ? str(folder.label) : '');
     const turn = obj(state.turn);
-    show(clockChip, turn ? str(turn.clock) : '');
+    showChip(clockChip, turn ? str(turn.clock) : '');
     root.dataset.phase = turn ? str(turn.phase) : '';
     const context = obj(state.context);
-    show(contextChip, context ? str(context.label) : '');
+    showChip(contextChip, context ? str(context.label) : '');
     const left = context && typeof context.percent_left === 'number' ? context.percent_left : null;
     contextChip.dataset.warn = left !== null && left <= 15 ? 'true' : 'false';
     // The Relay Free allowance: the desktop's words, its detail as the title, its warn flag the
     // same style the context chip warns by. Absent on the pane state: the chip hides (the pane
     // moved to a provider with a key).
     const allowance = obj(state.allowance);
-    show(allowanceChip, allowance ? str(allowance.label) : '');
+    showChip(allowanceChip, allowance ? str(allowance.label) : '');
     allowanceChip.dataset.warn = allowance && allowance.warn === true ? 'true' : 'false';
     allowanceChip.title = allowance ? str(allowance.detail) : '';
     renderModel();
@@ -957,6 +977,7 @@ export function mountPane(container, options = {}) {
       if (!m || (m.pane !== undefined && state && m.pane !== state.pane)) return;
       box.value = str(m.text) + typedAhead;
       typedAhead = '';
+      editRequest = '';
       editRow = str(m.row);
       selectedRow = '';
       if (state) renderRows();
@@ -964,6 +985,27 @@ export function mountPane(container, options = {}) {
       renderSendState();
       box.focus();
       box.setSelectionRange(box.value.length, box.value.length);
+    },
+
+    // An `error` answering something this view asked for. The one that matters is a refused
+    // `queue_edit`: the row is not coming back, so the keys typed on it must not sit in
+    // `typedAhead` waiting to be pushed in front of whatever comes back next — a letter typed on a
+    // row the desktop would not give up landed in front of a later row's text. Returns true when
+    // the refusal was this view's, so the host does not also say it somewhere else.
+    //
+    // It is said the way the view says everything: the toast over the terminal, which is where a
+    // phone reads it — the client's note lives under a transcript that is hidden while a pane has
+    // a screen (app/app.js, threadNote).
+    onRefused(message) {
+      const m = obj(message);
+      if (!m || !editRequest || str(m.id) !== editRequest) return false;
+      editRequest = '';
+      editRow = '';
+      typedAhead = '';
+      if (state) renderRows();
+      renderSendState();
+      showToast(str(m.message) || 'That row could not be taken back.');
+      return true;
     },
 
     setTheme(id) {

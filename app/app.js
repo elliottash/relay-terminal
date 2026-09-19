@@ -1338,6 +1338,9 @@ rrp.addEventListener('error', (event) => {
     screenView.more = false;
     return;
   }
+  // A refused `queue_edit` belongs to the pane view: it has the row and the keys typed on it, and
+  // says so over the terminal where the note below cannot be read (see threadNote).
+  if (paneView && paneView.onRefused(detail)) return;
   if (current) threadNote(detail.message || 'Refused.', true);
 });
 

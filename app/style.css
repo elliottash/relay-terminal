@@ -86,6 +86,19 @@ p { margin: 0 0 12px; }
 #thread-bar button {
   background: none; border: 0; color: var(--accent); font-size: 28px; line-height: 1;
   padding: 0 6px; cursor: pointer;
+  /* Positioned and above what follows it, so the target drawn below can overhang the bar: at
+     330 px the bar is 32 px tall and the pane starts straight under it, and a positioned pane
+     later in the document would otherwise take the taps the overhang is there to catch. */
+  position: relative; z-index: 1;
+}
+/* The glyph is 28x24, and the bar shrinks around it at 330 px (below), so padding the button out
+   to a finger would take the height the terminal needs. The target is drawn instead: a
+   pseudo-element centred on the button, at least 44 px each way (Apple's and Google's minimum,
+   the same one pane.css's --rp-tap keeps). It takes the tap for the button, and nothing that is
+   seen moves — no box, no background, no change to the bar's height or its gaps. */
+#thread-bar button::after {
+  content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: max(100%, 44px); height: max(100%, 44px);
 }
 #thread-title { font-weight: 600; }
 /* The pane's model; accent while a switch waits for the next step (issue 3ES1). */
@@ -189,8 +202,18 @@ details.tool > summary::marker { color: var(--muted); }
 @keyframes mic-pulse { 50% { opacity: 0.55; } }
 
 /* ---- terminal view ---------------------------------------------------------------------- */
-/* Dark Copper's [terminal] ground and ink: the grid stays plain, no copper reaches it. */
+/* Dark Copper's [terminal] ground and ink: the grid stays plain, no copper reaches it. These are
+   hand-typed, so tests/test_web_theme.py holds them to the theme file. */
 :root { --term-bg: #12131a; --term-fg: #dad4ce; }
+/* …but once the pane view is up, app.js moves #terminal-pane inside `.relay-pane`, where the
+   generated theme (app/pane-theme.css) has the terminal's own ground and ink for whichever theme
+   is showing. Redefining the two here is the whole job: the grid, the scrollbars and the cursor
+   below all read them, and so does app/screen.js's reverse video. Outside a pane — the pairing
+   screen, a guest's terminal — the var() is undefined and the hand-typed pair above stands. */
+#terminal-pane {
+  --term-bg: var(--rt-term-background, #12131a);
+  --term-fg: var(--rt-term-foreground, #dad4ce);
+}
 
 #thread-tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tab {
@@ -233,7 +256,9 @@ details.tool > summary::marker { color: var(--muted); }
 /* Scrollback, above the live rows in the same grid: same font, same runs, same scroll. */
 .screen-history { display: block; }
 .screen-row { white-space: pre; min-height: 1em; }
-.screen-row .cursor { background: var(--accent); color: #0d0f13; }
+/* The theme's cursor over the theme's ground, with the app's accent for a terminal that is not
+   inside a themed pane. */
+.screen-row .cursor { background: var(--rt-term-cursor, var(--accent)); color: var(--term-bg); }
 
 /* Sits over the bottom of the terminal, clear of the bar below it. It is the only way output
    moves the view while somebody is reading further up. */

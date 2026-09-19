@@ -11,6 +11,8 @@ the way Safari moves the real one. So the two things asserted are the two Safari
 
 * app/viewport.js pins the page to the visual viewport: the body is its height and sits at its
   offset, a pinch-zoom is not taken for a keyboard, and a short strip turns on the compact layout;
+* the thread bar's back button keeps a 44 px tap target in that strip, where the bar itself is
+  32 px tall — it is drawn, not padded in, so the terminal keeps the height;
 * in a strip the height of an iPad's landscape keyboard gap, the pane view (app/pane.js) keeps the
   terminal, the queue and the prompt box on screen instead of pushing the box off the bottom — in
   the demo page, and in the real client paired to a hub whose pane publishes `pane_state`, with a
@@ -182,6 +184,24 @@ class ViewportTests(unittest.TestCase):
                       parts: Object.fromEntries(['.rp-term-wrap', '.rp-queue', '.rp-composer', '#thread-bar',
                                                  '.rp-send']
                         .map(q => [q, (r => [r.top, r.bottom])(document.querySelector(q).getBoundingClientRect())])),
+                      // The back button's tap target, which is drawn rather than padded in (a 28x24
+                      // glyph in a bar that gives up its padding at 330 px): the pseudo-element's
+                      // own box, and what a finger landing 21 px off centre actually hits.
+                      back: (() => {
+                        const b = document.getElementById('thread-back');
+                        if (!b.getClientRects().length) return null;
+                        const s = getComputedStyle(b, '::after');
+                        const r = b.getBoundingClientRect();
+                        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                        const hit = (dx, dy) => {
+                          const e = document.elementFromPoint(x + dx, y + dy);
+                          return !!e && (e === b || b.contains(e));
+                        };
+                        return {target: [parseFloat(s.width), parseFloat(s.height)],
+                                glyph: [r.width, r.height],
+                                sides: [hit(-21, 0), hit(21, 0)],
+                                below: hit(0, 21)};
+                      })(),
                     })"""))
                 finally:
                     await browser.stop()
@@ -217,9 +237,28 @@ class ViewportTests(unittest.TestCase):
                     self.assertGreaterEqual(parts["#thread-bar"][0], 0)
                 self.assertGreater(parts[".rp-term-wrap"][1] - parts[".rp-term-wrap"][0], 12)
 
+    def test_the_back_button_is_a_44_px_target_in_the_keyboard_gap(self):
+        """Owner's 44 px (Apple's and Google's minimum, the same one pane.css keeps for a row).
+
+        `‹` is a 28x24 box in a bar that gives up its padding under 520 px, so the target cannot be
+        padding: it is a pseudo-element centred on the button, which changes nothing that is seen.
+        Measured in the gap an iPad's keyboard leaves, where the bar is at its smallest.
+        """
+        back = self.paired_pane_at(KEYBOARD_GAP, touch=True)["back"]
+        self.assertIsNotNone(back, "the thread bar is not drawn at 330 px")
+        self.assertGreaterEqual(back["target"][0], 44, f"the target is {back['target'][0]}px wide")
+        self.assertGreaterEqual(back["target"][1], 44, f"the target is {back['target'][1]}px tall")
+        # The glyph itself is untouched: the bar is not any taller for it.
+        self.assertLess(back["glyph"][1], 44)
+        # And a finger 21 px off centre still presses Back, to both sides and below it.
+        self.assertEqual(back["sides"], [True, True])
+        self.assertTrue(back["below"])
+
     def test_the_real_client_fits_landscape_without_a_keyboard(self):
         """834 px: nothing gives way here, and the pane must still end on the screen."""
-        parts = self.paired_pane_at(IPAD_LANDSCAPE[1], touch=True)["parts"]
+        seen = self.paired_pane_at(IPAD_LANDSCAPE[1], touch=True)
+        parts = seen["parts"]
+        self.assertEqual(seen["back"]["sides"], [True, True])
         self.assertLessEqual(parts[".rp-composer"][1], IPAD_LANDSCAPE[1])
         # With room, the terminal grows back past the two lines it is held to in the keyboard gap:
         # ten rows at least, beside a queue of six 44 px touch rows and the prompt box.

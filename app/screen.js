@@ -19,7 +19,8 @@ const ATTR = {
   STRIKE: 1 << 8, FAINT: 1 << 9,
 };
 
-// xterm's first 16, then the 6x6x6 cube and the greys, built once.
+// xterm's first 16, then the 6x6x6 cube and the greys, built once. These are the fallbacks: the
+// first 16 are the theme's, and what the grid actually paints is `THEMED` below.
 const PALETTE = (() => {
   const base = ['#000000', '#cd0000', '#00cd00', '#cdcd00', '#1e90ff', '#cd00cd', '#00cdcd',
     '#e5e5e5', '#4c4c4c', '#ff0000', '#00ff00', '#ffff00', '#4682b4', '#ff00ff', '#00ffff',
@@ -40,11 +41,20 @@ const PALETTE = (() => {
   return base;
 })();
 
+// The sixteen ANSI colours are the theme's, not xterm's: app/pane-theme.css is generated from the
+// desktop's own theme files and defines --rt-ansi-0…15 on `.relay-pane`, which the terminal sits
+// inside (app/app.js moves #terminal-pane into the pane view). A cell asks for the property and
+// keeps xterm's value as the fallback, so a page with no theme in scope — a guest's terminal —
+// paints exactly what it painted before, and a theme chosen on the page (pane.js `setTheme`)
+// repaints the grid with no message from the desktop. 16-255 are the cube and the greys, which
+// are fixed by the escape sequence itself and belong to no theme.
+const THEMED = PALETTE.map((hex, n) => (n < 16 ? `var(--rt-ansi-${n}, ${hex})` : hex));
+
 // Packed relay::CellColor: high byte is the kind, low 24 bits the value.
 function colorOf(packed) {
   const kind = (packed >>> 24) & 0xff;
   const value = packed & 0xffffff;
-  if (kind === 1) return PALETTE[value & 0xff] || null;
+  if (kind === 1) return THEMED[value & 0xff] || null;
   if (kind === 2) {
     return `#${(value & 0xffffff).toString(16).padStart(6, '0')}`;
   }

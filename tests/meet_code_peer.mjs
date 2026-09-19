@@ -15,7 +15,7 @@ import { createInterface } from 'node:readline';
 import { CPace } from '../app/cpace.js';
 import { b64, un64 } from '../app/rrp.js';
 import {
-  cleanCode, cleanPin, codePhase, lookupCode, meetKeys, meetProblem, MeetError,
+  cleanCode, cleanPin, codePhase, lookupCode, meetKeys, meetProblem, MeetError, openCodeRoom,
 } from '../app/meet.js';
 
 const utf8 = (text) => new TextEncoder().encode(text);
@@ -137,8 +137,34 @@ async function lookups() {
   return result;
 }
 
+// A rendezvous that accepts the connection and then says nothing: the socket fires no `open`, no
+// `error` and no `close`, which is the case that used to hang the join for ever. `openCodeRoom`
+// has its own deadline, so it comes back `unreachable` — the sentence that ends "try again", with
+// the form enabled again behind it (app/guest.js).
+async function connectTimeout() {
+  const sockets = [];
+  class DeadSocket {
+    constructor(url) { this.url = url; this.readyState = 0; this.closed = null; sockets.push(this); }
+    close(code, reason) { this.closed = { code, reason }; this.readyState = 3; }
+  }
+  const real = globalThis.WebSocket;
+  globalThis.WebSocket = DeadSocket;
+  const started = Date.now();
+  try {
+    await openCodeRoom('code-room-1', { origin: 'https://relay.example', connectWait: 150 });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, kind: error.kind, sentence: meetProblem(error),
+             url: sockets[0] && sockets[0].url, closed: !!(sockets[0] && sockets[0].closed),
+             waited: Date.now() - started >= 150 };
+  } finally {
+    globalThis.WebSocket = real;
+  }
+}
+
 async function cases() {
   return {
+    connectTimeout: await connectTimeout(),
     right: await scenario(),
     wrongPin: await scenario({ pin: '4828' }),
     flippedTag: await scenario({ tweak: { flipTag: true } }),

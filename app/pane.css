@@ -282,6 +282,10 @@
   min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
   overflow: hidden;
   white-space: nowrap;
+  /* For the one chip that is not a flex box: `select.rp-chip` (the model), whose text the browser
+     lays out itself. A flex box never ellipsizes its own text — the words are an anonymous item —
+     which is why the clock chip was cut mid-glyph at 330 px. Every chip whose text this file
+     writes puts it in .rp-chip-text below, which is a box that can. */
   text-overflow: ellipsis;
   padding: var(--qss-stripChipLabel-padding);
   background: var(--qss-stripChipLabel-background);
@@ -291,6 +295,12 @@
   font-size: var(--qss-stripChipLabel-font-size);
   line-height: 1.2;
 }
+/* A chip's words, in a box of their own. `min-width: 0` is what lets it shrink past its text
+   inside the chip's flex layout — without it a flex item is at least its content wide, so a long
+   folder name or a two-digit clock pushed out of the chip's `overflow: hidden` and was cut through
+   the middle of a glyph instead of ending in an ellipsis. */
+.rp-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-chip-text:empty { display: none; }      /* no stray `gap` beside an icon */
 .rp-context[data-warn="true"], .rp-allowance[data-warn="true"] { color: var(--qss-stripChipLabel-warn-true-color); border-color: var(--qss-stripChipLabel-warn-true-border-color); }
 button.rp-chip, .rp-folder {
   padding: var(--qss-stripChip-padding);
@@ -304,7 +314,7 @@ button.rp-chip { cursor: pointer; }
 button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: var(--qss-stripChip-hover-border-color); }
 .rp-folder { max-width: 34%; }
 .rp-sessions-button { max-width: 38%; }
-.rp-sessions-title { overflow: hidden; text-overflow: ellipsis; }
+.rp-sessions-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rp-sessions-title:empty { display: none; }
 /* The mode chip at the right of the prompt line takes the destination's colour, like the caret. */
 .rp-mode { flex: none; align-self: flex-start; }

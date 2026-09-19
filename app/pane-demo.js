@@ -104,6 +104,8 @@ window.paneDemo = {
   sent,
   update: (state) => (view ? view.update(state) : false),
   editText: (message) => { if (view) view.onEditText(message); },
+  refuse: (message) => (view ? view.onRefused(message) : false),
+  toast: () => { const t = document.querySelector('.rp-toast'); return t && !t.hidden ? t.textContent : ''; },
   state: () => JSON.parse(document.body.dataset.demoState || 'null'),
 };
 
