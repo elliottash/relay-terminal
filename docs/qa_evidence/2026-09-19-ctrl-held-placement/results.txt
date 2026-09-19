@@ -1,0 +1,8 @@
+PASS  01-bare-down-places-below: horizontal (148 15, expected horizontal)
+PASS  02-ctrl-down-places-below: horizontal (148 15, expected horizontal)
+PASS  03-ctrl-shift-down-places-below: horizontal (148 15, expected horizontal)
+PASS  04-ctrl-right-keeps-it-right: vertical (70 40, expected vertical)
+PASS  05-alt-down-is-dismissed: vertical (70 40, expected vertical)
+PASS  06-ctrl-down-after-the-window-is-passed-on: vertical (70 40, expected vertical)
+PASS  07-bound-chord-is-dismissed: vertical (70 40, expected vertical)
+PASS  08-ctrl-down-places-below: horizontal (148 15, expected horizontal)
