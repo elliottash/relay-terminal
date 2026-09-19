@@ -36,6 +36,21 @@ private Q_SLOTS:
         QCOMPARE(settings.value(QStringLiteral("theme/name")).toString(), QStringLiteral("solarized-dark"));
     }
 
+    // A tab switching to its own theme restyles without touching the stored default: that one is
+    // what Relay opens on and what a new tab starts with (owner, 2026-09-19).
+    void aTabsThemeDoesNotRewriteTheDefault() {
+        QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
+                           QStringLiteral("relay"));
+        const QString before = settings.value(QStringLiteral("theme/name")).toString();
+        QVERIFY(setActiveTheme(QStringLiteral("ibm-beige"), false));
+        QCOMPARE(activeThemeId(), QStringLiteral("ibm-beige"));
+        settings.sync();
+        QCOMPARE(settings.value(QStringLiteral("theme/name")).toString(), before);
+        QCOMPARE(specFor(QStringLiteral("gruvbox-dark")).id, QStringLiteral("gruvbox-dark"));
+        QVERIFY(specFor(QStringLiteral("no-such-theme")).id != QStringLiteral("no-such-theme"));
+        QCOMPARE(activeThemeId(), QStringLiteral("ibm-beige"));   // looking one up activates nothing
+    }
+
     void theThemeItAsksForIsGone() {
         for (const ThemeChoice &choice : availableThemes())
             QVERIFY2(choice.id != QStringLiteral("solarized-dark"), "solarized-dark is still on offer");

@@ -119,7 +119,15 @@ QString activeThemeId();
 QString defaultThemeId();
 // Switch. Returns false when the id is unknown. Restyles the application, regenerates the
 // terminal schemes and emits themeChanged(); no restart and, for Relay-engine panes, no new pane.
-bool setActiveTheme(const QString &id);
+// `persist` = also store it as `theme/name`, the theme Relay opens on and a new tab starts with
+// (Options › Appearance). A tab switching to its own theme passes false: it restyles, and the
+// default stays what the owner chose.
+bool setActiveTheme(const QString &id, bool persist = true);
+// The stored default, resolved: what Relay opens on and what a new tab starts with.
+QString startupThemeId();
+// A theme's parsed file without making it the active one (the tab bar paints each tab's swatch
+// from it). An unknown id gives the theme Relay would fall back to; compare `.id` to tell.
+ThemeSpec specFor(const QString &id);
 
 // Fusion style, the theme's QPalette, and the application stylesheet. Call after QApplication
 // exists; reads the theme named by QSettings `theme/name`.

@@ -2226,6 +2226,27 @@ that row's ink is the shell's own PS1. Options › Terminal › "Band behind wha
 the theme's raised surface, or none (no band, the destination colour as the ink). GhosttyCore does
 not parse OSC 7772 yet — it is not built on this machine — so under it the line is bold and unbanded.
 
+**A tab owns its theme** (owner, 2026-09-19: "add an option, on by default, that themes are tab
+specific … the theme that you have in the options menu is the default for when relay opens and new
+tabs … you can see the theme visually in the tab picker … add a /theme command"). The tokens, the
+`QPalette` and the stylesheet are the application's, so "per tab" means *the tab in front of the
+window in front decides*: each tab page carries a `relayTheme` property, and
+`RelayWindow::applyTabTheme()` calls `theme::setActiveTheme(id, persist = false)` on every tab
+change and window activation. Two windows therefore never show two themes at once; the one you are
+in wins. Options › Appearance › Theme is the **default** — `theme/name`, what Relay opens on and
+what a new tab starts with (`theme::startupThemeId()`); choosing it there also rethemes the tab you
+are in. `/light`, `/dark` and the new `/theme [name]` (a picker over every theme when bare) change
+only the current tab and leave the default alone; the first such choice pins the other tabs to what
+they were showing, so they do not follow. "Start each new tab on the next theme" (off by default)
+walks the theme list instead of inheriting the default. A tab's own theme is saved with the layout
+in the tab wrapper — `{"node", "theme"[, "project"]}`, only when it differs from the default
+(`windowstate::tabTheme()`) — and each tab wears it as a swatch on the tab bar: the theme's terminal
+ground over its accent, outlined in its own strong border, painted over the bar by
+`paintTabSwatches()` from `theme::specFor(id)` without activating anything. With "Each tab keeps its
+own theme" off, every choice is the application's and is stored, as before. What a tab has already
+printed in 24-bit colour keeps the colours of the theme it was printed under, which per-tab themes
+make rarer: a tab's scrollback now mostly lives under one theme.
+
 **A hostname is one mark.** The pane header's ⇄ chip and the file preview's host chip are the same
 chip since 2026-09-19 — the error hue's fill and near-solid line, the text colour for the name —
 so "this is on another machine" reads the same whether it is your typing or a file that lives

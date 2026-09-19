@@ -385,6 +385,7 @@ public:
             endBeneathDock();
             QWidget *page = m_tabs->currentWidget();
             if (!page) return;
+            applyTabTheme(page);   // themes are per tab: the one coming forward brings its own
             QWidget *leaf = m_lastActive.value(page);
             if (!leaf) { const auto leaves = leavesIn(page); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }
             if (leaf) { setActiveLeaf(leaf); focusLeaf(leaf); }
@@ -431,6 +432,15 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
+        // Its theme: the one it was saved with, else the default Options › Appearance holds — what
+        // Relay opens on and what a new tab starts with. (A *new* tab may then be moved on to the
+        // next theme in the list: startNewTabTheme(), behind its own option.)
+        if (perTabThemes()) {
+            const QString saved = relay::windowstate::tabTheme(tab);
+            const bool known = !saved.isEmpty() && relay::theme::specFor(saved).id == saved;
+            page->setProperty("relayTheme", known ? saved : relay::theme::startupThemeId());
+            applyTabTheme(page);
+        }
         // A saved tab comes back attached to the project it was attached to. A project that has
         // been moved or deleted comes back unattached and quiet rather than pointing the tab's
         // panes at a directory that is not there.
@@ -762,6 +772,15 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
+        // Theme swatches on the tabs: let the bar paint itself, then paint over it.
+        if (object == m_tabs->tabBar() && event->type() == QEvent::Paint && !m_paintingTabSwatches
+            && perTabThemes() && m_tabs->count() > 1) {
+            m_paintingTabSwatches = true;
+            QCoreApplication::sendEvent(object, event);
+            m_paintingTabSwatches = false;
+            paintTabSwatches();
+            return true;
+        }
         // Tab labels (issue JRWQ): double click a tab to name it by hand; Esc leaves it alone.
         if (object == m_tabs->tabBar() && event->type() == QEvent::MouseButtonDblClick) {
             const int index = m_tabs->tabBar()->tabAt(static_cast<QMouseEvent *>(event)->pos());
@@ -916,6 +935,9 @@ protected:
 
     // Maximizing hides the resize padding; the header button turns into "restore".
     void changeEvent(QEvent *event) override {
+        // The stylesheet and the tokens are the application's, so the window in front decides:
+        // coming forward, it puts its current tab's theme back (themes are per tab).
+        if (event->type() == QEvent::ActivationChange && isActiveWindow() && m_tabs) applyTabTheme(m_tabs->currentWidget());
         QMainWindow::changeEvent(event);
         if (event->type() == QEvent::WindowStateChange) updateChromeState();
         // Coming back to a window catches the writers that cannot say they wrote: a dialog that has
@@ -1025,7 +1047,7 @@ private:
         else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
         else if (id == QStringLiteral("windows.fresh")) startFreshWindowSet();
         else if (id == QStringLiteral("tab.new")) {
-            addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1);
+            if (addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1)) startNewTabTheme(m_tabs->currentWidget());
             markForSshHint(m_active, QString());   // an ssh typed here soon teaches Connect to host
         }
         else if (id == QStringLiteral("ssh.connect")) openSshMenu();
@@ -1707,17 +1729,31 @@ private:
                 labels << (choice.builtin ? choice.name : choice.name + QStringLiteral(" (yours)"));
             }
             appearance.rows << choiceRow(QStringLiteral("option:theme"), QStringLiteral("Theme"),
-                                         QStringLiteral("Applies at once: the app, the terminal palette and the "
-                                                        "prompt box's colours"),
-                                         ids, labels, relay::theme::activeThemeId(),
+                                         QStringLiteral("What Relay opens on and what a new tab starts with; this tab takes "
+                                                        "it at once. /light, /dark and /theme change one tab"),
+                                         ids, labels, relay::theme::startupThemeId(),
                                          relay::theme::defaultThemeId(), [this](const QString &id) {
-                if (!relay::theme::setActiveTheme(id)) {
+                if (!chooseTheme(id, m_tabs->currentWidget(), true)) {
                     notice(QStringLiteral("That theme could not be read."), 6000);
                     return;
                 }
                 notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
             });
         }
+        // Owner, 2026-09-19: "add an option, on by default, that themes are tab specific. and add
+        // an option, off by default, to start tabs with a new theme."
+        appearance.rows << toggleRow(QStringLiteral("theme/per_tab"), QStringLiteral("Each tab keeps its own theme"),
+                                     QStringLiteral("/light, /dark and /theme change the tab you are in, switching tabs switches "
+                                                    "the theme, and each tab shows its theme as a swatch"),
+                                     true, [this](bool on) {
+            if (on) applyTabTheme(m_tabs->currentWidget());
+            else relay::theme::setActiveTheme(relay::theme::startupThemeId(), false);
+            m_tabs->tabBar()->update();
+        });
+        appearance.rows << toggleRow(QStringLiteral("theme/new_tab_new_theme"), QStringLiteral("Start each new tab on the next theme"),
+                                     QStringLiteral("A new tab takes the next theme in the list instead of the default, so "
+                                                    "tabs are easy to tell apart"),
+                                     false);
         {
             // Pane header colours (#SPBN): the pane chrome reads the key; refreshAll() repaints.
             relay::SettingRow colours = choiceRow(QStringLiteral("option:pane_colours"), QStringLiteral("Pane colours"),
@@ -2669,7 +2705,7 @@ private:
             themes.label = QStringLiteral("Reload themes"); themes.detail = QStringLiteral("Pick up a theme file you added or edited");
             themes.run = [this] {
                 relay::theme::refreshThemes();
-                relay::theme::setActiveTheme(relay::theme::activeThemeId());
+                relay::theme::setActiveTheme(relay::theme::activeThemeId(), false);
                 notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
                                       "restart to give it to the ones already open."), 8000);
             };
@@ -2849,6 +2885,7 @@ private:
     void connectToHost(const QString &target) {
         if (target.trimmed().isEmpty()) return;
         if (!addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1) || !m_active) return;
+        startNewTabTheme(m_tabs->currentWidget());
         m_active->queueCommand(relay::ssh::connectCommand(target));
         relay::ssh::rememberHost(target);
     }
@@ -4053,6 +4090,10 @@ private:
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
+        pane->onChooseTheme = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) return w->chooseTheme(id, w->pageOf(guard), false);
+            return relay::theme::setActiveTheme(id);
+        };
         // The `board` block of every `configure` this pane sends (protocol 19.1). It is read at
         // the moment the configure is built, so a pane that is re-created or switches model comes
         // back on the board its tab is attached to — or, while the tab is attached to nothing, on
@@ -4299,6 +4340,85 @@ private:
         return {};
     }
 
+    // ----- themes per tab (owner, 2026-09-19) -------------------------------------------------
+    // A tab owns a theme (the page's "relayTheme" property). The tokens, the palette and the
+    // stylesheet are the application's, so "per tab" means: the tab in front of the window in
+    // front decides, and applyTabTheme() makes it so on every tab change and window activation.
+    // Two windows therefore never show two themes at once; the one you are in wins.
+    static bool perTabThemes() { return QSettings().value(QStringLiteral("theme/per_tab"), true).toBool(); }
+    static bool newTabNewTheme() { return QSettings().value(QStringLiteral("theme/new_tab_new_theme"), false).toBool(); }
+    static QString tabThemeOf(QWidget *page) { return page ? page->property("relayTheme").toString() : QString(); }
+
+    void applyTabTheme(QWidget *page) {
+        if (!page || !perTabThemes()) return;
+        QString id = tabThemeOf(page);
+        if (id.isEmpty()) id = relay::theme::startupThemeId();
+        if (id != relay::theme::activeThemeId()) relay::theme::setActiveTheme(id, false);
+    }
+
+    // /light, /dark, /theme (asDefault = false) and the Options picker (true: it also becomes what
+    // Relay opens on and what a new tab starts with). With per-tab themes off, every choice is the
+    // application's and is stored, as it always was.
+    bool chooseTheme(const QString &id, QWidget *page, bool asDefault) {
+        if (!perTabThemes() || !page) return relay::theme::setActiveTheme(id, true);
+        if (relay::theme::specFor(id).id != id) return false;
+        // The other tabs keep what they have been showing: a tab that never chose is pinned to it
+        // now, or it would follow this choice the next time it came forward.
+        for (int i = 0; i < m_tabs->count(); ++i)
+            if (QWidget *other = m_tabs->widget(i); other != page && tabThemeOf(other).isEmpty())
+                other->setProperty("relayTheme", relay::theme::activeThemeId());
+        page->setProperty("relayTheme", id);
+        if (page == m_tabs->currentWidget()) { if (!relay::theme::setActiveTheme(id, asDefault)) return false; }
+        else if (asDefault) relay::theme::setActiveTheme(id, true);
+        m_tabs->tabBar()->update();
+        m_manager->scheduleSave();
+        return true;
+    }
+
+    // "Start each new tab on the next theme": the list order, continuing from the last tab that
+    // was started this way (the rotation is the application's, not a window's).
+    void startNewTabTheme(QWidget *page) {
+        if (!page || !perTabThemes() || !newTabNewTheme()) return;
+        const QList<relay::theme::ThemeChoice> themes = relay::theme::availableThemes();
+        if (themes.size() < 2) return;
+        static QString last;
+        if (last.isEmpty()) last = relay::theme::startupThemeId();
+        int at = 0;
+        for (int i = 0; i < themes.size(); ++i) if (themes.at(i).id == last) at = i;
+        last = themes.at((at + 1) % themes.size()).id;
+        page->setProperty("relayTheme", last);
+        if (page == m_tabs->currentWidget()) applyTabTheme(page);
+        m_tabs->tabBar()->update();
+        m_manager->scheduleSave();
+    }
+
+    // Each tab wears its theme as a swatch at its left edge: the theme's terminal ground over its
+    // accent, outlined in its own strong border so a charcoal swatch still shows on charcoal
+    // chrome. Painted over the tab bar after it has painted itself.
+    void paintTabSwatches() {
+        QTabBar *bar = m_tabs->tabBar();
+        QPainter p(bar);
+        p.setRenderHint(QPainter::Antialiasing);
+        for (int i = 0; i < bar->count(); ++i) {
+            QString id = tabThemeOf(m_tabs->widget(i));
+            if (id.isEmpty()) id = relay::theme::startupThemeId();
+            const relay::theme::ThemeSpec spec = relay::theme::specFor(id);
+            const QRect tab = bar->tabRect(i);
+            const QRectF swatch(tab.left() + 0.5, tab.top() + 6.5, 6, qMax(8, tab.height() - 11));
+            const QColor ground = spec.terminalBackground.isValid() ? spec.terminalBackground : spec.uiColor(QStringLiteral("background"));
+            QPainterPath shape; shape.addRoundedRect(swatch, 2, 2);
+            p.save();
+            p.setClipPath(shape);
+            p.fillRect(swatch, ground);
+            p.fillRect(QRectF(swatch.left(), swatch.bottom() - swatch.height() * 0.34, swatch.width(), swatch.height() * 0.34 + 1),
+                       spec.uiColor(QStringLiteral("accent")));
+            p.restore();
+            p.setPen(QPen(spec.uiColor(QStringLiteral("border_strong")), 1));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(shape);
+        }
+    }
+
     QJsonObject serializeTab(int index) const {
         QWidget *page = m_tabs->widget(index);
         QWidget *root = page && page->layout() && page->layout()->count() ? page->layout()->itemAt(0)->widget() : nullptr;
@@ -4307,8 +4427,15 @@ private:
         // always was, so nothing changes for the quiet default and the schema does not move
         // (src/WindowState.h). An empty node still reads as empty: restorableTabs() drops it.
         const QString project = tabProject(page);
-        if (node.isEmpty() || project.isEmpty()) return node;
-        return {{QStringLiteral("project"), project}, {QStringLiteral("node"), node}};
+        // A tab's own theme rides in the same wrapper, and only when it is not the default, so a
+        // layout nobody themed is what it always was.
+        const QString theme = perTabThemes() ? tabThemeOf(page) : QString();
+        const bool ownTheme = !theme.isEmpty() && theme != relay::theme::startupThemeId();
+        if (node.isEmpty() || (project.isEmpty() && !ownTheme)) return node;
+        QJsonObject tab{{QStringLiteral("node"), node}};
+        if (!project.isEmpty()) tab.insert(QStringLiteral("project"), project);
+        if (ownTheme) tab.insert(QStringLiteral("theme"), theme);
+        return tab;
     }
 
     void setActive(Pane *pane) { setActiveLeaf(pane); }
@@ -5979,6 +6106,7 @@ private:
     QTimer m_statusTimer;
     QTimer m_pulseTimer;                       // the blink grid's next boundary, for the tab dots
     QHash<QWidget *, QString> m_tabIconKey;
+    bool m_paintingTabSwatches = false;
     QHash<QWidget *, TabMark> m_tabMark;
     QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
     QHash<QWidget *, relay::usage::Sample> m_tabUsageShown;  // ... the reading behind that text

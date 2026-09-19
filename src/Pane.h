@@ -473,6 +473,9 @@ public:
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
+    // /light, /dark and /theme: the window decides whether the theme is this tab's or everyone's
+    // (themes are per tab by default). Unset = the application-wide switch.
+    std::function<bool(const QString &themeId)> onChooseTheme;
     // ----- the project this pane's tab is attached to (card #JN7X, src/Projects.h) ------------
     // The `board` block of every `configure` this pane sends (protocol 19.1). The window answers
     // from the tab: `{"attach": false}` while the tab is attached to nothing, which is the quiet
@@ -6291,6 +6294,7 @@ private:
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
             {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
+            {QStringLiteral("theme"), QStringLiteral("[name]"), QStringLiteral("Theme for this tab: pick from every theme, or name one")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
         {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Switchboard")},
@@ -6690,9 +6694,26 @@ private:
             // copper"), so these are not "any light theme" — they are those two theme files. The
             // switch is the one the settings picker makes, which restyles the chrome, both
             // terminal engines and the prompt box's colours and stores `theme/name`.
-            const QString id = name == QStringLiteral("light") ? QStringLiteral("ibm-beige") : QStringLiteral("dark-copper");
-            if (!relay::theme::setActiveTheme(id)) { status(QStringLiteral("The %1 theme could not be read.").arg(id)); return; }
-            status(QStringLiteral("Theme: %1.").arg(relay::theme::active().name));
+            chooseTheme(name == QStringLiteral("light") ? QStringLiteral("ibm-beige") : QStringLiteral("dark-copper"));
+        }
+        else if (name == QStringLiteral("theme")) {
+            // Every theme, not just the owner's two (owner, 2026-09-19): `/theme gruvbox`, or the
+            // bare command for a list. Matched on the id, then the name, then a part of either.
+            const QList<relay::theme::ThemeChoice> themes = relay::theme::availableThemes();
+            if (!args.isEmpty()) {
+                const auto find = [&](auto test) { for (const auto &t : themes) if (test(t)) return t.id; return QString(); };
+                QString id = find([&](const auto &t) { return t.id.compare(args, Qt::CaseInsensitive) == 0 || t.name.compare(args, Qt::CaseInsensitive) == 0; });
+                if (id.isEmpty()) id = find([&](const auto &t) { return t.id.contains(args, Qt::CaseInsensitive) || t.name.contains(args, Qt::CaseInsensitive); });
+                if (id.isEmpty()) { status(QStringLiteral("No theme matches “%1”.").arg(args)); return; }
+                chooseTheme(id);
+                return;
+            }
+            QList<relay::agentui::PickerRow> rows;
+            for (const auto &t : themes)
+                rows << relay::agentui::PickerRow{{t.name, t.id == relay::theme::activeThemeId() ? QStringLiteral("current") : QString()}, t.description, t.id};
+            const auto result = relay::agentui::pick(this, QStringLiteral("Theme"), QStringLiteral("The theme for this tab. Options › Appearance sets the one Relay opens on."),
+                                                     {QStringLiteral("Theme"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
+            if (result.row >= 0 && result.row < themes.size()) chooseTheme(themes.at(result.row).id);
         }
         else if (name == QStringLiteral("rename")) {
             // With a name it renames straight away; without one it opens the same editor a double
@@ -10104,6 +10125,12 @@ private:
                 closeInline(); clearFix();
             }
         });
+    }
+
+    // /light, /dark, /theme: through the window when it listens (a tab's own theme), else app-wide.
+    void chooseTheme(const QString &id) {
+        const bool ok = onChooseTheme ? onChooseTheme(id) : relay::theme::setActiveTheme(id);
+        status(ok ? QStringLiteral("Theme: %1.").arg(relay::theme::active().name) : QStringLiteral("The %1 theme could not be read.").arg(id));
     }
 
     static QString shellQuote(const QString &value) {

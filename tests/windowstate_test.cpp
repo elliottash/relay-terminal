@@ -218,6 +218,24 @@ private slots:
     // risk is a reader that forgets to unwrap: a wrapper judged as a node is an unknown kind, so
     // every attached tab — and any window whose tabs are all attached — is silently dropped on
     // the first restore.
+    // A tab with a theme of its own saves it in the same wrapper, with or without a project; a
+    // bare node and a project-only wrapper read as "no theme of its own", and the wrapper is still
+    // judged by the node inside it.
+    void aTabsOwnThemeRoundTrips() {
+        const QJsonObject bare = pane(QStringLiteral("/tmp"));
+        const QJsonObject themed{{"node", bare}, {"theme", "ibm-beige"}};
+        const QJsonObject both{{"project", "/home/me/repo"}, {"node", bare}, {"theme", "gruvbox-dark"}};
+        QCOMPARE(tabTheme(themed), QStringLiteral("ibm-beige"));
+        QCOMPARE(tabNode(themed), bare);
+        QVERIFY(tabProject(themed).isEmpty());
+        QCOMPARE(tabTheme(both), QStringLiteral("gruvbox-dark"));
+        QCOMPARE(tabProject(both), QStringLiteral("/home/me/repo"));
+        QVERIFY(tabTheme(bare).isEmpty());
+        QVERIFY(tabTheme(QJsonObject{{"project", "/repo"}, {"node", bare}}).isEmpty());
+        QVERIFY(tabTheme(QJsonObject{{"theme", "ibm-beige"}}).isEmpty());   // no node: not a wrapper
+        QVERIFY(isUsableNode(themed));
+    }
+
     void anAttachedTabRoundTripsAndABareOneStillWorks() {
         const QJsonObject bare = pane(QStringLiteral("/tmp"));
         const QJsonObject wrapped{{"project", "/home/me/repo"}, {"node", bare}};

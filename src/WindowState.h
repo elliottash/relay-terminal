@@ -85,6 +85,10 @@ QJsonObject read(const QString &path, QString *error = nullptr);
 QJsonObject tabNode(const QJsonObject &tab);
 // The project an attached tab was saved with; empty for the bare shape.
 QString tabProject(const QJsonObject &tab);
+// The theme a tab was saved with, when it had one of its own (themes are per tab since 2026-09-19).
+// It rides in the same wrapper — {"node", "theme"[, "project"]} — and only when it differs from the
+// default, so a layout with no tab themes is byte-for-byte what it was. Empty for the bare shape.
+QString tabTheme(const QJsonObject &tab);
 
 // A pane tree that can be rebuilt: known node kinds only, non-empty splits, bounded depth. A tab
 // in the wrapper shape above is judged by the node inside it.

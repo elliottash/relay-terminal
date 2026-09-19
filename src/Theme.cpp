@@ -441,6 +441,10 @@ QFrame#settingsRow:hover { background: @surface; }
 QFrame#settingsRow[current="true"] { background: @surface; border-color: @accentBorder; }
 QLabel#settingsRowLabel { color: @text; }
 QLabel#settingsRowDetail { color: @muted; font-size: 9.5pt; }
+/* The ↺ on a row that is not at Relay's default: a mark first and a button second, so it reads as
+   a dot beside the words until the pointer is on it. */
+QPushButton#settingsRowReset { color: @muted; background: transparent; border: none; padding: 0 4px; font-size: 12pt; }
+QPushButton#settingsRowReset:hover { color: @text; background: @surface; border-radius: 6px; }
 QLabel#settingsFooter { color: @muted; font-size: 9pt; padding-top: 6px; border-top: 1px solid @border; }
 /* The requests ledger and a subagent transcript float over a pane; both are opaque on purpose. */
 QWidget#requestsPanel, QWidget#subagentTranscript { background: @bg; border: 1px solid @border; border-radius: 8px; }
@@ -778,11 +782,19 @@ void applyTheme(QApplication &app) {
 
 void applyDarkTheme(QApplication &app) { applyTheme(app); }
 
-bool setActiveTheme(const QString &id) {
+QString startupThemeId() { return resolveTheme(settingsThemeId()).id; }
+
+ThemeSpec specFor(const QString &id) {
+    if (!registry().scanned) scan();
+    const ThemeSpec *spec = loadTheme(id);
+    return spec ? *spec : resolveTheme(id);
+}
+
+bool setActiveTheme(const QString &id, bool persist) {
     if (!registry().scanned) scan();
     const ThemeSpec *spec = loadTheme(id);
     if (!spec) return false;
-    relaySettings().setValue(QStringLiteral("theme/name"), id);
+    if (persist) relaySettings().setValue(QStringLiteral("theme/name"), id);
     adoptTokens(*spec);
     if (auto *app = qobject_cast<QApplication *>(QCoreApplication::instance())) {
         applyPalette(*app, *spec);
