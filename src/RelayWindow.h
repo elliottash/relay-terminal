@@ -3903,7 +3903,9 @@ public:
             w->insertBeside(guard, pane, Qt::Horizontal, false);
             w->setActive(pane);
             focusLeaf(pane);
-            if (guest) pane->launchGuest(runnerId, {task}, workspace);
+            // A guest verifier goes through the pane's own Tier A / Tier B decision: the
+            // worker's harness when it can run the guest, the guest's TUI only when it cannot.
+            if (guest) pane->startGuestBoardTask(runnerId, task, card);
             else pane->startBoardTask(task, card);
             w->updateTitles();
         };

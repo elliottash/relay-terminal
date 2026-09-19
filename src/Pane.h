@@ -8143,6 +8143,12 @@ private:
                 m_pendingGuestResume = PendingGuestResume();
                 startGuestPreset(pending.guest, pending.extra, pending.cwd);
             }
+            // …and so could a pane opened by Verify for a guest verifier (#T71W).
+            if (!m_pendingGuestTask.guest.isEmpty()) {
+                const PendingGuestTask pending = m_pendingGuestTask;
+                m_pendingGuestTask = PendingGuestTask();
+                startGuestBoardTask(pending.guest, pending.task, pending.card);
+            }
             if (m_stored.isEmpty()) {
                 status(hostedUnavailable
                            ? QStringLiteral("No stored provider keys, and Relay Free needs python3-cryptography. "
@@ -8991,6 +8997,19 @@ public:
         m_boardTask = text; m_boardTaskCard = cardId;
         if (m_configured) runBoardTask();
         else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
+    }
+
+    // Verify (#T71W) hands a card to Claude Code or Codex. The same door the model picker uses:
+    // when the worker can run the guest through its harness (29.4) the pane goes onto the guest's
+    // preset and the brief is its first ask, with the card attached like any board task; only when
+    // it cannot does the guest's own TUI start in this pane's shell, with the brief as its first
+    // prompt. Which of the two is not known until the worker's presets are in, so a pane that was
+    // just created waits for them (the same wait a guest sessions row makes).
+    void startGuestBoardTask(const QString &guest, const QString &task, const QString &cardId) {
+        if (m_presets.isEmpty()) { m_pendingGuestTask = {guest, task, cardId}; return; }
+        if (!guestHarnessUsable(guest)) { launchGuest(guest, {task}, QString()); return; }
+        pickGuest(guest);
+        startBoardTask(task, cardId);
     }
 
     // One prompt from somewhere that is not the prompt box — Settings › Local models › "Set up a
@@ -13876,6 +13895,8 @@ private:
     QString m_guestSession;            // the guest's own session id, as `configured` reported it
     struct PendingGuestResume { QString guest; QStringList extra; QString cwd; };
     PendingGuestResume m_pendingGuestResume;   // a sessions row waiting for the worker's presets
+    struct PendingGuestTask { QString guest, task, card; };
+    PendingGuestTask m_pendingGuestTask;       // a Verify on a guest waiting for the same (#T71W)
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it
     QFrame *m_programBar = nullptr;    // the floating banner over the terminal
