@@ -94,6 +94,7 @@ private slots:
     void theLastTwoSectionsCanBeRenamedButNeverTakenAway();
     void mergingPutsBothSetsOfStatusesInOneSection();
     void aNewSectionNeedsANameAndStatusesNobodyElseCollects();
+    void theFolderRowOffersToHideOrShowTheBoardsFolder();
     void theMessageWritesOnlyWhatDiffersFromTheDefault();
     void anUntouchedPlanHasNothingToSay();
     void theGearSitsAfterTheSectionBoxesAndOpensThePage();
@@ -398,6 +399,36 @@ void BoardSectionsTests::aRenameReachesTheCheckboxAsWellAsTheHeader()
     // Still one box per section, and the gear is still the last thing in the row.
     QCOMPARE(boxText().size(), view.model().sections().size());
     QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardSectionGear")));
+}
+
+// The board's folder (protocol 19.17, card #916B): the gear's page says where the board is kept and
+// offers the one rename — hide a shown board, show a hidden one — and nothing on an `issues/` board.
+void BoardSectionsTests::theFolderRowOffersToHideOrShowTheBoardsFolder()
+{
+    relay::board::SectionEditor editor;
+    editor.setModel(Model());
+    auto *row = editor.findChild<QWidget *>(QStringLiteral("boardFolderRow"));
+    auto *button = editor.findChild<QPushButton *>(QStringLiteral("boardFolderButton"));
+    QVERIFY(row && button);
+    QVERIFY(!row->isVisibleTo(&editor));                       // nothing named yet: nothing offered
+
+    QList<bool> asked;
+    editor.onFolder = [&asked](bool hidden) { asked << hidden; };
+
+    editor.setFolder(QStringLiteral("switchboard"));
+    QVERIFY(row->isVisibleTo(&editor));
+    QCOMPARE(button->text(), QStringLiteral("Hide this board's folder"));
+    button->click();
+    QCOMPARE(asked, QList<bool>{true});                        // a shown board: hide it
+
+    editor.setFolder(QStringLiteral(".switchboard"));
+    QCOMPARE(button->text(), QStringLiteral("Show this board's folder"));
+    button->click();
+    QCOMPARE(asked, (QList<bool>{true, false}));               // a hidden board: show it
+
+    editor.setFolder(QStringLiteral("issues"));                // the original spelling: never moved
+    QVERIFY(!row->isVisibleTo(&editor));
+    QCOMPARE(editor.folder(), QStringLiteral("issues"));
 }
 
 QTEST_MAIN(BoardSectionsTests)

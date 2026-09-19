@@ -113,6 +113,15 @@ public:
     std::function<void(const QJsonObject &)> onSave;
     std::function<void()> onClose;
 
+    // The board's folder, and the one action that moves it (protocol 19.17, card #916B): "Hide this
+    // board's folder" on a `switchboard/` board, "Show this board's folder" on a `.switchboard/`
+    // one. `setFolder` takes the folder's name as the worker reported it; an `issues/` board — the
+    // original spelling, which whole repositories name in their own scripts and hooks — gets no
+    // button, because the worker would refuse the move anyway. `onFolder(hidden)` is the click.
+    void setFolder(const QString &folderName);
+    QString folder() const { return m_folder; }
+    std::function<void(bool hidden)> onFolder;
+
 protected:
     // Esc leaves the sections as they are, which is what Cancel's tooltip promises and what Esc
     // does everywhere else in this pane.
@@ -129,6 +138,10 @@ private:
     QWidget *m_rowsHost = nullptr;
     QLabel *m_summary = nullptr;
     QPushButton *m_save = nullptr;
+    QString m_folder;
+    QWidget *m_folderRow = nullptr;
+    QLabel *m_folderLabel = nullptr;
+    QPushButton *m_folderButton = nullptr;
 };
 
 }  // namespace board

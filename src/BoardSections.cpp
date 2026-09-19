@@ -304,6 +304,29 @@ SectionEditor::SectionEditor(QWidget *parent) : QWidget(parent)
     m_summary->setWordWrap(true);
     layout->addWidget(m_summary);
 
+    // The board's folder: its name, and the one action that renames it (protocol 19.17). It sits
+    // with the section list because both are "this board, as it is kept" — and nowhere else, so
+    // the rename is never a click away from the cards. Hidden until setFolder() names a folder the
+    // worker would move.
+    m_folderRow = new QWidget(this);
+    m_folderRow->setObjectName(QStringLiteral("boardFolderRow"));
+    auto *folderCells = new QHBoxLayout(m_folderRow);
+    folderCells->setContentsMargins(0, 4, 0, 0);
+    folderCells->setSpacing(8);
+    m_folderLabel = new QLabel(m_folderRow);
+    m_folderLabel->setObjectName(QStringLiteral("boardFolderLabel"));
+    m_folderLabel->setWordWrap(true);
+    folderCells->addWidget(m_folderLabel, 1);
+    m_folderButton = new QPushButton(m_folderRow);
+    m_folderButton->setObjectName(QStringLiteral("boardFolderButton"));
+    connect(m_folderButton, &QPushButton::clicked, this, [this] {
+        if (onFolder)
+            onFolder(m_folder != QLatin1String(".switchboard"));   // shown → hide it, hidden → show it
+    });
+    folderCells->addWidget(m_folderButton);
+    m_folderRow->hide();
+    layout->addWidget(m_folderRow);
+
     auto *buttons = new QHBoxLayout;
     buttons->addStretch(1);
     auto *cancel = new QPushButton(QStringLiteral("Cancel"), this);
@@ -348,6 +371,29 @@ void SectionEditor::setModel(const Model &model)
 void SectionEditor::refresh(const Model &model)
 {
     setModel(model);
+}
+
+void SectionEditor::setFolder(const QString &folderName)
+{
+    m_folder = folderName;
+    const bool hidden = m_folder == QLatin1String(".switchboard");
+    const bool shown = m_folder == QLatin1String("switchboard");
+    if (!hidden && !shown) {
+        // `issues/`, or a folder the worker has not named yet: nothing to offer.
+        m_folderRow->hide();
+        return;
+    }
+    m_folderLabel->setText(hidden
+        ? QStringLiteral("This board is kept in %1/, hidden from directory listings and from ripgrep-based agents.").arg(m_folder)
+        : QStringLiteral("This board is kept in %1/, in plain view in the project's root listing.").arg(m_folder));
+    m_folderButton->setText(hidden ? QStringLiteral("Show this board's folder")
+                                   : QStringLiteral("Hide this board's folder"));
+    m_folderButton->setToolTip(hidden
+        ? QStringLiteral("Rename .switchboard/ to switchboard/ — git mv in a checkout, a plain rename otherwise; "
+                         "refused while a turn runs or a card has uncommitted text")
+        : QStringLiteral("Rename switchboard/ to .switchboard/ — git mv in a checkout, a plain rename otherwise; "
+                         "refused while a turn runs or a card has uncommitted text"));
+    m_folderRow->show();
 }
 
 void SectionEditor::updateFooter()

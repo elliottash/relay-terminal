@@ -2173,6 +2173,13 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         send(request);
         closeSections();
     };
+    // "Hide this board's folder" / "Show this board's folder" (protocol 19.17, #916B): the one
+    // action that renames an existing board's folder. The worker answers `board_folder_changed`
+    // (handled in handleEvent) or a refusal, which the notice line shows like any other error.
+    m_sections->onFolder = [this](bool hidden) {
+        send({{QStringLiteral("type"), QStringLiteral("board_folder")}, {QStringLiteral("hidden"), hidden}});
+        closeSections();
+    };
     layout->addWidget(m_sections, 1);
 
     m_keys = new QLabel(this);
@@ -2734,6 +2741,17 @@ void BoardView::handleEvent(const QJsonObject &event)
     // next drag or quick add writes into the other repository. Events with no `root` (an older
     // worker) are handled exactly as before.
     const QString root = event.value(QStringLiteral("root")).toString();
+    // The board's folder was renamed at this pane's request (19.17): the event names the *new*
+    // root, so it comes before the guard below, which would otherwise read it as another
+    // project's. From here the worker speaks for the new folder; the watcher and the rows follow.
+    if (type == QStringLiteral("board_folder_changed") && mine) {
+        if (!root.isEmpty())
+            m_root = root;
+        showNotice(event.value(QStringLiteral("summary")).toString(), false);
+        watchIssues();
+        reload();
+        return;
+    }
     if (!root.isEmpty()) {
         if (!m_root.isEmpty() && root != m_root)
             return;
@@ -3252,6 +3270,7 @@ void BoardView::openSections()
         return;
     m_sectionsOpen = true;
     m_sections->setModel(m_model);
+    m_sections->setFolder(QFileInfo(m_root.isEmpty() ? projects::boardDirOf(m_workspace) : m_root).fileName());
     m_sections->show();
     m_sections->setFocus(Qt::OtherFocusReason);   // Esc closes the page from the moment it opens
     rebuild();
