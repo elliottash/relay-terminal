@@ -4762,8 +4762,9 @@ private:
         while (m_callOrder.size() > 5000) m_calls.remove(m_callOrder.takeFirst());
     }
 
-    // The fold's colours, from the live theme. The add/remove tints are the diff pane's: the
-    // token blended into the surface, so a light theme gets a light tint (src/DiffView.cpp).
+    // The fold's colours, from the live theme. The add/remove pair is the diff pane's: the
+    // theme's own green and red as the fill, and pure black or white — whichever reads — as the
+    // ink on it (theme::contrastInk, src/DiffView.cpp).
     relay::calllines::Palette foldPalette() const {
         namespace t = relay::theme;
         relay::calllines::Palette palette;
@@ -4771,19 +4772,12 @@ private:
         palette.muted = t::TextMuted;
         palette.code = t::SyntaxCommand;
         palette.link = t::Link;
-        palette.add = t::Success;
-        palette.remove = t::Error;
+        palette.addBg = t::Success;
+        palette.removeBg = t::Error;
+        palette.add = t::contrastInk(palette.addBg);
+        palette.remove = t::contrastInk(palette.removeBg);
         palette.error = t::SyntaxUnknown;
         palette.accent = t::Accent;   // a task in progress, as RequestsPanel paints it (#BDXG)
-        auto tint = [](const QColor &token) {
-            const QColor base = relay::theme::Surface;
-            const qreal mix = 0.22;
-            return QColor(int(base.red() + (token.red() - base.red()) * mix),
-                          int(base.green() + (token.green() - base.green()) * mix),
-                          int(base.blue() + (token.blue() - base.blue()) * mix));
-        };
-        palette.addBg = tint(t::Success);
-        palette.removeBg = tint(t::Error);
         return palette;
     }
 
@@ -4936,7 +4930,8 @@ private:
     }
 
     // The inline diff of a small write or edit (at most 12 changed lines, § 23.2): printed under
-    // the line with no click at all, in the add/remove inks the rest of Relay uses.
+    // the line with no click at all, in the black-or-white ink on the green/red fills the rest of
+    // Relay uses (owner, 2026-09-19).
     void printInlineDiff(const QString &unifiedDiff) {
         const relay::ParsedDiff diff = relay::parseUnifiedDiff(unifiedDiff);
         if (diff.isEmpty()) return;
@@ -10983,8 +10978,8 @@ private:
     // sent to the shell, violet for what they sent to the agent, white for the agent's prose —
     // and everything the machine did on its own (tools, tool output, recaps, notes) is the same
     // muted grey, so prose stands out and the amber/violet tokens keep their meanings (warn,
-    // agent destination). Diffs keep the add/remove pair and failures keep red: content, not
-    // chrome.
+    // agent destination). Diffs keep the add/remove pair — as black-or-white ink on the green/red
+    // fill, not green/red text — and failures keep red: content, not chrome.
     // Agent lines follow the active theme: the colours come from the live tokens (src/Theme.h),
     // so a light theme gets dark text instead of the near-white a dark theme uses. Lines already
     // printed keep the colours they were written in; the terminal cannot recolour its scrollback.
@@ -10995,8 +10990,11 @@ private:
         case Ink::User: return t::Shell;
         case Ink::UserAgent: return t::Agent;
         case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: return t::TextMuted;
-        case Ink::DiffAdd: return t::Success;
-        case Ink::DiffRemove: case Ink::Error: return t::Error;
+        // The fill colours themselves are the background the band is painted in (inkCode); as
+        // text they would vanish into it.
+        case Ink::DiffAdd: return t::contrastInk(t::Success);
+        case Ink::DiffRemove: return t::contrastInk(t::Error);
+        case Ink::Error: return t::Error;
         // The one thing waiting on a person (#MQ9C): amber, the warning token, which is what
         // every other "needs you" mark in Relay is drawn in (the status glyph, the work chip).
         case Ink::Ask: return t::Warning;
@@ -11014,6 +11012,16 @@ private:
         // amber on a light ground. It is the colour MarkdownAnsi's **Need:** bold already uses
         // for the same reason (src/MarkdownAnsi.h, card #4E13).
         if (ink == Ink::Ask) return QByteArray("\x1b[1;33m");
+        // A diff's add/remove lines carry their fill as a 24-bit background: the green/red ground
+        // with black-or-white ink on it is what the diff pane and the folds draw, and the inline
+        // copy under the tool row should be the same picture.
+        const auto sgr = [](const QColor &c) {
+            return QByteArray::number(c.red()) + ';' + QByteArray::number(c.green()) + ';'
+                   + QByteArray::number(c.blue());
+        };
+        if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
+            return "\x1b[38;2;" + sgr(inkColor(ink)) + ";48;2;"
+                   + sgr(ink == Ink::DiffAdd ? relay::theme::Success : relay::theme::Error) + 'm';
         const QColor c = inkColor(ink);
         // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
         // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
@@ -11022,8 +11030,7 @@ private:
         // response could be in bold amber".
         const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent || ink == Ink::Ask)
                                      ? QByteArray("1;") : QByteArray();
-        return "\x1b[" + style + "38;2;" + QByteArray::number(c.red()) + ';' + QByteArray::number(c.green())
-               + ';' + QByteArray::number(c.blue()) + 'm';
+        return "\x1b[" + style + "38;2;" + sgr(c) + 'm';
     }
 
     bool shellIdleAtPrompt() const {
@@ -11093,6 +11100,9 @@ private:
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format;
         format.setForeground(inkColor(ink));
+        // A diff line carries its fill here too, as the terminal's own copy does (inkCode).
+        if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
+            format.setBackground(ink == Ink::DiffAdd ? relay::theme::Success : relay::theme::Error);
         // The same bold the terminal gives these two: a line the user sent, and a question waiting
         // on them (#MQ9C). Here the token itself is used — a widget repaints on a theme switch.
         if (ink == Ink::User || ink == Ink::Ask) format.setFontWeight(QFont::Bold);

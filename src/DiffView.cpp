@@ -144,24 +144,25 @@ QColor blend(const QColor &a, const QColor &b, double weightOfA) {
 }
 
 // Everything one render paints with, read from the live theme tokens at the moment it runs. The
-// tints are the theme's own green and red laid over its surface — a fixed Breeze green would go
-// muddy on a light theme, and would not follow a theme switch.
+// add/remove fills are the theme's own green and red at full strength — a fixed Breeze green would
+// go muddy on a light theme, and would not follow a theme switch — and the ink on them is pure
+// black or white, whichever reads on the fill (theme::contrastInk): black on the pastel green a
+// dark theme carries, white on the deep green a light one does.
 struct DiffInk {
     QColor addBackground, removeBackground, hunkBackground, headerBackground;
-    QColor text, muted, addMark, removeMark, gutter, gutterText, rule;
+    QColor text, muted, addInk, removeInk, gutter, gutterText, rule;
 };
 
 DiffInk currentInk() {
     DiffInk ink;
     ink.text = theme::Text;
     ink.muted = theme::TextMuted;
-    ink.addBackground = blend(theme::Success, theme::Surface, 0.18);
-    ink.removeBackground = blend(theme::Error, theme::Surface, 0.18);
+    ink.addBackground = theme::Success;
+    ink.removeBackground = theme::Error;
     ink.hunkBackground = blend(theme::Border, theme::Surface, 0.45);
     ink.headerBackground = theme::SurfaceRaised;
-    // The marker column carries the colour; the code itself stays in the reading ink.
-    ink.addMark = blend(theme::Success, theme::Text, 0.8);
-    ink.removeMark = blend(theme::Error, theme::Text, 0.8);
+    ink.addInk = theme::contrastInk(ink.addBackground);
+    ink.removeInk = theme::contrastInk(ink.removeBackground);
     ink.gutter = blend(theme::Background, theme::Surface, 0.5);
     ink.gutterText = theme::TextMuted;
     ink.rule = theme::Border;
@@ -451,15 +452,15 @@ void DiffView::render() {
             break;
         case DiffLine::Add:
             block.setBackground(ink.addBackground);
+            body.setForeground(ink.addInk);
             marker = body;
-            marker.setForeground(ink.addMark);
             marker.setFontWeight(QFont::Bold);
             marked = true;
             break;
         case DiffLine::Remove:
             block.setBackground(ink.removeBackground);
+            body.setForeground(ink.removeInk);
             marker = body;
-            marker.setForeground(ink.removeMark);
             marker.setFontWeight(QFont::Bold);
             marked = true;
             break;
@@ -472,8 +473,8 @@ void DiffView::render() {
             break;
         }
         cursor.setBlockFormat(block);
-        // The +/- marker in the state's colour, the code in the reading ink: the tint says what
-        // happened at a glance, and the code stays as legible as it is in a preview pane.
+        // The whole line is one ink on its fill; the +/- marker alone is bold, so the marker
+        // column still reads at a glance without a second colour on it.
         if (marked && !line.text.isEmpty()) {
             cursor.setCharFormat(marker);
             cursor.insertText(line.text.left(1));

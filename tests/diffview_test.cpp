@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DiffView.h"
+#include "Theme.h"
 
 #include <QPushButton>
 #include <QStringList>
 #include <QTest>
+#include <QPlainTextEdit>
+#include <QTextBlock>
 
 using relay::DiffLine;
 using relay::DiffView;
@@ -205,6 +208,33 @@ private slots:
         QCOMPARE(view.lineCount(), 0);
         QCOMPARE(view.title(), QStringLiteral("x.py  +0 −0"));
         QCOMPARE(view.plainText(), QStringLiteral("(No text changes)"));
+    }
+
+    // Adds and removals are black-or-white text on the theme's own green/red (owner, 2026-09-19:
+    // "black/white text with a green or red background, rather than green / red text") — the fill
+    // as the line's background, never as its ink.
+    void addAndRemoveLinesAreInkOnTheirFills() {
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        auto *text = view.findChild<QPlainTextEdit *>(QStringLiteral("diffText"));
+        QVERIFY(text);
+        QTextBlock add, remove;
+        for (QTextBlock block = text->document()->firstBlock(); block.isValid(); block = block.next()) {
+            if (block.text() == QStringLiteral("+new = 1")) add = block;
+            if (block.text() == QStringLiteral("-old = 1")) remove = block;
+        }
+        QVERIFY(add.isValid());
+        QVERIFY(remove.isValid());
+        QCOMPARE(add.blockFormat().background().color(), relay::theme::Success);
+        QCOMPARE(remove.blockFormat().background().color(), relay::theme::Error);
+        // The ink is pure black or pure white — whichever reads on the fill — on the whole line,
+        // not the green or the red itself.
+        const QColor addInk = add.begin().fragment().charFormat().foreground().color();
+        const QColor removeInk = remove.begin().fragment().charFormat().foreground().color();
+        QCOMPARE(addInk, relay::theme::contrastInk(relay::theme::Success));
+        QCOMPARE(removeInk, relay::theme::contrastInk(relay::theme::Error));
+        QVERIFY(addInk == QColor(Qt::black) || addInk == QColor(Qt::white));
+        QVERIFY(removeInk == QColor(Qt::black) || removeInk == QColor(Qt::white));
     }
 
     // ----- the decision on a guest's diff (issue GT7X, protocol 26.5) --------------------------

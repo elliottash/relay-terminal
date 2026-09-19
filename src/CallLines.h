@@ -177,8 +177,8 @@ struct Palette {
     QColor muted;                // headings, hunk headers, the last row
     QColor code;                 // a command line
     QColor link;                 // a Markdown link: the theme's link green; invalid = code
-    QColor add, remove;          // diff foregrounds
-    QColor addBg, removeBg;      // diff backgrounds, already blended into the surface
+    QColor add, remove;          // the black-or-white ink on the diff fills (theme::contrastInk)
+    QColor addBg, removeBg;      // the diff fills themselves: the theme's green and red
     QColor error;
     QColor accent;               // a task in progress, in the ink the tasks panel gives it
 };

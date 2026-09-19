@@ -62,19 +62,12 @@ relay::calllines::Palette AgentInternalsView::palette() {
     out.muted = t::TextMuted;
     out.code = t::SyntaxCommand;
     out.link = t::Link;
-    out.add = t::Success;
-    out.remove = t::Error;
+    out.addBg = t::Success;
+    out.removeBg = t::Error;
+    out.add = t::contrastInk(out.addBg);
+    out.remove = t::contrastInk(out.removeBg);
     out.error = t::SyntaxUnknown;
     out.accent = t::Accent;
-    auto tint = [](const QColor &token) {
-        const QColor base = relay::theme::Surface;
-        const qreal mix = 0.22;
-        return QColor(int(base.red() + (token.red() - base.red()) * mix),
-                      int(base.green() + (token.green() - base.green()) * mix),
-                      int(base.blue() + (token.blue() - base.blue()) * mix));
-    };
-    out.addBg = tint(t::Success);
-    out.removeBg = tint(t::Error);
     return out;
 }
 

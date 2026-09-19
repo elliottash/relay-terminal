@@ -19,6 +19,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <cmath>
+
 class QApplication;
 class QWidget;
 
@@ -157,6 +159,18 @@ void repolishAll();
 // fill itself (the @onShell / @onAgent stylesheet tokens are made with it). Painting code that
 // fills a band in a channel colour — the line the user typed — uses the same rule.
 QColor chipInk(const QColor &fill);
+
+// Pure black or pure white — whichever reads on `fill` — for text that sits on one of the meaning
+// colours used as a ground rather than an ink: a diff's add/remove fills. chipInk() tints the fill
+// itself; this is the black/white a band of green or red asks for (owner, 2026-09-19: "black/white
+// text with a green or red background"). Whichever of the two wins does so at 4.6:1 or better,
+// because the crossover — WCAG relative luminance 0.179 — is the one fill where they score alike.
+inline QColor contrastInk(const QColor &fill) {
+    const auto channel = [](double v) { return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    const double luma = 0.2126 * channel(fill.redF()) + 0.7152 * channel(fill.greenF())
+                      + 0.0722 * channel(fill.blueF());
+    return luma < 0.179 ? QColor(Qt::white) : QColor(Qt::black);
+}
 
 // Name-based hooks for widgets that the stylesheet targets by object name.
 void polishWindow(QWidget *window);

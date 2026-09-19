@@ -218,10 +218,14 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
 
     m_log->clear();
     QTextCursor cursor(m_log->document());
-    auto add = [&cursor](const QString &text, const QColor &color, bool bold = false) {
+    // `fill`, when it is valid, is the ground the text sits on: a diff's add/remove lines are the
+    // black-or-white ink on the theme's green/red, exactly as the diff pane draws them.
+    auto add = [&cursor](const QString &text, const QColor &color, bool bold = false,
+                         const QColor &fill = QColor()) {
         QTextCharFormat format;
         format.setForeground(color);
         if (bold) format.setFontWeight(QFont::Bold);
+        if (fill.isValid()) format.setBackground(fill);
         cursor.movePosition(QTextCursor::End);
         cursor.insertText(text, format);
     };
@@ -243,10 +247,14 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
         const QString text = section.value(QStringLiteral("text")).toString();
         if (style == QStringLiteral("diff")) {
             for (const QString &line : text.split(QLatin1Char('\n'))) {
-                QColor colour = relay::theme::TextMuted;
-                if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) colour = relay::theme::Success;
-                else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) colour = relay::theme::Error;
-                add(line + QLatin1Char('\n'), colour);
+                if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++")))
+                    add(line + QLatin1Char('\n'), relay::theme::contrastInk(relay::theme::Success),
+                        false, relay::theme::Success);
+                else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---")))
+                    add(line + QLatin1Char('\n'), relay::theme::contrastInk(relay::theme::Error),
+                        false, relay::theme::Error);
+                else
+                    add(line + QLatin1Char('\n'), relay::theme::TextMuted);
             }
         } else {
             const QColor colour = style == QStringLiteral("error")  ? relay::theme::SyntaxUnknown

@@ -1023,7 +1023,8 @@ engine writes them into its parser.
 - Text is sanitized: C0 and C1 controls other than newline and tab are dropped.
 - On the first block, the idle prompt line is erased (`\r\x1b[2K`). Each kind of text has its
   own 24-bit color (`Ink`: user prompt, agent text, tool line, tool output, diff add/remove,
-  error, note).
+  error, note). A diff's add/remove lines also carry their fill as a 24-bit background — the
+  theme's green/red with pure black or white on it, whichever reads (`theme::contrastInk`).
 - `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
   are pending, the prompt is not redrawn between turns.
 - Tool calls print one line each; see "Tool-call lines" below.
@@ -2427,9 +2428,9 @@ There are three channels, and one meaning per colour:
 |---|---|---|
 | `shell` (cyan) | the terminal — as a **destination** and as **terminal work** | mode chip, caret, syntax, the `!` prefix chip, `Ink::User`, the Running glyph and its live dot, the Sessions band |
 | `agent` (violet) | the agent — destination and agent work | the same list for the agent: the `*` prefix chip, `Ink::UserAgent`, the plan chip, Working/Subagents, every agent pane's band, a cleanup while it runs |
-| `success` (green) | finished | the Done glyph, `**Done:**`, diff additions, the Options band |
+| `success` (green) | finished | the Done glyph, `**Done:**`, the fill of diff additions, the Options band |
 | `warning` (amber) | **something is waiting on a person** | the NeedsYou glyph and tab icon, the question card (`Ink::Ask`), `**Need:**`, the notification, the work chip's attention state, a context or quota chip near its limit, the board's problems, the composer hint *only* while a program waits for input |
-| `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, diff removals, the ssh band |
+| `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, the fill of diff removals, the ssh band |
 | `action` (red-orange) | the Actions pane | its band, glyph and title-bar button |
 | `tool` (brass) | this pane is a tool | the Switchboard's band and its neighbours' |
 | `link` (dark green) | **you can open this** | a path, folder, URL or `#card` in program output (at rest, since 2026-09-19), the hover underline and the keyboard walk, a fold's "open x.py" row, OSC 8 hyperlinks, the agent's Markdown links (ANSI 2), the composer's path token, `QPalette::Link` |

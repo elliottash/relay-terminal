@@ -312,9 +312,9 @@ QString stripAnsi(const QString &text) {
 
 namespace {
 
-// The diff of one section, as rows: add and remove keep their pair of colours on a tint, hunk
-// headers are muted, and the `--- / +++` file rows are dropped — the line above the fold already
-// names the file.
+// The diff of one section, as rows: add and remove are the black-or-white ink on their fills (the
+// palette carries both — theme::contrastInk over the green and the red), hunk headers are muted,
+// and the `--- / +++` file rows are dropped — the line above the fold already names the file.
 void appendDiff(QVector<FoldLine> &out, const QString &text, const Palette &palette) {
     const ParsedDiff diff = parseUnifiedDiff(text);
     if (diff.isEmpty()) { out << row(text, palette.text); return; }

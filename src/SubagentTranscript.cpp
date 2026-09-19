@@ -44,8 +44,12 @@ QColor SubagentTranscriptView::inkColor(Ink ink) {
     case Ink::Agent: return theme::Text;
     case Ink::User: return theme::Agent;
     case Ink::Tool: case Ink::ToolOutput: case Ink::Note: return theme::TextMuted;
-    case Ink::DiffAdd: return theme::Success;
-    case Ink::DiffRemove: case Ink::Error: return theme::Error;
+    // A diff's add/remove lines are drawn as a fill with black-or-white ink on it (as everywhere
+    // else since 2026-09-19), so these inks are the ink that reads on their own fill, not the
+    // green and the red — those are the backgrounds, set alongside in append().
+    case Ink::DiffAdd: return theme::contrastInk(theme::Success);
+    case Ink::DiffRemove: return theme::contrastInk(theme::Error);
+    case Ink::Error: return theme::Error;
     }
     return theme::Text;
 }
@@ -186,6 +190,10 @@ void SubagentTranscriptView::append(const QString &text, Ink ink) {
     cursor.movePosition(QTextCursor::End);
     QTextCharFormat format;
     format.setForeground(color);
+    // A diff's add/remove lines carry their green/red fill, as every surface that draws a diff
+    // does: black-or-white ink on the fill, not green/red text on the ground.
+    if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
+        format.setBackground(ink == Ink::DiffAdd ? theme::Success : theme::Error);
     if (ink == Ink::User) format.setFontWeight(QFont::Bold);
     cursor.insertText(clean, format);
     m_atLineStart = clean.endsWith(QLatin1Char('\n'));
@@ -391,8 +399,13 @@ void SubagentTranscriptView::toggleToolCall(int index) {
     format.setForeground(inkColor(Ink::ToolOutput));
     for (const QString &line : detail.split(QLatin1Char('\n'))) {
         QTextCharFormat lineFormat = format;
-        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) lineFormat.setForeground(inkColor(Ink::DiffAdd));
-        else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) lineFormat.setForeground(inkColor(Ink::DiffRemove));
+        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) {
+            lineFormat.setForeground(inkColor(Ink::DiffAdd));
+            lineFormat.setBackground(theme::Success);
+        } else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) {
+            lineFormat.setForeground(inkColor(Ink::DiffRemove));
+            lineFormat.setBackground(theme::Error);
+        }
         cursor.insertText(sanitize(QStringLiteral("    ") + line + QLatin1Char('\n')), lineFormat);
     }
     call.foldChars = m_log->document()->characterCount() - before;

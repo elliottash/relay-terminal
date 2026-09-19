@@ -4,6 +4,7 @@
 // from a theme. The live switch (palette, stylesheet, engines) is src/Theme.cpp and is checked
 // under Xvfb; everything here is pure and runs without a window.
 #include "ThemeFile.h"
+#include "Theme.h"   // contrastInk: the black-or-white a diff's green/red fill takes
 
 #include <QDir>
 #include <QFile>
@@ -352,6 +353,28 @@ private Q_SLOTS:
             QVERIFY2(r >= p.min, qPrintable(QStringLiteral("%1: %2 %3 on %4 is %5:1, needs %6:1")
                                                 .arg(id, QString::fromLatin1(p.what), p.fg.name(), p.bg.name())
                                                 .arg(r, 0, 'f', 2).arg(p.min, 0, 'f', 1)));
+        }
+    }
+
+    // A diff's add/remove lines are drawn as a fill — the theme's own success/error — with pure
+    // black or white on it, whichever reads (theme::contrastInk; owner, 2026-09-19). Whichever of
+    // the two inks the helper picks has to clear AA on that fill in every shipped theme, or the
+    // request buys colour at the price of legibility.
+    void diffFillsTakeABlackOrWhiteInkThatReads() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(files.size() >= 5);
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            for (const char *state : {"success", "error"}) {
+                const QColor fill = spec.uiColor(QString::fromLatin1(state));
+                const QColor ink = contrastInk(fill);
+                QVERIFY2(ink == QColor(Qt::black) || ink == QColor(Qt::white),
+                         qPrintable(it.key() + QStringLiteral(": %1 is not black or white").arg(state)));
+                QVERIFY2(contrast(ink, fill) >= 4.5,
+                         qPrintable(QStringLiteral("%1: %2 ink on %3 is %4:1")
+                                        .arg(it.key(), QString::fromLatin1(state), fill.name())
+                                        .arg(contrast(ink, fill), 0, 'f', 2)));
+            }
         }
     }
 
