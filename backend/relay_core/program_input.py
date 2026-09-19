@@ -109,15 +109,16 @@ def validate_grant(grant) -> dict:
     """`context.program_control` from the GUI: the user's consent for this one turn."""
     if grant is None:
         return {}
-    if not isinstance(grant, dict) or set(grant) - {"granted", "reason", "program", "question", "kind",
-                                                    "masked", "alt_screen", "waiting", "max_writes",
-                                                    "screen", "screen_source"}:
+    if not isinstance(grant, dict) or set(grant) - {"granted", "reason", "program", "guest", "question",
+                                                    "kind", "masked", "alt_screen", "waiting", "max_writes",
+                                                    "screen", "screen_source", "guest_model", "guest_context_pct",
+                                                    "guest_busy"}:
         raise ValueError("context.program_control has an unknown field.")
-    for key in ("granted", "masked", "alt_screen", "waiting"):
+    for key in ("granted", "masked", "alt_screen", "waiting", "guest_busy"):
         if grant.get(key) is not None and type(grant[key]) is not bool:
             raise ValueError(f"context.program_control.{key} must be a boolean.")
-    for key, limit in (("reason", 60), ("program", 200), ("question", 400), ("kind", 40),
-                       ("screen_source", 40)):
+    for key, limit in (("reason", 60), ("program", 200), ("guest", 40), ("question", 400),
+                       ("kind", 40), ("screen_source", 40), ("guest_model", 64)):
         value = grant.get(key)
         if value is not None and (not isinstance(value, str) or len(value) > limit):
             raise ValueError(f"context.program_control.{key} must be text of at most {limit} characters.")
@@ -128,6 +129,11 @@ def validate_grant(grant) -> dict:
     writes = grant.get("max_writes")
     if writes is not None and (type(writes) is not int or not 1 <= writes <= MAX_WRITES_LIMIT):
         raise ValueError(f"context.program_control.max_writes must be an integer from 1 to {MAX_WRITES_LIMIT}.")
+    # The guest's context share (protocol 26.3): an integer percentage, present only when the
+    # statusline could say. Absent and null both mean "unknown", never zero.
+    share = grant.get("guest_context_pct")
+    if share is not None and (type(share) is not int or not 0 <= share <= 100):
+        raise ValueError("context.program_control.guest_context_pct must be an integer from 0 to 100.")
     return grant
 
 
@@ -147,6 +153,10 @@ class ProgramControl:
         self.granted = False
         self.reason = ""
         self.program = ""
+        self.guest = ""
+        self.guest_model = ""
+        self.guest_context_pct = None   # unknown until a statusline event says otherwise (26.3)
+        self.guest_busy = False
         self.question = ""
         self.kind = "none"
         self.masked = False
@@ -160,12 +170,14 @@ class ProgramControl:
     def _apply(self, state: dict) -> None:
         if "granted" in state:
             self.granted = bool(state.get("granted"))
-        for key in ("reason", "program", "question", "kind", "screen_source"):
+        for key in ("reason", "program", "guest", "guest_model", "question", "kind", "screen_source"):
             if key in state:
                 self[key] = state.get(key) or ""
-        for key in ("masked", "alt_screen", "waiting"):
+        for key in ("masked", "alt_screen", "waiting", "guest_busy"):
             if key in state:
                 setattr(self, key, bool(state.get(key)))
+        if "guest_context_pct" in state:
+            self.guest_context_pct = state.get("guest_context_pct")   # validated above; None = unknown
         if "screen" in state:
             self.screen = clip_screen(state.get("screen"))
         if state.get("max_writes"):
@@ -207,10 +219,15 @@ class ProgramControl:
         return "not_granted"
 
     def summary(self) -> dict:
-        return {"granted": self.granted, "reason": self.reason, "program": self.program,
-                "kind": self.kind, "masked": self.masked, "waiting": self.waiting,
-                "writes": self.writes, "max_writes": self.max_writes,
-                "screen_source": self.screen_source}
+        summary = {"granted": self.granted, "reason": self.reason, "program": self.program,
+                   "guest": self.guest, "guest_model": self.guest_model, "guest_busy": self.guest_busy,
+                   "kind": self.kind, "masked": self.masked,
+                   "waiting": self.waiting, "writes": self.writes, "max_writes": self.max_writes,
+                   "screen_source": self.screen_source}
+        # Present only when known, exactly as the pane sends it (protocol 26.3).
+        if self.guest_context_pct is not None:
+            summary["guest_context_pct"] = self.guest_context_pct
+        return summary
 
     def available(self) -> bool:
         """Whether the tool is offered to the model at all. Re-read at every model call, so a

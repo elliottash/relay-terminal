@@ -356,6 +356,17 @@ WITHHELD_EVENTS: dict[str, str] = {
     # 2026-09-18 because the "denied by default" test had gone red waiting for somebody to; the
     # session that added it can move it to FORWARDED_EVENTS if a phone should show the chip.
     "hosted_quota": "the owner's hosted-account allowance; a reply to the desktop's own request",
+    # The guest event channel of protocol 26.3 (issue GT7X). Everything on it is pane-internal:
+    # `hook` forwards a hook's raw JSON whose tool inputs carry local file paths and contents,
+    # `bridge` carries tool arguments with whole file paths, contents and diffs, and `statusline`,
+    # `state` and `slash` feed desktop surfaces (chips, routing, the `/` popup). The subset a
+    # phone has any use for — the guest's model, context fill and busy flag — already rides
+    # `program_state` beside `guest`, so nothing is lost: same call as `board_created`.
+    "hook": "raw guest hook JSON; tool inputs carry local file paths and contents",
+    "statusline": "shim parse of the guest statusline; the pane-visible subset rides program_state",
+    "state": "guest turn state; guest_busy already rides program_state",
+    "bridge": "guest tool payloads carry local file paths and whole file contents",
+    "slash": "guest slash catalog for the desktop composer popup",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this

@@ -116,7 +116,9 @@ add_library(relay-subagents STATIC src/SubagentsPanel.cpp src/SubagentsPanel.h s
             src/JobsPanel.cpp src/JobsPanel.h)
 target_include_directories(relay-subagents PUBLIC src)
 # relay-toollabel: the transcript draws one concise line per tool call (protocol section 23).
-target_link_libraries(relay-subagents PUBLIC relay-toollabel ${RELAY_QT}::Widgets)
+# relay-requests: the strip under the composer pairs the running agents with the open task list
+# (owner, 2026-09-19), so it reads the same RequestLedgerModel the task list panel does.
+target_link_libraries(relay-subagents PUBLIC relay-toollabel relay-requests ${RELAY_QT}::Widgets)
 target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
 
 # Terminal engine settings (--engine-core / RELAY_ENGINE_CORE) and the pane's right-click menu:
@@ -401,7 +403,7 @@ if(RELAY_BUILD_APP)
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
     add_executable(relay src/main.cpp
-        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
+        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
@@ -462,6 +464,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-jobs-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
     add_test(NAME jobs COMMAND relay-jobs-tests)
     set_tests_properties(jobs PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The strip under the composer pairs subagents with the open tasks (owner, 2026-09-19): the
+    # window centred on the marginal task and the row pairing are pure functions, tested without a
+    # window.
+    add_executable(relay-striplayout-tests tests/striplayout_test.cpp)
+    target_link_libraries(relay-striplayout-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
+    add_test(NAME striplayout COMMAND relay-striplayout-tests)
+    set_tests_properties(striplayout PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(subagents PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-completion-tests tests/completion_test.cpp)
     target_link_libraries(relay-completion-tests PRIVATE relay-completion ${RELAY_QT}::Test)
@@ -495,6 +504,11 @@ if(BUILD_TESTING)
     add_executable(relay-runtimedirs-tests tests/runtimedirs_test.cpp)
     target_link_libraries(relay-runtimedirs-tests PRIVATE relay-runtimedirs ${RELAY_QT}::Test)
     add_test(NAME runtimedirs COMMAND relay-runtimedirs-tests)
+    # The IDE bridge's C++ rules (GT7X, 26.5), header-only beside the pane: which reply files the
+    # GUI may write, and the shell environment a claude pane injects.
+    add_executable(relay-guestbridge-tests tests/guestbridge_test.cpp)
+    target_link_libraries(relay-guestbridge-tests PRIVATE relay-logging relay-runtimedirs ${RELAY_QT}::Test)
+    add_test(NAME guestbridge COMMAND relay-guestbridge-tests)
     add_executable(relay-slash-tests tests/slashcommands_test.cpp)
     target_link_libraries(relay-slash-tests PRIVATE relay-slash ${RELAY_QT}::Test)
     add_test(NAME slash COMMAND relay-slash-tests)

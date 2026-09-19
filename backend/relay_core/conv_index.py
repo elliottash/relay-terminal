@@ -34,6 +34,18 @@ Three kinds of conversation live in the same tables, told apart by `conversation
               output. Commands typed straight into the terminal in native mode never reach Relay,
               so they are not indexed (see the issue for what is and is not captured).
 
+Two more kinds are **guests** — agent CLIs the user runs in a pane, whose transcripts Relay reads
+but never writes (`GUEST_SOURCES`, protocol 26.7):
+
+* `claude`  — one row per claude session (`~/.claude/projects/<cwd-slug>/<session-id>.jsonl`).
+* `codex`   — one row per codex rollout (`~/.codex/sessions/**/rollout-*.jsonl`), named from the
+              codex threads database.
+
+`backend/relay_core/guest_sessions.py` parses the guests' files and calls `update_guest()`; the
+rows are read-only for everyone else, and a rebuild cannot recreate them from the session files,
+so `delete_session()` on a guest drops index rows only. Guests are left out of a search unless
+`sources` names them, the same way subagent threads are (the sessions pane asks for them).
+
 The index holds message text, so it stays on this machine: same 0700 directory as the sessions,
 never synced, and deleting a conversation deletes its rows.
 """
@@ -142,7 +154,10 @@ KINDS = ("title", "summary", "prompt", "reply", "tool_call", "tool_output", "com
 # above body text, but the preview lists the messages, not these.
 HEADER_KINDS = ("title", "summary")
 _HEADER_SQL = ", ".join(f"'{kind}'" for kind in HEADER_KINDS)
-SOURCES = ("agent", "terminal", "subagent")
+SOURCES = ("agent", "terminal", "subagent", "claude", "codex")
+# The guest sources (protocol 26.7): their rows are written by guest_sessions.py from the guests'
+# own transcripts, never from Relay's session files, so a rebuild leaves them to `guest_reconcile`.
+GUEST_SOURCES = ("claude", "codex")
 SORTS = ("recent", "oldest", "longest", "relevance")
 # `relevance` tiers a conversation by the best kind it matched, then by how many entries matched,
 # then by recency: a title hit outranks a summary hit outranks a prompt outranks a reply outranks
@@ -864,6 +879,67 @@ class ConversationIndex:
             db.commit()
         self._run(work)
 
+    def update_guest(self, data: dict) -> int:
+        """Index (or re-index) one guest session (protocol 26.7) from a parsed record.
+
+        `data` is what `guest_sessions.parse_*` produce: `{source, id, file, title, title_kind,
+        workspace, created, mtime, message_count, entries}`. The rows are the guests' own
+        transcripts mirrored — `file_mtime` is the transcript's mtime, which is what makes the
+        next reconcile cheap — and `session_dir` stays empty, because the guests' directories are
+        not Relay's to write. A user's pin (or rename) survives a re-index, as it does for the
+        other sources.
+        """
+        source = str(data.get("source") or "")
+        session_id = str(data.get("id") or "")
+        if source not in GUEST_SOURCES:
+            raise ValueError(f"A guest source must be one of {', '.join(GUEST_SOURCES)}.")
+        if not session_id:
+            raise ValueError("A guest session has no id.")
+        workspace = normalize_workspace(str(data.get("workspace") or ""))
+        title = _one_line(data.get("title"), 200)
+        rows = [row for row in data.get("entries") or [] if isinstance(row, dict) and row.get("text")]
+        mtime = data.get("mtime")
+        mtime = float(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else None
+
+        def work(db):
+            keep = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?",
+                              (session_id,)).fetchone()
+            if "custom_title" in data or "pinned" in data:
+                keep = {"custom_title": data.get("custom_title") or None,
+                        "pinned": 1 if data.get("pinned") else 0}
+            db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+            db.execute(
+                "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
+                " model, preset, created, updated, turns, open_requests, session_dir, pinned, file_mtime,"
+                " indexed_version)"
+                " VALUES(?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?)",
+                (session_id, source, workspace, project_name(workspace), title,
+                 keep["custom_title"] if keep else None,
+                 data.get("created") or mtime, mtime or time.time(),
+                 max(0, int(data.get("message_count") or 0)),
+                 int(keep["pinned"]) if keep else 0, mtime, SCHEMA_VERSION))
+            written = header_entries((keep["custom_title"] if keep else None) or title, "") + rows
+            db.executemany(
+                "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
+                [(session_id, int(row.get("turn") or 0), int(row.get("seq") or 0),
+                  str(row.get("kind") or "reply"), row.get("time"),
+                  _clean(str(row.get("text") or ""), MAX_PROMPT)) for row in written])
+            db.commit()
+            return len(rows)
+        return self._run(work)
+
+    def guest_file_stamps(self, sources=GUEST_SOURCES) -> dict[str, tuple[str, float, float | None]]:
+        """`{session_id: (source, updated, file_mtime)}` of the guest rows, for `reconcile()`:
+        what is indexed and how fresh, without reading a transcript."""
+        wanted = [source for source in sources if source in GUEST_SOURCES]
+        if not wanted:
+            return {}
+        placeholders = ",".join("?" * len(wanted))
+        return self._run(lambda db: {
+            row["session_id"]: (row["source"], row["updated"] or 0, row["file_mtime"])
+            for row in db.execute("SELECT session_id, source, updated, file_mtime FROM conversations"
+                                  f" WHERE source IN ({placeholders})", wanted).fetchall()})
+
     def update_thread(self, data: dict, session_dir: str | Path | None = None, file_mtime: float | None = None) -> int:
         """Index (or re-index) one subagent thread. Returns the number of entries written."""
         thread_id = str(data.get("id") or "")
@@ -1000,7 +1076,9 @@ class ConversationIndex:
     def rebuild(self, root: str | Path | None = None) -> dict:
         """Drop every agent conversation and rebuild it from the session JSON files.
 
-        Terminal history has no file to rebuild from, so its rows are kept.
+        Terminal history has no file to rebuild from, so its rows are kept; so are the guest
+        rows (protocol 26.7), which have no session file either — `guest_sessions.reconcile()`
+        keeps those in line with the guests' own transcripts.
         """
         started = time.time()
         directory = Path(root) if root else sessions_root()
@@ -1082,7 +1160,11 @@ class ConversationIndex:
         return self._run(work)
 
     def delete_session(self, session_id: str, *, remove_files: bool = True) -> dict:
-        """Remove a conversation's index rows and, for agent sessions, its files and blobs."""
+        """Remove a conversation's index rows and, for agent sessions, its files and blobs.
+
+        A guest session (protocol 26.7) has no Relay file to delete: its rows go and the
+        transcript the guest owns stays, so `remove_files` never touches it.
+        """
         def work(db):
             row = db.execute("SELECT source, session_dir FROM conversations WHERE session_id=?", (session_id,)).fetchone()
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))

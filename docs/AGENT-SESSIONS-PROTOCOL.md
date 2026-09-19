@@ -2382,6 +2382,7 @@ pane: it answers the model directly and emits `program_input_refused` so the pan
 | `granted` | bool | the user handed this program to the agent **for this turn** |
 | `reason` | string (≤60) | `delegated`, or why a grant ended: `take_over`, `password`, `program_exited` |
 | `program` | string (≤200) | the foreground program's name |
+| `guest` | string (≤40) | the guest agent the program is — `claude`, `codex` or empty (section 26) |
 | `question` | string (≤400) | what the screen says it is asking ("Do you want to continue? [Y/n]") |
 | `kind` | string (≤40) | the classifier's verdict: `none`, `shell_prompt`, `yes_no`, `choice`, `password`, `press_key`, `free_text` |
 | `masked` | bool | a password prompt |
@@ -2437,7 +2438,7 @@ A `cancelled` reply raises `Cancelled` instead, so a stopped turn unwinds like a
 
 ### 21.4 `program_state` (GUI → worker)
 
-`program_state {granted, reason, program, question, kind, masked, alt_screen, waiting,
+`program_state {granted, reason, program, guest, question, kind, masked, alt_screen, waiting,
 max_writes, screen_source, id?}` — the same fields as the grant, without `screen`. The pane sends
 it whenever any of them changes and the worker keeps quiet about it unless the message carried an
 `id`, in which case it answers `program_control {id, granted, reason, program, kind, masked,
@@ -3032,6 +3033,246 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   file; on a thread, Enter opens its history in the ⓘ pane.
 - `reset` now carries the new conversation's `session_id`.
 
+## 26. Guest agent panes: Claude Code and Codex (v3.2, 2026-09-19)
+
+Issue GT7X (`issues/features/2026-09-19-claude-codex-guest-integration.md`). A **guest** is an
+agent CLI — Claude Code or Codex — the user starts in a pane's shell, exactly as they would in
+any other terminal. Relay detects it and puts its own surfaces (composer, chips, sessions pane)
+around it. The registry is `backend/relay_core/guest.py` (static identity, well-known paths,
+installation probe); tests `tests/test_guest.py`. This section is the stub the guest phases
+extend; everything here is additive.
+
+### 26.1 Detection and `guest`
+
+The pane classifies the foreground command line on its program poll (`guestProgram`,
+`src/Pane.h`): the first token's leaf (`claude`, `claude-code`, `codex`, `codex-cli`), or —
+when the first token is a launcher (`node`, `nodejs`, `bun`, `bunx`, `deno`, `npx`) — the first
+non-flag token after it, matched by leaf name (script extensions `.js`/`.mjs`/`.cjs`/`.ts`
+stripped) or by an exact path component (`node …/@anthropic-ai/claude-code/cli.js`). This is
+one rule in two languages; `guest.classify_command` and `guestProgram` change together.
+
+The pane publishes the result as `guest` in `program_state` (21.4) and, while a grant is live,
+in `context.program_control` (21.2): the guest id, or `""`. The worker keeps it in the program
+control state; nothing else changes, and a pane whose foreground program is not a guest behaves
+exactly as before. Guest state is **not** saved in the window layout: a restored pane starts at
+a shell and re-detects when the user starts the guest again. A guest run inside tmux is not
+visible, the same limitation `remoteCommandLine` documents for ssh.
+
+### 26.2 Env injection point
+
+Pane shells are spawned with the `qputenv` values set in `startTerminal` (`src/Pane.h`). The
+Claude IDE bridge phase writes its lock file under `guest.claude_ide_lock_dir()` and injects
+`guest.bridge_env("claude", port)` (`CLAUDE_CODE_SSE_PORT`, `ENABLE_IDE_INTEGRATION`) there, so
+a `claude` started in the pane finds Relay's bridge. Codex has no IDE-bridge equivalent; its
+environment stays untouched.
+
+### 26.3 The contracts the guest phases share
+
+The phases below are built in parallel (bridge, hooks, codex, sessions, composer), so the seams
+between them are fixed here first and each phase codes against this section, not against another
+phase's implementation.
+
+**The guest event channel.** Everything a guest or its shim learns reaches the pane through one
+file, never a listener. The GUI writes `shell/guest-event.py` into the pane's data dir beside
+`shell/event.py` and exports `RELAY_GUEST_EVENT` beside `RELAY_RUNTIME_DIR` (section 26.2's
+injection point). The helper is called as `guest-event.py <event>` with the event's JSON on stdin
+and atomically replaces `guest.json` in the pane's runtime dir:
+
+```json
+{"token": "<pane token>", "sequence": "<fresh uuid4>", "event": "<name>", "guest": "claude|codex", "data": {}}
+```
+
+The pane stats `guest.json` exactly as `pollShell()` stats `state.json` (new inode -> read, token
+check, sequence check), on the same tick. `sequence` must change on every write. Events, v1:
+
+| event | data | from | effect |
+|---|---|---|---|
+| `hook` | `{name, payload}` - the raw hook JSON under `payload` | claude/codex hooks | pane state, notifications, permission prompts |
+| `statusline` | `{model, context_pct, ...}` - the fields the shim could parse | statusline shim | `guest_model`, `guest_context_pct` chips |
+| `state` | `{busy, turn?}` | rollout tail, bridge | `guest_busy`, composer routing |
+| `bridge` | `{tool, args}` | the IDE bridge sidecar | diff view, file opens, guest notifications |
+| `slash` | `{commands: ["/model", ...]}` | slash catalog scan | `/` popup guest entries |
+
+The hard invariant: **a shim with no `RELAY_GUEST_EVENT` in its environment is a no-op** - exit 0,
+print nothing (statusline shims print their passthrough line only), write nowhere. Hooks installed
+in a user's global settings must therefore be harmless in every other terminal.
+
+**`program_state` additions.** Three optional fields join `guest` (21.4, mirrored in 21.2):
+`guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
+`guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
+
+**Settings the shims live in.** Guest integration is per project and off by default (Options >
+Guests). Turning it on writes hooks into that project's `.claude/settings.json` /
+`~/.codex/config.toml` additively - existing entries are preserved verbatim, Relay's carry a
+`relay-guest` marker - and turning it off removes exactly the marked entries. The user's global
+`~/.claude/settings.json` is touched only by an explicit second opt-in.
+
+**File ownership** (phases may read anything, but only their own files change):
+`guest.py` is shared and changes only through the lead; hooks own `shell/` helper generation,
+`backend/relay_core/guest_hook.py` and the Pane.h/PaneState plumbing for `guest.json`; the bridge
+owns `backend/relay_core/guest_bridge.py` and the diff-view glue; codex owns
+`backend/relay_core/guest_codex.py`; sessions own `backend/relay_core/guest_sessions.py` and the
+conv_index source listing; the composer owns the router/`program_input` routing and the slash
+registry.
+
+### 26.4 Claude hooks and the statusline shim
+
+Hooks call the shim as `"$RELAY_PYTHON" -m relay_core.guest_hook <event>` (JSON on stdin), which
+forwards a `hook` event through the channel. The statusline command is the same shim in
+`statusline` mode: it emits the `statusline` channel event and prints one passthrough line, so
+claude still renders its own statusline unchanged. Permission decisions hook-side are Relay
+questions on the pane, answered through the shim's exit code / decision JSON (claude's contract),
+never auto-approved.
+
+**How a hook reaches the shim.** `-m relay_core.guest_hook` needs the backend on `sys.path`, so
+the pane appends its own backend directory to `PYTHONPATH` in `startTerminal`, beside
+`RELAY_GUEST_EVENT` (26.2's injection point): appended, never prepended, so the user's own
+`PYTHONPATH` keeps its order and their cwd still wins. `RELAY_PYTHON` is the interpreter the
+pane's shell already exports.
+
+**The channel helper's arguments.** `guest-event.py <event> [guest] [sequence]`: the shim names
+its own guest and, for a question it must recognize the answer to, the uuid4 sequence it wants
+the envelope to carry. Without them the helper picks its own fresh uuid4.
+
+**The permission question, in full.** The shim writes the `hook` event for `PreToolUse` with its
+own uuid4 sequence and then waits (up to `RELAY_GUEST_PERMISSION_TIMEOUT`, default 120 s) for
+`guest-answer.json` in the pane's runtime dir:
+
+```json
+{"token": "<pane token>", "sequence": "<the question's sequence>", "decision": "allow|deny"}
+```
+
+The pane writes it atomically when the user clicks Allow or Deny on the question bar, which is
+the same envelope discipline as `guest.json`: a token check and a sequence check, so an answer
+can only ever be for the question it names. The shim then prints claude's own
+`hookSpecificOutput.permissionDecision` JSON and exits 0. **An unanswered question prints nothing
+and exits 0** — claude then asks exactly as it would without Relay — so a permission is never
+granted on the user's behalf, and a pane that has gone away costs only the wait.
+
+**The statusline passthrough.** The shim always prints exactly one line, in every terminal with
+or without Relay: `RELAY_GUEST_STATUSLINE` (fields `{model}`, `{dir}`, `{cwd}`, `{session}`),
+default `"{model} · {dir}"`. The `statusline` event's data carries only the fields the shim could
+parse — `model`, and `context_pct` when the input says it (`context_pct`,
+`context_window.used_percentage` or `context.used_percentage`; `exceeds_200k_tokens` reads as
+100) — so `guest_context_pct` is absent rather than zero when nothing is known.
+
+**What the installer writes.** `relay_core.guest_install` adds one matcher group per event for
+`PreToolUse`, `UserPromptSubmit`, `Stop` and `Notification`, plus `statusLine`, each command
+ending in the `--relay-guest` token that marks it as Relay's. Existing entries are preserved
+verbatim; `statusLine` is a single slot, so a user's own line is kept rather than replaced (the
+chip then simply shows nothing). `remove` deletes exactly the marked entries, byte-for-byte
+leaving everything else as it was; the installer refuses to touch a file that is not a JSON
+object.
+
+### 26.5 The Claude IDE bridge
+
+One bridge per GUI run, started lazily by the first claude pane, loopback only, ephemeral port,
+lock file `guest.claude_ide_lock_dir()/<port>.lock` (pid, ideName "relay", workspaceFolders),
+removed at exit; the pane injects `guest.bridge_env("claude", port)` (section 26.2). It speaks the
+editor side of the IDE integration - WebSocket MCP (JSON-RPC 2.0: `initialize`, `tools/list`,
+`tools/call`), the twelve tools of the published protocol; `getDiagnostics` answers empty
+(Relay has no LSP source - documented, not faked). `openDiff` opens Relay's diff view and the
+tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJECTED`).
+A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
+server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
+
+**The path rule.** A file the bridge writes is always a file inside the pane that is showing the
+diff. *Both* paths an `openDiff` names are resolved with `os.path.realpath` — `..` and symlinks
+followed — and both must land inside the workspace/cwd of the one pane the request routed to;
+anything else answers `DIFF_REJECTED` and is logged (`refused … reason=outside-pane`) without ever
+being shown to the user. The check is made twice: when the diff is opened, and again against the
+live pane set at the instant of the write, because a pane can close and a symlink can be planted
+while the decision is on screen. Routing looks at `old_file_path` first and `new_file_path` is
+what gets written, so checking only the routing path is checking the wrong one.
+
+**Implementation (claude-bridge phase).** The server is a spawned sidecar,
+`backend/relay_core/guest_bridge.py serve --state-dir <dir>`, one per GUI run, started lazily by
+the first pane's `startTerminal` through `src/GuestBridge.h` (the GUI's whole end of the bridge:
+spawn, registration, answers); the sidecar prints one ready line on stdout
+(`{"ready": true, "port": N, "lock": path}`) and the port comes from there. The bridge is off by
+default (`guests/claude_bridge`, Options › Guests); a failed start is never retried — a pane works
+without the bridge. Every claude pane registers itself as one JSON file in the run's state dir
+(`{token, runtime_dir, helper, python, workspace, cwd}`), rewritten when the cwd or workspace
+moves and removed when the claude exits or the pane closes; the sidecar routes by the longest
+workspace/cwd prefix of the paths a request names, newest file breaking a tie.
+
+**The lock's lifetime.** Stale locks (whose pid is gone) are swept at startup; then the listener
+binds, and only then is the lock written — a lock advertises a port and a live `authToken`, so
+there is no lock before there is a port and `0.lock` is never a file that exists. It is removed on
+three paths: `atexit`, registered the moment the lock is written; SIGTERM/SIGINT; and the GUI's
+own death via `PR_SET_PDEATHSIG`. A SIGKILLed run leaves a lock that the next run's sweep takes.
+
+**Nothing blocks the connection.** A pending `openDiff` is settled by its own task, so the read
+loop keeps serving while a decision is on screen: `tools/list` is answered, a ping gets its pong,
+and — the case that mattered — the client's own `close_tab` is read. `close_tab` settles the
+pending diff whose `tab_name` matches, on that connection, as `DIFF_REJECTED` (and still answers
+`TAB_CLOSED`, as upstream does unconditionally); that is how claude withdraws a diff it no longer
+wants. `closeAllDiffTabs` closes the calling connection's diffs only — two claudes share one
+sidecar, and one tidying up must not cancel what the user is reading in the other pane. A pending
+diff also ends by itself when its pane closes, when its connection drops, at shutdown, or after
+`DIFF_TIMEOUT_SECONDS` (30 minutes) on the wall clock. Every one of those answers `DIFF_REJECTED`:
+a guest told no is recoverable, a guest blocked forever is not.
+
+**The socket itself.** Loopback, one auth token in `x-claude-code-ide-authorization`, compared
+with `hmac.compare_digest`. A connection that does not finish its HTTP head within
+`HANDSHAKE_SECONDS` (10) is dropped. Client frames must be masked (RFC 6455 §5.1) or the
+connection is failed with close code 1002. A frame, and a reassembled fragmented message, is
+capped at `MAX_MESSAGE_BYTES` (4 MiB) and refused with 1009 *before* the announced bytes are read.
+Every `KEEPALIVE_SECONDS` (30) the sidecar pings each live connection, so an idle claude — and
+anything keeping state between the two — knows the bridge is alive. The accept-key helper is
+`remote/ws.py`'s when that package is importable and three equivalent lines when it is not; the
+rest of the frame layer is local because the sidecar runs with only `backend/` on its path.
+
+**The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface and
+the lock file, and it is the only side that can answer claude — including `getDiagnostics`
+(empty, documented). The GUI decides what only a person can decide. `openDiff` crosses the seam
+as one `bridge` event over the guest channel (26.3): the pane opens Relay's diff view and shows
+the banner whose action (Save) — also Ctrl+Shift+R, the visible banner's action — or whose
+dismissal (×) is the answer; on `FILE_SAVED` the *sidecar* writes the file, so the GUI never
+writes a user's file from a bridge event. `openFile` opens the preview pane; everything else
+the twelve tools ask for was answered sidecar-side already. The `bridge` event arrives through
+the shared channel plumbing (26.3): `pollGuestEvent` → `handleGuestEvent`, whose `bridge`
+branch calls the pane's `guestBridgeEvent`.
+
+**The channel's writer.** `shell/guest-event.py` (26.3) is the only writer, for the bridge as
+for the shim: the sidecar calls it as `guest-event.py bridge claude` with the event's data on
+stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
+the §26.3 envelope and replaces `guest.json` atomically. A helper that is missing, fails, or
+has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
+`DIFF_REJECTED` — never a second writer beside the channel's own. It is run with a minimal
+environment — `PATH`, `HOME`, `PYTHONPATH`, the locale and `RELAY_RUNTIME_DIR` /
+`RELAY_SESSION_TOKEN` / `RELAY_PYTHON` — not the sidecar's own, which inherits the GUI's
+provider keys.
+
+### 26.6 Codex attach
+
+Codex has no IDE bridge (section 26.2): its attach is hooks (`notify`, `tui.notification_condition`
+in `~/.codex/config.toml`, the same additive marked-entry rules) plus a rollout tail -
+`guest.codex_sessions_dir()` watched for the active pane's newest rollout - emitting `state` and
+`statusline`-equivalent events (model, token counts when the rollout carries them). The
+app-server daemon remains Tier A, deferred.
+
+### 26.7 Sessions sources `claude` and `codex`
+
+The sessions pane lists guest sessions beside Relay's own: source `claude` reads
+`guest.claude_projects_dir()` (`<cwd-slug>/<session-id>.jsonl`), source `codex` reads the
+rollouts and `guest.codex_state_db()` (highest `state_*.sqlite`). A record is
+`{source, id, title, mtime, workspace, message_count, resume_command}`; `resume_command` respawns
+the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`; `codex resume`, fork per
+its CLI). Search spans all sources; the active pane's live transcript is tailed so a running
+session appears without a rescan.
+
+### 26.8 Composer routing and the slash registry
+
+While `program_state.guest` is non-empty the Relay prompt is that guest's composer. Text routes
+through the pane's existing input queue: typed when the guest waits at its input (paste-safe,
+newline only on submit), queued while `guest_busy` and submitted when it waits again. Relay `/`
+commands stay Relay's; the `/` popup additionally lists the guest's slash commands (badge, from
+the `slash` event, static fallback catalog otherwise) and choosing one types it into the guest.
+`@file` becomes the guest's own syntax. Relay never routes `!` shell lines silently: the user's
+spelling decides. Where Relay has the surface natively (model picker, compact, resume) the Relay
+surface is what the user sees; the guest's equivalent is a passthrough command, not a second UI.
+
 ## 27. The agent asks the user a question (v3.3, 2026-09-19)
 
 Plan mode could investigate and it could write a plan; between the two it could not reach the user,
@@ -3143,3 +3384,4 @@ own" and no key that dismisses the card: those would each be a mode, and the box
   suffix cannot be drawn differently from the words the user is reading.
 - **No deadline.** `type_into_program` gives the pane 20 s because a program is waiting; here a
   person is, and a timeout would report "failed" for "still thinking".
+

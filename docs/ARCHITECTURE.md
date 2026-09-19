@@ -514,7 +514,7 @@ terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/
 starting a card edit in the Switchboard with the Edit button, a click on the title or a
 double-click in the text (→ `e`), a card's Discuss, Plan and Execute buttons (→ Enter, `p`, `x`),
 and rotating idle tips 4 s after a finished agent turn with an
-from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter) and the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
+from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share chip on a pane that is already shared (→ the palette, then "Sharing", because
 `pane.sharing` deliberately has no key of its own), answering an `ask_user` card by typing an
@@ -1529,6 +1529,29 @@ and `auditLine()` name todos and the user's own quoted words, never `R<n>` ids. 
 "limit"}` prints a `relay://continue/<pane>` link handled by `WindowManager::handleOpen`; Continue
 sends an ordinary ask. `max_steps`, `max_tool_calls` and `audit_requests` live in QSettings
 `agent/*`, go into `configure` and are sent with `set_agent_options` when changed.
+
+**The open task list under the prompt** (owner, 2026-09-19). The current task list also shows in the
+strip beneath the composer, beside the running agents — the same widget, `SubagentsPanel`
+(library `relay-subagents`, which therefore links `relay-requests`; the pure layout is tested in
+`tests/striplayout_test.cpp`). The strip is hidden when there is neither a listed subagent nor an
+open task, so it costs the terminal no rows on a simple turn. It draws at most `kMaxVisible` = 5
+task rows out of the current batch, in list order, through a window **centred on the marginal
+task** — the first `in_progress` todo, else the first that is not completed, done or cancelled, else
+the tail of the list — with the marginal row third of five, so two rows of context show above and
+below it. Completed tasks of the same list show as `✓` rows whenever the window has room: the list
+reads as a checklist, and "centre on the marginal task" only means anything if the settled ones are
+in it. With subagents and tasks both, the rows split at half width: **subagents on the left, tasks
+on the right**, one row per (subagent, task) pair, a violet `theme::Agent` connector on a linked
+pair, and `↳` in place of the name on the second and later rows of one subagent. `Left`/`Right` move
+between the two columns and the vertical chain (prompt → strip → jobs list) is unchanged; `Enter`
+opens the task's subagent when it has one and is listed, otherwise the task list on that task
+(`Pane::openTask`); `S` sends `todo_subagent` for a `delegable()` todo, exactly as the floating
+panel's S does; `x` and `m` stay subagent-only. The `main` row stays in both modes — it is where the
+keys are taught. **No protocol change**, and the link is still one subagent per task at a time
+(#QHR1): the N-rows-per-subagent pairing is built generically so the strip is already right the day
+`todo_id` becomes a list, but today N is always 1. The real multi-row case is the inverse — several
+finished subagent rows pointing at one re-run todo, each with its own row and the task cell drawn on
+the first.
 
 ### Tools
 
