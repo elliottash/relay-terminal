@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -29,6 +30,7 @@
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include <algorithm>
 
@@ -82,6 +84,16 @@ QrMatrix qrMatrixOf(const QJsonArray &rows)
         matrix.append(cells);
     }
     return matrix;
+}
+
+// The sentence under the invite row before any code exists. The expiry and uses boxes belong to
+// the link; a code that quietly ignored them would last longer or admit more than it seemed to.
+QString codeIntro()
+{
+    return QStringLiteral(
+        "Make a code to read out instead of sending a link. A code always lasts 10 minutes and "
+        "lets in one person, whatever the expiry and uses above say; it grants the role picked "
+        "here.");
 }
 
 } // namespace
@@ -340,6 +352,27 @@ void RemoteShare::handle(const QJsonObject &message)
                          message.value(QStringLiteral("uses")).toInt(),
                          message.value(QStringLiteral("expires")).toInt());
         requestParticipants();
+    } else if (kind == QLatin1String("code")) {
+        // QA hook, the same rule as the invite one above: the PIN is the secret half of a meeting
+        // code (#97EG), so it is never logged and only written out when a driver asks for it.
+        const QString code = message.value(QStringLiteral("code")).toString();
+        const QString pin = message.value(QStringLiteral("pin")).toString();
+        const QByteArray dump = qgetenv("RELAY_REMOTE_CODE_FILE");
+        if (!dump.isEmpty()) {
+            QFile file(QString::fromLocal8Bit(dump));
+            if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                file.write((code + QLatin1Char(' ') + pin).toUtf8() + '\n');
+            }
+        }
+        emit codeReady(code, pin, message.value(QStringLiteral("expires")).toInt(600),
+                       message.value(QStringLiteral("invite")).toString());
+        requestParticipants();   // the invite behind the code is a row on the Sharing pane
+    } else if (kind == QLatin1String("code_state")) {
+        emit codeStateChanged(message.value(QStringLiteral("code")).toString(),
+                              message.value(QStringLiteral("state")).toString(),
+                              message.value(QStringLiteral("failures")).toInt());
+        requestParticipants();
     } else if (kind == QLatin1String("knock")) {
         m_sharing.addKnock(message, QDateTime::currentMSecsSinceEpoch());
         emit sharingModelChanged();
@@ -580,6 +613,16 @@ void RemoteShare::createInvite(const QString &paneId, const QString &role, int e
 {
     send({{"t", "invite_create"}, {"pane", paneId}, {"role", role},
           {"expires", expires}, {"uses", uses}});
+}
+
+void RemoteShare::createCode(const QString &paneId, const QString &role)
+{
+    send({{"t", "code_create"}, {"pane", paneId}, {"role", role}});
+}
+
+void RemoteShare::revokeCode(const QString &code)
+{
+    send({{"t", "code_revoke"}, {"code", code}});
 }
 
 void RemoteShare::revokeInvite(const QString &inviteId)
@@ -826,6 +869,15 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     makeLink->setAutoDefault(false);
     connect(makeLink, &QPushButton::clicked, this, [this] { createInvite(); });
     inviteRow->addWidget(makeLink);
+    // The other way to hand out the same door: two short things to say out loud, for a friend who
+    // is on the phone or across the room rather than in a chat window (#97EG).
+    m_makeCode = new QPushButton(QStringLiteral("Make a code"));
+    m_makeCode->setAutoDefault(false);
+    m_makeCode->setToolTip(QStringLiteral(
+        "A four-letter meeting code and a four-digit PIN to read out. It grants the role picked "
+        "here, lasts 10 minutes and lets in one person."));
+    connect(m_makeCode, &QPushButton::clicked, this, [this] { createCode(); });
+    inviteRow->addWidget(m_makeCode);
     inviteRow->addStretch(1);
     column->addLayout(inviteRow);
 
@@ -891,6 +943,73 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     linkRow->addLayout(linkColumn, 1);
     column->addLayout(linkRow);
 
+    // ----- the meeting code (#97EG) -------------------------------------------------------------
+    // Its own sentence, under the row: the expiry and uses boxes belong to the link, and a code
+    // that quietly ignored them would be a code that lasts longer or admits more than it seems.
+    m_codeNote = new QLabel(codeIntro());
+    m_codeNote->setWordWrap(true);
+    m_codeNote->setTextFormat(Qt::PlainText);
+    m_codeNote->setObjectName(QStringLiteral("settingsRowDetail"));
+    column->addWidget(m_codeNote);
+
+    // Large, fixed-width and letter-spaced, because each character is going to be read aloud and
+    // typed by somebody else: an ambiguous glyph here is a wrong PIN there.
+    m_codeBox = new QWidget;
+    auto *codeRow = new QHBoxLayout(m_codeBox);
+    codeRow->setContentsMargins(0, 0, 0, 0);
+    codeRow->setSpacing(24);
+    QFont big = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    big.setPixelSize(30);
+    big.setWeight(QFont::DemiBold);
+    big.setLetterSpacing(QFont::AbsoluteSpacing, 6);
+    auto value = [&](const QString &caption, QLabel **target) {
+        auto *cell = new QVBoxLayout;
+        cell->setSpacing(2);
+        auto *label = new QLabel(caption);
+        label->setObjectName(QStringLiteral("settingsRowDetail"));
+        cell->addWidget(label);
+        *target = new QLabel;
+        (*target)->setFont(big);
+        (*target)->setTextFormat(Qt::PlainText);
+        (*target)->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        cell->addWidget(*target);
+        codeRow->addLayout(cell);
+    };
+    value(QStringLiteral("Meeting code"), &m_codeValue);
+    value(QStringLiteral("PIN"), &m_pinValue);
+    auto *codeSide = new QVBoxLayout;
+    codeSide->setSpacing(4);
+    m_codeClock = new QLabel;
+    m_codeClock->setTextFormat(Qt::PlainText);
+    codeSide->addWidget(m_codeClock);
+    auto *codeButtons = new QHBoxLayout;
+    m_codeCopy = new QPushButton(QStringLiteral("Copy"));
+    m_codeCopy->setAutoDefault(false);
+    m_codeCopy->setToolTip(QStringLiteral(
+        "Copies one line with the join address, the meeting code and the PIN, ready to send."));
+    connect(m_codeCopy, &QPushButton::clicked, this, [this] {
+        if (m_code.isEmpty()) return;
+        QString base = RemoteShare::instance().base();
+        while (base.endsWith(QLatin1Char('/'))) base.chop(1);
+        QGuiApplication::clipboard()->setText(
+            QStringLiteral("Join my Relay pane at %1/join — meeting code %2, PIN %3")
+                .arg(base, m_code, m_pin));
+        m_codeCopy->setText(QStringLiteral("Copied"));
+    });
+    codeButtons->addWidget(m_codeCopy);
+    m_codeAgain = new QPushButton(QStringLiteral("Make a new code"));
+    m_codeAgain->setAutoDefault(false);
+    m_codeAgain->hide();
+    connect(m_codeAgain, &QPushButton::clicked, this, [this] { createCode(); });
+    codeButtons->addWidget(m_codeAgain);
+    codeButtons->addStretch(1);
+    codeSide->addLayout(codeButtons);
+    codeRow->addLayout(codeSide, 1);
+    m_codeBox->hide();
+    column->addWidget(m_codeBox);
+    // Height the window keeps after a longer sentence goes collects here, not between the lines.
+    column->addStretch(1);
+
     m_devices = new QListWidget;
     m_devices->setMaximumHeight(90);
     column->addWidget(m_devices);
@@ -932,6 +1051,12 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     connect(&share, &RemoteShare::devicesChanged, this, &RemoteShareDialog::showDevices);
     connect(&share, &RemoteShare::addressesChanged, this, &RemoteShareDialog::showAddresses);
     connect(&share, &RemoteShare::inviteReady, this, &RemoteShareDialog::showInvite);
+    connect(&share, &RemoteShare::codeReady, this,
+            [this](const QString &code, const QString &pin, int expires, const QString &) {
+                showCode(code, pin, expires);
+            });
+    connect(&share, &RemoteShare::codeStateChanged, this, &RemoteShareDialog::showCodeState);
+    connect(&share, &RemoteShare::secondPassed, this, &RemoteShareDialog::codeTick);
     connect(&share, &RemoteShare::inviteSent, this, [this](bool ok, const QString &message) {
         m_inviteNote->setText(message);
         m_inviteSend->setEnabled(true);
@@ -941,6 +1066,14 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     showAddresses(share.addresses());
     connect(&share, &RemoteShare::failed, this, [this](const QString &message) {
         m_status->setText(message);
+        // The sidecar answers a code_create it could not carry out with an `error` line; said
+        // here too, where the person is looking, and the button comes back.
+        if (m_codeAskedAt) {
+            m_codeAskedAt = 0;
+            m_makeCode->setEnabled(true);
+            m_codeNote->setText(QStringLiteral("No code was made: %1").arg(message));
+            fit();
+        }
     });
     connect(&share, &RemoteShare::startedChanged, this, [this, &share] {
         if (share.running()) {
@@ -1019,6 +1152,8 @@ void RemoteShareDialog::updateRoleNote()
     if (m_inviteUrl) m_inviteUrl->hide();
     if (m_inviteCopy) m_inviteCopy->hide();
     m_inviteLink.clear();
+    // The same for a code on screen: it would be saying the wrong role out loud.
+    if (m_codeBox && !m_code.isEmpty()) putCodeAway();
     fit();
 }
 
@@ -1061,6 +1196,148 @@ void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const
                                              : QStringLiteral("%1 people").arg(uses),
                                    sharing::expiryText(expires), sharing::roleSentence(role)));
     fit();
+}
+
+// ---- the meeting code (#97EG) ------------------------------------------------------------------
+
+void RemoteShareDialog::createCode()
+{
+    // One live code per pane: the sidecar burns the one on screen to make room for this one, so
+    // from this moment it is not something to read out.
+    if (m_codeDeadline) {
+        m_codeDeadline = 0;
+        markCodeDead(true);
+        m_codeClock->setText(QStringLiteral("Replaced"));
+    }
+    m_codeRole = m_inviteRole->currentData().toString();
+    m_codeAskedAt = QDateTime::currentMSecsSinceEpoch();
+    m_makeCode->setEnabled(false);
+    m_codeAgain->setEnabled(false);
+    RemoteShare::instance().createCode(m_paneId, m_codeRole);
+    m_codeNote->setText(QStringLiteral("Making a code…"));
+    fit();
+}
+
+void RemoteShareDialog::showCode(const QString &code, const QString &pin, int expires)
+{
+    // Every open share window hears every `code` line; only the one that asked shows it.
+    if (!m_codeAskedAt) return;
+    m_codeAskedAt = 0;
+    m_code = code;
+    m_pin = pin;
+    m_codeDeadline = QDateTime::currentMSecsSinceEpoch() + qint64(expires > 0 ? expires : 600) * 1000;
+    m_codeValue->setText(code);
+    m_pinValue->setText(pin);
+    markCodeDead(false);
+    m_codeCopy->setText(QStringLiteral("Copy"));
+    m_codeAgain->hide();
+    m_makeCode->setEnabled(true);
+    QString base = RemoteShare::instance().base();
+    while (base.endsWith(QLatin1Char('/'))) base.chop(1);
+    m_codeNote->setText(QStringLiteral(
+        "Tell your friend both, out loud or in a message. They open %1/join, type the meeting "
+        "code and the PIN, and knock; you admit them on the Sharing pane, as %2 at most. The "
+        "code works once, for one person, and stops in 10 minutes.")
+                            .arg(base, m_codeRole == QLatin1String("editor")
+                                           ? QStringLiteral("an editor")
+                                           : QStringLiteral("a viewer")));
+    m_codeBox->show();
+    codeTick();
+    fit();
+}
+
+void RemoteShareDialog::showCodeState(const QString &code, const QString &state, int failures)
+{
+    if (code.isEmpty() || code != m_code) return;   // an older code this window no longer shows
+    // A new code is on its way for this pane, and the sidecar burns the old one to make room:
+    // that burn is the replacement, not three wrong PINs, and the new code is what goes here.
+    if (m_codeAskedAt != 0) return;
+    m_codeDeadline = 0;
+    markCodeDead(true);
+    if (state == QLatin1String("used")) {
+        m_codeClock->setText(QStringLiteral("Used"));
+        m_codeAgain->hide();
+        m_codeNote->setText(QStringLiteral(
+            "Someone joined with this code. Look for their knock on the Sharing pane, and admit "
+            "them only if it is the person you told. The code is closed now."));
+    } else if (state == QLatin1String("burned")) {
+        m_codeClock->setText(QStringLiteral("Closed"));
+        m_codeAgain->setEnabled(true);
+        m_codeAgain->show();
+        m_codeNote->setText(QStringLiteral(
+            "%1 wrong PINs were tried, so the code was closed. Nobody got in. Make a new one and "
+            "tell your friend again.")
+                                .arg(failures == 3 ? QStringLiteral("Three")
+                                                   : QString::number(failures)));
+        // Closed without a wrong guess: revoked, from here or from the Sharing pane's invite row.
+        if (failures <= 0)
+            m_codeNote->setText(QStringLiteral(
+                "This code was closed before anyone used it. Make a new one if your friend still "
+                "needs to join."));
+    } else {
+        m_codeClock->setText(QStringLiteral("Expired"));
+        m_codeAgain->setEnabled(true);
+        m_codeAgain->show();
+        m_codeNote->setText(QStringLiteral(
+            "This code expired before anyone used it. Make a new one if your friend still needs "
+            "to join."));
+    }
+    fit();
+}
+
+// Struck through rather than cleared: the person may be on the phone asking "which code?", and the
+// answer is this one, which is no longer any good. Copy goes with it: it no longer lets anyone in.
+void RemoteShareDialog::markCodeDead(bool dead)
+{
+    for (QLabel *label : {m_codeValue, m_pinValue}) {
+        QFont font = label->font();
+        font.setStrikeOut(dead);
+        label->setFont(font);
+    }
+    m_codeCopy->setVisible(!dead);
+}
+
+// Once a second: the countdown, a code that ran out before the sidecar said so, and a code_create
+// that nothing ever answered (a sidecar from before meeting codes ignores the line).
+void RemoteShareDialog::codeTick()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_codeAskedAt > 0 && now - m_codeAskedAt > 15000) {
+        m_codeAskedAt = -1;   // still listening: a late code is live on the hub and must show
+        m_makeCode->setEnabled(true);
+        m_codeAgain->setEnabled(true);
+        m_codeNote->setText(QStringLiteral(
+            "No code came back. The sharing service did not answer; try again, or make a link."));
+        fit();
+    }
+    if (!m_codeDeadline) return;
+    const qint64 left = (m_codeDeadline - now + 999) / 1000;
+    if (left <= 0) {
+        showCodeState(m_code, QStringLiteral("expired"), 0);
+        return;
+    }
+    m_codeClock->setText(QStringLiteral("Expires in %1:%2")
+                             .arg(left / 60)
+                             .arg(left % 60, 2, 10, QLatin1Char('0')));
+}
+
+// The role changed under a code on screen. A live one is revoked, not just hidden: it must not go
+// on admitting somebody at a role the owner has just moved away from. (Closing the window does
+// not come through here — the owner reads the code out and closes it, and the code stays good.)
+void RemoteShareDialog::putCodeAway()
+{
+    const bool live = m_codeDeadline != 0;
+    if (live) RemoteShare::instance().revokeCode(m_code);
+    m_code.clear();
+    m_pin.clear();
+    m_codeDeadline = 0;
+    m_codeValue->clear();
+    m_pinValue->clear();
+    m_codeBox->hide();
+    m_codeNote->setText(live ? QStringLiteral(
+        "The code on screen was for the other role, so it has been closed and no longer lets "
+        "anyone in. Make a new code for this one.")
+                             : codeIntro());
 }
 
 // Wrapped labels need more height the narrower they are, and a top-level window's automatic

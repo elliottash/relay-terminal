@@ -32,6 +32,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"invite_email","url":"<the link just minted>","to":"alice@example.com","role":"viewer",
      "expiry":"expires in 24 hours","pane":"relay-terminal","from_name":"Elliott"}  → `invite_sent`
     {"t":"invite_revoke","id":"<invite id>"}
+    {"t":"code_create","pane":"p1","role":"editor"}   a meeting code and PIN (card #97EG) → `code`;
+                                          a live code already on that pane burns
+    {"t":"code_revoke","code":"BQRT"}     withdraw a live code: it and its invite burn → `code_state`
     {"t":"knock_answer","participant":"<id>","admit":true,"role":"viewer"}   the dialog's answer
     {"t":"role_set","participant":"<id>","role":"editor"}
     {"t":"participant_remove","participant":"<id>"}
@@ -71,6 +74,14 @@ the GUI never links a crypto library and this process never touches a widget.
   here → GUI, multiplayer (section 10.5)
     {"t":"invite","id":"<id>","url":"...","qr":[[0,1,...],...],"role":"viewer",
      "panes":["p1"],"uses":1,"expires":86400}               the link and its QR
+    {"t":"code","code":"BQRT","pin":"4829","expires":600,"invite":"<id>"}   the code to read
+                                              out and its PIN. The PIN is a secret: show it, never
+                                              log it. Behind it is a one-use, one-knock invite
+    {"t":"code_state","code":"BQRT","state":"used","failures":0}   the code ended: "used" (a
+                                              PIN was confirmed; their knock follows), "burned"
+                                              (three failures, `code_revoke`, or replaced by a
+                                              newer code for the pane; its invite burned too) or
+                                              "expired" (unused; its invite burned too)
     {"t":"knock","participant":"<id>","name":"alice","platform":"Chrome","code":"12345",
      "fingerprint":"AB12 CD34 EF56","peer":"192.0.2.7","role":"viewer","pane":"p1",
      "panes":["p1"],"invite":"<id>"}                        someone at the door; answer with
@@ -549,6 +560,11 @@ class Sidecar:
             await self.invite_create(message)
         elif kind == "invite_email":
             await self.invite_email(message)
+        elif kind == "code_create":
+            await self.code_create(message)
+        elif kind == "code_revoke":
+            if self.host is not None:
+                await self.host.codes.revoke(str(message.get("code") or ""))
         elif kind == "invite_revoke":
             if self.host is not None and self.host.invite_revoke(str(message.get("id", ""))):
                 self.report_participants()
@@ -657,6 +673,7 @@ class Sidecar:
              "device_name": self.host.control.holder(pane).name}))
         self.host.on_share_state(lambda pane, paused, reason: self.emit(
             {"t": "share_state", "pane": pane, "paused": paused, "reason": reason}))
+        self.host.codes.on_state(self.code_state)
         # One `window_active` signal, two readers: the notification presence rule of section 9 and
         # "guests can act only while I am present" (10.5). The hub passes it on to the notifier.
         self.host.window_active(self.window_active)
@@ -865,6 +882,33 @@ class Sidecar:
             reply["note"] = ("Over a public link, anyone this link is forwarded to can knock. "
                              "You admit each person by hand.")
         self.emit(reply)
+
+    async def code_create(self, message: dict) -> None:
+        """``code_create {pane, role}`` → ``code {code, pin, expires, invite}`` (card #97EG).
+
+        The PIN goes to the GUI and nowhere else: not to a log line, not to the audit log, not to
+        the rendezvous. The invite behind the code is listed with the others, so the sharing
+        panel can revoke it like any link.
+        """
+        if self.host is None:
+            self.emit({"t": "error", "message": "sharing is not running."})
+            return
+        try:
+            record = await self.host.code_create([str(message.get("pane") or "")],
+                                                 str(message.get("role") or wire.VIEWER))
+        except wire.WireError as error:
+            self.emit({"t": "error", "message": error.message})
+            return
+        self.emit({"t": "code", "code": record.code, "pin": record.pin,
+                   "expires": record.seconds_left(), "invite": record.invite_id})
+        self.report_participants()
+
+    def code_state(self, record) -> None:
+        """``code_state {code, state, failures}``: a code was used, burned or expired."""
+        self.emit({"t": "code_state", "code": record.code, "state": record.state,
+                   "failures": record.failures})
+        if record.state != "used":
+            self.report_participants()          # its invite burned with it
 
     async def invite_email(self, message: dict) -> None:
         """``invite_email {url, to, role, expires, pane, from_name}`` → ``invite_sent {ok, message}``.

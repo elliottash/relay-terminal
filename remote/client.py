@@ -8,6 +8,8 @@ desktop whose static key is not the one it pinned at pairing, with no "trust thi
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hmac
 import json
 import time
 from dataclasses import dataclass
@@ -156,6 +158,83 @@ class Client:
                       expires=float(reply.get("expires", 0)),
                       static_private=self.static_private,
                       desktop_id=reply.get("desktop", {}).get("id", ""))
+
+    async def join_with_code(self, code: str, pin: str, *, app_base: str = "",
+                             timeout: float = 20.0) -> str:
+        """Type a meeting code and a PIN (card #97EG); get back the invite link they stand for.
+
+        What the join page does before it knocks: look the code up, run CPace on the PIN in the
+        code's room, check the desktop's tag **before** sending ours — a desktop that does not
+        know the PIN learns nothing from this side — and open the sealed invite fragment. The link
+        returned is an ordinary one for :meth:`knock`. A refusal raises ``WireError`` with the
+        desktop's reason (``wrong_pin``, ``burned``, ``expired``), or ``no_such_code`` when the
+        rendezvous does not know the code, which is also what an expired one looks like.
+        """
+        from . import meetcode
+        from .cpace import CPace, CPaceError
+        code = code.strip().upper()
+        room = await asyncio.to_thread(self._code_room, code)
+        socket = await ws.connect(self._url(room=room))
+        try:
+            async def receive() -> dict:
+                try:
+                    data = await asyncio.wait_for(socket.recv(), timeout)
+                except ws.ConnectionClosed as error:
+                    raise wire.WireError("closed", "the desktop closed the code room.") from error
+                message = meetcode.decode(data if isinstance(data, bytes) else data.encode())
+                if message["t"] == "meet_error":
+                    raise wire.WireError(str(message.get("error", "error")),
+                                         "the desktop refused the code.")
+                return message
+
+            party = CPace(pin.encode(), meetcode.CI, room.encode(), initiator=True,
+                          ad=meetcode.AD_GUEST)
+            await socket.send(meetcode.encode({"t": "meet_a", "y": pairing.b64(party.message)}))
+            reply = await receive()
+            if reply["t"] != "meet_b":
+                raise wire.WireError("internal", "the desktop answered out of turn.")
+            try:
+                yb = meetcode.point(reply)
+                isk = party.finish(yb, meetcode.AD_DESKTOP)
+            except (meetcode.MeetError, CPaceError) as error:
+                raise wire.WireError("wrong_pin", "the desktop's reply does not check out.") \
+                    from error
+            tag_a, tag_b = meetcode.confirm_tags(isk, party.message, yb)
+            try:
+                offered = pairing.un64(str(reply.get("tag", "")))
+            except Exception:
+                offered = b""
+            if not hmac.compare_digest(offered, tag_b):
+                # Wrong PIN (or not the desktop). Hang up without confirming: the desktop counts
+                # the attempt, and has learned nothing it could check a PIN against.
+                raise wire.WireError("wrong_pin", "that PIN is not the one on the desktop.")
+            await socket.send(meetcode.encode({"t": "meet_confirm", "tag": pairing.b64(tag_a)}))
+            sealed = await receive()
+            if sealed["t"] != "meet_invite":
+                raise wire.WireError("internal", "the desktop answered out of turn.")
+            try:
+                fragment = meetcode.unseal(isk, code, sealed)
+            except meetcode.MeetError as error:
+                raise wire.WireError("internal", "the sealed invite did not open.") from error
+        finally:
+            with contextlib.suppress(Exception):
+                await socket.close()
+        return f"{(app_base or self.rendezvous).rstrip('/')}/join#{fragment}"
+
+    def _code_room(self, code: str) -> str:
+        """``GET /v1/codes/<code>`` → the room, off the event loop like the host's own posts."""
+        import urllib.error
+        import urllib.request
+        from urllib.parse import quote
+        try:
+            with urllib.request.urlopen(f"{self.rendezvous}/v1/codes/{quote(code, safe='')}",
+                                        timeout=20) as response:
+                return str(json.loads(response.read())["room"])
+        except urllib.error.HTTPError as error:
+            if error.code == 429:
+                raise wire.WireError("rate_limited", "too many code lookups; wait a minute.") \
+                    from error
+            raise wire.WireError("no_such_code", "no such meeting code.") from error
 
     async def rejoin(self, joined: Joined) -> dict:
         """Reconnect as an admitted participant. An expired or removed one gets a `bye` carrying

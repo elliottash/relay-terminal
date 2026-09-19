@@ -1084,5 +1084,173 @@ class StaticOriginTests(unittest.TestCase):
         run(main())
 
 
+# ---- meeting codes and PINs (card #97EG) ---------------------------------------------------------
+
+class MeetingCodeTests(unittest.TestCase):
+    """The code phase's claims: the rendezvous learns neither the PIN nor the invite, the desktop
+    counts and burns, and what a correct PIN earns is one knock and nothing more.
+
+    The functional tests live in tests/test_remote_meetcode.py; its harness spies on everything
+    the rendezvous is sent and relays, which is exactly the vantage point these claims are about.
+    """
+
+    @staticmethod
+    def harness(**kwargs):
+        from tests.test_remote_meetcode import Harness as MeetHarness
+        return MeetHarness(**kwargs)
+
+    def test_the_rendezvous_given_every_frame_it_relayed_cannot_produce_the_invite_fragment(self):
+        """The fragment crosses the rendezvous only sealed under the CPace key, and the PIN does
+        not cross it at all: nothing the server was sent or relayed, in either direction, holds
+        the fragment, its secret or the PIN, and the code-room frames carry only curve points,
+        tags and ciphertext."""
+        from remote import meetcode
+
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.code()
+                fragment = record.fragment
+                url = await client_mod.Client(harness.base).join_with_code(record.code,
+                                                                           record.pin)
+                self.assertTrue(url.endswith(fragment))
+                secret = pairing.b64(pairing.parse_invite_url(url)["secret"])
+                client = client_mod.Client(harness.base)
+                await client.knock(url, name="alice", platform="Chrome")
+                await client.close()
+                code_frames = []
+                for message in harness.seen:
+                    for needle in (fragment.encode(), secret.encode(), record.pin.encode()):
+                        self.assertNotIn(needle, message)
+                    with contextlib.suppress(Exception):
+                        frame = meetcode.decode(message[17:] if message[:1] in (b"\x01",)
+                                                else message)
+                        if frame["t"].startswith("meet_"):
+                            code_frames.append(frame)
+                kinds = {frame["t"] for frame in code_frames}
+                self.assertEqual(kinds, {"meet_a", "meet_b", "meet_confirm", "meet_invite"})
+                allowed = {"t", "y", "tag", "nonce", "sealed"}
+                for frame in code_frames:
+                    self.assertLessEqual(set(frame), allowed, frame)
+        run(main())
+
+    def test_three_failures_burn_the_code_and_a_fourth_attempt_is_refused(self):
+        """The desktop counts, not the server. After the third failure the right PIN gets
+        nothing: the code no longer resolves, and a socket on its room is answered `burned`."""
+        from remote import meetcode
+
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.code()
+                wrong = f"{(int(record.pin) + 1) % 10000:04d}"
+                for _ in range(meetcode.MAX_FAILURES):
+                    with self.assertRaises(wire.WireError):
+                        await client_mod.Client(harness.base).join_with_code(record.code, wrong)
+                await harness.until(lambda: record.state == "burned")
+                with self.assertRaises(wire.WireError):
+                    await client_mod.Client(harness.base).join_with_code(record.code, record.pin)
+                socket = await harness.raw(record.room)
+                self.assertEqual(json.loads(await socket.recv()),
+                                 {"t": "meet_error", "error": "burned"})
+                await socket.close()
+                self.assertTrue(harness.guests.invite(record.invite_id).dead)
+                self.assertEqual(harness.knocks, [])
+        run(main())
+
+    def test_a_used_code_is_refused(self):
+        """One use: the code dies on the first confirmed PIN, and its room answers `burned`."""
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.code()
+                await client_mod.Client(harness.base).join_with_code(record.code, record.pin)
+                with self.assertRaises(wire.WireError):
+                    await client_mod.Client(harness.base).join_with_code(record.code, record.pin)
+                socket = await harness.raw(record.room)
+                self.assertEqual(json.loads(await socket.recv()),
+                                 {"t": "meet_error", "error": "burned"})
+                await socket.close()
+        run(main())
+
+    def test_a_forwarded_sealed_fragment_is_refused_after_the_first_knock(self):
+        """A code's invite takes one knock. Someone who got the fragment afterwards — forwarded,
+        replayed, read over a shoulder — is refused even while the first knock is still waiting
+        on the owner, and after the owner admits it."""
+        async def main():
+            async with self.harness(answer_delay=1.0) as harness:
+                record = await harness.code()
+                url = await client_mod.Client(harness.base).join_with_code(record.code,
+                                                                           record.pin)
+                first = client_mod.Client(harness.base)
+                waiting = asyncio.create_task(first.knock(url, name="alice", platform="Chrome"))
+                await harness.until(lambda: len(harness.knocks) == 1)
+                for name in ("mallory", "mallory again"):
+                    second = client_mod.Client(harness.base)
+                    with self.assertRaises(wire.WireError) as caught:
+                        await second.knock(url, name=name, platform="Chrome")
+                    self.assertEqual(caught.exception.code, "not_permitted")
+                    await second.close()
+                    if not waiting.done():
+                        await waiting                    # the second try is after admission
+                self.assertEqual(len(harness.knocks), 1, "the owner was asked once")
+                # While the first waited, the claim refused it; after admission the spent invite
+                # is not an invite any more, which refuses it earlier still.
+                refused = [line for line in harness.audit_lines()
+                           if line["kind"] == "knock_refused"]
+                self.assertEqual([line["reason"] for line in refused],
+                                 ["a code's invite accepts one knock"])
+                await first.close()
+        run(main(), timeout=90)
+
+    def test_a_code_room_connection_never_reaches_the_noise_path(self):
+        """A code room is answered by the code handler only: a Noise handshake sent to one is a
+        malformed attempt that counts as a failure, not a session, and no hub `Channel` exists
+        for it at any point."""
+        from remote import noise
+
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.code()
+                made = []
+                original = host_mod.Channel.__init__
+
+                def spy(channel, *args, **kwargs):
+                    made.append(channel)
+                    original(channel, *args, **kwargs)
+                host_mod.Channel.__init__ = spy
+                try:
+                    socket = await harness.raw(record.room)
+                    private, _ = noise.generate_keypair()
+                    initiator = noise.Initiator(private, harness.identity.public)
+                    await socket.send(initiator.write_message_1(b""))
+                    self.assertEqual(json.loads(await socket.recv()),
+                                     {"t": "meet_error", "error": "wrong_pin"})
+                    await socket.close()
+                    await harness.until(lambda: record.failures == 1)
+                finally:
+                    host_mod.Channel.__init__ = original
+                self.assertEqual(made, [], "a Noise channel was made for a code room")
+                self.assertEqual(harness.knocks, [])
+        run(main())
+
+    def test_the_cpace_implementation_matches_the_drafts_published_vectors(self):
+        """draft-irtf-cfrg-cpace appendix B.1, X25519/SHA-512, imported from tests/test_cpace.py
+        so there is one copy of the vectors: the messages, both sides' ISK in initiator-responder
+        mode, and every low-order point the draft lists refused."""
+        from remote import cpace
+        from tests import test_cpace as vectors
+        a = cpace.CPace(vectors.PRS, vectors.CI, vectors.SID, initiator=True, ad=vectors.ADA,
+                        scalar=vectors.YA_SCALAR)
+        b = cpace.CPace(vectors.PRS, vectors.CI, vectors.SID, initiator=False, ad=vectors.ADB,
+                        scalar=vectors.YB_SCALAR)
+        self.assertEqual(cpace.generator(vectors.PRS, vectors.CI, vectors.SID), vectors.G)
+        self.assertEqual(a.message, vectors.YA)
+        self.assertEqual(b.message, vectors.YB)
+        self.assertEqual(a.finish(vectors.YB, vectors.ADB), vectors.ISK_IR)
+        self.assertEqual(b.finish(vectors.YA, vectors.ADA), vectors.ISK_IR)
+        for point, product in vectors.LOW_ORDER:
+            if product == vectors.ZERO:
+                with self.assertRaises(cpace.CPaceError):
+                    a.finish(point, vectors.ADB)
+
+
 if __name__ == "__main__":
     unittest.main()

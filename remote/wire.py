@@ -100,6 +100,8 @@ OWNER_ONLY = frozenset({
     # 10.5). `control_take` is the owner's *physical* keystroke, so a message that claimed to be
     # one, arriving over the wire, would be exactly the thing it exists to outrank.
     "control_take", "control_revoke", "share_options",
+    # A meeting code and its PIN (card #97EG): minted on the desktop, read out by the owner.
+    "code_create", "code_revoke",
 })
 
 # Named so a reader can see they were considered and refused, and so a test can assert it.

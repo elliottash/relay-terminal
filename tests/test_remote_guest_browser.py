@@ -369,11 +369,24 @@ class GuestJoinTests(unittest.TestCase):
                         "document.getElementById('join-note').textContent || ''", timeout=20)
                     self.assertIn("invitation link is damaged", note)
                     self.assertFalse(await browser.evaluate(shown('join-knock')))
-                    # And a link that arrived with its fragment stripped altogether.
+                    # A link whose code was cut off after the `#` is noticed and named, offers no
+                    # knock and leaves nothing in storage. about:blank first, so this is a real
+                    # load and not a same-document jump from the damaged link above.
+                    await browser.navigate("about:blank")
+                    await browser.navigate(harness.base + "/join#")
+                    await browser.wait_for(shown('screen-meet'), timeout=20)
+                    self.assertIn("arrived without its code", await browser.evaluate(
+                        "document.getElementById('meet-note').textContent"))
+                    self.assertFalse(await browser.evaluate(shown('join-knock')))
+                    self.assertIsNone(await browser.evaluate(GUEST_RECORD))
+                    # A bare /join is somebody come to type a meeting code (#97EG): the same form,
+                    # but no sentence about a link, because none was opened. (A link stripped of
+                    # its `#` as well is this same address and cannot be told apart from it.)
                     await browser.navigate(harness.base + "/join")
-                    await browser.wait_for(
-                        "document.getElementById('join-note').textContent.includes('without its')",
-                        timeout=20)
+                    await browser.wait_for(shown('screen-meet'), timeout=20)
+                    self.assertNotIn("arrived without its code", await browser.evaluate(
+                        "document.getElementById('meet-note').textContent"))
+                    self.assertFalse(await browser.evaluate(shown('join-knock')))
                     no_console_errors(self, browser)
                 finally:
                     await browser.stop()
@@ -740,10 +753,11 @@ class GuestSessionTests(unittest.TestCase):
                     self.assertFalse(await browser.evaluate(shown('guest-screen-wrap')))
                     self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
 
+                    # /join with nothing to reconnect with is the meeting-code form (#97EG): one
+                    # screen, and no trace of the removed guest's session.
                     await browser.navigate(harness.base + "/join")
-                    await browser.wait_for(shown('screen-join'), timeout=30)
-                    self.assertIn("without its code", await browser.evaluate(
-                        "document.getElementById('join-note').textContent"))
+                    await browser.wait_for(shown('screen-meet'), timeout=30)
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
                     no_console_errors(self, browser)
                 finally:
                     await browser.stop()

@@ -79,6 +79,11 @@ class Invite:
     created: float = field(default_factory=time.time)
     attempts: int = 0                   # wrong secrets so far
     burned: bool = False                # revoked, or five wrong secrets
+    # An invite a meeting code delivered (card #97EG) accepts **one knock**, ever: the first one
+    # claims it for the knocking key. A link invite leaves both at their defaults and behaves
+    # exactly as it always has — a knock consumes nothing until the owner admits it.
+    single_knock: bool = False
+    knocked_by: str = ""                # the claiming key, base64url; "" until the first knock
 
     @property
     def expired(self) -> bool:
@@ -221,7 +226,8 @@ class GuestStore:
     # ---- invites -----------------------------------------------------------------------------
 
     def create_invite(self, panes: list[str], role: str, room: str, *,
-                      expires_in: float = DEFAULT_EXPIRY, uses: int = 1) -> tuple[Invite, bytes]:
+                      expires_in: float = DEFAULT_EXPIRY, uses: int = 1,
+                      single_knock: bool = False) -> tuple[Invite, bytes]:
         """Mint an invite and its one-and-only plaintext secret, which the caller puts in the URL."""
         if role not in wire.GUEST_ROLES:
             raise wire.WireError("not_permitted", f"{role!r} is not a role an invite may grant.")
@@ -233,7 +239,8 @@ class GuestStore:
         invite = Invite(invite_id=secrets.token_hex(8), panes=wanted, role=role,
                         expires=time.time() + lifetime,
                         uses_left=max(1, min(int(uses or 1), MAX_USES)),
-                        secret_hash=hash_secret(secret), room=room)
+                        secret_hash=hash_secret(secret), room=room,
+                        single_knock=bool(single_knock))
         self.invites[invite.invite_id] = invite
         self.save()
         return invite, secret
@@ -262,6 +269,23 @@ class GuestStore:
         if invite is None or invite.burned:
             return False
         invite.burned = True
+        self.save()
+        return True
+
+    def claim_knock(self, invite: Invite, public_key: bytes) -> bool:
+        """Let this knock through, for an invite that accepts only one (``single_knock``).
+
+        The first knock claims the invite for its key and every later one is refused — another
+        key, the same key, and while the first is still waiting on the owner alike — so a sealed
+        fragment that is forwarded, or read over a shoulder, after the code phase opens nothing.
+        A link invite is always let through here; its budget is `may_knock`.
+        """
+        if not invite.single_knock:
+            return True
+        if invite.knocked_by:
+            return False
+        from . import pairing
+        invite.knocked_by = pairing.b64(public_key)
         self.save()
         return True
 
@@ -312,6 +336,9 @@ class GuestStore:
             raise wire.WireError("not_permitted",
                                  "that key is already a paired device; it cannot also be a guest.")
         stored = pairing.b64(public_key)
+        if invite.single_knock and invite.knocked_by != stored:
+            # Only the key whose knock claimed a code's invite can be admitted on it.
+            raise wire.WireError("not_permitted", "that invite was claimed by another knock.")
         for existing in self.participants.values():
             if existing.guest_key == stored and existing.live:
                 raise wire.WireError("not_permitted", "that key is already a participant here.")

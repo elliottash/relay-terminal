@@ -51,6 +51,16 @@ MAX_CHANNELS_PER_PEER = 8
 MAX_PUSH_PER_HOUR = 600
 CHALLENGE_TTL = 120
 
+# Meeting codes (card #97EG): four letters a person can read out, pointing at a room. 23 letters
+# with no I, L or O, so nothing on the join page is ambiguous; about 280,000 values, which is why
+# lookups are rate-limited per address and why a code only lives ten minutes. The code is public
+# and the rendezvous may know it — the PIN that goes with it never comes here.
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ"
+CODE_LENGTH = 4
+MAX_CODE_TTL = 600
+MAX_LIVE_CODES_PER_DESKTOP = 5
+CODE_LOOKUPS_PER_MINUTE = 10
+
 # Where `/v1/push/send` may post. A Web Push endpoint comes from the browser's own push service,
 # and there are five of them; everything else is a URL somebody chose, and this process is the one
 # with a network on the hosted side. Without this the route is a request-forgery proxy: a paired
@@ -162,6 +172,11 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self.db.commit()
+        # Meeting codes, by code: (desktop_id, room, expires). In memory on purpose and never in
+        # the database: the code → room map is kept for the code's own ten minutes and not a
+        # second longer, where a row in `rooms` or `events` would sit in a file (and, deleted,
+        # in its free pages) for the seven days metadata is kept.
+        self.codes: dict[str, tuple[str, str, float]] = {}
 
     def close(self) -> None:
         self.db.close()
@@ -240,6 +255,53 @@ class Store:
         self.db.execute("DELETE FROM events WHERE at < ?", (now - METADATA_DAYS * 86400,))
         self.db.commit()
 
+    # ---- meeting codes ---------------------------------------------------------------------------
+
+    def _sweep_codes(self) -> None:
+        now = time.time()
+        for code in [code for code, (_, _, expires) in self.codes.items() if expires <= now]:
+            del self.codes[code]
+
+    def open_code(self, desktop_id: str, room: str, ttl: float) -> tuple[str, float] | None:
+        """A fresh code for one of this desktop's rooms, and how long it lives.
+
+        Never longer than ten minutes, and never longer than the room: a code that outlived its
+        room would resolve to a door that no longer opens. None when the desktop already has its
+        share of live codes, so one registered key cannot fill the code space.
+        """
+        self._sweep_codes()
+        row = self.db.execute("SELECT expires FROM rooms WHERE room = ? AND desktop_id = ?",
+                              (room, desktop_id)).fetchone()
+        now = time.time()
+        if not row or row["expires"] <= now:
+            raise KeyError(room)
+        if sum(1 for owner, _, _ in self.codes.values()
+               if owner == desktop_id) >= MAX_LIVE_CODES_PER_DESKTOP:
+            return None
+        lifetime = max(1.0, min(float(ttl), MAX_CODE_TTL, row["expires"] - now))
+        for _ in range(64):
+            code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
+            if code not in self.codes:
+                self.codes[code] = (desktop_id, room, now + lifetime)
+                return code, lifetime
+        raise RuntimeError("no free meeting code")    # 280,000 values; not reachable in practice
+
+    def code_room(self, code: str) -> str | None:
+        """The room behind a code, case-insensitively, or None — unknown and expired alike."""
+        self._sweep_codes()
+        entry = self.codes.get(code.strip().upper())
+        return entry[1] if entry else None
+
+    def burn_code(self, desktop_id: str, code: str) -> bool:
+        """Forget a code at once. Only the desktop that asked for it may."""
+        self._sweep_codes()
+        code = code.strip().upper()
+        entry = self.codes.get(code)
+        if entry is None or entry[0] != desktop_id:
+            return False
+        del self.codes[code]
+        return True
+
     # ---- registration challenges ---------------------------------------------------------------
 
     def new_challenge(self) -> tuple[str, str]:
@@ -306,6 +368,82 @@ def peer_address(socket: ws.WebSocket) -> str:
     return (socket.peer or "").rsplit(":", 1)[0]
 
 
+def client_address(request: ws.Request) -> str:
+    """Who is asking, for a per-address limit.
+
+    The socket's peer, unless that peer is loopback: then this is the desktop's own sidecar
+    rendezvous behind ``cloudflared`` or ``tailscale serve``, and every request from the internet
+    arrives from 127.0.0.1. Those proxies say who they are proxying — Cloudflare in
+    ``CF-Connecting-IP``, which it overwrites, and Tailscale by appending to ``X-Forwarded-For``,
+    so the last entry is the one the proxy saw. A header is never believed from anywhere else,
+    since anyone can send one.
+    """
+    peer = (request.peer or "").rsplit(":", 1)[0].strip("[]")
+    if peer in ("127.0.0.1", "::1", "localhost") or peer.startswith("127."):
+        forwarded = request.header("cf-connecting-ip").strip()
+        if not forwarded:
+            chain = [part.strip() for part in request.header("x-forwarded-for").split(",")]
+            forwarded = chain[-1] if chain and chain[-1] else ""
+        if forwarded:
+            return forwarded[:64]
+    return peer
+
+
+class LookupLimiter:
+    """At most ``limit`` lookups per address per minute, remembered in memory only.
+
+    A code is 4 letters, so resolution is the one place a stranger can enumerate. Ten a minute is
+    plenty for a person who mistyped and useless for a sweep of 280,000 values.
+    """
+
+    def __init__(self, limit: int = CODE_LOOKUPS_PER_MINUTE, window: float = 60.0,
+                 clock=time.monotonic):
+        self.limit = limit
+        self.window = window
+        self.clock = clock
+        self.seen: dict[str, list[float]] = {}
+
+    def allow(self, address: str) -> bool:
+        now = self.clock()
+        if len(self.seen) > 10_000:                 # forget idle addresses rather than grow
+            self.seen = {key: [t for t in times if now - t < self.window]
+                         for key, times in self.seen.items()}
+            self.seen = {key: times for key, times in self.seen.items() if times}
+        times = [t for t in self.seen.get(address, []) if now - t < self.window]
+        if len(times) >= self.limit:
+            self.seen[address] = times
+            return False
+        times.append(now)
+        self.seen[address] = times
+        return True
+
+
+class _Routes(dict):
+    """httpd's exact-path route table, plus the two routes whose last segment is a code.
+
+    ``GET /v1/codes/<CODE>`` and ``POST /v1/codes/<CODE>/burn`` are registered under a ``*`` and
+    found here; the handler reads the code back out of the path. Everything else is looked up
+    exactly as before.
+    """
+
+    def get(self, key, default=None):
+        found = super().get(key)
+        if found is not None:
+            return found
+        method, path = key
+        if path.startswith("/v1/codes/"):
+            rest = path[len("/v1/codes/"):]
+            if rest.endswith("/burn") and "/" not in rest[:-len("/burn")]:
+                return super().get((method, "/v1/codes/*/burn"), default)
+            if rest and "/" not in rest:
+                return super().get((method, "/v1/codes/*"), default)
+        return default
+
+
+def code_from_path(path: str) -> str:
+    return path[len("/v1/codes/"):].split("/", 1)[0].strip().upper()
+
+
 class Hub:
     """The live desktop sockets and the client channels attached to each."""
 
@@ -352,7 +490,9 @@ class Hub:
 
 def build(store: Store, static_root: Path | None = None) -> httpd.Server:
     server = httpd.Server(static_root=static_root)
+    server.routes = _Routes(server.routes)
     hub = Hub()
+    lookups = LookupLimiter()
 
     @server.route("POST", "/v1/challenge")
     async def challenge(request: ws.Request, body: bytes) -> httpd.Response:
@@ -405,6 +545,64 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         # The lifetime actually granted, not the default: an invite may ask for up to a week
         # (section 10.2) and the desktop sizes its own record from what comes back.
         return httpd.Response.json({"room": room, "expires_in": lifetime})
+
+    # ---- meeting codes (card #97EG) -------------------------------------------------------------
+    # The rendezvous learns a code and the room it names, which it could see anyway: a room id is
+    # what every client connects with. It never learns the PIN — that stays between the two ends,
+    # inside CPace (remote/meetcode.py) — so resolving a code is only ever the start of an online
+    # guess against the desktop, which counts and burns.
+
+    @server.route("POST", "/v1/codes")
+    async def codes(request: ws.Request, body: bytes) -> httpd.Response:
+        try:
+            fields = httpd.json_body(body)
+        except ValueError as error:
+            return httpd.Response.error(400, str(error))
+        desktop_id = str(fields.get("desktop_id", ""))
+        if not store.authenticate(desktop_id, str(fields.get("token", ""))):
+            return httpd.Response.error(401, "unknown desktop or bad token.")
+        try:
+            wanted = float(fields.get("ttl", MAX_CODE_TTL))
+        except (TypeError, ValueError):
+            wanted = MAX_CODE_TTL
+        try:
+            opened = store.open_code(desktop_id, str(fields.get("room", "")), wanted)
+        except KeyError:
+            return httpd.Response.error(404, "no such room for this desktop.")
+        if opened is None:
+            return httpd.Response.error(429, "too many live meeting codes.")
+        code, lifetime = opened
+        # Never the code itself: the event table is kept for seven days, the code for ten minutes.
+        store.note("code", desktop_id)
+        return httpd.Response.json({"code": code, "expires_in": lifetime})
+
+    @server.route("GET", "/v1/codes/*")
+    async def code_lookup(request: ws.Request, body: bytes) -> httpd.Response:
+        # CORS-open like /v1/push/key: in production the join page's origin is not this one.
+        cors = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET"}
+        if not lookups.allow(client_address(request)):
+            return httpd.Response(status=429, headers=cors, body=json.dumps(
+                {"error": "too many lookups; wait a minute."}).encode())
+        room = store.code_room(code_from_path(request.path))
+        if room is None:
+            # Unknown, expired, burned and malformed all answer the same, byte for byte, so a
+            # probe cannot tell a code that existed from one that never did.
+            return httpd.Response(status=404, headers=cors, body=json.dumps(
+                {"error": "no such meeting code."}).encode())
+        return httpd.Response(headers=cors, body=json.dumps({"room": room}).encode())
+
+    @server.route("POST", "/v1/codes/*/burn")
+    async def code_burn(request: ws.Request, body: bytes) -> httpd.Response:
+        try:
+            fields = httpd.json_body(body)
+        except ValueError as error:
+            return httpd.Response.error(400, str(error))
+        desktop_id = str(fields.get("desktop_id", ""))
+        if not store.authenticate(desktop_id, str(fields.get("token", ""))):
+            return httpd.Response.error(401, "unknown desktop or bad token.")
+        # Burning a code that has already gone is not an error: the desktop wanted it gone.
+        store.burn_code(desktop_id, code_from_path(request.path))
+        return httpd.Response.json({})
 
     @server.route("GET", "/v1/push/key")
     async def push_key(request: ws.Request, body: bytes) -> httpd.Response:

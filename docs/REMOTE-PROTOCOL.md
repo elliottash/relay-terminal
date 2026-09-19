@@ -794,7 +794,8 @@ stores a **participant record** (the pinned device key, name, role, panes, invit
 beside the device list, so the guest reconnects with an ordinary `hello` until it expires. A
 participant record is never a device record: it cannot appear in, or be promoted through, the
 paired-device list. Names pass through `clean_label`, and a second "alice" is shown as "alice (2)".
-Knocks are rate-limited per invite (5 a minute) and at most 3 wait at once.
+Knocks are rate-limited per invite (5 a minute) and at most 3 wait at once. An invite delivered by a meeting
+code (§10.7) is stricter: its first knock claims it, and every later knock is refused.
 
 That last rule is **structural** in `remote/guests.py`, not a convention: the two lists are
 different classes in different files (`guests.json` beside `devices.json`) whose **field names
@@ -953,7 +954,8 @@ The kinds, as written: `invite_create`, `invite_revoke`, `knock`, `knock_refused
 secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove`, `share_end`,
 `guest_prompt` (with the whole text), `prompt_decided` (with `approved` and, when it was not, why),
 `control_request`, `control_grant`, `control_refused`, `control_revoke`, `control_release`,
-`control_take`, `share_pause`, `share_options`, and the input a participant or a device sent:
+`control_take`, `share_pause`, `share_options`, the meeting-code kinds of §10.7 (`code_create`,
+`code_attempt`, `code_used`, `code_burned`, `code_expired`), and the input a participant or a device sent:
 `line` with its text, `keys` and `paste` as byte counts. Every one of them carries the participant
 id, which is minted at the knock, so a refusal and an admission name the same person as the join
 and the leave that follow; a device's input names the device id instead, and neither line ever
@@ -971,6 +973,115 @@ umask says, and the first line of an audit log is a pairing or a knock — insid
 `logs.py` requires of every Relay log, and size-capped, but not rotated the way `logs.py` rotates,
 because nothing in it is ever deleted: a month past 5 MiB goes on in numbered parts
 (`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
+
+### 10.7 Joining with a meeting code and a PIN
+
+An invite link is 141 characters: fine to paste, impossible to say. Owner request, 2026-09-18:
+*"i tell my friend a code and they type it on relay-terminal.ai to join me"* — settled as a
+**4-letter meeting code and a 4-digit PIN**, `BQRT` and `4829`. Card `#97EG`.
+
+The two halves do different jobs, the way magic-wormhole splits a nameplate from its password:
+
+| | Meeting code | PIN |
+|---|---|---|
+| Form | 4 letters from `ABCDEFGHJKMNPQRSTUVWXYZ` (no I, L, O): ~280,000 values | 4 digits: 10,000 values |
+| Drawn by | the rendezvous, unique among live codes | the desktop, with a CSPRNG |
+| Seen by the server | yes — it is how the room is found | **never** |
+| Job | routing | authentication, through CPace |
+
+**What the code phase is for.** A 4-digit PIN cannot be a bearer secret, and a 4-letter code cannot
+carry the desktop's key. CPace (`CPACE-X25519-SHA512`, draft-irtf-cfrg-cpace, initiator-responder)
+turns the PIN into a key exchange in which **every guess is an online attempt against the
+desktop**: a network observer learns nothing it can test offline, and a rendezvous that tried to
+sit in the middle would have to guess the PIN live, once per attempt, like anybody else. The phase
+ends by handing the browser, sealed under the CPace key, exactly what an invite link carries — so
+from the Noise handshake on, a code guest *is* an invite guest: §10.2's knock, the owner's admit
+by hand, roles, §10.3 control, §10.4 prompts, the join notification. There is no second admission
+path and no auto-admit.
+
+**Limits.** One use, 10 minutes. The **desktop** counts failed attempts, never the server — the
+server is the party this design declines to trust with the count. The third failure burns the code
+and its invite, and a fourth attempt is refused. Success burns the code too.
+
+**The delivered invite accepts one knock.** It is a full invite — it carries the secret `i` — so a
+fragment forwarded after the code phase could otherwise knock, and "one use" would be a promise
+about the code alone. An invite minted by `code_create` has `uses = 1`, an expiry no longer than the
+code's 600 s, and a stricter rule than a link invite: **the first knock claims it** for that
+knocking key, and every later knock with it is refused, even while the first is still waiting. If
+the owner refuses that knock the invite burns; it also burns with its code (three failures, or
+expiry unused). A stranger's chance per code is therefore 3 in 10,000, and a right guess still only earns a
+knock the owner has to admit. The known cost: anyone who learns the meeting code can burn it with
+three wrong PINs, and the owner makes a new one.
+
+The five-digit knock code of §5 still shows on both screens — on the knock row, in the Sharing
+pane, and on the guest's waiting screen — and the compare step stays. CPace has already ruled out
+anyone in the middle; the code is kept as a second, independent check.
+
+**CPace inputs.** `PRS` = the PIN in ASCII; `CI` = `relay/meet/v1`; `sid` = the code room's id in
+UTF-8; `ADa` = `guest` (the browser, initiator); `ADb` = `desktop` (responder). From `ISK`, with
+HMAC-SHA256 keyed by `ISK`:
+
+| Name | Over |
+|---|---|
+| `tag_b` — the desktop knows the PIN | `relay/meet/v1 desktop` ‖ `Ya` ‖ `Yb` |
+| `tag_a` — the guest knows it | `relay/meet/v1 guest` ‖ `Ya` ‖ `Yb` |
+| `seal_key` | `relay/meet/v1 seal` |
+
+Tags are compared in constant time. Both implementations (`remote/cpace.py`, `app/cpace.js`) are
+checked against the draft's published test vectors and against each other.
+
+**Routes** (`rendezvous/server.py`, the same code at relay-terminal.ai and in the desktop's sidecar):
+
+| Route | Caller | Body → reply |
+|---|---|---|
+| `POST /v1/codes` | desktop, authenticated like `/v1/rooms` | `{desktop_id, token, room, ttl}` → `{code, expires_in}`; `ttl` ≤ 600 |
+| `GET /v1/codes/<CODE>` | anyone; case-insensitive; per-peer lookup limit on top of `MAX_CHANNELS_PER_PEER` | → `{room}`; an unknown code and an expired one get the **same** 404, so they cannot be told apart |
+| `POST /v1/codes/<CODE>/burn` | desktop | `{desktop_id, token}` → `{}`; stops resolving at once |
+
+The code → room map lives only for the code's `ttl`; it is never part of the 7-day metadata the
+rendezvous keeps.
+
+**The code room** is a room of its own, opened with `/v1/rooms` (`ttl` 600) and separate from the
+invite's room. The desktop remembers which rooms are code rooms, and a client connecting to one is
+handed to the code handler (`remote/meetcode.py`) — it can never reach the Noise `Channel` path or
+any hub handler, before or after the sealed invite is delivered — and it takes a rendezvous slot
+like any other client. Frames are UTF-8 JSON;
+binary fields are unpadded base64url.
+
+| # | Direction | Frame |
+|---|---|---|
+| 1 | guest → desktop | `{"t":"meet_a","y":Ya}` |
+| 2 | desktop → guest | `{"t":"meet_b","y":Yb,"tag":tag_b}` |
+| 3 | guest → desktop | `{"t":"meet_confirm","tag":tag_a}` — sent only after `tag_b` checked out |
+| 4 | desktop → guest | `{"t":"meet_invite","nonce":n,"sealed":c}` — AES-256-GCM under `seal_key`, 12-byte random nonce, AAD = the code in upper case, plaintext = the invite fragment `v=1&d=…&i=…&r=…` |
+| – | desktop → guest | `{"t":"meet_error","error":"wrong_pin"\|"burned"\|"expired"}`, then close |
+
+An attempt that ends any other way than a valid `meet_confirm` within 30 s is a failure: a bad
+tag, an invalid point, a close, a timeout. **An attempt counts from the moment its connection
+opens**, not when it settles: a guest learns from `tag_b` whether its PIN was right before it
+confirms, so three sockets opened at once must not buy more than three guesses — a fourth while
+three are unsettled is told `burned`. The desktop's own link dropping mid-attempt is not the
+guest's failure and is not counted. The failure that burns the code answers `meet_error burned`;
+earlier ones answer `wrong_pin`; a used code answers `burned`.
+
+The lookup limit is per client address. The sidecar is normally reached through `cloudflared` or
+`tailscale serve`, so every request arrives from loopback; for a loopback peer **only**, the address
+is taken from `CF-Connecting-IP`, else the last `X-Forwarded-For` entry. Any other peer is its own
+socket address, whatever its headers say.
+
+**Desktop GUI ↔ sidecar** (owner-only, in `wire.OWNER_ONLY` with the rest of §10.5):
+`{"t":"code_create","pane":"p1","role":"editor"}` → `{"t":"code","code":"BQRT","pin":"4829","expires":600,"invite":"<id>"}`,
+then `{"t":"code_state","code":"BQRT","state":"used"|"burned"|"expired","failures":N}` when the code
+ends. `{"t":"code_revoke","code":"BQRT"}` withdraws a code (the share window sends it when the role
+changes under a live code). One live code per pane: a new `code_create` burns the pane's previous
+one. The PIN is a
+secret: never logged. The QA hook `RELAY_REMOTE_CODE_FILE` names a file the GUI writes `BQRT 4829`
+to, beside `RELAY_REMOTE_INVITE_FILE`.
+
+**Audit** (§10.6), each written before its action: `code_create` (code, invite, role — never the
+PIN), `code_attempt` (a failed attempt, with the count and why — never the PIN), `code_used`,
+`code_burned` (with `reason`: `failures`, `revoked` or `replaced`), `code_expired`. A second knock
+on a code's invite is written as `knock_refused`.
 
 ## 11. Versioning
 

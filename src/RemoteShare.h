@@ -120,6 +120,12 @@ public:
     // `invite_create {pane, role, expires, uses}` → an `invite` line with the link and its QR.
     void createInvite(const QString &paneId, const QString &role, int expires, int uses);
     void revokeInvite(const QString &inviteId);
+    // `code_create {pane, role}` → a `code` line: a four-letter meeting code and a four-digit PIN
+    // that a person reads out instead of sending a link (#97EG). It always lasts ten minutes and
+    // lets in one person; the sidecar mints an ordinary invite behind it.
+    void createCode(const QString &paneId, const QString &role);
+    // `code_revoke {code}`: the code and its invite burn now; answered by `code_state` "burned".
+    void revokeCode(const QString &code);
     // `knock_answer`. May lower the invite's role and never raise it; the hub checks that too.
     void answerKnock(const QString &participant, bool admit, const QString &role);
     void setRole(const QString &participant, const QString &role);
@@ -171,6 +177,10 @@ signals:
     // An `invite` line: the link to hand out, its QR, and what it grants.
     void inviteReady(const QString &url, const relay::QrMatrix &qr, const QString &role,
                      int uses, int expires);
+    // A `code` line. The PIN is the secret half: it goes to the dialog and nowhere else.
+    void codeReady(const QString &code, const QString &pin, int expires, const QString &invite);
+    // A `code_state` line: "used", "burned" (too many wrong PINs) or "expired".
+    void codeStateChanged(const QString &code, const QString &state, int failures);
     // Something changed in sharingModel(): the Sharing pane and the pane headers redraw.
     void sharingModelChanged();
     // Somebody is at the door, wants the keyboard, or has written a prompt. The window opens the
@@ -236,6 +246,12 @@ private:
                     int uses, int expires);
     void createInvite();
     void updateRoleNote();
+    void createCode();
+    void showCode(const QString &code, const QString &pin, int expires);
+    void showCodeState(const QString &code, const QString &state, int failures);
+    void codeTick();
+    void markCodeDead(bool dead);
+    void putCodeAway();
     void showAsk(int id, const QString &name, const QString &platform, const QString &fingerprint,
                  const QString &code, const QString &peer);
     void showDevices(const QJsonArray &items);
@@ -273,6 +289,21 @@ private:
     QString m_inviteRoleValue, m_inviteExpiryText;   // what the link that is on screen grants
     QPushButton *m_inviteSend = nullptr;
     QString m_inviteLink;
+    // "Make a code": a meeting code and a PIN to read out, beside "Make a link". Its own note,
+    // because m_inviteNote also carries the link's sentences and the public-address warning.
+    QPushButton *m_makeCode = nullptr;
+    QLabel *m_codeNote = nullptr;
+    QWidget *m_codeBox = nullptr;
+    QLabel *m_codeValue = nullptr;
+    QLabel *m_pinValue = nullptr;
+    QLabel *m_codeClock = nullptr;
+    QPushButton *m_codeCopy = nullptr;
+    QPushButton *m_codeAgain = nullptr;
+    QString m_code, m_pin, m_codeRole;
+    qint64 m_codeDeadline = 0;       // ms since the epoch; 0 once the code is no longer live
+    // ms since the epoch while a code_create is unanswered; -1 once the wait has been given up on
+    // but a late answer would still be shown; 0 when this window is not waiting for one.
+    qint64 m_codeAskedAt = 0;
 };
 
 } // namespace relay

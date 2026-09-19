@@ -31,7 +31,7 @@ from hashlib import sha256
 from typing import Awaitable, Callable
 
 from . import audit as audit_mod, control as control_mod, envelope, guests as guests_mod, \
-    identity as identity_mod, noise, notify as notify_mod, pairing, panes as panes_mod, \
+    identity as identity_mod, meetcode, noise, notify as notify_mod, pairing, panes as panes_mod, \
     push as push_mod, wire, ws
 
 log = logging.getLogger("relay.host")
@@ -512,6 +512,9 @@ class Host:
         self.secret_nonces: dict[str, SecretNonce] = {}
         self._prompt_generation: dict[str, int] = {}
         self.rooms = pairing.RoomBook()
+        # Meeting codes (card #97EG). A connection on a code room is a `meetcode.Attempt`, never a
+        # Noise `Channel`; it sits in `channels` so routing and teardown reach it, as nobody.
+        self.codes = meetcode.CodeBook(self)
         self.channels: dict[bytes, Channel] = {}
         self.streams: dict[str, wire.Stream] = {}
         self.epoch = base64.urlsafe_b64encode(time.time().hex().encode()).decode().rstrip("=")
@@ -642,7 +645,12 @@ class Host:
             meta = frame.meta()
         except envelope.EnvelopeError:
             meta = {}
-        channel = Channel(self, frame.channel, meta)
+        if self.codes.is_code_room(meta.get("room") or ""):
+            # A meeting code's room: CPace and a sealed invite, then close. It never reaches the
+            # Noise handshake or any handler below, before or after the invite (remote/meetcode.py).
+            channel = self.codes.attempt(frame.channel, meta)
+        else:
+            channel = Channel(self, frame.channel, meta)
         self.channels[frame.channel] = channel
         task = asyncio.create_task(self._run_channel(channel))
         self._tasks.add(task)
@@ -1444,7 +1452,8 @@ class Host:
 
     async def invite_create(self, panes: list[str], role: str = wire.VIEWER, *,
                             expires_in: float = guests_mod.DEFAULT_EXPIRY,
-                            uses: int = 1) -> tuple[guests_mod.Invite, str]:
+                            uses: int = 1,
+                            single_knock: bool = False) -> tuple[guests_mod.Invite, str]:
         """Open a room, mint an invite for it, and return the invite and the link.
 
         The room's ``ttl`` is the invite's lifetime, so a week-long invite does not point at a
@@ -1458,12 +1467,28 @@ class Host:
                                  guests_mod.MAX_EXPIRY))
         room, granted = await self._open_room(lifetime)
         invite, secret = self.guests.create_invite(list(panes), role, room,
-                                                   expires_in=min(lifetime, granted), uses=uses)
+                                                   expires_in=min(lifetime, granted), uses=uses,
+                                                   single_knock=single_knock)
         self.audit.record("invite_create", invite=invite.invite_id, panes=invite.panes,
                           role=invite.role, uses=invite.uses_left,
                           expires=round(invite.expires, 3))
         url = pairing.invite_url(self.app_base, self.identity.public, secret, room)
         return invite, url
+
+    async def code_create(self, panes: list[str],
+                          role: str = wire.VIEWER) -> meetcode.CodeRecord:
+        """A meeting code and a PIN for a pane (card #97EG).
+
+        Behind the code is an ordinary invite — one use, the code's ten minutes, and
+        ``single_knock`` so the fragment the code phase hands over admits one knock and no more —
+        and a second room that only the code phase listens on. The invite's link is kept in
+        memory in the code's record and nowhere else; the GUI is given the code, the PIN and the
+        invite's id, never the link.
+        """
+        invite, url = await self.invite_create(list(panes), role,
+                                               expires_in=meetcode.CODE_LIFETIME, uses=1,
+                                               single_knock=True)
+        return await self.codes.create(invite, url)
 
     def invite_revoke(self, invite_id: str) -> bool:
         invite = self.guests.invite(invite_id)
@@ -1539,6 +1564,12 @@ class Host:
             raise wire.WireError("not_permitted", "that invite link is wrong or spent.")
         if not self.guests.may_knock(invite.invite_id):
             raise wire.WireError("rate_limited", "too many people are knocking; try shortly.")
+        if not self.guests.claim_knock(invite, channel.client_static):
+            # A meeting code's invite takes one knock (card #97EG): this fragment was forwarded,
+            # replayed or read after the code phase, and the first knock already claimed it.
+            self.audit.record("knock_refused", invite=invite.invite_id, peer=channel.peer,
+                              reason="a code's invite accepts one knock")
+            raise wire.WireError("not_permitted", "that invite link is wrong or spent.")
 
         participant_id = secrets.token_hex(8)
         code = auth_code(channel.session.handshake_hash)
@@ -1573,6 +1604,8 @@ class Host:
             role = invite.role
         if not admitted:
             self.audit.record("refused", participant=participant_id, invite=invite.invite_id)
+            if invite.single_knock:
+                self.guests.burn_invite(invite.invite_id)   # its one knock was the owner's "no"
             await channel.send(wire.error("not_admitted", "the desktop did not let you in.",
                                           message.get("id")))
             await channel.close("not admitted")

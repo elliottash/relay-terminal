@@ -15,6 +15,7 @@
 
 import { Rrp, loadGuest, forgetGuest, fingerprint, b64 } from './rrp.js';
 import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
+import { cleanCode, cleanPin, validCode, validPin, joinWithCode, meetProblem } from './meet.js';
 
 const rrp = new Rrp();
 
@@ -139,8 +140,15 @@ export function startGuest() {
       resume(record);
       return;
     }
-    problem('This invitation link arrived without its code — usually because the browser '
-      + 'reloaded the page on the way here. Ask whoever invited you to send the link again.');
+    // Nothing in the address and nobody remembered: somebody came to type a meeting code. A `#`
+    // with nothing usable after it is different: a link was opened and lost its code on the way
+    // (a messenger that cut the fragment off), so say that rather than greet them as a stranger.
+    // A link stripped of the `#` as well is the same address as a bare /join and cannot be told
+    // apart from one; the form's own sentence covers that case.
+    offerCodeForm(location.href.includes('#')
+      ? 'This invitation link arrived without its code: part of it was lost on the way. Ask them '
+        + 'to send it again, or to read you a meeting code.'
+      : '');
   }).catch(() => problem('This browser could not read its own storage.'));
 }
 
@@ -169,6 +177,202 @@ function problem(text) {
   $('join-knock').hidden = !invite;
   if (invite) $('join-fingerprint').textContent = $('join-fingerprint').textContent || '…';
   else $('join-fingerprint').textContent = 'unknown';
+}
+
+// ---- joining with a meeting code and a PIN (card #97EG) -----------------------------------------
+// Somebody who was told `BQRT` and `4829` rather than sent a link. The code phase (app/meet.js)
+// runs CPace with the PIN against the desktop and comes back with an ordinary invite fragment,
+// which goes down exactly the road a link does: parse, `offerToJoin`, and the same knock, with the
+// same five-digit code to compare on the waiting screen.
+//
+// The PIN stays in its field and in the one call that uses it. It is not put in the address,
+// history or storage, and is not logged; the field is emptied once the attempt is over, whichever
+// way it went. The screen is built here rather than in index.html, from the classes the join
+// screen already uses, and its few layout rules are set through the CSSOM, which the app's CSP
+// (style-src 'self') allows where a style attribute would not be.
+
+let codeBusy = false;
+
+function styled(node, rules) {
+  Object.assign(node.style, rules);
+  return node;
+}
+
+// The two fields, styled like `#join-name` but big and monospaced: they are read off another
+// screen or out of a message, letter by letter.
+function codeField(id, placeholder) {
+  const input = styled(el('input'), {
+    width: '100%', boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)',
+    border: '1px solid var(--line)', borderRadius: '10px', padding: '10px 12px',
+    font: '600 24px/1.2 ui-monospace, "SF Mono", Menlo, monospace', letterSpacing: '6px',
+    textAlign: 'center', marginBottom: '14px',
+  });
+  input.id = id;
+  input.type = 'text';
+  input.placeholder = placeholder;
+  input.maxLength = 4;
+  input.spellcheck = false;
+  input.setAttribute('autocorrect', 'off');
+  // No `name`: should the page ever submit this form by itself, nothing in it goes anywhere.
+  return input;
+}
+
+function buildCodeScreen() {
+  if ($('screen-meet')) return $('screen-meet');
+  const screen = el('section', 'screen');
+  screen.id = 'screen-meet';
+  screen.hidden = true;
+  // With a phone's keyboard up the page is only as tall as what is left above it; the form
+  // scrolls inside its screen rather than off the bottom of the page.
+  styled(screen, { overflowY: 'auto' });
+  const pad = el('div', 'pad');
+  pad.append(el('h1', '', 'Join with a meeting code'));
+  pad.append(el('p', 'muted', 'Type the four letters and the four-digit PIN you were given by '
+    + 'the person sharing their terminal.'));
+
+  const form = document.createElement('form');
+  form.id = 'meet-form';
+  form.noValidate = true;
+  form.autocomplete = 'off';
+
+  const codeLabel = el('label', 'field-label', 'Meeting code');
+  codeLabel.htmlFor = 'meet-code';
+  const code = codeField('meet-code', 'BQRT');
+  code.autocapitalize = 'characters';
+  code.setAttribute('autocapitalize', 'characters');
+  code.autocomplete = 'off';
+  code.inputMode = 'text';
+  code.enterKeyHint = 'next';
+
+  const pinLabel = el('label', 'field-label', 'PIN');
+  pinLabel.htmlFor = 'meet-pin';
+  const pin = codeField('meet-pin', '4829');
+  pin.inputMode = 'numeric';
+  pin.pattern = '[0-9]*';
+  pin.autocomplete = 'one-time-code';
+  pin.enterKeyHint = 'go';
+
+  const status = el('p', 'note');
+  status.id = 'meet-note';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+
+  const join = el('button', 'plan-run', 'Join');
+  join.id = 'meet-join';
+  join.type = 'submit';
+  styled(join, { width: '100%', marginTop: '2px' });
+
+  form.append(codeLabel, code, pinLabel, pin, status, join);
+  pad.append(form);
+  pad.append(styled(el('p', 'muted small', 'Sent a link instead? Open the link itself — it has '
+    + 'everything in it. If you opened one and ended up here, part of it was lost on the way: '
+    + 'ask them to send it again, or to read you a meeting code.'), { marginTop: '16px' }));
+  screen.append(pad);
+  $('screen-join').after(screen);
+
+  code.addEventListener('input', () => {
+    const clean = cleanCode(code.value);
+    if (clean !== code.value) code.value = clean;
+    if (clean.length === 4 && document.activeElement === code) pin.focus();
+  });
+  pin.addEventListener('input', () => {
+    const clean = cleanPin(pin.value);
+    if (clean !== pin.value) pin.value = clean;
+  });
+  for (const input of [code, pin]) {
+    // A phone's keyboard comes up over the lower half of the page; keep the field being typed in
+    // above it.
+    input.addEventListener('focus', () => {
+      setTimeout(() => input.scrollIntoView({ block: 'nearest' }), 300);
+    });
+  }
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    joinByCode();
+  });
+  return screen;
+}
+
+// A quiet way from the invitation screen to the code form, for whoever landed there without a
+// link that works.
+function addCodeLink() {
+  if ($('join-by-code')) return;
+  const button = el('button', 'quiet-button', 'Have a meeting code instead?');
+  button.id = 'join-by-code';
+  button.type = 'button';
+  styled(button, { display: 'block', marginTop: '16px' });
+  button.addEventListener('click', () => offerCodeForm());
+  $('join-knock').after(button);
+}
+
+function codeNote(text, error = false) {
+  const status = $('meet-note');
+  status.textContent = text;
+  status.className = error ? 'note error' : 'note';
+}
+
+function offerCodeForm(text = '') {
+  buildCodeScreen();
+  show('meet');
+  setCodeBusy(false);
+  codeNote(text, !!text);
+  const code = $('meet-code');
+  (validCode(code.value) ? $('meet-pin') : code).focus();
+}
+
+function setCodeBusy(busy) {
+  codeBusy = busy;
+  $('meet-code').disabled = busy;
+  $('meet-pin').disabled = busy;
+  $('meet-join').disabled = busy;
+  $('meet-join').textContent = busy ? 'Joining…' : 'Join';
+}
+
+async function joinByCode() {
+  if (codeBusy) return;
+  const codeInput = $('meet-code');
+  const pinInput = $('meet-pin');
+  const code = cleanCode(codeInput.value);
+  const pin = cleanPin(pinInput.value);
+  codeInput.value = code;
+  if (!validCode(code)) {
+    codeNote('A meeting code is four letters, like BQRT.', true);
+    codeInput.focus();
+    return;
+  }
+  if (!validPin(pin)) {
+    codeNote('The PIN is four digits, like 4829.', true);
+    pinInput.focus();
+    return;
+  }
+  setCodeBusy(true);
+  codeNote('Checking the code and PIN with their desktop…');
+  let fragment;
+  try {
+    fragment = await joinWithCode(code, pin);
+  } catch (error) {
+    pinInput.value = '';
+    setCodeBusy(false);
+    codeNote(meetProblem(error), true);
+    const kind = error?.kind || '';
+    if (kind === 'unknown_code' || kind === 'burned' || kind === 'expired') codeInput.focus();
+    else pinInput.focus();
+    return;
+  }
+  pinInput.value = '';
+  setCodeBusy(false);
+  codeNote('');
+  let link;
+  try {
+    link = Rrp.parseInviteFragment(fragment);
+  } catch (error) {
+    offerCodeForm(error.message);
+    return;
+  }
+  // From here it is the invitation path, unchanged: the same screen, the same name field, the
+  // same knock and the same five digits to compare on the waiting screen.
+  invite = link;
+  offerToJoin(link);
 }
 
 function knockCountdown(seconds) {
@@ -963,6 +1167,7 @@ function wire() {
   $('bar').hidden = true;
 
   $('join-knock').addEventListener('click', knock);
+  addCodeLink();
   $('join-name').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
