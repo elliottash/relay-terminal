@@ -10,7 +10,7 @@ rank: '2'
 created: '2026-09-19'
 acceptance: Ctrl+Shift+S in a pane with no candidate project offers known projects; an attached tab shows its project and detaches in one click; a card filed in a tab with no project attached uses the default project (once set) or the picker
 source: 'owner, 2026-09-18, designing the project model after #JN7X: a tab has at most one project; "i use warp a lot, just screwing around in my downloads or admin folders"; agreed to a "move to project…" action on inbox cards ("lets try it that way"). Revised owner, 2026-09-19: dropped the personal inbox board (see Decisions)'
-links: {plans: [], commits: [28f2c27], evidence: [docs/qa_evidence/2026-09-19-project-picker/README.md], related: [JN7X, TVE1], github: null}
+links: {plans: [], commits: [28f2c27, 7e3fb9f, 5ee7259, 8e02fca, 6c68a2a, 604e01c7], evidence: [docs/qa_evidence/2026-09-19-project-picker/README.md], related: [JN7X, TVE1], github: null}
 ---
 # A project picker and a chip on the tab that says which project it is attached to
 
