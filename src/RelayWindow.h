@@ -2227,6 +2227,33 @@ private:
             plans.browse = true;
             agent.rows << plans;
         }
+        agent.rows << headingRow(QStringLiteral("Switchboard"));
+        {
+            // Owner, 2026-09-19: new boards are created hidden from now on, so the cards do not
+            // clutter the project's root listing. Only decides what a board created from now on is
+            // called (`relay::projects::newBoardFolder()`); a board that already exists moves only
+            // through the explicit "Hide this board's folder" / "Show this board's folder" action on
+            // the Switchboard itself (protocol 19.17), never through this row.
+            relay::SettingRow hiddenFolder =
+                toggleRow(QString::fromLatin1(relay::projects::kHiddenFolderSetting),
+                         QStringLiteral("Hidden Switchboard folder"),
+                         QStringLiteral("New boards are created as .switchboard/ rather than switchboard/"),
+                         true);
+            hiddenFolder.aliases = QStringLiteral("switchboard board folder dotfile hide show dotswitchboard");
+            agent.rows << hiddenFolder;
+        }
+        {
+            // The personal inbox board was dropped 2026-09-19 (#916B): a card filed in a tab with
+            // no project attached now goes here if it is set, else through the project picker.
+            relay::SettingRow defaultProject =
+                textRow(QString::fromLatin1(relay::projects::kDefaultProjectSetting),
+                       QStringLiteral("Default project for loose cards"),
+                       QStringLiteral("Where a card goes when filed with no project attached (empty: ask each time)"),
+                       QStringLiteral("(ask each time)"));
+            defaultProject.browse = true;
+            defaultProject.aliases = QStringLiteral("inbox loose card project picker default switchboard");
+            agent.rows << defaultProject;
+        }
         agent.rows << headingRow(QStringLiteral("Turn limits"));
         agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
                               QStringLiteral("Fraction of the model window, 0.50–0.98 (empty: 80% minus output room)"),
