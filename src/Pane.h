@@ -1984,6 +1984,16 @@ public:
                 openCallTarget(target);
                 return;
             }
+            // The last row of an "updated tasks" fold (card #BDXG): the task list, which is where
+            // those tasks stand now. It is the mouse path to a panel with a key, so it teaches it.
+            if (url.host() == QStringLiteral("tasks")) {
+                openRequests();
+                if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
+                    !keys.isEmpty() && requestsOpen())
+                    hint(QStringLiteral("tasks.fold"),
+                         relay::ShortcutHints::nextTime(keys, QStringLiteral("task list")));
+                return;
+            }
             // A `#K7Q2` in the output (Switchboard design section 5): the Switchboard opens in
             // this tab if it is not there yet, and the card opens in it.
             if (url.host() == QStringLiteral("card") && parts.size() == 1 && onOpenCard) {
@@ -4254,8 +4264,13 @@ private:
     // with no fold layer anchors everything to open-call, so a click still reaches the detail.
     QString callAnchor(const relay::calllines::Step &step, const QString &turnId,
                        const relay::toollabel::Label &label) const {
+        // Click::Todos folds too (card #BDXG): an "updated tasks" row *is* its list, so the fold is
+        // the surface it opens, and the ▸ it shows is kept. Everything else that is not Click::Fold
+        // opens a pane and so anchors relay://open-call.
+        const relay::calllines::Click click = relay::calllines::clickFor(label);
         const bool folds = terminalFolds()
-                           && (step.merged || relay::calllines::clickFor(label) == relay::calllines::Click::Fold);
+                           && (step.merged || click == relay::calllines::Click::Fold
+                               || click == relay::calllines::Click::Todos);
         return folds ? relay::calllines::foldUri(m_token, turnId, step.callId, step.extra)
                      : relay::calllines::openUri(m_token, turnId, step.callId);
     }
@@ -4315,6 +4330,7 @@ private:
         palette.add = t::Success;
         palette.remove = t::Error;
         palette.error = t::SyntaxUnknown;
+        palette.accent = t::Accent;   // a task in progress, as RequestsPanel paints it (#BDXG)
         auto tint = [](const QColor &token) {
             const QColor base = relay::theme::Surface;
             const qreal mix = 0.22;
@@ -4340,6 +4356,15 @@ private:
         // A diff of more than 12 changed lines goes to the diff pane, so the fold names it rather
         // than repeating a wall of green and red inside the terminal.
         options.diffToPane = relay::calllines::clickFor(record.label) == relay::calllines::Click::Diff;
+        // An "updated tasks" fold already holds the whole list, so its last row does not offer the
+        // detail again: it opens the task list, which is where the *current* state of those tasks
+        // lives (card #BDXG). A pane restored from scrollback has no record, but handleFoldReply
+        // fills the label from the worker's reply before asking for these options, so this still
+        // fires on the #EC58 fetch-by-anchor path.
+        if (relay::calllines::clickFor(record.label) == relay::calllines::Click::Todos) {
+            options.openInPane = QStringLiteral("relay://tasks/") + m_token;
+            options.openInPaneText = QStringLiteral("open the task list");
+        }
         return options;
     }
 
@@ -4445,6 +4470,10 @@ private:
             break;
         }
         case Click::Todos:
+            // A backend with no fold layer: the row is an open-call anchor, and the task list that
+            // call left behind reaches the user as the call's detail in a preview pane, the same
+            // `tasks` section the fold would have drawn (card #BDXG). Not the live task list —
+            // an old row must still say what it said.
         case Click::Fold:
             break;
         }

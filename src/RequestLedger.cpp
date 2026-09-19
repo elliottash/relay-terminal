@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RequestLedger.h"
+
+#include "CallLines.h"   // relay::calllines::taskGlyph: the one status-glyph table
+
 #include <QSet>
 #include <algorithm>
 
@@ -452,14 +455,10 @@ QString RequestLedgerModel::turnEndLine(int maxChars) const {
     return line;
 }
 
-QString RequestLedgerModel::statusGlyph(const QString &status) {
-    if (status == QStringLiteral("done") || status == QStringLiteral("completed")) return QStringLiteral("✓");
-    if (status == QStringLiteral("in_progress")) return QStringLiteral("◐");
-    if (status == QStringLiteral("cancelled") || status == QStringLiteral("cancelled_by_user")) return QStringLiteral("✕");
-    if (status == QStringLiteral("deferred")) return QStringLiteral("⏸");
-    if (status == QStringLiteral("blocked")) return QStringLiteral("✗");
-    return QStringLiteral("○");   // open, pending
-}
+// One table for the whole program (card #BDXG): the tool-call fold of an `update_todos` draws the
+// same list this panel does, and it has no widgets, so the table lives in the pure library and this
+// calls it. Changing a glyph there changes it here, in the strip and in the task menu at once.
+QString RequestLedgerModel::statusGlyph(const QString &status) { return relay::calllines::taskGlyph(status); }
 
 QString RequestLedgerModel::statusLabel(const QString &status) {
     if (status == QStringLiteral("in_progress")) return QStringLiteral("in progress");

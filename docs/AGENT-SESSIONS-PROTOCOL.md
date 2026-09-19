@@ -3093,7 +3093,7 @@ Short pieces, already formatted, in this order:
 ]
 ```
 
-`style` is one of `code`, `output`, `diff`, `args`, `error`, `text`. `truncated: true` is present
+`style` is one of `code`, `output`, `diff`, `args`, `error`, `text`, `tasks`. `truncated: true` is present
 when the section was cut; the caps are the ones the backend already stored under (32 KiB of command
 output, 128 KiB of file text or a diff). What the sections are, per kind:
 
@@ -3105,7 +3105,7 @@ output, 128 KiB of file text or a diff). What the sections are, per kind:
 | `list` | `entries` (output), one per line, a directory marked with a trailing `/` |
 | `load_skill` | `skill` (output) |
 | `write_plan` | `plan` (text) |
-| `update_todos` | `tasks` (args), one `[status] text` per line |
+| `update_todos` | `tasks` (tasks), one `[status] text` per line — the result's validated items when the call ran, the arguments when it failed |
 | `agent` | `task` (text), `report` (text) |
 | `type_into_program` | `intent` (text), `keystroke` (code), `screen` (output) |
 | everything else | `arguments` (args), one `key: value` per line, and `changes` (args) when the result has them |
@@ -3126,6 +3126,19 @@ not the capped first line.
 | `{"type": "todos"}` | `update_todos` |
 
 A failed call always opens the fold, whatever it would have opened.
+
+`{"type": "todos"}` is **a fold on a surface that has one** (card #BDXG): the `tasks` section above
+*is* the task list that call left behind, so a click unfolds it in place — one row per task with its
+status glyph — rather than opening another surface, and the fold's last row links to the task list
+instead of repeating the detail. A surface with no fold layer keeps it as an open-call line and shows
+the same section as the call's detail. The wire is unchanged: `open.type` is still `todos`, and the
+word a person reads is "tasks" (#SHE3).
+
+The `tasks` style is the one section that is not free text. Each `[status] text` line is one task,
+and the status is a `todos.py` status — `pending`, `in_progress`, `completed`, `cancelled`,
+`deferred`, `blocked`. A surface draws it with that status' glyph (Relay: ○ ◐ ✓ ✕ ⏸ ✗, completed and
+cancelled muted, one in progress in the accent ink, blocked in the error ink); a surface that does
+not know the style shows the lines, which still read.
 
 ### 23.7 `merge` — consecutive calls become one line
 

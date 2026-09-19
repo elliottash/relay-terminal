@@ -47,6 +47,7 @@ Palette palette() {
     p.addBg = QColor(0x1a, 0x28, 0x1d);
     p.removeBg = QColor(0x2a, 0x1a, 0x1c);
     p.error = QColor(0xf0, 0x71, 0x78);
+    p.accent = QColor(0x3e, 0xc5, 0xf0);
     return p;
 }
 
@@ -396,6 +397,61 @@ private slots:
         QCOMPARE(rows.size(), 12);   // 10 rows, the "… more" row, the links row
         QVERIFY(rows.at(10).startsWith(QStringLiteral("… 21 more lines")));
         QCOMPARE(rows.at(11), QStringLiteral("open in pane"));
+    }
+
+    // ---- the task list of an update_todos call (card #BDXG) ---------------------------------
+
+    void aTaskSectionBecomesOneGlyphedRowPerTask() {
+        const QJsonObject reply = json(
+            "{'detail': [{'heading': 'tasks', 'style': 'tasks',"
+            "'text': '[completed] read the card\\n[in_progress] write the fold\\n"
+            "[pending] run the tests\\n[blocked] ask the owner\\n[deferred] the icons\\n"
+            "[cancelled] the old plan'}]}");
+        const QVector<FoldLine> rows = foldForReply(reply, palette(), {});
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("\u2713  read the card"),
+                                             QStringLiteral("\u25D0  write the fold"),
+                                             QStringLiteral("\u25CB  run the tests"),
+                                             QStringLiteral("\u2717  ask the owner"),
+                                             QStringLiteral("\u23F8  the icons"),
+                                             QStringLiteral("\u2715  the old plan")}));
+        // The inks the tasks panel gives them: done and cancelled are behind you, one is live.
+        QCOMPARE(rows.at(0).spans.first().fg, palette().muted);
+        QCOMPARE(rows.at(1).spans.first().fg, palette().accent);
+        QCOMPARE(rows.at(2).spans.first().fg, palette().text);
+        QCOMPARE(rows.at(3).spans.first().fg, palette().error);
+        QCOMPARE(rows.at(5).spans.first().fg, palette().muted);
+    }
+
+    void theGlyphsAreTheOnesTheTasksPanelDraws() {
+        QCOMPARE(taskGlyph(QStringLiteral("pending")), QStringLiteral("\u25CB"));
+        QCOMPARE(taskGlyph(QStringLiteral("in_progress")), QStringLiteral("\u25D0"));
+        QCOMPARE(taskGlyph(QStringLiteral("completed")), QStringLiteral("\u2713"));
+        QCOMPARE(taskGlyph(QStringLiteral("done")), QStringLiteral("\u2713"));
+        QCOMPARE(taskGlyph(QStringLiteral("cancelled")), QStringLiteral("\u2715"));
+        QCOMPARE(taskGlyph(QStringLiteral("cancelled_by_user")), QStringLiteral("\u2715"));
+        QCOMPARE(taskGlyph(QStringLiteral("deferred")), QStringLiteral("\u23F8"));
+        QCOMPARE(taskGlyph(QStringLiteral("blocked")), QStringLiteral("\u2717"));
+        QCOMPARE(taskGlyph(QString()), QStringLiteral("\u25CB"));
+    }
+
+    void anEmptiedListSaysSoRatherThanFoldingToNothing() {
+        const QJsonObject reply = json("{'detail': [{'heading': 'tasks', 'style': 'tasks', 'text': ''}]}");
+        QCOMPARE(textsOf(foldForReply(reply, palette(), {})),
+                 (QStringList{QStringLiteral("(The list was emptied.)")}));
+    }
+
+    void theTaskFoldsLastRowOpensTheTaskList() {
+        FoldOptions options;
+        options.openInPane = QStringLiteral("relay://tasks/p1");
+        options.openInPaneText = QStringLiteral("open the task list");
+        const QJsonObject reply = json("{'detail': [{'heading': 'tasks', 'style': 'tasks',"
+                                       "'text': '[pending] one'}]}");
+        const QVector<FoldLine> rows = foldForReply(reply, palette(), options);
+        const FoldLine &last = rows.last();
+        QCOMPARE(last.spans.size(), 1);
+        QCOMPARE(last.spans.first().text, QStringLiteral("open the task list"));
+        QCOMPARE(last.spans.first().link, QStringLiteral("relay://tasks/p1"));
+        QVERIFY(last.spans.first().underline);
     }
 
     void anEmptyReplySaysNothingWasRecorded() {

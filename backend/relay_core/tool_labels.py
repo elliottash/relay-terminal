@@ -40,8 +40,10 @@ DETAIL_TEXT_CAP = 131072
 #: catch-all a tool nobody has taught this module gets.
 KINDS = ("run", "job", "read", "list", "edit", "agent", "plan", "skill", "board", "config",
          "input", "view", "web", "external", "other")
-#: Styles a `detail` section may ask for.
-DETAIL_STYLES = ("code", "output", "diff", "args", "error", "text")
+#: Styles a `detail` section may ask for. ``tasks`` is the one that is not free text: each
+#: ``[status] text`` line is a task, which a surface draws with its status glyph (card #BDXG). A
+#: surface that does not know it falls back to showing the lines, which still read.
+DETAIL_STYLES = ("code", "output", "diff", "args", "error", "text", "tasks")
 
 MINUS = "−"  # the real minus sign, for "+3 −1"
 
@@ -692,9 +694,16 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
         sections.append(_section("plan", "text", args.get("content") or "", cap=DETAIL_TEXT_CAP,
                                  keep_empty=True))
     elif name == "update_todos":
-        items = args.get("items") if isinstance(args.get("items"), list) else []
+        # Card #BDXG: the fold *is* the list, so this is the list that call left behind, not the
+        # live one — the result's validated items when the call got that far (they carry the ids
+        # and the statuses Relay settled on, including a task a subagent owns), and the arguments
+        # the model sent when it did not. The `tasks` style is one row per task with its status
+        # glyph; a surface that does not know the style still reads "[status] text" per line.
+        items = result.get("items") if isinstance(result.get("items"), list) else None
+        if items is None:
+            items = args.get("items") if isinstance(args.get("items"), list) else []
         listing = "\n".join(f"[{i.get('status')}] {i.get('text')}" for i in items if isinstance(i, dict))
-        sections.append(_section("tasks", "args", listing, keep_empty=True))
+        sections.append(_section("tasks", "tasks", listing, keep_empty=True))
     elif name == "agent":
         if isinstance(args.get("prompt"), str):
             sections.append(_section("task", "text", args["prompt"], cap=DETAIL_TEXT_CAP))

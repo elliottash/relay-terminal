@@ -385,7 +385,8 @@ target_compile_options(relay-calllines PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
-target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
+# relay-calllines for the one status-glyph table the fold and this panel share (card #BDXG).
+target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets relay-calllines)
 target_compile_options(relay-requests PRIVATE -Wall -Wextra -Wpedantic)
 
 # Multiplayer, the owner's side (#W5N2): the Sharing pane and the model behind it. The model eats
@@ -669,6 +670,9 @@ if(BUILD_TESTING)
     # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
     add_executable(relay-projects-tests tests/projects_test.cpp)
     target_link_libraries(relay-projects-tests PRIVATE relay-projects ${RELAY_QT}::Test)
+    # It reads backend/relay_core/board.py to check that both languages list the board folders in
+    # the same order (`boardFolders()` / `BOARD_FOLDERS`).
+    target_compile_definitions(relay-projects-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME projects COMMAND relay-projects-tests)
     # "Initialize a project and create a Switchboard here?": when it is asked, what the probe's
     # findings read as, and which import kinds a ticked box asks for. Pure (src/ProjectInit.h); the

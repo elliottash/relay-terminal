@@ -545,10 +545,35 @@ class DetailTests(unittest.TestCase):
                                          {'name': 'b.cpp', 'type': 'file'}], 'truncated': False})
         self.assertEqual(sections[0]['text'], 'a/\nb.cpp')
 
+    def test_a_task_detail_is_the_list_that_call_left_behind(self):
+        # Card #BDXG: the fold is the list, so it is the result's validated items — ids, and the
+        # statuses Relay settled on — and not the arguments the model happened to send.
+        sections = T.detail('update_todos',
+                            {'items': [{'text': 'write the fold', 'status': 'pending'}]},
+                            {'ok': True, 'open': 1,
+                             'items': [{'id': 'T1', 'text': 'write the fold', 'status': 'in_progress'},
+                                       {'id': 'T2', 'text': 'run the tests', 'status': 'completed'}]})
+        self.assertEqual(sections, [{'heading': 'tasks', 'style': 'tasks',
+                                     'text': '[in_progress] write the fold\n[completed] run the tests'}])
+
+    def test_a_task_detail_falls_back_to_the_arguments(self):
+        # A call that failed validation has no items in its result; the fold still shows what was asked.
+        sections = T.detail('update_todos',
+                            {'items': [{'text': 'write the fold', 'status': 'pending'}]},
+                            {'error': 'Task 1: a deferred task needs a note with the reason.'})
+        self.assertEqual(sections[0], {'heading': 'tasks', 'style': 'tasks',
+                                       'text': '[pending] write the fold'})
+        self.assertEqual(sections[-1]['style'], 'error')
+
+    def test_an_emptied_task_list_still_gets_its_section(self):
+        sections = T.detail('update_todos', {'items': []}, {'ok': True, 'items': [], 'open': 0})
+        self.assertEqual(sections, [{'heading': 'tasks', 'style': 'tasks', 'text': ''}])
+
     def test_detail_never_raises(self):
         for name, args, result in (('run_command', None, None), (None, {}, {}),
                                    ('type_into_program', {'text': 'y'}, {'ok': True, 'screen': 's'}),
-                                   ('agent', {'prompt': 'p'}, {'result': {'text': 'done'}})):
+                                   ('agent', {'prompt': 'p'}, {'result': {'text': 'done'}}),
+                                   ('update_todos', {'items': 'not a list'}, {'items': 7})):
             with self.subTest(tool=name):
                 for section in T.detail(name, args, result):
                     self.assertIn(section['style'], T.DETAIL_STYLES)

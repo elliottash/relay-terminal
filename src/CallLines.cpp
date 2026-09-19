@@ -155,6 +155,15 @@ Row mergedRow(const toollabel::MergeRun &run, int cells) {
 
 // ----- what a click does ----------------------------------------------------------------------
 
+QString taskGlyph(const QString &status) {
+    if (status == QLatin1String("done") || status == QLatin1String("completed")) return QStringLiteral("✓");
+    if (status == QLatin1String("in_progress")) return QStringLiteral("◐");
+    if (status == QLatin1String("cancelled") || status == QLatin1String("cancelled_by_user")) return QStringLiteral("✕");
+    if (status == QLatin1String("deferred")) return QStringLiteral("⏸");
+    if (status == QLatin1String("blocked")) return QStringLiteral("✗");
+    return QStringLiteral("○");   // open, pending
+}
+
 Click clickFor(const toollabel::Label &label) {
     if (label.failed()) return Click::Fold;   // § 23.6: a failure always opens its fold
     const QString &type = label.openType;
@@ -329,12 +338,44 @@ void appendDiff(QVector<FoldLine> &out, const QString &text, const Palette &pale
     }
 }
 
+// The `tasks` section of an `update_todos` call (card #BDXG): the list that call left behind, one
+// row per task, `taskGlyph` then the text. The ink is the tasks panel's — completed and cancelled
+// muted (they are done with), one in progress in the accent, a blocked one in the error ink — so
+// the fold and the panel its last row opens read as the same list. A line the backend wrote
+// without the "[status] " head (nothing does today, but a section is just text on the wire) is
+// shown as it stands rather than dropped.
+void appendTasks(QVector<FoldLine> &out, const QString &text, const Palette &palette) {
+    const QStringList lines = stripAnsi(text).split(QLatin1Char('\n'));
+    bool any = false;
+    for (const QString &line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.isEmpty()) continue;
+        any = true;
+        if (!trimmed.startsWith(QLatin1Char('['))) { out << row(trimmed, palette.text); continue; }
+        const int close = trimmed.indexOf(QLatin1Char(']'));
+        if (close < 0) { out << row(trimmed, palette.text); continue; }
+        const QString status = trimmed.mid(1, close - 1).trimmed();
+        const QString what = trimmed.mid(close + 1).trimmed();
+        const QColor ink = status == QLatin1String("completed") || status == QLatin1String("done")
+                                   || status.startsWith(QLatin1String("cancelled"))
+                               ? palette.muted
+                           : status == QLatin1String("in_progress")
+                               ? (palette.accent.isValid() ? palette.accent : palette.text)
+                           : status == QLatin1String("blocked") ? palette.error
+                                                                : palette.text;
+        out << row(taskGlyph(status) + QStringLiteral("  ") + what, ink);
+    }
+    if (!any) out << mutedRow(QStringLiteral("(The list was emptied.)"), palette);
+}
+
 // "open in pane · open x.py": the last row of every fold, so the whole thing is still reachable in
 // a pane when the terminal is the wrong place to read it.
 FoldLine linkRow(const Palette &palette, const FoldOptions &options) {
     FoldLine line;
     if (!options.openInPane.isEmpty()) {
-        FoldSpan span = plain(QStringLiteral("open in pane"), palette.muted);
+        FoldSpan span = plain(options.openInPaneText.isEmpty() ? QStringLiteral("open in pane")
+                                                               : options.openInPaneText,
+                              palette.muted);
         span.link = options.openInPane;
         span.underline = true;
         line.spans << span;
@@ -459,6 +500,8 @@ QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette,
                 span.bold = true;
                 out << oneSpan(span);
             }
+        } else if (style == QStringLiteral("tasks")) {
+            appendTasks(out, text, palette);
         } else {
             const QColor colour = style == QStringLiteral("error") ? palette.error : palette.text;
             const QStringList lines = stripAnsi(text).split(QLatin1Char('\n'));

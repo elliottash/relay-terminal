@@ -173,18 +173,31 @@ struct Palette {
     QColor add, remove;          // diff foregrounds
     QColor addBg, removeBg;      // diff backgrounds, already blended into the surface
     QColor error;
+    QColor accent;               // a task in progress, in the ink the tasks panel gives it
 };
 
 struct FoldOptions {
     int maxLines = kFoldLineCap;
     QString openInPane;      // the link "open in pane" carries; empty drops that word
+    QString openInPaneText;  // what that link reads; empty means "open in pane"
     QString openPath;        // the link "open <name>" carries (an absolute path)
     QString openName;        // what to show after "open "; defaults to openPath's last component
     bool diffToPane = false; // the diff went to a diff pane: say so instead of repeating it
 };
 
+// The glyph a task's status is drawn with: ○ pending, ◐ in progress, ✓ completed, ✕ cancelled,
+// ⏸ deferred, ✗ blocked. One table for the whole program — `RequestLedgerModel::statusGlyph`, which
+// the tasks panel, the queue strip and the task menu draw with, calls this — so an `update_todos`
+// fold and the panel its last row opens can never drift apart (card #BDXG). Pure, so the fold is
+// testable without a window.
+QString taskGlyph(const QString &status);
+
 // § 23.5's `detail` sections of a `tool_output` reply, as fold rows. Falls back to the reply's own
 // `text`/`preview` when it carries no sections (a worker from before § 23.5).
+//
+// The `tasks` style (an `update_todos` call, § 23.5) is the one section that is not text: each
+// "[status] text" line becomes a row of `taskGlyph(status)` and the task, completed and cancelled
+// ones muted and one in progress in the accent ink, exactly as the tasks panel paints them.
 QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette, const FoldOptions &options);
 
 // A merged run's fold: one row per member, each linking to the file it read.
