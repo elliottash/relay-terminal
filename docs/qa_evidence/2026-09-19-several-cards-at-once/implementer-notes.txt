@@ -1,0 +1,189 @@
+--- 01-board
+>» © project; Switchboard-3open- 2 * + 20 4 =e —o x
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". 3 open Filter — words, label:bug, status:done, folder:changes, @a... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ INBOX DISCUSSING (READY TO START @JIN PROGRESS (WAITING NEEDS QA VERIFIED
+~/project $ Gone g
+» INBOX 3
+» DISCUSSING ©
+> READY TO START 0
+> IN PROGRESS ©
+> WAITING ©
+> NEEDS QA ©
+> VERIFIED 0
+> DONE ©
+Shell commands or agent prompts... ? for help auto
+~iproject © 100% left || gim-5.3 ‘J(s)(s
+Enter open eedit pplan xexecute vverify nnew +/->foldsection Alt+Shift+t! reorder Alt+Shift+— status
+--- 01b-inbox-open
+>» © project; Switchboard-3 open: 2 x + oO 4e@S -ox
+© project TERMINAL ~/project @) g & x | #8 Switchboard a KR x
+To run a command as administrator (user “root"), use “sudo <command>". 3 open Filter — words, label:bug, status:done, folder:changes, @a... + New card (n) Clean up
+See “man sudo root" for details.
+~ @ INBOX E|DISCUSSING READY TO START (BIN PROGRESS GBWAITING GNEEDS QA VERIFIED
+DONE
+~/project $ o °
+y INBOX 3
+|| © Tab completion adds a stray "~" after a folder #2095 today
+© Each pane type gets its own header colour #SPaN today
+© Clickable paths in the output #«792 today
+» DISCUSSING ©
+> READY TO START 0
+> IN PROGRESS ©
+> WAITING ©
+> NEEDS QA 0
+> VERIFIED 0
+> DONE ©
+Shell commands or agent prompts... 2 for help auto
+~iproject © 100% left | glm-5.3 ~ ei
+Enter open eedit pplan xexecute vverify nnew +/->foldsection Alt+Shift+t! reorder Alt+Shift+— status
+--- 02-first-card-planning
+>» © project; Switchboard-3open- 2 * + oO 4e@S -ox
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user "root"), use "sudo <command>". © Back to board (Esc)
+See "man sudo root" for details.
++#SPBN #ID+prompt(t) Openfile(o) x
+~/project $
+Each pane type gets its own header colour ‘Edit (e)
+Inbox - Features v
+issues/features/b.md
+Issue
+Different headers or colours for subagents, switchboard and options panes.
+THREAD 1
+owner Pian just now
+Plan this card.
++ agent Plan
+thinking...
++ Agentis planning... Requesting model - step 3/256 x Stop planning
+Reply — Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments
+Shell commands or agent prompts... ? for help auto Plan(p) Execute (x)
+~/project | © 100% left || gim-5.3 ‘J(s)(s
+Esc back tothe board eedit d/Tabreply Enter discuss porCtrl+Enter plan x execute vverify Ctrl+Shift+Enter
+--- 03-list-while-one-plans
+>» © project; Switchboard-3 open: 2 x + oO 4e@S -ox
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". 3 open Filter — words, label:bug, status:done, folder:changes, @a... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ INBOX DISCUSSING (READY TO START @JIN PROGRESS (WAITING NEEDS QA VERIFIED
+DONE
+~/project $ Gi &
+y INBOX 3
+© Tab completion adds a stray "-" after a folder #295 today
+|| + Each pane type gets its own header colour #SP8Nv 81 today
+© Clickable paths in the output #«792 today
+» DISCUSSING ©
+> READY TO START 0
+> IN PROGRESS ©
+> WAITING ©
+> NEEDS QA 0
+> VERIFIED 0
+> DONE ©
+Shell commands or agent prompts... ? for help auto
+~iproject © 100% left | glm-5.3 ‘J(s)(s
+Enter open eedit pplan xexecute vverify nnew +/->foldsection Alt+Shift+t! reorder Alt+Shift+— status
+--- 04-second-card-planning
+>» © project; Switchboard-3open- 2 * + 20 4 =(g)@ -o x
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user "root"), use "sudo <command>". © Back to board (Esc)
+See "man sudo root" for details.
+#K7Q2 #ID + prompt(t) Open file(o) x
+~/project $
+Clickable paths in the output ‘Edit (e)
+Inbox - Features v
+issues/features/cmd
+Issue
+Apath printed by a command opens the file in a pane when clicked.
+THREAD 1
+owner Pian just now
+Plan this card.
++ agent Plan
+thinking...
++ Agentis planning... Requesting model - step 3/256 x Stop planning
+Reply — Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments
+Shell commands or agent prompts... ? for help auto Plan(p) Execute (x)
+~iproject © 100% left || gim-5.3 ‘J(s)(s
+Esc back tothe board eedit d/Tabreply Enter discuss porCtrl+Enter plan x execute vverify Ctrl+Shift+Enter
+--- 05-list-with-two-running
+>» © project; Switchboard-3 open: 2 x + oO 4e@S -ox
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". 3 open Filter — words, label:bug, status:done, folder:changes, @a... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ INBOX DISCUSSING (READY TO START @JIN PROGRESS (WAITING NEEDS QA VERIFIED
+DONE
+~/project $ Gi &
+y INBOX 3
+© Tab completion adds a stray "-" after a folder #295 today
++ Each pane type gets its own header colour #SP8N 81° today
+|| + clickable paths in the output #702 81 today
+» DISCUSSING ©
+> READY TO START 0
+> IN PROGRESS ©
+> WAITING ©
+> NEEDS QA 0
+> VERIFIED 0
+> DONE ©
+Shell commands or agent prompts... ? for help auto
+~iproject © 100% left | glm-5.3 ~ ei
+Enter open eedit pplan xexecute vverify nnew +/->foldsection Alt+Shift+t! reorder Alt+Shift+— status
+--- 06-list-after
+>» © project; Switchboard-3 open: 2 x + oO 4e@S -ox
+© project TERMINAL ~/project @) g & x | #8 Switchboard a KR x
+To run a command as administrator (user “root"), use “sudo <command>". 3 open Filter — words, label:bug, status:done, folder:changes, @a... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ INBOX DISCUSSING (READY TO START @JIN PROGRESS (WAITING NEEDS QA VERIFIED
+DONE
+~/project $ o °
+y INBOX 3
+© Tab completion adds a stray "-" after a folder #295 today
+© Each pane type gets its own header colour #SPaN 84° today
+|| © Clickable paths in the output #792 02. today
+» DISCUSSING ©
+> READY TO START 0
+> IN PROGRESS ©
+> WAITING ©
+> NEEDS QA 0
+> VERIFIED 0
+> DONE ©
+Shell commands or agent prompts... ? for help auto
+~iproject © 100% left | glm-5.3 ~ ei
+Enter open eedit pplan xexecute vverify nnew +/->foldsection Alt+Shift+t! reorder Alt+Shift+— status
+--- 07-a-plan-on-its-card
+>» © project; Switchboard-3open-2 x + oO 4e@S -ox
+© project TERMINAL ~/project @) g & x | #8 Switchboard @ KR x
+To run a command as administrator (user "root"), use "sudo <command>". © Back to board (Esc)
+See "man sudo root" for details.
+#K7Q2 #ID + prompt (t) Openfile(o) x
+~/project $ - .
+Clickable paths in the output [_seditiey
+Inbox a Features a
+issues/features/c.md
+Issue
+Apath printed by a command opens the file in a pane when clicked.
+Plan
+Goal. Paths that a command prints in the output pane render as clickable links; clicking one opens that
+file in a pane.
+Findings. The repo has no output pane, renderer or click handling today — src/complete . py holds
+only candidates(prefix, root), a folder-completion helper, and a search for hyperlink/OSC-8 code
+finds nothing. The feature therefore starts from scratch: land it as a pure detect-and-link module plus
+an open-path hook that the pane layer calls once it exists.
+Steps.
+1. New src/Links. py with:
+© find_paths(line, cwd=".") -> list[tupleLint, int, str]]—spans of tokens
+that resolve to an existing file or directory (absolute paths, . /... and relative tokens
+containing a separator). Bare words and flags are not paths.
+elinkify(text, cwd=".") -> str —wrap each detected span in OSC 8 escapes
+\x1b]8; ; file: //<abs>\x1b\\<span>\x1b]8; ; \x1b\\; text with no paths comes back
+byte-identical.
+© set_open_handler( fn) / open_path( path) — resolve the path to absolute and hand it
+to the registered handler; the pane layer registers its "open file in a pane" action here.
+Default handler just returns the absolute path, so the hook is testable without a pane.
+
+2. New tests/test_Links.. py: absolute path detected; relative path resolved against cwd;
+nonexistent token left unlinked; no-path line unchanged; the /- suffix candidates( ) appends to
+directories (see #ZW95) does not fool detection; open_path calls the registered handler with the
+
+Reply — Enter discusses, Ctrl+Enter plans, Ctrl+Shift+enter only comments
+Shell commands or agent prompts... ? for help auto Plan (p)
+~ project =O 100% left | gim-5.3 ~ @ €
+Esc back to the board eedit d/Tabreply Enter discuss por Ctrl+Enter plan xexecute vverify Ctrl+Shift+Enter

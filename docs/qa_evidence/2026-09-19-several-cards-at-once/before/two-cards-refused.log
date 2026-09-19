@@ -1,0 +1,20 @@
+# worker-drive.py against backend/worker.py at 34da8e8 (before the change), throwaway board,
+# preset glm-coding / glm-5.3. Captured from the driver's stdout; `thinking_delta` lines and the
+# events between are elided where marked, nothing else is changed.
+[    0.3] <<< {"event": "ready"}
+[    1.0] >>> {"type": "configure", "workspace": "<scratch>/repo", "preset": "glm-coding", "use_stored_key": true, "board": {"dir": "<scratch>/repo"}}
+[    1.0] >>> {"type": "board_open"}
+[    1.3] <<< {"event": "configured", "mode": "build"}
+[    1.3] <<< {"event": "board", "cards": [{"id": "SPBN", …}, {"id": "ZW95", …}]}
+[    3.0] >>> {"type": "board_ask", "id": "planA", "card": "ZW95", "mode": "plan"}
+[    3.0] <<< {"event": "board_thread_appended", "id": "planA", "card_id": "ZW95", "text": "Plan this card.", "mode": "plan"}
+[    3.0] <<< {"event": "agent_started", "id": "accfec4abbc043f0a0509f78bf05f830", "turn_id": "accfec4abbc043f0a0509f78bf05f830"}
+[    3.0] <<< {"event": "status", "text": "Requesting model · step 1/256", "card_id": "ZW95"}
+[    7.9] <<< {"event": "thinking_done", "turn_id": "accfec4…", "card_id": "ZW95"}
+[    7.9] <<< {"event": "tool_started", "tool": "board_read", "card_id": "ZW95"}
+[    7.9] <<< {"event": "tool_result", "tool": "board_read", "card_id": "ZW95"}
+[    7.9] <<< {"event": "tool_started", "tool": "search_files", "card_id": "ZW95"}
+[    7.9] <<< {"event": "tool_result", "tool": "search_files", "card_id": "ZW95"}
+[    7.9] <<< {"event": "status", "text": "Requesting model · step 2/256", "card_id": "ZW95"}
+[   11.0] >>> {"type": "board_ask", "id": "planB", "card": "SPBN", "mode": "plan"}
+[   11.0] <<< {"event": "error", "id": "planB", "code": "board_busy", "card_id": "ZW95", "text": "The Switchboard agent is busy with a question on #ZW95. Stop it first, then start the plan."}

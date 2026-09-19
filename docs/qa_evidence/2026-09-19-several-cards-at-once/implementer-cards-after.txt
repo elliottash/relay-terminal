@@ -1,0 +1,83 @@
+=== a.md
+---
+id: ZW95
+type: work
+status: inbox
+rank: m1
+created: '2026-09-19'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# Tab completion adds a stray "-" after a folder
+
+## Issue
+Completing a directory name gives `src/-` instead of `src/`.
+=== b.md
+---
+id: SPBN
+type: work
+status: inbox
+rank: m2
+created: '2026-09-19'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# Each pane type gets its own header colour
+
+## Issue
+Different headers or colours for subagents, switchboard and options panes.
+
+## Plan
+**Goal** — Give each pane type (subagents, switchboard, options) its own header colour so panes are distinguishable at a glance, without changing pane content or layout.
+
+**Findings**
+- This workspace has no pane-rendering code. The only source is `src/complete.py` (toy folder completion); a repo-wide search for pane/header/colour/render matches nothing outside this card and `issues/board.yaml`.
+- The UI that draws the subagents/switchboard/options panes therefore lives elsewhere (another repo or session). Execution needs that location from the owner before any edit is possible.
+
+**Steps**
+1. Owner confirms the repo and file/function that renders a pane's header (title bar).
+2. There, add one colour per pane type in a single lookup table, e.g. `PANE_HEADER_COLOURS = {"subagents": "cyan", "switchboard": "magenta", "options": "yellow"}`, with a neutral default for unknown pane types.
+3. Apply the colour to the header/title line only; leave pane bodies and layout untouched.
+4. Respect terminal limits: if `NO_COLOR` is set or the terminal lacks colour, fall back to the current default header style.
+5. Keep pane titles as they are — colour adds distinction, it must not become the only distinguishing feature.
+
+**Risks**
+- The pane code is not in this workspace; nothing can change until the owner says where it lives (asked as a question on this card).
+- Colour choice is a taste call; the proposed cyan/magenta/yellow can be swapped in one table.
+- Colour-only distinction is poor for colour-blind users; keeping distinct titles mitigates it.
+
+**Verify**
+- Open each of the three pane types: each header shows its own colour, bodies unchanged.
+- Run once with `NO_COLOR=1`: headers render with the default style.
+- Add a unit test for the colour lookup table, including the default for an unknown pane type.
+=== c.md
+---
+id: K7Q2
+type: work
+status: inbox
+rank: m3
+created: '2026-09-19'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# Clickable paths in the output
+
+## Issue
+A path printed by a command opens the file in a pane when clicked.
+
+## Plan
+**Goal.** Paths that a command prints in the output pane render as clickable links; clicking one opens that file in a pane.
+
+**Findings.** The repo has no output pane, renderer or click handling today — `src/complete.py` holds only `candidates(prefix, root)`, a folder-completion helper, and a search for hyperlink/OSC-8 code finds nothing. The feature therefore starts from scratch: land it as a pure detect-and-link module plus an open-path hook that the pane layer calls once it exists.
+
+**Steps.**
+1. New `src/links.py` with:
+   - `find_paths(line, cwd=".") -> list[tuple[int, int, str]]` — spans of tokens that resolve to an existing file or directory (absolute paths, `./…`, and relative tokens containing a separator). Bare words and flags are not paths.
+   - `linkify(text, cwd=".") -> str` — wrap each detected span in OSC 8 escapes `\x1b]8;;file://<abs>\x1b\\<span>\x1b]8;;\x1b\\`; text with no paths comes back byte-identical.
+   - `set_open_handler(fn)` / `open_path(path)` — resolve the path to absolute and hand it to the registered handler; the pane layer registers its "open file in a pane" action here. Default handler just returns the absolute path, so the hook is testable without a pane.
+2. New `tests/test_links.py`: absolute path detected; relative path resolved against `cwd`; nonexistent token left unlinked; no-path line unchanged; the `/-` suffix `candidates()` appends to directories (see #ZW95) does not fool detection; `open_path` calls the registered handler with the absolute path.
+3. Docstring in `src/links.py` stating the wiring contract: the output pane renders command output through `linkify`, and on a link click calls `open_path`.
+
+**Risks.**
+- No pane/app code exists in this repo to receive clicks. This plan lands the logic and the hook; the pane layer must register the handler. Owner: is the pane code coming in another card/repo, and should a click open a new pane or reuse an existing file pane? Recommend new pane; decided when that layer registers the handler.
+- Terminals without OSC 8 support show plain text — acceptable fallback, no extra work.
+- Only link paths that exist at render time, so stale paths render unlinked and nothing opens a wrong file.
+
+**Verify.** `python -m pytest tests/` green (fall back to `python -m unittest discover tests` if pytest is absent). Manual: `PYTHONPATH=src python -c "import links; print(links.linkify('see src/complete.py for details'))"` in an OSC-8 terminal renders `src/complete.py` as a clickable link.

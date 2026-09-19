@@ -4330,4 +4330,3 @@ void BoardView::showCleanupSummary(const QJsonObject &summary)
 }
 
 }  // namespace relay
-
