@@ -20,12 +20,14 @@ import threading
 from pathlib import Path
 
 from . import board as B
+from . import board_chat
 from . import board_import as I
 from . import board_turns
 from . import forge_github as GH
 from . import forge_sync as F
 from . import logs
 from . import project_probe as PP
+from . import roles as model_roles
 from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
                           card_brief, cleanup_brief, find_board_root, named_board_root,
@@ -38,7 +40,9 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          # docs/PROJECT-INIT-AND-IMPORT.md section 8).
          "project_probe", "board_import_propose", "board_import_apply",
          # Two-way sync with GitHub issues (19.14, docs/GITHUB-SYNC.md section 8).
-         "forge_sync_plan", "forge_sync_run"}
+         "forge_sync_plan", "forge_sync_run",
+         # The Switchboard page agent (19.18): a conversation about the whole board.
+         "board_chat", "board_chat_cancel", "board_chat_queue_remove", "board_chat_queue_move"}
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
 #: names, because a project may carry either and neither is wrong.
@@ -232,6 +236,13 @@ class BoardCommands:
         self.cards = board_turns.CardTurns(
             self.emit, lambda card_id, emit: self._build_card_agent(card_id, emit),
             on_answer=self._card_answer)
+        #: The page agent (19.18, `relay_core.board_chat`): one conversation about the whole
+        #: board, on the Switchboard's main page.  It can write any card, so it is exclusive
+        #: with the card turns and the cleanup (see `_busy_error`), and it queues its own
+        #: prompts the way a pane's agent does instead of refusing them.
+        self.chat = board_chat.PageAgent(
+            self.emit, lambda emit: self._build_page_agent(emit),
+            on_turn_end=self._chat_turn_ended)
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
@@ -328,6 +339,7 @@ class BoardCommands:
         # The card conversations belong to the board we are leaving, and their agents hold that
         # board's tools: stop them and forget them rather than let them write into it (19.16).
         self.cards.drop()
+        self.chat.drop()
         self._snapshot = {}
         self._ask_card = self._ask_hash = self._ask_turn = None
         self._ask_text = []
@@ -422,6 +434,59 @@ class BoardCommands:
             agent.set_instructions(main.instructions)
         return agent, tools
 
+    def _build_page_agent(self, emit):
+        """Build the page agent (19.18): this worker's provider — the `switchboard` role, which
+        is what the GUI starts a board worker on (`agent_role`) — its own conversation and its
+        own `BoardTools`, whose `ChatScope` offers the board tools with merge and split.
+
+        The model the page's picker named, when there is one, resolves through the same role
+        table, so a page on the Flash agent is a role choice and not a second provider setup.
+        """
+        from .agent import Agent          # late: agent.py pulls in the whole tool executor
+        from .tools import Workspace
+        main = self._agent()
+        if main is None:
+            raise ValueError("Configure a provider and workspace first.")
+        tools = self.agent_tools(self.workspace, {"board": self.settings["raw"]})
+        if tools is None:
+            raise ValueError("The Switchboard page agent has no board tools here "
+                             "(this project has no board.yaml, or its autonomy is off).")
+        workspace = str(tools.board.repo)
+        config = main.config
+        preset_id = main.preset.id if main.preset else None
+        effort = getattr(main, "effort", None)
+        role = self.chat.model or "switchboard"
+        resolved = main.roles.resolve(role) if (main.roles is not None and role != "main") else None
+        if resolved is not None:
+            config, preset_id = resolved.config, resolved.preset_id
+            effort = resolved.effort or effort
+        agent = Agent(config, workspace, emit,
+                      max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
+                      skills=getattr(main.executor, "skills", None),
+                      preset_id=preset_id, roles=main.roles, board=tools, effort=effort,
+                      track_requests=False, todo_tool=False, completion_check=False,
+                      stall_timeout_s=main.stall_timeout_s,
+                      first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
+                      failover=getattr(main, "failover", True),
+                      failover_hosted=getattr(main, "failover_hosted", False))
+        policy = getattr(main.executor, "policy", None)
+        if policy is not None:
+            agent.executor.policy = policy
+            agent.executor.workspace = Workspace(workspace, policy)
+        if getattr(main, "instructions", None) is not None:
+            agent.set_instructions(main.instructions)
+        return agent, tools
+
+    def _chat_turn_ended(self, turn_id: str, survey: bool, outcome: str) -> None:
+        """A page-agent turn ended: settle the survey state file (19.18).
+
+        `done`, `cancelled` or `error` all count: the survey ran, and asking again on every open
+        of the page would be the thing nobody wanted.  The owner can still import later — the
+        proposals are in the conversation and the import tool is one call away.
+        """
+        if survey and self.tools is not None:
+            board_chat.mark_survey(self.tools.board, "done", note=f"turn {outcome}")
+
     def _card_answer(self, session, turn_id, answer: str) -> None:
         """A card turn finished with something to say: it goes on that card's thread (19.10)."""
         tools = self.tools
@@ -444,6 +509,12 @@ class BoardCommands:
     def _board_became_ready(self) -> None:
         """A board was created: both halves of the tools and the system prompt catch up at once."""
         agent = self._agent()
+        # A fresh board is owed the survey (19.18, owner decision 2026-09-19: it is the page
+        # agent's opening turn, so the picker path that skips the import offer gets one too).
+        # The marker is what makes it fresh; whichever worker created the board writes it and
+        # the worker serving the page reads it on `board_open`.
+        if self.tools is not None and board_chat.survey_state(self.tools.board) is None:
+            board_chat.mark_survey(self.tools.board, "pending", note="created by board_init")
         for tools in (self.tools, getattr(agent, "board", None)):
             if tools is not None:
                 tools.state = "ready"
@@ -956,11 +1027,21 @@ class BoardCommands:
                         "root": str(tools.board.root), "workspace": str(tools.board.repo),
                         "project": tools.project, "state": tools.state, "exists": tools.exists(),
                         "config": self._config(), "cards": list(self._snapshot.values()),
-                        "problems": self._problems()})
+                        "problems": self._problems(), "chat": self.chat.state()})
+            # A board `board_init` just created gets the survey as the page agent's opening turn
+            # (19.18): the marker file is what makes it fresh, so an old board is never surveyed.
+            self._maybe_survey(tools)
         elif kind == "board_refresh":
             self.emit({**self._changed(), "id": rid})
         elif kind == "board_check":
-            self._send({"event": "board_problems", "id": rid, "items": self._problems()})
+            section = request.get("section")
+            if section is not None and not isinstance(section, str):
+                raise ValueError("board_check section must be a column id.")
+            items = self._problems()
+            if section:
+                items = [p for p in items if self._problem_section(p) == section]
+            self._send({"event": "board_problems", "id": rid, "items": items,
+                        "section": section or None})
         elif kind == "board_card_get":
             tools = self._need()
             result = tools.run("board_read", {"id": request.get("card"),
@@ -980,6 +1061,20 @@ class BoardCommands:
             self.emit(self._changed())
         elif kind == "board_ask":
             self._ask(request, rid)
+        elif kind == "board_chat":
+            self._chat(request, rid)
+        elif kind == "board_chat_cancel":
+            stopped = self.chat.stop()
+            self._send({"event": "board_chat_cancelled", "id": rid, "stopped": stopped,
+                        "chat": self.chat.state()})
+        elif kind == "board_chat_queue_remove":
+            item = request.get("item")
+            if not isinstance(item, str) or not self.chat.remove(item):
+                raise ValueError("That prompt is not queued (it may already have started).")
+        elif kind == "board_chat_queue_move":
+            item, to = request.get("item"), request.get("to")
+            if not isinstance(item, str) or not isinstance(to, int) or not self.chat.move(item, to):
+                raise ValueError("That prompt is not queued (it may already have started).")
         elif kind == "board_cancel":
             self._cancel_card(request, rid)
         elif kind == "board_cleanup":
@@ -1024,6 +1119,10 @@ class BoardCommands:
         running_cards = self.cards.running_cards()
         if cleanup:
             running, busy_card = "a Switchboard cleanup", None
+        elif self.chat.busy():
+            # The page agent's own prompts never reach here (they queue, 19.18); everything else
+            # waits, because it can write any card on the board.
+            running, busy_card = "the Switchboard page agent's turn", None
         elif card_id is not None and card_id in running_cards:
             running, busy_card = f"{_turn_phrase(self.cards.mode_of(card_id))} on #{card_id}", card_id
         elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
@@ -1177,6 +1276,89 @@ class BoardCommands:
         stopped = self.cards.stop(card_id) if card_id else bool(self.cards.stop_all())
         self._send({"event": "board_cancelled", "id": rid, "card_id": card_id or None,
                     "stopped": stopped, "cards": self.cards.running_cards()})
+
+    # ---- board_chat: the page agent (protocol 19.18) -----------------------------
+    def _chat(self, request: dict, rid) -> None:
+        """`board_chat`: a prompt for the page agent — a turn, or a place in the queue.
+
+        The page agent's own prompts never refuse on `board_busy`: the queue is the answer
+        (#N8VK's rule, the same as a pane's).  Everything else the board can run still refuses
+        while it is turning, because it can write any card.
+        """
+        self._need()
+        text = request.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
+            raise ValueError(f"board_chat text must be 1-{MAX_ASK_TEXT} characters.")
+        model = request.get("model")
+        if model is not None:
+            if not isinstance(model, str) or (model and model not in model_roles.SETTABLE):
+                raise ValueError("board_chat model must be a role id, or empty for the "
+                                 "Switchboard role.")
+            self.chat.model = model or None
+        if request.get("survey"):
+            return self._maybe_survey(self._need(), rid)   # one path: the survey is a chat turn
+        if not self.chat.busy() and self._busy_error(rid, "the page agent's prompt"):
+            return
+        what, ident = self.chat.ask(text.strip(), rid)
+        if what == "turn":
+            self._send({"event": "board_chat_started", "id": rid, "turn_id": ident,
+                        "model": self.chat.model or "switchboard", "chat": self.chat.state()})
+
+    def _problem_section(self, problem: dict) -> str | None:
+        """Which section a problem belongs to, for `board_check {section}` (a triage button).
+
+        Problems about the board itself — a thread file with no card, a duplicate id — belong to
+        no one section, and a scoped check leaves them out.
+        """
+        tools = self._need()
+        for card in tools.board.cards():
+            if card.id is not None and str(card.path.relative_to(tools.board.root)) == problem.get("path"):
+                config = tools.board.config()
+                for column in self._config()["columns"]:
+                    if card.status in B.column_statuses_of(config, column):
+                        return column
+        return None
+
+    def _maybe_survey(self, tools, rid=None) -> None:
+        """The survey (19.18): the page agent's opening turn on a board `board_init` just created.
+
+        `project_probe` and `board_import.propose` do the finding, offline and read-only; the
+        agent narrates what they found under a read-only scope, so nothing is written until the
+        owner answers.  The board's `survey-state.json` is what makes a board fresh: a board from
+        before the survey existed has no file and is never surveyed.
+        """
+        if tools is None or self.chat.surveyed or self.chat.busy():
+            return
+        if board_chat.survey_state(tools.board) != "pending":
+            return
+        board_chat.mark_survey(tools.board, "running")
+        repo = tools.board.repo
+        try:
+            probe = PP.probe(repo)
+        except PP.ProbeError as exc:                        # pragma: no cover - unreadable tree
+            board_chat.mark_survey(tools.board, "done", note=f"probe failed: {exc}")
+            return
+        proposals: list[dict] = []
+        try:
+            proposals = [p.to_dict() for p in I.propose(repo, board=tools.board)]
+        except (I.ImportError_, PP.ProbeError, B.BoardError, OSError):
+            proposals = []                                  # the survey still runs; nothing to offer
+        git = probe.get("git") or {}
+        primary_name = git.get("primary")
+        row = next((r for r in git.get("remotes") or [] if r.get("name") == primary_name), {})
+        self._send({"event": "board_survey", "id": rid, "root": str(tools.board.root),
+                    "project": str(repo), "hints": probe.get("hints") or [],
+                    "counts": probe.get("counts") or {}, "proposals": proposals[:MAX_IMPORT_KEYS],
+                    "git": {"is_repo": bool(git.get("is_repo")), "primary": primary_name,
+                            "primary_reason": git.get("primary_reason"), "url": row.get("url"),
+                            "forge": row.get("forge"), "owner": row.get("owner"),
+                            "repo": row.get("repo")}})
+        if self._busy_error(rid, "the survey"):
+            board_chat.mark_survey(tools.board, "pending")  # card turns are running; next open
+            return
+        prompt = board_chat.survey_prompt(tools.board.root, repo, probe, proposals[:MAX_IMPORT_KEYS])
+        self.chat.ask("Survey the project: what is already tracked here, and what should become "
+                      "cards?", rid, prompt=prompt, readonly=True, survey=True)
 
     # ---- board_cleanup: one agent turn over the whole board ----------------------
     def _cleanup(self, request: dict, rid) -> None:

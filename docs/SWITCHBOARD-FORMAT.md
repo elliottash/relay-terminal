@@ -45,6 +45,13 @@ issues/planning/               plan cards (type: plan), done ones in planning/do
 issues/memory/                 memory cards (type: memory), retired ones in memory/archive/
 issues/aliases/                alias cards (type: alias), retired ones in aliases/archive/
 issues/threads/<ID>.md         one append-only thread per card
+issues/import-state.json       what an import has already brought in (key → card id), so nothing
+                               is imported twice; written by `board_import.apply`, committed
+issues/survey-state.json       `{state: pending|running|done}` — whether the Switchboard page
+                               agent's opening survey (protocol 19.18) is still owed. Written
+                               `pending` by `board_init` when it creates the board, settled
+                               `done` when the survey turn ends. A board with no file predates
+                               the survey and is never surveyed.
 issues/.private/…              the private root: same layout, gitignored (issues/.gitignore)
 ```
 

@@ -1642,7 +1642,11 @@ class InitTests(AttachTest):
         self.assertTrue(state["board"]["exists"])
         self.assertEqual(state["board"]["state"], "ready")
         self.assertEqual(sorted(p.name for p in (project / B.DEFAULT_BOARD_FOLDER).iterdir()),
-                         [".gitignore", "board.yaml", "threads"])
+                         [".gitignore", "board.yaml", "survey-state.json", "threads"])
+        # A board created now owes the page agent's survey (19.18): the marker says "pending"
+        # until the first `board_open` on it runs the survey turn.
+        marker = project / B.DEFAULT_BOARD_FOLDER / "survey-state.json"
+        self.assertEqual(json.loads(marker.read_text())["state"], "pending")
         # It is safe to send twice: a board that exists is not scaffolded again.
         events = self.send(type="board_init", id="i2", project=str(project))
         self.assertEqual([e["event"] for e in events], ["board_state"])

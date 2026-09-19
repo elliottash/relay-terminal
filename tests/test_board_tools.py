@@ -66,9 +66,10 @@ class BoardToolsTest(unittest.TestCase):
 # --------------------------------------------------------------------------- specs
 
 class SpecTests(unittest.TestCase):
-    def test_the_six_designed_tools_are_offered_and_nothing_else(self):
+    def test_the_seven_designed_tools_are_offered_and_nothing_else(self):
         self.assertEqual(T.TOOL_NAMES, ("board_list", "board_read", "board_create_card",
-                                        "board_update_card", "board_move_card", "board_comment"))
+                                        "board_update_card", "board_move_card",
+                                        "board_import_items", "board_comment"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)

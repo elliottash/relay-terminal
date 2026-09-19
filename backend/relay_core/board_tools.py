@@ -230,6 +230,16 @@ TOOL_SPECS = [
                                             "through the bridge): the model that implemented the "
                                             "change. Relay's own stamp wins."}},
          ["id", "reason"]),
+    spec("board_import_items",
+         "Create Switchboard cards from tracking the project already has — a TODO.md, a backlog/ "
+         "folder, a GitHub-style issues list, spec files — through the same import the Switchboard "
+         "page uses, so every card carries a `source` key and is never imported twice. Call it "
+         "only after the owner said yes: it writes. Returns what each key became.",
+         {"keys": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000,
+                    "description": "Source keys of the items to import, from `board_import_propose` "
+                                   "or the survey's proposals."},
+          "tab": {"type": "string", "description": "Tab id the cards land in; default features."}},
+         ["keys"]),
     spec("board_comment",
          "Append one entry to a card's thread: a note, a question for the user, a decision they made, "
          "evidence, or progress. A question is numbered and carries your recommendation. A decision "
@@ -315,7 +325,7 @@ CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
 OWNER_TOOLS = ("board_sections",)
 ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
 WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment",
-               "board_merge_cards", "board_split_card", "board_sections")
+               "board_merge_cards", "board_split_card", "board_sections", "board_import_items")
 
 
 # ------------------------------------------------------------------ small helpers
@@ -666,6 +676,13 @@ CARD_MODE_BOARD_TOOLS = {
     "plan": ("board_list", "board_read", "board_update_card", "board_comment"),
 }
 
+#: The page agent's board tools (protocol 19.18): the ordinary set plus merge and split —
+#: merging duplicates is that conversation's headline job — plus the import. `board_sections`
+#: stays with a cleanup: restructuring the whole board is a run with a preview of its own.
+CHAT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_update_card",
+                    "board_move_card", "board_comment", "board_merge_cards",
+                    "board_split_card", "board_import_items")
+
 #: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
 PLAN_HEADING = "Plan"
 
@@ -696,6 +713,34 @@ def card_brief(mode: str) -> str:
     except OSError:                                        # pragma: no cover - packaging slip
         return ""
     return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+
+
+@dataclass
+class ChatScope:
+    """The Switchboard page agent's turn (protocol 19.18): read the repository, write the board.
+
+    It rides in the `card_scope` slot — that is where the agent looks for a turn's scope — so it
+    answers the same three questions `CardScope` does. `chat` marks it apart for the cleanup-only
+    fence in `run`.
+    """
+    chat: bool = True
+    mode: str = "chat"
+
+    def allows(self, name: str) -> bool:
+        return name in CARD_READ_TOOLS or name == "search_files" or name in CHAT_BOARD_TOOLS
+
+    def tool_specs(self, executor_specs: list[dict]) -> list[dict]:
+        """The turn's tool list: the executor's read-only tools, search_files, the board tools."""
+        keep = [t for t in executor_specs if t["function"]["name"] in CARD_READ_TOOLS]
+        board = [dict(s) for s in TOOL_SPECS if s["function"]["name"] in CHAT_BOARD_TOOLS]
+        cleanup = [dict(s) for s in CLEANUP_TOOL_SPECS
+                   if s["function"]["name"] in CHAT_BOARD_TOOLS]
+        return keep + [dict(SEARCH_SPEC)] + board + cleanup
+
+    def refusal(self, name: str) -> str:
+        return (f"{name} is not available to the Switchboard page agent: it reads the repository "
+                "(read_file, list_directory, search_files) and changes the board through the board "
+                "tools. Writing code is a card's Execute, not this conversation.")
 
 
 @dataclass
@@ -1094,8 +1139,12 @@ class BoardTools:
         #: ceilings, offers the merge/split/sections tools, and records every write.
         self.cleanup: CleanupLog | None = None
         #: Set while a card's Discuss or Plan turn runs (protocol 19.10, #XS6Q): the tools that
-        #: mode offers, and the card a Plan turn may write to. None for a pane's own turns.
-        self.card_scope: CardScope | None = None
+        #: mode offers, and the card a Plan turn may write to. None for a pane's own turns. The
+        #: page agent's turns set it to a `ChatScope` (19.18), which is why the type is loose.
+        self.card_scope: CardScope | ChatScope | None = None
+        #: Set while a turn that writes nothing runs (the survey of a fresh board, 19.18): every
+        #: write tool refuses, so what the agent offers stays an offer until the owner says yes.
+        self.readonly = False
 
     # ---- events ---------------------------------------------------------------
     def _emit_board(self, event: dict) -> None:
@@ -1223,6 +1272,20 @@ class BoardTools:
     def end_card_turn(self) -> None:
         self.card_scope = None
 
+    def begin_chat_turn(self, *, readonly: bool = False) -> ChatScope:
+        """The page agent's turn starts (protocol 19.18): board tools, merge and split included.
+
+        `readonly` is the survey's opening turn: nothing is written until the owner confirms, and
+        that is enforced here rather than asked for in the brief.
+        """
+        self.card_scope = ChatScope()
+        self.readonly = bool(readonly)
+        return self.card_scope
+
+    def end_chat_turn(self) -> None:
+        self.card_scope = None
+        self.readonly = False
+
     def _check_card_scope(self, name: str, args: dict) -> None:
         """A Plan turn writes its own card's `## Plan` and nothing else; Discuss has no extra rule."""
         scope = self.card_scope
@@ -1276,10 +1339,16 @@ class BoardTools:
             raise BoardToolError("Tool arguments must be an object.")
         try:
             if (name in CLEANUP_TOOL_NAMES and self.cleanup is None
-                    and not (by_owner and name in OWNER_TOOLS)):
+                    and not (by_owner and name in OWNER_TOOLS)
+                    and not getattr(self.card_scope, "chat", False)):
                 raise BoardToolError(f"{name} is only available during a Switchboard cleanup.",
                                      code="board_refused")
             self._check_card_scope(name, args)
+            if self.readonly and name in WRITE_TOOLS:
+                raise BoardToolError(
+                    "This turn writes nothing by design — the owner has not confirmed anything "
+                    "yet. Say what you would do; the write happens once the owner answers.",
+                    code="board_readonly_turn")
             if name == "search_files":
                 return search_workspace(Path(self.board.repo), dict(args))
             if self.state == "uninitialized" and name not in UNINITIALIZED_TOOLS:
@@ -1296,7 +1365,8 @@ class BoardTools:
                        "board_create_card": self._create, "board_update_card": self._update,
                        "board_move_card": self._move, "board_comment": self._comment,
                        "board_merge_cards": self._merge, "board_split_card": self._split,
-                       "board_sections": self._sections}[name]
+                       "board_sections": self._sections,
+                       "board_import_items": self._import_items}[name]
             return handler(dict(args))
         except BoardToolError as exc:
             # A dry run's refusals are the plan, not a problem: they are already recorded as
@@ -1310,6 +1380,42 @@ class BoardTools:
             if self.cleanup is not None:
                 self.cleanup.refusals.append({"tool": name, "error": str(exc), "code": "board_error"})
             return {"error": str(exc), "code": "board_error"}
+
+    def _import_items(self, args: dict) -> dict:
+        """`board_import_items`: cards from tracking the project already has (protocol 19.18).
+
+        The same import the page's survey uses (`board_import.propose` + `apply`), so every card
+        carries its `source` key and nothing is imported twice.  The keys are re-derived from the
+        project here rather than trusted from the caller, exactly as `board_import_apply` does.
+        """
+        from . import board_import as I
+        keys = args.get("keys")
+        if (not isinstance(keys, list) or not keys
+                or not all(isinstance(k, str) and k.strip() for k in keys)):
+            raise BoardToolError("board_import_items needs `keys`: the source keys to import.")
+        if len(keys) > 1000:
+            raise BoardToolError("board_import_items takes at most 1000 keys.")
+        tab = args.get("tab")
+        if tab is not None and not (isinstance(tab, str) and tab.strip()):
+            raise BoardToolError("board_import_items tab must be a tab id.")
+        wanted = list(dict.fromkeys(k.strip() for k in keys))
+        try:
+            proposals = I.propose(self.board.repo, board=self.board)
+            chosen = [p for p in proposals if p.source_key in set(wanted)]
+            created = I.apply(self, chosen, tab=tab.strip() if tab else None, actor="agent",
+                              emit=self.emit)
+        except (I.ImportError_, BoardError, OSError) as exc:
+            raise BoardToolError(f"The import could not run: {exc}") from exc
+        cards = []
+        for card_id in created:
+            card = self.board.card_by_id(card_id)
+            if card is None:                              # pragma: no cover - deleted mid-import
+                continue
+            cards.append({"id": card_id, "title": card.title,
+                          "source_key": I.source_key_of(card),
+                          "path": str(card.path.relative_to(self.board.repo))})
+        return {"created": len(cards), "cards": cards,
+                "skipped": [k for k in wanted if k not in {c["source_key"] for c in cards}]}
 
     # ---- limits ---------------------------------------------------------------
     def _check_write_budget(self, name: str, args: dict | None = None) -> None:

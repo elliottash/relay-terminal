@@ -2693,6 +2693,88 @@ only what a board created from now on is called (`new_board_folder()` / `newBoar
 never touches a board that already exists. Turning it off does not send `board_folder`, and sending
 `board_folder` does not change the option.
 
+### 19.18 The Switchboard page agent: a conversation about the whole board (v3.8, 2026-09-19)
+
+Card #8YQ9, owner 2026-09-19: an agent on the Switchboard's **main page** that takes the whole
+board as its context by default, for the questions that are about the board rather than one card
+— reorganizing it, merging duplicates, moving cards between sections, explaining what is where.
+It is the board worker's fourth kind of turn (after a pane's own, a card's 19.16, and the cleanup
+19.9): one persistent conversation per board root per worker, in `relay_core.board_chat.py`.
+
+`board_chat {text, model?, survey?}` → `board_chat_started` (below), or `board_chat_queued` when a
+page-agent turn is already running:
+
+```jsonc
+// GUI -> worker
+{"type": "board_chat", "id": 61, "text": "merge the two voice cards"}
+// worker -> GUI, when the turn starts
+{"event": "board_chat_started", "id": 61, "turn_id": "chat-9f1c2a", "model": "switchboard",
+ "chat": { "running": true, "turn_id": "chat-9f1c2a", "model": null, "survey": false,
+           "seconds": 0.0, "queue": [], "history": [ … the conversation so far … ]}}
+// worker -> GUI, when one is already running (FIFO, #N8VK's rule — never a refusal)
+{"event": "board_chat_queued", "id": "c2", "position": 1, "text": "then sort Inbox", "chat": true}
+```
+
+- **Context.** The conversation's first prompt is seeded with the whole board — the cleanup's
+  roster shape (one line per card, sections, config, `board_chat_brief.md`) — and every later
+  prompt is the owner's words alone. It persists for the life of the worker, like a card session;
+  `board` events now carry `chat` (the `chat` block above) so a reopened page redraws it.
+- **Tools.** Its own `BoardTools` under a `ChatScope`: the ordinary board tools **plus
+  `board_merge_cards` and `board_split_card`** (merging duplicates is this conversation's headline
+  job) **plus `board_import_items`** (below), the executor's read-only file tools and `search_files`.
+  No shell, no file writes: code is a card's Execute. `board_sections` stays with a cleanup.
+- **Model.** The `switchboard` role (13.1) — which is what a board worker is started on
+  (`agent_role`, 19.1) — so the page agent and the card threads answer on the same model.
+  `model` in a `board_chat` names another role for the turns after it (empty string: back to the
+  Switchboard role); the conversation survives the switch, as a pane's survives `set_model`.
+- **Queueing.** A prompt that arrives while *this* conversation is turning joins a worker-side
+  FIFO queue (cap 20; past it, `error`), announced by `board_chat_queued` and drained in order
+  when each turn ends — the pane's semantics (#N8VK), not the board's: the page agent never
+  refuses its own prompt. Everything else still refuses while it turns (`board_busy`, naming the
+  page agent), because it can write any card: a cleanup, a card turn, an import.
+- **Queue ops and stop.** `board_chat_queue_remove {item}`, `board_chat_queue_move {item, to}` →
+  `board_chat_state` (the `chat` block, always current); `board_chat_cancel` →
+  `board_chat_cancelled {stopped}` — the running turn stops and the queue carries on.
+- **Events.** Every turn event of the page agent carries `chat: true` and its `turn_id` — the
+  idiom `cleanup: true` and `card_id` already use — including `context`, so the page's
+  context-left chip follows the conversation like a pane's.
+
+**`board_import_items`** is a new ordinary board tool (pane agents get it too): it turns tracking
+the project already has into cards through the same import the survey and the page use
+(`board_import.propose` + `apply`, 19.13), so every card carries its `source` key and nothing is
+imported twice. `keys` are re-derived from the project, never trusted from the caller; it is a
+write tool, budgeted like the others and refused in a read-only turn.
+
+**The survey** is the page agent's opening turn on a **freshly created** board (owner, 2026-09-19:
+"for a new project, the switchboard agent should search for existing project todos or tracking. if
+it finds anything, it offers to conver to switchboard issues. if its .git, it should offer to look
+on github.com for an issues corpus to sync"). What makes a board fresh is a marker file,
+`<board folder>/survey-state.json`, which `board_init` writes as `{state: pending}` when it creates
+a board (`_board_became_ready`); boards from before this existed have no file and are **never**
+surveyed. The first `board_open` on a pending board:
+
+1. runs `project_probe.probe()` and `board_import.propose()` offline (both read-only), and sends
+   **`board_survey {root, project, hints, counts, proposals, git}`** — the `git` block is the
+   primary remote (`upstream` over `origin`, with its reason), its URL, the forge, and owner/repo,
+   so the page can offer the GitHub corpus;
+2. starts the page agent's turn on a prompt built from that data (`board_chat.survey_prompt`)
+   under a **read-only scope**: every write tool refuses with `board_readonly_turn`, so nothing is
+   written until the owner answers — the confirm path is the reply, or the page's Import button,
+   which sends the existing `board_import_apply` (19.13) or lets the agent call
+   `board_import_items`;
+3. settles the marker to `done` when the turn ends, whatever its outcome, so a board is surveyed
+   once. If card turns or a cleanup are running at open, the marker goes back to `pending` and the
+   next open tries again. A `board_chat {survey: true}` runs the same path by hand.
+
+The GitHub corpus is **an offer that links out only** until #GDQN (engine) and #ZKR0 (its
+Switchboard surface) land: the survey's prompt and event carry the issues URL and say so, and
+nothing is fetched or synced.
+
+**`board_check` gains `section`** (the page's per-section triage button): a column id, answered by
+`board_problems {items, section}` with only that section's cards' problems. Problems about the
+board itself (an orphan thread, a duplicate id) belong to no section and are left out of a scoped
+check; unscoped `board_check` is unchanged.
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
