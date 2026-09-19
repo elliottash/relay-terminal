@@ -1354,6 +1354,16 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   become reasoning, and a context overflow is named without quoting the body. Saved endpoints
   (`local:<id>`), the probe and the worker messages are `backend/relay_core/localmodels.py`; a
   hosted provider's request is unchanged. See [LOCAL-MODELS.md](LOCAL-MODELS.md).
+- A request refused with HTTP 408, 409, 429 or any 5xx by a provider that is not a local model
+  server is sent again, at most six times, the way Claude Code's transport retries: after the
+  delay a `Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute),
+  else an exponential backoff from 0.5 s doubling to 8 s with jitter. The status arrives before
+  anything streams, so a retry repeats nothing the user has seen; each wait emits
+  `provider_retry {reason: "http"}` and a `status`, and the refusal becomes the failure only when
+  the attempts run out. Every caller of `complete()` inherits it — pane turns, side calls, the key
+  test. The hosted gateway decides from its own error body (a rate limit is waited out until its
+  window reopens; a spent allowance is never waited out), and a local model server is excluded:
+  its 5xx are deterministic and its loading 503 has its own fixed wait.
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
   `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,

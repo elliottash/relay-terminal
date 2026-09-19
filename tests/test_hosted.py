@@ -54,6 +54,7 @@ class FakeGateway:
         self.unauthorized_once = False       # answer the next chat call 401, then behave
         self.always_unauthorized = False
         self.exhausted = False               # answer every chat call 429 quota_exhausted
+        self.rate_limited_once = False       # answer the next chat call 429 rate_limited, then behave
         self.lock = threading.Lock()
         outer = self
 
@@ -128,8 +129,15 @@ class FakeGateway:
                         outer.chat_calls += 1
                         refuse = outer.always_unauthorized or outer.unauthorized_once
                         outer.unauthorized_once = False
+                        limited = outer.rate_limited_once
+                        outer.rate_limited_once = False
                     if refuse or self._bearer() is None:
                         return self._refuse(401, "token_expired", "register again")
+                    if limited:
+                        # The gateway's own shape: the window reopens at resets_at (here, now).
+                        return self._json(429, {"error": {"code": "rate_limited",
+                                                          "message": "too many requests this minute.",
+                                                          "resets_at": int(time.time())}})
                     if outer.exhausted:
                         return self._refuse(429, "quota_exhausted", "allowance used", self._quota_headers())
                     self.send_response(200)
@@ -175,6 +183,7 @@ class HostedCase(unittest.TestCase):
         gateway = self.gateway
         with gateway.lock:
             gateway.unauthorized_once = gateway.always_unauthorized = gateway.exhausted = False
+            gateway.rate_limited_once = False
             gateway.registrations = gateway.chat_calls = 0
             gateway.tokens.clear()
             gateway.requests.clear()
@@ -329,6 +338,15 @@ class TransportTests(HostedCase):
         self.assertEqual(caught.exception.code, "token_expired")
         self.assertEqual(self.gateway.chat_calls, 2)
 
+    def test_a_rate_limited_gateway_is_waited_out_and_asked_again(self):
+        self.session.token()
+        self.gateway.rate_limited_once = True
+        result, events = self.complete()
+        self.assertEqual(result["content"], "FREE_OK")
+        self.assertEqual(self.gateway.chat_calls, 2)
+        self.assertTrue(any(e["event"] == "provider_retry" and e.get("reason") == "http"
+                            for e in events))
+
     def test_an_exhausted_allowance_is_a_provider_error_with_its_code_and_reset_time(self):
         self.gateway.exhausted = True
         with self.assertRaises(ProviderError) as caught:
@@ -341,6 +359,8 @@ class TransportTests(HostedCase):
         self.assertNotIn("allowance used", str(exc))     # the gateway's own message is not echoed
         # The refusal's headers still updated the last known quota.
         self.assertEqual(self.session.quota(), self.gateway.quota)
+        # A spent allowance lifts at midnight, not in seconds: it is not waited out.
+        self.assertEqual(self.gateway.chat_calls, 1)
 
     def test_error_wording_per_code_and_a_foreign_body_is_dropped(self):
         text, code, resets_at = hosted.describe_error(429, json.dumps(

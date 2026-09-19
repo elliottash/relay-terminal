@@ -985,6 +985,18 @@ New event, emitted before the retried model call:
 `provider_retry {turn_id, reason: "stall" | "truncated", attempt, max_attempts, seconds, step, text}`
 (`seconds` only for `"stall"`).
 
+Since 2026-09-19 the transport itself also retries a *refused* request — HTTP 408, 409, 429 or any
+5xx from a provider that is not a local model server — up to six times, waiting what a
+`Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute) and
+otherwise backing off exponentially (0.5 s doubling to 8 s, with jitter); this is the policy
+Claude Code's transport uses. The status arrives before anything streams, so the retry repeats
+nothing the user has seen. Each wait emits the same event with `reason: "http"` and no `turn_id`
+(the transport does not know the turn), plus a `status`; the refusal becomes an `error` only when
+the attempts run out. Relay's own gateway decides from its error body: a `rate_limited` window is
+waited out until it reopens, a spent `quota_exhausted` allowance is never waited out. A local
+model server is excluded — its 5xx are deterministic, and its loading 503 keeps its own fixed
+wait inside the first-token budget.
+
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 The GUI prints `text` as a note line.
 
