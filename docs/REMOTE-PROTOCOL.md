@@ -621,6 +621,17 @@ Any paired device may subscribe: the capability floor is `view`.
 The desktop keeps all five on the device record (`remote/identity.py`) and nowhere else. A `410`
 or `404` from the push service drops the subscription; so does revoking the device.
 
+**Each device's pushes go through its own rendezvous.** A browser subscribes under the VAPID key
+of the rendezvous it fetched `/v1/push/key` from, and only that server's signature is accepted for
+that subscription. So the device record keeps an `origin` — the rendezvous it paired through, then
+the one each `push_subscribe` arrived through — where `""` is the desktop's own local rendezvous
+(also what a record written before the field means), and the hub posts `/v1/push/send` there,
+whichever rendezvous it is registered with at the moment (§8, the hosted address). A push whose
+origin cannot be reached is dropped, never queued, and logged once by origin, never by endpoint. A
+phone that connects through a rendezvous whose key is not the one its subscription was made under
+renews the subscription under the new key and sends `push_subscribe` again, which moves its origin
+(`app/pushkey.js`); permission is already granted, so nothing is asked.
+
 **The choice of kinds is per device and is made on the device.** Which of these is worth
 interrupting you is not something a desktop can decide for a phone — it depends on whose phone it
 is and what the day looks like — so the desktop stores the list and does not own it. Sending
@@ -1275,6 +1286,15 @@ hands it to the same worker `transcribe` request its own microphone uses, and th
 answer comes back by that id. A remote transcript never reaches the desktop's prompt box, and the
 desktop's own is never sent to a device. A clip the GUI does not answer within 90 seconds is an
 error the phone shows, not a spinner that never stops.
+
+The hosted address (§8) is in the share dialog's picker: `relay-terminal.ai`, a different rendezvous
+the hub moves to and back from live. Two things follow from moving, and the entry's `where` and
+the note after a switch both say them. A switch **drops the guests and phones connected through the
+old address**: their channels were on the socket that closed, and they reconnect through the
+rendezvous they know. **Invites made earlier work again when their address is picked again**: their
+rooms stay at the rendezvous that minted them and are not burned by a switch — only live meeting
+codes are, as `expired`. Push is unaffected either way, because each device keeps its own origin
+(§9.1). Tested in `tests/test_remote_hosted_address.py`.
 
 The desktop endpoint runs as Python today. `RemoteHub` in the GUI (§1) is still the target for P2,
 where screen frames come from `TerminalView` in process; for P1, where everything the hub needs

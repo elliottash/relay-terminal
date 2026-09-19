@@ -162,6 +162,11 @@ class Device:
     # The Web Push subscription (section 9): endpoint + content keys + the inner seal key, sent
     # by the phone inside the Noise session and kept only here — never at the rendezvous.
     push: dict | None = None
+    # The rendezvous this device paired through, or last subscribed through: its pushes go out
+    # there, signed with that server's VAPID key, because that is the key the browser subscribed
+    # under. "" is the desktop's own local rendezvous, which is also what a record written before
+    # this field existed means (the local server's port changes each run, so it is not stored).
+    origin: str = ""
 
     @property
     def key_bytes(self) -> bytes:
@@ -238,19 +243,24 @@ class DeviceStore:
 
     # ---- changes -----------------------------------------------------------------------------
 
-    def pair(self, public_key: bytes, name: str, platform: str, capability: str) -> Device:
+    def pair(self, public_key: bytes, name: str, platform: str, capability: str,
+             origin: str = "") -> Device:
         import secrets
         existing = self.by_key(public_key)
         if existing is not None:                 # re-pairing the same key updates it in place
             existing.name = clean_label(name)
             existing.platform = clean_label(platform, 24)
             existing.capability = capability
+            if existing.push is None:
+                # A subscription it already holds was made under its old origin's key, and keeps
+                # going out there until the phone subscribes again (which moves it).
+                existing.origin = origin
             existing.last_seen = time.time()
             self.save()
             return existing
         device = Device(device_id=secrets.token_hex(8), name=clean_label(name),
                         platform=clean_label(platform, 24), public_key=pairing.b64(public_key),
-                        capability=capability)
+                        capability=capability, origin=origin)
         self.devices[device.device_id] = device
         self.save()
         return device
@@ -264,11 +274,16 @@ class DeviceStore:
         self._notify(device_id)              # a downgrade must reach live sessions at once
         return True
 
-    def set_push(self, device_id: str, subscription: dict | None) -> bool:
+    def set_push(self, device_id: str, subscription: dict | None,
+                 origin: str | None = None) -> bool:
+        """Store (or clear) a subscription; ``origin``, when given, is the rendezvous it was made
+        under, and moves the device's pushes there."""
         device = self.devices.get(device_id)
         if device is None:
             return False
         device.push = subscription
+        if origin is not None:
+            device.origin = origin
         self.save()
         return True
 

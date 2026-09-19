@@ -754,6 +754,9 @@ class Sidecar:
     # stands for "the public link" in both directions.
     CLOUDFLARE_VALUE = "cloudflare"
     HOSTED_WHERE = "works from anywhere, no certificate warning"
+    # What a switch costs, in the entry's `where` (the picker's tooltip) and in the note after it.
+    HOSTED_SWITCH = ("Switching address drops the guests and phones connected through the old "
+                     "one. Invites made earlier work again when their address is picked again.")
     # What the picker sends back for the hosted entry, whatever origin it stands for.
     HOSTED_VALUE = "relay-terminal.ai"
 
@@ -765,7 +768,8 @@ class Sidecar:
                  else urlsplit(origin).netloc or origin)
         available = not self.hosted_reason
         return {"value": self.HOSTED_VALUE, "kind": "hosted", "available": available,
-                "where": self.HOSTED_WHERE, "reason": self.hosted_reason,
+                "where": f"{self.HOSTED_WHERE}. {self.HOSTED_SWITCH}",
+                "reason": self.hosted_reason,
                 "label": f"{shown} — {self.HOSTED_WHERE}" if available else "",
                 "current": self.served_by_hosted}
 
@@ -902,7 +906,8 @@ class Sidecar:
         self.address = self.HOSTED_VALUE
         self.base = origin
         self.note = ("Links go through relay-terminal.ai, which carries only ciphertext it cannot "
-                     "read; anyone with a link can reach the door, and you admit each person.")
+                     "read; anyone with a link can reach the door, and you admit each person. "
+                     + self.HOSTED_SWITCH)
         await self._wait_for_socket()
         return True
 

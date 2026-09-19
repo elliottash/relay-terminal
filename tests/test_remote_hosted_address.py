@@ -16,7 +16,9 @@ import contextlib
 import functools
 import json
 import os
+import shutil
 import socket
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -29,9 +31,11 @@ from remote import gui_host
 from remote import identity as identity_mod
 from remote import tailnet as tailnet_mod
 from remote import wire
+from rendezvous import server as rendezvous_mod
 from rendezvous.server import Store, build
 
-APP_DIR = Path(__file__).resolve().parent.parent / "app"
+HERE = Path(__file__).resolve().parent
+APP_DIR = HERE.parent / "app"
 
 
 def run(coroutine, timeout=60):
@@ -100,6 +104,7 @@ class Hosted:
         self.side = gui_host.Sidecar()
         self.side.out = []
         self.side.emit = self.side.out.append
+        self.side.source.send = self.side.out.append    # the pane source's own line to the GUI
         await self.side.start({"port": 0, "tls": False, "name": "test desktop"})
         self.local = self.side.local
         await self.side.handle({"t": "pane", "id": "p1", "title": "relay-terminal",
@@ -156,6 +161,8 @@ class HostedAddressTests(unittest.TestCase):
                 self.assertEqual(entry["reason"], "")
                 self.assertIn("works from anywhere, no certificate warning", entry["label"])
                 self.assertFalse(entry["current"])
+                self.assertIn("drops the guests and phones connected", entry["where"])
+                self.assertIn("Invites made earlier work again", entry["where"])
                 self.assertEqual(h.sent("started")[-1]["base"], h.local)
                 self.assertEqual(await h.desktops(h.local), 1)
                 self.assertEqual(await h.desktops(h.hosted), 0)
@@ -293,6 +300,186 @@ class HostedAddressTests(unittest.TestCase):
                     self.assertEqual(h.side.host.app_base, h.hosted)
                 h.side.tls_port = 0
         run(main())
+
+
+# ---- per-device push origins (section 9) ----------------------------------------------------------
+
+def subscription_message() -> dict:
+    """A `push_subscribe` as a phone sends it: real P-256 keys, so the hub can encrypt to them."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from remote import push
+    key = ec.generate_private_key(ec.SECP256R1())
+    public = key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    return {"t": "push_subscribe", "endpoint": "https://push.example.com/v1/subscription/abc",
+            "p256dh": push.b64url(public), "auth": push.b64url(bytes(range(16))),
+            "key": push.b64url(bytes(range(32)))}
+
+
+BODY = {"v": 1, "kind": "waiting_input", "pane": "p1", "title": "Waiting for you",
+        "body": "Pane 1 is waiting for input"}
+
+
+class PushOriginTests(unittest.TestCase):
+    """Each device is pushed through the rendezvous it subscribed through, whichever one the hub
+    is registered with now: that server's VAPID key is the one the browser subscribed under."""
+
+    async def spy(self, h):
+        """Replace `/v1/push/send` on both servers with a recorder, keyed by which server."""
+        h.pushed = []
+        for name, server in (("local", h.side.server), ("hosted", h.hosted_server)):
+            async def record(request, body, name=name):
+                h.pushed.append((name, json.loads(body)))
+                return rendezvous_mod.httpd.Response.json(
+                    {"delivered": True, "status": 201, "drop": False})
+            server.routes[("POST", "/v1/push/send")] = record
+
+    async def phone(self, h, through):
+        """Pair a phone through ``through`` (the owner allows it), then connect it there."""
+        await h.side.pair()
+        url = h.sent("pairing")[-1]["url"]
+        asks = len(h.sent("ask"))
+        pairing = client_mod.Client(through)
+        task = asyncio.create_task(pairing.pair(url, name="phone", platform="Safari"))
+        await h.until(lambda: len(h.sent("ask")) > asks, timeout=10)
+        await h.side.handle({"t": "answer", "id": h.sent("ask")[-1]["id"], "allow": True,
+                             "capability": wire.FULL})
+        record = await asyncio.wait_for(task, 20)
+        await pairing.close()
+        return record
+
+    async def connect(self, record, through):
+        client = client_mod.Client(through)
+        await client.connect(record)
+        return client
+
+    async def subscribe(self, client):
+        await client.send(subscription_message())
+        state = await client.expect("push_state")
+        self.assertTrue(state["subscribed"])
+
+    def device(self, h, record):
+        return h.side.devices.devices[record.device_id]
+
+    def test_a_phone_paired_locally_is_pushed_locally_after_the_hub_moves(self):
+        async def main():
+            async with Hosted() as h:
+                await self.spy(h)
+                record = await self.phone(h, h.local)
+                self.assertEqual(self.device(h, record).origin, "", "local is recorded as \"\"")
+                client = await self.connect(record, h.local)
+                await self.subscribe(client)
+                await client.close()
+
+                await h.choose("relay-terminal.ai")
+                self.assertEqual(h.side.host.rendezvous, h.hosted)
+                await h.side.host.notifier.deliver(BODY)
+                self.assertEqual([name for name, _ in h.pushed], ["local"])
+                self.assertEqual(h.pushed[0][1]["token"], h.side.host.tokens[h.local],
+                                 "with the local token, which still works there")
+                self.assertEqual(h.pushed[0][1]["endpoint"],
+                                 "https://push.example.com/v1/subscription/abc")
+        run(main())
+
+    def test_a_phone_that_subscribes_again_moves_to_the_new_origin(self):
+        async def main():
+            async with Hosted() as h:
+                await self.spy(h)
+                record = await self.phone(h, h.local)
+                client = await self.connect(record, h.local)
+                await self.subscribe(client)
+                await client.close()
+
+                # The hub moves; the phone reaches it through the hosted server, sees a different
+                # /v1/push/key and subscribes again (app/pushkey.js).
+                await h.choose("relay-terminal.ai")
+                client = await self.connect(record, h.hosted)
+                await self.subscribe(client)
+                await client.close()
+                self.assertEqual(self.device(h, record).origin, h.hosted)
+                await h.side.host.notifier.deliver(BODY)
+                self.assertEqual([name for name, _ in h.pushed], ["hosted"])
+
+                # Back home: its subscription is still under the hosted key, so it stays there.
+                await h.side.drop_hosted()
+                self.assertEqual(h.side.host.rendezvous, h.local)
+                await h.side.host.notifier.deliver(BODY)
+                self.assertEqual([name for name, _ in h.pushed], ["hosted", "hosted"])
+        run(main())
+
+    def test_a_phone_paired_through_hosted_records_it_and_is_never_pushed_locally(self):
+        async def main():
+            async with Hosted() as h:
+                await self.spy(h)
+                await h.choose("relay-terminal.ai")
+                record = await self.phone(h, h.hosted)
+                self.assertEqual(self.device(h, record).origin, h.hosted)
+                client = await self.connect(record, h.hosted)
+                await self.subscribe(client)
+                await client.close()
+                await h.side.drop_hosted()
+                # The hub re-registered locally, which rotated nothing at the hosted server.
+                await h.side.host.notifier.deliver(BODY)
+                self.assertEqual([name for name, _ in h.pushed], ["hosted"])
+        run(main())
+
+    def test_an_unreachable_origin_drops_the_push_and_says_so_once_without_the_endpoint(self):
+        async def main():
+            async with Hosted() as h:
+                await self.spy(h)
+                await h.choose("relay-terminal.ai")
+                record = await self.phone(h, h.hosted)
+                client = await self.connect(record, h.hosted)
+                await self.subscribe(client)
+                await client.close()
+                await h.side.drop_hosted()
+                await h.hosted_server.close()          # relay-terminal.ai goes away
+                with self.assertLogs("relay.host", level="INFO") as logs:
+                    await h.side.host.notifier.deliver(BODY)
+                    await h.side.host.notifier.deliver(BODY)
+                    gui_host.host_mod.log.info("end of test")   # so assertLogs has a line
+                unreachable = [line for line in logs.output if "unreachable" in line]
+                self.assertEqual(len(unreachable), 1, logs.output)
+                self.assertNotIn("push.example.com", "\n".join(logs.output))
+                self.assertEqual(h.pushed, [], "never sent through another origin instead")
+                self.assertIsNotNone(self.device(h, record).push, "dropped, not unsubscribed")
+                # Restart it on the same port so the harness can close it again.
+                await h.hosted_server.start("127.0.0.1", int(h.hosted.rsplit(":", 1)[1]))
+        run(main())
+
+    def test_a_record_written_before_origins_is_the_local_registry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "devices.json"
+            path.write_text(json.dumps({"devices": [{
+                "device_id": "d1", "name": "old phone", "platform": "Safari",
+                "public_key": "AAAA", "capability": "full"}]}))
+            store = identity_mod.DeviceStore(Path(directory))
+            self.assertEqual(store.devices["d1"].origin, "")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class PushKeyRenewalTests(unittest.TestCase):
+    """app/pushkey.js, the phone's half: renew under a moved key, silently, and only then."""
+
+    def test_the_phone_renews_only_when_the_key_moved(self):
+        from remote import push
+        old = push.b64url(bytes(range(65)))
+        new = push.b64url(bytes(range(1, 66)))
+        done = subprocess.run([shutil.which("node"), str(HERE / "push_key_peer.mjs"), old, new],
+                              capture_output=True, text=True, cwd=str(HERE.parent))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        results = json.loads(done.stdout)
+        self.assertTrue(results["moved"]["renewed"])
+        self.assertEqual(results["moved"]["subscribed"], [new])
+        self.assertEqual(results["moved"]["reported"],
+                         [{"endpoint": "https://push.example/fresh", "vapid": new}])
+        self.assertFalse(results["same"]["renewed"])
+        self.assertEqual(results["same"]["subscribed"], [])
+        self.assertTrue(results["browser_only"]["renewed"])
+        self.assertFalse(results["unknown"]["renewed"])
+        self.assertEqual(results["unknown"]["fetched"], 0)
+        self.assertFalse(results["none"]["renewed"])
+        self.assertEqual(results["made_under"], old)
 
 
 if __name__ == "__main__":

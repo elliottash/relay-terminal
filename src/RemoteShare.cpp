@@ -1491,6 +1491,9 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
                         .arg(address, entry.value(QStringLiteral("where")).toString());
         }
         m_address->addItem(label, address);
+        // `where` can say more than the label has room for (the hosted entry: what a switch drops).
+        m_address->setItemData(m_address->count() - 1,
+                               entry.value(QStringLiteral("where")).toString(), Qt::ToolTipRole);
         if (entry.value(QStringLiteral("current")).toBool()) {
             m_address->setCurrentIndex(m_address->count() - 1);
             const QString current = entry.value(QStringLiteral("kind")).toString();

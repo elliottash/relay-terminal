@@ -283,7 +283,7 @@ class NotifierHarness:
                                         spawn=lambda coroutine: self.tasks.append(
                                             asyncio.ensure_future(coroutine)))
 
-    async def send(self, endpoint: str, payload: bytes) -> dict:
+    async def send(self, endpoint: str, payload: bytes, origin: str = "") -> dict:
         self.sent.append((endpoint, payload))
         return self.reply
 

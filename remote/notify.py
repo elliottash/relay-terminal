@@ -151,7 +151,8 @@ def elapsed_text(seconds: float) -> str:
 class Notifier:
     """What the hub pushes, to whom, and how often.
 
-    ``send`` is the one way out: ``await send(endpoint, payload)`` posts to the rendezvous and
+    ``send`` is the one way out: ``await send(endpoint, payload, origin=device.origin)`` posts
+    to the device's own rendezvous (``""`` is the local one) and
     answers ``{"delivered": bool, "status": int | None, "drop": bool}``. Keeping it a callable is
     what lets the triggers, the presence rule and the cooldown be tested without a push service.
     ``spawn`` runs a coroutine the hub will not await: the triggers are called from synchronous
@@ -283,7 +284,9 @@ class Notifier:
                 self.devices.set_push(device.device_id, None)
                 continue
             try:
-                reply = await self.send(subscription["endpoint"], payload)
+                # Through the rendezvous whose VAPID key this subscription was made under.
+                reply = await self.send(subscription["endpoint"], payload,
+                                        origin=getattr(device, "origin", ""))
             except Exception as error:
                 log.info("push for device %s did not go out: %s", device.device_id, error)
                 continue

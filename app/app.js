@@ -20,6 +20,8 @@ import { mountPane } from './pane.js';
 // The page is as tall as what is visible, so an on-screen keyboard shrinks it instead of pushing it
 // off the screen (owner, 2026-09-18, an iPad in landscape).
 import { trackViewport } from './viewport.js';
+// Renewing a push subscription made under another rendezvous's VAPID key (section 9).
+import { renewIfKeyMoved } from './pushkey.js';
 
 trackViewport();
 
@@ -326,6 +328,7 @@ async function enableNotifications() {
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true, applicationServerKey: un64(vapid),
   });
+  await storeValue('push-vapid', vapid);   // which rendezvous's key, for renewPushIfMoved
   // The seal key: generated here, kept where the service worker reads it, and sent to the
   // desktop and nowhere else.
   const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true,
@@ -342,6 +345,7 @@ async function disableNotifications() {
   if (subscription) await subscription.unsubscribe();
   await dropValue('push-key');
   await dropValue('push-kinds');
+  await dropValue('push-vapid');
   notifyKinds = null;
   await rrp.send({ t: 'push_unsubscribe' });
   await rrp.once('push_state', 15000);
@@ -359,6 +363,32 @@ async function toggleNotifications() {
     button.disabled = false;
     await updateNotifyRow();
   }
+}
+
+// The desktop pushes this phone through the rendezvous it subscribed through. When it is reached
+// through another one now (its owner moved it to relay-terminal.ai, or back), the key this
+// subscription was made under is not that rendezvous's: renew it under the new key, with the same
+// seal key and kinds, and send it again, which moves this device's push origin on the desktop.
+// Permission is already granted, so this asks nothing; any failure leaves the row to say so.
+async function renewPushIfMoved() {
+  if (!pushUsable() || Notification.permission !== 'granted') return;
+  const subscription = await currentSubscription();
+  if (!subscription || !(await storedValue('push-key'))) return;
+  await renewIfKeyMoved({
+    subscription,
+    stored: await storedValue('push-vapid'),
+    fetchVapid: async () => (await (await fetch(`${rrp.origin}/v1/push/key`)).json()).vapid,
+    subscribe: async (key) => {
+      await subscription.unsubscribe();      // a browser refuses a second key otherwise
+      const registration = await navigator.serviceWorker.ready;
+      return registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    },
+    report: async (fresh, vapid) => {
+      await storeValue('push-vapid', vapid);
+      await sendSubscription(fresh, (await storedValue('push-kinds'))
+        || NOTIFY_KINDS.map(([kind]) => kind));
+    },
+  });
 }
 
 // ---- thread -----------------------------------------------------------------------------------
@@ -1246,6 +1276,10 @@ rrp.addEventListener('welcome', (event) => {
   passwordEntry = !!event.detail.password_entry;
   $('capability').textContent = capability;
   updateVoiceUi();
+});
+
+rrp.addEventListener('welcome', () => {
+  renewPushIfMoved().catch(() => {}).finally(() => updateNotifyRow().catch(() => {}));
 });
 
 rrp.addEventListener('screen_snapshot', (event) => onScreen(event.detail));

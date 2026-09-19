@@ -525,6 +525,13 @@ class Host:
         self.token: str | None = None
         self.rendezvous: str | None = None
         self._rehomed = False
+        # Per-device push origins (section 9). `home` is the first rendezvous this hub registered
+        # with — the sidecar's own — and is what a device origin of "" means. `tokens` keeps a
+        # token for every rendezvous registered with, so a phone subscribed under the local
+        # server's VAPID key is still pushed through it while the hub sits at the hosted one.
+        self.home: str | None = None
+        self.tokens: dict[str, str] = {}
+        self._push_unreachable: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
         self._running = False
         self.devices.on_revoke(self._device_changed)
@@ -549,7 +556,14 @@ class Host:
         base = rendezvous_base.rstrip("/")
         self.token = await self._register_at(base)
         self.rendezvous = base
+        self.tokens[base] = self.token
+        if self.home is None:
+            self.home = base
         return self.identity.desktop_id
+
+    def origin(self) -> str:
+        """What a device paired or subscribed right now records as its origin: "" at home."""
+        return "" if self.rendezvous == self.home else (self.rendezvous or "")
 
     async def _register_at(self, base: str) -> str:
         """Challenge and register at ``base``; the token. Changes nothing on the hub, so a
@@ -582,6 +596,7 @@ class Host:
                        if record.state == meetcode.LIVE]:
             await self.codes.expire(record)
         self.rendezvous, self.token = base, token
+        self.tokens[base] = token
         # Drop the socket; `serve` reconnects at once, to `socket_url()`, which is now the new one.
         self._rehomed = True
         if self.socket is not None:
@@ -1481,7 +1496,8 @@ class Host:
         allowed, capability = await self.approver(request)
         if not allowed or capability not in wire.CAPABILITIES:
             raise wire.WireError("not_permitted", "the desktop refused this device.")
-        device = self.devices.pair(channel.client_static, request.name, request.platform, capability)
+        device = self.devices.pair(channel.client_static, request.name, request.platform,
+                                   capability, origin=self.origin())
         channel.device_id = device.device_id
         self.audit.record("pair", device=device.device_id, name=request.name,
                           capability=capability, peer=request.peer)
@@ -2301,7 +2317,9 @@ class Host:
         if channel.device_id is None:
             raise wire.WireError("not_permitted", "pair first.")
         subscription = notify_mod.clean_subscription(message)
-        self.devices.set_push(channel.device_id, subscription)
+        # The phone subscribed under the VAPID key of the rendezvous it reached us through, which
+        # is the one the hub is on now: its pushes go out there from here on (section 9).
+        self.devices.set_push(channel.device_id, subscription, origin=self.origin())
         self.audit.record("push_subscribe", device=channel.device_id)
         await channel.send({"t": "push_state", "subscribed": True,
                             "kinds": subscription["kinds"], "id": message.get("id")})
@@ -2314,14 +2332,42 @@ class Host:
         await channel.send({"t": "push_state", "subscribed": False, "kinds": [],
                             "id": message.get("id")})
 
-    async def push_send(self, endpoint: str, payload: bytes) -> dict:
-        """Post one encrypted payload through the rendezvous, which cannot read it."""
-        if not self.rendezvous or not self.token:
+    async def push_send(self, endpoint: str, payload: bytes, origin: str = "") -> dict:
+        """Post one encrypted payload through the device's own rendezvous, which cannot read it.
+
+        ``origin`` is the device's (``""`` is home, the local rendezvous): the server whose VAPID
+        key its subscription was made under, whichever rendezvous the hub is on at the moment. A
+        rendezvous this hub holds no token for is registered with first. One that cannot be
+        reached drops the push — never queued — and is logged once, by origin, never by endpoint.
+        """
+        base = (origin or self.home or "").rstrip("/")
+        if not base or not self.token:
             raise wire.WireError("internal", "this hub is not registered with a rendezvous.")
-        return await self._post("/v1/push/send", {
-            "desktop_id": self.identity.desktop_id, "token": self.token,
-            "endpoint": endpoint, "ciphertext": base64.b64encode(payload).decode(),
-            "ttl": push_mod.PUSH_TTL, "urgency": "normal"})
+        fields = {"desktop_id": self.identity.desktop_id, "endpoint": endpoint,
+                  "ciphertext": base64.b64encode(payload).decode(),
+                  "ttl": push_mod.PUSH_TTL, "urgency": "normal"}
+        try:
+            for attempt in (0, 1):
+                token = self.tokens.get(base)
+                if token is None:
+                    token = self.tokens[base] = await self._register_at(base)
+                try:
+                    reply = await self._post("/v1/push/send", {**fields, "token": token},
+                                             base=base)
+                    break
+                except wire.WireError as error:
+                    # A token that server no longer takes (it restarted): register once more.
+                    if attempt or "failed: 401" not in error.message:
+                        raise
+                    self.tokens.pop(base, None)
+        except OSError as error:                   # URLError, refused, timed out
+            if base not in self._push_unreachable:
+                self._push_unreachable.add(base)
+                log.info("push dropped: rendezvous %s is unreachable (%s)", base,
+                         type(error).__name__)
+            return {"delivered": False, "status": None, "drop": False}
+        self._push_unreachable.discard(base)
+        return reply
 
     # ---- pane_state (relay-terminal-71) ----------------------------------------------------------
     # One pane model, two views (docs/REMOTE-PROTOCOL.md section 16). The GUI publishes each shared
