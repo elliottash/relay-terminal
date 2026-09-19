@@ -1,11 +1,11 @@
 ---
 id: XEMH
 type: work
-status: inbox
+status: done
 labels: [bug, remote, tests]
 rank: zzzzj
 created: '2026-09-18'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp/test-results.txt], related: [], github: null}
 ---
 # Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)
 
@@ -17,3 +17,11 @@ No longer reproduces at `6e1e98f`: `python3 -m unittest tests.test_remote_wire t
 runs 42 tests, all passing, the Node peers included. `app/rrp.js` exports `Rrp` by name. The failure
 was the half-landed remote work in the tree at the time, since committed in `cc79c01` and `dd35ead`.
 This card can be closed; the remaining remote failures (voice, scrollback) are tracked on `#W5N2`.
+
+## Resolution
+Closed as a transient failure from half-landed remote work, not a remaining product defect. On
+`6fc30ae8c94bc1e0b331a33f3dd2006e2b21d899`, GPT-5 reran
+`python3 -m unittest tests.test_remote_wire tests.test_remote_noise`; all 48 tests passed, including
+the Node browser peers that import `Rrp` by name. The relevant app and test files were clean before
+the run. The recorded output is in
+`docs/qa_evidence/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp/test-results.txt`.

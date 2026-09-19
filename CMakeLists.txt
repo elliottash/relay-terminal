@@ -13,7 +13,7 @@ if(RELAY_QT_MAJOR STREQUAL "AUTO")
     #
     # Qt 5 wins when it is installed. Until KonsolePart was retired (2026-09-18) that was decided
     # for us — Qt 6 was only chosen when KF6Parts was there too. Qt 6 builds, tests and runs as of
-    # 2026-09-18 (card #WU4U; Ubuntu 26.04 x86_64 and aarch64), so -DRELAY_QT_MAJOR=6 is a real
+    # 2026-09-18 (card #WV4V; Ubuntu 26.04 x86_64 and aarch64), so -DRELAY_QT_MAJOR=6 is a real
     # choice — but Qt 5 stays the default here because that is what the desktop has been run on.
     find_file(RELAY_QT5_CONFIG Qt5Config.cmake PATH_SUFFIXES cmake/Qt5 lib/cmake/Qt5 lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/Qt5)
     find_file(RELAY_QT6_CONFIG Qt6Config.cmake PATH_SUFFIXES cmake/Qt6 lib/cmake/Qt6 lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/Qt6)

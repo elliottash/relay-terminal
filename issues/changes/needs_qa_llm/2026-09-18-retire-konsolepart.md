@@ -63,6 +63,6 @@ alive for a path nobody used.
 ## Follow-up
 
 Qt 6 is now the only thing between Relay and dropping KF entirely. The `qsizetype` narrowing
-named here, and three more like it, were fixed on 2026-09-18 under card `#WU4U`: Qt 6 builds,
+named here, and three more like it, were fixed on 2026-09-18 under card `#WV4V`: Qt 6 builds,
 passes `ctest` and runs from a `.deb` on Ubuntu 26.04. The `AUTO` probe still picks Qt 5
 wherever it exists, which is now a choice rather than a limitation.

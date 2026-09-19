@@ -1,0 +1,9 @@
+Build: 6fc30ae8c94bc1e0b331a33f3dd2006e2b21d899
+Model: GPT-5
+Command: python3 -m unittest tests.test_remote_wire tests.test_remote_noise
+
+................................................
+----------------------------------------------------------------------
+Ran 48 tests in 0.494s
+
+OK

@@ -1,4 +1,4 @@
-# Qt 6 build, and Relay installed on `sphinxpad` (card `#WU4U`)
+# Qt 6 build, and Relay installed on `sphinxpad` (card `#WV4V`)
 
 Implementer evidence, 2026-09-18. The owner asked for Relay on `sphinxpad` — their laptop,
 Ubuntu 26.04.1 x86_64, 192.168.1.153 — and then for the Qt 6 compile errors to be fixed rather

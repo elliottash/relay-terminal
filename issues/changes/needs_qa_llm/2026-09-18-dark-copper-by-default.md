@@ -1,5 +1,5 @@
 ---
-id: DKCU
+id: DKCV
 type: work
 status: needs-qa-llm
 labels: [theme]
@@ -27,7 +27,7 @@ links: {plans: [], commits: [a6ab586], evidence: ['docs/qa_evidence/2026-09-18-d
   default stays a default, not a choice made on the user's behalf. A profile that chose a theme
   keeps it. A stale or missing theme name falls back to Dark Copper, then Relay Dark (whose values
   the compiled-in palette carries), then that compiled-in palette. Options › Appearance › Reset to
-  defaults (#OPRS) goes back to Dark Copper too.
+  defaults (#0PRS) goes back to Dark Copper too.
 - **Browser app** (the phone and iPad view). `app/pane-theme.css` is generated with Dark Copper as
   the bare `.relay-pane` block, so the pane a browser draws matches a fresh desktop; Relay Dark and
   Relay Light remain as `data-theme` switches. The app's own shell (`app/style.css`: the header, the

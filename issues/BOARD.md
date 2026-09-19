@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-181 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+187 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (107)
+## Features (108)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -21,7 +21,7 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
-| `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress | agent |  | [1](threads/W5N2.md) |
+| `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 |  |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
@@ -31,6 +31,7 @@
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | agent |  |  |
 | `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | agent |  |  |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
+| `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/needs_qa_llm/2026-09-17-remote-phone-and-multiplayer.md) | needs-qa-llm | agent |  | [1](threads/W5N2.md) |
 | `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/needs_qa_llm/2026-09-17-screen-text-input-detection.md) | needs-qa-llm | agent |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | agent |  |  |
 | `#E01Z` | [The title-bar buttons are lit while their pane is open, and close it on a second click](features/needs_qa_llm/2026-09-18-lit-title-bar-buttons.md) | needs-qa-llm | agent |  |  |
@@ -116,16 +117,16 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (72)
+## Bugs (77)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
-| `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | inbox |  |  | [1](threads/XEMH.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
+| `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
 | `#P7QK` | [Model roles names providers, offers only the ones you hold a key for, and gives a tier that provider's tier model](changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md) | needs-qa-llm | agent |  |  |
@@ -144,7 +145,7 @@
 | `#C4M8` | [The queue strip is one list: steers are rows like the rest](changes/needs_qa_llm/2026-09-18-one-queue-list.md) | needs-qa-llm | agent |  |  |
 | `#P2WD` | [Options and Actions are two panes, open at the same time](changes/needs_qa_llm/2026-09-18-options-and-actions-side-by-side.md) | needs-qa-llm | agent |  |  |
 | `#H7KP` | [Pane buttons that are always there, and a header you can drag](changes/needs_qa_llm/2026-09-18-pane-buttons-and-header-drag.md) | needs-qa-llm | agent |  |  |
-| `#H8UP` | [The prompt box remembers across a restart, and every pane shares one history](changes/needs_qa_llm/2026-09-18-prompt-history-persists.md) | needs-qa-llm | agent |  |  |
+| `#H8VP` | [The prompt box remembers across a restart, and every pane shares one history](changes/needs_qa_llm/2026-09-18-prompt-history-persists.md) | needs-qa-llm | agent |  |  |
 | `#B2XF` | [Every skill reaches the prompt by name, and ~/.claude's nesting is indexed](changes/needs_qa_llm/2026-09-18-skills-every-name-in-the-prompt.md) | needs-qa-llm | agent |  |  |
 | `#HECG` | [Solarized Dark is removed](changes/needs_qa_llm/2026-09-18-solarized-dark-removed.md) | needs-qa-llm | agent |  |  |
 | `#TN4P` | [The agent waited to be asked before using the user's terminal](changes/needs_qa_llm/2026-09-18-the-agent-waits-to-be-asked-in-the-terminal.md) | needs-qa-llm | agent |  |  |
@@ -162,9 +163,13 @@
 | `#J314` | [A pane that is not being typed in never takes the keyboard](changes/needs_qa_llm/2026-09-18-panes-keep-their-own-keyboard.md) | needs-qa-llm | agent |  |  |
 | `#9V1F` | [Queued items are edited in the prompt box, and the highlighted top item holds the queue](changes/needs_qa_llm/2026-09-18-queue-items-edit-in-the-prompt-box.md) | needs-qa-llm | agent |  |  |
 | `#SB7K` | [Scrollback survives a quit and restart](changes/needs_qa_llm/2026-09-18-scrollback-survives-restart.md) | needs-qa-llm | agent |  |  |
+| `#DKCV` | [Dark Copper is the theme every build starts on](changes/needs_qa_llm/2026-09-18-dark-copper-by-default.md) | needs-qa-llm | agent |  |  |
+| `#KBFT` | [The browser app fits the screen above an iPad's keyboard, in either orientation](changes/needs_qa_llm/2026-09-18-ipad-keyboard-landscape.md) | needs-qa-llm | agent |  |  |
 | `#EFRT` | [Every reasoning-effort picker offers the same levels, and never drops "high"](changes/needs_qa_llm/2026-09-18-reasoning-levels-one-list.md) | needs-qa-llm | agent |  |  |
-| `#WU4U` | [Relay compiles and runs against Qt 6, and the Ubuntu 26.04 `.deb` builds](changes/needs_qa_llm/2026-09-18-relay-builds-against-qt6.md) | needs-qa-llm | agent |  |  |
+| `#WV4V` | [Relay compiles and runs against Qt 6, and the Ubuntu 26.04 `.deb` builds](changes/needs_qa_llm/2026-09-18-relay-builds-against-qt6.md) | needs-qa-llm | agent |  |  |
+| `#0PRS` | [Every Options page can be put back to how Relay ships](changes/needs_qa_llm/2026-09-18-reset-to-defaults-per-options-page.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
+| `#RM1N` | [Model roles: the Main row has its own controls, and a job can name its own provider](changes/needs_qa_llm/2026-09-18-roles-modal-main-row-and-per-job-providers.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | agent |  |  |
@@ -192,6 +197,7 @@
 | `#3ES1` | [Changing the model is refused while the agent is working](changes/needs_qa_llm/2026-09-18-changing-the-model-is-refused-while-the-agent-is.md) | needs-qa-llm | agent |  | [1](threads/3ES1.md) |
 | `#W954` | ["command not found" under a request whose first word ends in a comma](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request-whose-first-wo.md) | needs-qa-llm | agent |  | [1](threads/W954.md) |
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
+| `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
 
 ## Planning (2)
 

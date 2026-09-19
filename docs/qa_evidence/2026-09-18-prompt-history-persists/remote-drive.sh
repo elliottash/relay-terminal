@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A line typed away from the desktop is kept too (#H8UP, owner: "these should always be saved").
+# A line typed away from the desktop is kept too (#H8VP, owner: "these should always be saved").
 # A real guest joins a shared pane over the remote protocol and sends a prompt; this checks the
 # prompt reaches $XDG_DATA_HOME/relay/state/prompt-history.txt and that Up in the desktop's own
 # prompt box then offers it.
