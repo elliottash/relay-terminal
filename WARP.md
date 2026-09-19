@@ -11,6 +11,9 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   evidence under `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist.
 - **Tests:** `./scripts/test.sh` (backend + Bash/PTY) and `ctest --test-dir build` must pass.
   Verify GUI changes live under Xvfb with an isolated `XDG_CONFIG_HOME`.
+- **Commits:** land through `python3 scripts/land.py begin <me> <paths>` before editing and
+  `python3 scripts/land.py commit <me> -m …` afterwards; several sessions share this checkout
+  and a plain `git commit` from the shared index reverts them (`CLAUDE.md`).
 - **Protocol:** GUI ↔ worker messages are specified in `docs/AGENT-SESSIONS-PROTOCOL.md`;
   update it when adding messages or events.
 - **Decisions already made:** no Konsole fork (and KonsolePart itself retired 2026-09-18);

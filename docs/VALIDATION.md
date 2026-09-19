@@ -22,7 +22,7 @@ from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all 
 
 **Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
 `ctest --test-dir build` **29/29**, both clean. Neither is current: `python3 -m unittest discover
--s tests` **collects 2,819 cases in 92 modules** as of 2026-09-19 (how many pass is what the command
+-s tests` **collects 2,845 cases in 93 modules** as of 2026-09-19 (how many pass is what the command
 reports, and it has not been re-run here). `ctest` registers **56** tests, not 29
 (`grep -c add_test CMakeLists.txt engine/CMakeLists.txt`) — `guestbridge`, `projectinit`,
 `striplayout`, `pulsepaint`, `panestatus`, `boardworkspace`, `diffview` and `sharing` among
@@ -30,7 +30,7 @@ them. The three rows above are the 2026-09-17 snapshot; the two commands are the
 truth for pass/fail.
 
 The per-suite inventory below now names **every** module under `tests/` and `engine/tests/`
-(2026-09-19): 91 Python modules, 54 Qt suites and 7 engine suites, no module left out. It is
+(2026-09-19): 92 Python modules, 54 Qt suites and 7 engine suites, no module left out. It is
 generated rather than hand-kept, so it can be re-taken instead of edited:
 
 - a Python module's count is what `unittest` collects from it (`loadTestsFromName`), which is what
@@ -79,6 +79,7 @@ Backend tests by module:
 | `tests/test_keybindings.py` | 19 | Key normalization and validation, tool spec and enum, atomic write that keeps other content and reports conflicts, unbind, invalid existing file left alone, configure with and without a catalog, `keybindings` update keeps the conversation |
 | `tests/test_keystore.py` | 24 | Preset URL matching, secrets passed on stdin, env var overrides keyring, bad ids and keys, Warp TOML 1.1 tables, Warp default preset, custom preset matched by URL, import success, missing keys and no keys |
 | `tests/test_keytest.py` | 2 | The keys modal's Test button against a provider that says "not now" (protocol 13.8) |
+| `tests/test_land.py` | 26 | `scripts/land.py`: landing one session's hunks on the shared checkout — the snapshot/tip/working-copy three-way merge, another session's uncommitted edit left untouched, two sessions in one file, `main` moving under the commit, a conflict that aborts, `--whole`, the intake files, the shared-index update, `doctor` and the pre-commit hook |
 | `tests/test_local_keyless.py` | 18 | A model server on this machine has no key: configure, the role table, the Test button and the `presets` event (card #24XJ) |
 | `tests/test_local_tier.py` | 26 | The Local tier and the `local` pane role (card #JH22, protocol 13.7) |
 | `tests/test_localmodels.py` | 25 | Model servers on this machine: the registry file, the probe, and the worker messages (backend/relay_core/localmodels.py, protocol section 28) |
@@ -140,7 +141,7 @@ Backend tests by module:
 | `tests/test_web_meet_code.py` | 12 | Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG) |
 | `tests/test_web_theme.py` | 7 | app/pane-theme.css is generated from the desktop theme, and must not drift from it |
 | `tests/test_web_viewport.py` | 5 | The web client fits the part of the screen that is visible, on-screen keyboard or not |
-| **Total** | **2819** | 92 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
+| **Total** | **2845** | 93 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
 
 Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file stem without
 `_test`):

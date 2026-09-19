@@ -32,44 +32,74 @@ What this means in practice:
 
 On 2026-09-18 alone, five commits silently undid other sessions' work: each was built from an index
 or a base that was older than `main`, so it wrote files back to their old contents. The working tree
-still had the new code, so nobody noticed until a clean export failed to build. Commit this way:
+still had the new code, so nobody noticed until a clean export failed to build. That is how
+`backend/relay_core/tools.py` went twice in one day (#E99H) and how #W5N2 lost
+`docs/REMOTE-AND-MULTIPLAYER-DESIGN.md`; they came back in `f38682f` and `26362e2`.
 
-1. **Never commit from the shared index**, and never `git add` into it. Use a private one, set per
-   command and never exported (a test that runs `git add` in a temp repo inherits an exported
-   `GIT_INDEX_FILE` and corrupts it): `BASE=$(git rev-parse HEAD); GIT_INDEX_FILE=<scratch file> git
-   read-tree $BASE`, and prefix each later git command the same way.
-2. **Add only your changes** to it. A file only you changed: `git add <path>`. A file that also
-   holds another session's uncommitted edits: build the file as `BASE`'s version plus your hunks,
-   `git hash-object -w` it and `git update-index --cacheinfo`. Do not use hunk-filtered
-   `git apply --cached --unidiff-zero`, which can put insertions on the wrong line without an error.
-3. **Build and test the exact tree** you are committing, not the working tree:
-   `rm -rf` a scratch dir, `git checkout-index -a --prefix=<scratch dir>/`, then configure (check
-   CMake's exit code: a reused build dir hides a broken configure), build, and run `ctest` including
-   `backend-and-bash`, since Python tests read C++ sources. The working tree holds everyone's
-   uncommitted code and proves nothing about your commit.
-4. **Compare-and-swap onto `main`:** `NEW=$(git commit-tree $(git write-tree) -p $BASE -m ...)`, then
-   `git update-ref refs/heads/main $NEW $BASE`. If `main` moved, this fails; rebuild on the new
-   HEAD and retry. Never "just re-add" the files you built earlier on top of a newer base.
-   **Read the base once.** `$BASE` must be the same value in step 1, in `-p $BASE` and in
-   `update-ref`'s old-value argument. Each Bash call is a fresh shell, so the variable is gone by
-   the time step 4 runs and `BASE=$(git rev-parse HEAD)` looks like a harmless way to get it back —
-   it is not. The build in step 3 takes minutes, commits land here every few, and that second read
-   returns a newer head: the swap then guards the head it was given, succeeds, and writes your
-   older tree over everything that landed while you were testing. That is the one case the swap
-   exists to refuse, and it is what lost `backend/relay_core/tools.py` (#E99H, twice in one day)
-   and #W5N2's `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md`, restored in `f38682f` and `26362e2`. Carry
-   the value across calls in a file instead (`echo $BASE > <scratch>/base`), re-`read-tree` from it
-   right before committing, and gate on `git diff --name-only $BASE $NEW`: it must list only your
-   own paths. Check that before `update-ref`, not after — a revert nobody notices stays on `main`
-   for hours, because every working tree still shows the file as it should be.
-5. **Reset the shared index for your paths** afterwards: `git reset -q HEAD -- <your paths>`. Skipping this leaves the shared index at your old blobs, and the next plain
-   `git commit` by anyone reverts your commit.
+The hand-run recipe that replaced it then failed four more ways in one evening on 2026-09-19:
+`git checkout HEAD -- <path>` on a path another session was editing overwrote work that existed
+nowhere else; `git reset -q HEAD -- <paths>` run while the checkout sat on a different branch
+unstaged somebody else's files; a merge written as
+`git merge-file ours <(git show A:p) <(git show B:p)` exited 0 and applied nothing, because
+`merge-file` cannot read a `/dev/fd` pipe; and the shared index quietly filled with entries equal to
+older commits' blobs as `main` moved, so the next plain `git commit` by anyone reverted whatever had
+landed since. Every one of those looks like success at the terminal.
 
-If `git diff --cached --stat` in the shared index ever shows files you did not stage, do not commit
-over them. Check whether each staged blob is an older version from history
-(`git log --format=%h -- <file>`, then compare `git rev-parse :<file>` against `<commit>:<file>`).
-If it is, unstaging it with `git reset -q HEAD -- <file>` loses nothing, so do that and tell the
-session that owns it.
+So it is not hand-run any more. **`scripts/land.py` is the commit procedure here, and the only one.**
+
+```
+python3 scripts/land.py begin <me> <the paths you are about to change>
+# edit, build and test in this checkout, exactly as before
+python3 scripts/land.py commit <me> -m "message"      # or -m path/to/message.txt
+```
+
+`<me>` is any short name you pick for your session. `begin` snapshots those files as they are right
+now — including files another session has already half-edited, and files that do not exist yet.
+`commit` then takes, for each path, base = that snapshot, ours = the file at the current tip of
+`refs/heads/main`, theirs = your working copy, and three-way merges them into *the tip plus your
+hunks*: the other session's uncommitted edits were in the snapshot, so they are neither committed
+nor touched, and they are still sitting in the working tree afterwards. It hashes the merged blobs
+into a private index read from that same tip, `commit-tree`s onto it, checks that
+`git diff --name-only TIP NEW` lists exactly your paths, and compare-and-swaps with
+`git update-ref refs/heads/main NEW TIP`. If `main` moved while you were testing, the swap fails —
+that is the one case it exists for — and the whole merge is recomputed against the new tip and
+retried, up to ten times. Afterwards it sets the shared index entry for your paths, and only your
+paths, to what it committed, so `git status` shows what is still uncommitted and nobody's next
+`git commit` can revert you.
+
+What it refuses to do, and why each refusal is an incident from the list above:
+
+- **It never commits from the shared index and never `git add`s into it.** `python3
+  scripts/land.py hook install` puts a `pre-commit` hook in place that makes git itself refuse a
+  commit whose index is the shared one, saying so in a sentence; `begin` installs it if it is
+  missing. The owner's escape hatch is `RELAY_ALLOW_SHARED_COMMIT=1 git commit …`.
+- **It never runs `git checkout`, `git stash` or `git reset`, and never writes a working-tree
+  file.** The one exception is `doctor --fix` on a path whose index entry *and* working copy are
+  both byte-for-byte an older commit's blob — provably nobody's edit.
+- **It merges through real temporary files**, never process substitution.
+- **It reads the tip once per attempt** and passes that same sha to `commit-tree -p` and to
+  `update-ref`'s old-value argument. It never re-reads the branch between building and swapping.
+- **It never commits `issues/bug_intake.txt`, `issues/feature_intake.txt` or a `*.orig` file** (the
+  first two are the owner's inboxes), and it refuses a path that `.gitignore` covers, so a build
+  directory cannot be swept in.
+- **A path you edited without `begin` is refused**: with no snapshot there is no way to tell your
+  diff from anyone else's. Either claim it (`begin` snapshots it as it is now, so only what you do
+  from then on lands) or pass `--whole <path>`, which commits that entire working copy and prints
+  the hunks it is about to take with it.
+- **A conflict aborts.** It names the paths, exits 3, and leaves the branch, the index and the
+  working tree exactly as they were. Pull the other session's version into your copy by hand
+  (`git show main:<path>`), then run `commit` again.
+
+`--dry-run` prints the merged diff without landing anything, `--paths` lands a subset of what you
+claimed, and `abandon <me>` drops the snapshots (never the working tree). `--help` is written for a
+session that has not read this file.
+
+`python3 scripts/land.py doctor` is the thing to run when the checkout looks wrong. It reports a
+staged entry whose blob is an older commit's version of that path — the shape that reverts people —
+and `--fix` puts the index (and, only in the provable case above, the working copy) back to HEAD's
+version, which loses nothing. Staged content that is *not* in history is somebody's uncommitted
+work: it reports that and leaves it alone, and the same goes for stray branches, extra worktrees,
+`*.orig` files and a checkout that is not on `main`. It exits non-zero when it found something.
 
 ## Fix clear gaps; do not list them
 
