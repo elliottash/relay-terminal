@@ -25,3 +25,20 @@ Foundation landed (d166332, was bccba64 before the close-out session's rewrite):
   Not done: bridge, codex, sessions, composer phases; merging gt7x onto feature/guest-agents
   (a Warp session landed 68f9a41/4af9d0a and more concurrently — Pane.h conflicts to resolve);
   full validation + QA evidence.
+
+<!-- relay:entry 20260919T154444Z-k2 author=agent kind=decision -->
+Owner decision, 2026-09-19, taken while planning #R5TC (Relay-to-Relay agent messaging): **task
+`t:x2`, the Tier A headless harness — claude `stream-json` and codex `app-server` — is
+un-deferred.** Asked whether "talk to claude and codex agents" should use the harness or stay with
+the hooks already built here, the owner chose the harness. The owner then scoped the work: "there
+is an agent working on the claude/codex guest, so wait for that, lets do relay-relay first" — so
+this belongs to whoever owns #GT7X, not to #R5TC, and #R5TC was narrowed to local pane-to-pane
+Relay agents only. Recording it here because the decision was made in another session's
+conversation and would otherwise be lost. Note it reverses the deferral on the card and crosses the
+posture line at `docs/ARCHITECTURE.md:1786` ("Relay observes, and touches a guest only through the
+guest's own sanctioned surfaces"), which will need rewording rather than quietly contradicting.
+
+#R5TC leaves a hook so neither card blocks the other: its address grammar names a **pane**, with an
+optional `party: "agent" | "guest"`, and `party: "guest"` is refused today with `not_supported`.
+When the harness lands, that refusal is where it plugs in — no re-addressing, and #R5TC touches no
+guest file.
