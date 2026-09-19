@@ -12,7 +12,7 @@ rank: zzzzzzz
 created: '2026-09-19'
 acceptance: a streaming thinking fold never shows more than 6 rows of reasoning (the tail being written), a finished one opened by hand never more than 18 followed by "… N more lines · open in pane", on any length of reasoning; a test feeds a several-thousand-line block and asserts both caps
 source: 'issues/bug_intake.txt, 2026-09-19: "the thinking bubble height isnt capped, its filling up multiple terminal pages."'
-links: {plans: [], commits: [ebebb08, 41d4355], evidence: [docs/qa_evidence/2026-09-19-thinking-fold-cap/], related: [T8CN, QT8C], github: null}
+links: {plans: [], commits: [ebebb08, 41d4355, 3d9a4a0, 2417b43], evidence: [docs/qa_evidence/2026-09-19-thinking-fold-cap/], related: [T8CN, QT8C], github: null}
 ---
 # The thinking fold's height is not capped
 
