@@ -24,6 +24,7 @@
 #include <QApplication>
 #include <QDateTime>
 #include <QDynamicPropertyChangeEvent>
+#include <QEvent>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QFrame>
@@ -1005,16 +1006,35 @@ private:
             m_shown = show;
             m_text = next;
             m_inkBucket = inkBucket();
-            setToolTip(QStringLiteral("This pane's share of this machine\n%1\n\n"
-                                      "Counts the shell, the program it is running and this pane's agent "
-                                      "worker, with their children. A remote pane measures the local ssh "
-                                      "client, not the far machine.\n%2")
-                           .arg(relay::usage::describe(sample), relay::usage::memoryNote()));
+            setToolTip(tooltipFor(sample));
             setVisible(show);
             updateGeometry();
             update();
             // Appearing or leaving changes what the title has to elide around.
             if (m_owner) m_owner->updateHeader();
+        }
+        // The chip itself stays the sum; its tooltip is where the sum is broken down, because
+        // "30%" with nothing named is a number and not an answer. The busiest few processes get
+        // a line each, the two roots named "shell" and "agent worker". A child that has already
+        // exited still counts toward the sum, through its parent's cutime, and has no line —
+        // there is no longer a process to name.
+        static QString tooltipFor(const relay::usage::Sample &sample) {
+            const QString breakdown = relay::usage::processBreakdown(sample);
+            return QStringLiteral("This pane's share of this machine\n%1\n%2"
+                                  "\nCounts the shell, the program it is running and this pane's agent "
+                                  "worker, with their children. A remote pane measures the local ssh "
+                                  "client, not the far machine.\n%3")
+                .arg(relay::usage::describe(sample),
+                     breakdown.isEmpty() ? QString()
+                                         : QStringLiteral("\n") + breakdown + QStringLiteral("\n"),
+                     relay::usage::memoryNote());
+        }
+        // The breakdown moves faster than the rounded number the chip paints, and setSample()
+        // only rebuilds when that number moves — so the lines are written when the tooltip is
+        // actually asked for, rather than spending a string per pane 2.5 times a second.
+        bool event(QEvent *e) override {
+            if (e->type() == QEvent::ToolTip) setToolTip(tooltipFor(m_sample));
+            return QWidget::event(e);
         }
         QSize sizeHint() const override {
             if (m_text.isEmpty()) return {0, 0};

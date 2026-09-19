@@ -30,3 +30,34 @@ processes in the focused one, isolated `HOME`/`XDG_*`/`TMPDIR` under Xvfb): the 
 `project · 3 · 30% cpu` with one `·` and the memory half left out, because the pane's resident set
 is under the 256 MiB floor. The same run also showed that the chip appearing and leaving moves no
 splitter: the three panes' dividers are at the same x in the idle, busy and subagent frames.
+
+## The walk, and what is behind the number (2026-09-19, owner: "fix that, and add CPU/MEM% to children")
+
+Two things the pictures above could not have shown.
+
+**The walk missed half the tree.** It read `/proc/<pid>/task/<pid>/children`, which is the *main
+thread's* children. A process forked from any other thread is parented to that thread, and the
+Python worker spawns its subprocesses off a worker thread — so the pane's biggest child could be
+running unmeasured, and only turned up when the worker reaped it and its ticks appeared in
+`cutime`. `relay::usage::walkTrees()` reads `/proc/<pid>/task/<tid>/children` for every thread now.
+`tests/paneusage_test.cpp` (`childrenOfEveryThreadAreFound`) builds a `/proc` out of directories
+with the child under thread 137 and nothing under the main thread, which is an arrangement no test
+can ask the real kernel for; `relay::usage::setProcRoot()` is what points the walk at it.
+
+**There is one walk.** `Pane::programWaitingForInput()` had its own, over the same shell pid on its
+own 250 ms poll. It goes through `walkTrees()` now, asking for `Detail::PidsOnly` so that poll
+still opens no `stat` or `statm`, and keeping its cap of 64; its decision logic and its cadence are
+untouched. `oneWalkServesBothReaders` pins both forms to the same tree in the same order.
+
+**The tooltips say what the number is made of.** Per-process CPU is that process's own tick delta
+between two polls, keyed by pid *and* `starttime` — `perProcessDeltasKnowARecycledPid` feeds the
+meter a pid the kernel handed out again and checks it is read as a new process and not as a
+lifetime of ticks in one interval. The busiest five get a line each,
+`<name> · X% cpu · Y% mem`, with the pane's two roots named `shell` and `agent worker`; rows that
+round to 0 % on both axes are dropped, and a tab's tooltip merges its panes' rows and cuts them
+back, so it names the tab's busiest processes and not each pane's. The chip and the tab label are
+unchanged — still the sum alone, so nothing on screen grows or moves.
+
+Not pictured: the breakdown under Xvfb. A tooltip needs a hover the smoke script has no way to
+hold, and what it would show (`yes · 20% cpu · 0% mem`, five times) is what the unit tests assert
+line for line. `relay-paneusage-tests` is 19 tests now.
