@@ -1574,7 +1574,7 @@ protected:
         // The live theme tokens, not Relay Dark's values: cyan and amber on a light theme's paper
         // were under 2:1 (docs/ARCHITECTURE.md, "Legible text").
         QTextCharFormat heading; heading.setForeground(relay::theme::Accent); heading.setFontWeight(QFont::Bold);
-        QTextCharFormat bullet; bullet.setForeground(relay::theme::Warning);
+        QTextCharFormat bullet; bullet.setForeground(relay::theme::TextMuted);   // not amber: amber means "waiting on you" (be81edb)
         QTextCharFormat code; code.setForeground(relay::theme::Success);
         const bool inFence = previousBlockState() == 1;
         const bool fence = text.trimmed().startsWith(QStringLiteral("```"));

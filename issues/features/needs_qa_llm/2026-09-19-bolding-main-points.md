@@ -42,7 +42,7 @@ Two halves of one habit: agents put the reply's main point in bold — above all
 ## Risks
 
 - **Keyword heuristic**: a bold run that merely *starts with* a matching word ("**Error codes** …") gets coloured. Kept small by the short closed lists and the leading-word match only. Alternative — colour only bold runs that open a line or bullet — is stricter but misses mid-sentence main points; recommend the simple version first.
-- **Colours**: exact purple would need RGB, which is burnt into scrollback and broke theme switching (2026-09-18 report). The plan uses the theme's indexed magenta/blue/red instead — *question for the owner*: indexed colours as above, or literal purple/blue/red RGB regardless of theme?
+- **Colours** (answered: indexed, and green/amber/red per #4E13): exact purple would need RGB, which is burnt into scrollback and broke theme switching (2026-09-18 report). The plan uses the theme's indexed magenta/blue/red instead — *question for the owner*: indexed colours as above, or literal purple/blue/red RGB regardless of theme?
 - The held prefix adds ≤32 chars of streaming latency inside a bold run — imperceptible, and `finish()` already flushes held text.
 - Other surfaces (turn/subagent transcripts, exported text) show literal `**` today and are unchanged by this card.
 
@@ -53,7 +53,12 @@ Two halves of one habit: agents put the reply's main point in bold — above all
 
 ## QA checklist
 - [ ] `backend/relay_core/agent.py`: `SYSTEM` carries the new bold line right after the Markdown line, one sentence on one line, and the three labels read `**Done:**`, `**Problem:**`, `**Need:**` (case as written).
-- [ ] `src/MarkdownAnsi.h`: `Palette::done/need/problem` default to `1;35` / `1;34` / `1;31` — indexed ANSI, no RGB, no `38;2;`/`38;5;` — and the comment names card #CVHT and the reason.
+- [ ] `src/MarkdownAnsi.h`: `Palette::done/need/problem` default to `1;32` / `1;33` / `1;31` —
+      green, amber, red — indexed ANSI, no RGB, no `38;2;`/`38;5;`, and the comment names card #CVHT
+      and the reason. **The plan's magenta/blue/red was overtaken while this card was open**: card
+      #4E13 (`be81edb`, "Amber means one thing") made amber the one colour for "something is waiting
+      on you", so `**Need:**` is amber and `**Done:**` takes the Done glyph's green. That answers the
+      plan's open colour question for the labels; the *indexed, not RGB* rule it also fixed stands.
 - [ ] `src/MarkdownAnsi.cpp`: the match is on the bold run's *first* word only, case-insensitive, colon and punctuation stripped; the lists are the three the plan fixed.
 - [ ] The held prefix is bounded (≤ 32 chars) and flushed at the next inline marker, at a line end, in `finish()` and in `resetInline()`; `holding()` counts it. Feed `"**Done"` and then `finish()`: the text must come out, in the role colour, and nothing may be swallowed or duplicated.
 - [ ] Unlabelled bold is untouched: `**Bold**`, `***back***`, `snake_case`, `2 * 3 * 4` all render exactly as before, with no role SGR.

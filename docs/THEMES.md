@@ -13,7 +13,7 @@ and the two themes the owner asked to audition as candidates for the preferred p
 |---|---|
 | `data/theme/themes/dark-copper.toml` | new — the dark candidate |
 | `data/theme/themes/ibm-beige.toml` | new — the light candidate |
-| `relay-dark`, `relay-light`, `gruvbox-dark`, `solarized-dark` | incumbents, **unchanged**; `solarized-dark` since removed |
+| `relay-dark`, `relay-light`, `gruvbox-dark` | incumbents, **unchanged** (`solarized-dark` was removed 2026-09-18) |
 | `docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast.py` | the measuring tool; every number here comes from it |
 | `tests/theme_test.cpp` | the assertions (the existing theme test, extended) |
 

@@ -148,7 +148,7 @@
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
-| `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | inbox |  |  | [7](threads/EC58.md) |
+| `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/needs_qa_llm/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | needs-qa-llm | agent |  | [7](threads/EC58.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | ready | agent | 0/5 |  |

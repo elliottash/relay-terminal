@@ -62,6 +62,11 @@
     "label": "fake · local",
     "choices": []
   },
+  "composer": {
+    "mode": "auto",
+    "placeholder": "Shell commands or agent prompts…",
+    "modes": []
+  },
   "context": {
     "label": "91% left",
     "percent_left": 91

@@ -168,7 +168,13 @@ public:
             painter->drawText(QRect(left, r.top(), r.width(), r.height()), Qt::AlignVCenter | Qt::AlignLeft, lead);
             left += option.fontMetrics.horizontalAdvance(lead) + 8;
         }
-        painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : agent ? relay::theme::Accent : relay::theme::Warning));
+        // The glyph says where the row is going, so it wears the destination pair — `✦` agent
+        // violet, `$` shell cyan. It used to be violet/`Accent` for the agent and *amber* for the
+        // shell, which is the same mistake `be81edb` took out of the prefix chips (docs/
+        // ARCHITECTURE.md § 14, "The prefix chips were wrong"): amber means "something is waiting
+        // on you", and a queued shell command is not waiting on anyone.
+        painter->setPen(pending ? relay::theme::TextMuted
+                                : (steer || agent) ? relay::theme::Agent : relay::theme::Shell);
         painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
         left += 22;
         const QString suffix = pending ? QStringLiteral("  withdrawing…") : QString();
@@ -4030,11 +4036,15 @@ private:
 
     // One call's record, keyed by the anchor its row carries, so a fold request and a click on a
     // relay://open-call line both find it. Bounded: a long session must not grow a map for ever.
+    // The bound was 400, which a day's work reaches, and every line past it lost its rich label and
+    // its stored diff (#EC58); a record is a label and a few strings, so 5,000 of them is a few MB
+    // at worst and keeps the whole of a long session clickable. Past it the URI still fetches the
+    // output from the worker — only the label and the diff pane are lost.
     void rememberCall(const QString &anchor, const CallRecord &record) {
         if (anchor.isEmpty()) return;
         if (!m_calls.contains(anchor)) m_callOrder.append(anchor);
         m_calls.insert(anchor, record);
-        while (m_callOrder.size() > 400) m_calls.remove(m_callOrder.takeFirst());
+        while (m_callOrder.size() > 5000) m_calls.remove(m_callOrder.takeFirst());
     }
 
     // The fold's colours, from the live theme. The add/remove tints are the diff pane's: the
@@ -4094,7 +4104,13 @@ private:
         }
         const CallRecord record = m_calls.value(uri);
         if (record.merged) { setFold(uri, relay::calllines::foldForRun(record.members, foldPalette(), foldOptions(uri, record))); return; }
-        if (!m_workerReady || ref.turn.isEmpty() || record.callIds.isEmpty()) {
+        // The anchor already carries the turn and the first call's id, so a line whose record has
+        // gone — a pane restored from saved scrollback has none at all, and `rememberCall()` is
+        // bounded — can still be fetched from the worker (issue #EC58, owner 2026-09-19: "when i
+        // click on tooltipps it sometimes says: the details of this call is not available"). Only a
+        // URI that names no call, or no worker to ask, leaves the old note.
+        const QString callId = record.callIds.isEmpty() ? ref.call : record.callIds.first();
+        if (!m_workerReady || ref.turn.isEmpty() || callId.isEmpty()) {
             setFold(uri, relay::calllines::foldForNote(
                              QStringLiteral("The detail of this call is not available in this pane any more."),
                              foldPalette()));
@@ -4103,7 +4119,7 @@ private:
         const QString id = QStringLiteral("fold-") + QString::number(++m_requestId);
         m_foldRequests.insert(id, uri);
         while (m_foldRequests.size() > 64) m_foldRequests.erase(m_foldRequests.begin());
-        send({{"type", "tool_output_get"}, {"id", id}, {"turn_id", ref.turn}, {"call_id", record.callIds.first()}});
+        send({{"type", "tool_output_get"}, {"id", id}, {"turn_id", ref.turn}, {"call_id", callId}});
     }
 
     // The reply to a fold's own tool_output_get. It never opens a pane: the request id says which
@@ -4124,7 +4140,16 @@ private:
     bool handleFoldError(const QString &id, const QString &text) {
         if (!id.startsWith(QStringLiteral("fold-"))) return false;
         const QString uri = m_foldRequests.take(id);
-        if (!uri.isEmpty()) setFold(uri, relay::calllines::foldForNote(text, foldPalette()));
+        if (uri.isEmpty()) return true;
+        // A line this pane has no record for was fetched from the anchor alone (#EC58). When the
+        // worker cannot answer it either, the worker's own "only the last 50 turns are kept" is
+        // half the story: a pane restored from saved scrollback shows lines from *before* this
+        // worker existed, and no number of turns would bring them back. Say both reasons.
+        const QString note = m_calls.contains(uri)
+            ? text
+            : QStringLiteral("This call ran before the pane's current agent: its output is not kept "
+                             "across a restart, and the worker keeps only the last 50 turns.");
+        setFold(uri, relay::calllines::foldForNote(note, foldPalette()));
         return true;
     }
 
@@ -4168,13 +4193,16 @@ private:
             break;
         }
         // Everything the label asked for that this pane cannot open, and every fold-typed line on a
-        // backend with no fold layer: the call's stored output, in a preview pane.
-        if (!m_workerReady || ref.turn.isEmpty() || record.callIds.isEmpty()) {
+        // backend with no fold layer: the call's stored output, in a preview pane. The URI's own
+        // call id stands in for a record this pane no longer holds (#EC58), exactly as in
+        // `foldRequested()`; the worker's own "unknown turn_id" is reported separately.
+        const QString callId = record.callIds.isEmpty() ? ref.call : record.callIds.first();
+        if (!m_workerReady || ref.turn.isEmpty() || callId.isEmpty()) {
             status(QStringLiteral("That call's detail is not available in this pane any more."));
             return;
         }
         send({{"type", "tool_output_get"}, {"id", QStringLiteral("turn-") + QString::number(++m_requestId)},
-              {"turn_id", ref.turn}, {"call_id", record.callIds.first()}});
+              {"turn_id", ref.turn}, {"call_id", callId}});
     }
 
     // The inline diff of a small write or edit (at most 12 changed lines, § 23.2): printed under
@@ -5998,7 +6026,57 @@ private:
     }
 
 
+    // First launch on a machine with no instruction files at all: the introductory dialog had
+    // nothing to offer and still opened, asking the user to choose from an empty list (issue #ZYRB,
+    // owner 2026-09-18: "the introductory agent instructions file was still showing when i didnt
+    // have any. it shouldnt show any in that case. just init the default RELAY.MD"). So write the
+    // starter relay.md, point the agent at it, and say one line. Only the first-run path is quiet:
+    // `/instructions` and Options › Agent › Instructions asked for the dialog, so they still get it
+    // even when the list is empty — that is where a file is created on purpose.
+    bool initDefaultRelayMd() {
+        const QString path = relayMdPath();
+        if (QFileInfo::exists(path)) return false;
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+        // Deliberately short: a starter file the user will edit, not advice Relay pretends to have.
+        // The agent reads it verbatim, so every line here is a line it is told to follow.
+        file.write(
+            "# Relay instructions\n"
+            "\n"
+            "Notes for the agent in every Relay pane on this machine. Edit freely; Relay never\n"
+            "rewrites this file. A project's own CLAUDE.md, AGENTS.md or WARP.md is read as well.\n"
+            "\n"
+            "## How I like to work\n"
+            "\n"
+            "- Say what you changed and why, briefly.\n"
+            "- Ask before anything destructive.\n");
+        file.close();
+        QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
+        QSettings settings;
+        settings.setValue(QStringLiteral("instructions/files"), QStringList{path});
+        settings.setValue(QStringLiteral("instructions/onboarded"), true);
+        ensureLineStart();
+        printInline(QStringLiteral("Created %1 · your agent instructions, /instructions to change\n").arg(path),
+                    Ink::Note);
+        closeInline();
+        status(QStringLiteral("Created %1").arg(path));
+        applyConfigureChange(QStringLiteral("relay.md created"));
+        return true;
+    }
+
     void showInstructionsDialog(const QJsonArray &items) {
+        // `scan_instructions` lists the fixed names that are *missing* too (`exists: false`), so
+        // "I don't have any" is "nothing in the list is on disk", not "the list is empty".
+        const bool anyOnDisk = std::any_of(items.cbegin(), items.cend(), [](const QJsonValue &value) {
+            return value.toObject().value(QStringLiteral("exists")).toBool();
+        });
+        if (m_onboarding && !anyOnDisk && !QFileInfo::exists(relayMdPath())) {
+            m_onboarding = false;
+            if (initDefaultRelayMd()) { focusInput(); return; }
+            // The file could not be written (a read-only config directory): fall through to the
+            // dialog rather than swallowing the one chance to say something about instructions.
+        }
         QSettings settings;
         const QStringList selected = settings.value(QStringLiteral("instructions/files")).toStringList();
         QList<relay::agentui::InstructionFile> files;

@@ -1,26 +1,22 @@
 
 == dark (theme relay-dark)
 image implementer-dark.png (1440x900)
-  done          5 exact pixels (209 within 24), rows 207..207, 1 row band(s) [(207, 207)], columns 54..58
-           #d8aaf5: 5 pixels
-           plain foreground on these rows: columns 99..300
-  need         10 exact pixels (441 within 24), rows 283..283, 1 row band(s) [(283, 283)], columns 36..49
-           #81c4ff: 10 pixels
-  problem      10 exact pixels (132 within 24), rows 239..245, 2 row band(s) [(239, 240), (245, 245)], columns 27..76
+  done          5 exact pixels (276 within 24), rows 231..231, 1 row band(s) [(231, 231)], columns 58..62
+           #98e5b0: 5 pixels
+  need         11 exact pixels (317 within 24), rows 319..322, 1 row band(s) [(319, 322)], columns 35..53
+           #f8d58e: 11 pixels
+  problem      10 exact pixels (132 within 24), rows 269..275, 2 row band(s) [(269, 270), (275, 275)], columns 31..80
            #ff8c8f: 10 pixels
-           plain foreground on these rows: columns 111..396
-  plain       172 exact pixels (1017 within 24), rows 88..287, 7 row band(s) [(88, 97), (106, 116), (147, 150), (201, 211), (239, 249), (280, 280), (287, 287)], columns 27..606
-           #d8dce3: 172 pixels
+  plain        81 exact pixels (1090 within 24), rows 94..165, 3 row band(s) [(94, 103), (115, 125), (162, 165)], columns 31..610
+           #d8dce3: 81 pixels
 
 == palette (theme qa-bold)
 image implementer-palette.png (1440x900)
-  done          5 exact pixels (52 within 24), rows 207..207, 1 row band(s) [(207, 207)], columns 54..58
-           #ff80ff: 5 pixels
-           plain foreground on these rows: columns 99..300
-  need         10 exact pixels (150 within 24), rows 283..283, 1 row band(s) [(283, 283)], columns 36..49
-           #8080ff: 10 pixels
-  problem      10 exact pixels (97 within 24), rows 239..245, 2 row band(s) [(239, 240), (245, 245)], columns 27..76
+  done          9 exact pixels (70 within 24), rows 226..235, 1 row band(s) [(226, 235)], columns 31..62
+           #80ff80: 9 pixels
+  need         11 exact pixels (57 within 24), rows 319..322, 1 row band(s) [(319, 322)], columns 35..53
+           #ffff80: 11 pixels
+  problem      10 exact pixels (95 within 24), rows 269..275, 2 row band(s) [(269, 270), (275, 275)], columns 31..80
            #ff8080: 10 pixels
-           plain foreground on these rows: columns 111..396
-  plain       172 exact pixels (1017 within 24), rows 88..287, 7 row band(s) [(88, 97), (106, 116), (147, 150), (201, 211), (239, 249), (280, 280), (287, 287)], columns 27..606
-           #d8dce3: 172 pixels
+  plain        81 exact pixels (1134 within 24), rows 94..165, 3 row band(s) [(94, 103), (115, 125), (162, 165)], columns 31..610
+           #d8dce3: 81 pixels

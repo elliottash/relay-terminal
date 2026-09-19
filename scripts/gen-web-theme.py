@@ -10,8 +10,8 @@ both. So nothing in app/pane-theme.css is typed by hand: this script reads
                        the local colours they are computed from (`selection`, `caution`), and the
                        monospace family list (`monoFamily`);
   * src/Pane.h         the one colour the queue list paints itself (a selected row);
-  * data/theme/themes/dark-copper.toml, relay-dark.toml and relay-light.toml, the built-in themes
-                       whose values Theme.cpp's tokens take at run time,
+  * data/theme/themes/*.toml, the five built-in themes (THEMES below) whose values
+                       Theme.cpp's tokens take at run time,
 
 and evaluates the same expressions Qt does (`inkOn`, `blend`, `withAlpha`, QColor::lighter and
 ::darker, with Qt's own 16-bit and float arithmetic), so `--rt-accent-soft` here is the exact
@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = Path("app/pane-theme.css")
 # The default first — relay::theme::defaultThemeId(), so a browser shows what a fresh desktop does —
 # then the two Relay themes a data-theme can still switch to.
-THEMES = ("dark-copper", "relay-dark", "relay-light")
+THEMES = ("dark-copper", "gruvbox-dark", "ibm-beige", "relay-dark", "relay-light")
 USHRT_MAX = 0xFFFF
 
 # The widgets the web pane draws, as Qt sees them: (css name, Qt class, object name, ancestors).

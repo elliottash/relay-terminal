@@ -25,7 +25,10 @@ text_muted = "#5c6472"
 # lightness, so the accent and the shell destination stay recognisably cyan instead of grey.
 accent = "#006ab1"
 accent_text = "#ffffff"
-accent_hover = "#008cd6"
+# The hover of a primary button only changes the fill; the label stays `accent_text` white
+# (src/Theme.cpp, `QPushButton:default:hover`). #008cd6 put that white at 3.67:1, so the one
+# state a button spends its click in was the one that failed AA. Same hue, one step darker.
+accent_hover = "#0074bd"
 selection = "#005c99"
 disabled = "#a8aebb"
 success = "#1e763b"

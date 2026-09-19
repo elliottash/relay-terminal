@@ -7,7 +7,7 @@ What was built, and what was measured for it.
 | File | Change |
 |---|---|
 | `backend/relay_core/agent.py` | one new line in `SYSTEM`: the reply's main point goes in bold when the agent finishes, hits a problem or needs something, as `**Done:**` / `**Problem:**` / `**Need:**` |
-| `src/MarkdownAnsi.h` | `Palette::done = "1;35"`, `need = "1;34"`, `problem = "1;31"` (indexed, never RGB), a `BoldRole` and the held-prefix members |
+| `src/MarkdownAnsi.h` | `Palette::done = "1;32"`, `need = "1;33"`, `problem = "1;31"` (indexed, never RGB; green/amber/red since #4E13), a `BoldRole` and the held-prefix members |
 | `src/MarkdownAnsi.cpp` | a bold run's first word is held (≤ 32 chars) and matched case-insensitively, punctuation stripped, against three closed word lists; a match colours the run, anything else stays plain bold |
 | `tests/markdownansi_test.cpp` | `labelledBoldsAreColoured`, the three new palette fields in `everyColourComesFromThePalette`, labelled bold in the streaming corpus |
 | `tests/test_agent.py` | `SystemPromptTests` asserts the new line and the three labels |
@@ -45,19 +45,24 @@ Two scenes, both screenshotted (`implementer-dark.png`, `implementer-palette.png
 cropped at 150 % in `implementer-*-reply.png`), and `measure.py` reads the pixels back
 (`implementer-notes.txt` holds its raw output):
 
-- **dark** — the shipped `relay-dark`, which names no `terminal.palette`, so the engine's built-in
-  ANSI palette applies: the three labels are painted `#d8aaf5` (magenta), `#81c4ff` (blue),
-  `#ff8c8f` (red) — the palette's *bright* 13/12/9, because SGR `1;35` is bold plus index 5 and the
-  engine paints bold colour as the intense index.
+The colours are **green / amber / red**, not the plan's magenta / blue / red. Card #4E13 made amber
+mean one thing across Relay — "something is waiting on you" — so `**Need:**` is amber, `**Done:**`
+takes the Done glyph's green and `**Problem:**` keeps red (be81edb; `src/MarkdownAnsi.h`,
+`Palette::done` `1;32`, `need` `1;33`, `problem` `1;31`). They are still ANSI *indices*, which is the
+part the second scene proves.
+
+- **dark** — the shipped `relay-dark`: the three labels are painted `#98e5b0` (green), `#f8d58e`
+  (amber), `#ff8c8f` (red) — the palette's *bright* 10/11/9, because SGR `1;32` is bold plus index 2
+  and the engine paints bold colour as the intense index.
 - **palette** — a user theme (`relay/themes/qa-bold.toml`) whose `terminal.palette` names
-  `#ff00ff` / `#0000ff` / `#ff0000` and `#ff80ff` / `#8080ff` / `#ff8080`: the very same ANSI bytes
+  `#00ff00` / `#ffff00` / `#ff0000` and `#80ff80` / `#ffff80` / `#ff8080`: the very same ANSI bytes
   come out in *these* colours. That is the "not burnt in" half of the check — the renderer emits an
   index, the engine resolves it from the active theme at paint time.
 
 The label colour stops at the label: in the `**Problem:**` line the red pixels occupy columns
-27..76 while the line's plain text (including the unlabelled `**Bold**`) runs on from column 111 in
-the same rows. The three role colours sit in three distinct row bands (207, 239–245, 283) — one per
-label — and nowhere else.
+31..80 while the line's plain text (including the unlabelled `**Bold**`) is the terminal foreground.
+The three role colours sit in three distinct row bands (231, 269–275, 319–322) — one per label — and
+nowhere else.
 
 `./drive.sh [build-dir] [dark|palette]` reproduces all of it; `RELAY_QA_KEEP=1` keeps the sandbox
 and prints the app log. The sandbox config sets `[isolation] enabled=false`, because the QA sandbox

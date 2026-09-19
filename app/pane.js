@@ -452,6 +452,7 @@ export function mountPane(container, options = {}) {
     if (layer.hidden) return;
     layer.hidden = true;
     sheet.textContent = '';
+    delete sheet.dataset.sessions;
     sheetKind = '';
     const opener = sheetOpener;
     sheetOpener = null;
@@ -509,6 +510,7 @@ export function mountPane(container, options = {}) {
     if (!sessions) return;
     openSheet('sessions', '', (node) => {
       node.setAttribute('aria-label', 'Conversations');
+      node.dataset.sessions = JSON.stringify(sessions);   // what draw() compares against
       if (sessions.can_new === true) {
         const fresh = sheetButton('rp-new-conversation', 'New conversation', () => emit('conversation_new'));
         node.appendChild(fresh);
@@ -686,7 +688,12 @@ export function mountPane(container, options = {}) {
   }
 
   function renderStrip() {
-    const c = obj(state.composer);
+    // A `view` device is sent a composer whose `modes` is empty, not no composer at all
+    // (remote/pane_state.py `for_capability`, protocol § 16's table). It may not compose, so it
+    // gets no prompt box and no send button — rather than a box whose every send comes back
+    // `not_permitted`. `src/PaneState.cpp` always fills all three modes, so `[]` can only mean
+    // "this device is not allowed to type".
+    const c = arr(state.composer && state.composer.modes).length ? obj(state.composer) : null;
     composer.hidden = !c;
     if (c) {
       const placeholder = str(c.placeholder);
@@ -721,8 +728,8 @@ export function mountPane(container, options = {}) {
     // The strip is the prompt box's bottom row; with no prompt box (a view-only device) it is
     // still how the model, the clock and the sessions are seen, so it stands on its own.
     if (!c) root.classList.add('rp-no-composer'); else root.classList.remove('rp-no-composer');
-    // Send belongs to the prompt box: a device the hub sends no `composer` (a `view` device) may
-    // not compose at all, and the strip it keeps must not offer it a send button anyway.
+    // Send belongs to the prompt box: a `view` device may not compose at all, and the strip it
+    // keeps must not offer it a send button anyway.
     sendGroup.hidden = !c;
     if (!c && strip.parentNode === composer) root.insertBefore(strip, layer);
     if (c && strip.parentNode !== composer) composer.appendChild(strip);
@@ -733,6 +740,14 @@ export function mountPane(container, options = {}) {
     modelWrap.hidden = !m;
     if (!m) return;
     const choices = arr(m.choices).filter((choice) => obj(choice) && str(choice.id));
+    // Rebuilt only when the menu actually changed. A `pane_state` arrives up to ten times a second
+    // while a turn runs (the clock alone changes every second), and replacing the `<option>`s
+    // closes the native picker a phone has open over them — so the one thing a partner is promised,
+    // switching the model, only worked while the pane was idle.
+    const signature = JSON.stringify([str(m.label),
+      choices.map((choice) => [str(choice.id), str(choice.label), choice.current === true])]);
+    if (model.dataset.signature === signature) return;
+    model.dataset.signature = signature;
     model.textContent = '';
     const shown = el('option', '', str(m.label));
     shown.value = '';
@@ -753,7 +768,14 @@ export function mountPane(container, options = {}) {
     renderThinking();
     renderQueue();
     renderStrip();
-    if (sheetKind === 'sessions') openSessions();
+    // Rebuilt only when the rows actually changed. A `pane_state` arrives up to ten times a second
+    // while a turn runs, and `openSheet()` clears the sheet and focuses its first button — so an
+    // open conversations list threw the focus back to the top and scrolled itself there, ten times
+    // a second, exactly while the agent was working.
+    if (sheetKind === 'sessions') {
+      const signature = JSON.stringify(obj(state.sessions) || null);
+      if (sheet.dataset.sessions !== signature) openSessions();
+    }
     if (sheetKind === 'row') {
       const id = sheet.dataset.rowId;
       const row = findRow(id);

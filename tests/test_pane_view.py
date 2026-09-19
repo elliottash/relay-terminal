@@ -183,6 +183,12 @@ class PaneViewTests(unittest.TestCase):
         state = fixture("view_only")
         self.assertFalse(any(row.get("actions") for row in state["queue"]["rows"]),
                          "the fixture is the hub's view of a `view` device: no actions")
+        # The hub does not drop `composer` for a `view` device, it empties its `modes`
+        # (remote/pane_state.py `for_capability`, protocol § 16). The fixture had no `composer` at
+        # all, so this test passed over a client that happily drew a prompt box and an enabled Send
+        # for a viewer whose every `compose` came back `not_permitted`. Pin what the hub sends.
+        self.assertIn("composer", state)
+        self.assertEqual(state["composer"]["modes"], [])
 
         async def main():
             browser = Browser()
@@ -195,9 +201,9 @@ class PaneViewTests(unittest.TestCase):
                     "JSON.stringify([...document.querySelectorAll('.rp-row .rp-row-label')]"
                     ".map(e => e.textContent))"))
                 self.assertEqual(labels, [row["label"] for row in state["queue"]["rows"]])
-                # Nothing it can press. The composer is not drawn at all (the hub sends a `view`
-                # device no `composer`), the model chip offers its label and no choice, and there
-                # is no "new conversation". Drawn, not merely present: a hidden ancestor counts.
+                # Nothing it can press. The composer is not drawn at all (its `modes` is empty),
+                # the model chip offers its label and no choice, and there is no "new
+                # conversation". Drawn, not merely present: a hidden ancestor counts.
                 drawn = ("(s => [...document.querySelectorAll(s)]"
                          ".filter(e => e.getClientRects().length > 0).length)")
                 for selector in ('.rp-send', '.rp-input', '.rp-composer'):

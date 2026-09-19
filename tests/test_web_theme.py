@@ -2,8 +2,8 @@
 """app/pane-theme.css is generated from the desktop theme, and must not drift from it.
 
 The web view of a pane takes every colour and widget style from app/pane-theme.css, which
-scripts/gen-web-theme.py writes from src/Theme.cpp, src/Theme.h, src/Pane.h and the two built-in
-theme files. A change to any of those that changes the output has to regenerate the file in the
+scripts/gen-web-theme.py writes from src/Theme.cpp, src/Theme.h, src/Pane.h and the built-in
+theme files (gen.THEMES). A change to any of those that changes the output has to regenerate the file in the
 same commit, or the phone and the desktop stop looking alike; this test is what says so.
 """
 import importlib.util
@@ -45,7 +45,7 @@ class WebThemeTest(unittest.TestCase):
     def test_theme_file_values_reach_the_css(self):
         """The base tokens are the theme files' own values, per theme."""
         blocks = {theme_id: self.fresh.split(f'.relay-pane[data-theme="{theme_id}"]')[1].split("\n}")[0]
-                  for theme_id in ("dark-copper", "relay-dark", "relay-light")}
+                  for theme_id in self.gen.THEMES}
         for theme_id, block in blocks.items():
             ui = tomllib.loads((ROOT / "data/theme/themes" / f"{theme_id}.toml").read_text())["ui"]
             with self.subTest(theme=theme_id):

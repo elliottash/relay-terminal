@@ -315,6 +315,10 @@ private Q_SLOTS:
         }
         pairs << Pair{ui("accent"), ui("background"), 4.5, "accent as text"}
               << Pair{ui("accent_text"), ui("accent"), 4.5, "primary button label"}
+              // The hover only swaps the fill (`QPushButton:default:hover` in stylesheetFor); the
+              // label stays `accent_text`, so the state a button spends its click in is measured
+              // too. Relay Light's #008cd6 was 3.67:1 here while `accent` itself passed at 5.68.
+              << Pair{ui("accent_text"), ui("accent_hover"), 4.5, "primary button label, hovered"}
               << Pair{ui("border_strong"), ui("background"), 3.0, "focused pane outline (UI)"};
         for (const char *dest : {"shell", "agent"}) {
             pairs << Pair{ui(dest), ui("background"), 4.5, dest};

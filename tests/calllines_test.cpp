@@ -92,6 +92,28 @@ private slots:
         QVERIFY(ref.merged());
     }
 
+    // Issue #EC58: a pane restored from saved scrollback has no CallRecord for any of its rows, and
+    // `Pane::rememberCall()` is bounded besides, so `foldRequested()`/`openCallTarget()` fall back
+    // to the anchor itself for the `tool_output_get` they send. That only works if every anchor a
+    // row can carry yields a usable turn *and* a single call id — including a merged run's anchor
+    // (the first member's id) and ids that had to be percent-encoded.
+    void everyAnchorCarriesEnoughToRefetchTheCall() {
+        const QStringList ids{QStringLiteral("call_1"), QStringLiteral("a/b"), QStringLiteral("c+2"),
+                              QStringLiteral("id with space"), QStringLiteral("%2F")};
+        for (const QString &id : ids) {
+            for (int extra : {0, 6}) {
+                const Ref fold = parseUri(foldUri(QStringLiteral("pane1"), QStringLiteral("turn-9"), id, extra));
+                QVERIFY(fold.valid);
+                QCOMPARE(fold.turn, QStringLiteral("turn-9"));
+                QCOMPARE(fold.call, id);          // never empty, so the fallback always has one
+            }
+            const Ref open = parseUri(openUri(QStringLiteral("pane1"), QStringLiteral("turn-9"), id));
+            QVERIFY(open.valid);
+            QCOMPARE(open.turn, QStringLiteral("turn-9"));
+            QCOMPARE(open.call, id);
+        }
+    }
+
     // A call id with a `+` of its own is encoded, so it can never be read as a run's count.
     void plusInACallIdIsNotACount() {
         const Ref ref = parseUri(foldUri(QStringLiteral("p"), QStringLiteral("t"), QStringLiteral("c+2")));

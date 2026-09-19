@@ -10,7 +10,7 @@
 #   dark     the shipped relay-dark theme (which defines no terminal.palette, so the engine's
 #            built-in ANSI palette applies): implementer-dark.png
 #   palette  a user theme (relay/themes/qa-bold.toml) whose terminal.palette names unmistakable
-#            colours for red/blue/magenta and their bright variants: implementer-palette.png
+#            colours for red/green/yellow and their bright variants: implementer-palette.png
 #            The same ANSI bytes must come out in *these* colours — that is the "not burnt in"
 #            half of the check: the renderer emits index 35/34/31, the engine resolves it from the
 #            active theme at paint time.
@@ -54,7 +54,7 @@ t() { xdotool type --delay 18 "$1"; }
 k() { xdotool key --delay 60 "$@"; }
 
 # The theme file the "palette" scene installs: relay-dark with unmistakable ANSI colours, so a
-# screenshot can tell "the theme's magenta" from "a magenta someone baked into the reply". The
+# screenshot can tell "the theme's green" from "a green someone baked into the reply". The
 # shipped file's own multi-line `palette = [...]` block is replaced, not appended to — a second
 # `palette` key would just lose to the first one in the reader's flat map.
 qa_theme() {
@@ -130,15 +130,18 @@ rm -f "$out/implementer-notes.txt"
 for s in $scenes; do
     case $s in
     dark)
-        # The built-in ANSI palette (src/ThemeFile.cpp): 5 magenta #c692e9, 4 blue #61afef,
-        # 1 red #f2777a; the bright variants 13 #d8aaf5, 12 #81c4ff, 9 #ff8c8f are accepted too,
-        # because an engine may paint bold+colour as the intense index.
+        # relay-dark's own palette (data/theme/themes/relay-dark.toml): 2 green #7dd399,
+        # 3 amber #ecc476, 1 red #f2777a; the bright variants 10 #98e5b0, 11 #f8d58e, 9 #ff8c8f are
+        # accepted too, because an engine may paint bold+colour as the intense index — and in
+        # practice it does. Green/amber/red, not the plan's magenta/blue/red: card #4E13 made amber
+        # mean "something is waiting on you" everywhere, so `**Need:**` is amber and `**Done:**`
+        # takes the Done glyph's green (be81edb, src/MarkdownAnsi.h Palette::done/need/problem).
         scene dark relay-dark \
-            done=#c692e9,#d8aaf5 need=#61afef,#81c4ff problem=#f2777a,#ff8c8f \
+            done=#7dd399,#98e5b0 need=#ecc476,#f8d58e problem=#f2777a,#ff8c8f \
             plain=#d8dce3,#f5f7fa ;;
     palette)
         scene palette qa-bold qa-theme \
-            done=#ff00ff,#ff80ff need=#0000ff,#8080ff problem=#ff0000,#ff8080 \
+            done=#00ff00,#80ff80 need=#ffff00,#ffff80 problem=#ff0000,#ff8080 \
             plain=#d8dce3,#f5f7fa ;;
     *) echo "unknown scene $s"; exit 1 ;;
     esac

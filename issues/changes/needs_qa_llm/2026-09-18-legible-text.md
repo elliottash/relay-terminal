@@ -42,7 +42,7 @@ down in `docs/ARCHITECTURE.md` § 14, "Legible text", and tested:
 2. **Pane header bands** (#SPBN) name the pane in the terminal title's face and weight, in sentence
    case ("Switchboard", "Options"), instead of 8pt letter-spaced mono capitals.
 3. **Contrast, per theme, in the tokens.** A new test holds text, muted text, the accent and the
-   state colours to 4.5:1 on `background`, `surface` and `surface_raised` in all six shipped
+   state colours to 4.5:1 on `background`, `surface` and `surface_raised` in all five shipped (six at the time; Solarized Dark has since gone)
    themes, muted text on the terminal's ground, and the composer's syntax colours on both composer
    grounds. Failing tokens were lifted in their theme files: Solarized Dark (muted 2.37:1 on a raised
    surface, text 3.95:1, every state colour under 3.5:1; `surface_raised` moved a step toward base02),
@@ -69,7 +69,8 @@ down in `docs/ARCHITECTURE.md` § 14, "Legible text", and tested:
 8. **Switchboard section checkboxes** that are off drew their label in the disabled colour
    (3.0:1 dark, 2.2:1 light) though they are live controls; they stay `@muted`, the box says off.
 
-Files: `src/Theme.{h,cpp}`, `data/theme/themes/{relay-light,gruvbox-dark,solarized-dark}.toml`,
+Files: `src/Theme.{h,cpp}`, `data/theme/themes/{relay-light,gruvbox-dark}.toml` (the Solarized Dark edits went with the theme,
+removed 2026-09-18),
 `src/PaneChrome.h` (band label), `src/PaneStatus.{h,cpp}` (label case), `src/SubagentTranscript.{h,cpp}`,
 `src/TurnTranscript.cpp`, `src/Pane.h` (the note ink's style byte, the program overlay's note format,
 the thinking format — style constants only),
@@ -105,7 +106,7 @@ Switchboard, Options at Diagnostics, and the notification list — plus 100% bef
 - [ ] Options › General › Diagnostics in a narrow pane: "Log detail" is one line, its detail wraps in
       a readable column, the choice box is narrower
 - [ ] Two or more unread notifications: the bell's count is readable
-- [ ] Switch to Solarized Dark and Gruvbox Dark: muted text (setting details, the composer strip)
+- [ ] Switch to Gruvbox Dark and IBM Beige: muted text (setting details, the composer strip)
       is readable on every surface; the accent is still recognisably the theme's
 - [ ] Nothing clips: the composer strip's chips, the Switchboard's tools row and the Options rows
       at 9pt (the strip chips grew from 8.25pt; in a narrow pane they elide as before)
