@@ -535,17 +535,22 @@ the agent typed into `implemented_by`. Three changes, all in
 - **The signature is written, not typed.** The worker knows its own preset and model, so it stamps
   `implemented_by` on entering `in-progress` or a QA lane and `verified_by` on closing out of one,
   as `provider/model` where the provider is the *model's* vendor (`deepseek/deepseek-v4.1-flash`,
-  not `openrouter/…`; `openai/codex` for the guest CLI). The agent's own argument survives only for
-  a guest writing through the bridge, which is the one case the worker cannot know.
+  not `openrouter/…`). A Tier A guest pane records the model the harness reports along with the
+  harness itself — `anthropic/claude-opus-5-20260514 via claude-code` — because "Claude Code" is
+  not a model and next month's Claude Code is a different reviewer. The agent's own argument
+  survives only for a guest writing through the bridge, which is the one case the worker cannot know.
 - **The card names its verifier.** One ranked table (the owner's order: codex → claude → glm → kimi
-  → deepseek → gemini → minimax → relay-free → local) and one lineage table. The implementer's
+  → deepseek → gemini → minimax, then a local endpoint) and one lineage table. The implementer's
   family is skipped; a family in its lineage is moved behind every other lineage but still offered,
   because a second pair of eyes from the same training data is worth less, not nothing; a local
   model is offered last; anything with no CLI on PATH and no stored key is reported as unavailable
   with what is missing. The reasons come from the research report under
   `docs/qa_evidence/2026-09-19-cross-provider-qa/`, and both tables are data with a comment per row.
-- **Relay Free is a route, not a lab.** Its family is the gateway's upstream for the role in use, so
-  a GLM card is never handed back to GLM through the gateway without anyone noticing.
+- **Relay Free never verifies, and is not a family.** Owner, 2026-09-19: *"relay free is never used
+  for verifying — so verifying is not available on the free plan."* It is not in the ranking at all;
+  it is reported as unavailable with that reason, and a close signed `relay-free/…` is refused. On
+  the implementer side it still resolves to the gateway's upstream for the role, so a card written
+  on the free plan is verified from outside *that* lineage first rather than by the model behind it.
 
 Availability is always the worker's (PATH, keyring, local endpoints) — the GUI is told, never asked
 — and the same function answers `board_read`, `board_card_get` and

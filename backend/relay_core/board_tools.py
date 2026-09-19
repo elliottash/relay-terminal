@@ -1724,6 +1724,11 @@ class BoardTools:
                     "A card in a QA lane is closed with a verdict: add a `## Verdict` (or "
                     "`## Resolution`) section to the body first, then move it.",
                     code="board_refused", requires="verdict")
+            if QA.is_relay_free(mine):
+                raise BoardToolError(
+                    "Verifying is not available on Relay Free (owner's decision, 2026-09-19): "
+                    "run QA on a provider key, on Codex or on Claude Code, and close it from there.",
+                    code="board_refused", requires="independent_model")
             closer = model_family(mine or self.context.model)
             theirs = model_family(card.front.get("implemented_by"))
             if closer and theirs and closer == theirs:

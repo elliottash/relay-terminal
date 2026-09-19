@@ -15,9 +15,9 @@ from relay_core import guest
 from relay_core import presets
 from relay_core import qa_verifiers as Q
 
-def avail(guests=(), keys=(), hosted_ok=True, local=()):
+def avail(guests=(), keys=(), local=()):
     return {"installed_guests": set(guests), "keys": {k: True for k in keys},
-            "hosted_ok": hosted_ok, "local_models": local}
+            "local_models": local}
 
 
 class SignatureTests(unittest.TestCase):
@@ -35,9 +35,18 @@ class SignatureTests(unittest.TestCase):
         self.assertEqual(Q.signature("gemini", "gemini-3.1-pro-preview"),
                          "gemini/gemini-3.1-pro-preview")
 
-    def test_a_guest_signs_its_harness_because_its_model_is_not_observable(self):
+    def test_a_guest_signs_the_model_it_ran_and_the_harness_that_ran_it(self):
+        # Owner, 2026-09-19: "lets try to record the model used."
+        self.assertEqual(Q.signature("guest:claude", "claude-opus-5-20260514"),
+                         "anthropic/claude-opus-5-20260514 via claude-code")
+        self.assertEqual(Q.signature("guest:codex", "gpt-5.6-codex"),
+                         "openai/gpt-5.6-codex via codex")
+        self.assertEqual(Q.guest_signature("codex", "gpt-5.6-codex"), "openai/gpt-5.6-codex via codex")
+
+    def test_a_guest_whose_model_cannot_be_seen_signs_the_harness_alone(self):
         self.assertEqual(Q.signature("guest:codex"), "openai/codex")
         self.assertEqual(Q.signature("guest:claude"), "anthropic/claude-code")
+        self.assertEqual(Q.guest_signature("claude", "claude"), "anthropic/claude-code")
 
     def test_relay_free_signs_the_route_and_a_local_endpoint_signs_the_machine(self):
         self.assertEqual(Q.signature("relay-free", "relay-main"), "relay-free/relay-main")
@@ -82,6 +91,14 @@ class FamilyTests(unittest.TestCase):
         self.assertEqual(Q.family("relay-free/relay-flash"), "deepseek")
         self.assertEqual(Q.family("relay-free/relay-lite"), "gemini")
 
+    def test_the_via_suffix_reads_as_the_model_and_falls_back_to_the_harness(self):
+        self.assertEqual(Q.family("anthropic/claude-opus-5-20260514 via claude-code"), "anthropic")
+        self.assertEqual(Q.family("openai/gpt-5.6-codex via codex"), "openai")
+        self.assertEqual(Q.family("anthropic/claude-opus-5 via claude-code (pane 2)"), "anthropic")
+        # A model id this table has never seen is still OpenAI's CLI and OpenAI's harness prompt.
+        self.assertEqual(Q.family("acme/mystery-1 via codex"), "openai")
+        self.assertEqual(Q.lineage(Q.family("openai/gpt-5.6-codex via codex")), "openai")
+
     def test_nothing_and_an_unknown_model_never_raise(self):
         self.assertEqual(Q.family(None), "")
         self.assertEqual(Q.family("   "), "")
@@ -105,8 +122,17 @@ class LineageTests(unittest.TestCase):
 
     def test_every_ranked_family_has_a_lineage(self):
         for row in Q.VERIFIER_RANK:
-            name = Q.family(Q.relay_free_upstream()[0]) if row["family"] == "relay-free" else row["family"]
-            self.assertIn(name, Q.LINEAGE, row["family"])
+            self.assertIn(row["family"], Q.LINEAGE, row["family"])
+
+    def test_relay_free_is_not_a_verifier_at_all(self):
+        # Owner, 2026-09-19: "relay free is never used for verifying -- so verifying is not
+        # available on the free plan." It is a stated refusal, not a silent absence.
+        self.assertEqual([r for r in Q.VERIFIER_RANK if r["family"] == "relay-free"], [])
+        self.assertTrue(Q.is_relay_free("relay-free/relay-main"))
+        self.assertFalse(Q.is_relay_free("glm/glm-5.3"))
+        # …but a card *implemented* on Relay Free still resolves to its upstream's family.
+        self.assertEqual(Q.family("relay-free/relay-main"), "glm")
+        self.assertEqual(Q.lineage(Q.family("relay-free/relay-main")), "cn-open")
 
 
 class RecommendTests(unittest.TestCase):
@@ -138,6 +164,16 @@ class RecommendTests(unittest.TestCase):
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertEqual([s["family"] for s in result["skipped"]], ["anthropic"])
 
+    def test_a_card_implemented_on_relay_free_is_verified_outside_its_upstreams_lineage(self):
+        # relay-main is GLM-5.3 Flash today, so the card is a cn-open card: GLM is skipped and the
+        # rest of cn-open goes behind every other lineage.
+        result = Q.recommend("relay-free/relay-main",
+                             **avail(guests=("codex",), keys=("kimi-code", "gemini")))
+        self.assertEqual(result["implementer_family"], "glm")
+        self.assertEqual(result["recommended"]["runner"], "guest:codex")
+        self.assertEqual([a["family"] for a in result["alternates"]], ["gemini", "kimi"])
+        self.assertEqual([s["family"] for s in result["skipped"]], ["glm"])
+
     def test_glm_gets_a_different_lineage_first_and_its_own_lineage_last(self):
         result = Q.recommend("glm/glm-5.3", **avail(guests=("codex", "claude"),
                                                     keys=("kimi-code", "openrouter", "gemini")))
@@ -149,18 +185,21 @@ class RecommendTests(unittest.TestCase):
         for entry in result["alternates"][-2:]:
             self.assertIn("same lineage as the implementer (cn-open)", entry["why"])
 
-    def test_a_glm_card_is_not_verified_by_relay_free_which_is_glm_today(self):
-        result = Q.recommend("glm/glm-5.3", **avail())
-        self.assertIsNone(result["recommended"])
-        self.assertIn("relay free", result["skipped"][-1]["label"].lower())
-        self.assertIn("routes to the implementer's family", result["skipped"][-1]["why"])
-
-    def test_relay_free_is_the_floor_when_nothing_else_is_installed_or_keyed(self):
+    def test_a_machine_with_only_relay_free_has_no_verifier_and_is_told_what_to_add(self):
         result = Q.recommend("anthropic/claude-opus-5", **avail())
-        self.assertEqual(result["recommended"]["runner"], "preset:relay-free")
-        self.assertEqual(result["recommended"]["label"], "Relay Free (GLM-5.3 Flash)")
-        self.assertEqual(result["recommended"]["family"], "glm")
+        self.assertIsNone(result["recommended"])
+        self.assertEqual(result["alternates"], [])
+        self.assertEqual(result["note"], Q.NO_VERIFIER_NOTE)
+        self.assertIn("add a provider key", result["note"])
+        self.assertEqual([u for u in result["unavailable"] if u["family"] == "relay-free"],
+                         [dict(Q.RELAY_FREE_ROW)])
         self.assertTrue([u for u in result["unavailable"] if u["family"] == "openai"])
+
+    def test_relay_free_is_reported_unavailable_even_when_a_verifier_was_found(self):
+        result = Q.recommend("anthropic/claude-opus-5", **avail(guests=("codex",)))
+        self.assertEqual(result["recommended"]["runner"], "guest:codex")
+        self.assertIn(dict(Q.RELAY_FREE_ROW), result["unavailable"])
+        self.assertNotIn("note", result)
 
     def test_an_unavailable_family_says_what_is_missing(self):
         result = Q.recommend("glm/glm-5.3", **avail())
@@ -181,8 +220,7 @@ class RecommendTests(unittest.TestCase):
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertEqual(result["alternates"][-1]["family"], "local")
         self.assertEqual(result["alternates"][-1]["model"], "bonsai-2-27b")
-        only_local = Q.recommend("anthropic/claude-opus-5",
-                                 **avail(hosted_ok=False, local=local))
+        only_local = Q.recommend("anthropic/claude-opus-5", **avail(local=local))
         self.assertEqual(only_local["recommended"]["runner"], "preset:local:bonsai")
         self.assertIn("capability floor", only_local["note"])
 
@@ -194,7 +232,7 @@ class RecommendTests(unittest.TestCase):
         self.assertEqual(result["implementer_family"], "")
 
     def test_nothing_at_all_available_recommends_nobody_rather_than_guessing(self):
-        result = Q.recommend("openai/codex", **avail(hosted_ok=False))
+        result = Q.recommend("openai/codex", **avail())
         self.assertIsNone(result["recommended"])
         self.assertEqual(result["alternates"], [])
         self.assertTrue(result["unavailable"])
@@ -278,7 +316,7 @@ class CommitTrailerTests(unittest.TestCase):
 class AvailabilityTests(unittest.TestCase):
     def test_the_probe_answers_the_four_keys_and_only_known_guests(self):
         found = Q.availability(cache_seconds=0)
-        self.assertEqual(set(found), {"installed_guests", "keys", "hosted_ok", "local_models"})
+        self.assertEqual(set(found), {"installed_guests", "keys", "local_models"})
         self.assertTrue(found["installed_guests"] <= set(guest.guest_ids()))
         # Every preset has a row, and with RELAY_KEYRING=off (scripts/test.sh) none is a real key.
         self.assertEqual(set(found["keys"]), set(presets.PRESETS))

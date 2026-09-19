@@ -238,7 +238,7 @@ class WriteTests(ProtocolTest):
         self.commands.tools.context.model = "claude-opus-5"
         self.send(type="board_move", card=card_id, status="needs-qa-llm", reason="landed",
                   evidence="docs/qa_evidence/x/")
-        here = {"installed_guests": {"codex"}, "keys": {"glm-coding": True}, "hosted_ok": True,
+        here = {"installed_guests": {"codex"}, "keys": {"glm-coding": True},
                 "local_models": ()}
         with unittest.mock.patch.object(QA, "availability", lambda *a, **k: dict(here)):
             detail = [e for e in self.send(type="board_card_get", id="q1", card=card_id)

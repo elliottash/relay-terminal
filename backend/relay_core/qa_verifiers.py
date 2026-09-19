@@ -70,14 +70,6 @@ _VENDOR_TOKENS: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"^o[1-9](-.*)?$"), "openai"),
 )
 
-#: Display names, for a card line and for `relay-board.py verifier`.  Family names are ids; these
-#: are what a person reads.
-FAMILY_LABELS: dict[str, str] = {
-    "openai": "OpenAI", "anthropic": "Claude", "glm": "GLM", "kimi": "Kimi",
-    "deepseek": "DeepSeek", "gemini": "Gemini", "minimax": "MiniMax", "qwen": "Qwen",
-    "llama": "Llama", "relay-free": "Relay Free", "local": "Local",
-}
-
 #: What a runner is called on screen.  Display only: the *model* each runner runs comes from
 #: `presets.TIER_DEFAULTS` (see `runner_model`), so this table never decides anything.
 RUNNER_LABELS: dict[str, str] = {
@@ -86,7 +78,7 @@ RUNNER_LABELS: dict[str, str] = {
     "preset:glm-coding": "GLM-5.3", "preset:glm": "GLM-5.3",
     "preset:kimi-code": "Kimi K3", "preset:kimi": "Kimi K3",
     "preset:openrouter": "DeepSeek V4.1", "preset:gemini": "Gemini 3.1 Pro",
-    "preset:minimax": "MiniMax M3", "preset:relay-free": "Relay Free",
+    "preset:minimax": "MiniMax M3",
 }
 
 #: The model id a guest CLI signs with.  A guest's exact model is not observable from outside, so
@@ -95,6 +87,9 @@ GUEST_MODELS: dict[str, str] = {"codex": "codex", "claude": "claude-code"}
 
 _TOKENS = re.compile(r"[a-z0-9.]+")
 _PARENS = re.compile(r"\([^)]*\)")
+#: `anthropic/claude-opus-5-20260514 via claude-code` — a guest CLI signs the model it actually ran
+#: *and* the harness that ran it, because the harness is the thing a person reopens.
+_VIA = re.compile(r"\s+via\s+([a-z0-9._-]+)\s*$")
 
 
 def _tokens(text: str) -> list[str]:
@@ -150,6 +145,11 @@ def family(text: str | None) -> str:
     if not isinstance(text, str) or not text.strip():
         return ""
     cleaned = _PARENS.sub(" ", text.strip().lower())
+    via = _VIA.search(cleaned)
+    if via:
+        # The model decides, but a model id this table does not know falls back to the harness:
+        # whatever `codex` ran, it is OpenAI's CLI and OpenAI's harness prompt.
+        cleaned = cleaned[: via.start()]
     head, _, tail = cleaned.rpartition("/")
     for segment in (tail.strip(), head.strip()):
         # The whole segment, not its tokens: the role is `relay-flash`, and "relay" alone would
@@ -160,8 +160,29 @@ def family(text: str | None) -> str:
     found = _family_of_tokens(_tokens(tail)) or _family_of_tokens(_tokens(head))
     if found:
         return found
+    if via:
+        return _family_of_tokens(_tokens(via.group(1)))
     words = _tokens(head) or _tokens(tail)
     return words[0] if words else ""
+
+
+def guest_signature(guest_id: str, observed_model: str | None = "") -> str:
+    """What a guest CLI signs with.
+
+    The owner, 2026-09-19: *"lets try to record the model used."*  So when Relay can see which model
+    the guest is on — the harness reports it and keeps it current (`guest_harness_provider` puts it
+    in the pane's `config.model`) — the signature names it and the harness both:
+    `anthropic/claude-opus-5 via claude-code`, `openai/gpt-5.6-codex via codex`.  When it cannot be
+    seen, the signature is the harness alone, `anthropic/claude-code` or `openai/codex`, which is
+    all that was ever observable from outside.  `family()` reads both.
+    """
+    harness = GUEST_MODELS.get(guest_id, guest_id)
+    name = (observed_model or "").strip()
+    if not name or name.lower() in (guest_id.lower(), harness.lower()):
+        return signature(None, harness)
+    vendor = family(name) or family(harness)
+    slug = name.split("/")[-1]
+    return f"{vendor}/{slug} via {harness}" if vendor else f"{slug} via {harness}"
 
 
 def signature(preset_id: str | None, model: str | None = "") -> str:
@@ -176,8 +197,7 @@ def signature(preset_id: str | None, model: str | None = "") -> str:
     preset = (preset_id or "").strip().lower()
     name = (model or "").strip()
     if preset.startswith("guest:"):
-        guest = preset[len("guest:"):]
-        return signature(None, GUEST_MODELS.get(guest, guest))
+        return guest_signature(preset[len("guest:"):], name)
     if preset.startswith("local:"):
         # A local endpoint is signed by the machine, not by whoever trained the weights: two people
         # running "qwen3" locally are not running the same build, and nothing offsite saw it.
@@ -224,6 +244,16 @@ LINEAGE: dict[str, str] = {
 }
 
 
+def is_relay_free(text: str | None) -> bool:
+    """Whether a signature was written on Relay Free, whatever role it ran.
+
+    The one test the close rule needs: verifying is not part of the free plan (owner, 2026-09-19),
+    so a closer signed `relay-free/…` is refused even when its upstream is a different family from
+    the implementer's.
+    """
+    return (text or "").strip().lower().startswith("relay-free/")
+
+
 def lineage(family_id: str | None) -> str:
     """The lineage group of a family, or "" for one the table does not know."""
     return LINEAGE.get((family_id or "").strip().lower(), "")
@@ -247,15 +277,25 @@ VERIFIER_RANK: tuple[dict, ...] = (
     {"family": "deepseek", "label": "DeepSeek", "runners": ("preset:openrouter",)},
     {"family": "gemini", "label": "Gemini", "runners": ("preset:gemini",)},
     {"family": "minimax", "label": "MiniMax", "runners": ("preset:minimax",)},
-    # Always available on a fresh install, so it is the floor: some verifier rather than none. Its
-    # family is *not* "relay-free" — the row is resolved to the gateway's upstream for the Main role
-    # (`RELAY_FREE_UPSTREAMS`), so a GLM card is never handed back to GLM through the gateway.
-    {"family": "relay-free", "label": "Relay Free", "runners": ("preset:relay-free",)},
-    # Runners are filled in from the local-endpoint registry at recommend time; a machine with no
-    # local model simply has no local row. Always last, whatever the lineage: a small local model
-    # cannot judge code (Crupi et al. 2025, CodeJudgeBench 2507.10535).
+    # Relay Free is NOT a row here. Owner, 2026-09-19: "relay free is never used for verifying -- so
+    # verifying is not available on the free plan." It is reported as unavailable with that reason
+    # (`RELAY_FREE_ROW`) rather than silently missing, and `_move` refuses a close signed by it.
+    #
+    # Local: runners are filled in from the local-endpoint registry at recommend time, so a machine
+    # with no local model simply has no local row, and it is always last whatever the lineage —
+    # a model small enough to serve here cannot judge code (Crupi et al. 2025, CodeJudgeBench).
     {"family": "local", "label": "Local", "runners": ()},
 )
+
+
+#: Relay Free's standing answer. It is a row in `unavailable`, never a runner: the owner's decision
+#: is a product one (verifying is not part of the free plan), not a capability judgement, so it is
+#: stated rather than left as an absence somebody would read as a bug.
+RELAY_FREE_ROW = {"family": "relay-free", "label": "Relay Free",
+                  "why": "verifying is not available on Relay Free"}
+#: What to say when Relay Free is the only thing this machine could have used.
+NO_VERIFIER_NOTE = ("No verifier available. Verifying is not available on Relay Free: add a "
+                    "provider key, or install Codex or Claude Code.")
 
 
 def _local_entries(local_models) -> list[tuple[str, str, str]]:
@@ -303,12 +343,10 @@ def runner_label(runner: str, local_models=()) -> str:
     return runner_model(runner, local_models) or runner
 
 
-def _runner_available(runner: str, installed_guests, keys, hosted_ok: bool, local_models) -> bool:
+def _runner_available(runner: str, installed_guests, keys, local_models) -> bool:
     kind, _, name = (runner or "").partition(":")
     if kind == "guest":
         return name in set(installed_guests or ())
-    if name == "relay-free":
-        return bool(hosted_ok)
     if name.startswith("local:"):
         return any(endpoint == name for endpoint, _m, _l in _local_entries(local_models))
     return bool((keys or {}).get(name))
@@ -319,8 +357,6 @@ def _missing(runner: str) -> str:
     kind, _, name = (runner or "").partition(":")
     if kind == "guest":
         return f"{name} not on PATH"
-    if name == "relay-free":
-        return "Relay Free is off"
     if name.startswith("local:"):
         return "no local endpoint"
     return f"no {name} key"
@@ -331,8 +367,6 @@ def _why_available(runner: str) -> str:
     kind, _, name = (runner or "").partition(":")
     if kind == "guest":
         return "installed"
-    if name == "relay-free":
-        return "included, no key"
     if name.startswith("local:"):
         return "on this machine"
     return "key"
@@ -351,21 +385,14 @@ def _rows_for(implementer_family: str, local_models) -> tuple[list[dict], list[d
     group = lineage(implementer_family)
     for row in VERIFIER_RANK:
         entry = dict(row)
-        if entry["family"] == "relay-free":
-            model, label = relay_free_upstream(runner_model("preset:relay-free"))
-            # The row is judged as its upstream, and says so, so nobody has to know the routing.
-            entry["family"] = family(model)
-            entry["label"] = f"Relay Free ({label})"
-            entry["via"] = "relay-free"
         if entry["family"] == "local":
             entry["runners"] = tuple(f"preset:{endpoint}"
                                      for endpoint, _m, _l in _local_entries(local_models))
             if not entry["runners"]:
                 continue
         if implementer_family and entry["family"] == implementer_family:
-            why = ("implemented this card" if not entry.get("via") else
-                   f"routes to the implementer's family ({FAMILY_LABELS.get(implementer_family, implementer_family)})")
-            skipped.append({"family": entry["family"], "label": entry["label"], "why": why})
+            skipped.append({"family": entry["family"], "label": entry["label"],
+                            "why": "implemented this card"})
             continue
         rows.append(entry)
     local = [r for r in rows if r["family"] == "local"]
@@ -376,7 +403,7 @@ def _rows_for(implementer_family: str, local_models) -> tuple[list[dict], list[d
     return rest + local, skipped
 
 
-def recommend(implemented_by: str | None, *, installed_guests=(), keys=None, hosted_ok: bool = True,
+def recommend(implemented_by: str | None, *, installed_guests=(), keys=None,
               local_models=()) -> dict:
     """Who should verify a card its `implemented_by` says was written by `implemented_by`.
 
@@ -385,7 +412,9 @@ def recommend(implemented_by: str | None, *, installed_guests=(), keys=None, hos
     `alternates`, `skipped` and `unavailable`.  Pure: availability comes in as arguments, so a test
     never touches PATH or the keyring.  `keys` is `{preset id: bool}` as `keystore.available()`
     returns it; `installed_guests` is a set of guest ids; `local_models` is what
-    `localmodels.catalog()` holds.
+    `localmodels.catalog()` holds.  Relay Free is never a verifier (owner, 2026-09-19) and is
+    always reported as unavailable, so a machine with nothing but the free plan gets
+    `recommended: None` and a `note` saying what to add.
     """
     keys = dict(keys or {})
     implementer = (implemented_by or "").strip()
@@ -397,7 +426,7 @@ def recommend(implemented_by: str | None, *, installed_guests=(), keys=None, hos
     unavailable: list[dict] = []
     for row in rows:
         runner = next((r for r in row["runners"]
-                       if _runner_available(r, installed_guests, keys, hosted_ok, local_models)), None)
+                       if _runner_available(r, installed_guests, keys, local_models)), None)
         if runner is None:
             reasons = []
             for candidate in row["runners"]:
@@ -410,21 +439,16 @@ def recommend(implemented_by: str | None, *, installed_guests=(), keys=None, hos
             unavailable.append({"family": row["family"], "label": row["label"],
                                 "why": ", ".join(reasons) or "no runner"})
             continue
-        entry = {"family": row["family"], "label": row.get("label") or FAMILY_LABELS.get(row["family"], row["family"]),
-                 "runner": runner, "model": runner_model(runner, local_models),
-                 "available": _why_available(runner),
-                 "same_lineage": bool(group) and lineage(row["family"]) == group}
-        if row["family"] != "local" and runner in RUNNER_LABELS and "via" not in row:
-            entry["label"] = RUNNER_LABELS[runner]
-        if row.get("via"):
-            entry["via"] = row["via"]
-        if row["family"] == "local":
-            entry["label"] = runner_label(runner, local_models)
-        offers.append(entry)
+        offers.append({"family": row["family"], "label": runner_label(runner, local_models),
+                       "runner": runner, "model": runner_model(runner, local_models),
+                       "available": _why_available(runner),
+                       "same_lineage": bool(group) and lineage(row["family"]) == group})
+    unavailable.append(dict(RELAY_FREE_ROW))
 
     out = {"implemented_by": implementer, "implementer_family": implementer_family,
            "recommended": None, "alternates": [], "skipped": skipped, "unavailable": unavailable}
     if not offers:
+        out["note"] = NO_VERIFIER_NOTE
         return out
     first, rest = offers[0], offers[1:]
     if not implementer_family:
@@ -485,7 +509,9 @@ _CACHE: tuple[float, dict] | None = None
 
 
 def availability(cache_seconds: float = 60.0) -> dict:
-    """What this machine can actually run: `{installed_guests, keys, hosted_ok, local_models}`.
+    """What this machine can actually run: `{installed_guests, keys, local_models}`.
+
+    No hosted row: Relay Free never verifies (owner, 2026-09-19), so there is nothing to probe.
 
     Three probes, all local: `shutil.which` over the guest registry's binary names (never a version
     subprocess — a hung CLI must not stall a board read), `keystore.available()` for the stored keys
@@ -514,8 +540,7 @@ def availability(cache_seconds: float = 60.0) -> dict:
                  for endpoint in localmodels.catalog().values()]
     except Exception:                        # pragma: no cover - an unreadable registry is "none"
         local = []
-    out = {"installed_guests": installed, "keys": keys, "hosted_ok": True,
-           "local_models": tuple(local)}
+    out = {"installed_guests": installed, "keys": keys, "local_models": tuple(local)}
     _CACHE = (now, out)
     return dict(out)
 

@@ -598,7 +598,7 @@ class SignatureTests(BoardToolsTest):
     should verify next. The recommendation is computed with a fixed availability, so these tests
     say nothing about the machine they run on."""
 
-    HERE = {"installed_guests": {"codex"}, "keys": {"glm-coding": True}, "hosted_ok": True,
+    HERE = {"installed_guests": {"codex"}, "keys": {"glm-coding": True},
             "local_models": ()}
 
     def setUp(self):

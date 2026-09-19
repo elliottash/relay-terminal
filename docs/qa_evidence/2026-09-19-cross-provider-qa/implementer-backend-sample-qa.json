@@ -30,16 +30,6 @@
       "why": "next in the ranking and available here (key)"
     },
     {
-      "family": "glm",
-      "label": "Relay Free (GLM-5.3 Flash)",
-      "runner": "preset:relay-free",
-      "model": "relay-main",
-      "available": "included, no key",
-      "same_lineage": false,
-      "via": "relay-free",
-      "why": "next in the ranking and available here (included, no key)"
-    },
-    {
       "family": "local",
       "label": "Bonsai 2 27B",
       "runner": "preset:local:bonsai",
@@ -71,6 +61,11 @@
       "family": "minimax",
       "label": "MiniMax",
       "why": "no key"
+    },
+    {
+      "family": "relay-free",
+      "label": "Relay Free",
+      "why": "verifying is not available on Relay Free"
     }
   ],
   "commits": []

@@ -588,11 +588,19 @@ class Agent:
         OpenRouter from the same model served locally, and the signature a card records has to
         name the vendor (card #T71W, `qa_verifiers.signature`). Called at the top of every turn,
         because the model can change between turns.
+
+        A Tier A guest pane signs `… via claude-code` / `… via codex` with the model the harness
+        reports, which it keeps in this pane's `config.model`; `config_guest_id` is that module's
+        own test for "this pane is a guest", so the scheme is never spelled twice. Imported late:
+        the harness provider pulls in the whole guest stack, which a pane without one never needs.
         """
         if self.board is None:
             return
+        from . import guest_harness_provider
+        guest_id = guest_harness_provider.config_guest_id(self.config)
         self.board.context.model = self.config.model
-        self.board.context.preset = self.preset.id if self.preset is not None else None
+        self.board.context.preset = (f"guest:{guest_id}" if guest_id else
+                                     self.preset.id if self.preset is not None else None)
 
     def set_model(self, config: ProviderConfig, preset_id: str | None = None,
                   context_window: int | None = None, provider=None) -> None:
