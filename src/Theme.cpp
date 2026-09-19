@@ -102,7 +102,7 @@ QPushButton:pressed, QToolButton#stripChip:pressed {
 QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit, QFrame#composer, QWidget#pane,
 QTreeView#fileExplorerView, QTreeWidget#turnTools, QScrollArea#filePreviewImageArea {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
-QWidget#pane[relayActive="true"] { border: 2px solid @muted; }
+QWidget#pane[relayActive="true"] { border: 2px solid @borderStrong; }
 QFrame#composer[relayActive="true"] { border: 2px solid @accent; }
 )");
     return css.arg(light, dark);
@@ -346,11 +346,7 @@ QLabel { color: @text; background: transparent; }
 QLabel#muted, QLabel#cwd, QLabel#help, QLabel#privacy { color: @muted; }
 QLabel#route { color: @accent; font-family: "@mono"; }
 /* Pane header (issue JRWQ): the session title, the "auto" badge and the directory beside it. */
-/* Which pane is the active one (issue #H3TQ): a brighter outline on it, and a header that reads
-   at full strength there and a step back everywhere else. Grey, not accent — the accent means
-   "shell" here, so a pane frame must not compete with the composer (relay-dark.toml). */
-QLabel#paneTitle { color: @muted; font-weight: 600; }
-QLabel#paneTitle[relayActive="true"] { color: @text; }
+QLabel#paneTitle { color: @text; font-weight: 600; }
 QLabel#paneCwd { color: @muted; font-size: 9pt; }
 QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
@@ -468,7 +464,7 @@ QTreeWidget#requestsList { background: transparent; border: none; outline: none;
 QToolButton#interruptButton { border: 1px solid @border; border-radius: 6px; padding: 4px; background: transparent; }
 QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 8px; }
-QWidget#pane[relayActive="true"] { border: 1px solid @muted; }
+QWidget#pane[relayActive="true"] { border: 1px solid @borderStrong; }
 /* Pane button row, drop zones, tab bar controls */
 QFrame#helpCard { background: @raised; border: 1px solid @border; border-radius: 8px; }
 QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 9pt; min-width: 14px; }
