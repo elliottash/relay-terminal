@@ -54,6 +54,23 @@ static QJsonObject sessionItem(const QString &id, const QString &title, const QS
                        {QStringLiteral("updated"), 1.0e9}, {QStringLiteral("turns"), 3}};
 }
 
+static QJsonObject guestItem(const QString &source, const QString &id, const QString &title,
+                             const QString &cwd = QStringLiteral("/home/u/repos/relay-terminal")) {
+    const QJsonArray resume = source == QLatin1String("claude")
+                                  ? QJsonArray{QStringLiteral("claude"), QStringLiteral("-r"), id}
+                                  : QJsonArray{QStringLiteral("codex"), QStringLiteral("resume"), id};
+    const QJsonArray fork = source == QLatin1String("claude")
+                                ? QJsonArray{QStringLiteral("claude"), QStringLiteral("-r"), id, QStringLiteral("--fork-session")}
+                                : QJsonArray{QStringLiteral("codex"), QStringLiteral("fork"), id};
+    return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("id"), id},
+                       {QStringLiteral("source"), source}, {QStringLiteral("title"), title},
+                       {QStringLiteral("project"), QStringLiteral("relay-terminal")},
+                       {QStringLiteral("workspace"), cwd}, {QStringLiteral("resume_cwd"), cwd},
+                       {QStringLiteral("session_dir"), QString()},
+                       {QStringLiteral("updated"), 1.0e9}, {QStringLiteral("turns"), 12},
+                       {QStringLiteral("resume_command"), resume}, {QStringLiteral("fork_command"), fork}};
+}
+
 static const QString kOpen = QStringLiteral("<span style=\"background-color:#f5d76e;color:#101216;\">");
 static const QString kClose = QStringLiteral("</span>");
 
@@ -149,7 +166,11 @@ private slots:
         QCOMPARE(asked.value(QStringLiteral("scope")).toString(), QStringLiteral("project"));
         QCOMPARE(asked.value(QStringLiteral("query")).toString(), QString());
         QVERIFY(!asked.contains(QStringLiteral("since")));
-        QVERIFY(!asked.contains(QStringLiteral("sources")));
+        // "Everything" names every listable source, guests included (protocol 26.7), rather than
+        // leaving the worker's own default — Relay's sessions and its terminal history — to decide.
+        QCOMPARE(asked.value(QStringLiteral("sources")).toArray(),
+                 (QJsonArray{QStringLiteral("agent"), QStringLiteral("terminal"),
+                             QStringLiteral("claude"), QStringLiteral("codex")}));
         QVERIFY(!asked.contains(QStringLiteral("include_threads")));   // threads are off by default
         QJsonObject item{{QStringLiteral("session_id"), QString(32, QLatin1Char('a'))},
                          {QStringLiteral("source"), QStringLiteral("agent")},
@@ -871,6 +892,98 @@ private slots:
         QVERIFY(!closed);
         QTest::keyClick(search, Qt::Key_Escape);
         QVERIFY(closed);
+    }
+
+    // ----- guest sessions, protocol 26.7 ------------------------------------------------------
+
+    void guestRowsCarryTheToolsOwnResumeCommand() {
+        QVERIFY(isGuestSource(QStringLiteral("claude")));
+        QVERIFY(isGuestSource(QStringLiteral("codex")));
+        QVERIFY(!isGuestSource(QStringLiteral("agent")));
+        QVERIFY(!isGuestSource(QStringLiteral("terminal")));
+        QCOMPARE(guestLabel(QStringLiteral("claude")), QStringLiteral("Claude Code"));
+        QCOMPARE(guestLabel(QStringLiteral("codex")), QStringLiteral("Codex"));
+        // Ordinary words are left alone; anything else is single-quoted, and a quote of its own
+        // is closed and reopened rather than escaped.
+        QCOMPARE(shellWord(QStringLiteral("claude")), QStringLiteral("claude"));
+        QCOMPARE(shellWord(QStringLiteral("/home/u/my repo")), QStringLiteral("'/home/u/my repo'"));
+        QCOMPARE(shellWord(QStringLiteral("it's")), QStringLiteral("'it'\\''s'"));
+        QCOMPARE(shellWord(QString()), QStringLiteral("''"));
+
+        const QString id = QStringLiteral("3f2504e0-4f89-11d3-9a0c-0305e82c3301");
+        const QJsonObject claude = guestItem(QStringLiteral("claude"), id, QStringLiteral("Wire the pane"));
+        QCOMPARE(guestCommand(claude), QStringLiteral("claude -r ") + id);
+        QCOMPARE(guestCommand(claude, true), QStringLiteral("claude -r ") + id + QStringLiteral(" --fork-session"));
+        QCOMPARE(guestCwd(claude), QStringLiteral("/home/u/repos/relay-terminal"));
+        const QJsonObject codex = guestItem(QStringLiteral("codex"), id, QStringLiteral("Rollout"), QString());
+        QCOMPARE(guestCommand(codex), QStringLiteral("codex resume ") + id);
+        QCOMPARE(guestCommand(codex, true), QStringLiteral("codex fork ") + id);
+        QCOMPARE(guestCwd(codex), QString());          // no workspace: the pane keeps its own
+        // An ordinary session is not a guest and has no command of its own.
+        QCOMPARE(guestCommand(sessionItem(QStringLiteral("a"), QStringLiteral("Mine"))), QString());
+        QCOMPARE(guestCwd(sessionItem(QStringLiteral("a"), QStringLiteral("Mine"))), QString());
+    }
+
+    void theKindFilterListsTheGuestsAndAsksForOne() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        auto *kind = manager.findChild<QComboBox *>(QStringLiteral("sessionsKind"));
+        QVERIFY(kind);
+        QVERIFY(kind->findData(QStringLiteral("claude")) > 0);
+        QVERIFY(kind->findData(QStringLiteral("codex")) > 0);
+        kind->setCurrentIndex(kind->findData(QStringLiteral("claude")));
+        QCOMPARE(asked.last().value(QStringLiteral("sources")).toArray(),
+                 (QJsonArray{QStringLiteral("claude")}));
+        // A guest kind is a filter like any other, and "Clear filters" takes it back to everything.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}}});
+        auto *clear = manager.findChild<QPushButton *>(QStringLiteral("clearFilters"));
+        QVERIFY(clear->isVisibleTo(&manager));
+        clear->click();
+        QCOMPARE(asked.last().value(QStringLiteral("sources")).toArray(),
+                 (QJsonArray{QStringLiteral("agent"), QStringLiteral("terminal"),
+                             QStringLiteral("claude"), QStringLiteral("codex")}));
+    }
+
+    void aGuestRowResumesForksAndSaysWhoseItIs() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.show();
+        const QString id = QStringLiteral("3f2504e0-4f89-11d3-9a0c-0305e82c3301");
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{guestItem(QStringLiteral("claude"), id, QStringLiteral("Wire the pane"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *row = tree->topLevelItem(0)->child(0);
+        QCOMPARE(row->text(0), QStringLiteral("Wire the pane"));
+        QCOMPARE(row->text(3), QStringLiteral("Claude Code"));      // where a session shows its model
+        // Enter resumes it here, Shift+Enter in a new pane, Ctrl+Enter forks — all with the row,
+        // which is what carries the argv.
+        QString resumed, newPaned, forked;
+        manager.onResume = [&resumed, &newPaned](const QJsonObject &item, bool other) {
+            (other ? newPaned : resumed) = guestCommand(item, false);
+        };
+        manager.onFork = [&forked](const QJsonObject &item) { forked = guestCommand(item, true); };
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(resumed, QStringLiteral("claude -r ") + id);
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(newPaned, QStringLiteral("claude -r ") + id);
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(forked, QStringLiteral("claude -r ") + id + QStringLiteral(" --fork-session"));
+        // The ⓘ view and the summary read a Relay session file; a guest has none, so neither is
+        // offered. Rename, pin and delete are index-only and stay.
+        auto button = [&manager](const QString &text) -> QPushButton * {
+            for (QPushButton *candidate : manager.findChildren<QPushButton *>())
+                if (candidate->text() == text) return candidate;
+            return nullptr;
+        };
+        QVERIFY(button(QStringLiteral("Resume here"))->isEnabled());
+        QVERIFY(!button(QStringLiteral("Info"))->isEnabled());
+        QVERIFY(button(QStringLiteral("Rename…"))->isEnabled());
+        QVERIFY(button(QStringLiteral("Pin"))->isEnabled());
+        QVERIFY(button(QStringLiteral("Delete…"))->isEnabled());
+        QVERIFY(button(QStringLiteral("Resume here"))->toolTip().contains(QStringLiteral("claude -r ") + id));
+        QVERIFY(button(QStringLiteral("Resume here"))->toolTip().contains(QStringLiteral("/home/u/repos/relay-terminal")));
     }
 
     void summariesFromTheButtonAndTheBatch() {

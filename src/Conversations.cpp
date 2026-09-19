@@ -299,6 +299,58 @@ QString elideMiddleText(const QString &text, int maxChars) {
     return text.left(keepLeft) + QChar(0x2026) + text.right(keepRight);
 }
 
+// ----- guest sessions (protocol 26.7) -------------------------------------------------------
+
+bool isGuestSource(const QString &source) {
+    return source == QLatin1String("claude") || source == QLatin1String("codex");
+}
+
+bool isGuestItem(const QJsonObject &item) {
+    return isGuestSource(item.value(QStringLiteral("source")).toString());
+}
+
+QString guestLabel(const QString &source) {
+    if (source == QLatin1String("claude")) return QStringLiteral("Claude Code");
+    if (source == QLatin1String("codex")) return QStringLiteral("Codex");
+    return source;
+}
+
+// One argv word for a POSIX shell. Relay builds the words itself from the worker's answer, but a
+// session id is a file name the guest chose and a workspace is a path the user chose, so nothing
+// is passed through unquoted.
+QString shellWord(const QString &word) {
+    if (word.isEmpty()) return QStringLiteral("''");
+    bool plain = true;
+    for (const QChar c : word)
+        if (!(c.isLetterOrNumber() || c == QLatin1Char('_') || c == QLatin1Char('-')
+              || c == QLatin1Char('.') || c == QLatin1Char('/') || c == QLatin1Char(':')
+              || c == QLatin1Char('=') || c == QLatin1Char('@') || c == QLatin1Char('+'))) {
+            plain = false;
+            break;
+        }
+    if (plain) return word;
+    return QStringLiteral("'") + QString(word).replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QStringLiteral("'");
+}
+
+QString guestCommand(const QJsonObject &item, bool fork) {
+    if (!isGuestItem(item)) return QString();
+    const QJsonArray argv = item.value(fork ? QStringLiteral("fork_command") : QStringLiteral("resume_command")).toArray();
+    QStringList words;
+    for (const auto &value : argv) {
+        const QString word = value.toString();
+        if (word.isEmpty() && !value.isString()) return QString();   // not an argv at all
+        words << shellWord(word);
+    }
+    return words.join(QLatin1Char(' '));
+}
+
+QString guestCwd(const QJsonObject &item) {
+    if (!isGuestItem(item)) return QString();
+    QString cwd = item.value(QStringLiteral("resume_cwd")).toString();
+    if (cwd.isEmpty()) cwd = item.value(QStringLiteral("workspace")).toString();
+    return cwd;
+}
+
 QJsonArray continueItems(const QJsonArray &items, const QString &project,
                          const QSet<QString> &closedIds, int max) {
     QList<QJsonObject> picked;
@@ -482,9 +534,14 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_scope->addItem(QStringLiteral("This project"), QStringLiteral("project"));
     m_scope->addItem(QStringLiteral("All projects"), QStringLiteral("all"));
     m_kind = new QComboBox;
+    m_kind->setObjectName(QStringLiteral("sessionsKind"));
     m_kind->addItem(QStringLiteral("Everything"), QString());
     m_kind->addItem(QStringLiteral("Agent sessions"), QStringLiteral("agent"));
     m_kind->addItem(QStringLiteral("Terminal history"), QStringLiteral("terminal"));
+    // The guests (protocol 26.7). They are sources of the same index, so "Everything" is
+    // everything: the request names all four rather than leaving the worker to guess.
+    m_kind->addItem(QStringLiteral("Claude Code sessions"), QStringLiteral("claude"));
+    m_kind->addItem(QStringLiteral("Codex sessions"), QStringLiteral("codex"));
     m_model = new QComboBox;
     m_model->addItem(QStringLiteral("Any model"), QString());
     m_date = new QComboBox;
@@ -891,7 +948,10 @@ QJsonObject SessionManager::queryRequest() const {
     const double since = sinceFor(m_date->currentData().toString(), QDateTime::currentDateTime());
     if (since > 0) request.insert(QStringLiteral("since"), since);
     const QString kind = m_kind->currentData().toString();
-    if (!kind.isEmpty()) request.insert(QStringLiteral("sources"), QJsonArray{kind});
+    request.insert(QStringLiteral("sources"),
+                   kind.isEmpty() ? QJsonArray{QStringLiteral("agent"), QStringLiteral("terminal"),
+                                               QStringLiteral("claude"), QStringLiteral("codex")}
+                                  : QJsonArray{kind});
     if (m_threads->isChecked()) request.insert(QStringLiteral("include_threads"), true);
     const QString sort = m_sort->currentData().toString();
     if (sort != QLatin1String("recent")) request.insert(QStringLiteral("sort"), sort);
@@ -1002,7 +1062,10 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     row->setText(1, whenText(item.value(QStringLiteral("updated")).toDouble(), QDateTime::currentDateTime()));
     row->setText(2, QString::number(item.value(QStringLiteral("turns")).toInt())
                         + (open > 0 ? QStringLiteral(" · %1 open").arg(open) : QString()));
-    row->setText(3, terminal ? QStringLiteral("terminal") : item.value(QStringLiteral("model")).toString());
+    const QString source = item.value(QStringLiteral("source")).toString();
+    row->setText(3, terminal ? QStringLiteral("terminal")
+                 : isGuestSource(source) ? guestLabel(source)
+                                         : item.value(QStringLiteral("model")).toString());
     decorate(row, item);
     // An arrow to unfold the quick look: the row needs a child before it has one.
     auto *placeholder = new QTreeWidgetItem(row);
@@ -1478,22 +1541,30 @@ void SessionManager::updateButtons() {
     const bool has = !item.isEmpty();
     const bool terminal = isTerminal(item);
     const bool thread = isThread(item);
+    // A guest session (protocol 26.7) is the guest's own file: Relay resumes it by running the
+    // tool's command, and everything that reads a Relay session file — the ⓘ view, the summary —
+    // has nothing to read.
+    const bool guest = isGuestItem(item);
     m_resume->setEnabled(has && !terminal);
     m_resume->setText(thread ? QStringLiteral("Open history") : QStringLiteral("Resume here"));
     m_newPane->setEnabled(has && !terminal && !thread);
-    m_info->setEnabled(has && !terminal);
+    m_info->setEnabled(has && !terminal && !guest);
     m_rename->setEnabled(has);
     m_pin->setEnabled(has);
     m_delete->setEnabled(has);
     m_pin->setText(item.value(QStringLiteral("pinned")).toInt() > 0 ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
     m_resume->setToolTip(terminal ? QStringLiteral("Terminal history cannot be resumed; it is here to be searched.")
                          : thread ? QStringLiteral("Open this subagent thread's history, with the way back to its owner session.")
+                         : guest ? QStringLiteral("Runs %1 in this pane, in %2 — %3 resumes its own session.")
+                                       .arg(guestCommand(item),
+                                            guestCwd(item).isEmpty() ? QStringLiteral("this pane's directory") : guestCwd(item),
+                                            guestLabel(item.value(QStringLiteral("source")).toString()))
                          : m_openSessions.contains(selectedId())
                              ? QStringLiteral("This conversation is already open: Relay goes to that pane rather than loading it twice.")
                              : QStringLiteral("Replace this pane's conversation with the selected one."));
     const QString sessionId = item.value(QStringLiteral("session_id")).toString();
     m_reopen->setVisible(m_closed.contains(sessionId));
-    const bool summarisable = has && !thread && !terminal && bool(onSummarise);
+    const bool summarisable = has && !thread && !terminal && !guest && bool(onSummarise);
     const bool waiting = m_summarising.contains(sessionId);
     m_summarise->setVisible(summarisable && (waiting || item.value(QStringLiteral("summary")).toString().trimmed().isEmpty()));
     m_summarise->setEnabled(!waiting);
@@ -1794,15 +1865,22 @@ void SessionManager::remove() {
     if (item.isEmpty() || !onDelete) return;
     const bool terminal = isTerminal(item);
     const bool thread = isThread(item);
+    const bool guest = isGuestItem(item);
     QMessageBox confirm(QMessageBox::Warning, QStringLiteral("Delete"),
                         terminal ? QStringLiteral("Delete the indexed terminal history of “%1”?")
                                        .arg(item.value(QStringLiteral("project")).toString())
                         : thread ? QStringLiteral("Delete the subagent thread “%1”?").arg(item.value(QStringLiteral("title")).toString())
+                        : guest ? QStringLiteral("Forget Relay's copy of “%1”?").arg(item.value(QStringLiteral("title")).toString())
                                  : QStringLiteral("Delete “%1” permanently?").arg(item.value(QStringLiteral("title")).toString()),
                         QMessageBox::Cancel, this);
     confirm.setInformativeText(terminal
         ? QStringLiteral("Only the index rows are removed; your shell's own history file is untouched.")
         : thread ? QStringLiteral("The thread's file and its index rows are deleted; its owner session keeps the result it was given.")
+        // Relay never writes in ~/.claude or ~/.codex (protocol 26.7), so this says what it does:
+        // the row goes, the transcript stays, and the next scan lists the session again.
+        : guest ? QStringLiteral("%1 owns this session; Relay only indexed it. The index rows go and the transcript "
+                                 "stays where it is, so the session is listed again the next time Relay scans.")
+                      .arg(guestLabel(item.value(QStringLiteral("source")).toString()))
                  : QStringLiteral("The session, its subagent threads, its checkpoint file copies and its index rows are deleted. This cannot be undone."));
     auto *remove = confirm.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
     confirm.exec();

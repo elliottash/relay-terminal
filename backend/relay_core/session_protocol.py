@@ -12,11 +12,12 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from urllib.parse import urlsplit
 
-from . import (alias_import, aliases, attachments, conv_index, instructions, keystore, localmodels,
-               logs, planning, suggestions, titles)
+from . import (alias_import, aliases, attachments, conv_index, guest_sessions, instructions,
+               keystore, localmodels, logs, planning, suggestions, titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -26,6 +27,16 @@ from . import sessions as session_files
 from .sessions import SessionStore, check_id, default_session_dir
 
 _log = logs.get("aliases")
+_guest_log = logs.get("guest_sessions")
+
+# The `sources` a `conversations` request may name, for the one error message that lists them.
+LISTABLE_SOURCES = ", ".join(f'"{name}"' for name in conv_index.SOURCES)
+# A guest session id is the guest's own (protocol 26.7); this only stops an unbounded string
+# reaching the index as a lookup key.
+MAX_GUEST_ID = 200
+# How often a `conversations` request may set a guest reconcile going (seconds). The pane queries
+# on every keystroke; the guests' files do not change that fast.
+GUEST_RECONCILE_EVERY = 5.0
 
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
@@ -756,45 +767,131 @@ class SessionCommands:
         agent = self.turns.agent
         return str(agent.executor.workspace.root) if agent is not None else ""
 
-    @staticmethod
-    def _conversation_id(value) -> str:
+    def _conversation_id(self, value) -> str:
+        """The session id of a conversation request, in the three spellings the index holds.
+
+        Relay's own sessions are 32 hex digits (`sessions.check_id`) and terminal history is
+        `term-<digest>`. A guest row (protocol 26.7) is keyed by the guest's own id — claude and
+        codex name their transcripts after a dashed UUID — which no shape of Relay's would ever
+        accept, so it is checked against the index instead of against a pattern: an id the index
+        holds under a guest source is that guest's session and nothing else's.
+        """
         if isinstance(value, str) and conv_index.TERMINAL_ID.match(value):
             return value
+        if (isinstance(value, str) and 0 < len(value) <= MAX_GUEST_ID and conv_index.enabled()
+                and self._indexed(value).get("source") in conv_index.GUEST_SOURCES):
+            return value
         return check_id(value)
+
+    def _guest_state(self) -> dict:
+        """The one guest reconcile this worker may have running, built on first use."""
+        state = getattr(self, "_guests", None)
+        if state is None:
+            state = {"lock": threading.Lock(), "running": False, "at": 0.0, "request": None}
+            self._guests = state
+        return state
+
+    def _guest_refresh(self, request, sources) -> None:
+        """Bring the guest rows in line with `~/.claude` and `~/.codex` — off the request path.
+
+        The listing is answered from the index straight away; the reconcile runs on its own
+        thread, and only if the answer actually changed does a second `conversations` event
+        replace the list the pane drew. A reconcile is incremental (a transcript whose mtime
+        matches the indexed one is not read at all: warm, it is no work), but the *first* one
+        over a long claude history is seconds of parsing, which is exactly why it may not sit in
+        front of the answer. One at a time, and no oftener than `GUEST_RECONCILE_EVERY` seconds,
+        so typing in the search box does not queue a rescan per keystroke.
+
+        The second answer is built for the **latest** request, not for the one that happened to
+        set the rescan going: the user has gone on typing in the meantime, and re-sending an
+        older query's results under the same id would put the wrong list in front of them.
+        """
+        if not any(source in conv_index.GUEST_SOURCES for source in sources):
+            return
+        state = self._guest_state()
+        now = time.monotonic()
+        with state["lock"]:
+            state["request"] = request         # even when this one is throttled away
+            if state["running"] or (state["at"] and now - state["at"] < GUEST_RECONCILE_EVERY):
+                return
+            state["running"] = True
+
+        def work():
+            try:
+                outcome = guest_sessions.reconcile(self.index())
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                # A guest's files are not Relay's to depend on: an unreadable home is a log line,
+                # never an error on a listing the user already has in front of them.
+                logs.event(_guest_log, "guest reconcile failed", error=str(exc)[:200])
+                return None
+            except Exception:
+                logs.event(_guest_log, "guest reconcile failed", error="unexpected")
+                return None
+            finally:
+                with state["lock"]:
+                    state["running"] = False
+                    state["at"] = time.monotonic()
+            if not (outcome["added"] or outcome["refreshed"] or outcome["removed"]):
+                return None
+            with state["lock"]:
+                latest = state["request"]
+            try:
+                return self._conversations_event(latest)
+            except (OSError, ValueError, sqlite3.Error):
+                return None
+
+        self._background("guest_sessions", request.get("id"), work)
 
     def _conversations(self, request):
         for name in ("model", "file", "branch"):
             if request.get(name) is not None and not isinstance(request.get(name), str):
                 raise ValueError(f"{name} must be text.")
+        # The guests are sources like any other here (protocol 26.7): naming one is what asks for
+        # its rows, and naming something that is not a source is an error rather than a silence.
         sources = request.get("sources")
-        if sources is not None and (not isinstance(sources, list) or not all(isinstance(s, str) for s in sources)):
-            raise ValueError("sources must be a list of \"agent\", \"terminal\" and/or \"subagent\".")
+        if sources is not None and (not isinstance(sources, list)
+                                    or not all(isinstance(s, str) and s in conv_index.SOURCES for s in sources)):
+            raise ValueError("sources must be a list of " + LISTABLE_SOURCES + ".")
         for name in ("offset", "matches_per_item", "limit"):
             value = request.get(name)
             if value is not None and type(value) is not int:
                 raise ValueError(f"{name} must be an integer.")
-        include_threads = request.get("include_threads", False)
-        if type(include_threads) is not bool:
+        if type(request.get("include_threads", False)) is not bool:
             raise ValueError("include_threads must be true or false.")
         # The three-state filters (protocol 14.3): absent means "do not filter", not "false".
-        flags = {}
         for name in ("has_edits", "unfinished", "pinned", "has_summary"):
             value = request.get(name)
             if value is not None and type(value) is not bool:
                 raise ValueError(f"{name} must be true or false.")
-            flags[name] = value
+        self.emit(self._conversations_event(request))
+        # The guests' own transcripts are a cache like everything else here, refreshed behind the
+        # answer the pane already has (protocol 26.7).
+        self._guest_refresh(request, sources or [])
+
+    def _conversations_event(self, request) -> dict:
+        """The `conversations` answer for one request — built twice for the same request when a
+        guest reconcile changed the rows behind it, so it may not depend on anything but `request`."""
+        include_threads = bool(request.get("include_threads", False))
+        flags = {name: request.get(name) for name in ("has_edits", "unfinished", "pinned", "has_summary")}
         result = self.index().search(
             request.get("query", "") or "", scope=request.get("scope", "project") or "project",
             workspace=self._workspace(request), model=request.get("model") or None,
             has_open=bool(request.get("has_open_tasks")), since=request.get("since"),
-            until=request.get("until"), sources=sources, limit=request.get("limit", 50),
+            until=request.get("until"), sources=request.get("sources"), limit=request.get("limit", 50),
             include_threads=include_threads, sort=request.get("sort") or "recent",
             offset=request.get("offset") or 0,
             matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM,
             file=request.get("file") or None, branch=request.get("branch") or None, **flags)
-        self.emit({"event": "conversations", "id": request.get("id"),
-                   "scope": request.get("scope", "project") or "project",
-                   "workspace": self._workspace(request), **result})
+        # A guest row carries what it takes to resume it: the tool's own argv and the directory it
+        # must be run in (protocol 26.7). `fork_command` is the same argv with the guest's fork
+        # flag, so Ctrl+Enter on a guest row is one message rather than a rule spelled twice.
+        result["items"] = guest_sessions.annotate_items(result.get("items") or [])
+        for item in result["items"]:
+            if isinstance(item, dict) and item.get("source") in conv_index.GUEST_SOURCES:
+                item["fork_command"] = guest_sessions.resume_command(item["source"], item["id"], fork=True)
+        return {"event": "conversations", "id": request.get("id"),
+                "scope": request.get("scope", "project") or "project",
+                "workspace": self._workspace(request), **result}
 
     def _conversation_get(self, request):
         session_id = self._conversation_id(request.get("session_id", request.get("id")))
@@ -810,6 +907,12 @@ class SessionCommands:
         index = self.index()
         removed = {"session_id": session_id, "files": 0}
         if session_id.startswith("term-"):
+            index.delete_session(session_id, remove_files=False)
+        elif self._indexed(session_id).get("source") in conv_index.GUEST_SOURCES:
+            # A guest session is the guest's file (protocol 26.7). Deleting the row drops Relay's
+            # cached copy of its text and nothing else: `~/.claude` and `~/.codex` are never
+            # written or unlinked, and the next reconcile lists the session again if it is still
+            # on disk — which is what the pane's confirmation says it will do.
             index.delete_session(session_id, remove_files=False)
         elif self._indexed(session_id).get("source") == "subagent":
             row = self._indexed(session_id)
@@ -847,7 +950,8 @@ class SessionCommands:
 
     def _set_user_fields(self, session_id: str, **fields) -> None:
         """A rename or pin goes to the session's own files (meta, or the thread file), which the
-        index mirrors; terminal history has no file, so only its index row holds them."""
+        index mirrors; terminal history and the guest sessions have no file of Relay's, so only
+        their index rows hold them."""
         index = self.index()
         if session_id.startswith("term-"):
             if "custom_title" in fields:
@@ -856,6 +960,15 @@ class SessionCommands:
                 index.set_pinned(session_id, fields["pinned"])
             return
         row = self._indexed(session_id)
+        if row.get("source") in conv_index.GUEST_SOURCES:
+            # Index-only, for the same reason (protocol 26.7): there is no `.meta.json` beside a
+            # guest transcript to put a name or a pin in, and Relay may not make one. `update_guest`
+            # merges these two keys per key, so a re-index keeps whichever the user set.
+            if "custom_title" in fields:
+                index.rename(session_id, fields["custom_title"])
+            if "pinned" in fields:
+                index.set_pinned(session_id, fields["pinned"])
+            return
         directory = row.get("session_dir") or ""
         if not directory and self.turns.agent is not None and self.turns.agent.store is not None:
             directory = str(self.turns.agent.store.directory)

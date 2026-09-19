@@ -107,9 +107,41 @@ The privacy surface is now pinned by a test and written down in §26.7: indexing
 copies its title, prompts, assistant text and tool-call names into Relay's `entries` table and its
 FTS index. There is no guest-specific opt-out.
 
-**What is still not wired.** `guest_sessions` has no production caller: `session_protocol`
-neither reconciles nor annotates, `sessions.check_id` rejects a dashed UUID, and
-`src/Conversations.cpp` has no guest source in its Kind filter. See the review report.
+## Wired up, 2026-09-19 (third pass)
+
+`guest_sessions` has a production caller now (commit below). What the review listed as missing:
+
+* `session_protocol._conversations()` answers from the index first, annotates the guest rows
+  (`annotate_items`, plus a `fork_command` beside `resume_command`) and sets
+  `guest_sessions.reconcile()` going on a worker thread — never in front of the answer. One
+  rescan at a time, at most one every `GUEST_RECONCILE_EVERY` (5 s), and the follow-up
+  `conversations` event is built for the *latest* request, not the one that triggered it.
+* `sources` is validated against the five real sources and the error names all five. A request
+  that names no guest source still gets Relay's own rows only, so the phone's session list and
+  every other client are unchanged.
+* A guest id no longer goes through `sessions.check_id`: `_conversation_id` accepts an id the
+  index holds under a guest source, so `conversation_get` / `_delete` / `_rename` / `_pin` work
+  on a dashed UUID while junk is still "Invalid session id.".
+* Rename and pin write the index row (`rename` / `set_pinned`), delete drops the rows only
+  (`remove_files=False`). Nothing under `~/.claude` or `~/.codex` is written, and a test asserts
+  the transcript's bytes and its directory listing are unchanged after a rename, a pin and a
+  delete.
+* The Sessions pane's Kind filter lists "Claude Code sessions" and "Codex sessions"; "Everything"
+  now names all four sources explicitly. A guest row shows its guest where a session shows its
+  model, resumes with Enter (in this pane, behind a `cd` to `resume_cwd`), Shift+Enter (a new pane
+  created in that directory) and Ctrl+Enter (`fork_command`, always a new pane). The ⓘ view and
+  the summary button are off for guest rows, which have no Relay session file to read.
+
+Measured on a synthetic home in `tests.test_session_protocol.GuestSessionRows`
+(`test_a_warm_reconcile_reads_nothing`): 120 claude sessions, cold reconcile ~30 ms, warm 0 ms
+(`added/refreshed/removed` all zero — no transcript is opened). The owner's real
+`~/.claude/projects` was only sized read-only for this pass: 636 transcripts, 1.7 GB, which is
+why the first reconcile may not sit in front of a listing.
+
+**What is still not wired.** `guest_sessions.LiveTail` has no caller: a running guest session's
+row is refreshed by the next reconcile (its transcript's mtime changed) rather than tailed, so it
+updates when the pane next queries and not keystroke by keystroke. Tailing the active pane's
+transcript is the remaining half of the card's sessions task and is listed there as its own item.
 
 ## Deviations from §26.7
 

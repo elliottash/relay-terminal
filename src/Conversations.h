@@ -79,6 +79,27 @@ QStringList badges(const QJsonObject &item, bool openNow, const QString &closedT
 // A path elided in the middle ("src/…/Conversations.cpp"); other text is elided at the end.
 QString elideMiddleText(const QString &text, int maxChars);
 
+// ----- guest sessions (protocol 26.7) ------------------------------------------------------
+//
+// claude and codex sessions are listed beside Relay's own. Relay never loads one: it runs the
+// tool's own resume argv (`resume_command`, or `fork_command` for Ctrl+Enter) in a pane whose
+// working directory is the session's own (`resume_cwd`), because both guests resolve a session id
+// against the directory they start in.
+
+// True for a row of one of the guest sources ("claude", "codex").
+bool isGuestSource(const QString &source);
+bool isGuestItem(const QJsonObject &item);
+// "Claude Code" / "Codex" for a guest source; the raw id when it is not one.
+QString guestLabel(const QString &source);
+// One argv word quoted for a POSIX shell ("" for an empty word).
+QString shellWord(const QString &word);
+// The shell line that resumes (or, with `fork`, forks) a guest row: its argv, each word quoted.
+// Empty when the row is not a guest's or carries no argv.
+QString guestCommand(const QJsonObject &item, bool fork = false);
+// The directory that command must run in; empty when the transcript named none, and the pane then
+// keeps its own.
+QString guestCwd(const QJsonObject &item);
+
 // The "Continue" rows for an empty query: the conversations of `project` that are pinned,
 // unfinished or recently closed, newest first, at most `max` of them.
 QJsonArray continueItems(const QJsonArray &items, const QString &project,

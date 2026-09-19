@@ -2059,6 +2059,9 @@ public:
     std::function<void(const QJsonObject &state, const QString &title)> onForkState;
     // Conversation list, Shift+Enter: open an existing saved conversation in a new pane.
     std::function<void(const QJsonObject &state, const QString &title)> onOpenSessionInNewPane;
+    // A guest session (protocol 26.7) resumed in a new pane: the tool's own shell line and the
+    // directory it must run in (empty keeps this pane's).
+    std::function<void(const QString &command, const QString &cwd)> onOpenGuestPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
 
     // Relay's four levels, in order. This is the vocabulary a *stored* value may hold — a pane, a
@@ -5850,6 +5853,9 @@ public:
         // the pane says which of the two happened rather than pretending.
         view->onFork = [self](const QJsonObject &item) {
             if (!self) return;
+            // A guest forks itself: `claude --fork-session` / `codex fork` is the row's
+            // `fork_command`, and it always goes to a new pane so the original stays where it is.
+            if (relay::conversations::isGuestItem(item)) { self->openGuestSession(item, true, true); return; }
             const QString sessionId = item.value(QStringLiteral("session_id")).toString();
             if (sessionId == self->m_sessionId) { self->requestFork(); return; }
             self->status(QStringLiteral("Only the conversation a pane is holding can be forked; opening this one in a new pane."));
@@ -5917,6 +5923,9 @@ public:
     // Enter resumes in this pane, Shift+Enter opens the conversation in a new one. A conversation
     // saved for another workspace comes back through load_state, which accepts a session reference.
     void openSavedSession(const QJsonObject &item, bool newPane) {
+        // claude and codex rows are not Relay conversations: nothing here can load one, and the
+        // only way back into it is the tool's own resume command (protocol 26.7).
+        if (relay::conversations::isGuestItem(item)) { openGuestSession(item, newPane, false); return; }
         const QString sessionId = item.value(QStringLiteral("session_id")).toString();
         const QString directory = item.value(QStringLiteral("session_dir")).toString();
         const QString title = item.value(QStringLiteral("title")).toString();
@@ -5941,6 +5950,35 @@ public:
         if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before opening another conversation.")); return; }
         if (directory.isEmpty() || directory == m_sessionDir) send({{"type", "resume"}, {"id", sessionId}});
         else send({{"type", "load_state"}, {"state", reference}});
+    }
+
+    // A guest session row (protocol 26.7). Relay resumes it the way the user would: it runs the
+    // guest's own argv — `claude -r <id>`, `codex resume <id>`, and their fork variants — in a
+    // pane whose working directory is the session's own, because both guests resolve a session id
+    // against the directory they are started in and report an unknown session from anywhere else.
+    void openGuestSession(const QJsonObject &item, bool newPane, bool fork) {
+        const QString command = relay::conversations::guestCommand(item, fork);
+        if (command.isEmpty()) {
+            status(QStringLiteral("That session did not come with a resume command."));
+            return;
+        }
+        const QString cwd = relay::conversations::guestCwd(item);
+        if (newPane) {
+            if (onOpenGuestPane) { onOpenGuestPane(command, cwd); return; }
+            status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
+            return;
+        }
+        // In this pane: the shell must be at a prompt, and it has to be moved into the session's
+        // own directory first — `cd` and the resume are one command line so the guest never starts
+        // in the wrong place if the cd fails.
+        // The shell may have been cd'd anywhere since the pane opened, so the directory is set
+        // every time rather than compared against the one the pane started in.
+        QString line = command;
+        if (!cwd.isEmpty())
+            line = QStringLiteral("cd ") + relay::conversations::shellWord(cwd) + QStringLiteral(" && ") + command;
+        if (!runCommand(line)) return;     // runInTerminal has already said why
+        status(QStringLiteral("Resuming the %1 session in this pane.")
+                   .arg(relay::conversations::guestLabel(item.value(QStringLiteral("source")).toString())));
     }
 
     // Ctrl+F: find in this pane. The terminal scrollback is searched by the engine; the saved
@@ -9231,13 +9269,16 @@ public:
 
         // The session manager's rows (/resume, /conversations): agent sessions of this project, as
         // the worker last listed them. Terminal history cannot be resumed and threads belong to
-        // their session, so neither is a row here. Observing only: nothing here opens one.
+        // their session, so neither is a row here. Nor is a guest session (protocol 26.7):
+        // resuming one runs claude or codex in the pane's shell, which is not something a paired
+        // device gets to do from a list it is only watching. Observing only: nothing here opens one.
         const QDateTime now = QDateTime::currentDateTime();
         for (const QJsonValue &value : m_remoteSessions) {
             const QJsonObject item = value.toObject();
             const QString id = item.value(QStringLiteral("session_id")).toString();
             const QString source = item.value(QStringLiteral("source")).toString();
-            if (id.isEmpty() || source == QLatin1String("terminal") || source == QLatin1String("subagent")) continue;
+            if (id.isEmpty() || source == QLatin1String("terminal") || source == QLatin1String("subagent")
+                || relay::conversations::isGuestSource(source)) continue;
             QString title = item.value(QStringLiteral("title")).toString();
             if (title.trimmed().isEmpty()) title = item.value(QStringLiteral("first_prompt")).toString();
             if (title.trimmed().isEmpty()) title = QStringLiteral("Untitled conversation");

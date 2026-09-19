@@ -721,6 +721,22 @@ public:
 
     // Fork: a new agent pane on the right continues from the same conversation state. The
     // conversation list uses the same path with `fork` false to open a saved conversation.
+    // A guest session resumed in a pane of its own (protocol 26.7). The pane is created *in* the
+    // session's directory rather than cd'd into it afterwards, so the guest's own resume — which
+    // resolves its id against the directory it starts in — sees the right one from the first line.
+    void openGuestPane(Pane *source, const QString &command, const QString &cwd) {
+        if (!source || source->window() != this || command.isEmpty()) return;
+        const QString directory = QFileInfo(cwd).isDir() ? cwd : source->cwd();
+        Pane *pane = nullptr;
+        try { pane = createPane({{"cwd", directory}, {"workspace", directory}}); }
+        catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
+        insertBeside(source, pane, Qt::Horizontal, false);
+        setActive(pane);
+        // The pane names itself from its foreground program once the guest starts (the guest
+        // registry does the detecting), so nothing is imposed on it here.
+        pane->queueCommand(command);
+    }
+
     void openFork(Pane *source, const QJsonObject &state, const QString &title, bool fork = true) {
         if (!source || source->window() != this) return;
         Pane *pane = nullptr;
@@ -4274,6 +4290,9 @@ private:
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };
         pane->onForkState = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title); };
         pane->onOpenSessionInNewPane = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title, false); };
+        pane->onOpenGuestPane = [guard](const QString &command, const QString &cwd) {
+            if (auto *w = windowOf(guard)) w->openGuestPane(guard, command, cwd);
+        };
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };

@@ -17,6 +17,7 @@ from relay_core import instructions, presets
 from relay_core.agent import Agent
 from relay_core.provider import ChatProvider, ProviderConfig, ProviderError
 from relay_core.queue import TurnSupervisor
+from relay_core import session_protocol
 from relay_core.session_protocol import SessionCommands
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -373,3 +374,229 @@ class WorkerSubprocessTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GuestSessionRows(unittest.TestCase):
+    """The guest sources in the worker (protocol 26.7): a `conversations` request that names
+    claude or codex lists their sessions with the tool's own resume argv, rename and pin stay in
+    the index, delete drops the row and nothing under ~/.claude or ~/.codex is ever touched.
+
+    The homes are synthetic and `$HOME`, `XDG_DATA_HOME` and `RELAY_INDEX` all point inside the
+    test's temporary directory, so neither the owner's transcripts nor the real index is read.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(__file__).parent))
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.home = self.root / 'home'
+        (self.home / '.local' / 'share').mkdir(parents=True)
+        self.env = mock.patch.dict(os.environ, {'HOME': str(self.home),
+                                                'XDG_DATA_HOME': str(self.home / '.local' / 'share'),
+                                                'RELAY_INDEX': 'on'})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        # The throttle is what keeps a rescan off every keystroke; it has a test of its own, and
+        # holding these ones to it would mean a five-second wait between two listings.
+        quick = mock.patch.object(session_protocol, 'GUEST_RECONCILE_EVERY', 0.0)
+        quick.start()
+        self.addCleanup(quick.stop)
+        self.rec = Recorder()
+        self.sup = TurnSupervisor(self.rec)
+        self.addCleanup(self.sup.shutdown)
+        self.cmds = SessionCommands(self.sup, self.rec)
+
+    # ----- fixtures ---------------------------------------------------------------------------
+    def write_claude(self, session_id, *, cwd, prompt='fix the pane drag', title='Pane drag'):
+        from test_guest_sessions import claude_lines, write_claude
+        return write_claude(self.home, claude_lines(prompts=(prompt,), custom_title=title, cwd=cwd),
+                            cwd=cwd, session_id=session_id)
+
+    def ask(self, **extra):
+        """One `conversations` request over every source, answered from the index."""
+        request = {'id': 'c', 'scope': 'all',
+                   'sources': ['agent', 'terminal', 'claude', 'codex']}
+        request.update(extra)
+        before = len(self.rec.of('conversations'))
+        self.cmds.handle('conversations', request)
+        return self.rec.of('conversations')[before]
+
+    def listed(self, event):
+        return {item['session_id']: item for item in event['items']}
+
+    def settled(self, want, timeout=10.0):
+        """The listing after the background reconcile has caught up with the guests' files."""
+        deadline = time.monotonic() + timeout
+        while True:
+            items = self.listed(self.ask())
+            if want(items) or time.monotonic() > deadline:
+                return items
+            time.sleep(0.05)
+
+    # ----- the listing ------------------------------------------------------------------------
+    def test_a_guest_session_is_listed_with_its_own_resume_command(self):
+        cwd = str(self.root / 'repo')
+        session = 'aaaaaaaa-0000-4000-8000-00000000000a'
+        path = self.write_claude(session, cwd=cwd)
+        # The first answer comes out of the index, which has not seen the guests yet: the
+        # reconcile runs behind it (see test_the_reconcile_runs_behind_the_answer).
+        items = self.settled(lambda rows: session in rows)
+        self.assertIn(session, items)
+        row = items[session]
+        self.assertEqual('claude', row['source'])
+        self.assertEqual(['claude', '-r', session], row['resume_command'])
+        self.assertEqual(['claude', '-r', session, '--fork-session'], row['fork_command'])
+        self.assertEqual(cwd, row['resume_cwd'])
+        self.assertEqual(cwd, row['workspace'])
+        self.assertEqual(session, row['id'])
+        # Relay's own rows are untouched by the annotation.
+        self.assertTrue(all('resume_command' not in item for item in self.ask()['items']
+                            if item.get('source') not in ('claude', 'codex')))
+        self.assertTrue(path.exists())
+
+    def test_only_a_request_that_names_a_guest_lists_one(self):
+        session = 'bbbbbbbb-0000-4000-8000-00000000000b'
+        self.write_claude(session, cwd=str(self.root / 'repo'))
+        self.settled(lambda rows: session in rows)
+        event = self.ask(sources=['agent', 'terminal'])
+        self.assertNotIn(session, self.listed(event))
+        self.assertIn(session, self.listed(self.ask(sources=['claude'])))
+
+    def test_an_unknown_source_is_refused_by_name(self):
+        with self.assertRaises(ValueError) as caught:
+            self.cmds.handle('conversations', {'id': 'c', 'sources': ['gemini']})
+        for name in ('agent', 'terminal', 'subagent', 'claude', 'codex'):
+            self.assertIn(name, str(caught.exception))
+
+    def test_the_reconcile_runs_behind_the_answer(self):
+        """The listing may never wait on the guests' files: the first run over a long claude
+        history is seconds of parsing. The answer goes out, the rescan follows, and only a
+        rescan that changed something sends the list again."""
+        from relay_core import guest_sessions
+        started, release = threading.Event(), threading.Event()
+        real = guest_sessions.reconcile
+
+        def blocking(index, *args, **kwargs):
+            started.set()
+            release.wait(5)
+            return real(index, *args, **kwargs)
+
+        session = 'cccccccc-0000-4000-8000-00000000000c'
+        self.write_claude(session, cwd=str(self.root / 'repo'))
+        with mock.patch.object(guest_sessions, 'reconcile', blocking):
+            first = self.ask()                       # returns while the reconcile is blocked
+            self.assertTrue(started.wait(5))
+            self.assertNotIn(session, self.listed(first))
+            release.set()
+            # The reconcile found a session, so the same request id is answered a second time.
+            self.rec.wait(lambda e: e['event'] == 'conversations'
+                          and any(item.get('source') == 'claude' for item in e['items']))
+        # Nothing changed since: a further request sends no extra answer of its own.
+        self.assertIn(session, self.settled(lambda rows: session in rows))
+
+    # ----- rename, pin and delete are index-only ------------------------------------------------
+    def test_rename_and_pin_stay_in_the_index_and_survive_a_rescan(self):
+        from relay_core import guest_sessions
+        cwd = str(self.root / 'repo')
+        session = 'dddddddd-0000-4000-8000-00000000000d'
+        path = self.write_claude(session, cwd=cwd)
+        self.settled(lambda rows: session in rows)
+        self.cmds.handle('conversation_rename', {'session_id': session, 'title': 'Reading the drag'})
+        self.rec.wait(lambda e: e['event'] == 'conversation_renamed' and e['session_id'] == session)
+        self.cmds.handle('conversation_pin', {'session_id': session, 'pinned': True})
+        self.rec.wait(lambda e: e['event'] == 'conversation_pinned' and e['session_id'] == session)
+        row = self.listed(self.ask())[session]
+        self.assertEqual('Reading the drag', row['title'])
+        self.assertEqual(1, row['pinned'])
+        # Nothing was written beside the transcript, and the transcript itself is untouched.
+        self.assertEqual([path.name], [p.name for p in path.parent.iterdir()])
+        before = path.read_bytes()
+        # A rescan that re-reads the file keeps both: update_guest merges them per key.
+        os.utime(path, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))
+        outcome = guest_sessions.reconcile(self.cmds.index())
+        self.assertEqual(1, outcome['refreshed'])
+        row = self.listed(self.ask())[session]
+        self.assertEqual(('Reading the drag', 1), (row['title'], row['pinned']))
+        self.assertEqual(before, path.read_bytes())
+
+    def test_delete_drops_the_row_and_leaves_the_guests_transcript(self):
+        cwd = str(self.root / 'repo')
+        session = 'eeeeeeee-0000-4000-8000-00000000000e'
+        path = self.write_claude(session, cwd=cwd)
+        self.settled(lambda rows: session in rows)
+        self.cmds.handle('conversation_delete', {'session_id': session})
+        event = self.rec.wait(lambda e: e['event'] == 'conversation_deleted' and e['session_id'] == session)
+        self.assertEqual(0, event['files'])
+        self.assertTrue(path.exists())
+        # The row is gone until the next full reconcile finds the transcript again — which is
+        # what the pane's confirmation says will happen.
+        with mock.patch('relay_core.guest_sessions.reconcile', lambda *a, **k: {'added': 0, 'refreshed': 0,
+                                                                               'removed': 0, 'ms': 0}):
+            self.assertNotIn(session, self.listed(self.ask()))
+        self.assertIn(session, self.settled(lambda rows: session in rows))
+
+    def test_a_row_whose_transcript_went_away_is_pruned(self):
+        cwd = str(self.root / 'repo')
+        session = 'ffffffff-0000-4000-8000-00000000000f'
+        path = self.write_claude(session, cwd=cwd)
+        self.settled(lambda rows: session in rows)
+        path.unlink()
+        self.settled(lambda rows: session not in rows)
+        self.assertNotIn(session, self.listed(self.ask()))
+
+    # ----- the id the guest chose ----------------------------------------------------------------
+    def test_a_guest_id_is_accepted_where_relays_own_shape_is_not(self):
+        from relay_core.sessions import SESSION_ID
+        cwd = str(self.root / 'repo')
+        session = '11111111-0000-4000-8000-000000000011'
+        self.write_claude(session, cwd=cwd, prompt='where does the drag go')
+        self.settled(lambda rows: session in rows)
+        self.assertIsNone(SESSION_ID.match(session))      # not Relay's 32 hex digits
+        self.cmds.handle('conversation_get', {'id': 'g', 'session_id': session, 'query': 'drag'})
+        event = self.rec.wait(lambda e: e['event'] == 'conversation' and e.get('id') == 'g')
+        self.assertEqual(session, event['session_id'])
+        # An id no guest row holds is still refused, in every shape.
+        for bad in ('22222222-0000-4000-8000-000000000022', 'nonsense', '', 'x' * 400):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.cmds.handle('conversation_get', {'id': 'g', 'session_id': bad})
+
+    # ----- the cost of keeping the rows fresh ------------------------------------------------------
+    def test_a_rescan_is_not_queued_per_keystroke(self):
+        """The pane queries on every keystroke; the guests' files do not change that fast, so a
+        listing sets a reconcile going at most once every `GUEST_RECONCILE_EVERY` seconds."""
+        from relay_core import guest_sessions
+        session = '99999999-0000-4000-8000-000000000099'
+        self.write_claude(session, cwd=str(self.root / 'repo'))
+        calls = []
+        real = guest_sessions.reconcile
+        with mock.patch.object(session_protocol, 'GUEST_RECONCILE_EVERY', 60.0), \
+             mock.patch.object(guest_sessions, 'reconcile',
+                               lambda index, *a, **k: (calls.append(1), real(index, *a, **k))[1]):
+            for query in ('', 'drag', 'pane'):
+                self.ask(query=query)
+            # The rows the rescan found are sent again for the *latest* query, not for the one
+            # that set it going: by then the user has typed two more letters.
+            event = self.rec.wait(lambda e: e['event'] == 'conversations' and e['items']
+                                  and e['items'][0].get('source') == 'claude')
+            self.assertEqual('pane', event['query'])
+            for query in ('drag', 'pane'):
+                self.ask(query=query)
+        self.assertEqual(1, len(calls))
+
+    def test_a_warm_reconcile_reads_nothing(self):
+        """Measured on a synthetic home, not the owner's: the first pass parses every transcript,
+        and the second reads none of them, because a file whose mtime matches the indexed one is
+        never opened. That is what lets the sessions pane reconcile on every query."""
+        from relay_core import guest_sessions
+        sessions = [f'{n:08x}-0000-4000-8000-00000000{n:04x}' for n in range(120)]
+        for n, session in enumerate(sessions):
+            self.write_claude(session, cwd=str(self.root / f'repo{n % 8}'), title=f'session {n}')
+        index = self.cmds.index()
+        cold = guest_sessions.reconcile(index)
+        self.assertEqual((120, 0, 0), (cold['added'], cold['refreshed'], cold['removed']))
+        warm = guest_sessions.reconcile(index)
+        self.assertEqual((0, 0, 0), (warm['added'], warm['refreshed'], warm['removed']))
+        self.assertLessEqual(warm['ms'], max(50, cold['ms']))
+        print(f'\n  guest reconcile over {len(sessions)} synthetic claude sessions: '
+              f'cold {cold["ms"]} ms, warm {warm["ms"]} ms', file=sys.stderr)

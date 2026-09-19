@@ -807,7 +807,7 @@ rename re-writes the title entry, so a conversation is findable under its new na
 ### 14.3 `conversations`
 
 `conversations {query?, scope: "project"|"all", workspace?, model?, has_open_tasks?, since?,
-until?, sources?: ["agent"|"terminal"|"subagent"], include_threads?: bool, sort?:
+until?, sources?: ["agent"|"terminal"|"subagent"|"claude"|"codex"], include_threads?: bool, sort?:
 "recent"|"oldest"|"longest"|"relevance", offset?, matches_per_item? (1–20, default 5),
 limit? (1–200, default 50), id?}`
 
@@ -818,7 +818,9 @@ state**: absent means "do not filter", `false` means "only the ones without it".
 there, or a non-string `file`/`branch`, is an error.
 
 Subagent threads (`source: "subagent"`) are left out unless `include_threads` is true or
-`sources` names `subagent`; `sources` absent means agent sessions and terminal history. `sort`
+`sources` names `subagent`; the guest sources `claude` and `codex` (26.7) are left out unless
+`sources` names them, and naming a word that is not one of the five is an error. `sources` absent
+means agent sessions and terminal history. `sort`
 (pinned first in every order): newest `updated` first (default), oldest first, most turns, or
 relevance (14.2). `offset` pages: the event carries `next_offset` when there is more.
 
@@ -3585,9 +3587,44 @@ never writes to them, but it is a cache *of their text*: the session's title, ev
 plus the first 200 characters of its arguments) go into `entries` and are tokenised into the FTS
 index, which is what makes the sessions pane searchable across guests. The index file is mode 0600
 in Relay's own data directory and nothing leaves the machine (`remote/wire.py` withholds the guest
-events; a guest row is a conversation row like any other). There is no guest-specific opt-out —
-the whole index answers to `RELAY_INDEX` — and no worker calls `reconcile()` today, so nothing is
-copied until the sessions pane is wired up.
+events; a guest row is a conversation row like any other, and the pane keeps guest rows out of the
+session list it publishes to a paired device, because resuming one runs a program in its shell).
+There is no guest-specific opt-out — the whole index answers to `RELAY_INDEX` — and nothing is
+copied until a `conversations` request names a guest source.
+
+**Who asks, and when it is scanned.** A guest is a source of the `conversations` request like
+`agent` and `terminal`: naming `claude` or `codex` in `sources` is what lists its rows, and the
+worker's own default (Relay's sessions and its terminal history) is unchanged, so a client that
+names nothing — a paired phone, for one — sees no guest rows. The sessions pane's Kind filter
+names them: "Everything" sends all four, and "Claude Code sessions" / "Codex sessions" send one.
+`session_protocol._conversations()` answers out of the index **first** and then sets
+`guest_sessions.reconcile()` going on a worker thread: the first pass over a long claude history
+is seconds of parsing and may not sit in front of a listing, while a warm pass reads no transcript
+at all (a file whose mtime matches the indexed one is never opened). A rescan runs one at a time
+and at most once every `GUEST_RECONCILE_EVERY` seconds, and only a rescan that added, refreshed or
+removed a row sends a second `conversations` event — built for the **latest** request, not the one
+that set it going, since the user has gone on typing. An unreadable guest home is a log line,
+never an error on a listing the user already has in front of them.
+
+**The fields a guest row carries.** `guest_sessions.annotate_items()` adds `id`, `mtime`,
+`message_count`, `workspace`, `resume_command` and `resume_cwd` to each guest row, and the worker
+adds `fork_command` (the same argv with the guest's fork flag) beside them; every other row comes
+back exactly as the index gave it. The pane runs `resume_command` in the focused pane behind a
+`cd` to `resume_cwd` (Enter), or in a new pane created in that directory (Shift+Enter); Ctrl+Enter
+runs `fork_command`, always in a new pane. `src/Conversations.cpp` does the quoting
+(`shellWord` / `guestCommand`), so a session id or a workspace with a space in it stays one word.
+
+**The id, and the three things that can be done to a row.** A guest session's id is the guest's
+own — a dashed UUID, or whatever its transcript is named — so `sessions.check_id`'s 32 hex digits
+reject it by design. `conversation_get`, `conversation_delete`, `conversation_rename` and
+`conversation_pin` accept an id the index holds under a guest source, and nothing else: there is
+no second shape to guess at, and an id the index does not hold is still "Invalid session id.".
+Rename and pin write `custom_title` and `pinned` on the index row and nowhere else — there is no
+`.meta.json` beside a guest transcript and Relay may not make one — and `update_guest` merges
+those two keys back over a re-index, one key at a time. Delete removes the index rows only
+(`remove_files=False`); the transcript stays, so the session is listed again at the next full
+reconcile, which is what the pane's confirmation says it will do. The ⓘ view and session
+summaries read a Relay session file, so neither is offered on a guest row.
 
 ### 26.8 Composer routing and the slash registry
 

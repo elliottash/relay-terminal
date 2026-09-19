@@ -133,7 +133,7 @@
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
 | `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
 | `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |
-| `#GT7X` | [Claude Code + Codex guest integration (translator first, harness second)](features/needs_qa_llm/2026-09-19-claude-codex-guest-integration.md) | needs-qa-llm | agent | 7/8 | [4](threads/GT7X.md) |
+| `#GT7X` | [Claude Code + Codex guest integration (translator first, harness second)](features/needs_qa_llm/2026-09-19-claude-codex-guest-integration.md) | needs-qa-llm | agent | 7/9 | [4](threads/GT7X.md) |
 | `#HDA9` | [/update: download and install the latest release, then restart](features/needs_qa_llm/2026-09-19-update-download-and-install-the-latest-release-t.md) | needs-qa-llm |  |  | [5](threads/HDA9.md) |
 | `#Z0VG` | [Plan-mode turns run on the main model pushed to max reasoning (the "planning" role)](features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md) | needs-qa-llm | agent |  | [2](threads/Z0VG.md) |
 | `#D03W` | [Per-pane CPU and memory meters in the header, tab and session manager](features/needs_qa_llm/2026-09-19-per-pane-cpu-and-memory-meters-in-the-header-tab.md) | needs-qa-llm |  |  | [7](threads/D03W.md) |

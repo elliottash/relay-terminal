@@ -1348,7 +1348,9 @@ files the index missed and drops rows whose file is gone, and `index_rebuild` re
 from the session JSON. A corrupt database is deleted and recreated, in the constructor and again if
 SQLite reports corruption mid-query; a v1 database is migrated in place to v2 (subagent threads),
 since terminal history cannot be rebuilt. User titles and pins live in `<id>.meta.json`, not only in
-the index.
+the index. The guest sources are a cache of files Relay does not own, so they have a reconcile of
+their own: `guest_sessions.reconcile()` runs on a worker thread behind any `conversations` answer
+that named `claude` or `codex`, never in front of it, and at most once every few seconds.
 
 Subagent threads (protocol section 25) are rows too (`source: "subagent"`), each with its
 `owner_session` (the session that started it) and `parent_thread`, read from
@@ -1869,10 +1871,16 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   (`claude`, `codex`) beside Relay's own sessions and subagent threads. A record is
   `{source, id, title, mtime, workspace, message_count, resume_command}`, and
   `resume_command` is always the tool's own (`claude -r <id>`, `codex resume <id>`, and their
-  fork variants) — resuming is the tool's affair, run in a pane like any other command. The
-  index is a cache as everywhere else (`guest_sessions.reconcile()` on the worker's first
-  conversation command), and rename / pin / delete stay index-only: Relay never edits the
-  tool's files.
+  fork variants) — resuming is the tool's affair, run in a pane like any other command, in the
+  session's own `resume_cwd` because both guests resolve an id against the directory they start
+  in. Enter runs it in the focused pane (behind a `cd`), Shift+Enter in a new pane created in
+  that directory, Ctrl+Enter the row's `fork_command`. The index is a cache as everywhere else:
+  `_conversations()` annotates the guest rows with those fields and sets
+  `guest_sessions.reconcile()` going on a background thread, whose second `conversations` event
+  replaces the list only when the rescan actually changed something. Rename / pin / delete stay
+  index-only (`ConversationIndex.rename` / `set_pinned` / `delete_session(remove_files=False)`,
+  and `update_guest` merges a name and a pin back over a re-index): Relay never edits the tool's
+  files, so a deleted row is Relay's copy and the session is listed again at the next scan.
 - **Composer and input** (`guest_slash.py`, `src/Pane.h`): the pane builds the guest's slash
   catalog from a static `relay_core.guest_slash` scan (claude: the built-ins plus the skills
   and legacy-command locations it documents; codex: the stable TUI set), refreshed by live

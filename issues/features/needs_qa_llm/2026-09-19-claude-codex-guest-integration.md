@@ -34,6 +34,8 @@ special translator from the relay prompt into the claude code input and back."
 - [x] Codex Tier B: ~~daemon co-attach spike~~ → marked settings + rollout tail (spike declined: the tail covers Tier B; daemon stays Tier A) <!-- t:yz -->
 - [x] Composer translator + slash registry (guest autocomplete, TUI-state-aware injection) <!-- t:sy -->
 - [x] Sessions pane: claude + codex conv_index sources, resume/fork, unified search <!-- t:2f -->
+- [ ] Live tail of the active pane's guest transcript (`guest_sessions.LiveTail` has no caller; a
+      running session's row refreshes on the next reconcile instead) <!-- t:lt -->
 - [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:bt -->
 - [x] ~~Tier A headless harness adapters (codex app-server first, then claude stream-json)~~ — deferred by owner, kept as later optional phase <!-- t:x2 -->
 
@@ -104,7 +106,11 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
   in Relay's diff view: `FILE_SAVED` (the sidecar writes, never the GUI) or `DIFF_REJECTED`; every path must
   realpath-resolve inside the one pane's workspace. `guest.diffSave` accepts from the keyboard.
 - `backend/relay_core/guest_sessions.py` — the `claude` / `codex` Conversations sources and `reconcile()`;
-  records carry the tool's own `resume_command`; rename/pin/delete are index-only.
+  records carry the tool's own `resume_command`; rename/pin/delete are index-only. Wired into
+  `session_protocol._conversations()` on 2026-09-19: the listing is answered from the index and the
+  reconcile runs behind it on a worker thread, guest ids are accepted where Relay's 32-hex shape is
+  not, and the Sessions pane's Kind filter lists both guests (`src/Conversations.cpp`,
+  `src/Pane.h`'s `openGuestSession`, `RelayWindow::openGuestPane`).
 - `backend/relay_core/guest_slash.py` — the static slash catalogs (claude built-ins + skills + legacy commands;
   codex TUI set), published live as `slash` events.
 - `src/Pane.h` — `pollGuestEvent` dispatch, guest state in `program_state` (`guest_model`, `guest_context_pct`,
