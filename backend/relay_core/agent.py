@@ -627,9 +627,11 @@ class Agent:
                     * self.context.ratio)
         fit = {"used": used, "window": window, "limit": limit, "ceiling": ceiling, "compacts": used >= limit}
         if floor >= fit["ceiling"]:
+            # `_own_model`, not `self.config`: while a plan, vision or failover swap is up the model
+            # in force is this turn's, and the pane stays on the one the user chose.
             fit["refuse"] = (f"{config.model} cannot take over: its {window:,}-token window does not hold the "
                              f"system prompt and tools (about {floor:,} tokens) with room for a reply. "
-                             f"Staying on {self.config.model}.")
+                             f"Staying on {self._own_model()[0]}.")
         return fit
 
     def request_model(self, config: ProviderConfig, preset_id: str | None = None,
@@ -686,8 +688,9 @@ class Agent:
         with self._model_lock:
             routed = self._routed
             running = routed["model"] if routed else self.config.model
-            # `self.config` is the failover provider's while a turn is failed over (#G9VE), so a
-            # switch to the model named there is a real switch, not a no-op to be dropped.
+            # `self.config` is the routed or failover provider's while a plan, vision or failover
+            # swap is up, so a switch to the model named there is a real switch, not a no-op to be
+            # dropped: the swap ends with the turn and the pane would go back to its old model.
             if ((config.base_url, config.model) == (self.config.base_url, self.config.model)
                     and not routed and not self._failover):
                 self._pending_model = None
@@ -778,7 +781,7 @@ class Agent:
             self._refuse_switch(pending, (f"{config.model} did not take over: the conversation had to be compacted "
                                           f"to fit its window and the compaction "
                                           + ("was stopped" if stopped else f"failed ({str(exc)[:300] or type(exc).__name__})")
-                                          + f". Staying on {self.config.model}."), turn_id, at)
+                                          + f". Staying on {self._own_model()[0]}."), turn_id, at)
             if stopped and at == "step":
                 raise
             return None
@@ -796,7 +799,7 @@ class Agent:
                 if used >= fit["ceiling"]:
                     refuse = (f"{config.model} cannot take over: even compacted, the conversation needs about "
                               f"{used:,} tokens and its {window:,}-token window holds {fit['ceiling']:,} with room "
-                              f"for a reply. Staying on {self.config.model}.")
+                              f"for a reply. Staying on {self._own_model()[0]}.")
                 else:
                     return self._land_switch(pending, turn_id, step, at, compacted=True)
         if newer:
@@ -874,6 +877,8 @@ class Agent:
         with self._model_lock:
             pending = self._pending_model or self._switching
         if pending is not None:
+            # `in_flight_model` is whatever is serving right now, which is the routed or failover
+            # model while one of those swaps is up - not the pane's own, which `_own_model` answers.
             fit = self.switch_fit(pending["config"], _pending_window(pending))
             event["next"] = {"model": pending["config"].model, "window": fit["window"],
                              "limit_tokens": fit["limit"], "used_tokens": fit["used"],
@@ -1344,6 +1349,49 @@ class Agent:
                 record["outcome"] = record["outcome"] or "error"
             self.autosave()
 
+    # ----- routed turns: plan mode and image turns (shared with failover) ---------------
+    def _route_swap(self, turn_id: str, target) -> dict:
+        """What a routed turn has to remember to put the pane back: its provider, config, preset,
+        context window and effort. Built before `_route_to` changes any of them, and recorded on
+        `self._vision` / `self._planning` before the change, so `_own_model` (and the mid-turn
+        autosave behind it) reads the pane's own model out of the swap and never a half-adopted one.
+        """
+        return {"turn_id": turn_id, "provider": self.provider, "model": target.config.model,
+                "back_to": self.config.model, "config": self.config, "preset": self.preset,
+                "window": self.context.window, "effort": self.effort,
+                # An injected provider is never replaced (its owner decides what serves the turn),
+                # so nothing is adopted for it either and there is nothing to put back.
+                "adopted": not self._injected_provider}
+
+    def _route_to(self, swap: dict, target) -> None:
+        """Move the turn onto the routed model the way `_begin_failover` does.
+
+        Not `self.provider = ...` alone, which is all a plan or vision swap used to do: a model on
+        another vendor also needs the conversation in its own reasoning dialect (`adapt_history` -
+        Kimi rejects an assistant tool-call message with no `reasoning_content`) and its own context
+        window, or a compaction inside the turn measures the conversation against the pane model's.
+
+        `self.effort` is cleared first, unlike the failover swap, which carries the pane's effort to
+        the spare provider: the role resolver has already written this role's effort into
+        `target.config.extra` - it is half of what a plan turn *is* - so `_adopt_model` must read the
+        level back out of that config rather than push the pane's own level over it.
+        """
+        if not swap["adopted"]:
+            return
+        self.provider = _provider_for(target.config, self.stall_timeout_s)
+        self.effort = None
+        self._adopt_model(target.config, resolve_preset(target.preset_id, target.config.base_url,
+                                                        target.config.model))
+
+    def _route_back(self, swap: dict) -> None:
+        """Undo `_route_to`: the pane's own provider, model, dialect, window and effort, exactly as
+        `_end_failover` restores its own."""
+        if not self._injected_provider:
+            self.provider = swap["provider"]
+        if swap.get("adopted"):
+            self.effort = swap["effort"]
+            self._adopt_model(swap["config"], swap["preset"], swap["window"])
+
     # ----- image turns (issue EM1E) ---------------------------------------------------
     def _begin_vision_turn(self, pictures: list[dict], turn_id: str) -> dict | None:
         """Route one turn that carries images, for that turn only (owner decisions, 2026-09-17).
@@ -1372,20 +1420,19 @@ class Agent:
             raise ValueError(text)
         if main_reads_images and not pinned:
             return None
-        swap = {"turn_id": turn_id, "provider": self.provider, "back_to": self.config.model,
-                "model": target.config.model}
+        swap = self._route_swap(turn_id, target)
         self._vision = swap
-        if not self._injected_provider:
-            self.provider = _provider_for(target.config, self.stall_timeout_s)
+        self._route_to(swap, target)
+        from_model = swap["back_to"]
         logs.event(_log, "vision_route", session=self.session_id, turn=turn_id,
-                   from_model=self.config.model, to_model=target.config.model,
+                   from_model=from_model, to_model=target.config.model,
                    host=_host(target.config.base_url), images=len(pictures), source=target.source)
         self.emit({"event": "vision_route", "turn_id": turn_id, "model": target.config.model,
-                   "from_model": self.config.model, "preset": target.preset_id,
+                   "from_model": from_model, "preset": target.preset_id,
                    "base_url": target.config.base_url, "source": target.source,
                    "images": len(pictures), "scope": "turn",
                    "text": f"Image in this prompt · this turn runs on {target.config.model}, "
-                           f"then back to {self.config.model}."})
+                           f"then back to {from_model}."})
         self.emit({"event": "status", "text": f"Image turn · {target.config.model}"})
         return swap
 
@@ -1395,8 +1442,7 @@ class Agent:
         swap, self._vision = self._vision, None
         if not swap:
             return
-        if not self._injected_provider:
-            self.provider = swap["provider"]
+        self._route_back(swap)
         self.emit({"event": "vision_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
                    "was": swap["model"], "text": f"Back to {swap['back_to']}."})
 
@@ -1413,22 +1459,21 @@ class Agent:
                               and target.config.base_url == self.config.base_url
                               and target.config.extra == self.config.extra):
             return None
-        swap = {"turn_id": turn_id, "provider": self.provider, "back_to": self.config.model,
-                "model": target.config.model}
+        swap = self._route_swap(turn_id, target)
         self._planning = swap
-        if not self._injected_provider:
-            self.provider = _provider_for(target.config, self.stall_timeout_s)
+        self._route_to(swap, target)
+        from_model = swap["back_to"]
         logs.event(_log, "plan_route", session=self.session_id, turn=turn_id,
-                   from_model=self.config.model, to_model=target.config.model,
+                   from_model=from_model, to_model=target.config.model,
                    host=_host(target.config.base_url), effort=target.effort, source=target.source)
-        if target.config.model != self.config.model:
+        if target.config.model != from_model:
             text = (f"Plan mode · this turn runs on {target.config.model}, "
-                    f"then back to {self.config.model}.")
+                    f"then back to {from_model}.")
         else:
             text = (f"Plan mode · this turn runs on {target.config.model} at "
                     f"{target.effort or 'max'} reasoning.")
         self.emit({"event": "plan_route", "turn_id": turn_id, "model": target.config.model,
-                   "from_model": self.config.model, "preset": target.preset_id,
+                   "from_model": from_model, "preset": target.preset_id,
                    "base_url": target.config.base_url, "source": target.source,
                    "effort": target.effort, "scope": "turn", "text": text})
         self.emit({"event": "status", "text": f"Plan turn · {target.config.model}"})
@@ -1441,8 +1486,7 @@ class Agent:
         swap, self._planning = self._planning, None
         if not swap:
             return
-        if not self._injected_provider:
-            self.provider = swap["provider"]
+        self._route_back(swap)
         self.emit({"event": "plan_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
                    "was": swap["model"], "text": f"Back to {swap['back_to']}."})
 
@@ -2287,12 +2331,16 @@ class Agent:
         the conversation is on a model the user never chose - in the sessions list, the resume
         picker and the full-text index - and a save from a background title or summary thread could
         read them half swapped, mid-`_adopt_model`. The swap keeps the originals, so they are read
-        from there while it is up. The vision and plan swaps do not touch `self.config` at all.
+        from there while it is up.
+
+        A plan or vision swap adopts its model the same way, so it answers here too. The
+        *outermost* swap is the one holding the pane's own: a vision swap nests inside a plan swap
+        (and so remembers the planning model), and a failover is refused while either is up.
         """
-        swap = self._failover
-        if swap is None:
-            return self.config.model, self.preset, self.effort
-        return swap["config"].model, swap["preset"], swap["effort"]
+        for swap in (self._planning, self._vision, self._failover):
+            if swap is not None and swap.get("adopted", True):
+                return swap["config"].model, swap["preset"], swap["effort"]
+        return self.config.model, self.preset, self.effort
 
     def session_data(self) -> dict:
         model, preset, effort = self._own_model()

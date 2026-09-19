@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from relay_core import agent as agent_module                                    # noqa: E402
 from relay_core.agent import Agent                                             # noqa: E402
+from relay_core.presets import PRESETS                                         # noqa: E402
 from relay_core.provider import ProviderConfig                                 # noqa: E402
 from relay_core.roles import RoleResolver                                      # noqa: E402
 from test_images import RecordingProvider                                      # noqa: E402
@@ -53,6 +54,10 @@ class PlanTurnTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         RecordingProvider.served = []
+        RecordingProvider.raw = []
+        RecordingProvider.windows = []
+        RecordingProvider.agent = None
+        self.addCleanup(setattr, RecordingProvider, "agent", None)
         TrackedProvider.served_configs = []
         patch = mock.patch.object(agent_module, "ChatProvider", TrackedProvider)
         patch.start()
@@ -129,6 +134,81 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(self.served_configs()[-1][2], "https://api.z.ai/api/paas/v4")
         self.assertEqual(RecordingProvider.served[-1][0], "glm-5.3")
         self.assertEqual(agent.provider.config.model, "kimi-k3")
+
+    # ----- a planning model on another vendor: its dialect, its window, the pane's name ----
+    def kimi_planner(self):
+        """An Anthropic pane whose planning role is pinned to Kimi: two vendors, two dialects,
+        two context windows, and a reasoning dialect the pane itself never writes."""
+        agent = self.plan_agent(ANTHROPIC, "anthropic",
+                                {"planning": {"preset": "kimi", "model": "kimi-k3"}})
+        RecordingProvider.agent = agent
+        return agent
+
+    def test_a_pinned_planning_model_gets_the_history_in_its_dialect_and_its_own_window(self):
+        # The swap used to replace the provider and nothing else: the conversation reached the
+        # planning model in the pane's reasoning dialect, and a compaction inside the turn measured
+        # it against the pane's context window. Kimi refuses an assistant tool-call message with no
+        # `reasoning_content`, and an Anthropic pane never writes one.
+        agent = self.kimi_planner()
+        agent.messages.append({"role": "assistant", "content": "",
+                               "tool_calls": [{"id": "c0", "type": "function",
+                                               "function": {"name": "read_file", "arguments": "{}"}}]})
+        agent.messages.append({"role": "tool", "tool_call_id": "c0", "content": "ok"})
+        agent.ask("plan this change")
+        self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
+        adapted = [m for m in RecordingProvider.raw[-1] if m.get("tool_calls")]
+        self.assertTrue(adapted and adapted[0].get("reasoning_content"))
+        self.assertEqual(RecordingProvider.windows[-1], PRESETS["kimi"].context_window)
+        # ... and the pane is measured against its own window again once the turn is over.
+        self.assertEqual(agent.context.window, PRESETS["anthropic"].context_window)
+        self.assertEqual(agent.config.model, "claude-opus-5")
+        self.assertEqual(agent.provider.config.model, "claude-opus-5")
+
+    def test_a_save_while_a_plan_turn_is_routed_records_the_panes_own_model(self):
+        # `_autosave_soon` fires inside the turn, and a title or summary thread saves from its own:
+        # neither may write the planning model into the session file, which is what the sessions
+        # list, the resume picker and the index read.
+        agent = self.kimi_planner()
+        seen = []
+        original = TrackedProvider.complete
+
+        def complete(provider, messages, tools, emit, cancel):
+            seen.append((agent.session_data()["model"], agent.session_data()["preset"]))
+            return original(provider, messages, tools, emit, cancel)
+
+        with mock.patch.object(TrackedProvider, "complete", complete):
+            agent.ask("plan this change")
+        self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
+        self.assertEqual(seen, [("claude-opus-5", "anthropic")])
+        self.assertEqual(agent.session_data()["model"], "claude-opus-5")
+
+    def test_a_model_switch_during_a_plan_turn_lands_after_the_restore(self):
+        # The switch waits for the turn's end, as it does under a failover (#G9VE): landing it at a
+        # step boundary would put the pane on the new model and then have the restore undo it.
+        target = PRESETS["openai"]
+        other = ProviderConfig(target.base_url, target.model, "k")
+        agent = self.kimi_planner()
+        seen = {}
+        original = TrackedProvider.complete
+
+        def complete(provider, messages, tools, emit, cancel):
+            # What the worker does for a set_model that arrives mid-turn, then what the turn loop
+            # does at the next step boundary.
+            seen["deferred"] = agent.defer_model(other, "openai")
+            seen["at_step"] = agent.apply_pending_model("t1", 1, "step")
+            seen["model_at_step"] = agent.config.model
+            return original(provider, messages, tools, emit, cancel)
+
+        with mock.patch.object(TrackedProvider, "complete", complete):
+            agent.ask("plan this change")
+        self.assertEqual(seen["deferred"]["applies"], "turn_end")
+        self.assertEqual(seen["deferred"]["in_flight_model"], "kimi-k3")
+        self.assertIsNone(seen["at_step"])                      # not while the swap is in force
+        self.assertEqual(seen["model_at_step"], "kimi-k3")
+        self.assertEqual(agent.config.model, "claude-opus-5")   # the restore ran, and kept nothing
+        self.assertEqual(agent.apply_pending_model(at="turn_end")["model"], target.model)
+        self.assertEqual((agent.config.model, agent.context.window),
+                         (target.model, target.context_window))
 
     # ----- nothing to swap: no event, no provider change ------------------------------
     def test_a_build_turn_emits_no_plan_route(self):

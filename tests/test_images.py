@@ -34,6 +34,13 @@ class RecordingProvider:
     """Stands in for ChatProvider. Records every turn it served, with the model it was built for."""
 
     served: list = []
+    # The conversation as the agent handed it over, before `wire_messages` strips Relay's own keys:
+    # a swap has to convert it to the serving model's reasoning dialect, which is visible only here.
+    raw: list = []
+    # The agent's live context window at each call, and the agent to read it off. A turn routed to
+    # another model must be measured against *that* model's window, not the pane's.
+    windows: list = []
+    agent = None
 
     def __init__(self, config, stall_timeout=60.0):
         self.config = config
@@ -42,6 +49,9 @@ class RecordingProvider:
     def complete(self, messages, tools, emit, cancel):
         self.calls += 1
         RecordingProvider.served.append((self.config.model, transport.wire_messages(messages)))
+        RecordingProvider.raw.append([dict(message) for message in messages])
+        RecordingProvider.windows.append(
+            RecordingProvider.agent.context.window if RecordingProvider.agent is not None else None)
         emit({"event": "delta", "text": "A red square."})
         return {"role": "assistant", "content": "A red square."}
 
@@ -193,6 +203,10 @@ class ImageTurnTests(unittest.TestCase):
         self.image = self.root / "shot.png"
         self.image.write_bytes(PNG)
         RecordingProvider.served = []
+        RecordingProvider.raw = []
+        RecordingProvider.windows = []
+        RecordingProvider.agent = None
+        self.addCleanup(setattr, RecordingProvider, "agent", None)
         patch = mock.patch.object(agent_module, "ChatProvider", RecordingProvider)
         patch.start()
         self.addCleanup(patch.stop)
@@ -294,6 +308,45 @@ class ImageTurnTests(unittest.TestCase):
         agent = self.build(OPENAI, "openai", {"vision": {"preset": "gemini", "model": "gemini-3.1-pro-preview"}})
         agent.ask("what is this?", attachments=self.attachment())
         self.assertEqual(RecordingProvider.served[-1][0], "gemini-3.1-pro-preview")
+
+    # ----- a vision model on another vendor gets the history and the window it needs ---
+    def test_a_vision_model_on_another_vendor_gets_the_history_in_its_own_dialect(self):
+        # The swap used to replace the provider and nothing else, so the conversation went to the
+        # vision model in the pane's reasoning dialect and the turn was measured against the pane's
+        # context window. Kimi refuses an assistant tool-call message with no `reasoning_content`;
+        # an OpenAI pane never writes one, so its appearance is the swap doing the conversion.
+        agent = self.build(OPENAI, "openai", {"vision": {"preset": "kimi", "model": "kimi-k3"}})
+        RecordingProvider.agent = agent
+        agent.messages.append({"role": "assistant", "content": "",
+                               "tool_calls": [{"id": "c0", "type": "function",
+                                               "function": {"name": "read_file", "arguments": "{}"}}]})
+        agent.messages.append({"role": "tool", "tool_call_id": "c0", "content": "ok"})
+        agent.ask("what is this?", attachments=self.attachment())
+        self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
+        adapted = [m for m in RecordingProvider.raw[-1] if m.get("tool_calls")]
+        self.assertTrue(adapted and adapted[0].get("reasoning_content"))
+        self.assertEqual(RecordingProvider.windows[-1], presets.PRESETS["kimi"].context_window)
+        # ... and the pane is measured against its own again the moment the turn is over.
+        self.assertEqual(agent.context.window, presets.PRESETS["openai"].context_window)
+        self.assertEqual(agent.config.model, "gpt-6-astra")
+        self.assertEqual(agent.provider.config.model, "gpt-6-astra")
+
+    def test_a_save_while_an_image_turn_is_routed_records_the_panes_own_model(self):
+        # The session file, the resume picker and the index read this: a mid-turn autosave must
+        # never say the conversation is on the vision model.
+        agent = self.build(KIMI, "kimi", {"vision": {"preset": "openai", "model": "gpt-6-astra"}})
+        seen = []
+        original = RecordingProvider.complete
+
+        def complete(provider, messages, tools, emit, cancel):
+            seen.append((agent.session_data()["model"], agent.session_data()["preset"]))
+            return original(provider, messages, tools, emit, cancel)
+
+        with mock.patch.object(RecordingProvider, "complete", complete):
+            agent.ask("what is this?", attachments=self.attachment())
+        self.assertEqual(RecordingProvider.served[-1][0], "gpt-6-astra")
+        self.assertEqual(seen, [("kimi-k3", "kimi")])
+        self.assertEqual(agent.session_data()["model"], "kimi-k3")
 
     # ----- images live for one turn ---------------------------------------------------
     def test_the_image_is_replaced_by_a_description_and_its_path_after_the_turn(self):
