@@ -827,16 +827,25 @@ class Sidecar:
             panes = [message.get("pane", "")]
         try:
             expires = float(message.get("expires") or 0) or guests_mod.DEFAULT_EXPIRY
+            wanted = int(message.get("uses") or 1)
+            # pane_state/cloudflare (relay-terminal-71): a link worth several admissions is a room
+            # of colleagues at a desk on a LAN address, and twenty admissions for whoever it is
+            # forwarded to on a public one. While the tunnel is the address, one link admits one
+            # person; switching back to the LAN or tailnet lifts it again.
+            uses = 1 if self.served_by_cloudflare else wanted
             invite, url = await self.host.invite_create(
                 [str(pane) for pane in panes if pane],
                 str(message.get("role") or wire.VIEWER),
-                expires_in=expires, uses=int(message.get("uses") or 1))
+                expires_in=expires, uses=uses)
         except wire.WireError as error:
             self.emit({"t": "error", "message": error.message})
             return
-        self.emit({"t": "invite", "id": invite.invite_id, "url": url, "qr": qr_matrix(url),
-                   "role": invite.role, "panes": invite.panes, "uses": invite.uses_left,
-                   "expires": invite.seconds_left()})
+        reply = {"t": "invite", "id": invite.invite_id, "url": url, "qr": qr_matrix(url),
+                 "role": invite.role, "panes": invite.panes, "uses": invite.uses_left,
+                 "expires": invite.seconds_left()}
+        if self.served_by_cloudflare:
+            reply["note"] = "Over a public link, one link admits one person."
+        self.emit(reply)
 
     async def knock(self, request: host_mod.KnockRequest) -> tuple[bool, str]:
         """``knock {participant, name, platform, code, role, pane}`` → ``knock_answer``.

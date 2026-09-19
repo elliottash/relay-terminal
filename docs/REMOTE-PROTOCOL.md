@@ -762,6 +762,19 @@ Five wrong secrets burn the invite, as with pairing. The record keeps a **hash**
 never the secret: the plaintext exists once, in the link the owner hands out, so a restarted desktop
 can still admit someone holding the link and can no longer re-display the link itself.
 
+**Over a public link, one link admits one person** (owner, 2026-09-18, sharing with colleagues).
+While the sidecar serves the app through a cloudflared quick tunnel (section 14), `invite_create`
+clamps `uses` to 1 whatever was asked for, and the `invite` reply carries the clamped number and a
+sentence saying so; the share dialog caps its own control to match, and switching back to the LAN
+or tailnet address lifts both. A multi-use link on a LAN address is a room of colleagues at a desk;
+the same link on an address the internet can reach is that many admissions for anyone it is
+forwarded to.
+
+**Admission is always by hand.** There is no auto-admit: `admit_nobody` is the hub's default
+approver, and every guest knocks and is let in by the owner, with a role. That is what makes a
+leaked link survivable — the link gets someone to the door, not through it. Any future away-mode
+that admits without a person watching must refuse while a tunnel is up.
+
 An invite link is not a pairing link and cannot be used as one: `pair_prove` on a channel whose room
 belongs to a live invite is refused. No message on an invite channel reaches the paired-device
 list.

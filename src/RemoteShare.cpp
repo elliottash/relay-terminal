@@ -1038,6 +1038,7 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
     m_address->blockSignals(true);
     m_address->clear();
     QString reason;
+    bool publicLink = false;
     for (const QJsonValue &value : addresses) {
         const QJsonObject entry = value.toObject();
         if (entry.contains(QStringLiteral("available"))
@@ -1055,10 +1056,29 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
         m_address->addItem(label, address);
         if (entry.value(QStringLiteral("current")).toBool()) {
             m_address->setCurrentIndex(m_address->count() - 1);
+            publicLink = entry.value(QStringLiteral("kind")).toString() == QLatin1String("cloudflare");
         }
     }
     m_address->setVisible(m_address->count() > 1);
     m_address->blockSignals(false);
+    // A public link admits one person per link: a multi-use link on a LAN address is a room of
+    // colleagues at a desk, and the same link on a public URL is that many admissions for whoever
+    // it is forwarded to. The sidecar clamps it either way; capping the box here is so the number
+    // on screen is the number that will happen. Switching back to the LAN or tailnet lifts it.
+    if (publicLink) {
+        m_inviteUses->setRange(1, 1);
+        m_inviteUses->setValue(1);
+        m_inviteUses->setToolTip(QStringLiteral(
+            "Over a public link, one link admits one person. Choose another address to share one "
+            "link with several people."));
+        m_inviteNote->setText(QStringLiteral("Over a public link, one link admits one person."));
+        m_inviteNote->show();
+    } else if (m_inviteUses->maximum() == 1) {
+        m_inviteUses->setRange(1, 20);
+        m_inviteUses->setToolTip(QStringLiteral(
+            "How many people the link may let in. One link, one person, is the usual thing."));
+        m_inviteNote->clear();
+    }
     m_addressNote->setText(reason.isEmpty()
                                ? QString()
                                : QStringLiteral("No warning-free tailnet address: %1").arg(reason));
