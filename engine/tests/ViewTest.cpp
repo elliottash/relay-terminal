@@ -689,6 +689,12 @@ private slots:
         QVERIFY2(!rowHasColor(img, 1, ch, scheme.link), "the program's own red was overridden");
         QVERIFY(rowHasColor(img, 1, ch, QColor::fromRgb(scheme.palette[1])));
         QVERIFY2(rowHasColor(img, 2, ch, scheme.link), "a path in plain bright-white ink is not in the link colour");
+        // A light theme's "bright white" is a warm near-black (IBM Beige: #14120d), whose HSV
+        // saturation is high although it is plainly a grey: it must still count as plain ink.
+        scheme.palette[15] = 0xff14120d;
+        t.view->setColorScheme(scheme);
+        img = t.grab();
+        QVERIFY2(rowHasColor(img, 2, ch, scheme.link), "a path in a dark warm 'bright white' lost the link colour");
         t.view->setLinksColouredAtRest(false);
         img = t.grab();
         QVERIFY2(!rowHasColor(img, 0, ch, scheme.link), "the option is off but the path is still coloured");

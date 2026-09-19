@@ -600,6 +600,19 @@ void TerminalView::paintEvent(QPaintEvent *e)
     paintCursor(p);
 }
 
+namespace {
+// An ink that carries no meaning of its own: the default foreground, white, bright white, a grey,
+// the host's muted ink, a light theme's near-black "bright white". Either a small channel spread
+// (a dark warm grey such as IBM Beige's ANSI 15, #14120d, has HSV saturation 0.35 on a spread of
+// 7) or a low HSV saturation (Gruvbox's beige foreground, spread 57, saturation 0.24). Every ANSI
+// 1-6 and 9-14 in the shipped themes has a spread over 80 and a saturation over 0.45.
+bool plainInk(const QColor &c)
+{
+    const int spread = std::max({c.red(), c.green(), c.blue()}) - std::min({c.red(), c.green(), c.blue()});
+    return spread <= 40 || c.hsvSaturationF() < 0.3;
+}
+} // namespace
+
 void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
 {
     const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
@@ -702,13 +715,12 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
             continue;
         const int w = c.width == 2 ? 2 : 1;
         CellColors cc = colorsFor(col);
-        // The link colour, on a cell whose ink is plain — the default foreground or any achromatic
-        // one (the agent's prose is bright white, a tool line is the host's grey) — and that
-        // nothing else claims: a find match keeps its ink, a chromatic colour a program chose keeps
-        // its meaning. HSV saturation under 0.3 is "plain": every theme's text and greys measure
-        // under 0.25, every ANSI 1–6 and 9–14 over 0.45.
+        // The link colour, on a cell whose ink is plain (plainInk: the default foreground or any
+        // achromatic one — the agent's prose is bright white, a tool line is the host's grey) and
+        // that nothing else claims: a find match keeps its ink, a chromatic colour a program chose
+        // keeps its meaning.
         if (col < int(restLink.size()) && restLink[size_t(col)] && !(c.attrs & AttrReverse) && !highlighted(col)
-            && (CellColor::kind(c.fg) == CellColor::Default || cc.fg.hsvSaturationF() < 0.3))
+            && (CellColor::kind(c.fg) == CellColor::Default || plainInk(cc.fg)))
             cc.fg = m_scheme.link;
         const int x = m_padding + col * m_cw;
         const int variant = ((c.attrs & AttrBold) ? 1 : 0) | ((c.attrs & AttrItalic) ? 2 : 0);
@@ -1665,11 +1677,10 @@ void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
     logicalRowAt(m_frame, frameRow, &logical);
     if (logical.text.trimmed().isEmpty())
         return;
-    // Cheap first: nothing that could be a link, nothing to scan. (Scanning is what probes the
-    // filesystem; this is what keeps a wall of prose free.)
-    if (!logical.text.contains(QLatin1Char('/')) && !logical.text.contains(QLatin1Char('.'))
-        && !logical.text.contains(QLatin1Char('#')) && !logical.text.contains(QLatin1Char('~')))
-        return;
+    // No cheap pre-filter on the text: a bare name (`docs`, `relay-terminal`) is a candidate the
+    // scanner resolves against the directory, exactly as the pointer would, and an `ls` of
+    // extension-less folders is the commonest link-bearing line there is. The cache keeps the
+    // probe cost to one scan per changed line.
     if (m_restLinks.size() > 4096 || (m_restLinksAge.isValid() && m_restLinksAge.elapsed() > 5000))
         m_restLinks.clear();
     if (m_restLinks.isEmpty())
