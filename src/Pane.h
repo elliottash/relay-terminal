@@ -769,9 +769,9 @@ public:
         // shell (26.9), which is not a preset at all.
         if (const QString guest = guestOfPreset(id); !guest.isEmpty()) {
             if (!guestHarnessUsable(guest)) { chooseGuest(guest); return; }
-            // A TUI guest already here owns the prompt box: it is asked to leave first, and the
-            // pick is made again when it has (leaveGuest refuses while the guest is working).
-            if (!m_guest.isEmpty()) { leaveGuest([this, id] { selectModel(id); }); return; }
+            // A TUI guest already here owns the prompt box: the pane moves on from it at once
+            // and the pick is made again, now with nothing in front (leaveGuest, 26.9).
+            if (guestInFront()) { leaveGuest([this, id] { selectModel(id); }); return; }
             // …and on through the ordinary preset path below.
         }
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
@@ -1238,6 +1238,7 @@ private:
         const QString before = m_guest;
         m_guest = guest;
         if (!m_guest.isEmpty()) m_guestWanted.clear();   // picked and now detected (26.9)
+        m_guestLeaving = false;                          // whoever was being left has gone, or is new
         // A guest that left (or changed) takes its live facts and its open question with it;
         // the next statusline or state event repopulates them (26.3).
         clearGuestState();
@@ -1514,8 +1515,15 @@ private:
         updateGuestChip();
         sendProgramState();
         changed();
+        // The pane moved to another model while this guest was working (leaveGuest): its turn
+        // was left to finish, as a native model's request in flight is, and now it is asked to go.
+        if (!m_guestBusy && m_guestLeaving && !m_guest.isEmpty()) askGuestToExit(m_guest);
         if (!m_guestBusy) pumpQueue();
     }
+
+    // The TUI guest the prompt box is talking to: in the foreground, and not one the pane has
+    // already moved on from (26.9, "Leaving a guest").
+    bool guestInFront() const { return !m_guest.isEmpty() && !m_guestLeaving; }
 
     // A hook the guest's shim forwarded (26.4). `PermissionRequest` — the hook claude sends only
     // when it is really about to ask — becomes a Relay question on the pane; a notification
@@ -1705,6 +1713,12 @@ private:
 
     void clearGuestQuestions() {
         const bool had = !m_guestQuestions.isEmpty();
+        // The guest is gone (or changed) with questions still open: each shim behind one is
+        // holding its hook for up to 120 s (26.4) on an answer nobody can give any more. It is
+        // told no — never yes: a permission is not granted on the user's behalf — so it returns
+        // at once and the guest, if it is still there, asks in its own terminal as it always could.
+        for (const GuestQuestion &pending : std::as_const(m_guestQuestions))
+            writeGuestAnswer(pending.sequence, false);
         m_guestQuestions.clear();
         if (m_guestBar) m_guestBar->hide();
         if (had) focusInput();
@@ -6154,7 +6168,7 @@ public:
         leaveGuest([this, source, extra, cwd] {
             launchGuest(source, extra, cwd);
             status(QStringLiteral("Resuming the %1 session in this pane.").arg(guestDisplayName(source)));
-        });
+        }, true);
     }
 
     // Ctrl+F: find in this pane. The terminal scrollback is searched by the engine; the saved
@@ -6419,7 +6433,7 @@ private:
         // through verbatim rather than Relay diagnosing it as unknown.
         QStringList guestNames;
         int guestStart = -1;
-        if (!m_guest.isEmpty()) {
+        if (guestInFront()) {
             taken.clear();
             for (const auto &command : std::as_const(commands)) taken << command.name;
             guestStart = commands.size();
@@ -7938,8 +7952,10 @@ private:
             // shell line; a prompt is typed as the prompt (owner, 2026-09-19: "relay terminal
             // commands are piped to the agent as '! …' to maintain a seamless / identical
             // experience"). Relay's built-ins, aliases and skills above always win; any other
-            // `/command` is the guest's own, never rejected by Relay.
-            if (!m_guest.isEmpty()) {
+            // `/command` is the guest's own, never rejected by Relay. A guest the pane has moved
+            // on from (a model was picked while it worked) gets nothing more: the line is the new
+            // model's, exactly as after a native switch.
+            if (guestInFront()) {
                 QString line = m_editor->toPlainText();
                 const QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
                 const bool bang = line.startsWith(QLatin1Char('!'));
@@ -8596,7 +8612,7 @@ private:
         m_handoffPrefill = false; m_handoffPrefix = false; m_handoffOffered = false;
         // A guest pane (26.8): the auto router's verdict says how the line is typed into the guest
         // — a command as `!<command>`, a prompt as itself. Nothing reaches the pane's own shell.
-        if (!m_guest.isEmpty() && (route == QStringLiteral("shell") || route == QStringLiteral("agent"))) {
+        if (guestInFront() && (route == QStringLiteral("shell") || route == QStringLiteral("agent"))) {
             submitGuest(route == QStringLiteral("shell") ? QLatin1Char('!') + text.trimmed() : text, true);
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
             return;
@@ -9417,11 +9433,10 @@ private:
                  QStringLiteral("Tip: /model %1 does this from the prompt box").arg(id));
             return;
         }
-        // A preset picked while a guest runs: the guest is asked to leave first, and the pick
-        // is made again when it has (leaveGuest refuses while the guest is working).
-        if (!m_guest.isEmpty()) {
+        // A preset picked while a guest runs: the pane shifts over at once, like any model switch
+        // (leaveGuest); the guest finishes what it is doing and is then asked to exit.
+        if (guestInFront()) {
             leaveGuest([this, data] { selectModel(data); });
-            refreshPickers();   // the box shows the guest until it has actually left
             focusInput();
             return;
         }
@@ -9555,7 +9570,7 @@ private:
         // row here would be the same tool offered twice. Only the guest actually running as a TUI
         // in this pane keeps its row either way (tierBGuests).
         QStringList guests = tierBGuests();
-        const QString liveGuest = m_guest.isEmpty() ? m_guestWanted : m_guest;
+        const QString liveGuest = m_guestLeaving ? QString() : m_guest.isEmpty() ? m_guestWanted : m_guest;
         if (!liveGuest.isEmpty() && !guests.contains(liveGuest)) guests << liveGuest;   // run by a path
         if (!guests.isEmpty()) {
             m_modelBox->insertSeparator(m_modelBox->count());
@@ -9664,7 +9679,7 @@ private:
             if (!model.isEmpty())
                 status(QStringLiteral("%1 picks its own model when it runs in the terminal; ignoring “%2”.")
                            .arg(guestDisplayName(guest), model));
-            if (!m_guest.isEmpty() && m_guest != guest) leaveGuest([this, guest] { chooseGuest(guest); });
+            if (!m_guest.isEmpty() && m_guest != guest) leaveGuest([this, guest] { chooseGuest(guest); }, true);
             else chooseGuest(guest);
             return;
         }
@@ -9773,8 +9788,16 @@ private:
     // The picker's row: this guest, here, now.
     void chooseGuest(const QString &guest) {
         if (guestDisplayName(guest) == QStringLiteral("The guest agent")) return;   // not an id the table knows
-        if (m_guest == guest) { status(QStringLiteral("Already on %1.").arg(guestDisplayName(guest))); refreshPickers(); return; }
-        if (!m_guest.isEmpty()) { leaveGuest([this, guest] { chooseGuest(guest); }); return; }
+        if (m_guest == guest) {
+            // Picked again while it was being left and has not gone yet: the pane comes back to it.
+            const bool back = m_guestLeaving;
+            m_guestLeaving = false;
+            m_guestLeaveThen = nullptr;
+            status((back ? QStringLiteral("Back on %1.") : QStringLiteral("Already on %1.")).arg(guestDisplayName(guest)));
+            refreshPickers();
+            return;
+        }
+        if (!m_guest.isEmpty()) { leaveGuest([this, guest] { chooseGuest(guest); }, true); return; }
         launchGuest(guest, {}, QString());
     }
 
@@ -9861,29 +9884,46 @@ public:
     }
 private:
 
-    // Leave the guest, then do `then`. No guest: `then` runs now. A guest at its input: Relay
-    // types the guest's own `/exit` and `then` waits for the program poll to see the shell back
-    // (setGuest). A guest that is working is never interrupted unasked: the switch is refused with
-    // a line saying what to do, and `then` is dropped (owner's open question, 26.9: whether an
-    // interrupt should be sent instead).
-    void leaveGuest(std::function<void()> then) {
+    // Leave the guest and do `then`. No guest: `then` runs now. Otherwise the pane **shifts over at
+    // once**, the way a native model switch does (owner, 2026-09-19: "a busy guest model change
+    // should be the same as our relay-native models. just shift over immediately"): the box, the
+    // `/` popup and the prompt box stop being the guest's from this moment, and `then` — a model
+    // pick — runs now. The guest is not interrupted: idle, it is asked to `/exit` here; working,
+    // its turn in flight finishes, as a native model's request in flight does, and it is asked
+    // when it goes idle (setGuestBusy). A `then` that needs the pane's shell (another guest, a
+    // session resumed here: `needsShell`) cannot run beside a TUI, so that one waits for the
+    // program poll to see the shell back (setGuest).
+    void leaveGuest(std::function<void()> then, bool needsShell = false) {
         if (m_guest.isEmpty()) { if (then) then(); return; }
-        if (m_guestBusy) {
-            status(QStringLiteral("%1 is working · stop its turn first (Esc in the terminal), then switch.")
-                       .arg(guestDisplayName(m_guest)));
-            refreshPickers();
-            return;
-        }
-        m_guestLeaveThen = std::move(then);
         const QString guest = m_guest;
+        const bool already = m_guestLeaving;
+        m_guestLeaving = true;
+        if (needsShell) m_guestLeaveThen = std::move(then);
+        if (!already) {
+            if (m_guestBusy)
+                status(QStringLiteral("%1 finishes its turn and then exits · this pane has moved on.")
+                           .arg(guestDisplayName(guest)));
+            else
+                askGuestToExit(guest);
+        }
+        refreshPickers();
+        if (!needsShell && then) then();
+    }
+
+    // The guest's own `/exit`, typed into it, and a word if it stays anyway. The pane has already
+    // moved on, so a guest that does not go costs nothing but the terminal it is sitting in; a
+    // `then` that was waiting for the shell is dropped, and said so.
+    void askGuestToExit(const QString &guest) {
+        if (guest != m_guest) return;
         typeIntoGuest(guest, QStringLiteral("/exit"));
         status(QStringLiteral("Leaving %1…").arg(guestDisplayName(guest)));
         QTimer::singleShot(15000, this, [this, guest] {
-            if (m_guest == guest && m_guestLeaveThen) {
-                m_guestLeaveThen = nullptr;
-                status(QStringLiteral("%1 did not exit · type /exit into it, then pick the model again.").arg(guestDisplayName(guest)));
-                refreshPickers();
-            }
+            if (m_guest != guest || !m_guestLeaving) return;
+            const bool waiting = static_cast<bool>(m_guestLeaveThen);
+            m_guestLeaveThen = nullptr;
+            status(waiting ? QStringLiteral("%1 did not exit · type /exit into it, then pick again.").arg(guestDisplayName(guest))
+                           : QStringLiteral("%1 is still in the terminal · type /exit into it to close it.").arg(guestDisplayName(guest)));
+            refreshPickers();
         });
     }
 
@@ -14064,7 +14104,8 @@ private:
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
     QString m_guestWanted;             // picked in the model box, not yet in the foreground (26.9)
     QProcess *m_guestLaunch = nullptr; // relay_core.guest_launch preparing the command line, while it runs
-    std::function<void()> m_guestLeaveThen;   // what a model pick does once the guest has exited
+    std::function<void()> m_guestLeaveThen;   // what needs the shell, once the guest has exited
+    bool m_guestLeaving = false;       // the pane has moved on from this guest; it exits when idle
     QFrame *m_guestBar = nullptr;      // the guest's permission question, floating over the terminal
     QLabel *m_guestBarLabel = nullptr;
     QPushButton *m_guestAllow = nullptr;   // focused while a question is up; Y/Enter presses it
