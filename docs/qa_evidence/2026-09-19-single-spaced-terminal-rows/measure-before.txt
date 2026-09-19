@@ -1,0 +1,5 @@
+before (pitch): 17 bands, centres [64.5, 94.5, 102.5, 120.5, 142.5, 164.0, 184.0, 190.5, 208.5, 229.5, 252.5, 274.5, 297.0, 319.5, 341.5, 363.5, 385.5]
+before: row pitch 22.0px (run of 9)
+before (gap): 15 bands, centres [64.5, 100.0, 144.0, 188.0, 232.5, 276.0, 320.0, 364.0, 408.0, 452.0, 495.0, 517.5, 539.5, 561.5, 583.5]
+before: paragraph-to-paragraph distance 44.0px = 2.00 row pitches
+before: paragraph gap intact: one full blank grid row

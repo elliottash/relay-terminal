@@ -1,0 +1,14 @@
+binary: /home/elliott/repos/relay-terminal/build/relay
+binary sha256: c672f6b274e18bf2249f1b770289ac0b539fbd2392992dd73213470d6e7572f5
+=== before (LineSpacing=5) ===
+before (pitch): 17 bands, centres [64.5, 94.5, 102.5, 120.5, 142.5, 164.0, 184.0, 190.5, 208.5, 229.5, 252.5, 274.5, 297.0, 319.5, 341.5, 363.5, 385.5]
+before: row pitch 22.0px (run of 9)
+before (gap): 15 bands, centres [64.5, 100.0, 144.0, 188.0, 232.5, 276.0, 320.0, 364.0, 408.0, 452.0, 495.0, 517.5, 539.5, 561.5, 583.5]
+before: paragraph-to-paragraph distance 44.0px = 2.00 row pitches
+before: paragraph gap intact: one full blank grid row
+=== after (LineSpacing=0) ===
+after (pitch): 17 bands, centres [64.5, 91.5, 99.5, 112.5, 129.5, 146.0, 161.0, 167.5, 180.5, 196.5, 214.5, 231.5, 249.0, 266.5, 283.5, 300.5, 317.5]
+after: row pitch 17.0px (run of 9)
+after (gap): 15 bands, centres [64.5, 97.0, 131.0, 165.0, 199.5, 233.0, 267.0, 301.0, 335.0, 369.0, 402.0, 419.5, 436.5, 453.5, 470.5]
+after: paragraph-to-paragraph distance 34.0px = 2.00 row pitches
+after: paragraph gap intact: one full blank grid row

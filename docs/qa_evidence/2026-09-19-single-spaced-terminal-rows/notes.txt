@@ -1,0 +1,56 @@
+#T7AH implementer evidence — single-spaced terminal rows
+
+Change: `data/theme/terminal.conf` `[Appearance] LineSpacing=5 -> 0` (one line; the key
+stays, both readers already default to 0 without it).
+
+## What was measured (qa-drive.sh, 2026-09-19)
+
+Same binary throughout the drive (build/relay, sha256 c672f6b2…), same window and font;
+only `RELAY_THEME_DIR` differed — a control copy of the theme with the old `LineSpacing=5`
+vs the repo's `0`. The pane's shell prints the pattern itself from the isolated HOME's rc
+files (no typing or focus to go wrong). Each case captured twice because the default pane
+shows only a handful of rows:
+
+- pitch shot: `clear; seq 1 9`
+- gap shot:   `clear; for i in 1..9; do echo para-$i; echo; done` (text, blank, text…)
+
+| | LineSpacing=5 | LineSpacing=0 |
+|---|---|---|
+| row pitch (9-row constant run) | 22.0 px | 17.0 px |
+| paragraph-to-paragraph | 44.0 px = 2.00 pitches | 34.0 px = 2.00 pitches |
+
+- Rows tightened by exactly the removed 5 px; 17 px is the font's own cell height
+  (`m_ch = ceil(fm.height())`, Hack 11) — single spacing, no clipping by construction.
+- The blank line between paragraphs stays one full grid row: 2.00 pitches in both cases,
+  so paragraph spacing is untouched, exactly as planned.
+- An earlier full drive on a different binary (sha 37816f7e…, also same for both cases)
+measured the same 22.0 vs 17.0 px.
+
+Caveat: `build/` is shared with other sessions that were rebuilding during QA; the binary
+sha changed between drives. Within each drive both cases ran against one sha, and the
+measured delta equals the conf value in both drives, so the result does not depend on it.
+
+## Remote viewer (reader 2)
+
+`RemotePane::terminalFont()` (src/RemotePane.cpp:469) reads the same
+`Appearance/LineSpacing` key from the same `theme::themeDataDir()/terminal.conf` — the
+file this drive proves is the one read under `RELAY_THEME_DIR` — and `RemoteScreen::fit()`
+adds it to `m_cellH`, the same arithmetic as `TerminalView::updateMetrics()`. A live
+remote-viewer check needs a paired second desktop over the rendezvous server and was not
+driven here; by construction its rows tighten by the same 5 px.
+
+## Suites
+
+- `./scripts/test.sh`: 3411 tests, OK (python-tests.txt).
+- `ctest --test-dir build`: 62/63; the one failure (`buttonfit`,
+  `stylesheetFontsStayAtOrAboveTheFloor`, dark-copper 8.5pt `tabProjectChip`,
+  src/Theme.cpp:542) is pre-existing at HEAD 8b260cff and untouched by this change —
+  filed as bugs card #QAJQ (ctest.txt).
+
+## Files
+
+- `qa-drive.sh` — the drive (Xvfb, isolated XDG homes, RELAY_THEME_DIR A/B)
+- `measure.py` — band detection (masks pane-border columns) and the pitch/gap checks
+- `screen-{before-line5,after-line0}-{pitch,gap}.png` — the four captures
+- `measure-before.txt`, `measure-after.txt` — measured numbers
+- `theme-values.txt`, `qa-live-log.txt`, `qa-xvfb.log`, `relay-*-*.log` — run records

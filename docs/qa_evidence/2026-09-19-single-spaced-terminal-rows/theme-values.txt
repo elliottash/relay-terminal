@@ -1,0 +1,2 @@
+control /tmp/tmp.yBRSSMTf8g/theme-line5/terminal.conf: LineSpacing=5
+repo    /home/elliott/repos/relay-terminal/data/theme/terminal.conf: LineSpacing=0

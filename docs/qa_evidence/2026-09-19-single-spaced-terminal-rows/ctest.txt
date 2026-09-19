@@ -1,0 +1,20 @@
+ctest --test-dir build — run 2026-09-19 16:22–16:28 EDT, binary built 16:27 (scripts/relay-build).
+Working tree: #T7AH's one-line terminal.conf edit only in this path; other paths carry other sessions' work.
+
+98% tests passed, 1 tests failed out of 63
+
+Label Time Summary:
+engine    =  11.40 sec*proc (1 test)
+
+Total Test time (real) = 347.86 sec
+
+The following tests FAILED:
+	 37 - buttonfit (Failed)
+Errors while running CTest
+Output from these tests are in /home/elliott/repos/relay-terminal/build/Testing/Temporary/LastTest.log
+
+The one failure is unrelated to #T7AH and pre-existing at HEAD (8b260cff):
+ButtonFitTest::stylesheetFontsStayAtOrAboveTheFloor() — dark-copper: "font-size: 8.5pt"
+is under the 9pt floor, from QToolButton#tabProjectChip at src/Theme.cpp:542, which is
+committed code (git show HEAD:src/Theme.cpp finds it; the working diff does not touch it).
+No test reads Appearance/LineSpacing. Filed as bugs card #QAJQ.

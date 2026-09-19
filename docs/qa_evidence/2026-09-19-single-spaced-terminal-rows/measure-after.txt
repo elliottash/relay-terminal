@@ -1,0 +1,5 @@
+after (pitch): 17 bands, centres [64.5, 91.5, 99.5, 112.5, 129.5, 146.0, 161.0, 167.5, 180.5, 196.5, 214.5, 231.5, 249.0, 266.5, 283.5, 300.5, 317.5]
+after: row pitch 17.0px (run of 9)
+after (gap): 15 bands, centres [64.5, 97.0, 131.0, 165.0, 199.5, 233.0, 267.0, 301.0, 335.0, 369.0, 402.0, 419.5, 436.5, 453.5, 470.5]
+after: paragraph-to-paragraph distance 34.0px = 2.00 row pitches
+after: paragraph gap intact: one full blank grid row
