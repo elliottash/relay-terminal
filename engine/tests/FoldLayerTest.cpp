@@ -88,6 +88,38 @@ private slots:
         QCOMPARE(f.rowText(0, 1), QStringLiteral("你好"));
     }
 
+    // relay::wrapFoldLines() is what a host uses to cap its content in the rows the view will
+    // actually paint (#K48R: the reasoning fold's six and eighteen). It has to agree with the
+    // layer exactly, so: wrap first, lay the result out, and every line must be one row — and the
+    // rows must read the same as laying the original out did.
+    void preWrappedLinesLayOutOneRowEach()
+    {
+        const QVector<FoldLine> source = lines({QStringLiteral("0123456789abcdefghij"),
+                                                QStringLiteral("short"),
+                                                QString(),
+                                                QStringLiteral("你好你好你好你好你好"),
+                                                QStringLiteral("a\tb")});
+        for (int columns : {8, 20, 41, 80}) {
+            const int usable = columns - kFoldIndent;
+            FoldLayer direct;
+            direct.setGeometry(columns, kFoldIndent);
+            direct.setContent(QStringLiteral("u"), source);
+            const QVector<FoldLine> wrapped = wrapFoldLines(source, usable);
+            FoldLayer layer;
+            layer.setGeometry(columns, kFoldIndent);
+            layer.setContent(QStringLiteral("u"), wrapped);
+            const FoldLayer::Fold *fold = layer.fold(QStringLiteral("u"));
+            QVERIFY(fold);
+            // One row per pre-wrapped line: nothing wrapped a second time.
+            QCOMPARE(fold->height(), int(wrapped.size()));
+            QCOMPARE(fold->height(), direct.fold(QStringLiteral("u"))->height());
+            for (int row = 0; row < fold->height(); ++row)
+                QCOMPARE(layer.rowText(0, row), direct.rowText(0, row));
+        }
+        // Zero or less: the lines come back untouched, for a host that has no width yet.
+        QCOMPARE(wrapFoldLines(source, 0).size(), source.size());
+    }
+
     void combiningMarksStayInOneCell()
     {
         FoldLayer f;

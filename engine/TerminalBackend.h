@@ -17,6 +17,7 @@
 #include <QPoint>
 #include <QString>
 #include <QStringList>
+#include <QTextBoundaryFinder>
 #include <QVector>
 #include <QtGlobal>
 #include <functional>
@@ -49,6 +50,101 @@ struct FoldLine {
     QVector<FoldSpan> spans;
     QString text() const; // the spans joined
 };
+
+// How far the view pushes a fold's rows in from the left. The layer's default;
+// TerminalView::setFoldIndent() narrows it to 2..4 and nothing does today. A
+// host that has to know how many *rows* its content will take needs this too,
+// because the wrap happens at `columns - indent` (FoldLayer::layout()).
+inline constexpr int kFoldIndent = 3;
+
+// Grid columns one grapheme cluster occupies (1 or 2). East Asian Wide /
+// Fullwidth and the pictographs are two cells: the emulator cores decide this
+// for real cells, and fold text is the host's own, so the layer -- and any host
+// counting rows before it hands the content over -- needs the same answer.
+inline int foldClusterWidth(const QString &cluster)
+{
+    const auto wide = [](char32_t c) {
+        return (c >= 0x1100 && c <= 0x115F)     // Hangul Jamo
+            || (c >= 0x2E80 && c <= 0x303E)     // CJK radicals, Kangxi, punctuation
+            || (c >= 0x3041 && c <= 0x33FF)     // kana, Hangul compat, CJK compat
+            || (c >= 0x3400 && c <= 0x4DBF)     // CJK ext A
+            || (c >= 0x4E00 && c <= 0x9FFF)     // CJK unified
+            || (c >= 0xA000 && c <= 0xA4CF)     // Yi
+            || (c >= 0xAC00 && c <= 0xD7A3)     // Hangul syllables
+            || (c >= 0xF900 && c <= 0xFAFF)     // CJK compat ideographs
+            || (c >= 0xFE10 && c <= 0xFE19)     // vertical forms
+            || (c >= 0xFE30 && c <= 0xFE6F)     // CJK compat forms
+            || (c >= 0xFF00 && c <= 0xFF60)     // fullwidth forms
+            || (c >= 0xFFE0 && c <= 0xFFE6)
+            || (c >= 0x1F300 && c <= 0x1F64F)   // pictographs and emoticons
+            || (c >= 0x1F900 && c <= 0x1F9FF)
+            || (c >= 0x20000 && c <= 0x3FFFD);  // CJK ext B..
+    };
+    if (cluster.isEmpty())
+        return 0;
+    const QVector<uint> points = cluster.toUcs4();
+    for (uint point : points) {
+        if (point == 0xFE0F)    // emoji presentation selector
+            return 2;
+        if (wide(char32_t(point)))
+            return 2;
+    }
+    return 1;
+}
+
+// `lines` broken at `usable` columns, one FoldLine per row the view will paint:
+// the same hard wrap FoldLayer::layout() does, so a host can cap what it hands
+// over in *rendered* rows rather than in logical lines. Laying the result out
+// again is a no-op -- every line already fits -- which engine/tests/
+// FoldLayerTest.cpp asserts against the layer itself. `usable` is the grid width
+// less kFoldIndent; zero or less gives the lines back unchanged.
+inline QVector<FoldLine> wrapFoldLines(const QVector<FoldLine> &lines, int usable)
+{
+    if (usable <= 0)
+        return lines;
+    QVector<FoldLine> out;
+    out.reserve(lines.size());
+    for (const FoldLine &line : lines) {
+        FoldLine row;
+        int used = 0;
+        bool any = false;
+        for (const FoldSpan &span : line.spans) {
+            if (span.text.isEmpty())
+                continue;
+            QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, span.text);
+            FoldSpan part = span;
+            part.text.clear();
+            int from = 0;
+            while (from < span.text.size()) {
+                finder.setPosition(from);
+                int to = finder.toNextBoundary();
+                if (to <= from)
+                    to = from + 1;
+                const QString cluster = span.text.mid(from, to - from);
+                from = to;
+                const int width = foldClusterWidth(cluster);
+                if (width <= 0)
+                    continue;               // zero-width: the layer drops it too
+                if (used > 0 && used + width > usable) {
+                    if (!part.text.isEmpty()) { row.spans << part; part.text.clear(); }
+                    out << row;
+                    row = FoldLine{};
+                    used = 0;
+                }
+                part.text += cluster;
+                used += width;
+                any = true;
+            }
+            if (!part.text.isEmpty())
+                row.spans << part;
+        }
+        // An empty logical line is one empty row on the grid, exactly as the
+        // layer lays it out; a line of nothing but zero-width cells is too.
+        if (!row.spans.isEmpty() || !any)
+            out << row;
+    }
+    return out;
+}
 
 class TerminalBackend {
 public:

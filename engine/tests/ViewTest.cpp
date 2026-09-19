@@ -661,6 +661,31 @@ private slots:
         QCOMPARE(t.links, QStringList{QStringLiteral("https://relay.test/report")});
     }
 
+    // …and a *plain* click on it does too. Owner, 2026-09-19 (#K48R): "the open in pane link on the
+    // thinking fold doesnt work" — the "open in pane" row of a fold is a FoldSpan link, and nobody
+    // ctrl-clicks a word that is underlined and coloured like a link.
+    void aPlainClickOnALinkInsideAFoldOpensIt()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        FoldSpan plain;
+        plain.text = QStringLiteral("see ");
+        FoldSpan linked;
+        linked.text = QStringLiteral("open in pane");
+        linked.link = QStringLiteral("relay://turn/p/1");
+        FoldLine line;
+        line.spans << plain << linked;
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), QVector<FoldLine>{line});
+        QTest::qWait(100);
+        const int anchor = t.rowOf(QStringLiteral("* ran python"));
+        QVERIFY(anchor >= 0);
+        const QPoint p = t.cellPoint(anchor + 1, 3 + 6);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, p);
+        QTest::qWait(40);
+        QCOMPARE(t.links, QStringList{QStringLiteral("relay://turn/p/1")});
+    }
+
     // A path in the output that resolves wears the link colour at rest — in the default ink and in
     // a plain one like the bright white the agent's prose is written in; a chromatic colour the
     // program chose is never overridden; the option turns it all off (owner, 2026-09-19).

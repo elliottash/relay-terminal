@@ -162,6 +162,36 @@ private slots:
         QVERIFY(log(view).contains(QStringLiteral("No output recorded")));
     }
 
+    // #K48R, owner's report: "the open in pane link on the thinking fold doesnt work". It opened
+    // this pane — and the reasoning was not in it. The host writes the thinking it has and *then*
+    // asks the worker for the transcript; the reply arrived a round trip later and cleared the
+    // log. The view holds the reasoning now and redraws it above the messages, whichever of the
+    // two arrives first.
+    void theReasoningSurvivesTheTranscriptReply() {
+        TurnTranscriptView view(QStringLiteral("t1"));
+        view.setThinking(QStringLiteral("First I weighed the ponies.\nThen the weather."));
+        QVERIFY(log(view).contains(QStringLiteral("First I weighed the ponies.")));
+        view.setTranscript(json("{'turn_id':'t1','items':[{'role':'user','content':'ponies?'},"
+                                "{'role':'assistant','content':'Done.'}]}"));
+        QVERIFY2(log(view).contains(QStringLiteral("First I weighed the ponies.")),
+                 qPrintable(log(view)));
+        QVERIFY(log(view).contains(QStringLiteral("Then the weather.")));
+        QVERIFY(log(view).contains(QStringLiteral("ponies?")));
+        QVERIFY(log(view).contains(QStringLiteral("Done.")));
+        // The reasoning comes first: it is what the link was clicked for.
+        QVERIFY(log(view).indexOf(QStringLiteral("First I weighed")) < log(view).indexOf(QStringLiteral("ponies?")));
+        // The other order works too — a pane opened before any reasoning had arrived.
+        TurnTranscriptView second(QStringLiteral("t2"));
+        second.setTranscript(json("{'turn_id':'t2','items':[{'role':'user','content':'ponies?'}]}"));
+        second.setThinking(QStringLiteral("Weighing it up."));
+        QVERIFY(log(second).contains(QStringLiteral("Weighing it up.")));
+        QVERIFY(log(second).contains(QStringLiteral("ponies?")));
+        // A block still streaming calls this again with the longer text: it replaces, never doubles.
+        second.setThinking(QStringLiteral("Weighing it up. And again."));
+        QCOMPARE(log(second).count(QStringLiteral("Weighing it up.")), 1);
+        QVERIFY(log(second).contains(QStringLiteral("And again.")));
+    }
+
     void activatingARowAsksTheHostForItsOutput() {
         TurnTranscriptView view(QStringLiteral("t1"));
         QStringList asked;

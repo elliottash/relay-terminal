@@ -140,10 +140,45 @@ void TurnTranscriptView::setSummary(const QJsonObject &summary) {
 }
 
 void TurnTranscriptView::setTranscript(const QJsonObject &transcript) {
+    m_transcript = transcript;
+    renderLog();
+}
+
+// Thinking text collected while the turn ran. Held, not written once: the transcript arrives a
+// round trip after the pane opens and rebuilds the log, and before #K48R that reply wiped the
+// reasoning the fold's "open in pane" link had just promised — the pane opened with the tool list,
+// the messages, and nothing of what the model had thought. The stream keeps calling this as the
+// block grows, so it is idempotent: it replaces the text and redraws.
+void TurnTranscriptView::setThinking(const QString &text) {
+    if (text == m_thinking) return;
+    m_thinking = text;
+    renderLog();
+}
+
+// The log is the thinking block, then the turn's messages: whichever of the two the host has.
+// setToolOutput() takes the log over for one call's output, which is an explicit ask, and the next
+// of either of these puts it back.
+void TurnTranscriptView::renderLog() {
     m_log->clear();
-    QJsonArray items = transcript.value(QStringLiteral("items")).toArray();
-    if (items.isEmpty()) items = transcript.value(QStringLiteral("messages")).toArray();
+    if (!m_thinking.trimmed().isEmpty()) {
+        QTextCursor cursor(m_log->document());
+        QTextCharFormat format;   // upright, muted: see "Legible text"
+        format.setForeground(relay::theme::TextMuted);
+        // The fold in the terminal is six rows while it streams and eighteen when it settles
+        // (#K48R); this pane is where the rest of it is, so the cut here is generous enough that
+        // no reasoning anyone will read reaches it.
+        const QString text = m_thinking.trimmed();
+        cursor.insertText(QStringLiteral("Thinking\n") + text.left(kThinkingChars)
+                              + (text.size() > kThinkingChars
+                                     ? QStringLiteral("\n… %1 more characters").arg(text.size() - kThinkingChars)
+                                     : QString())
+                              + QStringLiteral("\n\n"), format);
+    }
+    QJsonArray items = m_transcript.value(QStringLiteral("items")).toArray();
+    if (items.isEmpty()) items = m_transcript.value(QStringLiteral("messages")).toArray();
+    if (items.isEmpty() && m_transcript.isEmpty()) return;   // nothing asked for yet
     QTextCursor cursor(m_log->document());
+    cursor.movePosition(QTextCursor::End);
     auto add = [&cursor](const QString &text, const QColor &color, bool bold) {
         QTextCharFormat format; format.setForeground(color); if (bold) format.setFontWeight(QFont::Bold);
         cursor.movePosition(QTextCursor::End);
@@ -231,14 +266,6 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
             relay::theme::TextMuted);
     }
     m_log->moveCursor(QTextCursor::Start);
-}
-
-void TurnTranscriptView::setThinking(const QString &text) {
-    if (text.trimmed().isEmpty()) return;
-    QTextCursor cursor(m_log->document());
-    cursor.movePosition(QTextCursor::Start);
-    QTextCharFormat format; format.setForeground(relay::theme::TextMuted);   // upright: see "Legible text"
-    cursor.insertText(QStringLiteral("Thinking\n") + text.trimmed().left(20000) + QStringLiteral("\n\n"), format);
 }
 
 void TurnTranscriptView::focusInput() { m_tools->setFocus(Qt::OtherFocusReason); }

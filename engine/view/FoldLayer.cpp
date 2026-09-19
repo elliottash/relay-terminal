@@ -15,44 +15,12 @@ QString FoldLine::text() const
     return s;
 }
 
-namespace {
-
-// East Asian Wide/Fullwidth and the pictographs terminals give two cells. The
-// emulator cores decide this for real cells; fold text is the host's own, so
-// the layer needs the same answer to wrap it onto the same grid.
-bool wideCodepoint(char32_t c)
-{
-    return (c >= 0x1100 && c <= 0x115F)     // Hangul Jamo
-        || (c >= 0x2E80 && c <= 0x303E)     // CJK radicals, Kangxi, punctuation
-        || (c >= 0x3041 && c <= 0x33FF)     // kana, Hangul compat, CJK compat
-        || (c >= 0x3400 && c <= 0x4DBF)     // CJK ext A
-        || (c >= 0x4E00 && c <= 0x9FFF)     // CJK unified
-        || (c >= 0xA000 && c <= 0xA4CF)     // Yi
-        || (c >= 0xAC00 && c <= 0xD7A3)     // Hangul syllables
-        || (c >= 0xF900 && c <= 0xFAFF)     // CJK compat ideographs
-        || (c >= 0xFE10 && c <= 0xFE19)     // vertical forms
-        || (c >= 0xFE30 && c <= 0xFE6F)     // CJK compat forms
-        || (c >= 0xFF00 && c <= 0xFF60)     // fullwidth forms
-        || (c >= 0xFFE0 && c <= 0xFFE6)
-        || (c >= 0x1F300 && c <= 0x1F64F)   // pictographs and emoticons
-        || (c >= 0x1F900 && c <= 0x1F9FF)
-        || (c >= 0x20000 && c <= 0x3FFFD);  // CJK ext B..
-}
-
-} // namespace
-
+// The table itself lives beside FoldLine in the host-facing header: a host that
+// caps its content in rendered rows has to wrap it exactly as this does
+// (relay::wrapFoldLines), and two copies of the width rules would drift.
 int FoldLayer::clusterWidth(const QString &cluster)
 {
-    if (cluster.isEmpty())
-        return 0;
-    const QVector<uint> cps = cluster.toUcs4();
-    for (uint cp : cps) {
-        if (cp == 0xFE0F)
-            return 2; // emoji presentation selector
-        if (wideCodepoint(char32_t(cp)))
-            return 2;
-    }
-    return 1;
+    return foldClusterWidth(cluster);
 }
 
 FoldLayer::FoldLayer() = default;

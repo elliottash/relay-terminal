@@ -177,7 +177,7 @@ private:
     QHash<int, int> m_anchorStarts; // real row -> fold index, for every resolved fold
     int m_totalHeight = 0;
     int m_columns = 80;
-    int m_indent = 3;
+    int m_indent = kFoldIndent;
 };
 
 } // namespace relay

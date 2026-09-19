@@ -49,7 +49,9 @@ public:
     // then its `detail` sections (§ 23.5) in order, written into the log. Without `detail` it falls
     // back to the reply's own text, which is what an older worker sends.
     void setToolOutput(const QJsonObject &reply);
-    // Thinking text collected while the turn ran (optional).
+    // Thinking text collected while the turn ran (optional). Held by the view and redrawn with the
+    // log, so the transcript reply that arrives after the pane opens cannot wipe it (#K48R); the
+    // host may call it again as the block streams.
     void setThinking(const QString &text);
     void focusInput();
     // Tool calls in the turn — the number the title says, not the number of rows, which is smaller
@@ -61,9 +63,18 @@ protected:
 
 private:
     void openSelected();
+    // The log: the thinking block, then the transcript's messages — both of them from what this
+    // view holds, so either can arrive first and neither erases the other.
+    void renderLog();
     // One call's row: the line in column 0, the exact duration in column 1.
     QTreeWidgetItem *addRow(QTreeWidgetItem *parent, const QJsonObject &tool, const toollabel::Label &label);
+    // As much reasoning as this pane writes out. The terminal fold is six rows streaming and
+    // eighteen settled (#K48R) and points here for the rest, so this is the whole of anything a
+    // person will read.
+    static constexpr int kThinkingChars = 400000;
     QString m_turnId;
+    QString m_thinking;
+    QJsonObject m_transcript;
     QLabel *m_header = nullptr;
     QTreeWidget *m_tools = nullptr;
     QPlainTextEdit *m_log = nullptr;
