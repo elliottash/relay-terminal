@@ -63,10 +63,19 @@ handle SIGUSR1 nostop noprint pass
 handle SIGUSR2 nostop noprint pass
 run
 echo \n===== relay stopped =====\n
-# Whatever it stopped for, this is the state it stopped in.
-bt full
-echo \n----- every thread -----\n
-thread apply all bt
+# Bounded on purpose. A stack overflow — the first crash this caught was 17,000 identical frames —
+# makes an unbounded `bt full` take longer to print than anyone will wait, and buries the two ends
+# that say what happened: where it was, and who called it.
+echo \n----- innermost 40 -----\n
+bt 40
+echo \n----- outermost 40 (past any runaway recursion, the real caller) -----\n
+bt -40
+echo \n----- how deep -----\n
+info frame
+echo \n----- locals, innermost 12 -----\n
+bt full 12
+echo \n----- every thread, 25 frames each -----\n
+thread apply all bt 25
 echo \n----- registers -----\n
 info registers
 echo \n===== end =====\n
