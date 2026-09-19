@@ -1145,6 +1145,7 @@ private:
     static constexpr int kMaxProgramWrites = 20;
     static constexpr int kScreenSnapshotChars = 8000;
     static constexpr int kGuestModelMax = 64;   // program_state.guest_model's ceiling (26.3)
+    static constexpr int kGuestSessionMax = 200; // program_state.guest_session's ceiling (26.7)
     // The guest event spool (26.3). A file past kGuestEventMax is deleted unread: a hook payload
     // that large is a bug or an attack, never a question worth showing, and the shim caps what it
     // forwards far below it. kGuestEventsPerTick keeps a burst from freezing the UI; the names
@@ -1237,6 +1238,10 @@ private:
             {QStringLiteral("reason"), m_delegated ? QStringLiteral("delegated") : m_delegationEnd},
             {QStringLiteral("program"), foregroundProgramName()},
             {QStringLiteral("guest"), m_guest},
+            // Which of the guest's own sessions this is (26.7). Relay follows that one transcript
+            // while it runs, so the Sessions row moves with the turn the user is watching; two
+            // claudes in one directory write two transcripts, and only the id tells them apart.
+            {QStringLiteral("guest_session"), m_guestSession.left(kGuestSessionMax)},
             // The guest's live facts (26.3): what it is running on, and whether a turn of its own
             // is going. Its context share joins below, only when the statusline could say.
             {QStringLiteral("guest_model"), m_guestModel.left(kGuestModelMax)},
@@ -1271,6 +1276,10 @@ private:
         // A guest that left (or changed) takes its live facts and its open question with it;
         // the next statusline or state event repopulates them (26.3).
         clearGuestState();
+        // The session id belongs to the guest that was launched (26.7). One that leaves the
+        // foreground takes it with it — unless this pane's *agent* is a guest harness (Tier A),
+        // whose session id comes from `configured` and has nothing to do with the terminal.
+        if (m_guest.isEmpty() && !onGuestPreset()) m_guestSession.clear();
         m_guestSlashCommands.clear();
         if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
         // The sidecar's lifetime follows the claude panes (26.9): it hears about every claude that
@@ -1519,6 +1528,14 @@ private:
             sendProgramState();
             changed();
         } else if (name == QStringLiteral("state")) {
+            // The rollout tail names the thread it follows (26.6); that thread id is codex's
+            // session id in the index (26.7), and the only one for a codex the user started —
+            // codex has no flag that chooses a new thread's id, so the launch cannot report it.
+            if (const QString thread = data.value(QStringLiteral("thread_id")).toString();
+                !thread.isEmpty() && thread != m_guestSession && !onGuestPreset()) {
+                m_guestSession = thread;
+                sendProgramState();
+            }
             setGuestBusy(data.value(QStringLiteral("busy")).toBool());
         } else if (name == QStringLiteral("hook")) {
             handleGuestHook(sequence, guest, data.value(QStringLiteral("name")).toString(),
@@ -1560,6 +1577,13 @@ private:
     // (it fires before every tool call, including the auto-allowed ones), but an install that
     // carries one is still read as the busy signal it is.
     void handleGuestHook(const QString &sequence, const QString &guest, const QString &name, const QJsonObject &payload) {
+        // 26.7: every claude hook payload names the session claude is writing, and that is the
+        // only source for a claude the *user* started rather than the picker.
+        if (const QString session = payload.value(QStringLiteral("session_id")).toString();
+            !session.isEmpty() && session != m_guestSession && !onGuestPreset()) {
+            m_guestSession = session;
+            sendProgramState();
+        }
         if (name == QStringLiteral("PermissionRequest")) {
             queueGuestQuestion(sequence, guest, payload);
         } else if (name == QStringLiteral("Notification")) {
@@ -10047,6 +10071,10 @@ public:
                         return;
                     }
                     QString line = result.value(QStringLiteral("command")).toString();
+                    // Tier B (26.7): guest_launch reports the session this command line will write
+                    // — claude's `--session-id`, or a resumed codex thread — and the next
+                    // program_state carries it to the worker.
+                    m_guestSession = result.value(QStringLiteral("session_id")).toString();
                     // `cd` and the launch are one command line, so the guest never starts in the
                     // wrong place if the cd fails (26.7).
                     if (!cwd.isEmpty() && QDir::cleanPath(cwd) != QDir::cleanPath(m_cwd))
@@ -14349,7 +14377,8 @@ private:
     // Tier A (29.4): the guest as this pane's agent, through the worker's harness preset.
     QJsonObject m_guestRequest;        // the `guest` object staged for the next configure/set_model
     QString m_presetBeforeGuest;       // the model to go back to if the guest cannot start (29.3)
-    QString m_guestSession;            // the guest's own session id, as `configured` reported it
+    QString m_guestSession;            // the guest's own session id: from `configured` (Tier A), or
+                                       // the launch, its hooks or its rollout tail (Tier B, 26.7)
     struct PendingGuestResume { QString guest; QStringList extra; QString cwd; };
     PendingGuestResume m_pendingGuestResume;   // a sessions row waiting for the worker's presets
     struct PendingGuestTask { QString guest, task, card; };
