@@ -102,12 +102,12 @@ PlacementWindow::Response PlacementWindow::mousePress(qint64 nowMs) {
 // gives way last" means, and the same line read the other way is what "the directory gives way
 // first" means; written as a list of rungs instead it would have been a dozen thresholds to keep in
 // step with one another. The thresholds do meet: the title reaches its floor at the same width at
-// which the word starts to shorten, and the ssh chip reaches its floor at the same width at which
-// the usage chip collapses.
+// which the ssh chip starts to squeeze, and the ssh chip reaches its floor at the same width at
+// which the usage chip collapses.
 //
 // Full widths and not granted ones, because an element that has just given way must not hand its
-// pixels to one that gave way before it: a title fed the pixels of a word that had just gone would
-// grow as the pane narrowed and shrink as it widened — the give-way order run backwards. Those
+// pixels to one that gave way before it: a title fed the pixels of a chip that had just given way
+// would grow as the pane narrowed and shrink as it widened — the give-way order run backwards. Those
 // pixels are simply not spent, and the stretch in the middle of the header row takes them, which
 // is what it does with the empty space a narrow header has anyway.
 //
@@ -121,8 +121,6 @@ HeaderFit headerFit(int headerWidth, const HeaderWants &wants) {
     const int titleFloor = std::min(titleWant, kTitleFloorPx);
     const int directoryWant = positive(wants.directory);
     const int directoryFloor = directoryWant > 0 ? std::min(directoryWant, kDirectoryFloorPx) : 0;
-    const int wordFull = positive(wants.stateWord);
-    const int wordShort = wordFull > 0 ? std::min(wordFull, positive(wants.stateWordShort)) : 0;
     // No form of the ssh chip is wider than the form above it, whatever the host is called: a host
     // whose own name is wider than the 150 px floor is elided into it rather than making the chip
     // grow at the moment it drops the `user@`, which would undo the rung above.
@@ -138,29 +136,21 @@ HeaderFit headerFit(int headerWidth, const HeaderWants &wants) {
     const int room = headerWidth - fixed;
 
     HeaderFit fit;
-    // 5. The usage chip: whole while everything that outlives it still has its floor, CPU alone
+    // 4. The usage chip: whole while everything that outlives it still has its floor, CPU alone
     // after that. The memory half and the separator go together — "12%/" is not a reading.
     // Its two forms are the only two widths it has — it paints a number, it does not elide one —
     // so the allowance only picks the form and the form then says the width.
     fit.usage = room - sshFloor - titleFloor >= usageFull ? UsageForm::CpuAndMemory : UsageForm::CpuOnly;
     fit.usagePx = fit.usage == UsageForm::CpuAndMemory ? usageFull : usageFloor;
 
-    // 4. The ssh chip: "user@host" down to the 150 px floor, then the host alone, then the host
+    // 3. The ssh chip: "user@host" down to the 150 px floor, then the host alone, then the host
     // elided to one ellipsis. The chip elides its own text into what it is given; the form only
     // says which of the two texts it elides.
     fit.sshPx = std::clamp(sshFull, sshFloor, std::max(sshFloor, room - usageFull - titleFloor));
     fit.ssh = fit.sshPx >= sshSqueezed ? SshForm::UserAndHost : SshForm::HostOnly;
 
-    // 3. The state word: the long form, then the short one, then nothing at all, since the glyph
-    // beside it and its tooltip both still say the state.
-    const int forWord = room - usageFull - sshFull - titleFloor;
-    fit.word = wordFull > 0 && forWord >= wordFull    ? WordForm::Full
-               : wordShort > 0 && forWord >= wordShort ? WordForm::Short
-                                                       : WordForm::Hidden;
-    fit.wordPx = fit.word == WordForm::Full ? wordFull : fit.word == WordForm::Short ? wordShort : 0;
-
     // 2. The title, elided from the right down to its floor.
-    const int forTitle = room - usageFull - sshFull - wordFull;
+    const int forTitle = room - usageFull - sshFull;
     fit.title = std::clamp(titleWant, titleFloor, std::max(titleFloor, forTitle));
 
     // 1. The directory gives way first: it has what is left once everything else is whole, and goes

@@ -82,18 +82,13 @@ private Q_SLOTS:
         QCOMPARE(stateLabel(State::Working), QStringLiteral("Relaying…"));
     }
 
-    // The short form the header falls back to when the row runs out of room (three panes to a
-    // window, with the usage chip and the subagent badge beside the word). It has to be a word,
-    // not a truncation, and never longer than the full label — the whole point is that it fits.
-    void theStateWordHasAShorterFormForACrowdedHeader() {
-        QCOMPARE(stateLabelShort(State::Running), QStringLiteral("Running"));
-        QCOMPARE(stateLabelShort(State::Subagents), QStringLiteral("Subagents"));
-        QCOMPARE(stateLabelShort(State::Working), stateLabel(State::Working));   // already short
+    // Card #0STR took the live state's word off the pane header, so there is no short form of it
+    // any more (`stateLabelShort` is gone with the widget that asked for it). What says the state
+    // in the header is the glyph, and `stateLabel` is what its tooltip reads.
+    void everyStateHasALabelForTheGlyphsTooltip() {
         for (State state : {State::Idle, State::Running, State::Subagents, State::Working,
-                            State::Recommends, State::Done, State::Failed, State::NeedsYou}) {
-            QVERIFY(!stateLabelShort(state).isEmpty());
-            QVERIFY(stateLabelShort(state).size() <= stateLabel(state).size());
-        }
+                            State::Recommends, State::Done, State::Failed, State::NeedsYou})
+            QVERIFY(!stateLabel(state).isEmpty());
     }
 
     // Card #V8KT: "its not clear enough if a pane agent or program is running". The live states
@@ -168,8 +163,10 @@ private Q_SLOTS:
         QVERIFY(msToNextPulseStep() >= 1 && msToNextPulseStep() <= kPulseStepMs);
     }
 
-    // The live state's word is text, so its ink is lifted to 4.5:1 on whatever ground the header
-    // is on — the pane's own background, or the ssh band a running command can sit above.
+    // The live state's words are text, so their ink is lifted to 4.5:1 on whatever ground they sit
+    // on — the pane's own background, or the ssh band a running command can sit above. Since card
+    // #0STR the reader of `stateText` is the busy line above the prompt box; the header has only
+    // the glyph, which keeps the glyph's 3:1 (`stateInk`).
     void theStateWordIsLegibleOnEveryGround() {
         for (const auto &spec : shippedThemes()) {
             const Tokens t = tokensOf(spec);

@@ -663,15 +663,14 @@ public:
         const QString host = remote ? relay::panestatus::remoteHost(remoteCommand) : QString();
         const QString program = remote ? QFileInfo(remoteCommand.section(' ', 0, 0)).fileName() : QString();
         if (state != m_state) {
-            const bool wasLive = relay::panestatus::isLive(m_state);
             m_state = state;
+            // The glyph is the whole mark in this row since card #0STR: it blinks while the state
+            // is live (#V8KT, #4E13) and its tooltip is where the state is spelled out. There was
+            // a word beside it until #0STR, and changing the state re-elided the title around it;
+            // the glyph is one fixed size in every state, so nothing in the row moves now.
             m_glyph->setToolTip(relay::panestatus::stateLabel(state));
             m_glyph->setProperty("paneState", relay::panestatus::stateName(state));
-            m_glyph->setLive(relay::panestatus::isLive(state));   // the live glyph blinks (#V8KT, #4E13)
-            m_word->setState(state);                              // ... and says its word
-            // The word takes room from the title, so the title re-elides around it.
-            if (relay::panestatus::isLive(state) != wasLive)
-                if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+            m_glyph->setLive(relay::panestatus::isLive(state));
         }
         if (remote != m_remote || host != m_remoteHost) {
             m_remote = remote; m_remoteHost = host;
@@ -726,11 +725,6 @@ public:
             return widget && !widget->isHidden();
         };
         if (shown(m_glyph)) { wants.fixed += gap; wants.glyph = m_glyph->sizeHint().width(); }
-        if (shown(m_word)) {
-            wants.fixed += gap;
-            wants.stateWord = m_word->fullWidth();
-            wants.stateWordShort = m_word->shortWidth();
-        }
         if (shown(m_subagentBadge)) { wants.fixed += gap; wants.badge = m_subagentBadge->sizeHint().width(); }
         if (shown(m_remoteChip)) {
             wants.fixed += gap;
@@ -750,7 +744,6 @@ public:
     // What the ladder decided. Each widget's size hint follows the form it is given, so the row the
     // layout then builds is the row the ladder measured.
     void applyHeaderFit(const relay::panes::HeaderFit &fit) {
-        if (m_word) m_word->setForm(fit.word);
         if (m_remoteChip) {
             m_remoteChip->setForm(fit.ssh);
             m_remoteChip->setAllowedWidth(fit.sshPx);
@@ -825,7 +818,6 @@ private:
         QWidget *header = pane->headerWidget();
         if (!row || !header) return;
         m_glyph = new PaneStateGlyph(this);
-        m_word = new PaneStateWord(this);
         m_subagentBadge = new PaneSubagentBadge(this, pane);
         m_usageChip = new PaneUsageChip(pane);
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
@@ -835,13 +827,12 @@ private:
                                                "The share chip under the prompt box shows the code or stops it."));
         m_remoteChip->hide(); m_phoneChip->hide();
         row->insertWidget(0, m_glyph);
-        row->insertWidget(1, m_word);
-        // The subagent badge reads with the state's word: both are what this pane's agent is doing
-        // now (card #YMSR). The safety chips (ssh, phone) keep their places to the right of them.
-        row->insertWidget(2, m_subagentBadge);
-        row->insertWidget(3, m_remoteChip);
-        row->insertWidget(4, m_phoneChip);
-        row->insertWidget(5, m_usageChip);
+        // The subagent badge reads with the glyph: both are what this pane's agent is doing now
+        // (card #YMSR). The safety chips (ssh, phone) keep their places to the right of them.
+        row->insertWidget(1, m_subagentBadge);
+        row->insertWidget(2, m_remoteChip);
+        row->insertWidget(3, m_phoneChip);
+        row->insertWidget(4, m_usageChip);
         m_backdrop = new RemoteBackdrop(pane);
         m_backdrop->hide();
         m_backdrop->lower();
@@ -921,77 +912,6 @@ private:
         void armPulse() { m_pulse->start(relay::panestatus::msToNextPulseStep()); }
         PaneChrome *m_chrome;
         QTimer *m_pulse = nullptr;
-    };
-
-    // The live state's word beside the glyph — "Command running", "Relaying…", "Subagents
-    // working" — in the state's own colour (the terminal's blue, the agent's violet) lifted to
-    // reading strength on the header's ground (card #V8KT). Painted, not a QLabel, for the same
-    // reason the chips are: the colour follows the state.
-    class PaneStateWord final : public QWidget {
-    public:
-        explicit PaneStateWord(PaneChrome *chrome) : m_chrome(chrome) {
-            setObjectName(QStringLiteral("paneStateWord"));
-            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
-            hide();
-        }
-        void setState(relay::panestatus::State state) {
-            setToolTip(relay::panestatus::stateLabel(state));
-            const bool live = relay::panestatus::isLive(state);
-            const QString text = live ? relay::panestatus::stateLabel(state) : QString();
-            if (text == m_text) return;
-            m_text = text;
-            m_short = live ? relay::panestatus::stateLabelShort(state) : QString();
-            updateGeometry(); update();
-            setVisible(!m_text.isEmpty());   // Pane::updateHeader re-elides the title around it
-        }
-        // Rung 3 of the header's give-way ladder (relay::panes::headerFit): the row can end up
-        // narrower than the word asked for — three panes to a window, with the usage chip and the
-        // subagent badge beside it. Then the short form, and when even that does not fit, nothing:
-        // a word cut off mid-letter says less than the glyph already does, and the tooltip still
-        // spells the state out. The ladder picks the form and the width follows it, so the word no
-        // longer holds room open for text it has decided not to paint.
-        void setForm(relay::panes::WordForm form) {
-            if (form == m_form) return;
-            m_form = form;
-            updateGeometry(); update();
-        }
-        int fullWidth() const { return m_text.isEmpty() ? 0 : advance(m_text) + 2; }
-        int shortWidth() const { return m_short.isEmpty() ? 0 : advance(m_short) + 2; }
-        QSize sizeHint() const override {
-            return {m_form == relay::panes::WordForm::Full      ? fullWidth()
-                    : m_form == relay::panes::WordForm::Short   ? shortWidth()
-                                                                : 0,
-                    18};
-        }
-        QSize minimumSizeHint() const override { return {0, 18}; }
-    protected:
-        void paintEvent(QPaintEvent *) override {
-            if (m_text.isEmpty()) return;
-            QString text = m_form == relay::panes::WordForm::Full    ? m_text
-                           : m_form == relay::panes::WordForm::Short ? m_short
-                                                                     : QString();
-            // The ladder says which form this is. Should the row have been squeezed below what it
-            // granted anyway — a header narrower than the badge and the glyph and the chips' floors
-            // put together — the word gives way again rather than lose a letter to the clip.
-            if (advance(text) > width()) text = advance(m_short) <= width() ? m_short : QString();
-            if (text.isEmpty()) return;
-            const relay::panestatus::Tokens t = relay::chrome::tokens();
-            const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
-            QPainter p(this);
-            QFont bold = font(); bold.setWeight(QFont::DemiBold);
-            p.setFont(bold);
-            p.setPen(relay::panestatus::stateText(m_chrome->state(), ground, t));
-            p.drawText(rect(), Qt::AlignLeft | Qt::AlignVCenter, text);
-        }
-    private:
-        int advance(const QString &text) const {
-            if (text.isEmpty()) return 0;
-            QFont bold = font(); bold.setWeight(QFont::DemiBold);
-            return QFontMetrics(bold).horizontalAdvance(text);
-        }
-        PaneChrome *m_chrome;
-        QString m_text, m_short;
-        relay::panes::WordForm m_form = relay::panes::WordForm::Full;
     };
 
     // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
@@ -1287,7 +1207,6 @@ private:
 
     int m_fullWidth = 0;
     PaneStateGlyph *m_glyph = nullptr;
-    PaneStateWord *m_word = nullptr;
     PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
     PaneUsageChip *m_usageChip = nullptr;

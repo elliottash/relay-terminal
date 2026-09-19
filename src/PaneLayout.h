@@ -49,21 +49,25 @@ void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor);
 // ----- the pane header: the order in which it gives way (owner, 2026-09-19) --------------------
 //
 // A pane header is the title on the left and the directory on the right, with the state glyph, the
-// state's word, the subagent badge and the ssh / phone / usage chips between them (PaneChrome puts
-// those at the front of the row). With everything on it wants about 470 px, and a pane in a
-// three-pane row has far less. So the elements give way in one fixed order, and when the pane
-// widens again they come back in exactly the reverse one:
+// subagent badge and the ssh / phone / usage chips between them (PaneChrome puts those at the
+// front of the row). With everything on it wants about 360 px, and a pane in a three-pane row has
+// far less. So the elements give way in one fixed order, and when the pane widens again they come
+// back in exactly the reverse one:
 //
 //   1. the directory elides from the left down to its legible floor, and then goes — below that
 //      floor "…/x" says nothing, so no path is better than a stub;
 //   2. the title elides (ElideRight) down to its own floor;
-//   3. the state word goes to its short form (`relay::panestatus::stateLabelShort`: "Running",
-//      "Subagents") and then goes, leaving the glyph, which says it too;
-//   4. the ssh chip is squeezed to its 150 px floor (eliding user@host in the middle), then drops
-//      the `user@` and shows the host alone — below its floor, which is what rung 4 is for — and
+//   3. the ssh chip is squeezed to its 150 px floor (eliding user@host in the middle), then drops
+//      the `user@` and shows the host alone — below its floor, which is what rung 3 is for — and
 //      below the host's own width elides the host with a whole ellipsis;
-//   5. the usage chip collapses to CPU alone: no memory half and no separator;
-//   6. nothing else gives. The subagent badge stays whole and the state glyph stays, always.
+//   4. the usage chip collapses to CPU alone: no memory half and no separator;
+//   5. nothing else gives. The subagent badge stays whole and the state glyph stays, always.
+//
+// The live state's word used to be rung 3, between the title and the ssh chip. Card #0STR took
+// the word off the header altogether (owner, 2026-09-19: "clean up the headers of tabs and panes.
+// they are busy") — the glyph beside it blinks and its tooltip spells the state out, and the
+// sentence lives on the busy line above the prompt box — so the rung is gone with it rather than
+// left in as a form nothing ever asks for.
 //
 // Nothing is ever drawn as a partial glyph or cut mid-letter: each step either elides by whole
 // glyphs or leaves its element out. Both labels are therefore elided by hand rather than left to
@@ -86,8 +90,6 @@ inline constexpr int kSshFloorPx = 150;        // a chip still showing user@ is 
 struct HeaderWants {
     int title = 0;            // the title's full text
     int directory = 0;        // the directory line's full text
-    int stateWord = 0;        // the live state's word, long form ("Subagents working")
-    int stateWordShort = 0;   // the same word, short form ("Subagents")
     int ssh = 0;              // the ssh chip showing "⇄ user@host"
     int sshHost = 0;          // the same chip showing the host alone
     int sshEllipsis = 0;      // the same chip with the host elided to one ellipsis: its hard floor
@@ -99,7 +101,6 @@ struct HeaderWants {
     int fixed = 0;            // margins, the row's spacing, the button row's room
 };
 
-enum class WordForm { Full, Short, Hidden };
 enum class SshForm { UserAndHost, HostOnly };
 enum class UsageForm { CpuAndMemory, CpuOnly };
 
@@ -109,8 +110,6 @@ enum class UsageForm { CpuAndMemory, CpuOnly };
 struct HeaderFit {
     int title = 0;            // px the title may elide (ElideRight) into; 0 only when there is none
     int directory = 0;        // px the directory may elide (ElideLeft) into; 0 means do not show it
-    WordForm word = WordForm::Hidden;
-    int wordPx = 0;           // px for the state word; 0 when it is not shown
     SshForm ssh = SshForm::UserAndHost;
     int sshPx = 0;            // px for the ssh chip, which elides its text into them; 0 when absent
     UsageForm usage = UsageForm::CpuAndMemory;

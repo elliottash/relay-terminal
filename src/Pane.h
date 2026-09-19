@@ -253,8 +253,8 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 // above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
 // more like how warp . claude does it. and not in bold."): the row belongs to the box under it,
 // so it starts where that box's own text starts, and it speaks quietly while the prompt is the
-// loud thing. Painted rather than a QLabel for the same reason the header's state word is
-// (PaneStateWord, src/PaneChrome.h): the colour follows the state, and the theme can change under
+// loud thing. Painted rather than a QLabel for the same reason the header's chips are
+// (src/PaneChrome.h): the colour follows the state, and the theme can change under
 // it. Elided from the middle so a long action ("Relaying – reading src/deep/path…") never pushes
 // the composer wide, and Ignored like the prompt box itself so a narrow pane clips it instead
 // (#G152).
@@ -3183,9 +3183,10 @@ private:
         m_cwdLabel->setCursor(Qt::PointingHandCursor);
         m_cwdLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         // A QLabel's minimum is its whole text. With the long "TERMINAL <path> │ AGENT
-        // WORKSPACE <path>" form that made the pane refuse to go under ~1000 px, so a pane
-        // opened beside it (the Switchboard, 2026-09-17) got a third of the window instead of
-        // half. The minimum goes, and the text is elided from the left in updateHeader() to
+        // WORKSPACE <path>" form this label carried until #0STR that made the pane refuse to go
+        // under ~1000 px, so a pane opened beside it (the Switchboard, 2026-09-17) got a third of
+        // the window instead of half. The minimum goes, and the text is elided from the left in
+        // updateHeader() to
         // exactly the room the header has left, so the label asks for no more than it shows.
         // Letting the layout do the squeezing instead cut the path mid-glyph — a crowded header
         // ended in a stray half of a character where the directory should be. The tooltip has
@@ -14147,12 +14148,15 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!m_cwdLabel) return;
         const QString home = QDir::homePath();
         auto tilde = [&home](const QString &path) { return path.startsWith(home) ? QStringLiteral("~") + path.mid(home.size()) : path; };
-        // The full line is kept here; updateHeader() decides how much of it fits and elides the
+        // Just the path (card #0STR, owner 2026-09-19: "clean up the headers of tabs and panes.
+        // they are busy"). It used to read "TERMINAL  ~/project     │     AGENT WORKSPACE  ~/x"
+        // in a wide pane: two words in capitals and a second path, to say something that is the
+        // same in almost every pane. The words and the workspace are in headerTooltip() now, in a
+        // sentence, so nothing has been dropped — only taken off the row that is always on screen.
+        // The full path is kept here; updateHeader() decides how much of it fits and elides the
         // rest away from the left, so the end of the path — the part that says where you are —
         // is the part that survives.
-        m_cwdText = width() >= 1000 || m_cwd == m_workspace
-            ? QStringLiteral("TERMINAL  ") + tilde(m_cwd) + (m_cwd == m_workspace ? QString() : QStringLiteral("     │     AGENT WORKSPACE  ") + tilde(m_workspace))
-            : tilde(m_cwd);
+        m_cwdText = tilde(m_cwd);
         m_cwdLabel->setToolTip(headerTooltip());
         updateHeader();
     }
@@ -14168,8 +14172,15 @@ public:
         QString tip = m_title.isEmpty() ? QStringLiteral("This pane has no title yet.")
                                         : m_title + (m_titleUser ? QStringLiteral("  (set by hand)")
                                                                  : QStringLiteral("  (written by the model)"));
-        return tip + QStringLiteral("\n\nTerminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace
-               + QStringLiteral("\n\nDouble click to rename · /rename")
+        // Where the header row's words went (#0STR). The row itself is the path alone now, and a
+        // pane whose title already says the folder does not even show that — so this sentence is
+        // the one place both paths are always readable, and it says which is which in words
+        // rather than in capitals across the top of the pane.
+        tip += m_cwd == m_workspace
+                   ? QStringLiteral("\n\nThe terminal and the agent both work in %1.").arg(m_cwd)
+                   : QStringLiteral("\n\nThe terminal is in %1, and the agent's workspace is %2.")
+                         .arg(m_cwd, m_workspace);
+        return tip + QStringLiteral("\n\nDouble click to rename · /rename")
                + QStringLiteral("\nDrag this header onto another pane's edge to move the pane there, or onto the tab bar to make it a tab");
     }
 
@@ -14182,8 +14193,8 @@ public:
     }
 
     // The header's give-way ladder (`relay::panes::headerFit`, owner's decision 2026-09-19). Every
-    // element in this row — the state glyph and its word, the title, the directory, the ssh, phone
-    // and usage chips, the subagent badge (#XM0T, #SPBN, #D03W, #YMSR) — is measured at its natural
+    // element in this row — the state glyph, the title, the directory, the ssh, phone and usage
+    // chips, the subagent badge (#XM0T, #SPBN, #D03W, #YMSR) — is measured at its natural
     // width, the ladder says what each of them shows in the room there is, and this applies it. The
     // labels are elided by hand rather than left to the layout, which clips a squeezed QLabel
     // mid-glyph: that is how a crowded header came to end in a stray half of a character.
@@ -14202,7 +14213,19 @@ public:
         const QFontMetrics cwdMetrics(m_cwdLabel ? m_cwdLabel->font() : m_titleLabel->font());
         relay::panes::HeaderWants wants;
         wants.title = metrics.horizontalAdvance(shown);
-        wants.directory = m_cwdLabel && !m_cwdText.isEmpty() ? cwdMetrics.horizontalAdvance(m_cwdText) : 0;
+        // The path is not shown when it would only repeat the title (#0STR). `shown` is the pane's
+        // title — the model's, or the one the user typed — and when there is none it is already the
+        // folder's own name, which is also the automatic title a model most often writes; either
+        // way, "project  …  ~/project" says one thing twice. The test is against the LAST segment
+        // of the terminal's directory only, trimmed and case-insensitively, because that segment is
+        // what a title of that folder would be and "Project" reads as "project". A title that only
+        // contains the folder name ("project notes") is not the same thing and keeps its path.
+        // Nothing is lost: headerTooltip() has both paths in full whatever the row shows.
+        const QString folder = QFileInfo(m_cwd).fileName();
+        const bool titleRepeatsPath = !folder.isEmpty() && shown.trimmed().compare(folder, Qt::CaseInsensitive) == 0;
+        wants.directory = m_cwdLabel && !m_cwdText.isEmpty() && !titleRepeatsPath
+                              ? cwdMetrics.horizontalAdvance(m_cwdText)
+                              : 0;
         // What no element on the ladder can have: the `auto` badge, the margins, and the room the
         // hover button row is kept clear of.
         wants.fixed = (m_titleAuto && m_titleAuto->isVisible()

@@ -107,7 +107,8 @@ logged as `runtime_sweep` only when something was removed or failed.
 | `Pane` (leaf) | Terminal pane: the engine, a Bash bridge, a composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
 
-Pane anatomy, top to bottom: the header (the pane title on the left, the directory on the right;
+Pane anatomy, top to bottom: the header (the pane title on the left, the terminal's directory
+on the right — the bare path, and nothing at all when the title already says that folder, #0STR;
 clicking the directory opens the explorer, and what the row does when it runs out of room is the
 give-way ladder below), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
@@ -116,18 +117,18 @@ key hints). Overlays float over the terminal without resizing it (a resize makes
 redraw its prompt in the middle of inline output): the agent queue strip, the thinking panel,
 toasts and the pane button row.
 
-**The pane header as it narrows** (owner, 2026-09-19). With everything on — the state glyph and
-its word, the title, the directory, the ssh chip, the phone chip, the usage meter and the subagent
-badge — the row wants about 470 px, and a pane in a three-pane row has far less. The elements give
+**The pane header as it narrows** (owner, 2026-09-19). With everything on — the state glyph, the
+title, the directory, the ssh chip, the phone chip, the usage meter and the subagent badge — the
+row wants about 360 px, and a pane in a three-pane row has far less. The elements give
 way in one decided order, and when the pane widens again they come back in exactly the reverse one:
 (1) the directory elides from the left to its legible floor and then goes altogether, since below
 that floor "…/x" says nothing a stub could be worth; (2) the title elides (ElideRight) down to its
-own floor; (3) the state's word goes to its short form (`stateLabelShort`: "Running", "Subagents")
-and then goes, leaving the glyph, which says it too; (4) the ssh chip is squeezed to its 150 px
+own floor; (3) the ssh chip is squeezed to its 150 px
 floor and then drops the `user@` for the host alone — that is what going *below* the floor buys —
-and below the host's own width elides the host; (5) the usage meter collapses to CPU alone (`cpu 12%`), with
-neither the memory half nor the separator; (6) nothing else gives: the subagent badge stays whole
-and the glyph stays, always. Nothing is ever drawn as a partial glyph or cut mid-letter: each step
+and below the host's own width elides the host; (4) the usage meter collapses to CPU alone (`cpu 12%`), with
+neither the memory half nor the separator; (5) nothing else gives: the subagent badge stays whole
+and the glyph stays, always. The live state's word was rung 3 between the title and the ssh chip
+until card #0STR took it off the header altogether, and the rung went with it. Nothing is ever drawn as a partial glyph or cut mid-letter: each step
 either elides by whole glyphs or leaves its element out, and both labels are elided by hand rather
 than left to the layout, which clips a squeezed QLabel mid-glyph — that is how a crowded header came
 to end in a stray half of a character instead of a path.
@@ -337,17 +338,17 @@ running… the icons / anims should use blue for terminal work happening and vio
 happening"). Running, Working and Subagents are work happening *now*, and their marks move
 (`relay::panestatus::isLive`): the header glyph is the Relay mark itself, blinking on the waiting
 dots' 600 ms clock (card #4E13: full size and a dimmed step alternating — `pulseScale`, a scale,
-never an opacity, so the ink keeps its contrast), the state's word sits beside it ("Command
-running", "Relaying…", "Subagents working" — `stateLabel`) in the work's own colour lifted to 4.5:1
-on the header's ground (`stateText`) — shortened to one word (`stateLabelShort`: "Running",
-"Subagents") when the row has run out of room for the full one, and left out rather than cut in
-half when even that does not fit, since the glyph and the tooltip still say it; which of the three
-it shows is rung 3 of the give-way ladder above, not the word's own reading of its width — and a
+never an opacity, so the ink keeps its contrast). The glyph is the whole of it in that row: the
+state's word used to sit beside the title ("Command running", "Relaying…", "Subagents working")
+and **card #0STR took it away** (owner, 2026-09-19: "clean up the headers of tabs and panes. they
+are busy") — the glyph still blinks, `stateLabel` is still what its tooltip says, and the sentence
+is on the busy line above the prompt box, where there is room for the action as well as the
+state. A
 tab with anything live carries a blinking corner dot
 in that colour (`liveMarker`: the agent's violet whenever agent work — a turn or subagents — is
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
-and takes the one across. The same word sits bold above the prompt box (`Pane::PaneBusyLine`, card
+and takes the one across. The sentence sits above the prompt box (`Pane::PaneBusyLine`, card
 #4E13): "Relaying – <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
 action a gerund of the live tool call, or what the pane waits for — and "Relaying – <program>…" in the
 terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
@@ -359,7 +360,7 @@ blink together instead of each on its own beat.
 
 **The subagent badge** (card #YMSR, owner 2026-09-19: "in the pane header, add a badge with a
 number for number of subagents, if applicable") is how many agents that pane's agent has
-running, in the header beside the state's word: a violet chip carrying the agent's own
+running, in the header beside the state glyph: a violet chip carrying the agent's own
 four-point star and the count. It counts *live* subagents — waiting or running — which is the
 same number `Facts::liveSubagents` resolves a state from, so the badge and the state's glyph
 cannot disagree about the pane; an agent that finished is not work happening now, and the strip
@@ -399,7 +400,7 @@ children it has already reaped still count — without that, a build whose compi
 less than one poll interval reads as an idle pane. A poll that reads nothing drops the baseline
 rather than zeroing it, so the reading after a blind tick is a fresh baseline and not a spurious
 100 %. The meter is the last thing in the header to give way, and all it gives is its memory half
-and the separator with it — rung 5 of the give-way ladder — so a narrow pane still says what it is
+and the separator with it — rung 4 of the give-way ladder — so a narrow pane still says what it is
 costing in CPU. Memory is a sum of resident sets, which counts pages two processes share more than once;
 the tooltips say so.
 
@@ -420,7 +421,8 @@ the tab's tooltip. The chip and the label stay the sum alone.
 `docs/qa_evidence/2026-09-19-usage-meter-numbers/`: *"the cpu / mem bar things are ugly and
 unintuitive. i think it should be numbers"*). A reading is written in exactly one place,
 `relay::usage::readingText()`: **`cpu 12% · mem 3%`**, plain words and whole percents. The three
-surfaces print that same string — a chip in the pane's header row right of the state's word
+surfaces print that same string — a chip at the left of the pane's header row, after the state
+glyph, the subagent badge and the ssh and phone chips
 (`PaneChrome::PaneUsageChip`, the body face, the words in the header's muted ink and each number
 warning at 60 % and erroring at 85 %; `readingParts()` is the same string cut into the pieces it
 colours separately), a `  ·  cpu 12% · mem 3%` suffix on the tab label (summed over the tab's

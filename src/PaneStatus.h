@@ -13,8 +13,11 @@
 //  * Live states (card #V8KT, owner 2026-09-19: "its not clear enough if a pane agent or program
 //    is running"). Running, Working and Subagents are work happening now: their glyph is the
 //    Relay mark itself, blinking (pulseScale, card #4E13), in the work's own colour — blue for
-//    terminal work, violet for agent work — with the state's word beside the title (stateText).
-//    The same word sits above the prompt box, left-aligned with the prompt text and in the normal
+//    terminal work, violet for agent work. The glyph is the whole mark in the header: the word
+//    that used to sit beside the title went with card #0STR (owner, 2026-09-19: "clean up the
+//    headers of tabs and panes. they are busy"), and what it said is in the glyph's tooltip
+//    (stateLabel) and, as a sentence, on the line above the prompt box — left-aligned with the
+//    prompt text and in the normal
 //    weight (#HQ2B), a spaced en dash between the verb and the action (#RR0G, owner 2026-09-19):
 //    "Relaying – <action>…", the action a gerund of
 //    what the agent is doing ("thinking", "reading src/Pane.h"), or the program's name for
@@ -52,17 +55,10 @@ State mostUrgent(const QList<State> &states);
 QString stateName(State state);
 // What the glyph's tooltip says ("Agent needs you").
 QString stateLabel(State state);
-// The same word for a header row that has run out of room: "Command running" → "Running",
-// "Subagents working" → "Subagents". A live pane's word sits between the glyph and the title
-// with the ssh, phone, subagent and usage chips beside it, and at three panes to a window the
-// row cannot hold every one of them: the word is the piece that gives way, and a word that
-// shortens reads, where "Command" cut out of "Command running" only looks broken.
-QString stateLabelShort(State state);
-
 // ----- live states (cards #V8KT, #4E13) ----------------------------------------------------------
 // Work happening in the pane right now: a command runs, an agent turn runs, or subagents run.
-// These are the states whose marks move — the Relay mark blinking in the header, a word beside
-// it, a blinking dot on the tab — because "is anything running over there?" is answered by
+// These are the states whose marks move — the Relay mark blinking in the header, the line above
+// the prompt box, a blinking dot on the tab — because "is anything running over there?" is answered by
 // motion, not by a shape you have to know. The news states (done, failed, needs you) stay still:
 // they pull the eye by being news. Owner, 2026-09-19: "the icons / anims should use blue for
 // terminal work happening and violet for agent work happening", and "a blue blinking relay icon
@@ -222,8 +218,9 @@ OpenButtonStyle openButtonStyle(const TypeStyle &band, bool hovered);
 QColor focusRing(const QColor &ground, const Tokens &tokens);
 // The colour a state glyph is drawn in.
 QColor stateInk(State state, const Tokens &tokens);
-// The colour the state's word is written in: the state's own ink, lifted to at least 4.5:1 on the
-// ground it sits on (a word is text; the glyph keeps the glyph's 3:1).
+// The colour the state's words are written in — the busy line above the prompt box (#4E13) is the
+// one that uses it now: the state's own ink, lifted to at least 4.5:1 on the ground it sits on
+// (a word is text; the glyph keeps the glyph's 3:1).
 QColor stateText(State state, const QColor &ground, const Tokens &tokens);
 
 // ----- the subagent badge (card #YMSR) ---------------------------------------------------------
@@ -236,7 +233,7 @@ QColor stateText(State state, const QColor &ground, const Tokens &tokens);
 //
 // Zero is not a "0": it is no badge at all. That is what "if applicable" asks for, and it is what
 // keeps a pane that has never started a subagent looking exactly as it did before. The number is
-// the whole badge — the state's word beside it already says whose work it counts.
+// the whole badge — the glyph beside it already says whose work it counts.
 QString subagentBadgeText(int live);
 // What the badge says on hover: the count in words, and the key that opens the pane showing those
 // agents. `keys` is the live Keymap text of `agent.subagentPane`, empty when it is unbound; the
