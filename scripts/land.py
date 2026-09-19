@@ -19,6 +19,34 @@ theirs = the working copy now, and three-way merges them with real temporary fil
 result is "the tip plus your hunks": another session's uncommitted edits were already in the
 snapshot, so they are not in your diff and stay uncommitted in the working tree.
 
+A snapshot only tells your hunks from someone else's while nobody else edits the file after
+it was taken. On 2026-09-19 a session held a snapshot of `src/Pane.h` for forty minutes, a
+second session edited that header in the meantime, and `commit` read the second session's
+work as its own and landed half of it. So:
+
+  * When you `begin` a path another live session already claims, this tool records your
+    snapshot as a *marker* in that session's data. At their commit, a hunk that is in
+    diff(their snapshot, your marker) was already in the tree before you started, so it is
+    theirs; anything else appeared afterwards and is **contested**.
+  * At your commit, a path claimed by another live session whose snapshot you have no marker
+    for (they began before you) has *every* hunk contested: you cannot tell their later edits
+    from yours.
+  * `commit` always prints a per-path stat. When a path has contested hunks, or its snapshot
+    is older than --stale-minutes, it does **not** land: it prints the numbered hunks and a
+    digest and exits 4. Rerun with `--confirm <digest>` to land all of it, or with
+    `--exclude-hunk <path>:<n>` (repeatable) to leave hunks out of the commit; excluded hunks
+    stay uncommitted in the working tree and land with a later commit.
+
+  * Before the swap, a landing that touches C++ or build files builds the EXACT tree it would
+    put on the branch, in its own directory under the session's snapshots. Never the working
+    tree: that holds every session's uncommitted code, so it can compile while the tree being
+    landed cannot -- which is how a green build of code nobody had written reached `main`
+    twice on 2026-09-19. A tree that does not compile is not landed (exit 5).
+
+`who` lists the live sessions, what they claim, how old their snapshots are and how to reach
+them (`begin --contact <name>`). `repair <sha> --paths ...` lands a commit that takes back
+what `<sha>` did to those paths, keeping whatever landed on them afterwards.
+
 What it refuses to do, and why:
 
   * It never commits from the shared index, and never runs `git add` there. The shared index
@@ -37,12 +65,14 @@ What it refuses to do, and why:
   * It never commits `issues/bug_intake.txt`, `issues/feature_intake.txt` or any `*.orig`.
 
 Exit codes: 0 fine, 1 usage or environment error, 2 `doctor` found something, 3 a merge
-conflict or a swap that could not be completed (nothing was changed).
+conflict or a swap that could not be completed, 4 the commit is held for review (contested or
+stale hunks), 5 the exact tree does not build. On 3, 4 and 5 nothing was changed.
 """
 
 import argparse
 import datetime as _dt
 import difflib
+import hashlib
 import json
 import os
 import shutil
@@ -53,11 +83,20 @@ from pathlib import Path
 
 DEFAULT_ROOT = "/tmp/claude-1000/land"
 DEFAULT_BRANCH = "main"
+DEFAULT_STALE_MINUTES = 15
+# A session that has not run a land.py command for this long is not editing anything any
+# more: `who` and `doctor` call it stale and contest detection ignores it.
+IDLE_HOURS = 12
 NEVER_COMMIT = ("issues/bug_intake.txt", "issues/feature_intake.txt")
 # Variables that would silently redirect a git command at someone else's index or work tree.
 GIT_ENV_STRIP = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
                  "GIT_COMMON_DIR", "GIT_NAMESPACE")
 SWAP_ATTEMPTS = 10
+# Above this many hunks on one path, the review prints every hunk's header but only the
+# bodies that need reading: the contested ones and the ones being left out.
+MAX_HUNK_BODIES = 20
+# `who` stays readable with twenty sessions in the registry.
+WHO_PATHS = 6
 
 HOOK_REFUSAL = "commit through scripts/land.py; the shared index is never committed here"
 
@@ -96,6 +135,13 @@ if [ "$mine" = "$shared" ]; then
 fi
 exit 0
 """.replace("REFUSAL_TEXT", HOOK_REFUSAL)
+
+
+class _Missing:
+    """Sentinel: "this argument was not given", where None is a meaningful value."""
+
+
+_MISSING = _Missing()
 
 
 class Fail(Exception):
@@ -277,6 +323,123 @@ def unified(old, new, path):
                                         fromfile="a/%s" % path, tofile="b/%s" % path))
 
 
+# --------------------------------------------------------------------------- hunks
+
+def lines_of(data):
+    """Bytes to a list of lines that turns back into exactly those bytes.
+
+    `surrogateescape`, not `replace`: a file that is not valid UTF-8 must still round-trip,
+    because these lines are spliced back together into the blob that gets committed.
+    """
+    if data is None:
+        return []
+    return data.decode("utf-8", "surrogateescape").splitlines(keepends=True)
+
+
+def bytes_of(lines):
+    return "".join(lines).encode("utf-8", "surrogateescape")
+
+
+class Hunk:
+    """One numbered change between a snapshot and a later version of the same file.
+
+    `i1:i2` is the range it replaces in the snapshot's lines (three lines of context each
+    side, as in a unified diff), `new` the lines that replace them. Two diffs taken against
+    the *same* snapshot describe the same change with the same `key`, which is how a hunk is
+    recognised as one that was already in the tree when another session began.
+    """
+
+    def __init__(self, i1, i2, j1, j2, base, new, minus, plus, whole=False):
+        self.i1, self.i2, self.j1, self.j2 = i1, i2, j1, j2
+        self.base, self.new = base, new
+        self.minus, self.plus = minus, plus
+        self.whole = whole
+
+    @property
+    def key(self):
+        return (self.i1, self.i2, tuple(self.base), tuple(self.new))
+
+    def header(self):
+        if self.whole:
+            return "@@ whole file @@"
+        return "@@ -%d,%d +%d,%d @@" % (self.i1 + 1, len(self.base),
+                                        self.j1 + 1, len(self.new))
+
+    def body(self):
+        if self.whole:
+            return ["(binary file, or a whole-file add or delete: it cannot be split)\n"]
+        out = []
+        matcher = difflib.SequenceMatcher(None, self.base, self.new, autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                out.extend(" " + line for line in self.base[i1:i2])
+            else:
+                out.extend("-" + line for line in self.base[i1:i2])
+                out.extend("+" + line for line in self.new[j1:j2])
+        return [line if line.endswith("\n") else line + "\n" for line in out]
+
+
+def split_hunks(base, new, context=3):
+    hunks = []
+    matcher = difflib.SequenceMatcher(None, base, new, autojunk=False)
+    for group in matcher.get_grouped_opcodes(context):
+        i1, i2 = group[0][1], group[-1][2]
+        j1, j2 = group[0][3], group[-1][4]
+        minus = sum(op[2] - op[1] for op in group if op[0] != "equal")
+        plus = sum(op[4] - op[3] for op in group if op[0] != "equal")
+        hunks.append(Hunk(i1, i2, j1, j2, base[i1:i2], new[j1:j2], minus, plus))
+    return hunks
+
+
+def path_hunks(snapshot, working):
+    """The numbered hunks between a snapshot and the working copy of one path."""
+    if snapshot == working:
+        return []
+    if working is None or is_binary(snapshot) or is_binary(working):
+        base = [] if is_binary(snapshot) else lines_of(snapshot)
+        return [Hunk(0, len(base), 0, 0, base, [], len(base), 0, whole=True)]
+    return split_hunks(lines_of(snapshot), lines_of(working))
+
+
+def apply_hunks(snapshot, working, hunks, selected):
+    """The snapshot with only the selected (1-based) hunks applied to it."""
+    if not hunks:
+        return snapshot
+    if hunks[0].whole:
+        return working if 1 in selected else snapshot
+    base = lines_of(snapshot)
+    out, pos = [], 0
+    for number, hunk in enumerate(hunks, 1):
+        if number not in selected:
+            continue
+        out.extend(base[pos:hunk.i1])
+        out.extend(hunk.new)
+        pos = hunk.i2
+    out.extend(base[pos:])
+    return bytes_of(out)
+
+
+def content_digest(tip, plans):
+    """A short hash over the tip and the exact bytes each path would be committed with.
+
+    The point is that it stops matching the moment anything that feeds the commit moves: a
+    later edit in the working tree, a hunk excluded or put back, or `main` advancing.
+    """
+    digest = hashlib.sha256()
+    digest.update(tip.encode("ascii"))
+    for path in sorted(plans):
+        content, mode = plans[path]
+        digest.update(b"\0")
+        digest.update(path.encode("utf-8", "surrogateescape"))
+        digest.update(b"\0")
+        if content is None:
+            digest.update(b"deleted")
+        else:
+            digest.update(("%s " % mode).encode("ascii"))
+            digest.update(hashlib.sha256(content).digest())
+    return digest.hexdigest()[:12]
+
+
 # --------------------------------------------------------------------------- registry
 
 def registry_file(root):
@@ -317,7 +480,7 @@ def edit_registry(root, mutate):
     return data
 
 
-def live_sessions(root, skip=None):
+def registered_sessions(root, skip=None):
     """Registered sessions whose snapshot directory still exists."""
     out = {}
     for name, entry in read_registry(root).get("sessions", {}).items():
@@ -328,16 +491,99 @@ def live_sessions(root, skip=None):
     return out
 
 
+def session_idle_minutes(entry):
+    return age_minutes(entry.get("updated") or entry.get("started"))
+
+
+def is_idle(entry):
+    idle = session_idle_minutes(entry)
+    return idle is not None and idle > IDLE_HOURS * 60
+
+
+def live_sessions(root, skip=None):
+    """Registered sessions that have run a land.py command in the last IDLE_HOURS."""
+    return {name: entry for name, entry in registered_sessions(root, skip=skip).items()
+            if not is_idle(entry)}
+
+
+def describe_session(name, entry):
+    contact = (entry.get("contact") or "").strip()
+    return "session %s%s" % (name, " (contact: %s)" % contact if contact else
+                             " (no --contact given; you cannot reach it)")
+
+
+def claimants(root, session, path):
+    """Live sessions other than `session` that still claim `path`, oldest begin first."""
+    found = [(name, entry) for name, entry in live_sessions(root, skip=session).items()
+             if path in (entry.get("claims") or [])]
+    found.sort(key=lambda item: item[1].get("started") or "")
+    return found
+
+
 def warn_overlaps(root, session, paths, log):
     clashes = []
-    for other, entry in live_sessions(root, skip=session).items():
+    for other, entry in sorted(live_sessions(root, skip=session).items()):
         shared = sorted(set(entry.get("claims") or []) & set(paths))
         if shared:
-            clashes.append((other, shared))
-    for other, shared in clashes:
-        log("warning: session %r has also claimed %s (not a blocker; the commit merges "
-            "against the tip, so land small and land often)" % (other, ", ".join(shared)))
+            clashes.append((other, entry, shared))
+    for other, entry, shared in clashes:
+        log("warning: %s has also claimed %s — hunks that appeared after it began are "
+            "contested and will be held for review" % (describe_session(other, entry),
+                                                       ", ".join(shared)))
     return clashes
+
+
+# --------------------------------------------------------------------------- markers
+
+def markers_file(root, session):
+    return session_dir(root, session) / "markers.json"
+
+
+def read_markers(root, session):
+    try:
+        data = json.loads(markers_file(root, session).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def marker_file(root, session, other, path):
+    return session_dir(root, session) / "markers" / other / path
+
+
+def marker_bytes(root, session, other, path):
+    """What `path` held when `other` began, as recorded in `session`'s data, or None."""
+    record = ((read_markers(root, session).get(other) or {}).get("paths") or {}).get(path)
+    if not isinstance(record, dict):
+        return None
+    if not record.get("existed"):
+        return b""
+    dest = marker_file(root, session, other, path)
+    return dest.read_bytes() if dest.exists() else None
+
+
+def record_marker(root, owner, other, path, data, contact):
+    """Leave `other`'s view of `path` in `owner`'s session data.
+
+    `owner` is a session that claimed the path first and is still editing it. At its commit
+    this is the line between "already in the tree when `other` started" (its own work) and
+    "appeared afterwards" (contested).
+    """
+    if not session_dir(root, owner).is_dir():
+        return
+    dest = marker_file(root, owner, other, path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if data is None:
+        if dest.exists():
+            dest.unlink()
+    else:
+        dest.write_bytes(data)
+    markers = read_markers(root, owner)
+    entry = markers.setdefault(other, {})
+    entry["at"] = now()
+    entry["contact"] = contact or entry.get("contact") or ""
+    entry.setdefault("paths", {})[path] = {"existed": data is not None}
+    write_json(markers_file(root, owner), markers)
 
 
 # --------------------------------------------------------------------------- session state
@@ -364,19 +610,35 @@ def read_meta(root, session):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_meta(root, session, meta):
-    path = meta_file(root, session)
+def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".meta-")
-    with os.fdopen(handle, "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, indent=2, sort_keys=True)
-        fh.write("\n")
-    os.replace(tmp, str(path))
+    handle, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".json-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
-def take_snapshot(repo, root, session, path, meta, tip):
-    """Copy the working copy of `path` aside and record whether the tip tracked it."""
-    data = work_bytes(repo, path)
+def write_meta(root, session, meta):
+    write_json(meta_file(root, session), meta)
+
+
+def take_snapshot(repo, root, session, path, meta, tip, content=_MISSING, base_rev=None):
+    """Snapshot `path` and record whether the tip tracked it.
+
+    `content` defaults to the working copy. It is given explicitly in two places: `begin
+    --base <rev>`, which snapshots that revision instead, and the end of a commit that left
+    some hunks out, where the new snapshot is "the old snapshot plus what was landed" so the
+    hunks that were left out are still later-than-the-snapshot next time.
+    """
+    data = work_bytes(repo, path) if content is _MISSING else content
     dest = snap_path(root, session, path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if data is None:
@@ -384,11 +646,16 @@ def take_snapshot(repo, root, session, path, meta, tip):
             dest.unlink()
     else:
         dest.write_bytes(data)
-    meta.setdefault("paths", {})[path] = {
+    record = {
         "existed": data is not None,
         "mode": work_mode(repo, path),
         "tracked_at_begin": tree_entry(repo, tip, path) is not None,
+        "at": now(),
     }
+    if base_rev:
+        record["base_rev"] = base_rev
+    meta.setdefault("paths", {})[path] = record
+    return data
 
 
 def snapshot_bytes(root, session, path, record):
@@ -400,6 +667,25 @@ def snapshot_bytes(root, session, path, record):
 
 def now():
     return _dt.datetime.now().isoformat(timespec="seconds")
+
+
+def age_minutes(stamp):
+    """How long ago an ISO timestamp written by `now()` was, in minutes, or None."""
+    try:
+        when = _dt.datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, (_dt.datetime.now() - when).total_seconds() / 60.0)
+
+
+def human_age(minutes):
+    if minutes is None:
+        return "age unknown"
+    if minutes < 60:
+        return "%dm" % int(minutes)
+    if minutes < 60 * 24:
+        return "%dh%02dm" % (int(minutes) // 60, int(minutes) % 60)
+    return "%dd%02dh" % (int(minutes) // 1440, (int(minutes) % 1440) // 60)
 
 
 def log_line(root, message):
@@ -439,6 +725,15 @@ def cmd_begin(args, log):
     repo = repo_root()
     root = Path(args.root)
     tip = branch_tip(repo, args.branch)
+
+    base_rev = None
+    if args.from_head:
+        if args.base:
+            raise Fail("--base and --from-head are the same argument; pass one")
+        base_rev = tip
+    elif args.base:
+        base_rev = git_out(repo, "rev-parse", "--verify", "%s^{commit}" % args.base)
+
     paths = []
     for given in args.paths:
         path = norm_path(repo, given)
@@ -463,9 +758,16 @@ def cmd_begin(args, log):
     meta["repo"] = str(repo)
     meta["branch"] = args.branch
     meta["updated"] = now()
+    if args.contact:
+        meta["contact"] = args.contact
+
+    # Who already holds these paths, read before our own claim goes into the registry.
+    holders = {path: claimants(root, args.session, path) for path in paths}
 
     for path in paths:
-        take_snapshot(repo, root, args.session, path, meta, tip)
+        content = rev_bytes(repo, base_rev, path) if base_rev else _MISSING
+        take_snapshot(repo, root, args.session, path, meta, tip, content=content,
+                      base_rev=base_rev)
     write_meta(root, args.session, meta)
 
     def mutate(data):
@@ -474,24 +776,340 @@ def cmd_begin(args, log):
         entry["branch"] = args.branch
         entry["updated"] = now()
         entry.setdefault("started", meta["started"])
+        if args.contact:
+            entry["contact"] = args.contact
         claims = set(entry.get("claims") or [])
         claims.update(paths)
         entry["claims"] = sorted(claims)
     edit_registry(root, mutate)
 
     install_hook(repo, log)
-    warn_overlaps(root, args.session, paths, log)
+
+    # Every session that already claims one of these paths gets our snapshot as a marker, so
+    # that at *their* commit the tool can say which hunks predate us.
+    for path, others in holders.items():
+        for other, _entry in others:
+            record_marker(root, other, args.session, path,
+                          work_bytes(repo, path), args.contact)
 
     log("session %s claims %d path(s) at tip %s" % (args.session, len(paths), tip[:12]))
     for path in paths:
         record = meta["paths"][path]
-        state = "new file" if not record["existed"] else (
-            "snapshot taken" if record["tracked_at_begin"] else "untracked, snapshot taken")
+        if base_rev:
+            state = "snapshot from %s" % base_rev[:12]
+        else:
+            state = "new file" if not record["existed"] else (
+                "snapshot taken" if record["tracked_at_begin"]
+                else "untracked, snapshot taken")
         log("  %s (%s)" % (path, state))
     log("snapshots: %s" % (directory / "snap"))
+    if base_rev:
+        log("--base was given, so your hunks are diff(%s:<path>, working copy) — which may "
+            "include another session's uncommitted edits. Every commit of these paths goes "
+            "through the --confirm review; read the hunks there." % base_rev[:12])
+    for path, others in sorted(holders.items()):
+        for other, entry in others:
+            log("warning: %s already holds %s (snapshot %s old). Your edits from now on are "
+                "contested there and here until one of you lands; talk to them before you "
+                "change the same function." % (describe_session(other, entry), path,
+                                               human_age(claim_age(root, other, path))))
+
     log("edit, build and test in %s as usual, then:" % repo)
     log("  python3 scripts/land.py commit %s -m \"message\"" % args.session)
     return 0
+
+
+def claim_age(root, session, path):
+    """How old `session`'s snapshot of `path` is, in minutes, or None."""
+    try:
+        meta = read_meta(root, session)
+    except (Fail, ValueError):
+        return None
+    record = (meta.get("paths") or {}).get(path) or {}
+    return age_minutes(record.get("at") or meta.get("started"))
+
+
+# --------------------------------------------------------------------------- hunk selection
+
+def parse_numbers(spec, path, flag):
+    """"3,7-9" -> {3, 7, 8, 9}."""
+    numbers = set()
+    for piece in spec.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        lo, sep, hi = piece.partition("-")
+        try:
+            if sep:
+                start, stop = int(lo), int(hi)
+            else:
+                start = stop = int(piece)
+        except ValueError:
+            raise Fail("%s %s:%s — %r is not a hunk number or a range like 7-9"
+                       % (flag, path, spec, piece))
+        if start < 1 or stop < start:
+            raise Fail("%s %s:%s — %r is not a range of hunk numbers" % (flag, path, spec,
+                                                                        piece))
+        numbers.update(range(start, stop + 1))
+    if not numbers:
+        raise Fail("%s %s: no hunk numbers given" % (flag, path))
+    return numbers
+
+
+def parse_selection(repo, values, flag):
+    """['src/Pane.h:2,5-7', ...] -> {'src/Pane.h': {2, 5, 6, 7}}, accumulating."""
+    out = {}
+    for value in values or []:
+        if ":" not in value:
+            raise Fail("%s wants <path>:<hunks>, for example `%s src/Pane.h:2,5-7` (got %r)"
+                       % (flag, flag, value))
+        given, _, spec = value.rpartition(":")
+        path = norm_path(repo, given)
+        out.setdefault(path, set()).update(parse_numbers(spec, path, flag))
+    return out
+
+
+def contested_hunks(root, session, path, snapshot, hunks, holders, forced=False):
+    """The hunk numbers on `path` that may be another live session's work.
+
+    A hunk that is also in diff(our snapshot, the marker another session left when it began)
+    was in the tree before that session started, so it is ours. Everything else appeared
+    afterwards, and nothing in the file can say which of us typed it. When a holder began
+    before we did we have no marker for it at all, and then every hunk is contested.
+    """
+    numbers = set(range(1, len(hunks) + 1))
+    if not hunks or not holders:
+        return set()
+    if forced or hunks[0].whole:
+        return numbers
+    base = lines_of(snapshot)
+    seen = {}
+    for other, _entry in holders:
+        marker = marker_bytes(root, session, other, path)
+        if marker is None or is_binary(marker):
+            return numbers
+        theirs = {hunk.key for hunk in split_hunks(base, lines_of(marker))}
+        for number, hunk in enumerate(hunks, 1):
+            if hunk.key in theirs:
+                seen[number] = seen.get(number, 0) + 1
+    return {n for n in numbers if seen.get(n, 0) < len(holders)}
+
+
+class PathInfo:
+    """Everything `commit` knows about one path, for the stat line and the review."""
+
+    def __init__(self, path):
+        self.path = path
+        self.whole_path = False
+        self.snapshot = None
+        self.hunks = []
+        self.selected = set()
+        self.excluded = set()
+        self.contested = set()
+        self.holders = []
+        self.age = None
+        self.stale = False
+        self.from_base = None
+
+    @property
+    def landing(self):
+        return [hunk for number, hunk in enumerate(self.hunks, 1) if number in self.selected]
+
+    def reasons(self):
+        why = []
+        if self.contested:
+            why.append("%d of %d hunks contested" % (len(self.contested), len(self.hunks)))
+        if self.stale:
+            why.append("snapshot %s old" % human_age(self.age))
+        if self.from_base:
+            why.append("snapshot taken from %s, not from your own edits" % self.from_base[:12])
+        return why
+
+    def stat(self):
+        if self.whole_path:
+            return "%s: the whole working copy (--whole)" % self.path
+        landing = self.landing
+        bits = ["%d hunk%s" % (len(landing), "" if len(landing) == 1 else "s"),
+                "+%d -%d" % (sum(h.plus for h in landing), sum(h.minus for h in landing)),
+                "snapshot %s old" % human_age(self.age)]
+        if self.excluded:
+            bits.append("%d left out" % len(self.excluded))
+        if self.contested:
+            bits.append("%d CONTESTED" % len(self.contested))
+        if self.from_base:
+            bits.append("snapshot from %s" % self.from_base[:12])
+        if self.holders:
+            bits.append("also claimed by %s" % ", ".join(
+                describe_session(name, entry) for name, entry in self.holders))
+        return "%s: %s" % (self.path, "; ".join(bits))
+
+
+def print_review(log, root, branch, infos, plans, held, digest):
+    log("")
+    log("HELD: nothing was committed, nothing in the working tree was touched.")
+    for path in held:
+        info = infos[path]
+        log("")
+        log("%s — %s" % (path, "; ".join(info.reasons()) or "review"))
+        for name, entry in info.holders:
+            log("  also claimed by %s, its snapshot %s old"
+                % (describe_session(name, entry), human_age(claim_age(root, name, path))))
+        # Every hunk is numbered, because those numbers are what --exclude-hunk takes. A
+        # large landing only prints the bodies that need reading.
+        bodies = len(info.hunks) <= MAX_HUNK_BODIES
+        for number, hunk in enumerate(info.hunks, 1):
+            marks = ["CONTESTED" if number in info.contested else "yours"]
+            if number not in info.selected:
+                marks.append("LEFT OUT by --exclude-hunk/--only-hunk")
+            log("  hunk %d of %d  +%d -%d  %s  %s"
+                % (number, len(info.hunks), hunk.plus, hunk.minus, hunk.header(),
+                   ", ".join(marks)))
+            if bodies or number in info.contested or number not in info.selected:
+                sys.stdout.write("".join("    " + line for line in hunk.body()))
+        if not bodies:
+            log("  (%d hunks, so only the contested and left-out ones are printed in full; "
+                "`--dry-run` prints the whole merged diff)" % len(info.hunks))
+    log("")
+    log("what it would land (digest %s):" % digest)
+    for path in sorted(plans):
+        log("  %s" % infos[path].stat())
+    log("")
+    log("  land all of it:  rerun the same command with --confirm %s" % digest)
+    log("  leave hunks out: --exclude-hunk <path>:<n>[,<n>-<m>]   (repeatable)")
+    log("  or keep a few:   --only-hunk <path>:<n>[,<n>-<m>]      (lands only those)")
+    log("Hunks left out are neither committed nor touched: they stay in the working tree and a "
+        "later commit picks them up. Either flag prints a new digest.")
+    log("The digest covers the tip of %s and the exact bytes of every path, so an edit in the "
+        "working tree, a different selection, or %s moving makes it stop matching and you are "
+        "asked again." % (branch, branch))
+    log("`python3 scripts/land.py who` says who else holds these paths and how to reach them.")
+
+
+# --------------------------------------------------------------------------- verify
+
+# Paths whose exact landed content decides whether `main` still compiles. On 2026-09-19 two
+# commits landed hunks that only built because the other half of somebody else's change was
+# sitting in the working tree; the tree that went onto the branch did not compile at all.
+CXX_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hh", ".inl", ".ipp")
+
+
+def is_cxx_path(path):
+    name = path.rsplit("/", 1)[-1]
+    if name == "CMakeLists.txt" or path.endswith(".cmake"):
+        return True
+    return path.startswith(("src/", "engine/", "tests/")) and path.endswith(CXX_SUFFIXES)
+
+
+def materialise_tree(repo, tree, dest, manifest_file):
+    """Write `tree` into `dest`, touching only the files whose blob changed.
+
+    This is the tool's own check, not a place to work: nobody edits here. Files that did not
+    change keep their mtime, so the build in `dest`'s sibling build directory stays
+    incremental across commits.
+    """
+    wanted = {}
+    for record in git(repo, "ls-tree", "-r", "-z", tree).stdout.split("\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition("\t")
+        bits = meta.split()
+        if len(bits) == 3 and bits[1] == "blob":
+            wanted[path] = [bits[0], bits[2]]
+    try:
+        have = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        have = {}
+    if not isinstance(have, dict):
+        have = {}
+
+    written = 0
+    for path, (mode, sha) in sorted(wanted.items()):
+        target = dest / path
+        if have.get(path) == [mode, sha] and (target.exists() or target.is_symlink()):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink():
+            target.unlink()
+        if mode == "120000":
+            os.symlink(blob_bytes(repo, sha).decode("utf-8", "surrogateescape"), str(target))
+        else:
+            target.write_bytes(blob_bytes(repo, sha))
+            os.chmod(str(target), 0o755 if mode == "100755" else 0o644)
+        written += 1
+    for path in sorted(set(have) - set(wanted)):
+        try:
+            (dest / path).unlink()
+        except OSError:
+            pass
+    write_json(manifest_file, wanted)
+    return written
+
+
+def first_errors(output, limit=25):
+    lines = output.splitlines()
+    picked = [line for line in lines if "error" in line.lower()][:limit]
+    return picked or lines[-limit:]
+
+
+def py_compile_landed(plans):
+    """Byte-compile the exact bytes of every .py file being landed. Cheap, so always on."""
+    targets = {path: content for path, (content, _mode) in plans.items()
+               if path.endswith(".py") and content is not None}
+    if not targets:
+        return None
+    tmp = tempfile.mkdtemp(prefix="land-py-")
+    try:
+        names = []
+        for path, content in sorted(targets.items()):
+            dest = Path(tmp) / path.replace("/", "__")
+            dest.write_bytes(content)
+            names.append(str(dest))
+        proc = subprocess.run([sys.executable, "-m", "py_compile", *names],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              cwd=tmp)
+        return None if proc.returncode == 0 else proc.stdout
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_verify(repo, root, session, tree, args, log):
+    """Build the exact tree this commit would put on the branch.
+
+    Returns (failed step, output) or (None, None). The working tree is never read: that is
+    the whole point, because it holds everyone's uncommitted code and proves nothing.
+    """
+    base = session_dir(root, session) / "verify"
+    src, build = base / "src", base / "build"
+    src.mkdir(parents=True, exist_ok=True)
+    build.mkdir(parents=True, exist_ok=True)
+    refreshed = materialise_tree(repo, tree, src, base / "manifest.json")
+    log("verify: tree %s materialised in %s (%d file(s) refreshed)"
+        % (tree[:12], src, refreshed))
+
+    jobs = os.environ.get("RELAY_JOBS") or "8"
+    steps = []
+    if args.verify_cmd:
+        steps.append(("verify command", ["sh", "-c", args.verify_cmd]))
+    else:
+        if not (build / "CMakeCache.txt").exists():
+            steps.append(("cmake configure", ["cmake", "-S", str(src), "-B", str(build)]))
+        target = [] if args.verify_tests else ["--target", args.verify_target]
+        steps.append(("compile", ["cmake", "--build", str(build), "--parallel", jobs]
+                      + target))
+        if args.verify_tests:
+            steps.append(("ctest -R %s" % args.verify_tests,
+                          ["ctest", "--test-dir", str(build), "-R", args.verify_tests,
+                           "--output-on-failure"]))
+    env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_STRIP}
+    env["VERIFY_BUILD"] = str(build)
+    for label, command in steps:
+        log("verify: %s" % " ".join(command))
+        proc = subprocess.run(command, cwd=str(src), env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True)
+        if proc.returncode != 0:
+            return label, proc.stdout
+    log("verify: the exact tree builds")
+    return None, None
 
 
 # --------------------------------------------------------------------------- commit
@@ -502,12 +1120,14 @@ class Conflict(Exception):
         self.paths = paths
 
 
-def plan_path(repo, root, session, path, record, tip, whole):
+def plan_path(repo, root, session, path, record, tip, whole, theirs=_MISSING):
     """Decide the bytes to commit for one path. Returns (content, mode) or None to skip.
 
-    content is None for a deletion. Raises Conflict for that one path.
+    content is None for a deletion. Raises Conflict for that one path. `theirs` overrides the
+    working copy as the right-hand side of the merge: it is the snapshot plus only the hunks
+    that were selected, when some of them were excluded from this commit.
     """
-    working = work_bytes(repo, path)
+    working = work_bytes(repo, path) if theirs is _MISSING else theirs
     tip_entry = tree_entry(repo, tip, path)
     tip_data = None if tip_entry is None else blob_bytes(repo, tip_entry[1])
 
@@ -554,8 +1174,11 @@ def plan_path(repo, root, session, path, record, tip, whole):
     return merged, work_mode(repo, path, tip_entry[0])
 
 
-def build_commit(repo, tip, entries, message):
-    """Private index from `tip`, your blobs in it, commit-tree onto `tip`. Returns the sha."""
+def build_tree(repo, tip, entries):
+    """Private index read from `tip`, your blobs in it, and the tree it writes out.
+
+    This tree is exactly what the branch would hold, which is what `verify` builds.
+    """
     index = Path(tempfile.mkdtemp(prefix="land-index-")) / "index"
     env = {"GIT_INDEX_FILE": str(index)}
     try:
@@ -566,9 +1189,15 @@ def build_commit(repo, tip, entries, message):
             else:
                 git(repo, "update-index", "--add", "--cacheinfo",
                     "%s,%s,%s" % (mode, blob, path), env=env)
-        tree = git_out(repo, "write-tree", env=env)
+        return git_out(repo, "write-tree", env=env)
     finally:
         shutil.rmtree(str(index.parent), ignore_errors=True)
+
+
+def build_commit(repo, tip, entries, message, tree=None):
+    """commit-tree the built tree onto `tip`. Returns the sha."""
+    if tree is None:
+        tree = build_tree(repo, tip, entries)
     return git_out(repo, "commit-tree", tree, "-p", tip, stdin=message)
 
 
@@ -615,9 +1244,10 @@ def cmd_commit(args, log):
         if path not in claimed and path not in whole:
             raise Fail("%s was edited without `begin`, so there is no snapshot to diff "
                        "against. Either `land.py begin %s %s` (it will snapshot the file as "
-                       "it is now, so only later edits land) or pass --whole %s to commit the "
-                       "whole working copy of it."
-                       % (path, args.session, path, path))
+                       "it is now, so only later edits land), or `land.py begin --base HEAD "
+                       "%s %s` if you have already edited it and want the diff against main, "
+                       "or pass --whole %s to commit the whole working copy of it."
+                       % (path, args.session, path, args.session, path, path))
         if path not in paths:
             paths.append(path)
     for path in dropped:
@@ -625,17 +1255,65 @@ def cmd_commit(args, log):
     if not paths:
         raise Fail("nothing to commit")
 
+    excludes = parse_selection(repo, args.exclude_hunk, "--exclude-hunk")
+    onlys = parse_selection(repo, args.only_hunk, "--only-hunk")
+    both = sorted(set(excludes) & set(onlys))
+    if both:
+        raise Fail("--exclude-hunk and --only-hunk both name %s; pick one form per path"
+                   % ", ".join(both))
+    for path in sorted(set(excludes) | set(onlys)):
+        if path not in paths:
+            raise Fail("%s is not one of this commit's paths (%s)" % (path, ", ".join(paths)))
+        if path in whole:
+            raise Fail("%s is a --whole path: it has no snapshot, so it has no numbered hunks"
+                       % path)
+
     warn_overlaps(root, args.session, paths, log)
 
-    last_error = None
+    last_error, verified = None, None
     for attempt in range(1, SWAP_ATTEMPTS + 1):
         tip = branch_tip(repo, branch)          # read once per attempt, used everywhere below
-        plans, conflicts = {}, []
+        plans, infos, conflicts = {}, {}, []
         for path in paths:
             record = claimed.get(path, {"existed": False, "tracked_at_begin": False})
+            info = PathInfo(path)
+            infos[path] = info
+            info.holders = claimants(root, args.session, path)
+            info.age = age_minutes(record.get("at") or meta.get("started"))
+            info.from_base = record.get("base_rev")
+
+            theirs = _MISSING
+            if path in whole:
+                # No snapshot, so no hunks and no age to be stale: --whole already prints the
+                # whole diff it is about to take and says whose code may be in it.
+                info.whole_path = True
+            else:
+                info.stale = info.age is not None and info.age > args.stale_minutes
+                working = work_bytes(repo, path)
+                info.snapshot = snapshot_bytes(root, args.session, path, record)
+                info.hunks = path_hunks(info.snapshot, working)
+                numbers = set(range(1, len(info.hunks) + 1))
+                asked = onlys.get(path) or excludes.get(path) or set()
+                unknown = sorted(asked - numbers)
+                if unknown:
+                    raise Fail("%s has %d hunk(s) right now, so there is no hunk %s. Run "
+                               "commit again without a selection to see them numbered."
+                               % (path, len(info.hunks),
+                                  ", ".join(str(n) for n in unknown)))
+                info.selected = (onlys[path] & numbers) if path in onlys else \
+                    (numbers - excludes.get(path, set()))
+                info.excluded = numbers - info.selected
+                info.contested = contested_hunks(root, args.session, path, info.snapshot,
+                                                 info.hunks, info.holders,
+                                                 forced=bool(info.from_base))
+                if info.excluded:
+                    if not info.selected:
+                        continue          # every hunk left out: this path is not in the commit
+                    theirs = apply_hunks(info.snapshot, working, info.hunks, info.selected)
+
             try:
                 outcome = plan_path(repo, root, args.session, path, record, tip,
-                                    path in whole)
+                                    path in whole, theirs)
             except Conflict as clash:
                 conflicts.extend(clash.paths)
                 continue
@@ -646,17 +1324,54 @@ def cmd_commit(args, log):
             raise Fail("merge conflict in: %s\nNothing was committed and nothing in the "
                        "working tree was touched. Pull the other session's change into your "
                        "copy by hand (their version is `git show %s:<path>`), then run commit "
-                       "again." % (", ".join(sorted(conflicts)), branch), code=3)
+                       "again. The cheapest resolution is often to need fewer files "
+                       "(restructure so the contested file needs no change), not to merge "
+                       "harder." % (", ".join(sorted(conflicts)), branch), code=3)
         if not plans:
-            log("nothing to land: every claimed path already matches the tip")
+            log("nothing to land: every claimed path already matches the tip"
+                + (" once the hunks you left out are taken off" if
+                   any(i.excluded for i in infos.values()) else ""))
             return 0
 
+        digest = content_digest(tip, plans)
+        held = sorted(path for path in plans
+                      if infos[path].contested or infos[path].stale or infos[path].from_base)
+
+        log("onto %s (tip %s), %d path(s), digest %s:"
+            % (branch, tip[:12], len(plans), digest))
+        for path in sorted(plans):
+            log("  %s" % infos[path].stat())
+
         if args.dry_run:
-            log("would commit onto %s (tip %s):" % (branch, tip[:12]))
-            for path, (content, _mode) in sorted(plans.items()):
+            for path in sorted(plans):
                 log("--- %s" % path)
-                sys.stdout.write(unified(rev_bytes(repo, tip, path), content, path))
+                sys.stdout.write(unified(rev_bytes(repo, tip, path), plans[path][0], path))
+            if held:
+                print_review(log, root, branch, infos, plans, held, digest)
+                log("(--dry-run, so nothing was committed either way.)")
+            if any(is_cxx_path(path) for path in plans) and not args.no_verify:
+                log("(a real commit would also build this exact tree in %s before the swap.)"
+                    % (session_dir(root, args.session) / "verify"))
             return 0
+
+        if args.no_verify and held:
+            raise Fail("--no-verify is refused while anything is contested or stale (%s). "
+                       "Those are exactly the landings that broke the build on 2026-09-19: "
+                       "the working tree compiled because the other session's other half was "
+                       "sitting in it, and the tree that went onto the branch did not."
+                       % ", ".join(held))
+        if args.confirm and args.confirm != digest:
+            print_review(log, root, branch, infos, plans, held, digest)
+            raise Fail("--confirm %s does not match this commit's digest %s. Something that "
+                       "feeds the commit moved since you were shown that digest: a working-tree "
+                       "edit, a different --exclude-hunk/--only-hunk selection, or %s advancing. "
+                       "Nothing was landed. Read the hunks above and rerun with --confirm %s."
+                       % (args.confirm, digest, branch, digest), code=4)
+        if held and args.confirm != digest:
+            print_review(log, root, branch, infos, plans, held, digest)
+            raise Fail("held for review: %s. Nothing was landed."
+                       % ", ".join("%s (%s)" % (path, "; ".join(infos[path].reasons()))
+                                   for path in held), code=4)
 
         for path in sorted(whole):
             if path in plans:
@@ -671,7 +1386,31 @@ def cmd_commit(args, log):
             else:
                 entries[path] = (hash_blob(repo, content), mode, False)
 
-        new = build_commit(repo, tip, entries, message)
+        tree = build_tree(repo, tip, entries)
+        cxx = {path: entries[path][0] for path in sorted(entries) if is_cxx_path(path)}
+        if args.no_verify:
+            log("verify: skipped (--no-verify)")
+        else:
+            problem = py_compile_landed(plans)
+            if problem is not None:
+                raise Fail("the exact bytes this commit would land do not compile as Python:\n"
+                           "%s\nNothing was landed." % problem.strip(), code=5)
+            if cxx and cxx == verified:
+                log("verify: every landed C++ blob is the one already built; not rebuilding")
+            elif cxx:
+                step, output = run_verify(repo, root, args.session, tree, args, log)
+                if step is not None:
+                    sys.stdout.write("\n".join(first_errors(output)) + "\n")
+                    raise Fail("the exact tree this commit would put on %s does not build "
+                               "(%s failed). Nothing was landed. The working tree is not the "
+                               "same thing: it holds every session's uncommitted code, so it "
+                               "can compile while this tree cannot. Look at the errors above; "
+                               "a missing declaration usually means you are landing one half "
+                               "of somebody else's change (`land.py who`)."
+                               % (branch, step), code=5)
+                verified = cxx
+
+        new = build_commit(repo, tip, entries, message, tree=tree)
         touched = [line for line in git_out(repo, "diff", "--name-only", tip, new).splitlines()
                    if line]
         if sorted(touched) != sorted(entries):
@@ -694,9 +1433,22 @@ def cmd_commit(args, log):
 
         set_shared_index(repo, branch, entries, log)
 
-        tip_now = new
+        kept = set()
         for path in sorted(entries):
-            take_snapshot(repo, root, args.session, path, meta, tip_now)
+            info = infos.get(path)
+            content, base_rev = _MISSING, None
+            if info is not None and info.excluded:
+                # The new snapshot is the old one plus what was landed, never the working
+                # copy: the hunks left out have to stay later-than-the-snapshot so a later
+                # commit still sees them.
+                content = apply_hunks(info.snapshot, work_bytes(repo, path), info.hunks,
+                                      info.selected)
+                base_rev = info.from_base
+                kept.add(path)
+                log("  %s: %d hunk(s) left uncommitted in the working tree; a later commit "
+                    "picks them up" % (path, len(info.excluded)))
+            take_snapshot(repo, root, args.session, path, meta, new, content=content,
+                          base_rev=base_rev)
         meta["updated"] = now()
         write_meta(root, args.session, meta)
 
@@ -704,7 +1456,7 @@ def cmd_commit(args, log):
             entry = data["sessions"].get(args.session)
             if not entry:
                 return
-            entry["claims"] = sorted(set(entry.get("claims") or []) - set(entries))
+            entry["claims"] = sorted((set(entry.get("claims") or []) - set(entries)) | kept)
             entry["updated"] = now()
             entry["last_commit"] = new
         edit_registry(root, mutate)
@@ -837,9 +1589,168 @@ def cmd_doctor(args, log):
         findings += 1
         log("untracked *.orig files: %s (report only; never committed)" % ", ".join(orig))
 
+    for name, entry in sorted(registered_sessions(Path(args.root)).items()):
+        if not is_idle(entry):
+            continue
+        findings += 1
+        log("stale land session: %s has not run a land.py command for %s (claims: %s). It is "
+            "ignored for contest detection; `land.py abandon %s` drops it, which never touches "
+            "the working tree."
+            % (name, human_age(session_idle_minutes(entry)),
+               ", ".join(entry.get("claims") or []) or "none", name))
+
     if not findings:
         log("clean: nothing staged from an older commit, and nothing else to report")
     return 0 if findings == 0 else 2
+
+
+# --------------------------------------------------------------------------- who
+
+def cmd_who(args, log):
+    root = Path(args.root)
+    sessions = registered_sessions(root)
+    if not sessions:
+        log("no land sessions under %s" % root)
+        return 0
+    for name, entry in sorted(sessions.items()):
+        idle = session_idle_minutes(entry)
+        state = "STALE, idle %s (ignored for contest detection)" % human_age(idle) \
+            if is_idle(entry) else "idle %s" % human_age(idle)
+        log("%s — %s, contact: %s" % (name, state, entry.get("contact") or "none given"))
+        claims = entry.get("claims") or []
+        for path in claims[:WHO_PATHS]:
+            log("    %s  snapshot %s old" % (path, human_age(claim_age(root, name, path))))
+        if len(claims) > WHO_PATHS:
+            log("    ... and %d more (%s/%s/meta.json has them all)"
+                % (len(claims) - WHO_PATHS, root, name))
+    return 0
+
+
+# --------------------------------------------------------------------------- repair
+
+def cmd_repair(args, log):
+    """Take back what one commit did to some paths, keeping what landed on them since."""
+    repo = repo_root()
+    branch = args.branch
+    sha = git_out(repo, "rev-parse", "--verify", "%s^{commit}" % args.sha)
+    parents = git_out(repo, "rev-list", "--parents", "-n", "1", sha).split()[1:]
+    if not parents:
+        raise Fail("%s is a root commit: there is no earlier version to go back to" % sha[:12])
+    if len(parents) > 1:
+        raise Fail("%s is a merge commit; repair only handles a single-parent commit" % sha[:12])
+    parent = parents[0]
+
+    paths = []
+    for given in args.paths:
+        path = norm_path(repo, given)
+        if excluded(path):
+            log("not repairing %s (intake file or *.orig)" % path)
+            continue
+        if path not in paths:
+            paths.append(path)
+    if not paths:
+        raise Fail("nothing to repair")
+
+    changed = set(git_out(repo, "diff", "--name-only", parent, sha).splitlines())
+    for path in paths:
+        if path not in changed:
+            log("warning: %s is not one of the paths %s changed" % (path, sha[:12]))
+
+    message = read_message(args.message) if args.message else (
+        "repair: take back %s's changes to %s\n\nEach path is the current tip's version with "
+        "that commit's hunks removed (three-way: base %s, ours the tip, theirs %s), so "
+        "anything that landed on these paths afterwards is kept. No working-tree file was "
+        "touched.\n" % (sha[:12], ", ".join(paths), sha[:12], parent[:12]))
+
+    last_error = None
+    for attempt in range(1, SWAP_ATTEMPTS + 1):
+        tip = branch_tip(repo, branch)
+        plans, conflicts = {}, []
+        for path in paths:
+            base = rev_bytes(repo, sha, path)            # what <sha> left there
+            ours = rev_bytes(repo, tip, path)            # what main has now
+            theirs = rev_bytes(repo, parent, path)       # what it held before <sha>
+            entry = tree_entry(repo, tip, path) or tree_entry(repo, parent, path)
+            mode = entry[0] if entry else "100644"
+            if ours is None:
+                if theirs is None:
+                    continue                             # nothing there either way
+                conflicts.append(path)                   # deleted on main since: not ours to
+                continue                                 # decide, so abort
+            if theirs is None:
+                if ours == base:
+                    plans[path] = (None, mode)           # <sha> added it; take it back out
+                else:
+                    conflicts.append(path)               # and someone has edited it since
+                continue
+            merged, bad = merge3(base if base is not None else b"", ours, theirs,
+                                 ("%s (tip of %s)" % (tip[:8], branch),
+                                  "%s (the commit being taken back)" % sha[:8],
+                                  "%s (before it)" % parent[:8]))
+            if bad:
+                conflicts.append(path)
+                continue
+            if merged == ours:
+                continue
+            plans[path] = (merged, mode)
+        if conflicts:
+            raise Fail("cannot take back %s cleanly in: %s\nSomething that landed afterwards "
+                       "overlaps the hunks being removed. Nothing was changed — not the "
+                       "branch, not the index, not the working tree. Fix those paths by hand "
+                       "through a normal `begin`/`commit`."
+                       % (sha[:12], ", ".join(sorted(conflicts))), code=3)
+        if not plans:
+            log("nothing to repair: %s already holds no trace of %s in %s"
+                % (branch, sha[:12], ", ".join(paths)))
+            return 0
+
+        log("would take back %s from %s (tip %s):" % (sha[:12], branch, tip[:12]))
+        for path in sorted(plans):
+            log("--- %s" % path)
+            sys.stdout.write(unified(rev_bytes(repo, tip, path), plans[path][0], path))
+        if args.dry_run:
+            log("--dry-run: nothing was changed.")
+            return 0
+
+        entries = {}
+        for path, (content, mode) in plans.items():
+            entries[path] = (None, mode, True) if content is None else \
+                (hash_blob(repo, content), mode, False)
+
+        new = build_commit(repo, tip, entries, message)
+        touched = [line for line in git_out(repo, "diff", "--name-only", tip, new).splitlines()
+                   if line]
+        if sorted(touched) != sorted(entries):
+            raise Fail("name gate failed: the repair would touch %s but you asked for %s. "
+                       "Nothing was landed." % (sorted(touched), sorted(entries)), code=3)
+
+        swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
+        if swap.returncode != 0:
+            last_error = swap.stderr.strip()
+            log("%s moved under attempt %d (was %s); recomputing the repair"
+                % (branch, attempt, tip[:12]))
+            continue
+
+        log_line(Path(args.root), "%s %s -> %s (repair of %s) [%s]"
+                 % (branch, tip[:12], new[:12], sha[:12], " ".join(sorted(entries))))
+        log("landed %s on %s" % (new, branch))
+        for path in sorted(entries):
+            log("  %s" % path)
+
+        # The working copy legitimately holds newer foreign code, so the shared index entry
+        # would otherwise still point at the pre-repair blob and the next plain `git commit`
+        # by anyone would put the bad version back. Index only; never the working copy.
+        set_shared_index(repo, branch, entries, log)
+
+        log("the working tree was NOT touched and still holds whatever the other sessions "
+            "have in these files. Verify a repair on a clean export of the new tree, never on "
+            "the working tree: `git archive %s | tar -x -C <scratch dir>`, then build there."
+            % new[:12])
+        print(new)
+        return 0
+
+    raise Fail("%s moved under every one of the %d attempts (last: %s). Nothing was landed."
+               % (branch, SWAP_ATTEMPTS, last_error or "swap refused"), code=3)
 
 
 # --------------------------------------------------------------------------- hook command
@@ -860,7 +1771,7 @@ def cmd_hook(args, log):
 EPILOG = """\
 the whole workflow
 
-  python3 scripts/land.py begin mysession src/Pane.h docs/ARCHITECTURE.md
+  python3 scripts/land.py begin mysession --contact "my Claude name" src/Pane.h docs/X.md
   # ... edit, build and test in this checkout, as usual ...
   python3 scripts/land.py commit mysession -m "what I did"
 
@@ -869,18 +1780,69 @@ main plus the hunks you added since the snapshot -- so another session's uncommi
 the same file are neither committed nor disturbed -- then points the shared index at what it
 committed, so `git status` shows only what is still uncommitted.
 
-  -m accepts either the message text or the path to a file holding it.
-  --paths p...   land only some of the session's paths.
-  --whole p      commit the entire working copy of a path you never ran `begin` on.
-  --dry-run      print the merged diff and stop.
+contested hunks
 
+A snapshot tells your hunks from someone else's only while nobody else edits the file after it
+was taken. When another live session claims the same path, `commit` calls a hunk CONTESTED if
+it appeared after that session began -- and if that session began before you, it calls every
+hunk contested, because nothing in the file can say who typed it. A path with contested hunks,
+or whose snapshot is older than --stale-minutes, is held: `commit` prints the numbered hunks
+and a digest and exits 4 without landing anything. Then either
+
+  commit mysession -m "..." --confirm DIGEST                 land all of it
+  commit mysession -m "..." --exclude-hunk src/Pane.h:2,5-7  leave those hunks out
+  commit mysession -m "..." --only-hunk src/Pane.h:1,3       land only those hunks
+
+Hunks left out are neither committed nor touched: they stay in the working tree and a later
+commit picks them up. Either selection flag prints a new digest. The digest covers the tip and
+the exact bytes of every path, so a working-tree edit, a different selection or main moving
+makes it stop matching, and you are asked again.
+
+  -m accepts either the message text or the path to a file holding it.
+  --paths p...       land only some of the session's paths.
+  --whole p          commit the entire working copy of a path you never ran `begin` on.
+  --dry-run          print the merged diff (and the review, if it would be held) and stop.
+  --stale-minutes N  hold a path whose snapshot is older than this (default {stale}).
+
+the build gate
+
+When the paths being landed include C++ or build files (src/, engine/, tests/*.cpp,
+CMakeLists.txt, *.cmake), `commit` materialises the EXACT tree it is about to put on the branch
+into <root>/<me>/verify/src and builds it in <root>/<me>/verify/build before the swap. Only a
+tree that compiles is landed; otherwise the first errors are printed, nothing is landed, and it
+exits 5. That directory is the tool's own check, not a place to work: nobody edits there. It is
+kept between commits and only the files whose blob changed are rewritten, so the build stays
+incremental. Landed .py files are byte-compiled the same way, which costs nothing.
+
+The working tree is deliberately not what gets built: it holds every session's uncommitted
+code, so it can compile while the tree you are landing cannot. That is how a green build of
+code nobody had written reached main twice on 2026-09-19.
+
+  --verify-cmd "..."   run this instead (cwd = the materialised tree, VERIFY_BUILD in env).
+  --verify-tests RE    also build everything and run the ctest cases matching RE.
+  --verify-target T    the cmake target the default verify builds (default relay).
+  --no-verify          skip it -- refused when any path is contested or stale.
+
+  begin --contact NAME  how to reach you; shown in every claim warning and in `who`.
+  begin --base REV p    snapshot REV's version of p instead of the working copy, for a file
+  begin --from-head p   you had already edited before claiming it (--from-head is --base tip).
+                        Its hunks are then diff(REV:p, working copy), which includes anything
+                        another session left in that file, so such a path is always held for
+                        the --confirm review. This replaces editing the snapshot by hand.
+
+  python3 scripts/land.py who                 live sessions, their paths, ages and contacts.
   python3 scripts/land.py abandon mysession   drop the snapshots and claims.
   python3 scripts/land.py doctor [--fix]      shared-index and checkout hygiene.
   python3 scripts/land.py hook install        make git refuse a shared-index commit.
+  python3 scripts/land.py repair SHA --paths p...
+      land a commit that takes back what SHA did to those paths, keeping whatever landed on
+      them afterwards, then point the shared index at it. The working tree is never touched,
+      so verify a repair on `git archive <new sha>`, never in the checkout.
 
 exit codes: 0 fine, 1 usage or environment error, 2 doctor found something, 3 conflict or a
-swap that could not be completed (in which case nothing was changed).
-"""
+swap that could not be completed, 4 held for review, 5 the exact tree does not build.
+Nothing was changed on 3, 4 or 5.
+""".replace("{stale}", str(DEFAULT_STALE_MINUTES))
 
 
 def build_parser():
@@ -898,6 +1860,14 @@ def build_parser():
     begin.add_argument("session")
     begin.add_argument("paths", nargs="+")
     begin.add_argument("--branch", default=DEFAULT_BRANCH)
+    begin.add_argument("--contact", default=None,
+                       help="free text saying how to reach this session, e.g. its Claude "
+                            "peer name; shown in every claim warning and in `who`")
+    begin.add_argument("--base", default=None,
+                       help="snapshot this revision's version of each path instead of the "
+                            "working copy (for a file you edited before claiming it)")
+    begin.add_argument("--from-head", action="store_true",
+                       help="shorthand for --base <the current tip of the branch>")
     begin.set_defaults(func=cmd_begin)
 
     commit = subs.add_parser("commit", help="land your hunks on the branch")
@@ -907,7 +1877,31 @@ def build_parser():
     commit.add_argument("--whole", nargs="+", action="extend", default=None, help="commit a whole working copy, unsnapshotted (repeatable)")
     commit.add_argument("--branch", default=None)
     commit.add_argument("--dry-run", action="store_true")
+    commit.add_argument("--confirm", default=None, metavar="DIGEST",
+                        help="the digest a held commit printed; lands it unchanged")
+    commit.add_argument("--exclude-hunk", action="append", default=None, metavar="PATH:N",
+                        help="leave these hunks out of the commit, e.g. src/Pane.h:2,5-7 "
+                             "(repeatable, accumulating)")
+    commit.add_argument("--only-hunk", action="append", default=None, metavar="PATH:N",
+                        help="land only these hunks of that path and leave the rest out "
+                             "(repeatable, accumulating)")
+    commit.add_argument("--stale-minutes", type=float, default=DEFAULT_STALE_MINUTES,
+                        help="hold a path whose snapshot is older than this (default %d)"
+                             % DEFAULT_STALE_MINUTES)
+    commit.add_argument("--verify-cmd", default=None, metavar="SHELL",
+                        help="run this instead of the default cmake build, with cwd = the "
+                             "materialised tree and VERIFY_BUILD in the environment")
+    commit.add_argument("--verify-tests", default=None, metavar="REGEX",
+                        help="also build everything and run the ctest cases matching REGEX")
+    commit.add_argument("--verify-target", default=os.environ.get("RELAY_LAND_VERIFY_TARGET",
+                                                                  "relay"),
+                        help="the cmake target the default verify builds (default relay)")
+    commit.add_argument("--no-verify", action="store_true",
+                        help="skip the build gate; refused when any path is contested or stale")
     commit.set_defaults(func=cmd_commit)
+
+    who = subs.add_parser("who", help="live sessions, their paths, ages and contacts")
+    who.set_defaults(func=cmd_who)
 
     abandon = subs.add_parser("abandon", help="drop a session's snapshots and claims")
     abandon.add_argument("session")
@@ -922,6 +1916,15 @@ def build_parser():
     hook.add_argument("hook_action", choices=["install"], metavar="install")
     hook.add_argument("--force", action="store_true")
     hook.set_defaults(func=cmd_hook)
+
+    repair = subs.add_parser("repair", help="take back what one commit did to some paths")
+    repair.add_argument("sha")
+    repair.add_argument("--paths", nargs="+", action="extend", required=True)
+    repair.add_argument("-m", "--message", default=None,
+                        help="the message, or a file holding it (a default is written for you)")
+    repair.add_argument("--branch", default=DEFAULT_BRANCH)
+    repair.add_argument("--dry-run", action="store_true")
+    repair.set_defaults(func=cmd_repair)
     return parser
 
 

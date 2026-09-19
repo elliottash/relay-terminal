@@ -88,11 +88,83 @@ What it refuses to do, and why each refusal is an incident from the list above:
   the hunks it is about to take with it.
 - **A conflict aborts.** It names the paths, exits 3, and leaves the branch, the index and the
   working tree exactly as they were. Pull the other session's version into your copy by hand
-  (`git show main:<path>`), then run `commit` again.
+  (`git show main:<path>`), then run `commit` again — or, as the message says, need fewer files:
+  restructuring so the contested file needs no change is usually cheaper than merging harder.
 
 `--dry-run` prints the merged diff without landing anything, `--paths` lands a subset of what you
 claimed, and `abandon <me>` drops the snapshots (never the working tree). `--help` is written for a
 session that has not read this file.
+
+### Contested hunks, and the two-step commit
+
+A snapshot tells your hunks from someone else's only for as long as nobody else edits that file
+after it was taken. On 2026-09-19 a session held a snapshot of `src/Pane.h` for forty minutes,
+another session edited the header in that window, and `commit` read the second session's work as
+its own: it landed half of somebody else's change, without the other file it needed, and `main`
+stopped compiling. It had skipped `--dry-run` the second time, and there was then no way to say
+"take back the hunks I landed by mistake, leave the working tree alone".
+
+So `begin` now leaves a **marker**: when you claim a path a live session already claims, your
+snapshot is recorded in their session data too. At their commit, a hunk that is also in
+diff(their snapshot, your marker) was in the tree before you started, so it is theirs; anything
+else appeared afterwards and is **contested**. At *your* commit, a path claimed by a session that
+began before you has *every* hunk contested — you hold no marker for them, so nothing in the file
+can say who typed what.
+
+`commit` always prints a per-path stat (hunks, +/- lines, snapshot age, who else holds the path).
+When a path has contested hunks, or its snapshot is older than 15 minutes (`--stale-minutes`), it
+does **not** land: it prints the numbered hunks with the contested ones marked, plus a digest of
+exactly what it would land, and exits 4. Then either
+
+```
+commit <me> -m "..." --confirm <digest>                  land all of it
+commit <me> -m "..." --exclude-hunk src/Pane.h:2,5-7     leave those hunks out
+commit <me> -m "..." --only-hunk src/Pane.h:1,3          land only those hunks
+```
+
+Hunks left out are neither committed nor touched: they stay in the working tree and a later commit
+picks them up. Either selection flag prints a new digest. The digest covers the tip and the exact
+bytes of every path, so an edit in the tree, a different selection or `main` moving makes it stop
+matching and you are asked again. Uncontested, fresh paths still land in one step.
+
+`begin --contact <name>` records how to reach you — a land-session name is not an address — and it
+is shown in every claim warning. `python3 scripts/land.py who` lists the live sessions, what they
+claim, how old their snapshots are and their contacts. A session that has run no land.py command
+for 12 hours is stale: `who` and `doctor` say so, and it stops contesting anything.
+
+`begin --base <rev>`, or `--from-head`, snapshots that revision's version of each path instead of
+the working copy — for a file you had already edited before claiming it. **This is the supported
+replacement for hand-editing files under `/tmp/claude-1000/land/<me>/snap/`.** Its hunks are then
+diff(`<rev>:path`, working copy), which includes anything another session left in that file, so
+such a path always goes through the confirm review, never in one step.
+
+### The build gate: what gets built is what would land
+
+Every session builds the same `build/` from the same working tree, and that tree holds everyone's
+uncommitted code — so "it compiles here" says nothing about the commit. On 2026-09-19 two commits
+landed hunks that only built because the other half of somebody else's change was sitting in the
+tree; the tree that went onto the branch did not compile at all.
+
+So when the paths being landed include C++ or build files (`src/`, `engine/`, `tests/*.cpp`,
+`CMakeLists.txt`, `*.cmake`), `commit` materialises the **exact** tree it is about to put on `main`
+into `/tmp/claude-1000/land/<me>/verify/src`, builds it in `.../verify/build`, and performs the
+compare-and-swap only if that exits 0. Otherwise it prints the first compiler errors, lands nothing
+and exits 5. Only files whose blob changed are rewritten and the build directory is kept between
+commits, so it stays incremental. That directory is the tool's own check, not a workspace: nobody
+edits there. `--verify-cmd "<shell>"`, `--verify-tests "<ctest regex>"` and `--verify-target`
+override the default (configure if needed, then `cmake --build … --target relay`); `--no-verify`
+exists and is refused whenever any path is contested or stale. Landed `.py` files are byte-compiled
+the same way, which costs nothing.
+
+### `repair <sha> --paths p...`: take back what one commit landed
+
+`python3 scripts/land.py repair <sha> --paths src/Pane.h` lands one commit that sets each of those
+paths to `<sha>^`'s version *plus* whatever landed on them after `<sha>` (three-way: base
+`<sha>:path`, ours the tip, theirs `<sha>^:path`), then points the shared index at the new blobs so
+nobody's next `git commit` puts the bad version back. A conflict aborts with nothing changed, and
+`--dry-run` shows the diff. It never touches the working tree — which still holds the other
+session's code — so **verify a repair on a clean export of the resulting tree**
+(`git archive <new sha> | tar -x -C <scratch dir>`), never in the checkout.
 
 `python3 scripts/land.py doctor` is the thing to run when the checkout looks wrong. It reports a
 staged entry whose blob is an older commit's version of that path — the shape that reverts people —
