@@ -1,12 +1,13 @@
 ---
 id: JXWT
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature, gui, keyboard]
+implemented_by: glm/glm-5.3
 rank: zzzzzzzzzz
 created: '2026-09-19'
 source: pane 1, 2026-09-20
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-pane-move-past-page-edge/], related: [], github: null}
 ---
 # Ctrl+E then Ctrl+arrow should place the pane (Ctrl still held)
 
