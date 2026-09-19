@@ -10475,15 +10475,19 @@ private:
         rememberPresetBeforeGuest(id);
         m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
         if (announce) status(QStringLiteral("Switching model. This starts a new conversation."));
-        QJsonObject request{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
+        // Through the funnel, spelled the way tests/boardworkspace_test.cpp counts it: every
+        // `configure` this pane sends is `withSessionFields(QJsonObject{{"type", "configure"} …`,
+        // so none can leave without its board block.
+        QJsonObject request = withSessionFields(QJsonObject{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
-              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}};
+              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}});
         // A guest preset (29.3): the harness is started with this — `permissions`, and `model`,
-        // `resume` or `fork` when the pick carried them. The harness runs in `workspace`.
+        // `resume` or `fork` when the pick carried them. The harness runs in `workspace`. Added
+        // after the funnel, which neither reads nor writes it.
         if (const QJsonObject guest = takeGuestRequest(id); !guest.isEmpty()) request.insert(QStringLiteral("guest"), guest);
-        send(withSessionFields(request));
+        send(request);
         updatePaths();
     }
 
