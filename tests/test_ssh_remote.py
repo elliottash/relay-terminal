@@ -486,7 +486,11 @@ class RemoteFileToolTests(unittest.TestCase):
                          "listen 80\n")
         self.assertEqual([e["name"] for e in self.call("list_directory",
                                                        path=str(self.elsewhere))["entries"]], ["app.conf"])
-        # Unreadable is the host's own answer, not a rule of Relay's.
+        # Unreadable is the host's own answer, not a rule of Relay's. Root reads a mode-000 file
+        # regardless (the package build runs the suite as root in a container), so that half of
+        # the check only means something as an ordinary user.
+        if os.geteuid() == 0:
+            self.skipTest("root can read a mode-000 file, so the host cannot refuse it")
         (self.elsewhere / "app.conf").chmod(0o000)
         try:
             with self.assertRaisesRegex(ValueError, "cannot be read"):
