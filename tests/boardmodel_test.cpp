@@ -1264,7 +1264,7 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     view.selectCard(QStringLiteral("K7Q2"));
     view.quickAdd();
     QVERIFY(!strip->isHidden());
-    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Ready — Enter adds, Esc closes"));
+    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Ready to start — Enter adds, Esc closes"));
     field->setText(QStringLiteral("clickable paths in the output"));
     QTest::keyClick(field, Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
