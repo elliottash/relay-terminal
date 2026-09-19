@@ -18,6 +18,7 @@
 #include "PaneView.h"
 
 #include "PaneStatus.h"
+#include "RelayMark.h"   // the app's own mark, painted: the state glyph and the tab icons
 #include "PaneUsage.h"
 #include "Theme.h"
 
@@ -197,30 +198,9 @@ inline void paintTypeGlyph(QPainter &p, const QRectF &box, ps::Glyph glyph, cons
     p.restore();
 }
 
-// The Relay mark, one ink: the cord chevron, the dash and the seated tip, redrawn from
-// data/icons/org.relayterminal.Relay-symbolic.svg (16x16) into the glyph box. It is the live
-// states' glyph (card #4E13: "a blue blinking relay icon (terminal program running) or purple
-// blinking relay icon (agent working)") — the app saying its own name where work is happening.
-// `ground` fills the ring's hole, as the other filled shapes do for their cut marks.
-inline void paintRelayMark(QPainter &p, const QRectF &box, const QColor &ink, const QColor &ground) {
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing);
-    const qreal u = std::min(box.width(), box.height()) / 16.0;
-    auto at = [&](qreal x, qreal y) { return box.topLeft() + QPointF(x, y) * u; };
-    // The cord: a > shape, stroked with round ends as the icon's own is.
-    p.setPen(QPen(ink, 1.9 * u, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.setBrush(Qt::NoBrush);
-    p.drawPolyline(QPolygonF(QVector<QPointF>{at(2.6, 3.6), at(6.4, 8.0), at(2.6, 12.4)}));
-    // The dash.
-    p.setPen(Qt::NoPen);
-    p.setBrush(ink);
-    p.drawRoundedRect(QRectF(at(7.2, 7.05), at(11.0, 8.95)), 0.95 * u, 0.95 * u);
-    // The seated tip: a filled ring with its hole in the ground's colour.
-    p.drawEllipse(at(12.9, 8.0), 2.35 * u, 2.35 * u);
-    p.setBrush(ground);
-    p.drawEllipse(at(12.9, 8.0), 1.15 * u, 1.15 * u);
-    p.restore();
-}
+// The Relay mark itself moved to src/RelayMark.h on 2026-09-19 (#4X53): the button on the
+// "Relaying – …" line paints the same mark, and that line lives in Pane.h, which is included
+// before this header. `relay::chrome::paintRelayMark` is unchanged and still lands here.
 
 // A pane state's glyph. Each has its own shape so it reads without colour: a ring (idle), the
 // Relay mark for work happening now (running, working, subagents — card #4E13), a prompt chevron
@@ -517,7 +497,7 @@ public:
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()}}}};
         if (m_subagent) return m_subagent->node();
-        // The agent internals pane (card #QT8C) comes back open beside its owner, empty until the
+        // The Activity pane (card #QT8C) comes back open beside its owner, empty until the
         // next event; `owner` is the owner's scrollback id, the key the subagent pane uses too.
         if (m_kind == Kind::Internals)
             return {{"internals", QJsonObject{{"cwd", m_subagentCwd}, {"owner", property("internalsOwner").toString()}}}};
