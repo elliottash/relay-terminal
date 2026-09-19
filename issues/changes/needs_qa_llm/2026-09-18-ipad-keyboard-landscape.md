@@ -12,7 +12,7 @@ rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist on a real iPad (or iPhone) and records it under `docs/qa_evidence/`
 source: 'owner, 2026-09-18, feature intake: "in browser app on ipad, it doesnt adapt well to the keyboard. in portrait mode without on screen keyboard it looks good, but once you haev the on screen keyboard, it looks good in portrait but not landscape, it goes off screen." Then, relayed by relay-terminal-71: "same on portrait actually, test it with the on screen keyboard"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-ipad-keyboard-landscape/'], related: [W5N2], github: null}
+links: {plans: [], commits: [d14a4b4], evidence: ['docs/qa_evidence/2026-09-18-ipad-keyboard-landscape/'], related: [W5N2], github: null}
 ---
 # The browser app fits the screen above an iPad's keyboard, in either orientation
 
