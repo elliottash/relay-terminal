@@ -12,7 +12,7 @@ rank: zzzzzzzl
 created: '2026-09-19'
 acceptance: the pane chip, the tab suffix, the Sessions row's tag and the tooltips' first line all print the one string `cpu 12% · mem 3%` in plain words and the body face; no glyph is drawn anywhere in the meter; the halves, the narrow rung, the warning inks, the tooltip breakdown and the "usage meters" setting behave exactly as before
 source: 'issues/bug_intake.txt, 2026-09-19'
-links: {commits: [82ea0b4, cc683aa], evidence: [docs/qa_evidence/2026-09-19-usage-meter-words/], github: null, plans: [], related: [D03W, 0STR]}
+links: {commits: [d0e1628, 82ea0b4, cc683aa, e0fd2e4], evidence: [docs/qa_evidence/2026-09-19-usage-meter-words/], github: null, plans: [], related: [D03W, 0STR]}
 ---
 # The usage meter says "cpu" and "mem" in words, in one string everywhere
 
@@ -64,7 +64,11 @@ same wording, so the reading is learned once.
 
 ## As built
 
-`src/PaneUsage.h` / `src/PaneUsage.cpp` hold the one wording, and nothing else spells it:
+`src/PaneUsage.h` / `src/PaneUsage.cpp` hold the one wording, and nothing else spells it. (Those
+two files are in `d0e1628`, the AGPL relicense: that session held a snapshot of all 567 files and
+its three-way merge took this card's edits along with the licence header. Nothing was lost and
+nothing was reverted, but the formatter's commit is that one rather than `82ea0b4`.)
+
 
 - `readingText(sample, cpuOnly = false)` → `"cpu 12% · mem 3%"`, or the single half that is worth
   showing on its own (`"cpu 12%"`, `"mem 3%"`), or empty. `cpuOnly` drops the memory half and its
