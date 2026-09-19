@@ -1,0 +1,15 @@
+== gate diffs pass --no-renames (scripts/land.py)
+1420:        touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only", tip, new).splitlines()
+1660:    changed = set(git_out(repo, "diff", "--no-renames", "--name-only", parent, sha).splitlines())
+1727:        touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only", tip, new).splitlines()
+
+== the fix commit
+de3510f295480cd8113a8e41c7ca85472055e255 Elliott Ash Sat Sep 19 13:47:00 2026 -0400
+land.py: a moved file lands in one commit (the name gate ignores rename detection)
+
+ scripts/land.py    |  6 +++---
+ tests/test_land.py | 16 ++++++++++++++++
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+== regression test present
+236:        # Moving a card is a delete plus an add with the same bytes; git's rename detection used
