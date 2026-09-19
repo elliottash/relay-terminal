@@ -1,6 +1,7 @@
-# Build output
-/build/
-/build-*/
+# Build output. Any /build* directory: a session that configured into `build1/` had its
+# whole 710 MB build tree swept into a merge commit on 2026-09-19 (3787 files), because
+# only `/build/` and `/build-*/` were listed here.
+/build*/
 
 # Python
 __pycache__/
