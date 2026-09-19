@@ -188,6 +188,9 @@ class Pane final : public QWidget {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
+        // A guest-composer entry is neither a Relay-agent prompt nor a shell command. It stays
+        // in the pane's one delivery queue until this named guest reports that it is idle.
+        QString guest;
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -203,7 +206,8 @@ public:
         QString label() const {
             const QString what = fix ? QStringLiteral("fix request")
                                  : written() ? QStringLiteral("terminal result") : text;
-            return author.isEmpty() ? what : author + QStringLiteral(" · ") + what;
+            const QString labelled = guest.isEmpty() ? what : guestDisplayName(guest) + QStringLiteral(" · ") + what;
+            return author.isEmpty() ? labelled : author + QStringLiteral(" · ") + labelled;
         }
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
@@ -285,6 +289,25 @@ public:
                 m_worker.waitForFinished(1000);
             }
         }
+    }
+
+    // Scan asynchronously: an unreadable home/config directory or a vanished guest helper must
+    // not block a keystroke in the pane. The helper publishes a normal `slash` event atomically.
+    void publishGuestSlashCatalog(const QString &guest) {
+        if (guest != QStringLiteral("claude") && guest != QStringLiteral("codex")) return;
+        auto *scan = new QProcess(this);
+        scan->setWorkingDirectory(m_cwd);
+        scan->setProgram(m_python);
+        scan->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
+                            QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
+        connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, scan, guest](int code, QProcess::ExitStatus exit) {
+                    if (exit != QProcess::NormalExit || code != 0)
+                        status(QStringLiteral("Could not read %1 slash commands.").arg(guestDisplayName(guest)));
+                    scan->deleteLater();
+                });
+        connect(scan, &QProcess::errorOccurred, this, [scan](QProcess::ProcessError) { scan->deleteLater(); });
+        scan->start();
     }
 
     // ----- interface used by RelayWindow ----------------------------------------------------
@@ -939,6 +962,8 @@ private:
         // A guest that left (or changed) takes its live facts and its open question with it;
         // the next statusline or state event repopulates them (26.3).
         clearGuestState();
+        m_guestSlashCommands.clear();
+        if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
         sendProgramState();
         changed();
     }
@@ -965,8 +990,8 @@ private:
                          envelope.value(QStringLiteral("data")).toObject());
     }
 
-    // One event off the channel. v1 handles the hooks phase's own events (26.3); `bridge` and
-    // `slash` arrive from other phases and are ignored until theirs land.
+    // One event off the channel. `slash` is Relay's own scanned fallback catalog (26.8); a
+    // future guest bridge may replace it with a more exact catalog through the same channel.
     void handleGuestEvent(const QString &sequence, const QString &name, const QJsonObject &data) {
         if (name == QStringLiteral("statusline")) {
             m_guestModel = data.value(QStringLiteral("model")).toString().simplified().left(kGuestModelMax);
@@ -980,6 +1005,16 @@ private:
         } else if (name == QStringLiteral("hook")) {
             handleGuestHook(sequence, data.value(QStringLiteral("name")).toString(),
                             data.value(QStringLiteral("payload")).toObject());
+        } else if (name == QStringLiteral("slash")) {
+            QStringList commands;
+            static const QRegularExpression command(QStringLiteral("^/[A-Za-z0-9][A-Za-z0-9._-]*$"));
+            for (const QJsonValue &value : data.value(QStringLiteral("commands")).toArray()) {
+                const QString item = value.toString().trimmed();
+                if (command.match(item).hasMatch() && !commands.contains(item, Qt::CaseInsensitive))
+                    commands << item;
+            }
+            m_guestSlashCommands = commands;
+            updateSlashPopup();
         }
     }
 
@@ -989,6 +1024,7 @@ private:
         updateGuestChip();
         sendProgramState();
         changed();
+        if (!m_guestBusy) pumpQueue();
     }
 
     // A hook the guest's shim forwarded (26.4). A permission request becomes a Relay question
@@ -5318,6 +5354,20 @@ private:
             if (description.size() > 60) description = description.left(59).trimmed() + QChar(0x2026);
             commands.append({skill.name, skill.args, QStringLiteral("Skill · ") + description});
         }
+        // A guest catalog follows every Relay-owned surface. Relay's own names (and its aliases
+        // and skills) win a collision, while a guest-only or newly introduced command passes
+        // through verbatim rather than Relay diagnosing it as unknown.
+        QStringList guestNames;
+        if (!m_guest.isEmpty()) {
+            taken.clear();
+            for (const auto &command : std::as_const(commands)) taken << command.name;
+            for (const QString &slash : std::as_const(m_guestSlashCommands)) {
+                const QString name = slash.mid(1);
+                if (taken.contains(name, Qt::CaseInsensitive)) continue;
+                commands.append({name, QString(), QStringLiteral("%1 · guest").arg(guestDisplayName(m_guest))});
+                guestNames << name;
+            }
+        }
         for (int i = 0; i < commands.size(); ++i) {
             // Name prefix first, then names containing the query; descriptions do not match.
             const QString name = commands[i].name.toLower();
@@ -5339,6 +5389,7 @@ private:
             auto *item = new QListWidgetItem(QStringLiteral("/%1 %2    %3").arg(command.name, command.args, command.description).simplified(), m_slashList);
             item->setData(Qt::UserRole, command.name);
             item->setData(Qt::UserRole + 1, !command.args.isEmpty() && command.args.startsWith('<'));
+            item->setData(Qt::UserRole + 2, guestNames.contains(command.name, Qt::CaseInsensitive));
         }
         m_slashList->setCurrentRow(0);
         if (m_composer) {
@@ -5375,6 +5426,7 @@ private:
         if (!m_slashList || !m_slashList->currentItem()) return;
         const QString name = m_slashList->currentItem()->data(Qt::UserRole).toString();
         const bool needsArgument = m_slashList->currentItem()->data(Qt::UserRole + 1).toBool();
+        const bool guest = m_slashList->currentItem()->data(Qt::UserRole + 2).toBool();
         hideSlashPopup();
         if (!run || needsArgument) {
             m_editor->setPlainText(QStringLiteral("/") + name + ' ');
@@ -5382,6 +5434,10 @@ private:
             return;
         }
         m_editor->clear();
+        if (guest) {
+            submitGuest(QStringLiteral("/") + name, false);
+            return;
+        }
         // An alias name that reached the popup is not a built-in (issue G8DK); a skill is neither.
         if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
                          [&](const auto &c) { return c.name == name; })) {
@@ -6640,7 +6696,7 @@ private:
             // `@path` on its own opens the file (or folder) in a Relay pane.
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
-            if (match.hasMatch()) {
+            if (m_guest.isEmpty() && match.hasMatch()) {
                 const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
                 if (!absolute.isEmpty() && onOpenPath) {
                     m_editor->remember(m_editor->toPlainText().trimmed());
@@ -6660,6 +6716,27 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
+            // `!` remains a terminal line even when the foreground program is a guest. The
+            // key handler has already converted a typed leading bang into shell mode; this arm
+            // covers a pasted spelling, which must not be silently handed to Claude or Codex.
+            if (!m_guest.isEmpty() && m_editor->toPlainText().startsWith(QLatin1Char('!'))) {
+                const QString command = m_editor->toPlainText().mid(1);
+                if (command.trimmed().isEmpty()) {
+                    status(QStringLiteral("Type a terminal command after !."));
+                    return;
+                }
+                m_editor->remember(m_editor->toPlainText());
+                m_editor->clear();
+                submitTerminal(command, false);
+                return;
+            }
+            // Relay's built-ins and aliases above always win. A guest's unknown command is its
+            // own business, though: never let Relay reject a new guest command it has not scanned.
+            if (!m_guest.isEmpty() && m_prefixMode != QStringLiteral("shell")) {
+                submitGuest(m_editor->toPlainText(), true);
+                if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+                return;
+            }
             // A `/command` that is not one of the above never reaches the router: Relay says so
             // itself rather than letting Bash answer with "command not found".
             if (reportUnknownSlashCommand(m_editor->toPlainText())) return;
@@ -8812,6 +8889,41 @@ private:
     }
 
     bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
+    // Relay's rich composer is the foreground guest's input line. We deliberately keep this out
+    // of `program_input`: that tool is for an LLM acting under a per-turn delegation grant, while
+    // this is the user's own composer text. Ctrl+U clears the TUI line, bracketed paste keeps a
+    // multiline prompt literal, and Escape after a slash selection closes the guest menu before
+    // Enter (otherwise Claude/Codex consumes Enter as menu navigation).
+    bool typeIntoGuest(const QString &guest, const QString &text) {
+        if (!m_backend || guest != m_guest || text.trimmed().isEmpty()) {
+            status(QStringLiteral("Guest input was not sent: %1 is no longer ready.").arg(guestDisplayName(guest)));
+            return false;
+        }
+        m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
+        m_backend->sendText(text, true);
+        if (text.trimmed().startsWith(QLatin1Char('/')))
+            m_backend->sendInput(QByteArrayLiteral("\x1b"));  // dismiss its slash popup before Enter
+        m_backend->sendInput(QByteArrayLiteral("\r"));
+        status(QStringLiteral("Sent to %1.").arg(guestDisplayName(guest)));
+        return true;
+    }
+
+    void submitGuest(const QString &text, bool fromEditor) {
+        if (m_guest.isEmpty()) return;
+        if (fromEditor) {
+            m_editor->remember(text);
+            m_editor->clear();
+            hideAtPopup(); hideSlashPopup(); clearAiGhost();
+        }
+        if (m_entries.isEmpty() && !m_activeValid && !m_guestBusy) {
+            typeIntoGuest(m_guest, text);
+            return;
+        }
+        QueueEntry entry;
+        entry.guest = m_guest;
+        entry.text = text;
+        enqueue(entry);
+    }
 
     void enqueue(QueueEntry entry) {
         // A queued item is edited where it stands now (selectQueueEntry / saveQueueEdit), so nothing
@@ -8821,7 +8933,9 @@ private:
         m_selected = -1;
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
         status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
-                           : QStringLiteral("Queued · the command runs when the terminal is free"));
+                           : !entry.guest.isEmpty()
+                               ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
+                               : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -8867,7 +8981,11 @@ private:
         if (queueBlocked() || m_activeValid || m_entries.isEmpty()) return;
         const QueueEntry head = m_entries.first();
         const quint64 selected = selectedEntryId();
-        if (head.agent) {
+        if (!head.guest.isEmpty()) {
+            if (m_guestBusy || head.guest != m_guest) return;
+            m_entries.removeFirst();
+            if (!typeIntoGuest(head.guest, head.text)) m_entries.prepend(head);
+        } else if (head.agent) {
             if (m_agentBusy || !m_configured) return;
             m_entries.removeFirst();
             startAgentEntry(head, true);
@@ -11244,6 +11362,7 @@ private:
     QString m_guestSequence, m_guestModel, m_guestQuestionSeq;
     int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
     bool m_guestBusy = false;
+    QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;
