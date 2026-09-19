@@ -31,7 +31,7 @@
 #include "PaneUsage.h"    // the tab-level sum of the panes' CPU / memory
 #include "SshConfig.h"
 #include "TurnTranscript.h"
-#include "AgentInternalsView.h"   // the agent internals pane beside a terminal (#QT8C)
+#include "AgentInternalsView.h"   // the Activity pane beside a terminal (#QT8C)
 #include "SettingsPane.h"
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
@@ -2763,9 +2763,9 @@ private:
                                 ? QStringLiteral("Fold the agent's reasoning away in this pane")
                                 : QStringLiteral("Unfold the agent's reasoning · the last turn's, between turns"),
                             QStringLiteral("agent.thinkingPanel"), pane && pane->thinkingFoldVisible());
-        items << actionItem(agent, QStringLiteral("Agent internals"),
+        items << actionItem(agent, QStringLiteral("Activity"),
                             pane && pane->internals()
-                                ? QStringLiteral("Bring this pane's agent internals pane forward")
+                                ? QStringLiteral("Bring this pane's Activity pane forward")
                                 : QStringLiteral("Watch the reasoning and the tool calls in a pane beside the terminal"),
                             QStringLiteral("agent.internalsPane"), pane && pane->internals());
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
@@ -3466,7 +3466,7 @@ public:
         updateTitles();
     }
 
-    // ----- the agent internals pane (card #QT8C) ------------------------------------------------
+    // ----- the Activity pane (card #QT8C, named by #4X53) ---------------------------------------
     // One per terminal pane, beside it: the reasoning and the tool calls, live, while the terminal
     // prints neither. Opening it again brings the one that is there forward. Closing it — its ×,
     // Ctrl+W, the tab — hands the rows it took back to the terminal (Pane::detachInternals), and
