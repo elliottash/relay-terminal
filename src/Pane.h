@@ -43,6 +43,8 @@
 #include "RequestsPanel.h"
 #include "Conversations.h"
 #include "SessionInfo.h"
+#include "AgentInternalsView.h"   // the reasoning and the tool calls in a pane beside this one (#QT8C)
+#include "InternalsLedger.h"      // …and what that pane took, for the terminal to print when it closes
 #include "Logging.h"
 #include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "TerminalBackends.h"
@@ -517,6 +519,7 @@ public:
     std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
+    std::function<void()> onOpenInternals;   // the agent internals pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
     // The window's id for the tab this pane is in, and how many terminals it holds, so the share
@@ -2003,6 +2006,11 @@ public:
             }
             if (url.host() == QStringLiteral("turn") && parts.size() == 2 && onOpenTurn) {
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
+                return;
+            }
+            // The reasoning fold's "open in pane": the internals pane, on that turn's block (#QT8C).
+            if (url.host() == QStringLiteral("internals") && parts.size() == 2) {
+                openInternalsPane(QUrl::fromPercentEncoding(parts.at(1).toUtf8()), fromMouse);
                 return;
             }
             // A tool-call line whose click is not a fold: the file, the diff pane, the subagent or
@@ -3850,6 +3858,7 @@ private:
             // A fold asked for a call the worker no longer has ("Unknown turn_id (only the last 50
             // turns are kept)"): the fold says so, in one row, rather than staying empty (#TK9C).
             if (handleFoldError(id, event.value(QStringLiteral("text")).toString())) return true;
+            if (handleInternalsError(id, event.value(QStringLiteral("text")).toString())) return true;
             // A local-model save that found nothing to detect (card #24XJ): the Settings pane's
             // section says so under the row that asked, never in the transcript.
             if (id.startsWith(QStringLiteral("lm-"))) {
@@ -3884,8 +3893,10 @@ private:
             QString &buffer = m_turnThinking[turn];
             if (buffer.size() < 200000) buffer += event.value(QStringLiteral("text")).toString();
             m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail
-            // "never" keeps the buffer (the turn pane still shows it) but draws nothing.
-            if (thinkingDisplay() != QLatin1String("never")) thinkingDelta(turn);
+            // "never" keeps the buffer (the turn pane still shows it) but draws nothing. With the
+            // internals pane open the block goes there and nothing is drawn here (#QT8C).
+            if (m_internals) internalsThinking(turn, false, 0);
+            else if (thinkingDisplay() != QLatin1String("never")) thinkingDelta(turn);
             pushThinkingToTurnPane(turn);   // a turn pane open on this turn follows the stream
             return true;
         }
@@ -3893,6 +3904,10 @@ private:
             const qint64 ms = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
             // The block is whole now: an open turn pane gets all of it, whatever was drawn here.
             pushThinkingToTurnPane(event.value(QStringLiteral("turn_id")).toString(), true);
+            if (m_internals && m_thinkingAnchor.isEmpty()) {
+                internalsThinking(event.value(QStringLiteral("turn_id")).toString(), true, ms);
+                return true;
+            }
             // A stream that stopped mid-reasoning reports {elapsed_ms: 0, chars: 0}: the fold still
             // gets what arrived, and its row says the stream stopped rather than lying with a time.
             if (!m_thinkingAnchor.isEmpty()) { finishThinkingFold(ms); return true; }
@@ -3939,6 +3954,7 @@ private:
         // is the request id: a `fold-` reply fills a fold in the terminal and opens no pane at all.
         if (type == QStringLiteral("tool_output") && event.value(QStringLiteral("stored")).toBool()) {
             if (handleFoldReply(event)) return true;
+            if (handleInternalsReply(event)) return true;   // a row in the internals pane asked (#QT8C)
             const QString turn = m_turnOutputRequests.take(event.value(QStringLiteral("id")).toString());
             if (!turn.isEmpty()) {
                 if (auto view = m_turnViews.value(turn)) { view->setToolOutput(event); return true; }
@@ -4096,8 +4112,10 @@ private:
         relay::calllines::FoldOptions options;
         options.maxLines = tail ? relay::calllines::kThinkingStreamRows : relay::calllines::kThinkingDoneRows;
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
+        // "open in pane" is the internals pane (#QT8C), which shows this turn's whole reasoning
+        // and follows the stream; the turn pane stays what the ✦ N tool calls line opens.
         if (ref.valid)
-            options.openInPane = QStringLiteral("relay://turn/%1/%2")
+            options.openInPane = QStringLiteral("relay://internals/%1/%2")
                                      .arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(ref.turn)));
         QString text = m_turnThinking.value(ref.valid ? ref.turn : QString());
         // Six rows of a stream need nothing like the whole buffer re-rendered four times a second;
@@ -4115,7 +4133,7 @@ private:
     // otherwise, and rewrite the anchor row in place so the transcript's one line per event
     // holds. Runs even for a stream that stopped mid-reasoning ({chars: 0}): what arrived is
     // still worth a fold, and the row says the stream stopped rather than lying with a time.
-    void finishThinkingFold(qint64 ms) {
+    void finishThinkingFold(qint64 ms, const QString &settledLabel = QString()) {
         const QString uri = m_thinkingAnchor;
         m_thinkingAnchor.clear();
         m_lastThinkingAnchor = uri;   // Alt+R reopens this one until the next block replaces it
@@ -4129,7 +4147,7 @@ private:
         const bool keepOpen = m_thinkingUserToggled ? openNow : thinkingDisplay() == QLatin1String("always");
         m_backend->setFoldExpanded(uri, keepOpen);
         m_thinkingFoldOpen = keepOpen;
-        rewriteThinkingAnchor(uri, ms);
+        rewriteThinkingAnchor(uri, ms, settledLabel);
         m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail settled
     }
 
@@ -4138,20 +4156,273 @@ private:
     // does not count — has printed since), so one row up, erase, redraw, and back. Guards for
     // every way that stops being true: the shell redrew its line over the anchor, or output
     // pushed the anchor into history.
-    void rewriteThinkingAnchor(const QString &uri, qint64 ms) {
+    void rewriteThinkingAnchor(const QString &uri, qint64 ms, const QString &settledLabel = QString()) {
         if (!m_backend || !m_inlineOpen || !m_atLineStart) return;
         const QPoint cursor = m_backend->cursorPosition();
         if (cursor.x() != 0 || cursor.y() < 1) return;
         const QStringList rows = m_backend->screenText().split('\n');
         if (cursor.y() >= rows.size() || !rows.at(cursor.y()).isEmpty()) return;
         if (!rows.at(cursor.y() - 1).contains(QStringLiteral("✦ thinking"))) return;
-        const QString label = ms > 0
-            ? QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000))
-            : QStringLiteral("✦ thinking stopped");
+        const QString label = !settledLabel.isEmpty() ? settledLabel
+            : ms > 0 ? QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000))
+                     : QStringLiteral("✦ thinking stopped");
         QByteArray out = takeWrapped() + "\x1b[A\r\x1b[2K";
         out += "\x1b]8;;" + uri.toUtf8() + "\x1b\\";
         out += inkCode(Ink::Note) + QByteArray("▸ ") + sanitize(label).toUtf8() + "\x1b[0m";
         out += "\x1b]8;;\x1b\\\r\n";
+        writeTerminal(out);
+    }
+
+    // ----- the agent internals pane (card #QT8C) ------------------------------------------------
+    //
+    // A ToolPane beside this one (RelayWindow::openInternalsPane) holds the reasoning and the tool
+    // calls, live, interleaved as they happen. While it is attached this pane prints neither: the
+    // thinking events and the tool events go to the view, and every row the terminal would have
+    // drawn goes to the ledger (src/InternalsLedger.h) instead, so that when the pane closes the
+    // terminal gets them back — the owner: "i did mean that the hidden rows should be reprinted on
+    // close". The records a fold needs (rememberCall, m_turnThinking, m_thinkingBlocks) are kept
+    // exactly as for a live row, so a reprinted row unfolds like one that was printed live.
+public:
+    relay::AgentInternalsView *internals() const { return m_internals; }
+
+    // The window made the view and its pane; from here on the events go there. A block streaming
+    // into the grid right now settles with a row that says where the rest went, and the view gets
+    // the block so far and follows it from here.
+    void attachInternals(relay::AgentInternalsView *view) {
+        if (!view || m_internals == view) return;
+        m_internals = view;
+        m_internalsTurn.clear();
+        m_internalsBlockKey.clear();
+        m_internalsBlockInline = false;
+        m_internalsPushAt.invalidate();
+        m_internalsRun.clear(); m_internalsMembers.clear(); m_internalsFirstCall.clear();
+        endCallRun();   // a held run of reads in the grid ends where it is; the pane draws the rest
+        if (thinkingDisplay() == QLatin1String("never"))
+            view->note(QStringLiteral("Reasoning display is off (Options › General) · this pane shows the tool calls only"));
+        if (!m_thinkingAnchor.isEmpty()) {
+            const relay::calllines::Ref ref = relay::calllines::parseUri(m_thinkingAnchor);
+            finishThinkingFold(0, QStringLiteral("✦ thinking moved to the internals pane"));
+            if (ref.valid) {
+                internalsBeginTurn(ref.turn);    // the rule first, the block under it
+                m_internalsBlockKey = ref.call;
+                m_internalsBlockTurn = ref.turn;
+                m_internalsBlockInline = true;   // its row is in the grid already: not reprinted on close
+                internalsThinking(ref.turn, false, 0, true);
+            }
+        }
+    }
+
+    // The pane closed: from now on the terminal draws its own rows again, and first it gets the
+    // ones the pane took. A pane closing because this pane is closing never gets here — the guard
+    // the window holds on this pane is null by then — so nothing is reprinted into a dying pane.
+    void detachInternals(relay::AgentInternalsView *view) {
+        if (view && m_internals && m_internals != view) return;
+        m_internals = nullptr;
+        m_internalsBlockKey.clear();
+        m_internalsBlockInline = false;
+        m_internalsRun.clear(); m_internalsMembers.clear(); m_internalsFirstCall.clear();
+        if (m_internalsLedger.isEmpty()) return;
+        if (inlineReady()) reprintHiddenRows();
+        else m_internalsReprintPending = true;   // flushInline() prints them when the screen is back
+    }
+
+    // Open (or bring forward) this pane's internals pane. `turn` is the reasoning fold's "open in
+    // pane" link: the view is put on that turn's block, seeded with the turn's whole reasoning when
+    // the block streamed before the pane existed, so the link always lands on something.
+    void openInternalsPane(const QString &turn = QString(), bool fromMouse = false) {
+        if (!onOpenInternals) return;
+        onOpenInternals();
+        if (m_internals && !turn.isEmpty()) {
+            if (!m_internals->hasThinking(turn) && !m_turnThinking.value(turn).isEmpty())
+                m_internals->setThinking(turn, QStringLiteral("earlier-") + turn, m_turnThinking.value(turn), true, -1);
+            m_internals->showThinking(turn);
+        }
+        if (fromMouse) {
+            const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.internalsPane"));
+            if (!key.isEmpty())
+                hint(QStringLiteral("internals.open"),
+                     relay::ShortcutHints::nextTime(key, QStringLiteral("opens the agent internals pane")));
+        }
+    }
+
+private:
+    // The first event of a turn in the pane: its rule, with the request the turn started from.
+    void internalsBeginTurn(const QString &turn) {
+        if (!m_internals || turn.isEmpty() || turn == m_internalsTurn) return;
+        m_internalsTurn = turn;
+        m_internalsLedger.setRequest(turn, m_currentRequest);
+        m_internals->beginTurn(turn, m_currentRequest);
+        m_internalsRun.clear(); m_internalsMembers.clear(); m_internalsFirstCall.clear();
+    }
+
+    // One reasoning block into the view, keyed as its fold anchor would be (thinking, thinking-2,
+    // …) so the ledger's row unfolds from m_turnThinking exactly as a live one does. Re-rendering
+    // the block as Markdown per delta would burn the CPU on a long stream: the view is refreshed
+    // at the fold's own 4 Hz, and once more, whole, when the block ends.
+    void internalsThinking(const QString &turn, bool done, qint64 ms, bool force = false) {
+        if (!m_internals || turn.isEmpty()) return;
+        if (m_internalsBlockKey.isEmpty() || m_internalsBlockTurn != turn) {
+            const int block = ++m_thinkingBlocks[turn];
+            m_internalsBlockKey = block <= 1 ? QStringLiteral("thinking") : QStringLiteral("thinking-%1").arg(block);
+            m_internalsBlockTurn = turn;
+            m_internalsBlockInline = false;
+            internalsBeginTurn(turn);
+        }
+        if (!done && !force && m_internalsPushAt.isValid() && m_internalsPushAt.elapsed() < 250) {
+            if (!m_internalsFlushPending) {   // the tail of a burst still gets drawn
+                m_internalsFlushPending = true;
+                QTimer::singleShot(250, this, [this, turn] {
+                    m_internalsFlushPending = false;
+                    if (m_internals && !m_internalsBlockKey.isEmpty() && m_internalsBlockTurn == turn)
+                        internalsThinking(turn, false, 0, true);
+                });
+            }
+            return;
+        }
+        m_internalsPushAt.restart();
+        m_internals->setThinking(turn, m_internalsBlockKey, m_turnThinking.value(turn), done, ms);
+        if (!done) return;
+        if (!m_internalsBlockInline) {
+            relay::internals::HiddenRow row;
+            row.kind = relay::internals::HiddenRow::Kind::Thinking;
+            row.anchor = relay::calllines::foldUri(m_token, turn, m_internalsBlockKey);
+            row.title = ms > 0 ? QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000))
+                               : QStringLiteral("✦ thinking stopped");
+            m_internalsLedger.add(turn, row);
+        }
+        m_internalsBlockKey.clear();
+        m_internalsBlockInline = false;
+        m_internalsPushAt.invalidate();
+    }
+
+    void internalsToolStarted(const QJsonObject &event) {
+        internalsBeginTurn(event.value(QStringLiteral("turn_id")).toString());
+        if (m_internals) m_internals->toolStarted(event);
+    }
+
+    void internalsToolOutput(const QString &text) {
+        if (m_internals) m_internals->toolOutput(text);
+    }
+
+    // The pane's settled row, and the ledger's: the same row the terminal would have drawn, with
+    // the record its fold will need, exactly as the live tool_result path keeps it. A run of reads
+    // is one row that grows, anchored to its first call, and the ledger rewrites it in place.
+    void internalsToolResult(const QJsonObject &event, const QString &call, const QString &turn,
+                             const relay::toollabel::Label &label, const QString &diff) {
+        internalsBeginTurn(turn);
+        if (m_internals) m_internals->toolResult(event);
+        const bool mergeable = label.hasMerge && !label.failed();
+        const bool joins = mergeable && m_internalsRun.active() && m_internalsRun.accepts(label);
+        if (!joins) { m_internalsRun.clear(); m_internalsMembers.clear(); m_internalsFirstCall = call; }
+        if (mergeable) {
+            m_internalsRun.add(label);
+            QString path = label.path;
+            if (!path.isEmpty() && !path.startsWith(QLatin1Char('/'))) path = QDir(m_workspace).filePath(path);
+            m_internalsMembers.append({label.line(), path, call});
+        }
+        const bool merged = m_internalsRun.count() > 1;
+        const int cells = callLineCells();
+        const relay::calllines::Row row = merged ? relay::calllines::mergedRow(m_internalsRun, cells)
+                                                 : relay::calllines::finishedRow(label, cells);
+        relay::calllines::Step step;
+        step.callId = merged ? m_internalsFirstCall : call;
+        step.extra = merged ? m_internalsRun.count() : 0;
+        step.merged = merged;
+        const QString anchor = callAnchor(step, turn, label);
+        CallRecord record;
+        record.turnId = turn;
+        record.label = label;
+        record.diff = diff;
+        record.merged = merged;
+        if (merged) { record.members = m_internalsMembers; for (const auto &member : m_internalsMembers) record.callIds << member.call; }
+        else record.callIds << call;
+        rememberCall(anchor, record);
+        relay::internals::HiddenRow hidden;
+        hidden.kind = relay::internals::HiddenRow::Kind::Call;
+        hidden.anchor = anchor;
+        hidden.title = row.title;
+        hidden.rest = row.rest;
+        hidden.failed = row.failed;
+        m_internalsLedger.add(turn, hidden, merged);
+    }
+
+    // A row in the pane was clicked: the same tool_output_get round trip the terminal's folds use,
+    // under an `int-` id so the reply goes back to the pane and opens nothing else.
+public:
+    void requestInternalsOutput(const QString &turn, const QString &callId) {
+        if (!m_workerReady || turn.isEmpty() || callId.isEmpty()) {
+            if (m_internals)
+                m_internals->setToolOutputError(callId, QStringLiteral("That call's detail is not available in this pane any more."));
+            return;
+        }
+        const QString id = QStringLiteral("int-") + QString::number(++m_requestId);
+        m_internalsAsked.insert(id, callId);
+        while (m_internalsAsked.size() > 64) m_internalsAsked.erase(m_internalsAsked.begin());
+        send({{"type", "tool_output_get"}, {"id", id}, {"turn_id", turn}, {"call_id", callId}});
+    }
+private:
+    bool handleInternalsReply(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        if (!id.startsWith(QStringLiteral("int-"))) return false;
+        m_internalsAsked.remove(id);
+        if (m_internals) m_internals->setToolOutput(event);
+        return true;
+    }
+    bool handleInternalsError(const QString &id, const QString &text) {
+        if (!id.startsWith(QStringLiteral("int-"))) return false;
+        const QString callId = m_internalsAsked.take(id);
+        if (m_internals) m_internals->setToolOutputError(callId, text);
+        return true;
+    }
+
+    // What the pane took, back into the terminal: at the cursor, so below whatever printed while
+    // the pane was open, and therefore grouped per turn under a muted rule carrying that turn's
+    // request — the block reads as "what the agent did for this", not as new activity. Each row is
+    // settled and collapsed with its live anchor, so a click unfolds it. A turn still running gets
+    // its rows so far; the live rows then continue under them. Only when Relay may write to the
+    // screen: otherwise it waits (flushInline) rather than being dropped.
+    void reprintHiddenRows() {
+        if (!inlineReady()) { m_internalsReprintPending = true; return; }
+        m_internalsReprintPending = false;
+        int dropped = 0;
+        const QVector<relay::internals::HiddenTurn> turns = m_internalsLedger.take(&dropped);
+        if (turns.isEmpty() && dropped == 0) return;
+        endCallRun();
+        ensureLineStart();
+        if (dropped > 0)
+            printInline(QStringLiteral("… %1 earlier turn%2 went to the internals pane\n")
+                            .arg(dropped).arg(dropped == 1 ? QString() : QStringLiteral("s")), Ink::Note);
+        for (const relay::internals::HiddenTurn &turn : turns) {
+            const QString request = turn.request.section(QLatin1Char('\n'), 0, 0).trimmed().left(120);
+            // The gap belongs *above* the rule, not between the rule and the rows it introduces
+            // (#5AWD): the separator and its rows are one block.
+            beginBlock(relay::gaps::Block::Header);
+            printInline(QStringLiteral("── %1 ──\n").arg(request.isEmpty() ? QStringLiteral("agent turn") : request), Ink::Note);
+            for (const relay::internals::HiddenRow &row : turn.rows) {
+                const bool thinking = row.kind == relay::internals::HiddenRow::Kind::Thinking;
+                printAnchoredRow(row.anchor, row.title, row.rest, thinking ? Ink::Note : row.failed ? Ink::Error : Ink::Tool);
+                if (thinking) m_lastThinkingAnchor = row.anchor;   // Alt+R reopens the last one
+            }
+        }
+        if (!m_agentBusy && !moreTurnsPending()) closeInline();
+    }
+
+    // One settled, collapsed row with its anchor, the way drawCallRow draws a finished row: the
+    // reprinted rows of the internals pane, in the ink each would have had live. (Ink is defined
+    // further down the class; a parameter type needs it declared first.)
+    enum class Ink;
+    void printAnchoredRow(const QString &anchor, const QString &title, const QString &rest, Ink ink) {
+        // A reprinted reasoning row is the agent's own block; a call row sits with the tool rows
+        // (#5AWD). Both follow the rule above them, which is a Header, so neither opens a gap.
+        beginBlock(ink == Ink::Note ? relay::gaps::Block::Agent : relay::gaps::Block::Call);
+        QByteArray out = takeWrapped();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (!m_atLineStart) out += "\r\n";
+        out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\";
+        out += inkCode(ink) + QByteArray("▸ ") + sanitize(title).toUtf8() + "\x1b[0m";
+        if (!rest.isEmpty()) out += inkCode(Ink::Note) + sanitize(rest).toUtf8() + "\x1b[0m";
+        out += "\x1b]8;;\x1b\\\r\n";
+        m_atLineStart = true;
         writeTerminal(out);
     }
 
@@ -8519,6 +8790,7 @@ private:
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
             const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
             m_fixAwaitingAgent = prompt.fix;
+            m_currentRequest = prompt.text;   // the internals pane names the turn by it (#QT8C)
             // Wrong-mode hints: the shell command this turn was submitted with, if any, so a
             // failing run_command of the same text can suggest the terminal (see tool_result).
             m_turnShellPrompt = prompt.shellText;
@@ -8589,7 +8861,8 @@ private:
             const QString text = event.value(QStringLiteral("text")).toString();
             m_toolLines += text.count('\n');
             m_toolPartialLine = !text.isEmpty() && !text.endsWith('\n');
-            if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
+            if (m_internals) internalsToolOutput(text);   // the row lives in the internals pane (#QT8C)
+            else if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
             else if (!m_liveCall.isEmpty() && shellIdleAtPrompt()) {
                 // The running row counts what the command has printed. Throttled to about ten
                 // rewrites a second: a build that prints a thousand lines must not repaint a row a
@@ -8629,8 +8902,10 @@ private:
                 tickTurnClock();
             }
             // Deferred while a program owns the terminal: a pending line can only be replayed in
-            // its final form, so nothing is drawn until the result arrives.
-            if (shellIdleAtPrompt()) {
+            // its final form, so nothing is drawn until the result arrives. With the internals
+            // pane open the row is drawn there instead, and nothing here (#QT8C).
+            if (m_internals) internalsToolStarted(event);
+            else if (shellIdleAtPrompt()) {
                 m_callCursor.setCells(callLineCells());
                 beginBlock(relay::gaps::Block::Call);   // a blank line after prose, none inside a run (#5AWD)
                 const relay::calllines::Step step = m_callCursor.start(call, label);
@@ -8664,7 +8939,9 @@ private:
                 refreshBackgroundWait();
                 tickTurnClock();
             }
-            if (!shellIdleAtPrompt()) {
+            if (m_internals) {
+                internalsToolResult(event, call, turn, label, diff);   // the pane's row, and the ledger's (#QT8C)
+            } else if (!shellIdleAtPrompt()) {
                 // Deferred: the finished line, as plain text. It carries no anchor, because a line
                 // replayed by flushInline() cannot be rewritten and nothing would fold under it.
                 ensureLineStart();
@@ -10891,6 +11168,8 @@ private:
     }
 
     void flushInline() {
+        // The internals pane closed while a program owned the screen: its rows waited for this.
+        if (m_internalsReprintPending && inlineReady()) reprintHiddenRows();
         if (m_inlinePending.isEmpty() || !inlineReady()) return;
         const auto pending = m_inlinePending;
         m_inlinePending.clear();
@@ -14231,6 +14510,15 @@ private:
     bool m_thinkingFoldOpen = false, m_thinkingUserToggled = false, m_thinkingFlushPending = false;
     QHash<QString, int> m_thinkingBlocks;
     QElapsedTimer m_thinkingPushAt;   // last push of the reasoning into an open turn pane (#K48R)
+    // The agent internals pane (#QT8C): the view while one is open, and the rows it took.
+    QPointer<relay::AgentInternalsView> m_internals;
+    relay::internals::Ledger m_internalsLedger;
+    QString m_internalsTurn, m_internalsBlockKey, m_internalsBlockTurn, m_internalsFirstCall, m_currentRequest;
+    relay::toollabel::MergeRun m_internalsRun;
+    QVector<relay::calllines::RunMember> m_internalsMembers;
+    QHash<QString, QString> m_internalsAsked;   // `int-` request id → call id, for the error path
+    QElapsedTimer m_internalsPushAt;
+    bool m_internalsReprintPending = false, m_internalsBlockInline = false, m_internalsFlushPending = false;
     bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline

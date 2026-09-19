@@ -31,6 +31,7 @@
 #include "PaneUsage.h"    // the tab-level sum of the panes' CPU / memory
 #include "SshConfig.h"
 #include "TurnTranscript.h"
+#include "AgentInternalsView.h"   // the agent internals pane beside a terminal (#QT8C)
 #include "SettingsPane.h"
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
@@ -1139,6 +1140,7 @@ private:
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
         else if (id == QStringLiteral("agent.requests")) pane->toggleRequests();
         else if (id == QStringLiteral("agent.thinkingPanel")) pane->toggleThinkingPanel();
+        else if (id == QStringLiteral("agent.internalsPane")) openInternalsPane(pane);
         else if (id == QStringLiteral("agent.continue")) pane->continueTurn(Keymap::instance().shortcutText(id).isEmpty());
         else if (id == QStringLiteral("agent.instructions")) pane->openInstructions();
         else if (id == QStringLiteral("agent.export")) pane->exportConversation();
@@ -2695,6 +2697,11 @@ private:
                                 ? QStringLiteral("Fold the agent's reasoning away in this pane")
                                 : QStringLiteral("Unfold the agent's reasoning · the last turn's, between turns"),
                             QStringLiteral("agent.thinkingPanel"), pane && pane->thinkingFoldVisible());
+        items << actionItem(agent, QStringLiteral("Agent internals"),
+                            pane && pane->internals()
+                                ? QStringLiteral("Bring this pane's agent internals pane forward")
+                                : QStringLiteral("Watch the reasoning and the tool calls in a pane beside the terminal"),
+                            QStringLiteral("agent.internalsPane"), pane && pane->internals());
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
@@ -3391,6 +3398,81 @@ public:
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
+    }
+
+    // ----- the agent internals pane (card #QT8C) ------------------------------------------------
+    // One per terminal pane, beside it: the reasoning and the tool calls, live, while the terminal
+    // prints neither. Opening it again brings the one that is there forward. Closing it — its ×,
+    // Ctrl+W, the tab — hands the rows it took back to the terminal (Pane::detachInternals), and
+    // closing the owner takes it along with nothing reprinted.
+    ToolPane *internalsPaneOf(Pane *owner) const {
+        QWidget *page = pageOf(owner);
+        if (!page) return nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Internals
+                && tool->property("internalsOwnerPane").value<QObject *>() == owner)
+                return tool;
+        return nullptr;
+    }
+
+    void openInternalsPane(Pane *owner) {
+        if (!owner) return;
+        ToolPane *tool = internalsPaneOf(owner);
+        if (!tool) {
+            tool = createInternalsPane(owner->cwd());
+            linkInternalsPane(tool, owner);
+            // Beside the owner; below it when the owner is too narrow to share its width.
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
+    ToolPane *createInternalsPane(const QString &cwd) {
+        auto *view = new relay::AgentInternalsView;
+        auto *tool = new ToolPane(ToolPane::Kind::Internals, view, view, cwd);
+        tool->setProperty("paneType", QStringLiteral("internals"));   // pane-type header colours
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        return tool;
+    }
+
+    void linkInternalsPane(ToolPane *tool, Pane *owner) {
+        auto *view = tool ? dynamic_cast<relay::AgentInternalsView *>(tool->hosted()) : nullptr;
+        if (!view || !owner) return;
+        tool->setProperty("internalsOwnerPane", QVariant::fromValue<QObject *>(owner));
+        tool->setProperty("internalsOwner", owner->scrollbackId());   // the saved layout's key
+        QPointer<Pane> ownerGuard(owner);
+        QPointer<ToolPane> guard(tool);
+        view->onOpenOutput = [ownerGuard](const QString &turn, const QString &callId) {
+            if (ownerGuard) ownerGuard->requestInternalsOutput(turn, callId);
+        };
+        view->onOpenDiff = [ownerGuard](const QString &title, const QString &diff) {
+            if (auto *w = windowOf(ownerGuard)) w->openDiffPane(ownerGuard, title, diff);
+        };
+        // The view going — the pane closed any way at all — is what hands the rows back. The
+        // owner is the context, so when the owner goes first the connection goes with it and a
+        // dying pane is reprinted into by nobody.
+        connect(view, &QObject::destroyed, owner, [ownerGuard, view] { if (ownerGuard) ownerGuard->detachInternals(view); });
+        connect(owner, &QObject::destroyed, tool, [guard] {
+            if (guard) QTimer::singleShot(0, guard.data(), [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
+        });
+        owner->attachInternals(view);
+    }
+
+    // A saved internals pane comes back beside the pane it belonged to (buildNode), once the
+    // layout is built; with no such pane, the first terminal of its tab, and with none, it goes.
+    void linkRestoredInternalsPane(ToolPane *tool, const QString &ownerKey) {
+        if (!tool) return;
+        QWidget *page = pageOf(tool);
+        const auto panes = page ? panesIn(page) : QList<Pane *>();
+        Pane *owner = nullptr;
+        for (Pane *pane : panes)
+            if (!ownerKey.isEmpty() && pane->scrollbackId() == ownerKey) owner = pane;
+        if (!owner && !panes.isEmpty()) owner = panes.first();
+        if (!owner || internalsPaneOf(owner)) { closePane(tool, false); return; }
+        linkInternalsPane(tool, owner);
     }
 
     // One unified diff, in a pane beside the terminal: what a write or an edit of more than 12
@@ -4566,6 +4648,7 @@ private:
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
+        pane->onOpenInternals = [guard] { if (auto *w = windowOf(guard)) w->openInternalsPane(guard); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
         pane->onShareTab = [guard](int *panes) {
@@ -4649,6 +4732,14 @@ private:
             const QString fallback = relay::windowstate::resolveDirectory(
                 workspace, m_manager->workspace(), QDir::homePath());
             return createPane({{"cwd", fallback}, {"workspace", fallback}});
+        }
+        if (node.contains(QStringLiteral("internals"))) {   // card #QT8C: empty until the next event, beside its owner
+            const QJsonObject saved = node.value(QStringLiteral("internals")).toObject();
+            ToolPane *tool = createInternalsPane(saved.value(QStringLiteral("cwd")).toString());
+            QPointer<ToolPane> guard(tool);
+            const QString owner = saved.value(QStringLiteral("owner")).toString();
+            QTimer::singleShot(0, tool, [guard, owner] { if (auto *w = windowOf(guard)) w->linkRestoredInternalsPane(guard, owner); });
+            return tool;
         }
         if (node.contains(QStringLiteral("subagents"))) {   // card #WD83: the tabs' text, then its owner
             const QJsonObject saved = node.value(QStringLiteral("subagents")).toObject();

@@ -392,6 +392,16 @@ target_include_directories(relay-calllines PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(relay-calllines PUBLIC relay-toollabel relay-diffview relay-markdown)
 target_compile_options(relay-calllines PRIVATE -Wall -Wextra -Wpedantic)
 
+# The agent internals pane (card #QT8C): the view that holds one terminal pane's reasoning and tool
+# calls, and the ledger of the rows it took from the terminal while it was open. The ledger is pure
+# QtCore; the view draws relay::calllines' own fold rows, so a section the folds learn to draw
+# appears in the pane without this knowing about it. Both are tested without a window.
+add_library(relay-internals STATIC src/InternalsLedger.cpp src/InternalsLedger.h
+    src/AgentInternalsView.cpp src/AgentInternalsView.h)
+target_include_directories(relay-internals PUBLIC src)
+target_link_libraries(relay-internals PUBLIC relay-calllines relay-highlight ${RELAY_QT}::Widgets)
+target_compile_options(relay-internals PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 # relay-calllines for the one status-glyph table the fold and this panel share (card #BDXG).
@@ -452,6 +462,7 @@ if(RELAY_BUILD_APP)
         COMMENT "Numbering this build of relay" VERBATIM)
     install(FILES $<TARGET_FILE_DIR:relay>/relay.build-id DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
+    target_link_libraries(relay PRIVATE relay-internals)   # the agent internals pane (#QT8C)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
@@ -726,6 +737,15 @@ if(BUILD_TESTING)
     target_link_libraries(relay-diffview-tests PRIVATE relay-diffview ${RELAY_QT}::Test)
     add_test(NAME diffview COMMAND relay-diffview-tests)
     set_tests_properties(diffview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The agent internals pane (card #QT8C): the ledger of rows it took from the terminal, and the
+    # view itself. Both are part of the application; the tests compile them directly.
+    add_executable(relay-internalsledger-tests tests/internalsledger_test.cpp)
+    target_link_libraries(relay-internalsledger-tests PRIVATE relay-internals ${RELAY_QT}::Test)
+    add_test(NAME internalsledger COMMAND relay-internalsledger-tests)
+    add_executable(relay-agentinternals-tests tests/agentinternals_test.cpp)
+    target_link_libraries(relay-agentinternals-tests PRIVATE relay-internals ${RELAY_QT}::Test)
+    add_test(NAME agentinternals COMMAND relay-agentinternals-tests)
+    set_tests_properties(agentinternals PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-toollabel-tests tests/toollabel_test.cpp)
     target_link_libraries(relay-toollabel-tests PRIVATE relay-toollabel ${RELAY_QT}::Test)
     add_test(NAME toollabel COMMAND relay-toollabel-tests)

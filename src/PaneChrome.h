@@ -404,7 +404,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -517,6 +517,10 @@ public:
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()}}}};
         if (m_subagent) return m_subagent->node();
+        // The agent internals pane (card #QT8C) comes back open beside its owner, empty until the
+        // next event; `owner` is the owner's scrollback id, the key the subagent pane uses too.
+        if (m_kind == Kind::Internals)
+            return {{"internals", QJsonObject{{"cwd", m_subagentCwd}, {"owner", property("internalsOwner").toString()}}}};
         if (m_turn || m_diff || m_settingsView || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
@@ -545,6 +549,7 @@ public:
             return m_settingsView && m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("actions") : QStringLiteral("options");
         case Kind::Subagent: return QStringLiteral("subagent");
         case Kind::Turn: return QStringLiteral("turn");
+        case Kind::Internals: return QStringLiteral("internals");
         case Kind::Explorer: return QStringLiteral("explorer");
         case Kind::Preview: return QStringLiteral("preview");
         case Kind::Plan: return QStringLiteral("plan");

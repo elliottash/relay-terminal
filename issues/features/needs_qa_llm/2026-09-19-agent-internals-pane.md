@@ -1,17 +1,18 @@
 ---
 id: QT8C
 type: work
-status: ready
+status: needs-qa-llm
 labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent
 assignee: agent
+implemented_by: Claude Opus 5 subagent and Claude Fable 5.1 fork (Claude Code session), 2026-09-19
 rank: zzzzzzz
 created: '2026-09-19'
 acceptance: an agent internals pane opens beside a terminal pane as an ordinary splitter leaf, streams that pane's reasoning and tool calls live and in order across turns, the terminal prints neither while it is open, and when it is closed the rows it hid are reprinted into the terminal in order and later ones print inline again, and it has a keymap action, a palette entry and a shortcut hint
 source: 'issues/feature_intake.txt, 2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [T8CN, K48R, BDXG, 9K5H], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-agent-internals-pane/], related: [T8CN, K48R, BDXG, 9K5H], github: null}
 ---
 # An agent internals pane: watch the thinking and the tool calls beside the terminal
 
@@ -75,6 +76,35 @@ links: {plans: [], commits: [], evidence: [], related: [T8CN, K48R, BDXG, 9K5H],
 - Shortcut hint (standing rule): opening it from the link or the palette shows
   "Next time: <agent.internalsPane key>".
 - Session restore: the pane is restored as open beside its owner, empty until the next event.
+
+## As built (2026-09-19)
+
+- `src/AgentInternalsView.{h,cpp}` — the view (`relay::AgentInternalsView`, a `relay::PaneView`
+  hosted by `ToolPane(Kind::Internals)`, pane type `internals`): rule per turn, reasoning blocks
+  rewritten in place while they stream, one row per tool call (running → settled, runs merged),
+  folds through `tool_output_get` with `int-` ids, big diffs to the diff pane, pinned to the bottom
+  with End re-pinning. `tests/agentinternals_test.cpp` (11 tests).
+- `src/InternalsLedger.{h,cpp}` — what the pane took, per turn, for the reprint: order, the run
+  rewrite rule, hand over once, the 50-turn bound with the dropped count.
+  `tests/internalsledger_test.cpp` (8 tests).
+- `src/Pane.h` — `attachInternals` / `detachInternals` / `openInternalsPane`, the event routing
+  (`thinking_delta`, `thinking_done`, `tool_started`, `tool_output`, `tool_result` go to the view
+  and the ledger while a pane is attached), `reprintHiddenRows()` and `printAnchoredRow()`, the
+  `int-` reply and error paths, the reasoning fold's "open in pane" now `relay://internals/…`,
+  the mid-block hand-over (`finishThinkingFold` takes the settled label), the reprint deferred
+  through `flushInline()` while a program owns the screen.
+- `src/RelayWindow.h` — `openInternalsPane` / `createInternalsPane` / `linkInternalsPane` /
+  `linkRestoredInternalsPane`, the `agent.internalsPane` dispatch, the palette row, the
+  `{"internals": {cwd, owner}}` layout node. `src/PaneChrome.h` — `Kind::Internals` and its node;
+  `src/PaneStatus.cpp` — the pane type's band label; `src/Keymap.h` — **Alt+Shift+R** (Alt+R's
+  shifted neighbour; no preset binds it).
+- Shortcut hint `internals.open` on the link and palette paths ("Next time: Alt+Shift+R …").
+- Decisions taken here, inside the card's letter: the pane's header line says what closing it will
+  do to the terminal; a block that streamed before the pane existed is seeded into the view when
+  the fold's link opens it, under "✦ reasoning so far in this turn", so the link always lands on
+  something; the in-progress block at close time is not in the ledger (its row is written when
+  the block ends), so closing mid-reasoning reprints the rows before it and the fresh inline fold
+  then shows the whole block; `agent/thinking_display=never` is said once in the pane.
 
 ## Not in this card
 

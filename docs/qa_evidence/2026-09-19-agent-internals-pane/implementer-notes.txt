@@ -1,0 +1,664 @@
+--- open-empty (terminal, left half)
+re EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+--- open-empty (right half)
+rr ae ne
++ Agent internals
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- open-stream (terminal, left half)
+ee EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+Model is reasoning...
+Relaying thinking... - 3s - step 1/256 - Esc stops |
+--- open-stream (right half)
+i ae re
++ Agent internals
+1 turn - 0 tool calls - the terminal prints these again when you close this pane
+— please check the stable —
++ thinking...
+
+What the ask needs
+
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+--- open-tools (terminal, left half)
+re EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+
+| Ready )
+(— 7 ne )
+--- open-tools (right half)
+i ae re
++ Agent internals
+1 turn - 3 tool calls - the terminal prints these again when you close this pane
+
+— please check the stable —
+
++ thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+--- open-done (terminal, left half)
+a EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+
+f 7 ne \
+--- open-done (right half)
+i ae re
++ Agent internals
+1 turn - 3 tool calls - the terminal prints these again when you close this pane
+
+— please check the stable —
+
++ thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+--- open-two-turns (terminal, left half)
+a EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+
+(— 7 an 7 “)
+--- open-two-turns (right half)
+i ae re
++ Agent internals
+2 turns - 6 tool calls - the terminal prints these again when you close this pane
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+>» read 2 files - 7 lines
+
+— and once more please —
+
++ thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+
+. ran cleen 41 - 2 linec - evit M- 4c
+--- closed (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+— please check the stable —
+» + thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+— and once more please —
+» + thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+(— 7 ne
+--- closed (right half)
+|
+|
+STEELE
+open: clicking the reprinted run row at 105,518
+--- closed-unfolded (terminal, left half)
++ 3 tool calls - 9s (Ctrl+click)
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+— please check the stable —
+» + thought for 5 s
+vy ran sleep +1 - 3 lines - exit 0-45
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+open in pane
+» read 2 files - 7 lines
+— and once more please —
+» + thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+(— 7 ne
+--- closed-unfolded (right half)
+EN
+—
+--- closed-twice (terminal, left half)
++ 3 tool calls - 9s (Ctrl+click)
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+— please check the stable —
+» + thought for 5 s
+vy ran sleep +1 - 3 lines - exit 0-45
+command
+$ sleep 4; printf ‘gauge ok\nfeed ok\nstable ok\n'
+output
+gauge ok
+feed ok
+stable ok
+open in pane
+» read 2 files - 7 lines
+— and once more please —
+» + thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+(— 7 ne
+--- closed-twice (right half)
+EN
+—
+--- midturn-closed (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please check the stable
+
+» stub
+
+— please check the stable —
+
+» + thought for 5 s
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+--- midturn-closed (right half)
+EN
+|
+
+( Ready |
+=_eEeE_E_E_ xh. =>)
+--- midturn-done (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please check the stable
+
+» stub
+
+— please check the stable —
+
+» + thought for 5 s
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+--- midturn-done (right half)
+EN
+LLL)
+--- midblock (terminal, left half)
+ee EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+» + thinking moved to the internals pane
+| Reasoning streams under the + line - a click or Alt+R folds it away )
+Relaying running sleep +1... -5s- step 1/256 - Esc stops
+--- midblock (right half)
+i ae re
++ Agent internals
+1 turn - 1 tool call - the terminal prints these again when you close this pane
+
+— please check the stable —
+
++ thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+
+» running sleep +1..
+--- midblock-done (terminal, left half)
+OR EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+» + thinking moved to the internals pane
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+--- midblock-done (right half)
+i ae re
++ Agent internals
+1 turn - 3 tool calls - the terminal prints these again when you close this pane
+
+— please check the stable —
+
++ thought for 5 s
+What the ask needs
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+17. step 17: check the gauge, the feed and the stable module
+18. step 18: check the gauge, the feed and the stable module
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+--- less-open (terminal, left half)
+# project
+A readme with a few lines.
+Relaying less...
+ne
+--- less-open (right half)
+EN
+less is running Take control (Ctrl+H)
+--- less-quit (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+less README.md
+~/project $
+— please check the stable —
+» + thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+(— 7 ne
+--- less-quit (right half)
+EN
+( Shell ready - exit 0 )
+—————o—————OeEeS—o—wow
+--- twopanes-open (terminal, left half)
+re EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+Next time: Alt+Left / Alt+Right / Alt+Up / AlttDown moves between panes
+Shell commands or agent prompts... ? for help auto
+~/project o 100% left stub local - & od
+© Agent internals # KR x
++ Agent internals
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- twopanes-open (right half)
+ne EN
+
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+Shell commands or agent prompts... ? for help auto
+~/project 8 100% left stub local - & od
+
+® Agent internals B KR x
+
++ Agent internals
+
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- twopanes-asked (terminal, left half)
+re EN
+
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+Shell commands or agent prompts... ? for help auto
+~/project o 100% left stub local - & od
+
+© Agent internals # KR x
+
++ Agent internals
+
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- twopanes-asked (right half)
+ne EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+>» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+Shell commands or agent prompts... ? for help auto
+~/project 8 94% left stub local - & od
+© Agent internals B KR x
++ Agent internals
+1 turn - 3 tool calls - the terminal prints these again when you close this pane
+19. step 19: check the gauge, the feed and the stable module
+20. step 20: check the gauge, the feed and the stable module
+21. step 21: check the gauge, the feed and the stable module
+22. step 22: check the gauge, the feed and the stable module
+23. step 23: check the gauge, the feed and the stable module
+24. step 24: check the gauge, the feed and the stable module
+25. step 25: check the gauge, the feed and the stable module
+26. step 26: check the gauge, the feed and the stable module
+27. step 27: check the gauge, the feed and the stable module
+28. step 28: check the gauge, the feed and the stable module
+29. step 29: check the gauge, the feed and the stable module
+30. step 30: check the gauge, the feed and the stable module
+So: run the check, read the two files, answer.
+a
+--- ownerclose-moved (terminal, left half)
+a EN
+
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
++ please check the stable
+
+» stub
+
+» + thought for 5 s
+
+» ran sleep +1 - 3 lines - exit 0-45
+
+» read 2 files - 7 lines
+
+Done: the check passed and both files are read.
+
++ 3 tool calls - 9s (Ctrl+click)
+| No pane in that direction. J
+N ES
+--- ownerclose-moved (right half)
+ne EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+Shell commands or agent prompts... ? for help auto
+~/project 8 100% left stub local - & od
+————————————————
+® Agent internals B KR x
++ Agent internals
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- ownerclose-after (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+» « thought for 5 s
+» ran sleep +1 - 3 lines - exit 0-45
+» read 2 files - 7 lines
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+(— 7 ne
+--- ownerclose-after (right half)
+EN
+LLL)
+--- hint (terminal, left half)
+re EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+Next time: Alt+Shift+R - agent internals
+--- hint (right half)
+rr ae ne
++ Agent internals
+0 turns - 0 tool calls - the terminal prints these again when you close this pane
+--- ownerclose-moved (terminal, left half)
+EN i ae re
+To run a command as administrator + Agent internals
+(user “root"), use “sudo <comman 1 turn - 3 tool calls - the terminal prints these again
+d>".
+See "man sudo root" for details. = vee diced: ie stile =
++ thought for 5 s
+~/project $ What the ask needs
+1. step 1: check the gauge, the
+feed and the stable module
+2. step 2: check the gauge, the
+feed and the stable module
+3. step 3: check the gauge, the
+feed and the stable module
+4. step 4: check the gauge, the
+feed and the stable module
+5. step 5: check the gauge, the
+feed and the stable module
+6. step 6: check the gauge, the
+feed and the stable module
+7. step 7: check the gauge, the
+feed and the stable module
+8. step 8: check the gauge, the
+feed and the stable module
+9. step 9: check the gauge, the
+feed and the stable module
+10. step 10: check the gauge, the
+feed and the stable module
+11. step 11: check the gauge, the
+feed and the stable module
+12. step 12: check the gauge, the
+feed and the stable module
+13. step 13: check the gauge, the
+feed and the stable module
+14. step 14: check the gauge, the
+feed and the stable module
+15. step 15: check the gauge, the
+feed and the stable module
+16. step 16: check the gauge, the
+feed and the stable module
+17. step 17: check the gauge, the
+feed and the stable module
+18. step 18: check the gauge, the
+eo ee
+--- ownerclose-moved (right half)
+a EN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please check the stable
+» stub
+Done: the check passed and both files are read.
++ 3 tool calls - 9s (Ctrl+click)
+--- ownerclose-after (terminal, left half)
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+SS
+--- ownerclose-after (right half)
+EN
+———————— eee

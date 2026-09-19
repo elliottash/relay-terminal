@@ -344,6 +344,11 @@ private:
         // to settle one action at a time.
         add("agent.thinkingPanel", "agent", "Reasoning: fold or unfold this pane's latest reasoning",
             {QStringLiteral("Alt+R")});
+        // The agent internals pane (card #QT8C): the reasoning and the tool calls, live, in a pane
+        // beside the terminal. Alt+R's shifted neighbour, because it is the reasoning fold's bigger
+        // sibling; no preset binds Alt+Shift+R and no other action does.
+        add("agent.internalsPane", "agent", "Agent internals: watch this pane's reasoning and tool calls in a pane beside it",
+            {QStringLiteral("Alt+Shift+R")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
