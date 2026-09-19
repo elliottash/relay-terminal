@@ -1468,6 +1468,39 @@ private:
         return row;
     }
 
+    // A list stored as a QStringList and edited as one line (card #3KB7, the Security section).
+    // `separator` is a regular expression, and the caller's detail line says which it is: a command
+    // rule may contain spaces ("git push --force*") so its list splits on commas only, while a
+    // secret pattern may contain a comma ("x{1,3}") so its list splits on whitespace. There is no
+    // multi-line row kind to sidestep the question with.
+    relay::SettingRow listRow(const QString &key, const QString &label, const QString &detail,
+                              const QString &placeholder, const QString &separator,
+                              const QString &aliases = QString()) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Text;
+        row.id = QStringLiteral("option:") + key;
+        row.label = label;
+        row.detail = detail;
+        row.aliases = aliases;
+        row.placeholder = placeholder;
+        row.text = QSettings().value(key).toStringList().join(QStringLiteral(", "));
+        row.onText = [this, key, separator](const QString &value) {
+            QStringList items;
+            for (const QString &word : value.split(QRegularExpression(separator), Qt::SkipEmptyParts)) {
+                const QString item = word.trimmed();
+                if (!item.isEmpty() && !items.contains(item)) items << item;
+            }
+            if (items.isEmpty()) QSettings().remove(key);
+            else QSettings().setValue(key, items);
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
+        row.reset = [this, key] {
+            QSettings().remove(key);          // every one of these ships empty
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
+        return row;
+    }
+
     static relay::SettingRow headingRow(const QString &label) {
         relay::SettingRow row;
         row.kind = relay::SettingRow::Heading;
@@ -1937,6 +1970,57 @@ private:
         agent.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
                                 QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         sections << agent;
+
+        // ----- Security (card #3KB7) -------------------------------------------------------
+        // Owner, 2026-09-19: "add a security options menu with various secruity options like that
+        // ... more of the approvals options on warp." Warp's execution profiles set a value per
+        // capability — always_allow / always_ask / never — plus command and directory lists. Relay
+        // keeps the two ends and not the middle: `docs/ROADMAP.md` settled against per-action
+        // approvals, so where Warp asks, Relay denies, confines or bounds. The worker enforces
+        // every row here (backend/relay_core/security.py); the rows only carry the lists to it.
+        relay::SettingsSection security;
+        security.id = QStringLiteral("security");
+        security.title = QStringLiteral("Security");
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:security");
+            info.label = QStringLiteral(
+                "Relay allows by default and never stops to ask: the agent's commands and file edits run "
+                "without per-action approval. What bounds them is where they may reach, and that is what this "
+                "page sets. File tools are confined to the pane's workspace and refuse .ssh, .gnupg, .git, "
+                ".env and .pem/.key files, on this machine and on an ssh host. Commands run with your own user "
+                "permissions under a systemd memory limit — a denylist below is a guardrail against an obvious "
+                "mistake, not a sandbox: a shell line can always be spelled another way.");
+            security.rows << info;
+        }
+        security.rows << listRow(QStringLiteral("security/command_denylist"),
+                                 QStringLiteral("Commands the agent never runs"),
+                                 QStringLiteral("Comma-separated. A bare name is a program, so \"rm\" also refuses "
+                                                "\"sudo rm\" and \"ls && rm x\" but not \"rmdir\"; a * makes it a "
+                                                "pattern for the whole line (\"git push --force*\"). The agent is told "
+                                                "which rule refused it."),
+                                 QStringLiteral("rm, shutdown, git push --force*"),
+                                 QStringLiteral(","),
+                                 QStringLiteral("denylist deny block command"));
+        security.rows << listRow(QStringLiteral("security/readable_roots"),
+                                 QStringLiteral("Folders the agent may read outside the workspace"),
+                                 QStringLiteral("Comma-separated absolute paths. Reading only — writing stays inside "
+                                                "the workspace whatever is listed here, and the symlink and "
+                                                "secret-file guards apply to these folders too."),
+                                 QStringLiteral("/home/you/notes, /srv/reference"),
+                                 QStringLiteral(","),
+                                 QStringLiteral("directory allowlist folder read"));
+        security.rows << listRow(QStringLiteral("security/secret_patterns"),
+                                 QStringLiteral("Files the agent never reads"),
+                                 QStringLiteral("Space-separated regular expressions, matched against each part of a "
+                                                "path, added to the built-in list — which cannot be removed. Use \\s "
+                                                "for a space."),
+                                 QStringLiteral("\\.vault$ credentials"),
+                                 QStringLiteral("\\s+"),
+                                 QStringLiteral("secret redact pattern regex"));
+        sections << security;
+
 
         // Voice transcription (issue NY7Z). The section names the model and says where the audio
         // goes, because that is the one thing a microphone button must not leave implicit.

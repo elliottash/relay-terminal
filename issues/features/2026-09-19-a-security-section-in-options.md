@@ -1,7 +1,7 @@
 ---
 id: 3KB7
 type: work
-status: ready
+status: in-progress
 labels: [feature]
 component: [gui, worker]
 milestone: beta
@@ -11,7 +11,7 @@ rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
-links: {plans: [], commits: [], evidence: [], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
+links: {plans: [], commits: [77118fd], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
 ---
 # A Security section in Options, gathering what the agent may reach
 
@@ -118,28 +118,63 @@ but shipping one set first is the smaller step and matches how Relay's other set
 
 ## Tasks
 
-- [ ] The `security` section itself, between `agent` and `privacy` (`src/RelayWindow.h:1930`), with <!-- t:a3 -->
+- [x] The `security` section itself, between `agent` and `privacy` (`src/RelayWindow.h:1930`), with <!-- t:a3 -->
       the posture sentence at its head
 - [ ] `security/unattended_full_tools` (default on) and the predicate it drives, with #R5TC <!-- t:b5 -->
 - [ ] Move, do not copy: `agent/terminal_handoff`, `isolation/*`, `agent/max_auto_turns`, <!-- t:c7 -->
       `agent/max_steps`, `agent/max_tool_calls`, `agent/audit_requests`. Check every reader of each
       key still finds it, and that the Agent and Terminal sections do not end up with a hole
-- [ ] The command denylist: a setting, the match (before execution, on the resolved command), the <!-- t:d9 -->
+- [x] The command denylist: a setting, the match (before execution, on the resolved command), the <!-- t:d9 -->
       refusal the model sees, and a line in the pane saying which rule refused it
-- [ ] Readable folders outside the workspace: the setting, and the widened check in <!-- t:e2 -->
+- [x] Readable folders outside the workspace: the setting, and the widened check in <!-- t:e2 -->
       `backend/relay_core/tools.py` — including the ssh-host path, where the workspace guard does
       not apply (#S5SH)
-- [ ] User patterns added to `looks_secret()` (`tools.py:50-55`), extend-only, with the built-ins <!-- t:f4 -->
+- [x] User patterns added to `looks_secret()` (`tools.py:50-55`), extend-only, with the built-ins <!-- t:f4 -->
       shown and not removable
 - [ ] An OSC 52 row driving `setClipboardWriteAllowed()` (`engine/view/TerminalView.h:111`), <!-- t:g6 -->
       default off
 - [ ] "Where your prompts go", beside the hosted-inference switch <!-- t:h8 -->
 - [ ] `docs/VALIDATION.md`'s "Security boundaries" section becomes the written statement this <!-- t:j1 -->
       section renders, so the two cannot drift
-- [ ] Tests: the denylist refuses and says why; a folder outside the workspace is readable only <!-- t:k3 -->
+- [x] Tests: the denylist refuses and says why; a folder outside the workspace is readable only <!-- t:k3 -->
       when listed, on this machine and on an ssh host; a user pattern is honoured and a built-in
       cannot be removed; `security/unattended_full_tools` off actually withholds the two tools;
       and every moved key is still read from its new home
+
+## Landed so far (2026-09-19)
+
+**`77118fd` — the policy the worker enforces.** `backend/relay_core/security.py` (pure) plus its
+wiring: the three lists ride protocol 12.1 beside `max_steps`, validated in `validate_turn_options`
+and returned under one `security_options` key, and `Agent` hands them to the executor's policy
+rather than setting them on itself. 33 cases in `tests/test_security.py`, including a `WiringTests`
+class for the half that can silently not be connected. Verified on a clean export of main plus
+exactly those hunks: 3044 tests passing.
+
+**This commit — the section.** Options › Security between Agent and Privacy: the posture paragraph
+and the three list rows, carried to the worker by `requestOptions()` and applied to a running agent
+at once (any `security/` key now re-sends `set_agent_options`, as the turn limits already did).
+Evidence in `docs/qa_evidence/2026-09-19-security-section/`, including the end-to-end run where a
+`rm -rf` tool call is refused by name and the probe file survives.
+
+One design note worth keeping: there is no multi-line row kind, so each list is one line with its
+own separator, and each detail line says which. A command rule may contain spaces
+(`git push --force*`) so that list splits on commas; a secret pattern may contain a comma (`x{1,3}`)
+so that one splits on whitespace.
+
+## Still to do
+
+- [ ] `security/unattended_full_tools` and `agent/cross_pane`. Both govern something #R5TC has not <!-- t:m5 -->
+      built yet — there is no unattended turn in Relay today — and a control that does nothing is
+      worse than no control, so they land with that card.
+- [ ] The OSC 52 row. `setClipboardWriteAllowed()` is on `TerminalView` but not on the <!-- t:n7 -->
+      `TerminalBackend` interface the Pane speaks to, so it needs a virtual added to the engine
+      interface and an implementation in `VTermBackend` — more than a settings row. Clipboard
+      writes are off today, which is the safe default, and reads are never answered.
+- [ ] Moving `agent/terminal_handoff`, `isolation/*`, the turn bounds and `agent/audit_requests` <!-- t:p9 -->
+      onto this page. Mechanical, but it touches every reader of each key and `src/RelayWindow.h`
+      had three sessions editing it today; worth doing in one quiet pass rather than beside a
+      feature.
+
 
 ## Decisions
 
