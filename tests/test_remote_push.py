@@ -95,6 +95,23 @@ def subscription_keypair() -> tuple[bytes, bytes, bytes]:
     return private, public, bytes(range(16))
 
 
+class VapidPersistenceTests(unittest.TestCase):
+    """The local registry keeps one VAPID key across restarts (a phone subscribes with it)."""
+
+    def test_the_same_store_file_gives_the_same_key_after_a_restart(self):
+        import os, stat
+        from rendezvous.server import Store
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rendezvous.db"
+            first = Store(path)
+            _, public = first.vapid_pair()
+            first.close()
+            again = Store(path)
+            self.assertEqual(again.vapid_pair()[1], public)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            again.close()
+
+
 class Rfc8291Tests(unittest.TestCase):
     # RFC 8291 Appendix A, "Push Message Encryption Example".
     PLAINTEXT = b"When I grow up, I want to be a watermelon"

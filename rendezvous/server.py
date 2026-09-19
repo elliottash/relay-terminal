@@ -169,6 +169,11 @@ def push_public_of(private: bytes) -> bytes:
 class Store:
     def __init__(self, path: str | Path = ":memory:"):
         self.db = sqlite3.connect(path, check_same_thread=False)
+        if str(path) != ":memory:":
+            # The file holds the VAPID private key (`vapid_pair`), so it is the owner's alone.
+            # The sidecar keeps its local registry on disk for exactly that key: drawn fresh at
+            # every start, every phone subscribed before a restart was getting no pushes.
+            os.chmod(path, 0o600)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self.db.commit()

@@ -682,7 +682,9 @@ class Sidecar:
             return
         self.identity = identity_mod.Identity.load_or_create()
         self.devices = identity_mod.DeviceStore()
-        self.store = Store(":memory:")
+        # On disk, not in memory: the registry holds the VAPID key phones subscribe with, and a
+        # key drawn fresh at every start silently ended every earlier subscription.
+        self.store = Store(identity_mod.state_dir() / "rendezvous.db")
         self.server = build(self.store, static_root=APP_DIR)
         await self.server.start("127.0.0.1", int(message.get("port") or 0))
         local = f"http://127.0.0.1:{self.server.port}"

@@ -247,7 +247,7 @@ async def share(args) -> int:
         print(terminal_mod.BUILD_HINT)
         return 2
 
-    store = Store(":memory:")
+    store = Store((directory or identity_mod.state_dir()) / "rendezvous.db")   # keeps the VAPID key
     server = build(store, static_root=APP_DIR)
     await server.start("127.0.0.1", args.port)
     local = f"http://127.0.0.1:{server.port}"
