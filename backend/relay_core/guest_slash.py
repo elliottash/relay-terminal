@@ -93,18 +93,14 @@ WRITER = Path(__file__).resolve().parents[2] / "shell" / "guest-event.py"
 def helper_path(environment=None) -> str:
     """`shell/guest-event.py`, or "" outside a Relay pane.
 
-    ``RELAY_GUEST_EVENT`` is the pane's spool *directory* since the single ``guest.json`` slot was
-    replaced (26.3); it named this script in the first cut, so a value that still ends in ``.py``
-    is taken at its word. Either way the variable is what says there is a pane at all.
+    ``RELAY_GUEST_EVENT`` is the pane's spool *directory* (26.3) and is only what says there is a
+    pane at all; the writer is this package's sibling. ``RELAY_GUEST_WRITER`` overrides the path,
+    which is how a test points at another checkout.
     """
     environment = os.environ if environment is None else environment
-    exported = environment.get("RELAY_GUEST_EVENT") or ""
-    if not exported:
+    if not (environment.get("RELAY_GUEST_EVENT") or ""):
         return ""
-    override = environment.get("RELAY_GUEST_WRITER") or ""
-    if override:
-        return override
-    return exported if exported.endswith(".py") else str(WRITER)
+    return environment.get("RELAY_GUEST_WRITER") or str(WRITER)
 
 
 def emit(guest: str, cwd: str | os.PathLike[str] | None = None) -> bool:

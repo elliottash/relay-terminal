@@ -61,10 +61,9 @@ MAX_CONFIG_BYTES = 1024 * 1024       # a config.toml larger than this is not one
 # The channel helper's variable, written into the pane's environment by the GUI (26.3).
 GUEST_EVENT_VAR = "RELAY_GUEST_EVENT"
 # The channel's one writer, beside the backend directory this file lives in: an installed Relay
-# and a checkout both have `shell/` and `backend/` as siblings. `RELAY_GUEST_EVENT` named this
-# script itself in the first cut of 26.3; since the spool replaced the single `guest.json` slot
-# the pane exports the spool *directory* there, so the writer's path is resolved here and the
-# variable is only what says there is a pane to write to at all.
+# and a checkout both have `shell/` and `backend/` as siblings. The pane exports the spool
+# *directory* as `RELAY_GUEST_EVENT` (26.3), so the writer's path is resolved here and the variable
+# is only what says there is a pane to write to at all.
 # Three shims carry this constant (guest_hook, guest_codex, guest_slash) and they must not
 # be folded into one: two of them are run by absolute path with no PYTHONPATH, so they may
 # not import from `relay_core` at all. `tests/test_guest.py` (OneChannelInThreeLanguages) is what
@@ -76,17 +75,11 @@ WRITER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.ab
 def helper_path(environment) -> str:
     """`shell/guest-event.py`, or "" when this process is not inside a Relay pane.
 
-    `RELAY_GUEST_WRITER` overrides the path, which is how a test points at another checkout; a
-    pane that still exports the script itself rather than the spool directory is taken at its
-    word, because the two conventions have to coexist while the guest phases land separately.
+    `RELAY_GUEST_WRITER` overrides the path, which is how a test points at another checkout.
     """
-    exported = environment.get(GUEST_EVENT_VAR) or ""
-    if not exported:
+    if not (environment.get(GUEST_EVENT_VAR) or ""):
         return ""
-    override = environment.get("RELAY_GUEST_WRITER") or ""
-    if override:
-        return override
-    return exported if exported.endswith(".py") else WRITER
+    return environment.get("RELAY_GUEST_WRITER") or WRITER
 
 
 class CodexError(Exception):

@@ -36,6 +36,10 @@ SESSIONS = FIXTURES / "sessions"
 REAL_CONFIG = FIXTURES / "config.toml"                  # copied from a real ~/.codex/config.toml
 COMMENTED_CONFIG = FIXTURES / "config-with-comments.toml"
 HELPER = ROOT / "shell" / "guest-event.py"              # the channel's one writer (26.3)
+# What the pane exports as RELAY_GUEST_EVENT: the spool *directory*, which is only what says there
+# is a pane at all. The writer's own path comes from RELAY_GUEST_WRITER, which is how a test points
+# at this checkout's helper (`guest_codex.helper_path`).
+SPOOL = "/run/relay/pane-1/guest-events"
 
 # The workspace the fixture session was started in, and the three sessions under `SESSIONS`.
 WORKSPACE = "/home/elliott/repos/relay-terminal"
@@ -76,12 +80,20 @@ def events_of(pairs) -> dict:
     return {name: data for name, data in pairs}
 
 
+def pane_env(**extra) -> dict:
+    """A pane's environment as far as the channel is concerned: a spool directory to say there is a
+    pane, and this checkout's writer. Nothing is run with it unless a test passes a real runner."""
+    return {"RELAY_GUEST_EVENT": SPOOL, "RELAY_GUEST_WRITER": str(HELPER), **extra}
+
+
 @contextlib.contextmanager
 def pane_environment(runtime: str, token: str = "tok-1"):
     """A pane's environment, in this process: the helper is a real child and inherits it."""
-    keys = ("RELAY_GUEST_EVENT", "RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN", "RELAY_PYTHON")
+    keys = ("RELAY_GUEST_EVENT", "RELAY_GUEST_WRITER", "RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN",
+            "RELAY_PYTHON")
     saved = {key: os.environ.get(key) for key in keys}
-    os.environ["RELAY_GUEST_EVENT"] = str(HELPER)
+    os.environ["RELAY_GUEST_EVENT"] = os.path.join(runtime, "guest-events")
+    os.environ["RELAY_GUEST_WRITER"] = str(HELPER)
     os.environ["RELAY_RUNTIME_DIR"] = runtime
     os.environ["RELAY_SESSION_TOKEN"] = token
     os.environ.pop("RELAY_PYTHON", None)
@@ -800,7 +812,7 @@ class RolloutTailTests(unittest.TestCase):
             sessions.add(TURN, when=1000)
             self.assertEqual(0, guest_codex.poll_and_emit(sessions.tail(), env={}))
             self.assertEqual(2, guest_codex.poll_and_emit(
-                sessions.tail(), env={"RELAY_GUEST_EVENT": str(HELPER)}, runner=Recorder()))
+                sessions.tail(), env=pane_env(), runner=Recorder()))
 
 
 # ----- the event channel -----------------------------------------------------------------------
@@ -817,7 +829,7 @@ class EventChannel(unittest.TestCase):
 
     def test_emit_hands_the_helper_the_event_and_the_data_on_stdin(self):
         recorder = Recorder()
-        environment = {"RELAY_GUEST_EVENT": str(HELPER), "RELAY_PYTHON": "/opt/relay/python3"}
+        environment = pane_env(RELAY_PYTHON="/opt/relay/python3")
         self.assertTrue(guest_codex.emit("state", {"busy": True}, env=environment,
                                         runner=recorder))
         self.assertEqual(["/opt/relay/python3", "-S", str(HELPER), "state", "codex"],
@@ -829,7 +841,7 @@ class EventChannel(unittest.TestCase):
 
     def test_the_interpreter_defaults_to_python3_on_path(self):
         recorder = Recorder()
-        guest_codex.emit("state", {}, env={"RELAY_GUEST_EVENT": str(HELPER)}, runner=recorder)
+        guest_codex.emit("state", {}, env=pane_env(), runner=recorder)
         self.assertTrue(recorder.argv[0])
         self.assertEqual(["-S", str(HELPER), "state", "codex"], recorder.argv[1:])
 
@@ -837,7 +849,7 @@ class EventChannel(unittest.TestCase):
         for error in (OSError("gone"), subprocess.TimeoutExpired("helper", 5),
                       subprocess.SubprocessError("boom")):
             with self.subTest(error=error):
-                self.assertFalse(guest_codex.emit("state", {}, env={"RELAY_GUEST_EVENT": "x"},
+                self.assertFalse(guest_codex.emit("state", {}, env=pane_env(),
                                                   runner=Recorder(error)))
 
     def test_a_hook_event_wraps_the_payload(self):
@@ -887,7 +899,7 @@ class NotifyHook(unittest.TestCase):
                    "cwd": WORKSPACE, "client": "codex-tui", "input-messages": ["ls"],
                    "last-assistant-message": "done"}
         code = guest_codex.notify_main(["--some", "flag", json.dumps(payload)],
-                                       env={"RELAY_GUEST_EVENT": str(HELPER)}, runner=recorder)
+                                       env=pane_env(), runner=recorder)
         self.assertEqual(0, code)
         self.assertEqual(["hook", "codex"], recorder.argv[-2:])
         self.assertEqual({"name": "notify", "payload": payload},
@@ -898,7 +910,7 @@ class NotifyHook(unittest.TestCase):
         for argv in ([], ["not json"], ['{"type": "other"}'], ['["a", "list"]']):
             with self.subTest(argv=argv):
                 self.assertEqual(0, guest_codex.notify_main(
-                    argv, env={"RELAY_GUEST_EVENT": str(HELPER)}, runner=recorder))
+                    argv, env=pane_env(), runner=recorder))
         self.assertEqual(0, recorder.calls)
 
     def test_it_exits_zero_even_when_the_helper_cannot_run(self):

@@ -62,7 +62,11 @@ class GuestSlashTests(unittest.TestCase):
                 "pathlib.Path(os.environ['CAPTURE']).write_text(' '.join(sys.argv[1:]) + '\\n' + sys.stdin.read())\n"
             )
             helper.chmod(0o755)
-            with patch.dict(os.environ, {"RELAY_GUEST_EVENT": str(helper), "CAPTURE": str(capture)}, clear=False):
+            # RELAY_GUEST_EVENT is the pane's spool directory and only says there is a pane;
+            # RELAY_GUEST_WRITER is what points the channel at a writer (26.3).
+            with patch.dict(os.environ, {"RELAY_GUEST_EVENT": directory,
+                                         "RELAY_GUEST_WRITER": str(helper),
+                                         "CAPTURE": str(capture)}, clear=False):
                 self.assertTrue(guest_slash.emit("codex", directory))
             invocation, payload = capture.read_text().split("\n", 1)
         self.assertEqual(invocation, "slash codex")
@@ -79,7 +83,8 @@ class GuestSlashTests(unittest.TestCase):
                 "import os, pathlib, sys\n"
                 "pathlib.Path(os.environ['CAPTURE']).write_text(' '.join(sys.argv[1:]))\n")
             helper.chmod(0o644)          # no execute bit at all
-            with patch.dict(os.environ, {"RELAY_GUEST_EVENT": str(helper),
+            with patch.dict(os.environ, {"RELAY_GUEST_EVENT": directory,
+                                         "RELAY_GUEST_WRITER": str(helper),
                                          "CAPTURE": str(capture)}, clear=False):
                 self.assertTrue(guest_slash.emit("codex", directory))
             self.assertEqual("slash codex", capture.read_text())
