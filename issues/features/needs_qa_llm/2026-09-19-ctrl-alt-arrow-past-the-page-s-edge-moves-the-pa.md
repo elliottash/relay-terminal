@@ -1,12 +1,13 @@
 ---
 id: 8G7E
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature, gui, keyboard]
+implemented_by: glm/glm-5.3
 rank: zzzzzzzzzzi
 created: '2026-09-19'
 source: recovered from the stopped "Moving panes past page edges" agent session (81abd1b4), 2026-09-19; landed by the continue session
-links: {plans: [], commits: [], evidence: [], related: [JXWT], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-pane-move-past-page-edge/], related: [JXWT], github: null}
 ---
 # Ctrl+Alt+arrow past the page's edge moves the pane into a column or row of its own
 
