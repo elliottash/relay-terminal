@@ -4525,10 +4525,11 @@ guest's:
 | `delta` | `{text}` | `delta` |
 | `thinking` | `{text}` | `thinking_delta` |
 | `tool_started` | `{call_id, tool, input, label?}` | `tool_started` |
+| `tool_output` | `{call_id, text}` — appended since the last one | `tool_output` (the live one) |
 | `tool_result` | `{call_id, tool, output, ok, diff?, ms?}` | `tool_result` (with `diff`, section 23) |
-| `approval` | `{id, kind: command\|patch\|tool\|other, detail}` | `question` (Allow / Deny) |
+| `approval` | `{id, kind: command\|patch\|tool\|other, detail}` | `question` (Allow / Deny, scoped) |
 | `question` | `{id, questions: [...]}` | `question` (section 27) |
-| `usage` | `{input_tokens, output_tokens, context_pct?, cost_usd?, model?}` | `context` |
+| `usage` | `{input_tokens, output_tokens, context_pct?, context_tokens?, context_window?, cost_usd?, model?}` | `context` |
 | `notice` | `{text}` | `status` |
 | `done` | `{text, stop_reason}` | (the turn's answer) |
 | `error` | `{text, code?}` | `error` |
@@ -4638,6 +4639,31 @@ restarts the harness with `resume` when it has a session id. Nothing is retried 
 - A guest pane's `agent_role` is forced to `main`; a guest's approvals and questions go through
   their own round trip (`question` / `question_answer` with the raw per-question answer lists),
   not the Agent's `ask_user` machinery, and an unanswered or stopped approval is a deny.
+
+**A long tool call says what it is doing, where the guest lets it.** `tool_output` carries what a
+running tool has printed since the last one, and the provider emits Relay's own live `tool_output`
+event, so the pane renders a guest's build exactly as it renders Relay's. Codex sends it
+(`item/commandExecution/outputDelta`). **Claude Code cannot**, and the reason is worth writing down
+so nobody looks again: `--include-partial-messages` streams the model's own message, where a tool
+appears only as its *input* being typed; `--include-hook-events` fires before and after a tool, not
+during; and while the CLI does watch a running Bash live, its stream-json serialiser turns that
+into `tool_progress`, which carries the elapsed seconds and drops the text. Relay emits nothing
+there rather than dressing seconds up as output. A chunk is 4 KiB and a call's stream stops after
+32 768 characters, the budget Relay's own live output has; the whole output still arrives with
+`tool_result`.
+
+**The context window, not only the share.** `usage` carries `context_tokens` and `context_window`
+beside `context_pct` — codex reports both in `thread/tokenUsage/updated`, claude's come from the
+`result`'s `modelUsage` and the turn's prompt — and they ride the `context` event under
+`guest_context`, beside Relay's own measurement of Relay's own window. Two windows, two numbers,
+one event: the chip can say "13k of 258k" instead of "5%".
+
+**An approval can be scoped.** `answer()` takes `once` (the default), `session`, or `stop` for a
+deny that ends the turn as well, so the card the pane draws under `permissions: "ask"` offers four
+choices rather than two. Codex has all three on the wire; Claude Code has them too — an allow may
+carry a session rule and a deny may carry `interrupt: true` — and the rule Relay writes is kept as
+narrow as the thing that was asked about, never a blanket "Bash is allowed now". A scope the table
+does not recognise, and a card the user stops, is a plain deny.
 
 **The model and the reasoning effort are the guest's own** (owner, 2026-09-19: "you should be able
 to pick the model and reasoning effort for those"). The `guest` block of a `configure` or
