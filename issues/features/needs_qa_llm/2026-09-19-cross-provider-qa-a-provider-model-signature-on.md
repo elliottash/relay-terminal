@@ -313,6 +313,71 @@ are competitive-programming solutions, so absolute rates will not transfer to pu
 structural question of whether an author × reviewer interaction exists will. **Not run: it spends
 the owner's API credits, and that is his call.**
 
+### The pairwise matrix does exist, and it contradicts the lineage grouping (2026-09-19)
+
+Chasing the owner's question down to item-level *pairwise* numbers found them: Kohli
+([2605.29800](https://arxiv.org/abs/2605.29800)) Appendix B publishes the full **9x9 phi matrix of
+error correlations between judges**, per item, 9 models from 7 families. The relevant cells:
+
+| Pair | phi | Same family? |
+|---|---|---|
+| Claude Sonnet 4.5 x Gemini 2.5 Pro | **0.603** | no |
+| GPT-4o x Claude Sonnet 4.5 | 0.588 | no |
+| Mistral Large 3 x DeepSeek-V3 | 0.564 | no |
+| Gemini 2.5 Pro x Llama 4 Scout | **0.161** | no |
+| same-family mean (OpenAI / Meta) | 0.437 / 0.435 | yes |
+| cross-family mean | 0.389 | no |
+
+**Same family buys +0.047 of correlation, against a spread of 0.161 to 0.603 — and the three most
+correlated pairs in the matrix are all cross-family.** The paper's own conclusion is that provider
+diversity does not ensure independence. Whatever drives the spread, it is not vendor: the tightest
+pair is Anthropic x Google, which this card's `LINEAGE` table calls two independent lines.
+
+The code-side per-category recalls point the same way — Table 6 of
+[2606.15689](https://arxiv.org/abs/2606.15689), five reviewers:
+
+| Category | Haiku | Sonnet | GPT-5.4m | MiniMax | GLM |
+|---|---|---|---|---|---|
+| Security | 69.6 | 69.6 | 69.6 | 71.1 | 69.6 |
+| Logic | 24.5 | 19.6 | 16.8 | 16.0 | 12.7 |
+| Architecture | 33.3 | 27.3 | 13.6 | 26.1 | 17.4 |
+| Best practice | 6.7 | 0.0 | 0.0 | 0.0 | 0.0 |
+| Performance | 0.0 | 0.0 | 0.0 | 0.0 | 4.5 |
+
+Security is flat to within 1.5 points across four vendors: on that category a second reviewer is
+worth nothing at all. Logic is monotone in overall strength. Only two cells carry any profile
+signal — MiniMax beating GPT-5.4 mini on Architecture, and GLM being the only one to see a
+Performance issue — so `d_B(t)` is very close to rank-1 plus noise, which is the factorisation
+hypothesis answered in the negative for this dataset: there is almost nothing to factorise.
+
+**Recommendation, for the owner (not applied).** The evidence no longer supports reordering by
+lineage, and that reordering was mine, added on the first research pass — the owner's original
+sketch was a plain preference order with a self-skip ("codex -> claude -> glm -> kimi -> deepseek"),
+which is what the newer evidence supports. Suggested: drop the lineage reordering from
+`recommend()`, keep `LINEAGE` only to word the warning, and let the order be capability alone.
+Unchanged either way: the different-family rule for closing a QA card, which is an
+audit-independence guarantee and not a bet on error correlation.
+
+**Provenance and three caveats, because this is load-bearing evidence against a shipped design.**
+Kohli was submitted **28 May 2026** (arXiv abstract page, checked directly); "Bigger Isn't Always
+Better" is 2026 with an April/June discrepancy between its listed submission date and its arXiv id,
+unresolved here. Then:
+
+1. **Not code.** The phi matrix is over three natural-language-inference datasets. The category
+   table is code, but n=150.
+2. **A model generation behind.** The nine judges in the phi matrix read, on a secondary fetch of
+   the paper's HTML, as Claude Sonnet 4.5, Gemini 2.5 Pro, GPT-4o, Mistral Large 3, DeepSeek-V3 and
+   Llama 4 Scout — a 2024-25 roster for a mid-2026 paper, and **none of the models Relay actually
+   routes to** except DeepSeek. Goel et al. find error correlation *rises* with capability, so the
+   +0.047 family effect measured on that roster is not safe to project onto today's frontier in
+   either direction.
+3. **The cell values are a secondary read.** The 9x9 matrix is in the paper's Appendix B; the
+   individual phi values above came from a fetch of the HTML rather than from a table I read whole.
+   Before any of this is used to change `VERIFIER_RANK`, the appendix should be read directly.
+
+Which is the strongest argument for the pilot: it would produce this matrix for the models Relay
+runs, on code, rather than borrowing one from another domain and an older generation.
+
 ## QA checklist
 
 For a verifier outside the Anthropic family (on this machine `relay-board.py verifier T71W` names
