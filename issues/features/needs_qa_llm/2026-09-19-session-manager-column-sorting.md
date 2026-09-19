@@ -6,7 +6,7 @@ assignee: agent
 implemented_by: glm/glm-5.3
 rank: zzzzzzzzzz
 created: '2026-09-19'
-links: {commits: [ddbcdc4c], evidence: [docs/qa_evidence/2026-09-19-session-manager-column-sorting/], github: null, plans: [], related: []}
+links: {commits: [ddbcdc4c, 9bfef232], evidence: [docs/qa_evidence/2026-09-19-session-manager-column-sorting/], github: null, plans: [], related: []}
 ---
 # session manager column sorting
 
