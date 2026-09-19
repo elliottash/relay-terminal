@@ -94,6 +94,13 @@ enum class Click { Fold, File, Diff, Subagent, Card, Plan, Todos };
 // opened. An unknown `open.type` folds too.
 Click clickFor(const toollabel::Label &label);
 
+// Which scheme the row's OSC 8 anchor takes: relay://call/ (true) or relay://open-call/ (false).
+// A fold when the terminal *has* a fold layer and the row's click is one the fold answers —
+// Click::Fold, a merged run, or Click::Todos, whose task list is the detail and so has nothing
+// else to open (card #BDXG). Everything else opens a pane, and on a backend with no fold layer
+// every row anchors open-call so a click still reaches the detail.
+bool anchorsFold(Click click, bool merged, bool backendFolds);
+
 // ----- the state machine ------------------------------------------------------------------------
 //
 // Which row the cursor is on, whether it may still be rewritten, and how far a run of mergeable
@@ -199,6 +206,13 @@ QString taskGlyph(const QString &status);
 // "[status] text" line becomes a row of `taskGlyph(status)` and the task, completed and cancelled
 // ones muted and one in progress in the accent ink, exactly as the tasks panel paints them.
 QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette, const FoldOptions &options);
+
+// The same reply as plain text: the call's line, then every section as foldForReply() lays it out
+// (headings, `$ ` on a command, a task's glyph before it), one line per row, no colour and no
+// cap. For the surface that has no fold layer — a backend without the capability anchors every
+// row to relay://open-call and shows the call's detail in a preview pane (#BDXG) — so it reads
+// the same list the fold would have drawn rather than the result's JSON.
+QString replyAsText(const QJsonObject &reply);
 
 // A merged run's fold: one row per member, each linking to the file it read.
 QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &palette,

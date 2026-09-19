@@ -40,4 +40,26 @@ QStringList closest(const QString &name, const QStringList &known, int max = 3);
 // It names the command, suggests the closest real ones, and points at `/` and `/help`.
 QString unknownLine(const QString &name, const QStringList &known);
 
+// ----- names Relay answers to but never teaches (card #SHE3) ------------------------------------
+//
+// `/todos` is the first: the list it opens is called the task list now, so the palette must not
+// put the retired word back in front of anyone, while the name itself has to keep working — people
+// have it in their fingers and in saved prompts. A hidden name is therefore left out of the `/`
+// popup and never completed from a prefix, but it is still *known*: typed in full it runs, it is
+// never reported as an unknown command, and no alias or skill can take it.
+//
+// Both rules live here so they are the same rules the pane runs and can be tested without a
+// window. `hidden` is a subset of `names`; comparison is exact, as the registry spells them.
+
+// The names the `/` popup may offer, in the order `names` gives them.
+QStringList offered(const QStringList &names, const QStringList &hidden);
+
+// What a half-typed `/text` (the name part alone, no slash and no arguments) resolves to:
+// the exact name when there is one — hidden or not, because typing it in full is deliberate —
+// and otherwise the first name in registry order that it prefixes and that is not hidden.
+// Empty when nothing matches. `exact` is set when the answer was an exact match rather than a
+// completion, which is what tells the caller a command was named rather than being typed.
+QString resolve(const QString &typed, const QStringList &names, const QStringList &hidden,
+                bool *exact = nullptr);
+
 }  // namespace relay::slash

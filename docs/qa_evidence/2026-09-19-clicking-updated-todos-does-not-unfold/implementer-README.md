@@ -33,13 +33,39 @@ Shots 02 and 05 show that row rendered and linked, and `calllines_test.cpp` pins
 
 ## What the shots cannot show, and what covers it
 
-- **A restored pane with no call record** (the #EC58 fetch-by-anchor path) reaches the same fold
-  because `handleFoldReply` fills the label from the worker's reply *before* asking for the fold's
-  options, so `foldOptions` still sees `Click::Todos`. Read in `src/Pane.h`; no scene drives a
-  scrollback restore.
-- **A backend with no fold layer** keeps the open-call anchor (`callAnchor` gates on
-  `terminalFolds()`) and shows the same `tasks` section as the call's detail in a preview pane. Only
-  the libvterm core builds on this machine and it has folds, so this path is read, not shot.
+Follow-up, same day (Claude Fable 5.1, the coordinating session, after the owner's rule that a gap
+within reach is fixed rather than listed): the two paths below are now *tested*, not read, and each
+says exactly why it has no live scene.
+
+- **A pane with no call record for the row** (the #EC58 fetch-by-anchor path): `handleFoldReply`
+  fills the label from the worker's reply *before* asking for the fold's options, so the reply alone
+  has to carry everything. `calllines_test.cpp::aRestoredPaneGetsTheTaskFoldFromTheReplyAlone` feeds
+  `foldForReply` the reply exactly as the worker sends it for an `update_todos` call, with no record
+  and no stored diff, and checks the label rebuilt from it decides `Click::Todos`, that
+  `anchorsFold` folds it, and that the rows are the glyphed tasks and `open the task list`.
+  Why there is no live scene: a pane restored after a restart does not have this row as an anchor
+  at all — saved scrollback is replayed as *plain text* (`replayRestoredScrollback` in `src/Pane.h`
+  strips every escape sequence, `src/WindowState.h` says why the colours are not kept either), so
+  the ▸ row comes back as inert text and nothing can be clicked. In a live pane the record is only
+  lost once `rememberCall()` has evicted it past its 5,000-anchor bound, which is not a scene worth
+  five thousand turns. The comment on `foldRequested()` that names "a pane restored from saved
+  scrollback" describes the *worker* side (a turn from before this worker) — the anchor itself does
+  not survive a restart.
+- **A backend with no fold layer.** The anchor rule is now one function,
+  `relay::calllines::anchorsFold(click, merged, backendFolds)`, and `Pane::callAnchor()` calls
+  exactly it; `calllines_test.cpp::aTaskRowAnchorsAFoldOnlyWhenTheBackendHasOne` runs both columns:
+  with folds a task row folds, without them every row anchors `relay://open-call`. What that click
+  then shows was **wrong** as first landed — `Pane::openToolOutput()` wrote the result's JSON into
+  the preview pane, not the list — and is fixed here: a reply with § 23.5 `detail` sections is
+  written through the new `relay::calllines::replyAsText()`, which lays the sections out exactly as
+  the fold would (the `tasks` style with its glyphs), so the preview pane reads
+  `✓ updated tasks · 2 open` / `◐  write the fold` / `○  run the tests`.
+  `calllines_test.cpp::aFoldlessBackendReadsTheSameTaskListAsText` pins that text, for a good call
+  and a failed one. Why there is no live scene: `terminalFolds()` is
+  `terminalCan(TerminalBackend::Folds)`, a capability the engine core reports, with no setting or
+  environment switch to turn it off; the only core that builds on this machine (libvterm) reports
+  it, and GhosttyCore changes are uncompiled here. The rule and the text are what the unit tests
+  cover, and QA on a machine with a fold-less core can take the row from there.
 
 ## Tests
 

@@ -38,6 +38,33 @@ own arguments — the card's decision.
 The palette's *search keywords* still carry "todos todo" (`src/RelayWindow.h`), which is how someone
 who still types the old word finds the Tasks rows. Keywords are matched, never drawn.
 
+## `/todos` after the hiding: live, and as a rule with tests (follow-up, same day)
+
+Claude Fable 5.1 (the coordinating session), after the owner's rule that a gap within reach is
+fixed rather than listed: "`/todos` still opens the panel" had been left to QA. It is now proven
+twice.
+
+- **The rules are one place.** `relay::slash::offered(names, hidden)` is what the `/` popup lists
+  and `relay::slash::resolve(typed, names, hidden, &exact)` is what a typed `/name` becomes; the
+  pane's popup and `Pane::slashCommandFor()` both call them (`src/SlashCommands.{h,cpp}`).
+  `tests/slashcommands_test.cpp` runs them against the pane's own registry:
+  `aHiddenNameIsNeverOfferedByThePalette` (`/todos` is out, `/tasks` and the order are kept),
+  `aHiddenNameTypedInFullStillResolves` (exact, so it runs even with arguments, and it is still a
+  known name for the unknown-command line), `aPrefixNeverCompletesToAHiddenName` (`/to` resolves
+  to nothing — with nothing hidden it would complete to `todos`, so the rule is the hiding, not the
+  spelling; `/ta` still completes to `tasks`).
+- **Live**, `drive-todos.sh` (same sandbox and stub provider as #BDXG's scenes; it checks the OCR
+  of each shot itself and prints PASS/FAIL per scene, `implementer-todos-notes.txt` has the OCR):
+
+  | Shot | What it shows |
+  | --- | --- |
+  | `implementer-01-popup.png` | `/` typed: the popup lists `/tasks` (and `/help`, `/model`, …) and never `/todos`. |
+  | `implementer-02-prefix.png` | `/to` typed: no popup row and no ghost completion at all — nothing offers the hidden name. |
+  | `implementer-03-panel.png` | `/todos` typed in full and sent: the Tasks panel opens on the six tasks the turn left (`Tasks · 1/6 …`), with the `Next time: Ctrl+Shift+K · task list` hint. |
+
+  Run: `docs/qa_evidence/2026-09-19-call-todos-tasks-everywhere-a-person-reads/drive-todos.sh` —
+  all six checks passed (`0 failure(s)`).
+
 ## Evidence in this folder
 
 - `implementer-backend-tests.log` — the backend modules this touches.

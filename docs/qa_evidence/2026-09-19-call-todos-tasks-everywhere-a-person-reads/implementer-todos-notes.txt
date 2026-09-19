@@ -1,0 +1,53 @@
+--- 01-popup
+.t on the other session s nea. Talted, !4 ask The owner about the icons”
+/help The keys and prefixes Relay answers to (same as ?)
+/model [name] Switch model, keeping the conversation
+/main Run this pane on the Main model
+/flash Run this pane on the Flash model (same as Alt+F)
+/local Run this pane on a model served on this machine
+/gim Switch to the GLM Coding Plan
+/kimi Switch to the Kimi Coding Plan
+/
+
+~/project ( © 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) ) 94% left stub - local ~ <
+O main idle | from the prompt to select 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished)
+¥ 71 __ read the card and the code it names
+©T2 ~~ make the row a fold and draw the list
+O73 runctest and the backend suite
+« T4 ask the owner about the icons
+X T5 wait on the other session's header
+
++1 task - Agents... and /tasks in the palette
+PASS 01-popup: the popup offers /tasks
+PASS 01-popup: the popup never offers /todos
+--- 02-prefix
++ Tasks 1/6 (1 Talled, 1 aererred, 1 cancetled, 2 unTinisned) -« [5 walt on the other session's hea. Talted, 14 aSkK The owner about the icons
+deferred +3 more - /tasks
+“Project Duele sub-leal
+© main idle | from the prompt to select 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished)
+¥ 71 __ read the card and the code it names
+©7T2 ~~ make the row a fold and draw the list
+O73 runctest and the backend suite
+« T4 ask the owner about the icons
+X T5 wait on the other session's header
++1 task - Agents... and /tasks in the palette
+PASS 02-prefix: no /todos row for the prefix
+PASS 02-prefix: no "todos" completion at all
+--- 03-panel
++ Tasks 1/6 (il Talled, 1 aererred, i cancelled, 2 unTinisned
+deferred +3 more - /tasks
+T6 - cancelled
+Note: superseded
+the old plan
+Next time: Ctrl+Shift+K - task list
+Shell commands or agent prompts... ? for help auto
+“rie Duele sub-leal
+© main idle | from the prompt to select 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished)
+¥ 71 __ read the card and the code it names
+©7T2 ~~ make the row a fold and draw the list
+O73 runctest and the backend suite
+« T4 ask the owner about the icons
+X T5 wait on the other session's header
++1 task - Agents... and /tasks in the palette
+PASS 03-panel: the Tasks panel opened
+PASS 03-panel: and it holds the tasks the turn left

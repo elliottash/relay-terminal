@@ -15,9 +15,11 @@ QStringList registry() {
             QStringLiteral("compact"), QStringLiteral("context"), QStringLiteral("rewind"),
             QStringLiteral("rewind-code"), QStringLiteral("fork"), QStringLiteral("resume"),
             QStringLiteral("conversations"), QStringLiteral("find"), QStringLiteral("plan"),
-            QStringLiteral("tasks"), QStringLiteral("shell"), QStringLiteral("agent"),
-            QStringLiteral("deploy")};
+            QStringLiteral("tasks"), QStringLiteral("todos"), QStringLiteral("shell"),
+            QStringLiteral("agent"), QStringLiteral("deploy")};
 }
+// `/todos` is the one name Relay answers to and never teaches (card #SHE3).
+QStringList hiddenNames() { return {QStringLiteral("todos")}; }
 // A machine where only the real absolute paths of this test exist.
 Probe machine() {
     return [](const QString &path) {
@@ -44,6 +46,45 @@ private Q_SLOTS:
         for (const QString &name : registry())
             QCOMPARE(attemptedName(QLatin1Char('/') + name, machine()), name);
         QCOMPARE(attemptedName(QStringLiteral("/compact the older turns"), machine()), QStringLiteral("compact"));
+    }
+
+    // ----- a name Relay answers to but never teaches (card #SHE3) ---------------------------
+    //
+    // The list a person reads is the task list now, so the palette must not put "todos" back in
+    // front of anyone; but `/todos` is in people's fingers and in saved prompts, so it has to keep
+    // working. These are the rules Pane::slashCommandFor() and the `/` popup run.
+
+    void aHiddenNameIsNeverOfferedByThePalette() {
+        const QStringList shown = offered(registry(), hiddenNames());
+        QVERIFY(!shown.contains(QStringLiteral("todos")));
+        QVERIFY(shown.contains(QStringLiteral("tasks")));
+        // Nothing else is dropped, and the registry's order is kept.
+        QCOMPARE(shown.size(), registry().size() - 1);
+        QCOMPARE(shown.first(), QStringLiteral("new"));
+        QCOMPARE(shown.at(shown.indexOf(QStringLiteral("tasks")) - 1), QStringLiteral("plan"));
+    }
+
+    void aHiddenNameTypedInFullStillResolves() {
+        bool exact = false;
+        QCOMPARE(resolve(QStringLiteral("todos"), registry(), hiddenNames(), &exact), QStringLiteral("todos"));
+        QVERIFY(exact);   // an exact match, so it runs even with arguments after it
+        // And it is still a known name, so the unknown-command line never claims it does not exist.
+        QVERIFY(registry().contains(attemptedName(QStringLiteral("/todos"), machine())));
+    }
+
+    void aPrefixNeverCompletesToAHiddenName() {
+        bool exact = true;
+        // "/to" could be "todos" by spelling; it must not be, or the palette teaches the old word.
+        QCOMPARE(resolve(QStringLiteral("to"), registry(), hiddenNames(), &exact), QString());
+        QVERIFY(!exact);
+        // With nothing hidden it would have completed — the rule is the hiding, not the spelling.
+        QCOMPARE(resolve(QStringLiteral("to"), registry(), {}), QStringLiteral("todos"));
+        // A prefix of a visible name still completes, in registry order.
+        QCOMPARE(resolve(QStringLiteral("ta"), registry(), hiddenNames()), QStringLiteral("tasks"));
+        QCOMPARE(resolve(QStringLiteral("re"), registry(), hiddenNames()), QStringLiteral("rewind"));
+        // An exact name wins over any completion, and an unknown prefix resolves to nothing.
+        QCOMPARE(resolve(QStringLiteral("rewind"), registry(), hiddenNames()), QStringLiteral("rewind"));
+        QCOMPARE(resolve(QStringLiteral("zz"), registry(), hiddenNames()), QString());
     }
 
     void pathsAreNeverCommands() {

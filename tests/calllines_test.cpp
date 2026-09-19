@@ -440,6 +440,71 @@ private slots:
                  (QStringList{QStringLiteral("(The list was emptied.)")}));
     }
 
+    // The anchor's scheme, both answers. On this machine every engine core reports the Folds
+    // capability, so the `backendFolds == false` column cannot be reached by running the app: it is
+    // the rule itself that is tested, and Pane::callAnchor() calls exactly this (#BDXG).
+    void aTaskRowAnchorsAFoldOnlyWhenTheBackendHasOne() {
+        QVERIFY(anchorsFold(Click::Todos, false, true));      // the row folds to its task list
+        QVERIFY(anchorsFold(Click::Fold, false, true));
+        QVERIFY(anchorsFold(Click::File, true, true));        // a merged run always folds
+        QVERIFY(!anchorsFold(Click::File, false, true));      // opens a preview pane
+        QVERIFY(!anchorsFold(Click::Diff, false, true));
+        QVERIFY(!anchorsFold(Click::Subagent, false, true));
+        // No fold layer: every row anchors relay://open-call, so a click still reaches the detail.
+        for (const Click click : {Click::Todos, Click::Fold, Click::File, Click::Diff})
+            QVERIFY(!anchorsFold(click, false, false));
+        QVERIFY(!anchorsFold(Click::Fold, true, false));
+    }
+
+    // #EC58: a pane restored from saved scrollback holds no CallRecord, so Pane::handleFoldReply()
+    // builds the label from the worker's reply before it asks for the fold's options. This is that
+    // reply, exactly as the worker sends it for an update_todos call, and nothing else.
+    void aRestoredPaneGetsTheTaskFoldFromTheReplyAlone() {
+        const QJsonObject reply = json(
+            "{'id': 'fold-7', 'turn_id': 't1', 'call_id': 'c1',"
+            " 'label': {'kind': 'plan', 'running': 'updating tasks', 'title': 'updated tasks',"
+            "           'stats': ['2 open'], 'ok': true, 'open': {'type': 'todos'}},"
+            " 'detail': [{'heading': 'tasks', 'style': 'tasks',"
+            "             'text': '[in_progress] write the fold\\n[pending] run the tests'}]}");
+        const Label rebuilt = relay::toollabel::fromEvent(reply);
+        QVERIFY(rebuilt.valid);
+        QCOMPARE(rebuilt.title, QStringLiteral("updated tasks"));
+        // The label alone is enough to decide that this row folds to the task list.
+        QCOMPARE(clickFor(rebuilt), Click::Todos);
+        QVERIFY(anchorsFold(clickFor(rebuilt), false, true));
+
+        // And the reply alone carries the rows, with no record and no stored diff.
+        FoldOptions options;
+        options.openInPane = QStringLiteral("relay://tasks/p1");
+        options.openInPaneText = QStringLiteral("open the task list");
+        QCOMPARE(textsOf(foldForReply(reply, palette(), options)),
+                 (QStringList{QStringLiteral("\u25D0  write the fold"),
+                              QStringLiteral("\u25CB  run the tests"),
+                              QStringLiteral("open the task list")}));
+    }
+
+    // A backend with no fold layer shows the call's detail in a preview pane instead
+    // (Pane::openToolOutput): the same list, as text, and not the result's JSON (#BDXG).
+    void aFoldlessBackendReadsTheSameTaskListAsText() {
+        const QJsonObject reply = json(
+            "{'id': 'turn-3', 'turn_id': 't1', 'call_id': 'c1', 'name': 'update_todos',"
+            " 'label': {'kind': 'plan', 'running': 'updating tasks', 'title': 'updated tasks',"
+            "           'stats': ['2 open'], 'ok': true, 'open': {'type': 'todos'}},"
+            " 'result': {'items': [{'id': 'T1', 'text': 'write the fold', 'status': 'in_progress'}]},"
+            " 'detail': [{'heading': 'tasks', 'style': 'tasks',"
+            "             'text': '[in_progress] write the fold\\n[pending] run the tests'}]}");
+        QCOMPARE(replyAsText(reply),
+                 QStringLiteral("✓ updated tasks · 2 open\n\n◐  write the fold\n○  run the tests"));
+        // A failed call: its line says so, and the error section follows in full.
+        const QJsonObject failed = json(
+            "{'name': 'update_todos',"
+            " 'label': {'kind': 'plan', 'running': 'updating tasks', 'title': 'update tasks',"
+            "           'ok': false, 'error': 'Task 2: status must be one of pending, in_progress.'},"
+            " 'detail': [{'heading': 'error', 'style': 'error', 'text': 'Task 2: status must be one of pending, in_progress.'}]}");
+        QVERIFY(replyAsText(failed).startsWith(QStringLiteral("✗ ")));
+        QVERIFY(replyAsText(failed).endsWith(QStringLiteral("\n\nTask 2: status must be one of pending, in_progress.")));
+    }
+
     void theTaskFoldsLastRowOpensTheTaskList() {
         FoldOptions options;
         options.openInPane = QStringLiteral("relay://tasks/p1");

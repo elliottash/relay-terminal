@@ -4264,13 +4264,11 @@ private:
     // with no fold layer anchors everything to open-call, so a click still reaches the detail.
     QString callAnchor(const relay::calllines::Step &step, const QString &turnId,
                        const relay::toollabel::Label &label) const {
-        // Click::Todos folds too (card #BDXG): an "updated tasks" row *is* its list, so the fold is
-        // the surface it opens, and the ▸ it shows is kept. Everything else that is not Click::Fold
-        // opens a pane and so anchors relay://open-call.
-        const relay::calllines::Click click = relay::calllines::clickFor(label);
-        const bool folds = terminalFolds()
-                           && (step.merged || click == relay::calllines::Click::Fold
-                               || click == relay::calllines::Click::Todos);
+        // The rule itself is relay::calllines::anchorsFold, so both answers — including the one a
+        // backend with no fold layer gets, which cannot be reached on a machine whose only engine
+        // core has folds — are decided by code tests/calllines_test.cpp runs (#BDXG).
+        const bool folds = relay::calllines::anchorsFold(relay::calllines::clickFor(label),
+                                                         step.merged, terminalFolds());
         return folds ? relay::calllines::foldUri(m_token, turnId, step.callId, step.extra)
                      : relay::calllines::openUri(m_token, turnId, step.callId);
     }
@@ -4470,10 +4468,11 @@ private:
             break;
         }
         case Click::Todos:
-            // A backend with no fold layer: the row is an open-call anchor, and the task list that
-            // call left behind reaches the user as the call's detail in a preview pane, the same
-            // `tasks` section the fold would have drawn (card #BDXG). Not the live task list —
-            // an old row must still say what it said.
+            // Only reached on a backend with no fold layer (anchorsFold): the row is an open-call
+            // anchor, and the task list that call left behind reaches the user as the call's
+            // detail in a preview pane — openToolOutput() writes the same `tasks` section the fold
+            // would have drawn, through replyAsText (card #BDXG). Not the live task list: an old
+            // row must still say what it said.
         case Click::Fold:
             break;
         }
@@ -5484,7 +5483,12 @@ private:
         const QString preview = event.value(QStringLiteral("preview")).toString();
         const QJsonValue result = event.value(QStringLiteral("result"));
         QString body;
-        if (result.isObject()) {
+        // A reply with § 23.5 sections reads as the fold would have drawn it — an `update_todos`
+        // call's task list with its glyphs, a command with its `$ ` — not as the result's JSON.
+        // This is the surface a backend with no fold layer gets for every row (#BDXG).
+        if (event.value(QStringLiteral("detail")).isArray() && !event.value(QStringLiteral("detail")).toArray().isEmpty())
+            body = relay::calllines::replyAsText(event) + QLatin1Char('\n');
+        else if (result.isObject()) {
             const QJsonObject r = result.toObject();
             for (const char *field : {"output", "stdout", "content", "text", "error", "message"})
                 if (r.contains(QLatin1String(field)) && r.value(QLatin1String(field)).isString()) body += r.value(QLatin1String(field)).toString() + QLatin1Char('\n');
@@ -6459,6 +6463,12 @@ private:
     // in full still runs it, and it still counts as a known command (so it is not reported unknown
     // and an alias cannot take its name). Card #SHE3: `/todos` is the first of these.
     struct SlashCommand { QString name, args, description; bool hidden = false; };
+    // The hidden names, for relay::slash::offered() and resolve().
+    static QStringList hiddenSlashNames() {
+        QStringList out;
+        for (const auto &command : slashCommands()) if (command.hidden) out << command.name;
+        return out;
+    }
     static const QList<SlashCommand> &slashCommands() {
         static const QList<SlashCommand> commands{
             {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
@@ -6528,10 +6538,10 @@ private:
         // is never hidden behind an alias of the same name.
         QList<SlashCommand> commands;
         QStringList builtins;
-        for (const auto &command : slashCommands()) {
-            builtins << command.name;                 // a hidden name still shadows an alias
-            if (!command.hidden) commands.append(command);
-        }
+        for (const auto &command : slashCommands()) builtins << command.name;   // hidden ones shadow an alias too
+        const QStringList shown = relay::slash::offered(builtins, hiddenSlashNames());
+        for (const auto &command : slashCommands())
+            if (shown.contains(command.name)) commands.append(command);
         for (const auto &alias : std::as_const(m_aliasList)) {
             if (alias.shadowed || builtins.contains(alias.name)) continue;
             commands.append({alias.name, alias.params.isEmpty() ? QString() : QStringLiteral("[args]"),
@@ -6611,15 +6621,23 @@ private:
         if (!match.hasMatch()) return nullptr;
         const QString name = match.captured(1);
         const bool hasArgs = match.capturedLength(2) > 0;
-        const SlashCommand *prefix = nullptr;
+        // The two hidden-name rules are relay::slash's, so the popup, this hint and
+        // tests/slashcommands_test.cpp all run the same ones (#SHE3): a hidden name is never
+        // completed from a prefix — that would put the retired word back in front of the user —
+        // but typed in full it resolves like any other. `/shell` and `/agent` are the router's own
+        // prefixes and are not commands here at all.
+        QStringList names, hidden;
         for (const auto &command : slashCommands()) {
             if (command.name == QStringLiteral("shell") || command.name == QStringLiteral("agent")) continue;
-            if (command.name == name) return &command;
-            // A hidden alias is never completed from a prefix: it would put the retired word back
-            // in front of the user, which is the whole point of hiding it (#SHE3).
-            if (!hasArgs && !prefix && !command.hidden && command.name.startsWith(name)) prefix = &command;
+            names << command.name;
+            if (command.hidden) hidden << command.name;
         }
-        return prefix;
+        bool exact = false;
+        const QString found = relay::slash::resolve(name, names, hidden, &exact);
+        if (found.isEmpty() || (hasArgs && !exact)) return nullptr;
+        for (const auto &command : slashCommands())
+            if (command.name == found) return &command;
+        return nullptr;
     }
 
     void hideSlashPopup() { if (m_slashList && m_slashList->isVisible()) m_slashList->hide(); }

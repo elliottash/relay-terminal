@@ -96,4 +96,22 @@ QString unknownLine(const QString &name, const QStringList &known) {
     return line + QStringLiteral(" · type / for every command, /help for the keys");
 }
 
+QStringList offered(const QStringList &names, const QStringList &hidden) {
+    QStringList out;
+    for (const QString &name : names)
+        if (!hidden.contains(name)) out << name;
+    return out;
+}
+
+QString resolve(const QString &typed, const QStringList &names, const QStringList &hidden, bool *exact) {
+    if (exact) *exact = false;
+    if (names.contains(typed)) {          // typing it in full is deliberate, hidden or not
+        if (exact) *exact = true;
+        return typed;
+    }
+    for (const QString &name : names)     // registry order decides which prefix match wins
+        if (!hidden.contains(name) && name.startsWith(typed)) return name;
+    return {};
+}
+
 }  // namespace relay::slash

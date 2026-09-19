@@ -4,6 +4,7 @@
 #include "DiffView.h"
 #include "MarkdownAnsi.h"
 
+#include <limits>
 #include <QJsonArray>
 #include <QStringList>
 #include <QUrl>
@@ -174,6 +175,11 @@ Click clickFor(const toollabel::Label &label) {
     if (type == QStringLiteral("plan")) return Click::Plan;
     if (type == QStringLiteral("todos")) return Click::Todos;
     return Click::Fold;
+}
+
+bool anchorsFold(Click click, bool merged, bool backendFolds) {
+    if (!backendFolds) return false;
+    return merged || click == Click::Fold || click == Click::Todos;
 }
 
 // ----- the state machine ------------------------------------------------------------------------
@@ -519,6 +525,21 @@ QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette,
     }
     capAndClose(out, palette, options);
     return out;
+}
+
+QString replyAsText(const QJsonObject &reply) {
+    QStringList lines;
+    const toollabel::Label label = toollabel::fromEvent(reply);
+    if (label.valid) lines << (label.failed() ? QStringLiteral("✗ ") : QStringLiteral("✓ ")) + label.line() << QString();
+    // No colours and no links: an invalid Palette draws nothing, and empty options add no last row.
+    FoldOptions options;
+    options.maxLines = std::numeric_limits<int>::max();
+    for (const FoldLine &line : foldForReply(reply, Palette{}, options)) {
+        QString text;   // the spans joined; FoldLine::text() lives in the engine, not this library
+        for (const FoldSpan &span : line.spans) text += span.text;
+        lines << text;
+    }
+    return lines.join(QLatin1Char('\n'));
 }
 
 QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &palette,
