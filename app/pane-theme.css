@@ -28,6 +28,7 @@
   --rt-bg: #0e0f12;
   --rt-success-border: #466c4f;
   --rt-warning-border: #7a6847;
+  --rt-agent-border: #5d5385;
   --rt-success: #7ec88c;
   --rt-warning: #e5c07b;
   --rt-error: #e06c75;
@@ -59,6 +60,7 @@
   --rt-token-syntax-variable: #ab97f7;
   --rt-token-text: #ece6e0;
   --rt-token-text-muted: #a2968c;
+  --rt-token-tool: #c08556;
   --rt-token-warning: #e5c07b;
   --rt-queue-row-selected: #312620;
   --rt-term-background: #12131a;
@@ -107,6 +109,7 @@
   --rt-bg: #0f1115;
   --rt-success-border: #476d51;
   --rt-warning-border: #7a6948;
+  --rt-agent-border: #625086;
   --rt-success: #7ec88c;
   --rt-warning: #e5c07b;
   --rt-error: #e06c75;
@@ -138,6 +141,7 @@
   --rt-token-syntax-variable: #b48ef7;
   --rt-token-text: #e6e8ec;
   --rt-token-text-muted: #8b919c;
+  --rt-token-tool: #c8a45c;
   --rt-token-warning: #e5c07b;
   --rt-queue-row-selected: #262a33;
   --rt-term-background: #0f1115;
@@ -186,6 +190,7 @@
   --rt-bg: #fbfbfd;
   --rt-success-border: #8db99c;
   --rt-warning-border: #c3ac7f;
+  --rt-agent-border: #bc9bf5;
   --rt-success: #1e763b;
   --rt-warning: #8a5d00;
   --rt-error: #c0273a;
@@ -217,6 +222,7 @@
   --rt-token-syntax-variable: #7c3aed;
   --rt-token-text: #1a1d24;
   --rt-token-text-muted: #5c6472;
+  --rt-token-tool: #5a3f1a;
   --rt-token-warning: #8a5d00;
   --rt-queue-row-selected: #ffffff;
   --rt-term-background: #fbfbfd;
@@ -256,19 +262,8 @@
   --qss-toast-border-radius: 8px;
   --qss-toast-color: var(--rt-text);
   --qss-toast-padding: 6px 12px;
-  --qss-thinkingOverlay-background: var(--rt-bg);
-  --qss-thinkingOverlay-border: 1px solid var(--rt-border);
-  --qss-thinkingOverlay-border-radius: 8px;
   --qss-transcriptHeader-background: transparent;
   --qss-transcriptHeader-color: var(--rt-muted);
-  --qss-thinkingView-background: transparent;
-  --qss-thinkingView-border: none;
-  --qss-thinkingView-border-radius: 6px;
-  --qss-thinkingView-color: var(--rt-muted);
-  --qss-thinkingView-font-family: var(--rt-mono);
-  --qss-thinkingView-font-size: calc(var(--rt-pt) * 10);
-  --qss-thinkingView-padding: 5px 8px;
-  --qss-thinkingView-focus-border-color: var(--rt-accent-border);
   --qss-queueStrip-background: var(--rt-surface);
   --qss-queueStrip-border: 1px solid var(--rt-border);
   --qss-queueStrip-border-radius: 8px;

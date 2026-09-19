@@ -1,0 +1,7 @@
+2026-09-19T05:11:02.922Z INFO relay.gui gui_start version=0.1.0 pid=1471060 level=info
+2026-09-19T05:11:02.998Z INFO relay.gui worker_start pane=3748d5bd workspace_set=1
+2026-09-19T05:11:03.089Z INFO relay.gui event type=ready pane=3748d5bd
+2026-09-19T05:11:03.120Z INFO relay.gui event type=configured pane=3748d5bd model=stub
+2026-09-19T05:11:11.719Z INFO relay.gui event type=agent_started pane=3748d5bd turn_id=97281af32adb42518a8e1d1eae73b417
+2026-09-19T05:11:15.864Z INFO relay.gui event type=turn_summary pane=3748d5bd turn_id=97281af32adb42518a8e1d1eae73b417 outcome=done ms=4145
+2026-09-19T05:11:15.880Z INFO relay.gui event type=agent_finished pane=3748d5bd outcome=done

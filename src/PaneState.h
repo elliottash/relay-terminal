@@ -84,6 +84,10 @@ struct Inputs {
     // context
     QString contextLabel;            // "96% left"; empty when the pane has no window yet
     int percentLeft = -1;            // -1: unknown, published as null
+    // allowance (Relay Free)
+    QString allowanceLabel;          // the quota chip's own words; empty: not published at all
+    int allowanceLeft = -1;          // percent of today's allowance left; -1: unknown, as null
+    QString allowanceDetail;         // the chip's tooltip: "182,400 of 250,000 tokens today · …"
     // sessions
     QList<Session> sessions;
     bool canNew = false;             // a new conversation may be started now

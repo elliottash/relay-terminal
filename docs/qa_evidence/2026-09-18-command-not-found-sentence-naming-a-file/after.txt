@@ -1,0 +1,18 @@
+ok   explain=False (want False) owner line (verbatim, session 4e62ce12 turn da613e73)
+     command not found: new | Reads like a request · sent to the agent
+ok   explain=False (want False) colon mid-line, file named
+     command not found: gti | Reads like a request · sent to the agent
+ok   explain=False (want False) full stop mid-line, file named
+     command not found: gti | Reads like a request · sent to the agent
+ok   explain=False (want False) full stop mid-line, path named
+     command not found: pyton | Reads like a request · sent to the agent
+ok   explain=True  (want True ) real slip with a file operand keeps the note
+     command not found: gti | Not a runnable command (command not found: gti) · sent to the agent
+ok   explain=True  (want True ) a full stop on the LAST word is not a sentence break
+     command not found: gti | Not a runnable command (command not found: gti) · sent to the agent
+ok   explain=True  (want True ) plain slip keeps the note
+     command not found: gti | Not a runnable command (command not found: gti) · sent to the agent
+ok   explain=True  (want True ) typo of cd with a dot-dot operand keeps the note
+     command not found: cs | Not a runnable command (command not found: cs) · sent to the agent
+
+0 wrong of 8

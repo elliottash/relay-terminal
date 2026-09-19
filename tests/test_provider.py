@@ -1,3 +1,5 @@
+import email.message
+import email.utils
 import io
 import json
 import os
@@ -5,6 +7,7 @@ import socket
 import threading
 import time
 import unittest
+import urllib.error
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from relay_core.provider import (CONNECT_TIMEOUT, MAX_OUTPUT_TOKENS, ChatProvider, ProviderConfig,
@@ -396,6 +399,172 @@ class StallTests(unittest.TestCase):
             for connection in held:
                 connection.close()
             thread.join(timeout=5)
+
+
+class RetryTests(unittest.TestCase):
+    """A provider's transient refusal — 429, a 5xx — is asked again, the way Claude Code asks.
+
+    Every wait here is either a ``Retry-After: 0`` or a backoff shrunk on the instance, so the
+    suite stays quick. The server only ever answers on loopback.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.counts = {}
+        outer = cls
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+
+            def refuse(self, status, retry_after=None, body=b''):
+                self.send_response(status)
+                if retry_after is not None:
+                    self.send_header('Retry-After', retry_after)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def ok(self):
+                self.send_response(200); self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                self.wfile.write(event({'content': 'RETRY_OK'}) + event(finish='stop')
+                                 + b'data: [DONE]\n\n')
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                mount = self.path.rsplit('/chat', 1)[0]
+                outer.counts[mount] = outer.counts.get(mount, 0) + 1
+                seen = outer.counts[mount]
+                if mount == '/rate/v1' and seen == 1:
+                    return self.refuse(429, '0', b'{"error": "rate limit hit"}')
+                if mount == '/after/v1' and seen == 1:
+                    return self.refuse(429, '1')
+                if mount == '/always/v1':
+                    return self.refuse(429, '0')
+                if mount == '/slow/v1':
+                    return self.refuse(429, '2')
+                if mount == '/server/v1' and seen == 1:
+                    return self.refuse(500)
+                if mount == '/auth/v1':
+                    return self.refuse(401, body=b'SECRET_ECHO')
+                if mount == '/overflow/v1':
+                    return self.refuse(500, body=b'{"error": "prompt exceeds the available context size"}')
+                if mount == '/loading/v1' and seen == 1:
+                    return self.refuse(503)
+                self.ok()
+
+        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True); cls.thread.start()
+        cls.base = f'http://127.0.0.1:{cls.server.server_port}'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join()
+
+    def provider(self, mount, **config):
+        return ChatProvider(ProviderConfig(self.base + mount, 'test-model', '', **config))
+
+    def complete(self, provider, cancel=None):
+        events = []
+        result = provider.complete([{'role': 'user', 'content': 'hello'}], [], events.append,
+                                   cancel or threading.Event())
+        return result, events
+
+    def seen(self, mount) -> int:
+        return self.counts.get(mount, 0)
+
+    def test_a_rate_limited_request_is_sent_again(self):
+        provider = self.provider('/rate/v1')
+        result, events = self.complete(provider)
+        self.assertEqual(result['content'], 'RETRY_OK')
+        self.assertEqual(self.seen('/rate/v1'), 2)
+        retry = next(e for e in events if e['event'] == 'provider_retry')
+        self.assertEqual(retry['reason'], 'http')
+        self.assertEqual(retry['attempt'], 1)
+        self.assertEqual(retry['max_attempts'], 6)
+        self.assertIn('429', retry['text'])
+        self.assertTrue(any('429' in e.get('text', '') for e in events if e['event'] == 'status'))
+        self.assertFalse(provider.response_open())
+
+    def test_the_wait_a_retry_after_header_names_is_honoured(self):
+        provider = self.provider('/after/v1')
+        started = time.monotonic()
+        result, _ = self.complete(provider)
+        self.assertEqual(result['content'], 'RETRY_OK')
+        self.assertGreaterEqual(time.monotonic() - started, 1.0)
+        self.assertEqual(self.seen('/after/v1'), 2)
+
+    def test_a_refusal_that_never_lifts_fails_after_the_retries(self):
+        provider = self.provider('/always/v1')
+        events = []
+        with self.assertRaises(ProviderError) as caught:
+            provider.complete([{'role': 'user', 'content': 'hello'}], [], events.append,
+                              threading.Event())
+        self.assertIn('429', str(caught.exception))
+        self.assertEqual(self.seen('/always/v1'), 7)          # the first try and six retries
+        notes = [e for e in events if e['event'] == 'provider_retry']
+        self.assertEqual([e['attempt'] for e in notes], [1, 2, 3, 4, 5, 6])
+        self.assertFalse(provider.response_open())
+
+    def test_a_server_error_is_sent_again_too(self):
+        provider = self.provider('/server/v1')
+        provider.HTTP_RETRY_BASE_S = provider.HTTP_RETRY_CEILING_S = 0.01   # no header: backoff
+        result, _ = self.complete(provider)
+        self.assertEqual(result['content'], 'RETRY_OK')
+        self.assertEqual(self.seen('/server/v1'), 2)
+
+    def test_a_refusal_about_the_request_itself_is_not_retried(self):
+        provider = self.provider('/auth/v1')
+        with self.assertRaises(ProviderError) as caught:
+            self.complete(provider)
+        self.assertIn('401', str(caught.exception))
+        self.assertNotIn('SECRET_ECHO', str(caught.exception))
+        self.assertEqual(self.seen('/auth/v1'), 1)
+
+    def test_a_local_server_is_not_generically_retried(self):
+        # Its 5xx are deterministic — the prompt does not fit — so the sentence arrives at once.
+        provider = self.provider('/overflow/v1', local=True)
+        with self.assertRaises(ProviderError) as caught:
+            self.complete(provider)
+        self.assertIn('no longer fits', str(caught.exception))
+        self.assertEqual(self.seen('/overflow/v1'), 1)
+
+    def test_a_local_server_still_loading_is_waited_out(self):
+        provider = self.provider('/loading/v1', local=True)
+        provider.LOADING_RETRY_S = 0.01
+        result, events = self.complete(provider)
+        self.assertEqual(result['content'], 'RETRY_OK')
+        self.assertEqual(self.seen('/loading/v1'), 2)
+        self.assertIn({'event': 'status', 'text': 'The local server is loading its model…'}, events)
+        self.assertFalse(any(e['event'] == 'provider_retry' for e in events))
+
+    def test_stop_during_the_wait_ends_the_turn(self):
+        provider = self.provider('/slow/v1')
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        with self.assertRaises(Cancelled):
+            self.complete(provider, cancel)
+        self.assertFalse(provider.response_open())
+
+    def test_retry_after_header_parsing(self):
+        provider = self.provider('/rate/v1')
+
+        def refusal(headers: dict):
+            message = email.message.Message()
+            for name, value in headers.items():
+                message[name] = value
+            return urllib.error.HTTPError('http://x/', 429, 'Too Many Requests', message, None)
+        self.assertEqual(provider._retry_after_s(refusal({'Retry-After': '2.5'})), 2.5)
+        self.assertEqual(provider._retry_after_s(refusal({'retry-after-ms': '250'})), 0.25)
+        self.assertEqual(provider._retry_after_s(refusal({'Retry-After': '3600'})), 60.0)
+        past = email.utils.formatdate(time.time() - 30, usegmt=True)
+        self.assertEqual(provider._retry_after_s(refusal({'Retry-After': past})), 0.0)
+        soon = email.utils.formatdate(time.time() + 3, usegmt=True)
+        waited = provider._retry_after_s(refusal({'Retry-After': soon}))
+        self.assertGreaterEqual(waited, 1.0)
+        self.assertLessEqual(waited, 3.0)
+        self.assertIsNone(provider._retry_after_s(refusal({'Retry-After': 'soon'})))
+        self.assertIsNone(provider._retry_after_s(refusal({})))
 
 
 class OpenRouterReasoningTests(unittest.TestCase):

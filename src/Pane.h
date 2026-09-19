@@ -16,6 +16,8 @@
 #include "Theme.h"
 #include "BoardPane.h"
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
+#include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
+#include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
 #include "AgentUi.h"
 #include "Completion.h"
 #include "FileIndex.h"
@@ -27,6 +29,7 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "PaneTitles.h"
+#include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
@@ -40,7 +43,6 @@
 #include "Conversations.h"
 #include "SessionInfo.h"
 #include "Logging.h"
-#include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"
@@ -183,15 +185,65 @@ public:
     }
 };
 
+// The bold "Relaying…" line above the prompt box (card #4E13): one verb, the colour saying whose
+// work it is — the agent's violet while a turn runs or subagents it started still work, the
+// terminal's blue while a program runs, amber when the turn is blocked on your answer (#MQ9C).
+// Painted rather than a QLabel for the same reason the header's state word is (PaneStateWord,
+// src/PaneChrome.h): the colour follows the state, and the theme can change under it. Elided
+// from the middle so a long action ("Relaying reading src/deep/path…") never pushes the composer
+// wide, and Ignored like the prompt box itself so a narrow pane clips it instead (#G152).
+class PaneBusyLine final : public QWidget {
+public:
+    explicit PaneBusyLine(QWidget *parent) : QWidget(parent) {
+        setObjectName(QStringLiteral("paneBusyLine"));
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        setMinimumWidth(1);   // a narrow pane clips the line rather than growing for it
+        hide();
+    }
+    void setBusy(relay::panestatus::State state, const QString &text, const QString &tip) {
+        m_state = state; m_text = text;
+        setToolTip(tip);
+        setAccessibleName(text);
+        setVisible(true);
+        update();
+    }
+    void clearBusy() {
+        if (m_text.isEmpty() && isHidden()) return;
+        m_text.clear();
+        setToolTip(QString());
+        setAccessibleName(QString());
+        hide();
+    }
+    QSize sizeHint() const override {
+        QFont bold = font(); bold.setWeight(QFont::DemiBold);
+        return {QFontMetrics(bold).horizontalAdvance(m_text) + 2, 18};
+    }
+protected:
+    void paintEvent(QPaintEvent *) override {
+        if (m_text.isEmpty()) return;
+        const relay::panestatus::Tokens t{relay::theme::Background, relay::theme::Text, relay::theme::TextMuted,
+                                          relay::theme::Shell, relay::theme::Agent, relay::theme::Success,
+                                          relay::theme::Warning, relay::theme::Error, relay::theme::Action};
+        QFont bold = font(); bold.setWeight(QFont::DemiBold);
+        QPainter p(this);
+        p.setFont(bold);
+        // A word is text: the state's own ink, lifted to at least 4.5:1 on the pane's ground
+        // (panestatus::stateText), so the line reads in every shipped theme.
+        p.setPen(relay::panestatus::stateText(m_state, relay::theme::Background, t));
+        p.drawText(rect().adjusted(0, 0, -2, 0), Qt::AlignRight | Qt::AlignVCenter,
+                   QFontMetrics(bold).elidedText(m_text, Qt::ElideMiddle, std::max(1, width() - 2)));
+    }
+private:
+    relay::panestatus::State m_state = relay::panestatus::State::Idle;
+    QString m_text;
+};
+
 // One terminal pane: a shell behind relay::TerminalBackend (Relay's own engine, engine/), its
 // Bash bridge, a composer, and its own agent worker and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
-        // A guest-composer entry is neither a Relay-agent prompt nor a shell command. It stays
-        // in the pane's one delivery queue until this named guest reports that it is idle.
-        QString guest;
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -207,8 +259,7 @@ public:
         QString label() const {
             const QString what = fix ? QStringLiteral("fix request")
                                  : written() ? QStringLiteral("terminal result") : text;
-            const QString labelled = guest.isEmpty() ? what : guestDisplayName(guest) + QStringLiteral(" · ") + what;
-            return author.isEmpty() ? labelled : author + QStringLiteral(" · ") + labelled;
+            return author.isEmpty() ? what : author + QStringLiteral(" · ") + what;
         }
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
@@ -273,11 +324,6 @@ public:
     ~Pane() override {
         m_closing = true;
         qApp->removeEventFilter(this);
-        // The bridge: this pane is gone, so its registration ends here — and so does any diff it
-        // still owes claude an answer to. Rejecting is the only honest answer once nobody can
-        // show the change (26.5).
-        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("pane closed"));
-        unregisterFromBridge();
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
@@ -295,25 +341,6 @@ public:
                 m_worker.waitForFinished(1000);
             }
         }
-    }
-
-    // Scan asynchronously: an unreadable home/config directory or a vanished guest helper must
-    // not block a keystroke in the pane. The helper publishes a normal `slash` event atomically.
-    void publishGuestSlashCatalog(const QString &guest) {
-        if (guest != QStringLiteral("claude") && guest != QStringLiteral("codex")) return;
-        auto *scan = new QProcess(this);
-        scan->setWorkingDirectory(m_cwd);
-        scan->setProgram(m_python);
-        scan->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
-                            QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
-        connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
-                [this, scan, guest](int code, QProcess::ExitStatus exit) {
-                    if (exit != QProcess::NormalExit || code != 0)
-                        status(QStringLiteral("Could not read %1 slash commands.").arg(guestDisplayName(guest)));
-                    scan->deleteLater();
-                });
-        connect(scan, &QProcess::errorOccurred, this, [scan](QProcess::ProcessError) { scan->deleteLater(); });
-        scan->start();
     }
 
     // ----- interface used by RelayWindow ----------------------------------------------------
@@ -336,7 +363,21 @@ public:
     // An empty reason never attaches, so the `#` index, the idle tip and the shortcut hints stay
     // quiet in an unattached pane.
     std::function<QString(const QString &reason, QString *why)> onBoardProject;
+    // ----- "Initialize a project and create a Switchboard here?" (protocol 19.12) --------------
+    // What the window knows about this pane before the question is raised: its candidate project,
+    // whether that project already has a board, and what the registry remembers about it. The
+    // rules live in src/ProjectInit.h; the window only answers facts.
+    std::function<relay::projectinit::Situation()> onProjectInitSituation;
+    // A yes: attach this pane's tab to `project` with `reason` (projects::kReason*), so the
+    // conversation carries on with the card tools (set_board, protocol 19.11).
+    std::function<void(const QString &project, const QString &reason)> onProjectAttach;
+    // What happened to the question, for the window to remember. `what` is one of "asked" (it is
+    // on screen now), "yes", "no" — written to the registry for ever — "not-now", which silences
+    // trigger (1) for this Relay session only, and "reconsider", which `/init` sends to clear a
+    // remembered no.
+    std::function<void(const QString &project, const QString &what)> onProjectInitEvent;
     std::function<void(const QString &code)> onJoinShared;   // /join CODE, /connect CODE
+    std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
@@ -378,7 +419,18 @@ public:
         facts.finishSerial = m_finishSerial;
         facts.lastOutcome = m_lastOutcome;
         facts.lastAsked = m_lastAsked;
+        facts.questionOpen = m_ask.open();
         return facts;
+    }
+    // This pane's share of the machine (issue #D03W): CPU and memory summed over the shell's
+    // process tree and the pane's agent worker, sampled by the window's status poll so every
+    // pane is measured on the same interval. An idle pane is a valid sample of nothing.
+    relay::usage::Sample usageSample() const { return m_usageSample; }
+    void refreshUsage() {
+        QList<qint64> roots;
+        if (const int shell = shellPid(); shell > 0) roots << shell;
+        if (m_worker.state() == QProcess::Running) roots << qint64(m_worker.processId());
+        m_usageSample = m_usageMeter.update(roots);
     }
     // The foreground program's command line while it is ssh, mosh or telnet; empty otherwise.
     // Read live from the terminal's foreground process group, so it is true exactly while the
@@ -393,23 +445,6 @@ public:
     // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
     // Classified from the command line on every program poll (issue GT7X, protocol 26).
     QString guest() const { return m_guest; }
-    // One `bridge` event from this pane's guest channel (26.3, 26.5): what the IDE bridge's
-    // sidecar learned from a claude connected to it, handed in by the channel's own reader
-    // (handleGuestEvent) — the fold the seam was waiting for.
-    // `openDiff` is the one that asks for Relay surfaces of its own (the diff view, and the
-    // banner that decides it); `openFile` opens the preview pane. Everything else — a selection,
-    // a dirty flag, the diagnostics Relay does not have — was answered by the sidecar, which is
-    // the only side that can answer it.
-    void guestBridgeEvent(const QJsonObject &data) {
-        const QString tool = data.value(QStringLiteral("tool")).toString();
-        if (tool == QStringLiteral("openDiff")) { showGuestDiff(data); return; }
-        if (tool == QStringLiteral("openFile")) {
-            const QString path = data.value(QStringLiteral("filePath")).toString();
-            if (!path.isEmpty() && onOpenPath) onOpenPath(path, 0);
-            return;
-        }
-        relay::log::debug(QStringLiteral("guest_bridge_tool pane=%1 tool=%2").arg(paneLogId(), tool));
-    }
     bool sharedWithPhone() const { return relay::RemoteShare::instance().isSharing(m_token); }
     bool processBusy() const {
         if (!m_backend) return false;
@@ -447,6 +482,10 @@ public:
         if (relay::windowstate::isScrollbackId(scrollback)) {
             m_scrollbackId = scrollback;
             m_restoredScrollback = relay::windowstate::readScrollback(scrollback);
+            // The same id names this pane's prompt history: the composer was pointed at the fresh
+            // token in buildUi(), before there was a saved spec to read. Nothing has been typed
+            // yet, so re-pointing simply loads the pane's own history instead.
+            m_editor->useHistoryFile(promptHistoryPath());
         }
         changed();
     }
@@ -456,6 +495,9 @@ public:
     // first prompt. Plain text: see the note in src/WindowState.h on why the colours do not come
     // back with it.
     QString scrollbackId() const { return m_scrollbackId; }
+    // The file this pane's prompt-box Up/Down history lives in, under the same id (owner report,
+    // 2026-09-19: "i want pane histories for up/down"). Empty only without a data location.
+    QString promptHistoryPath() const { return relay::prompthistory::pathFor(m_scrollbackId); }
     // The two rules the replay prints around the restored block. They are also what the save
     // filters out, so a pane that has been restored twice does not stack them.
     // True of both ways a pane comes back: Relay restarted, or the pane was closed and reopened.
@@ -502,6 +544,7 @@ public:
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
         send({{"type", "reset"}}); clearFix();
+        closeQuestion(QString());   // the conversation it belonged to is over (#MQ9C)
         // Agent turns print into the terminal, so a new conversation that left the old ones on
         // screen looked as though /new had done nothing: clear it, the way "Clear terminal" does.
         // The note then goes to the toast rather than the screen, because printing it would erase
@@ -544,12 +587,13 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
-        // "role:" is a Main/Flash row, "gear:" the model options modal, and "vision:" the model this
-        // one turn is running on because it carries an image: none of the three is a preset to
-        // switch to. The first two are acted on where the box is built (chooseAgentRole,
-        // openRolesDialog); this is the guard for the other callers — /model and the roles modal.
+        // "role:" is a Main/Flash row, "gear:" the model options modal, and "vision:"/"planning:"
+        // the model this one turn is running on (an image, or plan mode's own role): none of them
+        // is a preset to switch to. The first two are acted on where the box is built
+        // (chooseAgentRole, openRolesDialog); this is the guard for the other callers — /model and
+        // the roles modal.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
-            || id.startsWith(QStringLiteral("vision:"))) return;
+            || id.startsWith(QStringLiteral("vision:")) || id.startsWith(QStringLiteral("planning:"))) return;
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
@@ -616,9 +660,9 @@ public:
     // Mirrors relay_core.roles.ROLES minus "main" (the pane's own model).
     static QStringList roleIds() {
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
-                QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("summaries"),
-                QStringLiteral("suggestions"), QStringLiteral("chores"), QStringLiteral("audit"),
-                QStringLiteral("vision"), QStringLiteral("route_assist")};
+                QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("planning"),
+                QStringLiteral("summaries"), QStringLiteral("suggestions"), QStringLiteral("chores"),
+                QStringLiteral("audit"), QStringLiteral("vision"), QStringLiteral("route_assist")};
     }
     // The pane-agent role was called "fast" until 2026-09-18 (see backend/relay_core/roles.py:
     // DEPRECATED_ROLES). Saved layouts and settings written before then still say "fast"; every
@@ -634,6 +678,7 @@ public:
             {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
             {QStringLiteral("flash"), QStringLiteral("Flash agent")},
             {QStringLiteral("local"), QStringLiteral("Local agent")},
+            {QStringLiteral("planning"), QStringLiteral("Plan mode")},
             {QStringLiteral("summaries"), QStringLiteral("Summaries")},
             {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
             {QStringLiteral("chores"), QStringLiteral("Chores")},
@@ -869,7 +914,6 @@ private:
     // Keystrokes the agent may send into one program in one turn. The worker enforces it too.
     static constexpr int kMaxProgramWrites = 20;
     static constexpr int kScreenSnapshotChars = 8000;
-    static constexpr int kGuestModelMax = 64;   // program_state.guest_model's ceiling (26.3)
 
     relay::screen::Signals screenSignals() const {
         relay::screen::Signals sig;
@@ -948,16 +992,12 @@ private:
     // a running turn before its next model call (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
     QJsonObject programStateMessage() const {
         const bool masked = m_secretMode || m_screenPrompt.masked;
-        QJsonObject state = QJsonObject{
+        return QJsonObject{
             {QStringLiteral("type"), QStringLiteral("program_state")},
             {QStringLiteral("granted"), m_delegated && processBusy() && !m_native && !masked},
             {QStringLiteral("reason"), m_delegated ? QStringLiteral("delegated") : m_delegationEnd},
             {QStringLiteral("program"), foregroundProgramName()},
             {QStringLiteral("guest"), m_guest},
-            // The guest's live facts (26.3): what it is running on, and whether a turn of its own
-            // is going. Its context share joins below, only when the statusline could say.
-            {QStringLiteral("guest_model"), m_guestModel.left(kGuestModelMax)},
-            {QStringLiteral("guest_busy"), m_guestBusy},
             {QStringLiteral("kind"), QString::fromLatin1(relay::screen::kindName(m_screenPrompt.kind))},
             {QStringLiteral("question"), m_screenPrompt.question},
             {QStringLiteral("masked"), masked},
@@ -965,8 +1005,6 @@ private:
             {QStringLiteral("waiting"), m_screenPrompt.actionable() || m_waiting},
             {QStringLiteral("max_writes"), kMaxProgramWrites},
             {QStringLiteral("screen_source"), canShowAgentTheScreen() ? QStringLiteral("engine") : QStringLiteral("none")}};
-        if (m_guestContextPct >= 0) state.insert(QStringLiteral("guest_context_pct"), m_guestContextPct);
-        return state;
     }
 
     void sendProgramState() {
@@ -982,261 +1020,8 @@ private:
     void setGuest(const QString &guest) {
         if (guest == m_guest) return;
         m_guest = guest;
-        // A guest that left (or changed) takes its live facts and its open question with it;
-        // the next statusline or state event repopulates them (26.3).
-        clearGuestState();
-        m_guestSlashCommands.clear();
-        if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
         sendProgramState();
         changed();
-        // The bridge follows the guest (26.5): a claude in the foreground means this pane must be
-        // routable before the first request can arrive, and a claude that exited means the pane is
-        // nobody's target again until another one starts. Codex has no IDE bridge and never
-        // registers — bridge_env("codex") is empty, so there is nothing to be found.
-        if (m_guest == QStringLiteral("claude")) registerWithBridge();
-        else if (m_guest.isEmpty()) unregisterFromBridge();
-    }
-
-    // ----- the Claude IDE bridge: this pane's registration, and its diffs (GT7X, 26.5) --------
-    //
-    // The sidecar routes a request by the longest workspace/cwd prefix of the paths it names, so
-    // every pane tells it where it is — once at shell start (the shell carries the port; a claude
-    // started in it connects back), again when the cwd or the workspace moves, and again when a
-    // claude turns up in the foreground. Rewrites that would say exactly what the last one said
-    // are dropped by the bridge itself, so this is cheap enough to ask for on every change.
-    void registerWithBridge() {
-        auto &bridge = relay::guestbridge::Bridge::instance();
-        if (!bridge.started()) return;   // nothing to register with yet
-        bridge.setDataRoot(m_data);
-        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python);
-    }
-
-    void unregisterFromBridge() {
-        if (!relay::guestbridge::Bridge::started()) return;
-        relay::guestbridge::Bridge::instance().unregisterPane(m_token);
-    }
-
-    // The pane's answer to a blocking openDiff (26.5): the diff view shows the change, this is
-    // what the user decided. FILE_SAVED makes the *sidecar* write the file — the GUI never writes
-    // a user's file from a bridge event — and either answer returns the waiting tool call.
-    void settleGuestDiff(const QString &outcome, const QString &why) {
-        if (!m_guestDiff.pending) return;
-        const GuestDiff diff = m_guestDiff;
-        m_guestDiff = GuestDiff();
-        relay::guestbridge::Bridge::instance().answerDiff(diff.replyPath, outcome);
-        const QString name = QFileInfo(diff.file).fileName();
-        const bool saved = outcome == relay::guestbridge::fileSaved();
-        relay::log::info(QStringLiteral("guest_bridge_diff pane=%1 saved=%2 reason=%3")
-                             .arg(paneLogId()).arg(saved ? 1 : 0).arg(why));
-        // A closing pane settles its debt without staging a toast nobody will ever see.
-        if (!m_closing)
-            toast(saved ? QStringLiteral("Saved claude's changes to %1").arg(name)
-                        : QStringLiteral("Kept the file as it was · claude's changes to %1 were not applied").arg(name));
-    }
-
-    // `openDiff` from the bridge: Relay's diff view beside this pane, and the banner that decides.
-    // The decision is the banner's action (save) or its dismissal (reject), because claude's call
-    // blocks until one of them — an unanswered diff is a claude left waiting forever.
-    void showGuestDiff(const QJsonObject &data) {
-        const QString reply = data.value(QStringLiteral("reply")).toString();
-        const QString file = data.value(QStringLiteral("file")).toString();
-        const QString diff = data.value(QStringLiteral("diff")).toString();
-        const QString tabName = data.value(QStringLiteral("tab_name")).toString();
-        if (reply.isEmpty()) {
-            // Not a protocol event a pane can answer, so it is not answered: logged and dropped.
-            relay::log::error(QStringLiteral("guest_bridge_diff_no_reply pane=%1").arg(paneLogId()));
-            return;
-        }
-        // A second openDiff while one waits: claude replaced its proposal, and the first call
-        // cannot be answered any more. Rejecting it is the only honest answer.
-        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("replaced"));
-        m_guestDiff.replyPath = reply;
-        m_guestDiff.file = file;
-        m_guestDiff.pending = true;
-        const QString name = QFileInfo(file).fileName();
-        if (diff.isEmpty() || !onOpenDiff) {
-            // Nowhere to show the change is nowhere to decide it: refuse rather than leave claude
-            // waiting on a question this pane cannot put to anyone.
-            relay::log::error(QStringLiteral("guest_bridge_diff_unshowable pane=%1").arg(paneLogId()));
-            settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("no diff view"));
-            return;
-        }
-        onOpenDiff(tabName.isEmpty() ? name : tabName, diff);
-        const QString where = m_workspace.isEmpty() ? name : QStringLiteral("%1 · %2").arg(name, m_workspace);
-        showBanner(QStringLiteral("claude proposes changes to %1").arg(where), QStringLiteral("Save"),
-                   [this] {
-                       settleGuestDiff(relay::guestbridge::fileSaved(), QStringLiteral("saved"));
-                       hideBanner();
-                   });
-        // The banner's action is Ctrl+Shift+R's too (restartStopped runs the visible banner's
-        // action); teaching that once is cheaper than a claude left waiting on a decision nobody
-        // knows is one keystroke away.
-        if (const QString key = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell")); !key.isEmpty())
-            hint(QStringLiteral("guest.diffSave"),
-                QStringLiteral("Next time: %1 saves claude's change").arg(key));
-    }
-
-    // ----- the guest event channel (issue GT7X, protocol 26.3) ---------------------------------
-    // Everything a guest or its shim learns arrives as guest.json in the runtime dir, written
-    // atomically by shell/guest-event.py, and is polled exactly as pollShell() polls state.json:
-    // a new inode means a new event, then a token check and a sequence check, on the same tick.
-    void pollGuestEvent() {
-        const QString guestPath = m_runtime.filePath(QStringLiteral("guest.json"));
-        struct stat info;
-        if (::stat(QFile::encodeName(guestPath).constData(), &info) != 0) return;
-        if (m_guestSeen && info.st_ino == m_guestInode && info.st_size == m_guestSize
-            && info.st_mtim.tv_sec == m_guestMtime.tv_sec && info.st_mtim.tv_nsec == m_guestMtime.tv_nsec) return;
-        QFile file(guestPath);
-        if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
-        m_guestSeen = true; m_guestInode = info.st_ino; m_guestSize = info.st_size; m_guestMtime = info.st_mtim;
-        const auto envelope = QJsonDocument::fromJson(file.readAll()).object();
-        if (envelope.value(QStringLiteral("token")).toString() != m_token) return;
-        const auto sequence = envelope.value(QStringLiteral("sequence")).toString();
-        if (sequence.isEmpty() || sequence == m_guestSequence) return;
-        m_guestSequence = sequence;
-        handleGuestEvent(sequence, envelope.value(QStringLiteral("event")).toString(),
-                         envelope.value(QStringLiteral("data")).toObject());
-    }
-
-    // One event off the channel: the hooks phase's own events (26.3), the bridge phase's (26.5),
-    // and `slash`, Relay's own scanned fallback catalog (26.8).
-    void handleGuestEvent(const QString &sequence, const QString &name, const QJsonObject &data) {
-        if (name == QStringLiteral("statusline")) {
-            m_guestModel = data.value(QStringLiteral("model")).toString().simplified().left(kGuestModelMax);
-            const QJsonValue share = data.value(QStringLiteral("context_pct"));
-            m_guestContextPct = share.isDouble() && 0 <= share.toInt() && share.toInt() <= 100 ? share.toInt() : -1;
-            updateGuestChip();
-            sendProgramState();
-            changed();
-        } else if (name == QStringLiteral("state")) {
-            setGuestBusy(data.value(QStringLiteral("busy")).toBool());
-        } else if (name == QStringLiteral("hook")) {
-            handleGuestHook(sequence, data.value(QStringLiteral("name")).toString(),
-                            data.value(QStringLiteral("payload")).toObject());
-        } else if (name == QStringLiteral("bridge")) {
-            guestBridgeEvent(data);
-        } else if (name == QStringLiteral("slash")) {
-            QStringList commands;
-            static const QRegularExpression command(QStringLiteral("^/[A-Za-z0-9][A-Za-z0-9._-]*$"));
-            for (const QJsonValue &value : data.value(QStringLiteral("commands")).toArray()) {
-                const QString item = value.toString().trimmed();
-                if (command.match(item).hasMatch() && !commands.contains(item, Qt::CaseInsensitive))
-                    commands << item;
-            }
-            m_guestSlashCommands = commands;
-            updateSlashPopup();
-        }
-    }
-
-    void setGuestBusy(bool busy) {
-        if (busy == m_guestBusy) return;
-        m_guestBusy = busy;
-        updateGuestChip();
-        sendProgramState();
-        changed();
-        if (!m_guestBusy) pumpQueue();
-    }
-
-    // A hook the guest's shim forwarded (26.4). A permission request becomes a Relay question
-    // on the pane; a notification reaches the notification centre; the rest only moves state.
-    void handleGuestHook(const QString &sequence, const QString &name, const QJsonObject &payload) {
-        if (name == QStringLiteral("PreToolUse")) {
-            showGuestQuestion(sequence, payload);
-        } else if (name == QStringLiteral("Notification")) {
-            const QString message = payload.value(QStringLiteral("message")).toString().simplified();
-            if (!message.isEmpty()) notify(guestDisplayName(m_guest), message);
-        } else if (name == QStringLiteral("UserPromptSubmit")) {
-            setGuestBusy(true);   // a guest turn has begun; Stop ends it
-        } else if (name == QStringLiteral("Stop")) {
-            setGuestBusy(false);
-        }
-    }
-
-    // The permission question: the guest asks before a tool run, the shim holds the hook open,
-    // and Relay answers through guest-answer.json. It is never answered on the guest's behalf —
-    // the bar stays until the user clicks, and a shim that times out falls back to the guest's
-    // own asking, so nothing is auto-approved.
-    void showGuestQuestion(const QString &sequence, const QJsonObject &payload) {
-        if (!m_guestBar) return;
-        m_guestQuestionSeq = sequence;
-        const QString tool = payload.value(QStringLiteral("tool_name")).toString();
-        const QJsonObject input = payload.value(QStringLiteral("tool_input")).toObject();
-        QString detail = input.value(QStringLiteral("command")).toString();
-        for (const char *field : {"file_path", "path", "url", "pattern"})
-            if (detail.isEmpty()) detail = input.value(QLatin1String(field)).toString();
-        QString label = guestDisplayName(m_guest)
-                        + QStringLiteral(" wants to run %1").arg(tool.isEmpty() ? QStringLiteral("a tool") : tool);
-        if (!detail.isEmpty()) label += QStringLiteral(" · ") + detail.simplified().left(80);
-        m_guestBarLabel->setText(m_guestBarLabel->fontMetrics().elidedText(label, Qt::ElideMiddle,
-                                                                           std::max(200, width() - 420)));
-        m_guestBarLabel->setToolTip(label);
-        m_guestBar->adjustSize();
-        m_guestBar->show();
-        m_guestBar->raise();
-        placeGuestBar();
-    }
-
-    void hideGuestQuestion() {
-        m_guestQuestionSeq.clear();
-        if (m_guestBar) m_guestBar->hide();
-    }
-
-    // The clicked answer, written atomically beside the events for the shim waiting on this
-    // exact sequence; the shim turns it into the hook's decision (claude's contract, 26.4).
-    void answerGuestPermission(bool allow) {
-        const QString sequence = m_guestQuestionSeq;
-        hideGuestQuestion();
-        if (sequence.isEmpty() || m_runtime.path().isEmpty()) return;
-        QSaveFile file(m_runtime.filePath(QStringLiteral("guest-answer.json")));
-        if (!file.open(QIODevice::WriteOnly)) return;
-        file.write(QJsonDocument(QJsonObject{{QStringLiteral("token"), m_token},
-                                             {QStringLiteral("sequence"), sequence},
-                                             {QStringLiteral("decision"), allow ? QStringLiteral("allow")
-                                                                                 : QStringLiteral("deny")}})
-                       .toJson(QJsonDocument::Compact));
-        file.commit();
-        status(allow ? QStringLiteral("Allowed in Relay.") : QStringLiteral("Denied in Relay."));
-    }
-
-    void clearGuestState() {
-        m_guestModel.clear();
-        m_guestContextPct = -1;
-        m_guestBusy = false;
-        hideGuestQuestion();
-        updateGuestChip();
-    }
-
-    // The guest's chip in the prompt-box strip: its model and, when the statusline could say,
-    // how much of its context window is in use. The same idiom as the context chip beside it.
-    void updateGuestChip() {
-        if (!m_guestChip) return;
-        if (m_guest.isEmpty()) { m_guestChip->hide(); return; }
-        const QString model = m_guestModel.isEmpty() ? guestDisplayName(m_guest) : m_guestModel;
-        m_guestChip->setText(m_guestContextPct >= 0
-                                 ? QStringLiteral("%1 · %2%").arg(model, QString::number(m_guestContextPct)) : model);
-        m_guestChip->setProperty("warn", m_guestContextPct >= 90);
-        m_guestChip->style()->unpolish(m_guestChip); m_guestChip->style()->polish(m_guestChip);
-        m_guestChip->setToolTip(QStringLiteral("%1 · %2 of its context window%3")
-                                    .arg(guestDisplayName(m_guest),
-                                         m_guestContextPct >= 0 ? QStringLiteral("%1%").arg(m_guestContextPct)
-                                                                : QStringLiteral("an unknown share"),
-                                         m_guestBusy ? QStringLiteral(" · a turn is running") : QString()));
-        m_guestChip->show();
-    }
-
-    // The question bar floats over the terminal's top-left, opposite the program banner's
-    // top-right (placeTakeControl), so both can be up at once without overlapping.
-    void placeGuestBar() {
-        if (!m_guestBar || !m_guestBar->isVisible() || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        const QSize size = m_guestBar->sizeHint();
-        const int barWidth = std::min(size.width(), std::max(240, host.width() - 20));
-        m_guestBar->setGeometry(host.left() + 10, host.top() + 8, barWidth, size.height());
-        m_guestBar->raise();
-    }
-
-    static QString guestDisplayName(const QString &guest) {
-        return guest == QStringLiteral("codex") ? QStringLiteral("Codex") : QStringLiteral("Claude Code");
     }
 
     // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
@@ -1532,7 +1317,6 @@ public:
         if (!m_currentPreset.isEmpty()) configurePreset(m_currentPreset, false);
         updatePaths();
         changed();
-        registerWithBridge();   // the bridge routes by workspace too (26.5)
     }
 
     // ----- the terminal pane's right-click menu (issue #X2F1) -------------------------------------
@@ -1799,6 +1583,186 @@ public:
         toast(QStringLiteral("Still planning · tell the agent what to change"));
     }
 
+    // ----- the agent asks the user something (#MQ9C, protocol 27) --------------------------
+    // The worker cannot draw, so a question is a round trip: `question` comes in, the pane prints
+    // the card and waits, the prompt box takes the answer, `question_answer` goes back and the
+    // agent's turn — which has been blocked on it all this time — carries on.
+    //
+    // It is printed into the terminal rather than put in a widget over it, in the amber the rest
+    // of Relay's "needs you" marks use (#4E13: "questions or items needing human response could be
+    // in bold amber"). The keyboard is enough: with options, "2" picks one and "1,3" picks two;
+    // without them the question is open and whatever you type is the answer; `/skip` leaves any
+    // question unanswered, and so does "0" when there are numbers to be clear of. Questions in one
+    // call are asked one at a time; answering the last one sends them all back together.
+    struct Ask {
+        QString id;
+        QJsonArray questions;
+        QList<QStringList> answers;
+        int current = -1;
+        bool open() const { return current >= 0 && current < questions.size(); }
+    };
+
+    bool questionOpen() const { return m_ask.open(); }
+
+    void showQuestion(const QJsonObject &event) {
+        // A second card can only mean the first one is stale (a worker restart, a turn that was
+        // stopped between the emit and the reply): drop it rather than stack them.
+        if (m_ask.open()) closeQuestion(QString());
+        m_ask = Ask{};
+        m_ask.id = event.value(QStringLiteral("id")).toString();
+        m_ask.questions = event.value(QStringLiteral("questions")).toArray();
+        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) return;
+        for (int i = 0; i < m_ask.questions.size(); ++i) m_ask.answers.append(QStringList());
+        m_ask.current = 0;
+        printQuestion();
+        if (!watched())
+            notify(QStringLiteral("Agent needs you"), questionAt(0).value(QStringLiteral("question")).toString(),
+                   relay::NotificationCenter::kindWarning);
+        refreshBackgroundWait();
+        changed();
+        focusInput();
+    }
+
+    // The worker took the card away: Stop, or the turn ending under it.
+    void closeQuestion(const QString &reason) {
+        if (!m_ask.open()) { m_ask = Ask{}; return; }
+        m_ask = Ask{};
+        ensureLineStart();
+        printInline(reason.isEmpty() ? QStringLiteral("Question withdrawn\n")
+                                     : QStringLiteral("Question withdrawn · %1\n").arg(reason), Ink::Note);
+        closeInline();
+        refreshBackgroundWait();
+        changed();
+    }
+
+private:
+    QJsonObject questionAt(int index) const {
+        return m_ask.questions.at(index).toObject();
+    }
+
+    static QJsonArray questionOptions(const QJsonObject &question) {
+        return question.value(QStringLiteral("options")).toArray();
+    }
+
+    // The card for the question being asked now.
+    void printQuestion() {
+        const QJsonObject question = questionAt(m_ask.current);
+        const QJsonArray options = questionOptions(question);
+        const bool multiple = question.value(QStringLiteral("multiple")).toBool();
+        ensureLineStart();
+        const QString header = question.value(QStringLiteral("header")).toString();
+        const QString counter = m_ask.questions.size() > 1
+            ? QStringLiteral(" (%1 of %2)").arg(m_ask.current + 1).arg(m_ask.questions.size()) : QString();
+        printInline(QStringLiteral("? %1%2 · %3\n").arg(header, counter,
+                                                        question.value(QStringLiteral("question")).toString()),
+                    Ink::Ask);
+        for (int i = 0; i < options.size(); ++i) {
+            const QJsonObject option = options.at(i).toObject();
+            const bool recommended = option.value(QStringLiteral("recommended")).toBool();
+            printInline(QStringLiteral("  %1  %2%3\n").arg(i + 1).arg(option.value(QStringLiteral("label")).toString(),
+                                                                     recommended ? QStringLiteral("   ← recommended")
+                                                                                 : QString()),
+                        Ink::Ask);
+            const QString description = option.value(QStringLiteral("description")).toString();
+            if (!description.isEmpty())
+                printInline(QStringLiteral("     %1\n").arg(description), Ink::Note);
+        }
+        if (!options.isEmpty()) printInline(QStringLiteral("  0  Skip this one\n"), Ink::Note);
+        printInline(options.isEmpty()
+                        ? QStringLiteral("  Type your answer · /skip to pass · Ctrl+Shift+Enter still runs a command.\n")
+                        : (multiple
+                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · Ctrl+Shift+Enter still runs a command.\n")
+                               : QStringLiteral("  A number, or your own words · Ctrl+Shift+Enter still runs a command.\n")),
+                    Ink::Note);
+        closeInline();
+    }
+
+    // What the prompt box says while a card is up. Longest first, for a narrow pane.
+    QStringList questionPlaceholders() const {
+        if (!m_ask.open()) return {};
+        const QJsonObject question = questionAt(m_ask.current);
+        const int count = questionOptions(question).size();
+        const QString header = question.value(QStringLiteral("header")).toString();
+        if (count == 0)
+            return {QStringLiteral("%1 · type your answer, or /skip").arg(header),
+                    QStringLiteral("type your answer, or /skip"),
+                    QStringLiteral("answer the question")};
+        return {QStringLiteral("%1 · 1–%2, 0 to skip, or your own words").arg(header).arg(count),
+                QStringLiteral("1–%1, 0 to skip, or your own words").arg(count),
+                QStringLiteral("1–%1, or your own words").arg(count),
+                QStringLiteral("answer the question")};
+    }
+
+    // The text in the prompt box, read as an answer. `/skip` always skips. With options, numbers
+    // pick them and "0" skips; anything else is the user's own words, which is the whole point of
+    // not making this a button row. An open question has no numbers to read: it is all own words.
+    QStringList readAnswer(const QString &text) const {
+        if (text.trimmed().compare(QStringLiteral("/skip"), Qt::CaseInsensitive) == 0) return {};
+        const QJsonObject question = questionAt(m_ask.current);
+        const QJsonArray options = questionOptions(question);
+        if (options.isEmpty()) return {text.trimmed()};
+        const bool multiple = question.value(QStringLiteral("multiple")).toBool();
+        static const QRegularExpression numbers(QStringLiteral("^\\s*\\d+(?:\\s*[,\\s]\\s*\\d+)*\\s*$"));
+        if (!numbers.match(text).hasMatch()) return {text.trimmed()};
+        QStringList chosen;
+        const auto parts = text.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+        for (const QString &part : parts) {
+            const int index = part.toInt();
+            if (index == 0) return {};                       // skip wins: "0" is never a label
+            if (index < 1 || index > options.size()) return {text.trimmed()};   // out of range: their words
+            const QString label = options.at(index - 1).toObject().value(QStringLiteral("label")).toString();
+            if (!chosen.contains(label)) chosen.append(label);
+            if (!multiple) break;                            // one answer asked for, one taken
+        }
+        return chosen;
+    }
+
+    // Enter in the prompt box while a card is up. Returns false when there is no card, so the
+    // ordinary routing runs.
+    bool answerQuestion(const QString &text) {
+        if (!m_ask.open()) return false;
+        const QString trimmed = text.trimmed();
+        if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
+        const QJsonObject question = questionAt(m_ask.current);
+        const QStringList answer = readAnswer(trimmed);
+        m_ask.answers[m_ask.current] = answer;
+        // The slow path for this card is typing an option out in full when its number would do
+        // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in
+        // the user's own words is the tool working as intended, not something to correct.
+        for (int i = 0; i < questionOptions(question).size(); ++i)
+            if (questionOptions(question).at(i).toObject().value(QStringLiteral("label")).toString()
+                    .compare(trimmed, Qt::CaseInsensitive) == 0) {
+                hint(QStringLiteral("question.number"),
+                     QStringLiteral("Next time: just type %1").arg(i + 1));
+                break;
+            }
+        ensureLineStart();
+        printInline(QStringLiteral("✦ %1: %2\n").arg(question.value(QStringLiteral("header")).toString(),
+                                                     answer.isEmpty() ? QStringLiteral("skipped")
+                                                                      : answer.join(QStringLiteral(", "))),
+                    Ink::UserAgent);
+        closeInline();
+        ++m_ask.current;
+        if (m_ask.open()) { printQuestion(); refreshBackgroundWait(); return true; }
+        sendAnswers();
+        return true;
+    }
+
+    void sendAnswers() {
+        QJsonArray answers;
+        for (const QStringList &answer : std::as_const(m_ask.answers)) {
+            QJsonArray one;
+            for (const QString &label : answer) one.append(label);
+            answers.append(one);
+        }
+        send({{"type", "question_answer"}, {"id", m_ask.id}, {"answers", answers}});
+        m_ask = Ask{};
+        refreshBackgroundWait();
+        changed();
+    }
+
+public:
+
     // Settings changed in Actions › Agent options.
     void agentOptionsChanged(const QString &key) {
         // Voice settings are the GUI's own: the recorder, the chip and its tooltip, never the agent.
@@ -1813,9 +1777,12 @@ public:
             return;
         }
         if (key == QStringLiteral("agent/panes_flash")) return;   // only affects panes opened later
+        // The reasoning fold reads it live: nothing to reconfigure, nothing to send.
+        if (key == QStringLiteral("agent/thinking_display")) return;
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
-            || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")) {
+            || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")
+            || key == QStringLiteral("agent/failover")) {
             if (m_configured) {
                 QJsonObject request{{"type", "set_agent_options"}};
                 const QJsonObject options = requestOptions();
@@ -1975,7 +1942,6 @@ protected:
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
         placeTakeControl();
-        placeGuestBar();
         placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
@@ -2035,9 +2001,9 @@ protected:
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
         }
-        // The reasoning bubble and the program transcript are read-only text views, so their
-        // copy on select is the shared filter (src/CopyOnSelect.h) installed where they are
-        // built. Ctrl+C in the prompt box still copies the bubble (copyThinkingSelection).
+        // The program transcript is a read-only text view, so its copy on select is the shared
+        // filter (src/CopyOnSelect.h) installed where it is built. Ctrl+C in the prompt box still
+        // copies the terminal's selection (copySelection).
         // A plain click in the terminal (not a selection drag) used to give it the keyboard.
         // It no longer does, so say which key still hands the keyboard over.
         if (event->type() == QEvent::MouseButtonPress && ownsTerminalWidget(qobject_cast<QWidget *>(object)))
@@ -2419,9 +2385,12 @@ private:
         routeRow->setContentsMargins(2, 0, 2, 0);
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
-        // Up and Down walk through one history per user, kept in a file, not one per pane that
-        // dies with the pane (owner report, 2026-09-18). src/PromptHistory.h has the rules.
-        m_editor->useHistoryFile(relay::prompthistory::defaultPath());
+        // Up and Down walk this pane's own history, kept in a file under the pane's layout id so
+        // it survives a restart and a close-and-reopen, and stays this pane's alone (owner report,
+        // 2026-09-19: "the up/down history seems to be getting commands from other panes, not just
+        // mine"). src/PromptHistory.h has the rules; initRestore() re-points this at the saved id
+        // when the pane is being restored.
+        m_editor->useHistoryFile(promptHistoryPath());
         m_highlighter = new relay::InputHighlighter(m_editor->document());
         QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
@@ -2437,6 +2406,14 @@ private:
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
+        // The bold "Relaying…" line (card #4E13), the first row of the composer frame so native
+        // mode hides it with the prompt box: agent work in the agent's violet, saying what it is
+        // doing right now ("Relaying reading src/Pane.h… · 12 s · Esc stops"), a terminal program
+        // in the terminal's blue ("Relaying sleep…"), right-aligned above the prompt. The turn
+        // clock lived in the strip under the box until this card; it moved up here and was
+        // restyled into this line — one place, one verb, the colour saying whose work it is.
+        m_busyLine = new PaneBusyLine(composer);
+        composerLayout->addWidget(m_busyLine);
         composerLayout->addLayout(inputRow);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
         // line goes to the running program. It is a separate widget so the password can never
@@ -2510,34 +2487,6 @@ private:
         });
         bannerRow->addWidget(m_takeControl);
         m_programBar->hide();
-        // A guest's permission question (GT7X, 26.4): the PreToolUse hook holds the shim open,
-        // and this bar is where the user answers it. The same banner idiom, the opposite
-        // corner, so a question and the program banner never sit on top of each other.
-        m_guestBar = new QFrame(this);
-        m_guestBar->setObjectName(QStringLiteral("programBanner"));
-        m_guestBar->setAttribute(Qt::WA_StyledBackground);
-        auto *questionRow = new QHBoxLayout(m_guestBar);
-        questionRow->setContentsMargins(10, 4, 6, 4);
-        questionRow->setSpacing(8);
-        m_guestBarLabel = new QLabel(m_guestBar);
-        m_guestBarLabel->setObjectName(QStringLiteral("programBannerLabel"));
-        m_guestBarLabel->setTextFormat(Qt::PlainText);
-        questionRow->addWidget(m_guestBarLabel, 1);
-        auto *allowTool = new QPushButton(m_guestBar);
-        allowTool->setObjectName(QStringLiteral("delegateChip"));
-        allowTool->setCursor(Qt::PointingHandCursor);
-        allowTool->setFocusPolicy(Qt::NoFocus);
-        allowTool->setText(QStringLiteral("Allow"));
-        connect(allowTool, &QPushButton::clicked, this, [this] { answerGuestPermission(true); });
-        questionRow->addWidget(allowTool);
-        auto *denyTool = new QPushButton(m_guestBar);
-        denyTool->setObjectName(QStringLiteral("takeControlChip"));
-        denyTool->setCursor(Qt::PointingHandCursor);
-        denyTool->setFocusPolicy(Qt::NoFocus);
-        denyTool->setText(QStringLiteral("Deny"));
-        connect(denyTool, &QPushButton::clicked, this, [this] { answerGuestPermission(false); });
-        questionRow->addWidget(denyTool);
-        m_guestBar->hide();
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
         setupJobsUi(layout);        // commands the agent left running, beneath that
@@ -2551,16 +2500,6 @@ private:
     }
 
     void buildSessionControls(QHBoxLayout *row) {
-        // The turn clock (toasts-and-turn-clock): "thinking · 48 s · Esc stops" lives here, in the
-        // strip under the prompt box, for as long as a turn runs. It is state, not an event, so it
-        // never goes through toast() and never covers one. Shown and hidden by the turn clock.
-        m_turnClockLabel = new QLabel;
-        m_turnClockLabel->setObjectName(QStringLiteral("stripChipLabel"));
-        m_turnClockLabel->setAccessibleName(QStringLiteral("Agent turn time"));
-        m_turnClockLabel->setTextFormat(Qt::PlainText);
-        m_turnClockLabel->setMinimumWidth(1);   // a narrow pane clips it rather than growing for it
-        m_turnClockLabel->hide();
-        row->addWidget(m_turnClockLabel);
         m_planChip = new QLabel(QStringLiteral("PLAN"));
         m_planChip->setObjectName(QStringLiteral("planChip"));
         m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
@@ -2571,16 +2510,6 @@ private:
         m_ctxLabel->setTextFormat(Qt::PlainText);
         m_ctxLabel->hide();
         row->addWidget(m_ctxLabel);
-        // The guest agent's context (GT7X, 26.3): its model and context share, fed by the
-        // statusline shim through the guest event channel. Hidden without a guest, like every
-        // chip here that has nothing to say.
-        m_guestChip = new QLabel;
-        m_guestChip->setObjectName(QStringLiteral("stripChipLabel"));
-        m_guestChip->setAccessibleName(QStringLiteral("Guest agent context"));
-        m_guestChip->setTextFormat(Qt::PlainText);
-        m_guestChip->setMinimumWidth(1);
-        m_guestChip->hide();
-        row->addWidget(m_guestChip);
         // Relay Free's allowance (protocol 13.9): "Free · 73% left", the same chip idiom as the
         // context bar beside it, shown only while this pane's main preset is the hosted one.
         m_quotaLabel = new QLabel;
@@ -2795,7 +2724,9 @@ private:
                 {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
                 // Idle deadline for a streamed model call (protocol 15).
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
-                {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()}};
+                {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()},
+                // Whether a turn whose provider keeps failing continues on another one (#G9VE).
+                {"failover", settings.value(QStringLiteral("agent/failover"), true).toBool()}};
     }
 
     // Session-related configure fields from settings (protocol sections 1 and 8).
@@ -2938,7 +2869,6 @@ private:
     }
 
     // ----- thinking, turn summaries, tool outputs, routing assist, skills (protocol 11) --------
-    static bool showThinking() { return QSettings().value(QStringLiteral("agent/show_thinking"), true).toBool(); }
     // Off by default: a tool call is one line that counts its output, and a click unfolds the whole
     // of it under that line (#TK9C). On, the stream prints under the line as it arrives.
     static bool showToolOutput() { return QSettings().value(QStringLiteral("agent/show_tool_output"), false).toBool(); }
@@ -3012,13 +2942,18 @@ private:
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
             QString &buffer = m_turnThinking[turn];
             if (buffer.size() < 200000) buffer += event.value(QStringLiteral("text")).toString();
-            if (showThinking()) appendThinking(event.value(QStringLiteral("text")).toString());
+            m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail
+            // "never" keeps the buffer (the turn pane still shows it) but draws nothing.
+            if (thinkingDisplay() != QLatin1String("never")) thinkingDelta(turn);
             return true;
         }
         if (type == QStringLiteral("thinking_done")) {
             const qint64 ms = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
-            endThinking();
-            // A stream that stopped mid-reasoning reports {elapsed_ms: 0, chars: 0}: nothing to summarize.
+            // A stream that stopped mid-reasoning reports {elapsed_ms: 0, chars: 0}: the fold still
+            // gets what arrived, and its row says the stream stopped rather than lying with a time.
+            if (!m_thinkingAnchor.isEmpty()) { finishThinkingFold(ms); return true; }
+            // No fold is streaming ("never", a backend without folds, a program owning the screen):
+            // the single ✦ line the transcript has always had.
             if (event.value(QStringLiteral("chars")).toInt() <= 0 && ms <= 0) return true;
             ensureLineStart();
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
@@ -3031,7 +2966,10 @@ private:
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
             m_turnSummaries.insert(turn, event);
             m_turnOrder.removeAll(turn); m_turnOrder.append(turn);
-            while (m_turnOrder.size() > 50) { const QString old = m_turnOrder.takeFirst(); m_turnSummaries.remove(old); m_turnThinking.remove(old); }
+        while (m_turnOrder.size() > 50) {
+            const QString old = m_turnOrder.takeFirst();
+            m_turnSummaries.remove(old); m_turnThinking.remove(old); m_thinkingBlocks.remove(old);
+        }
             const int tools = event.value(QStringLiteral("tools")).toArray().size();
             if (tools > 0) {
                 endCallRun();   // a run of reads that ended the turn gets its newline here (#TK9C)
@@ -3100,144 +3038,155 @@ private:
         return false;
     }
 
-    // Reasoning streams into a panel between the terminal and the queue strip. It is a row of the
-    // pane's column, not an overlay: it takes real layout space, so the terminal host above it
-    // shrinks and the shell reflows into what is left instead of losing its last lines behind the
-    // panel (owner report, 2026-09-18: "the terminal needs to move up, rather than being covered
-    // up"). placeThinking() sets the height, and every show or hide runs through keepPaneSizes().
-    void appendThinking(const QString &text) {
-        if (text.isEmpty()) return;
-        m_paneState.changed();   // pane_state (relay-terminal-71)
-        if (!m_thinking) {
-            m_thinking = new QFrame(this);
-            m_thinking->setObjectName(QStringLiteral("thinkingOverlay"));
-            m_thinking->setAttribute(Qt::WA_StyledBackground);
-            // Ignored width for the same reason as the prompt box's: a line of reasoning is wider
-            // than a pane in a three-pane split, and a minimum that wide would move this pane's
-            // minimum and make the splitter redistribute the whole row (#G152).
-            m_thinking->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-            auto *box = new QVBoxLayout(m_thinking); box->setContentsMargins(10, 4, 6, 6); box->setSpacing(2);
-            // The header is a widget wrapping its row, not a bare layout, so placeThinking() can
-            // measure what the panel spends on chrome instead of assuming a number (thinkingChrome).
-            m_thinkingHeaderRow = new QWidget;
-            auto *header = new QHBoxLayout(m_thinkingHeaderRow); header->setContentsMargins(0, 0, 0, 0);
-            m_thinkingHeader = new QLabel; m_thinkingHeader->setObjectName(QStringLiteral("transcriptHeader"));
-            header->addWidget(m_thinkingHeader, 1);
-            auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true); close->setFocusPolicy(Qt::NoFocus);
-            close->setToolTip(QStringLiteral("Hide for this turn (Actions › Agent options › Show thinking turns it off)"));
-            connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; m_thinkingHeld = false; hideBubble(m_thinking); });
-            auto *expand = new QToolButton; expand->setAutoRaise(true); expand->setFocusPolicy(Qt::NoFocus);
-            expand->setText(QStringLiteral("▴"));
-            expand->setToolTip(QStringLiteral("Show more of the reasoning"));
-            connect(expand, &QToolButton::clicked, this, [this, expand] {
-                m_thinkingExpanded = !m_thinkingExpanded;
-                expand->setText(m_thinkingExpanded ? QStringLiteral("▾") : QStringLiteral("▴"));
-                expand->setToolTip(m_thinkingExpanded ? QStringLiteral("Show less") : QStringLiteral("Show more of the reasoning"));
-                placeThinking();
-            });
-            header->addWidget(expand);
-            header->addWidget(close);
-            box->addWidget(m_thinkingHeaderRow);
-            m_thinkingView = new QPlainTextEdit;
-            // Its own name, not transcriptView's: the overlay is styled quieter than the transcript.
-            m_thinkingView->setObjectName(QStringLiteral("thinkingView"));
-            m_thinkingView->setReadOnly(true);
-            m_thinkingView->setFocusPolicy(Qt::NoFocus);
-            m_thinkingView->setMaximumBlockCount(400);
-            // Highlighting the reasoning copies it, like the terminal above it, and says so.
-            relay::installCopyOnSelect(m_thinkingView, [this](const QString &text) { toastCopied(text); });
-            box->addWidget(m_thinkingView, 1);
-            m_thinking->hide();
-            // Above the queue strip and below the terminal: the order the two had as overlays.
-            if (auto *column = qobject_cast<QVBoxLayout *>(layout()))
-                column->insertWidget(column->indexOf(m_terminalHost) + 1, m_thinking);
-        }
-        if (!m_thinkingShown) {
-            m_thinkingShown = true;
-            m_thinkingDismissed = false;
-            m_thinkingHeld = false;   // this turn owns the panel now, not the key that reopened the last one
-            m_thinkingView->clear();
-            m_thinkingHeader->setText(QStringLiteral("Thinking… · %1").arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
-        }
-        // Follow the reasoning down only while the reader is at the bottom and not selecting:
-        // pinning the view on every chunk made a drag-selection jump away mid-stream, so text in
-        // the bubble could not be highlighted to copy (owner report, 2026-09-18).
-        QScrollBar *bar = m_thinkingView->verticalScrollBar();
-        const bool follow = bar->value() >= bar->maximum() - 2 && !m_thinkingView->textCursor().hasSelection()
-                            && !(QApplication::mouseButtons() & Qt::LeftButton && m_thinkingView->underMouse());
-        QTextCursor cursor(m_thinkingView->document());
-        cursor.movePosition(QTextCursor::End);
-        QTextCharFormat format; format.setForeground(relay::theme::TextMuted);   // upright: "Legible text"
-        cursor.insertText(sanitize(text), format);
-        if (follow) bar->setValue(bar->maximum());
-        if (!m_thinkingDismissed) placeThinking();   // it decides whether there is room to show it
-    }
-
-    // Everything in the panel that is not a line of reasoning: the frame's margins, the spacing, the
-    // header row with its ▴ and × buttons, and the text view's own document margin. Measured rather
-    // than assumed, because a hard-coded 30 px was less than half of it: the compact panel came out
-    // 64 px tall with 15 px of viewport for a 17 px line, so it drew its header over an empty box —
-    // the same half-drawn window cefdb02 set out to stop. Whoever presses Alt+R wants the reasoning,
-    // not the frame around it.
-    int thinkingChrome() const {
-        if (!m_thinking || !m_thinkingView) return 0;
-        const QMargins pad = m_thinking->layout() ? m_thinking->layout()->contentsMargins() : QMargins();
-        const int spacing = m_thinking->layout() ? m_thinking->layout()->spacing() : 0;
-        const int header = m_thinkingHeaderRow ? m_thinkingHeaderRow->sizeHint().height() : 0;
-        return pad.top() + pad.bottom() + spacing + header + 2 * int(m_thinkingView->document()->documentMargin());
-    }
-
-    // The height the reasoning panel asks the pane's column for. It is a row now rather than an
-    // overlay, so this is what moves the terminal up instead of covering it (owner report,
-    // 2026-09-18: "the terminal needs to move up, rather than being covered up"); the two heights
-    // the ▴ button switches between are the ones it always had.
-    void placeThinking() {
-        if (!m_thinking || !m_terminalHost) return;
-        // Second in the queue for room, and hidden rather than clipped (owner, 2026-09-18). The
-        // reasoning is commentary on a turn: losing it costs less than losing the queue, and the
-        // panel is dismissible by hand anyway.
-        const int taken = m_queueStrip && m_queueStrip->isVisible()
-                          ? m_queueStrip->height() + (layout() ? layout()->spacing() : 0) : 0;
-        // m_thinkingHeld is the keyboard holding it open between turns (toggleThinkingPanel): with no
-        // turn running there is nothing to stream, but the last turn's reasoning is still in the
-        // view and the key asked for it.
-        if ((!m_thinkingShown && !m_thinkingHeld) || m_thinkingDismissed || !roomForBubble(taken)) { hideBubble(m_thinking); return; }
-        showBubble(m_thinking);
-        // Compact by default: the panel takes the terminal's space now, so it must take as little
-        // as it can. The ▴ button expands it when the reasoning is worth reading.
-        const int lineHeight = std::max(14, m_thinkingView->fontMetrics().height());
-        const int chrome = thinkingChrome();
-        const int span = bubbleSpan();
-        const int wanted = m_thinkingExpanded ? span / 3 : lineHeight * 2 + chrome;
-        int height = std::min(m_thinkingExpanded ? 220 : lineHeight * 2 + chrome, std::max(wanted, lineHeight + chrome));
-        // Never more than half of what it shares with the terminal: in a pane squeezed down to a
-        // few rows the terminal keeps the other half rather than vanishing under the panel.
-        height = std::min(height, std::max(lineHeight + chrome, span / 2));
-        setBubbleHeight(m_thinking, height);
-    }
-
-    void endThinking() {
-        m_paneState.changed();   // pane_state (relay-terminal-71)
-        if (!m_thinkingShown) return;
-        m_thinkingShown = false;
-        if (m_thinking) hideBubble(m_thinking);
-    }
-
-    // ----- the two bubbles that share the terminal's column -------------------------------------
+    // ----- reasoning as a streaming fold (issue T8CN) ---------------------------------------------
     //
-    // The reasoning panel and the queue strip are rows between the terminal host and the prompt
-    // box, so showing one moves the terminal up instead of covering its last lines (owner report,
-    // 2026-09-18). Their height is part of this pane's minimum height, and a splitter that cannot
-    // satisfy every minimum redistributes all of its panes as soon as one minimum moves (#G152),
-    // so every show, hide and height change runs with the enclosing splitters' sizes held.
+    // Reasoning streams into a fold in the terminal's own grid, under an anchor row of its own:
+    // "▸ ✦ thinking…" while it arrives, rewritten in place to "▸ ✦ thought for N s" when it ends.
+    // The fold opens with the first delta, so a reader who wants to watch the model think watches
+    // it live; it collapses when the turn is done, so the default transcript keeps its one line
+    // per event. A reader who folds it away mid-stream is not asked again: m_thinkingUserToggled
+    // holds their answer for the life of the pane. The text is kept per turn whatever the display
+    // mode — m_turnThinking feeds the turn pane too — and agent/thinking_display says how much of
+    // this runs at all (collapse / always / never; "never" leaves the single ✦ line of the old
+    // design, printed by thinking_done).
 
-    // The height the terminal and whichever bubbles are up share. Heights are measured against
-    // this rather than against the terminal host alone, so showing a bubble does not shrink the
-    // number the next call sizes it from and leave the two chasing each other.
+    // The first delta of a block: anchor row, fold, and its first content. Later deltas only queue
+    // a flush — the fold is updated coalesced (queueThinkingFlush), not per chunk.
+    void thinkingDelta(const QString &turn) {
+        // A fold needs a backend that draws folds and a screen Relay may write to; without either,
+        // thinking_done falls back to the single ✦ line the transcript has always had.
+        if (!terminalFolds() || !inlineReady()) return;
+        if (m_thinkingAnchor.isEmpty()) {
+            const int block = ++m_thinkingBlocks[turn];
+            m_thinkingAnchor = relay::calllines::foldUri(m_token, turn,
+                block <= 1 ? QStringLiteral("thinking") : QStringLiteral("thinking-%1").arg(block));
+            m_thinkingUserToggled = false;   // a new block starts unprejudiced
+            m_thinkingFoldOpen = true;
+            printThinkingAnchor();
+            setFold(m_thinkingAnchor, thinkingFoldLines(m_thinkingAnchor, true));
+            const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.thinkingPanel"));
+            hint(QStringLiteral("thinking.fold"),
+                 key.isEmpty() ? QStringLiteral("Reasoning streams under the ✦ line · a click folds it away")
+                               : QStringLiteral("Reasoning streams under the ✦ line · a click or %1 folds it away").arg(key));
+        }
+        queueThinkingFlush();
+    }
+
+    // The anchor row itself, in the terminal at column 0 — the ghostty core only finds anchors
+    // that start there — hyperlinked to the fold's URI. "▸ " is the placeholder the view
+    // overpaints with ▸ or ▾, the convention every tool row uses (#TK9C).
+    void printThinkingAnchor() {
+        endCallRun();   // a held tool-call row ends before the anchor starts its own (#TK9C)
+        QByteArray out = takeWrapped();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (!m_atLineStart) out += "\r\n";
+        out += "\x1b]8;;" + m_thinkingAnchor.toUtf8() + "\x1b\\";
+        out += inkCode(Ink::Note) + QByteArray("▸ ✦ thinking…") + "\x1b[0m";
+        out += "\x1b]8;;\x1b\\\r\n";
+        m_atLineStart = true;
+        writeTerminal(out);
+    }
+
+    // Fold updates are coalesced to ~4 Hz: re-rendering the whole buffer as markdown per chunk
+    // would burn the CPU on a long stream, and four frames a second is more than anyone reads.
+    void queueThinkingFlush() {
+        if (m_thinkingFlushPending || m_thinkingAnchor.isEmpty()) return;
+        m_thinkingFlushPending = true;
+        QTimer::singleShot(250, this, [this] { flushThinkingFold(); });
+    }
+
+    void flushThinkingFold() {
+        m_thinkingFlushPending = false;
+        const QString uri = m_thinkingAnchor;
+        if (uri.isEmpty() || !m_backend) return;
+        // The reader may have folded it away since the last flush. setFoldContent() opens what it
+        // sets, so a folded fold is left alone: pushing content would reopen it over their click.
+        if (m_thinkingFoldOpen && !m_backend->foldExpanded(uri)) {
+            m_thinkingFoldOpen = false;
+            m_thinkingUserToggled = true;
+        }
+        if (!m_thinkingFoldOpen) return;
+        setFold(uri, thinkingFoldLines(uri, true));
+    }
+
+    // The fold's rows: the buffer rendered as markdown (src/CallLines.h, foldForMarkdown), its
+    // tail while streaming — the end is the part being written — capped at 400 rows, with a link
+    // to the turn pane, which holds the whole of every block. Empty at done becomes a row that
+    // says so, because a blank fold reads as a dead one.
+    QVector<relay::FoldLine> thinkingFoldLines(const QString &uri, bool tail) const {
+        relay::calllines::FoldOptions options;
+        options.maxLines = 400;
+        const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
+        if (ref.valid)
+            options.openInPane = QStringLiteral("relay://turn/%1/%2")
+                                     .arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(ref.turn)));
+        QString text = m_turnThinking.value(ref.valid ? ref.turn : QString());
+        if (tail) text = text.right(12000);
+        const QVector<relay::FoldLine> lines = relay::calllines::foldForMarkdown(text, foldPalette(), options);
+        return !lines.isEmpty() ? lines
+               : tail ? QVector<relay::FoldLine>()
+                      : relay::calllines::foldForNote(QStringLiteral("(No reasoning was kept for this turn.)"),
+                                                       foldPalette());
+    }
+
+    // The block ended: settle the fold, collapse it unless the reader or the setting asked
+    // otherwise, and rewrite the anchor row in place so the transcript's one line per event
+    // holds. Runs even for a stream that stopped mid-reasoning ({chars: 0}): what arrived is
+    // still worth a fold, and the row says the stream stopped rather than lying with a time.
+    void finishThinkingFold(qint64 ms) {
+        const QString uri = m_thinkingAnchor;
+        m_thinkingAnchor.clear();
+        m_lastThinkingAnchor = uri;   // Alt+R reopens this one until the next block replaces it
+        m_thinkingFlushPending = false;   // a queued flush would resurrect a cleared anchor
+        if (!m_backend || uri.isEmpty()) return;
+        const bool openNow = m_backend->foldExpanded(uri);
+        if (openNow != m_thinkingFoldOpen) m_thinkingUserToggled = true;   // the reader clicked since
+        setFold(uri, thinkingFoldLines(uri, false));
+        // Collapsed by default: the fold was for reading along, and the rewritten row carries the
+        // summary. Kept open when the reader said so — by click, by Alt+R, or by the setting.
+        const bool keepOpen = m_thinkingUserToggled ? openNow : thinkingDisplay() == QLatin1String("always");
+        m_backend->setFoldExpanded(uri, keepOpen);
+        m_thinkingFoldOpen = keepOpen;
+        rewriteThinkingAnchor(uri, ms);
+        m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail settled
+    }
+
+    // "▸ ✦ thought for N s" over the anchor row, without moving anything else: the cursor is
+    // still on the empty row under the anchor (nothing but fold content — virtual rows the grid
+    // does not count — has printed since), so one row up, erase, redraw, and back. Guards for
+    // every way that stops being true: the shell redrew its line over the anchor, or output
+    // pushed the anchor into history.
+    void rewriteThinkingAnchor(const QString &uri, qint64 ms) {
+        if (!m_backend || !m_inlineOpen || !m_atLineStart) return;
+        const QPoint cursor = m_backend->cursorPosition();
+        if (cursor.x() != 0 || cursor.y() < 1) return;
+        const QStringList rows = m_backend->screenText().split('\n');
+        if (cursor.y() >= rows.size() || !rows.at(cursor.y()).isEmpty()) return;
+        if (!rows.at(cursor.y() - 1).contains(QStringLiteral("✦ thinking"))) return;
+        const QString label = ms > 0
+            ? QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000))
+            : QStringLiteral("✦ thinking stopped");
+        QByteArray out = takeWrapped() + "\x1b[A\r\x1b[2K";
+        out += "\x1b]8;;" + uri.toUtf8() + "\x1b\\";
+        out += inkCode(Ink::Note) + QByteArray("▸ ") + sanitize(label).toUtf8() + "\x1b[0m";
+        out += "\x1b]8;;\x1b\\\r\n";
+        writeTerminal(out);
+    }
+
+    // ----- the queue strip that shares the terminal's column -------------------------------------
+    //
+    // The queue strip is a row between the terminal host and the prompt box, so showing it moves
+    // the terminal up instead of covering its last lines (owner report, 2026-09-18). Its height is
+    // part of this pane's minimum height, and a splitter that cannot satisfy every minimum
+    // redistributes all of its panes as soon as one minimum moves (#G152), so every show, hide and
+    // height change runs with the enclosing splitters' sizes held.
+
+    // The height the terminal and the queue strip share. Heights are measured against this rather
+    // than against the terminal host alone, so showing the strip does not shrink the number the
+    // next call sizes it from and leave the two chasing each other.
     int bubbleSpan() const {
         int span = m_terminalHost ? m_terminalHost->height() : 0;
         const int spacing = layout() ? layout()->spacing() : 0;
-        if (m_thinking && m_thinking->isVisible()) span += m_thinking->height() + spacing;
         if (m_queueStrip && m_queueStrip->isVisible()) span += m_queueStrip->height() + spacing;
         return span;
     }
@@ -3457,6 +3406,12 @@ private:
     void foldRequested(const QString &uri) {
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
         if (!ref.valid || !ref.fold) return;
+        // The reasoning fold answers from the pane's own buffer, with no worker round trip however
+        // old the turn (issue T8CN).
+        if (ref.call == QLatin1String("thinking") || ref.call.startsWith(QLatin1String("thinking-"))) {
+            setFold(uri, thinkingFoldLines(uri, false));
+            return;
+        }
         const CallRecord record = m_calls.value(uri);
         if (record.merged) { setFold(uri, relay::calllines::foldForRun(record.members, foldPalette(), foldOptions(uri, record))); return; }
         if (!m_workerReady || ref.turn.isEmpty() || record.callIds.isEmpty()) {
@@ -3565,50 +3520,57 @@ public:
     // A relay://open-call link arriving from outside the window (the desktop's relay: handler).
     void openCallLink(const QString &uri) { openCallTarget(uri); }
 
-    bool thinkingPanelVisible() const { return m_thinking && m_thinking->isVisible(); }
+    // How reasoning is shown at all (issue T8CN): collapse (the default) streams the fold open and
+    // folds it away when the block ends; always leaves it open; never draws nothing at all and lets
+    // thinking_done print the single ✦ line. A settings file that still has the agent/show_thinking
+    // bool is migrated in place the first time this is asked, and the old key retired.
+    static QString thinkingDisplay() {
+        QSettings settings;
+        const QString value = settings.value(QStringLiteral("agent/thinking_display")).toString();
+        if (value == QLatin1String("always") || value == QLatin1String("never")) return value;
+        if (value.isEmpty() && settings.contains(QStringLiteral("agent/show_thinking"))) {
+            const bool shown = settings.value(QStringLiteral("agent/show_thinking"), true).toBool();
+            settings.setValue(QStringLiteral("agent/thinking_display"),
+                              shown ? QStringLiteral("collapse") : QStringLiteral("never"));
+            settings.remove(QStringLiteral("agent/show_thinking"));
+            return shown ? QStringLiteral("collapse") : QStringLiteral("never");
+        }
+        return QStringLiteral("collapse");
+    }
 
-    // Alt+R shows and hides this pane's reasoning panel (owner report, 2026-09-18: "need a keyboard
-    // shortcut for showing / hiding the reasoning traces, maybe an F# key ... or alt+R").
-    //
-    // Between turns the key reopens the last turn's reasoning rather than going inert. That text is
-    // still in the view — endThinking() only hides the panel — so there is something honest to show,
-    // and a key that answers only during the seconds an agent happens to be thinking reads as broken
-    // for the rest of the session. Reopened after the turn the header says which turn it is, so a
-    // finished trace is never mistaken for a live one.
-    //
-    // Both refusals speak. A pane too short to draw the panel hides it on purpose (placeThinking),
-    // and a pane that has never streamed reasoning has nothing to draw; silence in either case would
-    // look like the same dead key.
+    bool thinkingFoldVisible() const {
+        const QString uri = !m_thinkingAnchor.isEmpty() ? m_thinkingAnchor : m_lastThinkingAnchor;
+        return !uri.isEmpty() && m_backend && m_backend->foldExpanded(uri);
+    }
+
+    // Alt+R opens and folds this pane's reasoning (owner report, 2026-09-18: "need a keyboard
+    // shortcut for showing / hiding the reasoning traces, maybe an F# key ... or alt+R"). The
+    // reasoning is a fold now, so the key toggles the latest one — live while it streams, the last
+    // turn's afterwards: between blocks there is nothing streaming, but the fold and its anchor
+    // row are still in the grid, and a key that answers only during the seconds an agent happens
+    // to be thinking reads as broken for the rest of the session. Every refusal speaks, or the
+    // key would look dead in exactly the panes where it has nothing to do.
     void toggleThinkingPanel() {
-        const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.thinkingPanel"));
-        if (thinkingPanelVisible()) {
-            m_thinkingDismissed = true;   // the state the × button sets: hidden for the rest of this turn
-            m_thinkingHeld = false;
-            placeThinking();
-            toast(key.isEmpty() ? QStringLiteral("Reasoning hidden")
-                                : QStringLiteral("Reasoning hidden · %1 shows it again").arg(key));
+        if (thinkingDisplay() == QLatin1String("never")) {
+            toast(QStringLiteral("Thinking display is off · Options › General turns it on"));
             return;
         }
-        if (!m_thinking || m_thinkingView->document()->isEmpty()) {
-            toast(showThinking() ? QStringLiteral("No reasoning yet in this pane")
-                                 : QStringLiteral("Show thinking is off · Options › General turns it on"));
+        const QString uri = !m_thinkingAnchor.isEmpty() ? m_thinkingAnchor : m_lastThinkingAnchor;
+        if (uri.isEmpty() || !m_backend || !terminalFolds()) {
+            toast(QStringLiteral("No reasoning yet in this pane"));
             return;
         }
-        // Second in line for room, behind the queue strip — the way placeThinking() measures it.
-        const int taken = m_queueStrip && m_queueStrip->isVisible()
-                          ? m_queueStrip->height() + (layout() ? layout()->spacing() : 0) : 0;
-        if (!roomForBubble(taken)) {
-            toast(QStringLiteral("This pane is too short for the reasoning panel · make it taller"));
+        m_thinkingUserToggled = true;   // however this ends, a person set it
+        if (!m_backend->toggleFold(uri)) {
+            toast(QStringLiteral("This pane's reasoning has scrolled out of the terminal"));
             return;
         }
-        m_thinkingDismissed = false;
-        if (!m_thinkingShown) {
-            m_thinkingHeld = true;   // no turn is running: the key holds it up until the next one starts
-            if (m_thinkingHeader)
-                m_thinkingHeader->setText(QStringLiteral("Thought · last turn · %1")
-                                              .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
+        m_thinkingFoldOpen = m_backend->foldExpanded(uri);
+        if (!m_thinkingFoldOpen) {
+            const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.thinkingPanel"));
+            toast(key.isEmpty() ? QStringLiteral("Reasoning folded away")
+                                : QStringLiteral("Reasoning folded away · %1 shows it again").arg(key));
         }
-        placeThinking();
     }
 
     void openSkills() {
@@ -4192,7 +4154,8 @@ public:
     QString shareStatus() const {
         if (m_secretMode) return QStringLiteral("password");
         const relay::panestatus::Facts facts = statusFacts();
-        if (facts.programAsking || facts.handoffWaiting) return QStringLiteral("waiting_input");
+        if (facts.programAsking || facts.handoffWaiting || facts.questionOpen)
+            return QStringLiteral("waiting_input");
         if (facts.processBusy || facts.agentBusy) return QStringLiteral("running");
         // The last turn failed and nothing has happened since. Cleared when the pane is used
         // again (a new turn, a command), so a phone is told about a failure once rather than
@@ -4592,7 +4555,9 @@ private:
                     if (m_steering[i].requestId != value.toString()) continue;
                     const SteerEntry steer = m_steering[i];
                     ensureLineStart();
-                    printInline(QStringLiteral("✦ ") + steer.text + QStringLiteral("  ↪ at the next tool call\n"), Ink::UserAgent);
+                    // Delivered here, not queued: no "at the next tool call" suffix, which only
+                    // belongs on a row still waiting in the strip.
+                    printInline(QStringLiteral("✦ ") + steer.text + QLatin1Char('\n'), Ink::UserAgent);
                     forgetSteer(i);
                     if (steer.withdraw) {
                         // The withdraw lost the race: the turn took it first, so the transcript line
@@ -4701,7 +4666,7 @@ private:
                 ? (afterCompaction
                        ? QStringLiteral("Model: %1 once the conversation is compacted to fit its window").arg(m_model)
                        : applies == QStringLiteral("turn_end")
-                       ? QStringLiteral("Model: %1 from the next turn · this image turn finishes on %2").arg(m_model, inFlight)
+                       ? QStringLiteral("Model: %1 from the next turn · this turn finishes on %2").arg(m_model, inFlight)
                        : QStringLiteral("Model: %1 from the next step · %2 is not interrupted").arg(m_model, inFlight))
                 : role.isEmpty() || role == QStringLiteral("main")
                 ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
@@ -4838,6 +4803,15 @@ private:
                 toast(mode == QStringLiteral("plan") ? QStringLiteral("Plan mode · the agent investigates and writes a plan")
                                                      : QStringLiteral("Build mode"));
             changed();
+            return true;
+        }
+        if (type == QStringLiteral("question")) {
+            showQuestion(event);
+            return true;
+        }
+        if (type == QStringLiteral("question_closed")) {
+            closeQuestion(event.value(QStringLiteral("reason")).toString() == QStringLiteral("cancelled")
+                              ? QStringLiteral("the turn was stopped") : QString());
             return true;
         }
         if (type == QStringLiteral("plan_written")) {
@@ -5414,6 +5388,7 @@ private:
             {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
+        {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Switchboard")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
             {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: what the agent is working on")},
             {QStringLiteral("requests"), QString(), QStringLiteral("Task list (same as /tasks)")},
@@ -5427,6 +5402,7 @@ private:
             {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
             {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
             {QStringLiteral("join"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session: their meeting code, then the PIN")},
+            {QStringLiteral("update"), QString(), QStringLiteral("Download and install the latest Relay release, then restart")},
             {QStringLiteral("connect"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session (same as /join)")},
             {QStringLiteral("shell"), QStringLiteral("<command>"), QStringLiteral("Send to the terminal")},
             {QStringLiteral("agent"), QStringLiteral("<prompt>"), QStringLiteral("Send to the agent")}};
@@ -5465,20 +5441,6 @@ private:
             if (description.size() > 60) description = description.left(59).trimmed() + QChar(0x2026);
             commands.append({skill.name, skill.args, QStringLiteral("Skill · ") + description});
         }
-        // A guest catalog follows every Relay-owned surface. Relay's own names (and its aliases
-        // and skills) win a collision, while a guest-only or newly introduced command passes
-        // through verbatim rather than Relay diagnosing it as unknown.
-        QStringList guestNames;
-        if (!m_guest.isEmpty()) {
-            taken.clear();
-            for (const auto &command : std::as_const(commands)) taken << command.name;
-            for (const QString &slash : std::as_const(m_guestSlashCommands)) {
-                const QString name = slash.mid(1);
-                if (taken.contains(name, Qt::CaseInsensitive)) continue;
-                commands.append({name, QString(), QStringLiteral("%1 · guest").arg(guestDisplayName(m_guest))});
-                guestNames << name;
-            }
-        }
         for (int i = 0; i < commands.size(); ++i) {
             // Name prefix first, then names containing the query; descriptions do not match.
             const QString name = commands[i].name.toLower();
@@ -5500,7 +5462,6 @@ private:
             auto *item = new QListWidgetItem(QStringLiteral("/%1 %2    %3").arg(command.name, command.args, command.description).simplified(), m_slashList);
             item->setData(Qt::UserRole, command.name);
             item->setData(Qt::UserRole + 1, !command.args.isEmpty() && command.args.startsWith('<'));
-            item->setData(Qt::UserRole + 2, guestNames.contains(command.name, Qt::CaseInsensitive));
         }
         m_slashList->setCurrentRow(0);
         if (m_composer) {
@@ -5537,7 +5498,6 @@ private:
         if (!m_slashList || !m_slashList->currentItem()) return;
         const QString name = m_slashList->currentItem()->data(Qt::UserRole).toString();
         const bool needsArgument = m_slashList->currentItem()->data(Qt::UserRole + 1).toBool();
-        const bool guest = m_slashList->currentItem()->data(Qt::UserRole + 2).toBool();
         hideSlashPopup();
         if (!run || needsArgument) {
             m_editor->setPlainText(QStringLiteral("/") + name + ' ');
@@ -5545,10 +5505,6 @@ private:
             return;
         }
         m_editor->clear();
-        if (guest) {
-            submitGuest(QStringLiteral("/") + name, false);
-            return;
-        }
         // An alias name that reached the popup is not a built-in (issue G8DK); a skill is neither.
         if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
                          [&](const auto &c) { return c.name == name; })) {
@@ -5796,6 +5752,11 @@ private:
             // the command line, where it would land in the prompt history.
             if (onJoinShared) onJoinShared(args.trimmed().toUpper());
         }
+        else if (name == QStringLiteral("update")) {
+            // The window runs scripts/relay-update.py and shows each of its lines as the notice;
+            // on its UPDATED marker it restarts Relay into the version it just installed.
+            if (onUpdateApp) onUpdateApp();
+        }
         else if (name == QStringLiteral("switchboard")) {
             if (onOpenBoard) onOpenBoard();
             boardShortcutHint(QStringLiteral("board.slash"));
@@ -5803,10 +5764,11 @@ private:
         else if (name == QStringLiteral("card")) {
             if (args.trimmed().isEmpty()) { status(QStringLiteral("Usage: /card <what to remember>")); return; }
             // An explicit project action: it attaches this tab to the pane's candidate project
-            // when that project has a Switchboard. When it has none, one quiet line and **nothing
-            // is created** — the "Initialize a project and create a Switchboard here?" question
-            // is a later stage's (protocol 19.12).
+            // when that project has a Switchboard. When it has none, this is trigger (4) of the
+            // init question — and **the card text is held, not lost**: it lands as the first card
+            // the moment the board exists (protocol 19.12). Still nothing is created before a yes.
             if (QString why; !attachForBoard(relay::projects::kReasonCardCommand, &why)) {
+                if (askProjectInit(relay::projectinit::Trigger::CardCommand, args.trimmed(), &why)) return;
                 status(why.isEmpty() ? QStringLiteral("No Switchboard here.") : why);
                 return;
             }
@@ -5817,6 +5779,14 @@ private:
                   {QStringLiteral("text"), args.trimmed()}});
             m_cardIndexAsked = false;
             boardShortcutHint(QStringLiteral("card.slash"));
+        }
+        else if (name == QStringLiteral("init")) {
+            // Trigger (5): the explicit command. It asks even about a project the user declined
+            // once — typing it is changing your mind — and in a directory that is no project at
+            // all it offers to treat the pane's own directory as one.
+            QString why;
+            if (!askProjectInit(relay::projectinit::Trigger::InitCommand, QString(), &why))
+                status(why.isEmpty() ? QStringLiteral("Nothing to initialize here.") : why);
         }
         else if (name == QStringLiteral("recap")) requestRecap();
         else if (name == QStringLiteral("tasks") || name == QStringLiteral("requests") || name == QStringLiteral("todos")) {
@@ -6114,6 +6084,7 @@ private:
                 if (view) if (const auto *row = m_subagents.row(view->agentId())) view->setRow(*row, m_subagents.elapsedNow(*row));
             if (m_modelBox) m_modelBox->setToolTip(modelTooltip(QStringLiteral("Tokens: ") + m_subagents.tokenSplit()));
             refreshBackgroundWait();   // a subagent started or ended (card #V7QD)
+            refreshBusyLine();         // the violet waiting line, when no turn of its own runs (#4E13)
         };
         // Only one start and one finish line per subagent reach the terminal, never its tool activity.
         m_subagents.onFinishedCleared = [this] { if (m_subagentTabs) m_subagentTabs->dropEnded(); };
@@ -6162,7 +6133,11 @@ private:
         // The desktop's "do not blink" (a cursor flash time of 0) is this app's reduce-motion
         // signal — RichEditor::setCaretColor already takes the caret's blink from it.
         const bool animate = QApplication::cursorFlashTime() > 0;
-        const QStringList lines = relay::panestatus::waitingLines(waitingFacts(), animate ? m_waitPhase : -1);
+        // A question card owns the prompt box while it is up: what the box invites you to type is
+        // the answer, not "waiting for 2 subagents" (#MQ9C).
+        const QStringList lines = m_ask.open()
+            ? questionPlaceholders()
+            : relay::panestatus::waitingLines(waitingFacts(), animate ? m_waitPhase : -1);
         if (lines.isEmpty()) {
             if (m_waitDots) m_waitDots->stop();
             m_waitPhase = 0;
@@ -6178,7 +6153,10 @@ private:
         m_editor->setAccessibleDescription(lines.first().trimmed());
         // Nothing is drawn over typed text, so the timer has nothing to animate: stop it and let
         // the next keystroke (updateGhost) start it again once the box is empty.
-        if (!animate || !m_editor->toPlainText().isEmpty()) { if (m_waitDots) m_waitDots->stop(); return; }
+        if (!animate || m_ask.open() || !m_editor->toPlainText().isEmpty()) {
+            if (m_waitDots) m_waitDots->stop();
+            return;
+        }
         if (!m_waitDots) {
             m_waitDots = new QTimer(this);
             m_waitDots->setInterval(600);   // gentle: four steps, a little over two seconds a cycle
@@ -6604,6 +6582,12 @@ private:
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         environment.insert(QStringLiteral("RELAY_PANE_ID"), paneLogId());
         environment.insert(QStringLiteral("RELAY_LOG_LEVEL"), relay::log::levelName(relay::log::level()));
+        // Programs the agent starts — tmux, Chrome — move themselves into their own app.slice
+        // scopes over the session bus (StartTransientUnit), escaping this pane's memory cap
+        // (card #Y4RX). Without a session bus address they stay in the pane scope; the worker
+        // itself does not use D-Bus, and agent-run systemd-run --user is not supported anyway.
+        if (isolation::enabled() && isolation::available())
+            environment.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
         m_worker.setProcessEnvironment(environment);
         relay::log::info(QStringLiteral("worker_start pane=%1 workspace_set=%2")
                              .arg(paneLogId()).arg(m_workspace.isEmpty() ? 0 : 1));
@@ -6611,8 +6595,8 @@ private:
         if (isolation::enabled() && isolation::available()) {
             m_agentUnit = QStringLiteral("relay-pane-%1-agent-%2").arg(m_token.left(8)).arg(++m_agentGeneration);
             m_worker.setProgram(QStandardPaths::findExecutable(QStringLiteral("systemd-run")));
-            m_worker.setArguments(isolation::wrap(m_agentUnit, {QStringLiteral("MemoryMax=") + isolation::memory("isolation/agent_memory_max", "2G"),
-                                                                QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/agent_swap_max", "512M"),
+            m_worker.setArguments(isolation::wrap(m_agentUnit, {QStringLiteral("MemoryMax=") + isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
+                                                                QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault()),
                                                                 QStringLiteral("TimeoutStopSec=5"),
                                                                 QStringLiteral("OOMPolicy=stop")}, command));
         } else {
@@ -6646,6 +6630,9 @@ private:
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
+            // Nobody is left to answer to (#MQ9C): take the card down rather than leave the pane
+            // asking on behalf of a worker that is gone.
+            closeQuestion(QStringLiteral("the agent worker stopped"));
             stopTurnClock();
             relay::log::error(QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3")
                                   .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0));
@@ -6653,7 +6640,7 @@ private:
             const bool oom = isolation::takeResult(m_agentUnit) == QStringLiteral("oom-kill");
             const bool killed = exit == QProcess::CrashExit || code == 137 || code == 143;
             showBanner(oom ? QStringLiteral("The agent worker stopped because it ran out of memory (limit %1).")
-                                 .arg(isolation::memory("isolation/agent_memory_max", "2G"))
+                                 .arg(isolation::memory("isolation/agent_memory_max", isolation::agentDefault()))
                            : killed ? QStringLiteral("The agent worker was stopped.") : QStringLiteral("The agent worker exited."),
                        QStringLiteral("Restart agent"), [this] { hideBanner(); startWorker(); });
         });
@@ -6668,15 +6655,6 @@ private:
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
         qputenv("RELAY_SHELL_EVENT", (m_data + QStringLiteral("/shell/event.py")).toUtf8());
-        // The guest event channel's writer (GT7X, protocol 26.3): the shims a guest's settings
-        // call (relay_core.guest_hook) reach it through this, beside the runtime dir above.
-        qputenv("RELAY_GUEST_EVENT", (m_data + QStringLiteral("/shell/guest-event.py")).toUtf8());
-        // `$RELAY_PYTHON -m relay_core.guest_hook` (26.4) needs the backend importable. The
-        // same directory the worker is spawned from (startWorker) is appended, never prepended:
-        // the user's own PYTHONPATH keeps its order and cwd still wins over both.
-        const QString backendDir = m_data + QStringLiteral("/backend");
-        const QString pythonPath = qEnvironmentVariable("PYTHONPATH");
-        qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QLatin1Char(':') + backendDir).toUtf8());
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
         // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
@@ -6703,23 +6681,6 @@ private:
         }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
-        // The Claude IDE bridge (GT7X, 26.2): the first claude pane starts the sidecar and every
-        // shell after it carries the port, so a `claude` started in this pane finds Relay instead
-        // of no editor at all. Codex has no IDE bridge, so it gets nothing; when the bridge is off
-        // or failed to start, `bridge_env` is empty and both keys are removed.
-        {
-            auto &bridge = relay::guestbridge::Bridge::instance();
-            bridge.setDataRoot(m_data);
-            const int port = bridge.portFor(m_python);
-            const QJsonObject env = relay::guestbridge::bridgeEnv(QStringLiteral("claude"), port);
-            for (auto it = env.constBegin(); it != env.constEnd(); ++it) {
-                if (it.value().toString().isEmpty()) qunsetenv(it.key().toUtf8().constData());
-                else qputenv(it.key().toUtf8().constData(), it.value().toString().toUtf8());
-            }
-        }
-        // Registered now, not at the first prompt: the port is already in this shell's
-        // environment, so a claude started at that prompt must find a routable pane (26.5).
-        registerWithBridge();
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
@@ -6737,7 +6698,7 @@ private:
             const bool oom = isolation::takeResult(m_shellUnit) == QStringLiteral("oom-kill");
             if (oom) {
                 showBanner(QStringLiteral("This pane's shell was stopped because it ran out of memory (limit %1).")
-                               .arg(isolation::memory("isolation/shell_memory_max", "8G")),
+                               .arg(isolation::memory("isolation/shell_memory_max", isolation::shellDefault())),
                            QStringLiteral("Restart shell"), [this] { restartShell(); });
                 return;
             }
@@ -6821,9 +6782,10 @@ private:
             m_shellUnit = QStringLiteral("relay-pane-%1-shell-%2").arg(m_token.left(8)).arg(++m_shellGeneration);
             const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
             started = m_backend->startProgram(tool, isolation::wrap(m_shellUnit,
-                {QStringLiteral("MemoryMax=") + isolation::memory("isolation/shell_memory_max", "8G"),
-                 QStringLiteral("MemoryHigh=") + isolation::memory("isolation/shell_memory_high", "6G"),
-                 QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/shell_swap_max", "2G"),
+                {QStringLiteral("MemoryMax=") + isolation::memory("isolation/shell_memory_max", isolation::shellDefault()),
+                 QStringLiteral("MemoryHigh=") + isolation::memory("isolation/shell_memory_high",
+                 isolation::fractionOf(isolation::memory("isolation/shell_memory_max", isolation::shellDefault()), 80)),
+                 QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/shell_swap_max", isolation::shellSwapDefault()),
                  // Interactive bash ignores SIGTERM; SIGHUP ends it (and its jobs) when the scope stops.
                  QStringLiteral("KillSignal=SIGHUP"), QStringLiteral("TimeoutStopSec=5"),
                  QStringLiteral("OOMPolicy=") + (QSettings().value(QStringLiteral("isolation/shell_oom_policy")).toString() == QStringLiteral("stop")
@@ -6854,10 +6816,24 @@ private:
             return;
         }
         if (submit) {
+            // A question card is up: this text is the answer, not a prompt and not a command
+            // (#MQ9C). Nothing below runs — not `@path`, not `/commands`, not the router. An
+            // explicit terminal submit (Ctrl+Shift+Enter, or Enter with the chip on TERMINAL) is
+            // the exception: a question from the agent must not take the user's terminal away,
+            // and the card's own footer says so.
+            const bool toShell = (overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode)
+                                 == QStringLiteral("shell");
+            if (m_ask.open() && !toShell && !m_editor->toPlainText().trimmed().isEmpty()) {
+                const QString typed = m_editor->toPlainText().trimmed();
+                m_editor->remember(typed);
+                m_editor->clear();
+                answerQuestion(typed);
+                return;
+            }
             // `@path` on its own opens the file (or folder) in a Relay pane.
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
-            if (m_guest.isEmpty() && match.hasMatch()) {
+            if (match.hasMatch()) {
                 const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
                 if (!absolute.isEmpty() && onOpenPath) {
                     m_editor->remember(m_editor->toPlainText().trimmed());
@@ -6877,27 +6853,6 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
-            // `!` remains a terminal line even when the foreground program is a guest. The
-            // key handler has already converted a typed leading bang into shell mode; this arm
-            // covers a pasted spelling, which must not be silently handed to Claude or Codex.
-            if (!m_guest.isEmpty() && m_editor->toPlainText().startsWith(QLatin1Char('!'))) {
-                const QString command = m_editor->toPlainText().mid(1);
-                if (command.trimmed().isEmpty()) {
-                    status(QStringLiteral("Type a terminal command after !."));
-                    return;
-                }
-                m_editor->remember(m_editor->toPlainText());
-                m_editor->clear();
-                submitTerminal(command, false);
-                return;
-            }
-            // Relay's built-ins and aliases above always win. A guest's unknown command is its
-            // own business, though: never let Relay reject a new guest command it has not scanned.
-            if (!m_guest.isEmpty() && m_prefixMode != QStringLiteral("shell")) {
-                submitGuest(m_editor->toPlainText(), true);
-                if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
-                return;
-            }
             // A `/command` that is not one of the above never reaches the router: Relay says so
             // itself rather than letting Bash answer with "command not found".
             if (reportUnknownSlashCommand(m_editor->toPlainText())) return;
@@ -7298,6 +7253,7 @@ private:
             }
             m_liveCall = call; m_liveTurn = turn; m_liveLabel = label;
             m_liveTick.invalidate();
+            if (m_agentBusy) tickTurnClock();   // the busy line says this call's gerund now (#4E13)
             // The two calls that block the main agent on the background work it started, so that
             // the prompt box can say so until the call lands: agent_wait (#V7QD) and command_output,
             // which waits on a job (#KP4M).
@@ -7335,6 +7291,7 @@ private:
             const QString diff = event.value(QStringLiteral("diff")).toString();
             m_toolLines = 0; m_toolPartialLine = false;
             m_liveCall.clear();
+            if (m_agentBusy) tickTurnClock();   // between calls, the busy line says "thinking" again (#4E13)
             if (!call.isEmpty() && (m_waitCall == call || m_jobWaitCall == call)) {
                 // The agent_wait (#V7QD) or the command_output (#KP4M) returned.
                 if (m_waitCall == call) m_waitCall.clear(); else m_jobWaitCall.clear();
@@ -7384,6 +7341,16 @@ private:
             // "what to do about it" line is added here.
             ensureLineStart();
             printInline(QStringLiteral("🖼 No vision model · Options › Models › Vision model\n"), Ink::Error);
+        } else if (type == QStringLiteral("plan_route")) {
+            // Plan mode's own model role (protocol 13): this turn runs on the planning model — by
+            // default the pane's own at max reasoning. Said plainly, like the image routing.
+            ensureLineStart();
+            printInline(QStringLiteral("◆ ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
+            m_planModel = event.value(QStringLiteral("model")).toString();
+            refreshPickers();
+        } else if (type == QStringLiteral("plan_route_ended")) {
+            m_planModel.clear();
+            refreshPickers();
         } else if (type == QStringLiteral("provider_retry")) {
             // The model went silent; the worker is retrying this turn once. Say so in the transcript.
             ensureLineStart();
@@ -7565,9 +7532,9 @@ private:
         if (kills < 0) return;
         if (m_oomKills >= 0 && kills > m_oomKills) {
             showBanner(QStringLiteral("A command in this pane was stopped because it ran out of memory (limit %1). The shell is still running.")
-                           .arg(isolation::memory("isolation/shell_memory_max", "8G")),
+                           .arg(isolation::memory("isolation/shell_memory_max", isolation::shellDefault())),
                        QString(), {});
-            notify(QStringLiteral("Out of memory"), QStringLiteral("A command in %1 was stopped (limit %2).").arg(m_cwd, isolation::memory("isolation/shell_memory_max", "8G")),
+            notify(QStringLiteral("Out of memory"), QStringLiteral("A command in %1 was stopped (limit %2).").arg(m_cwd, isolation::memory("isolation/shell_memory_max", isolation::shellDefault())),
                    relay::NotificationCenter::kindError);
         }
         m_oomKills = kills;
@@ -7579,7 +7546,7 @@ private:
         if (m_native) setNative(false, false);
         const bool oom = isolation::takeResult(m_shellUnit) == QStringLiteral("oom-kill");
         showBanner(oom ? QStringLiteral("This pane's shell was stopped because it ran out of memory (limit %1).")
-                             .arg(isolation::memory("isolation/shell_memory_max", "8G"))
+                             .arg(isolation::memory("isolation/shell_memory_max", isolation::shellDefault()))
                        : QStringLiteral("This pane's shell was stopped."),
                    QStringLiteral("Restart shell"), [this] { restartShell(); });
         if (oom) notify(QStringLiteral("Out of memory"), QStringLiteral("The shell in %1 was stopped.").arg(m_cwd),
@@ -7611,14 +7578,7 @@ private:
         m_banner->show();
     }
 
-    void hideBanner() {
-        if (m_banner) m_banner->hide();
-        m_bannerCallback = nullptr;
-        // The guest-diff banner's dismissal is its decision (26.5): once the banner is gone there
-        // is nothing left to answer claude with, so × — or anything else that clears the banner —
-        // rejects the change rather than leaving the tool call waiting forever.
-        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("dismissed"));
-    }
+    void hideBanner() { if (m_banner) m_banner->hide(); m_bannerCallback = nullptr; }
 
 public:
     // Ctrl+Shift+R: restart whatever stopped in this pane.
@@ -7784,16 +7744,6 @@ private:
         const int count = text.toUcs4().size();
         if (count > 0)
             toast(count == 1 ? QStringLiteral("1 character copied") : QStringLiteral("%L1 characters copied").arg(count));
-    }
-
-    // What is highlighted in the reasoning bubble, to the clipboard. False when nothing is.
-    bool copyThinkingSelection() {
-        if (!m_thinkingView || !m_thinking || !m_thinking->isVisible()) return false;
-        const QString text = relay::copyOnSelectText(m_thinkingView);
-        if (text.isEmpty()) return false;
-        QApplication::clipboard()->setText(text);
-        toastCopied(text);
-        return true;
     }
 
     // A backend with no "has selection" query copies nothing when nothing is selected.
@@ -8127,9 +8077,9 @@ private:
                           : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
     }
 
-    // "thinking · 48 s · Esc stops" in the prompt-box strip (m_turnClockLabel), and in the thinking
-    // overlay's header when it is open, so a silent turn is never indistinguishable from a hung
-    // one. Not a toast: a clock that re-toasted every second covered every real toast in a turn.
+    // "Relaying reading src/Pane.h… · 48 s · Esc stops", bold above the prompt box (m_busyLine,
+    // card #4E13), so a silent turn is never indistinguishable from a hung one. Not a toast: a
+    // clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
         m_turnElapsed.start();
         m_turnStep.clear();
@@ -8151,8 +8101,9 @@ private:
         m_turnStep.clear();
         m_waitCall.clear();      // no turn, no agent_wait (#V7QD)
         m_jobWaitCall.clear();   // and no command_output (#KP4M)
-        if (m_turnClockLabel) { m_turnClockLabel->hide(); m_turnClockLabel->clear(); }
+        m_turnClockText.clear();
         refreshBackgroundWait();   // the turn ended; background work left running keeps the line up
+        refreshBusyLine();         // and subagents or a program may still be relaying (#4E13)
     }
 
     void tickTurnClock() {
@@ -8160,25 +8111,63 @@ private:
         if (!m_agentBusy) { stopTurnClock(); return; }
         const qint64 seconds = m_turnElapsed.elapsed() / 1000;
         const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
-        // Blocked on the background work it started, the strip says what it is blocked on rather
-        // than "thinking" (cards #V7QD, #KP4M); the prompt box carries the same words, animated.
+        const QString stopWord = stop.isEmpty() ? QStringLiteral("Esc") : stop;
+        // What the agent is doing right now (card #4E13): the live tool call's own gerund
+        // ("reading src/Pane.h"), or "thinking" between calls.
+        QString what = QStringLiteral("thinking");
+        if (!m_liveCall.isEmpty() && !m_liveLabel.running.isEmpty()) what = m_liveLabel.running;
+        // Blocked on the background work it started, the line says what it is blocked on rather
+        // than "thinking" (cards #V7QD, #KP4M).
         const QString subject = relay::panestatus::waitingSubject(waitingFacts());
-        const QString what = subject.isEmpty() ? QStringLiteral("thinking")
-                                               : QStringLiteral("waiting for ") + subject;
-        const QString label = QStringLiteral("%1 · %2 s%3 · %4 stops")
+        if (!subject.isEmpty()) what = QStringLiteral("waiting for ") + subject;
+        // Blocked on a question card is the plainest case of all (#MQ9C): the turn is not thinking,
+        // it is waiting for the person reading it, and saying "thinking" would be a lie in the one
+        // place the user is looking while they decide.
+        const bool asked = m_ask.open();
+        if (asked) what = QStringLiteral("waiting for your answer");
+        const QString label = QStringLiteral("Relaying %1… · %2 s%3 · %4 stops")
                                   .arg(what)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
-                                  .arg(stop.isEmpty() ? QStringLiteral("Esc") : stop);
-        if (m_turnClockLabel) {
-            m_turnClockLabel->setText(label);
-            m_turnClockLabel->setToolTip(QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
-                                             .arg(seconds).arg(stop.isEmpty() ? QStringLiteral("Esc") : stop));
-            m_turnClockLabel->show();
+                                  .arg(stopWord);
+        m_turnClockText = label;   // pane_state's clock, for a paired phone (relay-terminal-71)
+        if (m_busyLine)
+            m_busyLine->setBusy(asked ? relay::panestatus::State::NeedsYou : relay::panestatus::State::Working,
+                                label,
+                                asked
+                                    ? QStringLiteral("The agent asked you something and its turn is blocked on the answer "
+                                                     "(%1 s so far). %2 stops the turn.").arg(seconds).arg(stopWord)
+                                      : QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
+                                          .arg(seconds).arg(stopWord));
+    }
+
+    // The "Relaying…" line when no turn of this pane's own is running (card #4E13): subagents it
+    // started still working (violet, no clock — nothing of this pane's is being timed), or a
+    // program in the terminal (blue, the program's name). Hidden when the pane is idle, so an
+    // idle pane looks exactly as it did before. The turn's own line is the turn clock's.
+    void refreshBusyLine() {
+        if (!m_busyLine) return;
+        if (m_agentBusy) { tickTurnClock(); return; }
+        const relay::panestatus::Waiting wait = waitingFacts();
+        if (wait.subagents > 0) {
+            const QString subject = relay::panestatus::waitingSubject(wait);
+            m_busyLine->setBusy(relay::panestatus::State::Subagents,
+                                QStringLiteral("Relaying waiting for %1…").arg(subject),
+                                QStringLiteral("%1 started by this pane's agent still running. The agents list under "
+                                                "the composer shows them; the header's relay mark blinks until they end.")
+                                    .arg(subject.isEmpty() ? QStringLiteral("Background work") : subject));
+            return;
         }
-        if (m_thinkingShown && m_thinkingHeader)
-            m_thinkingHeader->setText(QStringLiteral("Thinking… · %1 · %2 s")
-                                          .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model).arg(seconds));
+        if (processBusy()) {
+            const QString program = foregroundProgramName();
+            const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
+            m_busyLine->setBusy(relay::panestatus::State::Running,
+                                QStringLiteral("Relaying %1…").arg(who),
+                                QStringLiteral("%1 owns this terminal; prompts queue until it exits.")
+                                    .arg(program.isEmpty() ? QStringLiteral("This program") : program));
+            return;
+        }
+        m_busyLine->clearBusy();
     }
 
     void refreshPickers() {
@@ -8236,9 +8225,18 @@ private:
                                    QStringLiteral("vision:") + m_visionModel);
             m_modelBox->setCurrentIndex(0);
         }
-        m_modelBox->setToolTip(modelTooltip(m_visionModel.isEmpty()
+        // Plan mode's own model role (protocol 13): while a plan turn runs on its planning model,
+        // the chip says which — when it is the pane's own model id, the bump is the tooltip's.
+        if (!m_planModel.isEmpty()) {
+            m_modelBox->insertItem(0, QStringLiteral("◆ %1 · this turn").arg(m_planModel),
+                                   QStringLiteral("planning:") + m_planModel);
+            m_modelBox->setCurrentIndex(0);
+        }
+        m_modelBox->setToolTip(modelTooltip(!m_visionModel.isEmpty()
+            ? QStringLiteral("This turn carries an image, so it runs on %1 and then goes back.").arg(m_visionModel)
+            : m_planModel.isEmpty()
             ? QString()
-            : QStringLiteral("This turn carries an image, so it runs on %1 and then goes back.").arg(m_visionModel)));
+            : QStringLiteral("Plan mode: this turn runs on %1 (the planning role) and then goes back.").arg(m_planModel)));
     }
 
     // "glm-5.3", not "Z.AI · GLM-5.3 · Coding Plan": the model id from the worker's preset list,
@@ -8304,11 +8302,21 @@ public:
         in.busy = m_agentBusy;
         in.toolRunning = m_agentBusy && !m_liveCall.isEmpty();
         const relay::panestatus::Facts facts = statusFacts();
-        in.waiting = facts.programAsking || facts.handoffWaiting;
-        in.clock = m_agentBusy && m_turnClockLabel ? m_turnClockLabel->text() : QString();
-        in.thinkingVisible = m_thinkingShown && !m_thinkingDismissed;
-        if (m_thinkingHeader) in.thinkingHeader = m_thinkingHeader->text();
-        if (m_thinkingView) in.thinkingText = m_thinkingView->toPlainText().right(relay::panestate::kTailMax);
+        in.waiting = facts.programAsking || facts.handoffWaiting || facts.questionOpen;
+        in.clock = m_agentBusy ? m_turnClockText : QString();
+        // The reasoning fold (issue T8CN): its text is the buffer's tail whatever the display mode
+        // — the phone draws its own copy from the same bytes — and it is "visible" when the latest
+        // fold is on screen. The header says live or last, so a finished trace is never mistaken
+        // for a streaming one.
+        const QString thinkingUri = !m_thinkingAnchor.isEmpty() ? m_thinkingAnchor : m_lastThinkingAnchor;
+        const relay::calllines::Ref thinkingRef = relay::calllines::parseUri(thinkingUri);
+        const QString thinkingTurn = thinkingRef.valid ? thinkingRef.turn : QString();
+        in.thinkingText = m_turnThinking.value(thinkingTurn).right(relay::panestate::kTailMax);
+        in.thinkingVisible = !in.thinkingText.isEmpty() && thinkingDisplay() != QLatin1String("never")
+                             && m_backend && m_backend->foldExpanded(thinkingUri);
+        in.thinkingHeader = !m_thinkingAnchor.isEmpty()
+            ? QStringLiteral("Thinking… · %1").arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model)
+            : QStringLiteral("Thought · last turn · %1").arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model);
 
         in.queuePaused = queueBlocked();
         in.pauseReason = !m_pauseReason.isEmpty() ? m_pauseReason
@@ -8631,7 +8639,7 @@ private:
     }
 
     // ----- inline output in the terminal -------------------------------------------------
-    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
+    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap, Ask };
 
     // Two levels (owner, 2026-09-18): the conversation carries colour — cyan for what the user
     // sent to the shell, violet for what they sent to the agent, white for the agent's prose —
@@ -8651,16 +8659,31 @@ private:
         case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: return t::TextMuted;
         case Ink::DiffAdd: return t::Success;
         case Ink::DiffRemove: case Ink::Error: return t::Error;
+        // The one thing waiting on a person (#MQ9C): amber, the warning token, which is what
+        // every other "needs you" mark in Relay is drawn in (the status glyph, the work chip).
+        case Ink::Ask: return t::Warning;
         }
         return t::Text;
     }
 
     static QByteArray inkCode(Ink ink) {
+        // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
+        // Everything printed into the terminal is frozen at the colour it was written in — the
+        // emulator cannot recolour its scrollback — and a question card is the one piece of inline
+        // output that is still actionable after a theme switch. Indexed bold yellow is what each
+        // theme's own palette renders (`[terminal] palette[3]`: #ecc476 on Relay Dark, the ochre
+        // #7a5400 on IBM Beige), so the card follows the theme instead of keeping a dark theme's
+        // amber on a light ground. It is the colour MarkdownAnsi's **Need:** bold already uses
+        // for the same reason (src/MarkdownAnsi.h, card #4E13).
+        if (ink == Ink::Ask) return QByteArray("\x1b[1;33m");
         const QColor c = inkColor(ink);
         // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
         // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
         // "Legible text").
-        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent) ? QByteArray("1;") : QByteArray();
+        // Bold amber for a question, as card #4E13 asked: "questions or items needing human
+        // response could be in bold amber".
+        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent || ink == Ink::Ask)
+                                     ? QByteArray("1;") : QByteArray();
         return "\x1b[" + style + "38;2;" + QByteArray::number(c.red()) + ';' + QByteArray::number(c.green())
                + ';' + QByteArray::number(c.blue()) + 'm';
     }
@@ -8732,7 +8755,9 @@ private:
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format;
         format.setForeground(inkColor(ink));
-        if (ink == Ink::User) format.setFontWeight(QFont::Bold);
+        // The same bold the terminal gives these two: a line the user sent, and a question waiting
+        // on them (#MQ9C). Here the token itself is used — a widget repaints on a theme switch.
+        if (ink == Ink::User || ink == Ink::Ask) format.setFontWeight(QFont::Bold);
         cursor.insertText(clean, format);
         m_transcriptView->verticalScrollBar()->setValue(m_transcriptView->verticalScrollBar()->maximum());
         if (!m_transcriptDismissed && !m_transcript->isVisible()) m_transcript->show();
@@ -8813,8 +8838,8 @@ private:
         writeTerminal(out);
     }
 
-    // While Relay's own output owns the cursor row, a resize (the reasoning panel opening or
-    // closing, a split) must not reach the shell: Readline answers SIGWINCH with "\r\x1b[K",
+    // While Relay's own output owns the cursor row, a resize (a split, the queue strip opening or
+    // closing) must not reach the shell: Readline answers SIGWINCH with "\r\x1b[K",
     // which blanked the row of the reply being written, a row at a time (TerminalBackend.h).
     // The hold ends with the inline block, or as soon as a program other than the idle shell
     // could be reading the size.
@@ -8960,6 +8985,18 @@ private:
             return;
         }
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); skillSlashHint(text); }
+        // Trigger (1) of "Initialize a project and create a Switchboard here?": the first prompt
+        // sent to the agent in a pane standing in a git repository that has no board (19.12). The
+        // prompt is **not** held for it — it goes on below and the turn starts now; the question is
+        // raised on the next turn of the event loop and a yes takes effect for the turn after, as
+        // a deferred `set_board`. A line typed on a phone or by a guest never raises it: a remote
+        // participant cannot answer a question about a folder on this machine.
+        if (!m_remoteSubmit) {
+            QPointer<Pane> guard(this);
+            QTimer::singleShot(0, this, [guard] {
+                if (guard) guard->askProjectInit(relay::projectinit::Trigger::AgentWork);
+            });
+        }
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
@@ -8994,10 +9031,10 @@ private:
         // like any other (owner, 2026-09-18: "these should always be saved"). It is written here,
         // before anything is routed or refused, so a prompt that bounces off an unconfigured agent
         // is still there to recall — there is no prompt box out there holding on to it. It goes
-        // straight to the file rather than through the composer, whose draft and browse position
-        // belong to whoever is sitting at this desk; every prompt box takes it in on its next Up,
-        // and the file stores the same line once however this one is routed.
-        relay::prompthistory::append(relay::prompthistory::defaultPath(), trimmed);
+        // straight to this pane's file rather than through the composer, whose draft and browse
+        // position belong to whoever is sitting at this desk; the composer takes it in on its next
+        // Up, and the file stores the same line once however this one is routed.
+        relay::prompthistory::append(promptHistoryPath(), trimmed);
         const QString who = originName.trimmed().isEmpty()
                                 ? (origin.isEmpty() ? QStringLiteral("a phone") : origin)
                                 : originName.trimmed();
@@ -9006,6 +9043,10 @@ private:
         // next tool call, which is what Enter on an empty prompt box does here (#C4M8). With no
         // turn to steer, the worker queues it, exactly as the desktop's own steer does.
         m_remoteAuthor = originName.trimmed();
+        // A question card is up (#MQ9C): the line answers it, wherever it was typed. The phone
+        // sees the card because it sees this pane's text; without this its answer would be queued
+        // as a prompt behind the very turn that is blocked waiting for it.
+        if (answerQuestion(trimmed)) { m_remoteAuthor.clear(); return; }
         if (when == QLatin1String("steer") && m_agentBusy) {
             m_remoteSubmit = true; submitAgent(trimmed, false, who); m_remoteSubmit = false;   // the name, not the id
             if (!m_entries.isEmpty() && m_entries.last().agent) {
@@ -9057,41 +9098,6 @@ private:
     }
 
     bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
-    // Relay's rich composer is the foreground guest's input line. We deliberately keep this out
-    // of `program_input`: that tool is for an LLM acting under a per-turn delegation grant, while
-    // this is the user's own composer text. Ctrl+U clears the TUI line, bracketed paste keeps a
-    // multiline prompt literal, and Escape after a slash selection closes the guest menu before
-    // Enter (otherwise Claude/Codex consumes Enter as menu navigation).
-    bool typeIntoGuest(const QString &guest, const QString &text) {
-        if (!m_backend || guest != m_guest || text.trimmed().isEmpty()) {
-            status(QStringLiteral("Guest input was not sent: %1 is no longer ready.").arg(guestDisplayName(guest)));
-            return false;
-        }
-        m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
-        m_backend->sendText(text, true);
-        if (text.trimmed().startsWith(QLatin1Char('/')))
-            m_backend->sendInput(QByteArrayLiteral("\x1b"));  // dismiss its slash popup before Enter
-        m_backend->sendInput(QByteArrayLiteral("\r"));
-        status(QStringLiteral("Sent to %1.").arg(guestDisplayName(guest)));
-        return true;
-    }
-
-    void submitGuest(const QString &text, bool fromEditor) {
-        if (m_guest.isEmpty()) return;
-        if (fromEditor) {
-            m_editor->remember(text);
-            m_editor->clear();
-            hideAtPopup(); hideSlashPopup(); clearAiGhost();
-        }
-        if (m_entries.isEmpty() && !m_activeValid && !m_guestBusy) {
-            typeIntoGuest(m_guest, text);
-            return;
-        }
-        QueueEntry entry;
-        entry.guest = m_guest;
-        entry.text = text;
-        enqueue(entry);
-    }
 
     void enqueue(QueueEntry entry) {
         // A queued item is edited where it stands now (selectQueueEntry / saveQueueEdit), so nothing
@@ -9101,9 +9107,7 @@ private:
         m_selected = -1;
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
         status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
-                           : !entry.guest.isEmpty()
-                               ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
-                               : QStringLiteral("Queued · the command runs when the terminal is free"));
+                           : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -9149,11 +9153,7 @@ private:
         if (queueBlocked() || m_activeValid || m_entries.isEmpty()) return;
         const QueueEntry head = m_entries.first();
         const quint64 selected = selectedEntryId();
-        if (!head.guest.isEmpty()) {
-            if (m_guestBusy || head.guest != m_guest) return;
-            m_entries.removeFirst();
-            if (!typeIntoGuest(head.guest, head.text)) m_entries.prepend(head);
-        } else if (head.agent) {
+        if (head.agent) {
             if (m_agentBusy || !m_configured) return;
             m_entries.removeFirst();
             startAgentEntry(head, true);
@@ -9425,9 +9425,9 @@ private:
         if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
             && (upgradeLastQueuedToSteer() || escalateSteerToInterrupt()))
             return true;
-        // Ctrl+C with nothing selected in the prompt box copies what is highlighted in the reasoning
-        // bubble, which cannot hold the keyboard itself.
-        if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && copyThinkingSelection())
+        // Ctrl+C with nothing selected in the prompt box copies what is highlighted in the
+        // terminal — the reasoning is a fold there now, so its selection is the terminal's.
+        if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && copySelection())
             return true;
         // Esc stops a running program, so Ctrl+C is left to copying.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
@@ -9788,7 +9788,259 @@ public:
               {QStringLiteral("board"), board.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(board)}});
     }
 
+    // ----- "Initialize a project and create a Switchboard here?" (protocol 19.12 and 19.13) ----
+    //
+    // The one question that ever creates `<project>/switchboard/`. Five triggers raise it and
+    // nothing else does (the table is in src/ProjectInit.h): the first prompt sent to the agent in
+    // a git repository with no board, the agent's first card, opening the Switchboard, `/card` and
+    // `/init`. A `cd`, launching Relay, hovering, `#` typed in the composer and opening a file are
+    // silent, for ever — the owner's rule is that nothing appears on disk unasked.
+    //
+    // **It never blocks what raised it.** The prompt has already gone to the agent when the
+    // question appears beside it, and a yes lands as a `set_board`, which the worker defers to the
+    // end of a running turn — so the card tools arrive for the *next* turn, in the same
+    // conversation (19.11).
+    //
+    // The order on a yes is fixed by the worker and not by taste: an unattached pane has no board
+    // object at all, so a `board_init` sent there answers "this project has no Switchboard". The
+    // tab is attached first (`set_board {project, state: "uninitialized"}`) and `board_init` goes
+    // out when that lands, which is also exactly what makes a mid-turn yes take effect at turn end.
+    //
+    // Raise the question for `trigger`; `cardText` is a `/card` being held, which lands as the
+    // first card on a yes and is never lost. True when a question is on its way.
+    bool askProjectInit(relay::projectinit::Trigger trigger, const QString &cardText = QString(),
+                        QString *why = nullptr) {
+        if (!onProjectInitSituation) return false;
+        relay::projectinit::Situation situation = onProjectInitSituation();
+        situation.cwd = m_cwd;
+        situation.asking = m_initStage != InitStage::Idle;
+        const relay::projectinit::Decision decision = relay::projectinit::decide(trigger, situation);
+        if (decision.outcome == relay::projectinit::Outcome::Say) {
+            if (why) *why = decision.message; else status(decision.message);
+            return false;
+        }
+        if (decision.outcome == relay::projectinit::Outcome::Attach) {
+            // Nothing to create: the project already has a board, so this is an ordinary attach.
+            if (onProjectAttach) onProjectAttach(decision.project, decision.reason);
+            if (!decision.message.isEmpty()) { if (why) *why = decision.message; else status(decision.message); }
+            return false;
+        }
+        if (decision.outcome != relay::projectinit::Outcome::Ask) return false;
+        if (decision.clearsDecline && onProjectInitEvent)
+            onProjectInitEvent(decision.project, QStringLiteral("reconsider"));
+        beginProjectInit(trigger, decision.project, QString(), cardText);
+        return true;
+    }
+
 private:
+    // Where the one flow has got to. Only one runs at a time in a pane; `Asking` is the window the
+    // `situation.asking` guard closes, so a second trigger cannot replace the findings under the
+    // user's cursor.
+    enum class InitStage { Idle, Probing, Asking, Attaching, Creating, Importing };
+
+    // Ask the worker what is in the project, then draw the answer. `project_probe` opens no socket,
+    // runs no subprocess and writes no file — the worker guarantees it (19.13) — so the question
+    // can say what it found before anything at all has happened.
+    void beginProjectInit(relay::projectinit::Trigger trigger, const QString &project,
+                          const QString &requestId, const QString &cardText) {
+        if (project.isEmpty()) return;
+        m_initStage = InitStage::Probing;
+        m_initTrigger = trigger;
+        m_initProject = project;
+        m_initRequestId = requestId;
+        m_initCardText = cardText;
+        m_initKinds.clear();
+        m_initProbeId = QStringLiteral("pi-%1-%2").arg(m_token.left(6)).arg(++m_initSeq);
+        // The window notes it at once, not on the answer: one question per project per session, so
+        // a second pane standing in the same repository does not raise a second one behind it.
+        if (onProjectInitEvent) onProjectInitEvent(project, QStringLiteral("asked"));
+        relay::log::info(QStringLiteral("project init asked pane=%1 trigger=%2 project=%3")
+                             .arg(m_token.left(8), relay::projectinit::triggerName(trigger), project));
+        send({{QStringLiteral("type"), QStringLiteral("project_probe")},
+              {QStringLiteral("id"), m_initProbeId},
+              {QStringLiteral("project"), project}});
+        // The probe is a handful of file reads, but a project on a slow mount must not swallow the
+        // question: with no answer in five seconds it is asked with no findings at all.
+        QPointer<Pane> guard(this);
+        const QString waitingFor = m_initProbeId;
+        QTimer::singleShot(5000, this, [guard, waitingFor] {
+            if (!guard || guard->m_initStage != InitStage::Probing || guard->m_initProbeId != waitingFor) return;
+            guard->showProjectInit(QJsonObject{{QStringLiteral("project"), guard->m_initProject}});
+        });
+    }
+
+    // The worker asked: the agent called `board_create_card` in a project with no Switchboard, and
+    // its turn thread is parked on the answer (19.12). The pane owns the dialog and always answers,
+    // so this never simply ignores the request: a trigger the rules refuse is answered `false`.
+    void handleBoardInitRequest(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        const QString project = event.value(QStringLiteral("project")).toString();
+        if (id.isEmpty() || project.isEmpty()) return;
+        relay::projectinit::Situation situation =
+            onProjectInitSituation ? onProjectInitSituation() : relay::projectinit::Situation{};
+        situation.project = project;   // the worker names it; the tab is already attached to it
+        situation.cwd = m_cwd;
+        situation.hasBoard = false;    // the worker only asks when there is none
+        situation.asking = m_initStage != InitStage::Idle;
+        const relay::projectinit::Decision decision =
+            relay::projectinit::decide(relay::projectinit::Trigger::AgentCard, situation);
+        if (!decision.asks()) {
+            send({{QStringLiteral("type"), QStringLiteral("board_init_answer")},
+                  {QStringLiteral("id"), id}, {QStringLiteral("accept"), false}});
+            return;
+        }
+        beginProjectInit(relay::projectinit::Trigger::AgentCard, project, id,
+                         event.value(QStringLiteral("title")).toString());
+    }
+
+    // The block is a row of the pane's own column, directly under the terminal, beside the thinking
+    // panel and the queue strip — never a dialog and never an overlay (owner's rule, 2026-09-18).
+    relay::ProjectInitBlock *projectInitBlock() {
+        if (!m_initBlock) {
+            m_initBlock = new relay::ProjectInitBlock(this);
+            m_initBlock->hide();
+            QPointer<Pane> guard(this);
+            m_initBlock->answered = [guard](relay::ProjectInitBlock::Answer answer, const QStringList &kinds) {
+                if (guard) guard->answerProjectInit(answer, kinds);
+            };
+            if (auto *column = qobject_cast<QVBoxLayout *>(layout()))
+                column->insertWidget(column->indexOf(m_terminalHost) + 1, m_initBlock);
+        }
+        return m_initBlock;
+    }
+
+    void showProjectInit(const QJsonObject &probeResult) {
+        QJsonObject result = probeResult;
+        // The probe answers about the project it was given; a result with no `project` (the
+        // timeout's empty stand-in) still has to name the folder the yes would create.
+        if (result.value(QStringLiteral("project")).toString().isEmpty())
+            result.insert(QStringLiteral("project"), m_initProject);
+        m_initStage = InitStage::Asking;
+        projectInitBlock()->ask(relay::projectinit::questionFrom(result));
+    }
+
+    void answerProjectInit(relay::ProjectInitBlock::Answer answer, const QStringList &kinds) {
+        const QString project = m_initProject;
+        const relay::projectinit::Trigger trigger = m_initTrigger;
+        const QString requestId = m_initRequestId;
+        if (answer != relay::ProjectInitBlock::Answer::Yes) {
+            // A no and a "not now" both release the agent's parked tool call, because the pane owns
+            // the dialog and the turn thread is waiting on it. They differ only in what is
+            // remembered: a no for ever (the registry), a not-now for this Relay session.
+            if (!requestId.isEmpty())
+                send({{QStringLiteral("type"), QStringLiteral("board_init_answer")},
+                      {QStringLiteral("id"), requestId}, {QStringLiteral("accept"), false}});
+            const bool no = answer == relay::ProjectInitBlock::Answer::No;
+            if (onProjectInitEvent)
+                onProjectInitEvent(project, no ? QStringLiteral("no") : QStringLiteral("not-now"));
+            ensureLineStart();
+            printInline((no ? relay::projectinit::declinedLine(project)
+                            : relay::projectinit::notNowLine(project)) + QLatin1Char('\n'), Ink::Note);
+            closeInline();
+            resetProjectInit();
+            focusInput();
+            return;
+        }
+        m_initKinds = kinds;
+        if (onProjectInitEvent) onProjectInitEvent(project, QStringLiteral("yes"));
+        if (!requestId.isEmpty()) {
+            // The worker asked, so the worker creates: the card the agent was writing is completed
+            // on the way through and is never lost (19.12).
+            m_initStage = InitStage::Creating;
+            send({{QStringLiteral("type"), QStringLiteral("board_init_answer")},
+                  {QStringLiteral("id"), requestId}, {QStringLiteral("accept"), true}});
+        } else {
+            // Attach first (set_board), then `board_init` once that has landed: see askProjectInit.
+            m_initStage = InitStage::Attaching;
+            if (onProjectAttach) onProjectAttach(project, relay::projectinit::triggerName(trigger));
+        }
+        focusInput();
+    }
+
+    // Is this `board_state` about the project the question is about? The worker echoes the
+    // `project` it was pointed with; an older board block may carry only the folder.
+    bool projectInitOwns(const QJsonObject &board) const {
+        if (m_initProject.isEmpty()) return false;
+        if (board.value(QStringLiteral("project")).toString() == m_initProject) return true;
+        const QString root = board.value(QStringLiteral("root")).toString();
+        return !root.isEmpty() && root.startsWith(m_initProject + QLatin1Char('/'));
+    }
+
+    // Each step of a yes, driven by the `board_state` that says `applies: "now"` — the one in force.
+    void projectInitBoardState(const QJsonObject &board) {
+        if (m_initStage != InitStage::Attaching && m_initStage != InitStage::Creating) return;
+        if (!projectInitOwns(board)) return;
+        const QString state = board.value(QStringLiteral("state")).toString();
+        if (m_initStage == InitStage::Attaching && state == QStringLiteral("uninitialized")) {
+            m_initStage = InitStage::Creating;
+            send({{QStringLiteral("type"), QStringLiteral("board_init")},
+                  {QStringLiteral("project"), m_initProject}});
+            return;
+        }
+        if (m_initStage != InitStage::Creating || state != QStringLiteral("ready")) return;
+        // The board is on disk and the pane's tools are the full set. The card the user typed goes
+        // in first, then whatever they ticked is imported.
+        if (!m_initCardText.isEmpty()) {
+            send({{QStringLiteral("type"), QStringLiteral("board_create")},
+                  {QStringLiteral("tab"), QStringLiteral("features")},
+                  {QStringLiteral("status"), QStringLiteral("inbox")},
+                  {QStringLiteral("text"), m_initCardText}});
+            m_cardIndexAsked = false;
+        }
+        if (m_initKinds.isEmpty()) { finishProjectInit(-1); return; }
+        m_initStage = InitStage::Importing;
+        // Propose first, apply second: nothing from the proposals goes back on the wire but the
+        // keys, and the worker re-derives every card body from the project itself (19.13).
+        send({{QStringLiteral("type"), QStringLiteral("board_import_propose")},
+              {QStringLiteral("id"), m_initProbeId},
+              {QStringLiteral("project"), m_initProject},
+              {QStringLiteral("kinds"), QJsonArray::fromStringList(m_initKinds)}});
+    }
+
+    void projectInitProposals(const QJsonObject &event) {
+        if (m_initStage != InitStage::Importing) return;
+        QJsonArray keys;
+        for (const QJsonValue &value : event.value(QStringLiteral("proposals")).toArray()) {
+            const QString key = value.toObject().value(QStringLiteral("source_key")).toString();
+            if (!key.isEmpty()) keys.append(key);
+        }
+        if (keys.isEmpty()) { finishProjectInit(0); return; }
+        send({{QStringLiteral("type"), QStringLiteral("board_import_apply")},
+              {QStringLiteral("id"), m_initProbeId},
+              {QStringLiteral("project"), m_initProject},
+              {QStringLiteral("keys"), keys}});
+    }
+
+    // One quiet line, and the Switchboard itself when that is what the user was reaching for.
+    void finishProjectInit(int imported) {
+        const QString project = m_initProject;
+        const bool openBoard = m_initTrigger == relay::projectinit::Trigger::Switchboard;
+        ensureLineStart();
+        printInline(relay::projectinit::createdLine(project, imported) + QLatin1Char('\n'), Ink::Note);
+        closeInline();
+        status(relay::projectinit::createdLine(project, imported));
+        resetProjectInit();
+        if (openBoard && onOpenBoard) onOpenBoard();
+    }
+
+    void resetProjectInit() {
+        m_initStage = InitStage::Idle;
+        m_initProject.clear();
+        m_initRequestId.clear();
+        m_initCardText.clear();
+        m_initProbeId.clear();
+        m_initKinds.clear();
+        if (m_initBlock) m_initBlock->hide();
+    }
+
+    InitStage m_initStage = InitStage::Idle;
+    relay::projectinit::Trigger m_initTrigger = relay::projectinit::Trigger::AgentWork;
+    QString m_initProject, m_initRequestId, m_initCardText, m_initProbeId;
+    QStringList m_initKinds;
+    int m_initSeq = 0;
+    relay::ProjectInitBlock *m_initBlock = nullptr;
+
+
     // Whether this pane's tab is attached to a project, without attaching anything or touching
     // the filesystem. The quiet default is false.
     bool hasBoard() const { return onBoardProject && !onBoardProject(QString(), nullptr).isEmpty(); }
@@ -9804,6 +10056,29 @@ private:
     // Switchboard events a *terminal* pane cares about: the card index behind the `#` picker,
     // and one inline line per agent write (protocol 17.2 and 17.5).
     bool handleBoardEvent(const QString &type, const QJsonObject &event) {
+        // ----- the init question's own round trips (protocol 19.12, 19.13) --------------------
+        if (type == QStringLiteral("board_init_request")) { handleBoardInitRequest(event); return true; }
+        if (type == QStringLiteral("project_probe_result")) {
+            if (m_initStage == InitStage::Probing && event.value(QStringLiteral("id")).toString() == m_initProbeId)
+                showProjectInit(event);
+            return true;
+        }
+        if (type == QStringLiteral("board_import_proposals")) { projectInitProposals(event); return true; }
+        if (type == QStringLiteral("board_imported")) {
+            if (m_initStage == InitStage::Importing)
+                finishProjectInit(event.value(QStringLiteral("cards")).toArray().size());
+            return true;
+        }
+        // An error while the flow is in flight must not leave it waiting for an event that will
+        // never come. A probe that failed still gets its question — with no findings, because the
+        // folder a yes creates is the same either way — and any later step gives up quietly. The
+        // event is not consumed: the pane's ordinary error line still says what went wrong.
+        if (type == QStringLiteral("error") && m_initStage != InitStage::Idle && !m_initProbeId.isEmpty()
+            && event.value(QStringLiteral("id")).toString() == m_initProbeId) {
+            if (m_initStage == InitStage::Probing) showProjectInit(QJsonObject{});
+            else resetProjectInit();
+            return false;
+        }
         if (type == QStringLiteral("board")) {
             m_cardIndex.setConfig(event.value(QStringLiteral("config")).toObject());
             m_cardIndex.reset(event.value(QStringLiteral("cards")).toArray());
@@ -9832,6 +10107,10 @@ private:
             relay::log::info(QStringLiteral("board_state pane=%1 board=%2 state=%3")
                                  .arg(m_token.left(8), root.isEmpty() ? QStringLiteral("none") : root,
                                       board.value(QStringLiteral("state")).toString()));
+            // A yes walks forward on this event: the attach has landed (so `board_init` may go), or
+            // the board is on disk (so the held card and the ticked imports may go). Mid-turn the
+            // worker sends it at turn end, which is exactly when the yes is meant to take effect.
+            projectInitBoardState(board);
             // Another project's cards are not this one's: drop the picker index and the work
             // chip's card list, and ask again the next time something needs them.
             m_cardIndex.reset({});
@@ -10735,6 +11014,12 @@ private:
     void refreshProgramHint() {
         if (!m_opaqueHint) return;
         QString text;
+        // The line said all four of its things in amber. Three of them are not waiting on the
+        // person — the agent driving is agent work, a program merely running is terminal work —
+        // and amber is reserved for what is (docs/ARCHITECTURE.md, "What the colours mean"). So
+        // the hint now wears the colour of the state it is describing, which is the same map the
+        // pane's own status glyph uses.
+        QString state;
         if (!m_native && !m_secretMode) {
             const QString program = foregroundProgramName();
             const QString who = program.isEmpty() ? QStringLiteral("The program") : program;
@@ -10743,16 +11028,26 @@ private:
                                        : program.isEmpty() ? QStringLiteral("the program") : program;
                 text = QStringLiteral("The agent is driving %1 · %2 takes it back")
                            .arg(driven, Keymap::instance().shortcutText(QStringLiteral("control.human")));
-            } else if (m_screenPrompt.actionable())
+                state = QStringLiteral("agent");
+            } else if (m_screenPrompt.actionable()) {
                 // Read off the screen, so it names the question: "apt is asking: … [Y/n]".
                 text = relay::screen::waitingLine(program, m_screenPrompt);
-            else if (m_waiting)
+                state = QStringLiteral("needs-you");
+            } else if (m_waiting) {
                 text = QStringLiteral("%1 is waiting for input · Enter sends your line to it").arg(who);
-            else if (!m_opaqueProgram.isEmpty())
+                state = QStringLiteral("needs-you");
+            } else if (!m_opaqueProgram.isEmpty()) {
                 text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
                            .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")));
+                state = QStringLiteral("running");
+            }
         }
         m_opaqueHint->setText(text);
+        if (m_opaqueHint->property("state").toString() != state) {
+            m_opaqueHint->setProperty("state", state);
+            m_opaqueHint->style()->unpolish(m_opaqueHint);
+            m_opaqueHint->style()->polish(m_opaqueHint);
+        }
         m_opaqueHint->setVisible(!text.isEmpty());
         // m_routeLabel is not shown here: it is the mode chip's tooltip, not a widget on the row.
     }
@@ -10927,13 +11222,10 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // moves the terminal up instead of covering it (owner report, 2026-09-18: "the terminal needs
     // to move up, rather than being covered up").
     void placeQueueStrip() {
-        QTimer::singleShot(0, this, [this] { placeThinking(); });
         if (!m_queueStrip || !m_terminalHost) return;
         // Too short for a legible strip: nothing, rather than a clipped one (owner, 2026-09-18).
-        // The queue outranks the reasoning panel when only one of them fits, because it is the one
-        // holding work — what is queued, and the Resume and Clear that act on it. Queueing already
-        // says so on screen ("Queued · the command runs when the terminal is free"), so a strip
-        // that cannot be drawn is not the only word the person gets.
+        // Queueing already says so on screen ("Queued · the command runs when the terminal is
+        // free"), so a strip that cannot be drawn is not the only word the person gets.
         if (!m_queueWanted || !roomForBubble(0)) { hideBubble(m_queueStrip); return; }
         showBubble(m_queueStrip);
         setBubbleHeight(m_queueStrip, std::max(bubbleRow(), std::min(m_queueStrip->sizeHint().height(), bubbleSpan() / 2)));
@@ -11052,6 +11344,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
 
     void refreshStatusStrip() {
         if (m_interruptButton) m_interruptButton->setVisible(processBusy());
+        // The terminal's blue "Relaying <program>…" line rides the shell poll, which is what
+        // notices a program start and end; a turn's violet line keeps its own one-second clock.
+        if (!m_agentBusy) refreshBusyLine();
     }
 
     void refreshShellReady() {
@@ -11082,9 +11377,6 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
-        // The guest channel is polled on the same tick (26.3), before state.json's own checks
-        // below can return: a guest event must land even in a tick where the shell did not.
-        pollGuestEvent();
         // This runs 12 times a second in every pane, and the file changes a few times per
         // command. shell/event.py replaces it atomically, so a new event is a new inode: one
         // stat() says whether there is anything to read, in place of an open, a read and a JSON
@@ -11105,12 +11397,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         const QString stage = event.value(QStringLiteral("event")).toString();
         if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) m_shellPid = reported;
         const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
-        if (newCwd != m_cwd) {
-            m_cwd = newCwd; updatePaths(); changed();
-            // The bridge routes by the longest workspace/cwd prefix (26.5): a pane that moved must
-            // say so before a request names a place it is no longer in.
-            registerWithBridge();
-        }
+        if (newCwd != m_cwd) { m_cwd = newCwd; updatePaths(); changed(); }
         if (stage == QStringLiteral("ready")) {
             m_promptReported = true;
             refreshShellReady();
@@ -11517,9 +11804,7 @@ private:
                   {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
                   {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
                   {"keybindings", Keymap::instance().catalog()}}));
-            updatePaths();
-            registerWithBridge();   // the bridge routes by workspace too (26.5)
-            dialog.accept();
+            updatePaths(); dialog.accept();
         });
         dialog.exec();
     }
@@ -11533,21 +11818,13 @@ private:
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
-    // guest.json as pollShell() last read it (GT7X, 26.3): the same stat/token/sequence dance
-    // as state.json above, on the same tick. Then the guest's live facts and the PreToolUse
-    // question whose answer the waiting shim still needs.
-    bool m_guestSeen = false; ino_t m_guestInode = 0; off_t m_guestSize = 0; timespec m_guestMtime{};
-    QString m_guestSequence, m_guestModel, m_guestQuestionSeq;
-    int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
-    bool m_guestBusy = false;
-    QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
-    // A bridge diff this pane still owes claude an answer to (GT7X, 26.5): where the sidecar is
-    // waiting for the decision, and the file the decision is about.
-    struct GuestDiff { bool pending = false; QString replyPath, file; };
-    GuestDiff m_guestDiff;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;
+    // The pane's resource meter (usageSample() above); one baseline per pane, so percentages
+    // are always over the status poll's own interval.
+    relay::usage::Meter m_usageMeter;
+    relay::usage::Sample m_usageSample;
     QByteArray m_workerBuffer;
     QList<QByteArray> m_workerPending;
     QTimer m_poll, m_debounce;
@@ -11643,15 +11920,16 @@ private:
     QStringList m_turnOrder;
     QHash<QString, QPointer<relay::TurnTranscriptView>> m_turnViews;
     QString m_lastTurnId;
-    // m_thinkingHeld: the panel reopened by the keyboard between turns (toggleThinkingPanel).
-    bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false, m_thinkingHeld = false;
+    // The reasoning fold (issue T8CN): the anchor streaming now (empty between blocks), the last
+    // finished one (Alt+R reopens it until the next block), whether it is open, whether a reader —
+    // not the stream — last set that, whether a coalesced flush is queued, and the per-turn block
+    // counter that tells a second block in one turn from the first (thinking, thinking-2, …).
+    QString m_thinkingAnchor, m_lastThinkingAnchor;
+    bool m_thinkingFoldOpen = false, m_thinkingUserToggled = false, m_thinkingFlushPending = false;
+    QHash<QString, int> m_thinkingBlocks;
     bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
-    QFrame *m_thinking = nullptr;
-    QLabel *m_thinkingHeader = nullptr;
-    QPlainTextEdit *m_thinkingView = nullptr;
-    QWidget *m_thinkingHeaderRow = nullptr;
     QString m_prefixMode, m_prefixPrevMode;
     QTimer m_idleTip;
     QFrame *m_banner = nullptr;
@@ -11747,6 +12025,8 @@ private:
     QString m_agentRole = QStringLiteral("main");
     // The model this pane's current turn runs on because it carries an image, or empty (protocol 17).
     QString m_visionModel;
+    // The model this pane's current plan-mode turn runs on (the planning role), or empty (protocol 13).
+    QString m_planModel;
     QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog;
     QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;
@@ -11805,11 +12085,13 @@ private:
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;
     QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;
-    // In-flight turn clock: "thinking · 48 s · Esc stops" while the agent is busy (issue SQAM).
+    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the bold "Relaying…" line
+    // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
-    QLabel *m_turnClockLabel = nullptr;   // the turn clock's home in the prompt-box strip
+    QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
+    PaneBusyLine *m_busyLine = nullptr;   // the bold "Relaying…" line above the prompt (#4E13)
     // "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.
@@ -11830,9 +12112,6 @@ private:
     bool m_delegated = false;          // the user handed the foreground program to the agent
     QString m_delegatedProgram;
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
-    QFrame *m_guestBar = nullptr;      // the guest's permission question, floating over the terminal
-    QLabel *m_guestBarLabel = nullptr;
-    QLabel *m_guestChip = nullptr;     // the guest's model/context chip in the prompt-box strip
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it
     QFrame *m_programBar = nullptr;    // the floating banner over the terminal
@@ -11859,6 +12138,7 @@ private:
         else enqueue(entry);
     }
     QString m_lastPlanPath;      // the plan this pane's agent wrote last
+    Ask m_ask;                   // the question card up in this pane, if any (#MQ9C)
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     relay::SubagentsPanel *m_agentsPanel = nullptr;

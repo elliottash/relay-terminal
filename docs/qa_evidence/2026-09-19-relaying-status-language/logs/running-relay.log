@@ -1,0 +1,6 @@
+2026-09-19T06:47:39.884Z INFO relay.gui gui_start version=0.1.0 pid=2255291 level=info
+2026-09-19T06:47:39.940Z INFO relay.gui worker_start pane=97288bb4 workspace_set=1
+2026-09-19T06:47:40.006Z INFO relay.gui event type=ready pane=97288bb4
+2026-09-19T06:47:40.037Z INFO relay.gui event type=configured pane=97288bb4 model=stub
+2026-09-19T06:48:01.773Z INFO relay.gui gui_quit reason=signal
+2026-09-19T06:48:01.825Z ERROR relay.gui worker_exit pane=97288bb4 code=0 crashed=0

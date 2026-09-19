@@ -376,6 +376,7 @@ private:
     QFrame *m_composer = nullptr;
     QPlainTextEdit *m_box = nullptr;
     QLabel *m_mode = nullptr, *m_folder = nullptr, *m_clock = nullptr, *m_context = nullptr;
+    QLabel *m_allowance = nullptr;   // the Relay Free chip, next to the context one
     QToolButton *m_model = nullptr, *m_sessions = nullptr, *m_sendMenu = nullptr;
     QPushButton *m_send = nullptr;
     QMenu *m_modelMenu = nullptr, *m_sessionsMenu = nullptr;

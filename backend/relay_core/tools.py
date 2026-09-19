@@ -30,6 +30,7 @@ from typing import Callable
 
 from .keybindings import KeybindingCatalog
 from .program_input import ProgramControl
+from .questions import Questions
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
@@ -238,6 +239,12 @@ class ToolExecutor:
         # Handing a command to the user's real shell. Offered only when the pane says it takes
         # them; see relay_core/terminal_handoff.py.
         self.terminal = TerminalHandoff(emit, cancel)
+        # Asking the user a question and waiting for the answer; see relay_core/questions.py.
+        # Offered in both modes (owner, 2026-09-19: "let the non-plan agent use the questions as
+        # well (like warp / claude)"); `can_ask` is off for a subagent's executor, which cannot see
+        # the pane the card would be drawn in.
+        self.questions = Questions(emit, cancel)
+        self.can_ask = True
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
         # The ssh session the user's terminal is logged into this turn (remote_session.validate's
@@ -310,6 +317,8 @@ class ToolExecutor:
             tools = tools + [self.program.tool_spec()]
         if self.terminal.available():
             tools = tools + [self.terminal.tool_spec()]
+        if self.can_ask:
+            tools = tools + [self.questions.tool_spec()]
         return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:
@@ -330,6 +339,11 @@ class ToolExecutor:
             return Prepared(name, payload, preview)
         if name == "run_in_terminal":
             payload, preview = self.terminal.prepare(args)
+            return Prepared(name, payload, preview)
+        if name == "ask_user":
+            if not self.can_ask:
+                raise ValueError("ask_user is not available here: you cannot reach the user.")
+            payload, preview = self.questions.prepare(args)
             return Prepared(name, payload, preview)
         if name == "set_keybinding":
             catalog = self.keybindings
@@ -576,6 +590,8 @@ class ToolExecutor:
             return self.program.execute(args)
         if name == "run_in_terminal":
             return self.terminal.execute(args)
+        if name == "ask_user":
+            return self.questions.execute(args)
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None or args["action"] not in catalog.actions:

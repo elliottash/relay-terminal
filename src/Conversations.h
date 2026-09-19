@@ -69,9 +69,11 @@ QString removeOperator(const QString &query, const QJsonObject &op);
 // "closed 5 min ago" for a recently-closed stamp (milliseconds since the epoch); empty when the
 // stamp is not set. Mirrors relay::closed::age, which this library cannot link against.
 QString closedAgo(qint64 closedAtMs, qint64 nowMs);
-// The short text tags in a row's title cell: pinned, open, closed …, unfinished, edits · N files,
-// and the branch when it is not the trunk. `openNow` is "a pane already has this conversation".
-QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText);
+// The short text tags in a row's title cell: pinned, open, closed …, cpu / mem when its pane is
+// busy, unfinished, edits · N files, and the branch when it is not the trunk. `openNow` is
+// "a pane already has this conversation"; `usageTag` is that pane's live reading (issue #D03W).
+QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText,
+                   const QString &usageTag = QString());
 // A path elided in the middle ("src/…/Conversations.cpp"); other text is elided at the end.
 QString elideMiddleText(const QString &text, int maxChars);
 
@@ -139,6 +141,9 @@ public:
     // a window itself. `closed` maps a session id to {closed-list id, closed-at in milliseconds}.
     void setProject(const QString &project);
     void setOpenSessions(const QStringList &sessionIds);
+    // What each open conversation's pane is using, as a labelled tag on its row (issue #D03W).
+    // Pushed by the window's status poll; a session with no entry shows nothing.
+    void setLiveUsage(const QHash<QString, QString> &usage);
     void setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed);
     // "closed 5 min ago" is a clock, not a stamp: the pane re-reads it on a timer while anything
     // is in the closed list, so a row that said "closed just now" catches up without the list
@@ -230,6 +235,7 @@ private:
     QHash<QString, QJsonObject> m_overviews;   // what an unfolded row shows, once fetched
     QSet<QString> m_summarising;
     QStringList m_openSessions;
+    QHash<QString, QString> m_liveUsage;   // session id → "cpu 12% · mem 3%" (issue #D03W)
     QHash<QString, QPair<QString, qint64>> m_closed;
     QString m_project, m_pendingSelect, m_previewPending, m_batchScope, m_note;
     QString m_previewFor, m_previewHtml;      // the side preview as last filled, and for which row

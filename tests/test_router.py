@@ -272,6 +272,37 @@ class ValidityTests(unittest.TestCase):
             result = self.check("./run.sh", cwd=d)
             self.assertEqual((result.route, result.explain_invalid), ("agent", True))
 
+    def test_a_sentence_naming_a_file_is_not_a_mistyped_command(self):
+        # Card #N3WC, owner report 2026-09-18 (the tenth "command not found under a request"
+        # report): the line below went to the agent with "command not found: new" under it.
+        # `new` sits one edit from `net` and `znew` on this machine, and the mention of RELAY.MD
+        # counted as a file operand, so the word-count guard stood aside and the typo test fired
+        # on a 21-word, three-sentence request. Sentence punctuation on a word before the last
+        # ("card:", "any.", "case.") is a sentence break: the segment is writing, whatever it
+        # names. `net` is passed as known_commands because the tests' INSTALLED table has no
+        # program one edit from "new"; this machine has two.
+        owner = ("new card: the introductory agent instructions file was still showing when i "
+                 "didnt have any. it shouldnt show any in that case. just init the default "
+                 "RELAY.MD\n\n")
+        result = self.check(owner, known_commands=["net"])
+        self.assertEqual(result.route, "agent")
+        self.assertFalse(result.explain_invalid, f"{owner!r}: {result.invalid_reason}")
+        self.assertEqual(result.reason, "Reads like a request · sent to the agent")
+        for text in ["gti notes: the commit should explain why relay.md changed, and nothing else",
+                     "gti log shows relay.md was committed. can you check",
+                     "pyton note: scripts/train.py OOMs again. can you look"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+        # Real slips keep the note: the file-operand reading is for lines like these, and the
+        # last word's own full stop is still not a sentence break.
+        for text in ["gti stauts report.txt", "gti stauts.", "gti status", "cs .."]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.explain_invalid, text)
+
     def test_a_question_word_is_not_a_glob(self):
         # Card #W954: "really?" and "ready?" were read as a glob in command position, which the
         # router cannot judge, so they ran in the shell. A `?` glob still counts inside a real one.

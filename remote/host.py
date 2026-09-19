@@ -611,7 +611,7 @@ class Host:
         def go() -> dict:
             request = urllib.request.Request(
                 url, data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"}, method="POST")
+                headers={"Content-Type": "application/json", "User-Agent": ws.USER_AGENT}, method="POST")
             try:
                 with urllib.request.urlopen(request, timeout=20) as response:
                     return json.loads(response.read())

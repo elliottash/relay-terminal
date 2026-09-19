@@ -3,6 +3,7 @@
 // worth keeping, and that two Relays appending at once do not lose each other's lines.
 #include <QtTest>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include "PromptHistory.h"
@@ -62,7 +63,8 @@ private slots:
         QCOMPARE(tail, (QStringList{QStringLiteral("line 9"), QStringLiteral("line 10"), QStringLiteral("line 11")}));
     }
 
-    // Two panes (or two Relays) appending: every line is there, in the order it was submitted.
+    // Two writers on one pane's file (the composer, and a paired phone writing at the door): every
+    // line is there, in the order it was submitted.
     void appendsFromEverywhereInterleave() {
         QVERIFY(ph::append(path(), QStringLiteral("pane one")));
         QVERIFY(ph::append(path(), QStringLiteral("pane two")));
@@ -114,10 +116,36 @@ private slots:
 
     void clearForgetsEverything() {
         QVERIFY(ph::append(path(), QStringLiteral("git status")));
-        QVERIFY(ph::clear(path()));
+        QVERIFY(ph::clearDirectory(QFileInfo(path()).absolutePath()));
         QVERIFY(!QFile::exists(path()));
         QVERIFY(ph::read(path()).isEmpty());
-        QVERIFY(ph::clear(path()));   // already gone: still fine
+        QVERIFY(ph::clearDirectory(QFileInfo(path()).absolutePath()));   // already gone: still fine
+    }
+
+    // One file per pane (owner report, 2026-09-19: "i want pane histories for up/down"). The path
+    // is keyed by the pane's layout id, and an id that is not a pane token is refused.
+    void pathsAreKeyedByPaneId() {
+        const QString id = QStringLiteral("0f0dd9b2-64b3-4a2e-9a11-6c5f18a63b21");
+        const QString path = ph::pathFor(id);
+        QVERIFY(path.endsWith(QStringLiteral("/prompt-history/") + id + QStringLiteral(".txt")));
+        QVERIFY(ph::pathFor(QString()).isEmpty());
+        QVERIFY(ph::pathFor(QStringLiteral("short")).isEmpty());
+        QVERIFY(ph::pathFor(QStringLiteral("../windows-json")).isEmpty());
+        QVERIFY(ph::pathFor(QStringLiteral("spaces in it")).isEmpty());
+    }
+
+    // The saved layout is the list of panes that can still come back; a history file whose pane
+    // is not in it goes, exactly as the scrollback store is pruned.
+    void pruneKeepsThePanesThatCanComeBack() {
+        const QString dir = m_dir.filePath(QStringLiteral("prompt-history"));
+        const QString kept = dir + QStringLiteral("/pane-aaaa0000.txt");
+        const QString gone = dir + QStringLiteral("/pane-bbbb1111.txt");
+        QVERIFY(ph::append(kept, QStringLiteral("git status")));
+        QVERIFY(ph::append(gone, QStringLiteral("rm -rf /")));
+        QCOMPARE(ph::prune(dir, QStringList{QStringLiteral("pane-aaaa0000")}), 1);
+        QVERIFY(QFile::exists(kept));
+        QVERIFY(!QFile::exists(gone));
+        QCOMPARE(ph::prune(dir, QStringList{QStringLiteral("pane-aaaa0000")}), 0);   // idempotent
     }
 
     void aMissingOrUnusablePathIsNotACrash() {

@@ -804,6 +804,12 @@ def _meant_as_command(segment: str, known: set[str], commands: Commands, cwd: st
             return False                        # "not sure", "the other one", "am i out of credits"
         if words[1].strip(SENTENCE_TAIL).lower() in SENTENCE_LEAD:
             return False
+        if any(w[-1] in ",:;.?!…" and w[:-1].isalpha() for w in words[:-1]):
+            # Sentence punctuation stuck to a word before the last ("new card: the …", "…
+            # relay.md was wrong. it …") is a sentence break, whatever the rest looks like —
+            # a named file further on (card #N3WC) does not make the line a command. The last
+            # word's own mark is judged below, so "gti stauts." keeps its note.
+            return False
         if len(words) > 3 and not files:
             return False
         if words[-1][-1] in ",:?!…" and words[-1][:-1].isalpha():

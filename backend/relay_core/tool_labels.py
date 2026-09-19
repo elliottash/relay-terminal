@@ -417,6 +417,13 @@ def _base(name, args: dict, existed) -> dict:
     if name == "agent_wait":
         who = _short(args.get("id"), 24) or "the background subagents"
         return _row("agent", f"waiting for {who}", f"waited for {who}", f"wait for {who}")
+    if name == "ask_user":
+        # The headers are what the card is about: "asking you about Scope, Naming" (#MQ9C).
+        items = args.get("questions") if isinstance(args.get("questions"), list) else []
+        headers = [_short(q.get("header"), 30) for q in items if isinstance(q, dict) and q.get("header")]
+        about = ", ".join(h for h in headers if h)[:60]
+        subject = f" about {about}" if about else ""
+        return _row("input", f"asking you{subject}", f"asked you{subject}", f"ask you{subject}")
     if name == "type_into_program":
         typed = _typed(args)
         return _row("input", f"typing {typed}", f"typed {typed}", "type into the program")
@@ -694,6 +701,18 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
             else result.get("result")
         if isinstance(report, str) and report.strip():
             sections.append(_section("report", "text", report, cap=DETAIL_TEXT_CAP))
+    elif name == "ask_user":
+        items = args.get("questions") if isinstance(args.get("questions"), list) else []
+        answers = result.get("answers") if isinstance(result.get("answers"), list) else []
+        lines = []
+        for index, question in enumerate(items):
+            if not isinstance(question, dict):
+                continue
+            lines.append(str(question.get("question") or ""))
+            given = answers[index] if index < len(answers) else None
+            lines.append("→ " + str((given or {}).get("answer") or "Unanswered"))
+        sections.append(_section("questions", "text", "\n".join(lines), cap=DETAIL_TEXT_CAP,
+                                 keep_empty=True))
     elif name == "type_into_program":
         if isinstance(args.get("intent"), str):
             sections.append(_section("intent", "text", args["intent"]))

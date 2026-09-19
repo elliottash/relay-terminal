@@ -202,12 +202,64 @@ class ApplyTest(ImportCase):
         for item in card.tasks():
             self.assertIsNotNone(item.item_id)
 
+    def test_a_subtask_dependency_becomes_a_blocked_by_marker_on_the_item(self):
+        # The gap `docs/PROJECT-INIT-AND-IMPORT.md` §9 listed until 2026-09-18: Task Master
+        # numbers dependencies between subtasks, and a `## Tasks` item can carry them.
+        self.apply()
+        card = self.by_key()["taskmaster:.taskmaster/tasks/tasks.json#master/2"]
+        items = card.tasks()
+        self.assertEqual([i.blocked_by for i in items],
+                         [[], [items[0].item_id], [items[1].item_id]])
+        self.assert_check_clean()
+        self.assert_sources_untouched()
+
+    def test_a_qualified_subtask_dependency_names_the_sibling_it_meant(self):
+        # `"2.2"` inside task 2 is that task's own second subtask, not a card.
+        self.apply()
+        card = self.by_key()["taskmaster:.taskmaster/tasks/tasks.json#master/2"]
+        third = card.tasks()[2]
+        self.assertEqual(third.text, "Expire old sessions")
+        self.assertEqual(third.blocked_by, [card.tasks()[1].item_id])
+
+    def test_a_proposal_carries_item_dependencies_as_positions(self):
+        by_key = {p.source_key: p for p in self.propose(["taskmaster"])}
+        tasks = by_key["taskmaster:.taskmaster/tasks/tasks.json#master/2"].tasks
+        self.assertEqual([t.get("blocked_by") for t in tasks], [None, [1], [2]])
+
     def test_a_dependency_becomes_blocked_by_naming_a_card_that_exists(self):
         self.apply()
         cards = self.by_key()
         blocked = cards["taskmaster:.taskmaster/tasks/tasks.json#master/2"]
         blocker = cards["taskmaster:.taskmaster/tasks/tasks.json#master/1"]
         self.assertEqual(blocked.front["blocked_by"], [blocker.id])
+
+    def test_a_subtask_that_depends_on_another_task_is_blocked_by_that_card(self):
+        (self.project / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps({"tasks": [
+            {"id": 1, "title": "The blocker task", "status": "pending"},
+            {"id": 2, "title": "The blocked task", "status": "pending", "subtasks": [
+                {"id": 1, "title": "Waits for the other card", "dependencies": ["1.1"]}]}]}),
+            encoding="utf-8")
+        self.before = self.snapshot()
+        self.apply(self.propose(["taskmaster"]))
+        cards = self.by_key()
+        blocker = cards["taskmaster:.taskmaster/tasks/tasks.json#master/1"]
+        blocked = cards["taskmaster:.taskmaster/tasks/tasks.json#master/2"]
+        self.assertEqual(blocked.tasks()[0].blocked_by, [f"#{blocker.id}"])
+        self.assert_check_clean()
+
+    def test_an_item_dependency_on_a_card_outside_the_run_is_dropped(self):
+        (self.project / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps({"tasks": [
+            {"id": 1, "title": "The blocker task", "status": "pending"},
+            {"id": 2, "title": "The blocked task", "status": "pending", "subtasks": [
+                {"id": 1, "title": "Waits for the other card", "dependencies": ["1.1"]}]}]}),
+            encoding="utf-8")
+        self.before = self.snapshot()
+        blocked_only = [p for p in self.propose(["taskmaster"])
+                        if p.source_key.endswith("#master/2")]
+        self.apply(blocked_only)
+        card = self.by_key()["taskmaster:.taskmaster/tasks/tasks.json#master/2"]
+        self.assertEqual(card.tasks()[0].blocked_by, [])
+        self.assert_check_clean()
 
     def test_a_beads_parent_child_edge_becomes_the_parent_field(self):
         self.apply()

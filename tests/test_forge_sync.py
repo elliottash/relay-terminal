@@ -521,6 +521,170 @@ class CommentTests(SyncCase):
         self.assertEqual(sum(1 for t in texts if t.strip() == "ours"), 1)
 
 
+# ------------------------------------------------------- the owner's decisions (2026-09-18)
+
+class ConfigTests(SyncCase):
+    """What lives in the committed `board.yaml` and what is per user (`board_config`)."""
+
+    def write_config(self, extra: str):
+        (self.root / B.BOARD_CONFIG).write_text(CONFIG + extra, encoding="utf-8")
+
+    def test_the_committed_block_carries_the_repository_and_the_caps(self):
+        self.write_config("github: {repo: relay/terminal, base_url: 'https://ghe.example.com', "
+                          "create_cap: 5, default_tab: bugs}\n")
+        config = F.board_config(self.board)
+        self.assertEqual(config["repo"], "relay/terminal")
+        self.assertEqual(config["base_url"], "https://ghe.example.com")
+        self.assertEqual(config["create_cap"], 5)
+        self.assertEqual(config["default_tab"], "bugs")
+
+    def test_a_board_with_no_github_block_has_defaults_and_no_repository(self):
+        config = F.board_config(self.board)
+        self.assertEqual(config["repo"], "")
+        self.assertEqual(config["create_cap"], F.DEFAULT_CREATE_CAP)
+        self.assertEqual(config["login_map"], {})
+        self.assertEqual(config["comment_kinds"], list(F.DEFAULT_COMMENT_KINDS))
+
+    def test_the_login_map_is_per_user_and_read_from_the_private_root(self):
+        self.write_config("github: {repo: relay/terminal}\n")
+        (self.root / ".private").mkdir(exist_ok=True)
+        (self.root / F.LOGINS_FILES[0]).write_text("Elliott: elliott-ash\nAna: anab\n",
+                                                   encoding="utf-8")
+        self.assertEqual(F.board_config(self.board)["login_map"],
+                         {"Elliott": "elliott-ash", "Ana": "anab"})
+
+    def test_the_login_map_may_be_json_or_nested_under_logins(self):
+        (self.root / ".private").mkdir(exist_ok=True)
+        (self.root / F.LOGINS_FILES[2]).write_text(
+            json.dumps({"logins": {"Elliott": "elliott-ash"}}), encoding="utf-8")
+        self.assertEqual(F.read_logins(self.board), {"Elliott": "elliott-ash"})
+
+    def test_a_login_map_committed_to_board_yaml_is_not_read(self):
+        # The decision: logins are somebody's account names, not a property of the project.
+        self.write_config("github: {repo: relay/terminal, login_map: {Elliott: elliott-ash}}\n")
+        self.assertEqual(F.board_config(self.board)["login_map"], {})
+
+    def test_an_unreadable_login_file_is_no_map_rather_than_a_failed_sync(self):
+        (self.root / ".private").mkdir(exist_ok=True)
+        (self.root / F.LOGINS_FILES[2]).write_text("{ not json", encoding="utf-8")
+        self.assertEqual(F.read_logins(self.board), {})
+
+    def test_the_login_file_leaves_relay_board_check_clean(self):
+        (self.root / ".private").mkdir(exist_ok=True)
+        (self.root / F.LOGINS_FILES[0]).write_text("Elliott: elliott-ash\n", encoding="utf-8")
+        self.card()
+        self.assertCheckClean()
+
+    def test_comment_kinds_can_be_widened_and_an_unknown_kind_is_refused(self):
+        self.write_config("github: {repo: relay/terminal, comment_kinds: [comment, progress]}\n")
+        self.assertEqual(F.board_config(self.board)["comment_kinds"], ["comment", "progress"])
+        self.write_config("github: {repo: relay/terminal, comment_kinds: [gossip]}\n")
+        with self.assertRaises(F.ForgeError) as bad:
+            F.board_config(self.board)
+        self.assertIn("gossip", str(bad.exception))
+
+
+class CommentKindTests(SyncCase):
+    """Which thread kinds are public (owner, 2026-09-18): the said-out-loud ones only."""
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.card().id
+        self.sync()
+
+    def add(self, kind, text="text"):
+        return self.board.append_thread(self.card_id, text, author="agent", kind=kind)
+
+    def test_progress_and_evidence_stay_local_by_default(self):
+        for kind in ("progress", "evidence"):
+            self.add(kind, f"a {kind} entry")
+        result = self.sync()
+        self.assertEqual(result.comments_out, 0)
+        self.assertEqual(self.gh.comments_of(1), [])
+
+    def test_the_four_said_out_loud_kinds_are_pushed(self):
+        for kind in ("comment", "question", "decision", "note"):
+            self.add(kind, f"a {kind} entry")
+        result = self.sync()
+        self.assertEqual(result.comments_out, 4)
+
+    def test_board_yaml_can_widen_what_goes_out(self):
+        self.add("progress", "ran the suite")
+        engine = self.engine(comment_kinds=["comment", "progress"])
+        result = engine.run(confirm_bulk=True)
+        self.assertEqual(result.comments_out, 1)
+        self.assertIn("ran the suite", self.gh.comments_of(1)[0]["body"])
+
+
+class OneRepositoryTests(SyncCase):
+    """One board, one repository: pointing a synced board elsewhere is refused (decision d)."""
+
+    def test_a_board_already_synced_refuses_a_different_repository(self):
+        self.card()
+        self.sync()
+        self.gh.add_repo("other/repo")
+        with self.assertRaises(F.ForgeError) as refused:
+            self.engine(self.provider(repo="other/repo"))
+        message = str(refused.exception)
+        self.assertIn("relay/terminal", message)
+        self.assertIn("other/repo", message)
+        self.assertIn("One board", message)
+
+    def test_nothing_is_written_to_either_side_by_the_refusal(self):
+        card_id = self.card().id
+        self.sync()
+        link = self.reload(card_id).front["links"]["github"]
+        self.gh.add_repo("other/repo")
+        writes = len(self.gh.writes)
+        with self.assertRaises(F.ForgeError):
+            self.engine(self.provider(repo="other/repo"))
+        self.assertEqual(len(self.gh.writes), writes)
+        self.assertEqual(self.reload(card_id).front["links"]["github"], link)
+
+    def test_a_link_left_on_a_card_refuses_even_when_the_state_file_is_gone(self):
+        self.card()
+        self.sync()
+        (self.root / F.STATE_FILE).unlink()
+        self.gh.add_repo("other/repo")
+        with self.assertRaises(F.ForgeError) as refused:
+            self.engine(self.provider(repo="other/repo"))
+        self.assertIn("relay/terminal", str(refused.exception))
+        self.assertIn("1 card(s) linked", str(refused.exception))
+
+    def test_the_same_repository_is_of_course_fine(self):
+        self.card()
+        self.sync()
+        self.assertEqual(self.sync().errors, [])
+
+
+class ImportedIssueTests(SyncCase):
+    """Issues filed on GitHub do become cards (decision c), in the tab their label names."""
+
+    def test_the_tab_label_picks_the_folder(self):
+        self.gh.make_issue("Crash on startup", labels=["tab:bugs"])
+        self.sync()
+        card = next(c for c in self.board.cards() if c.title == "Crash on startup")
+        self.assertEqual(F.tab_of(self.board, card), "bugs")
+        self.assertEqual(card.status, F.IMPORT_STATUS)
+
+    def test_default_tab_is_used_when_the_issue_names_none(self):
+        self.gh.make_issue("No label at all")
+        self.sync(default_tab="bugs")
+        card = next(c for c in self.board.cards() if c.title == "No label at all")
+        self.assertEqual(F.tab_of(self.board, card), "bugs")
+
+    def test_the_first_tab_is_used_when_there_is_no_default(self):
+        self.gh.make_issue("No label at all")
+        self.sync()
+        card = next(c for c in self.board.cards() if c.title == "No label at all")
+        self.assertEqual(F.tab_of(self.board, card), "features")
+
+    def test_an_imported_card_is_a_normal_card_check_accepts(self):
+        self.gh.make_issue("Crash on startup", labels=["tab:bugs"])
+        self.sync()
+        self.assertCheckClean()
+
+
 # ---------------------------------------------------------------------- privacy
 
 class PrivacyTests(SyncCase):

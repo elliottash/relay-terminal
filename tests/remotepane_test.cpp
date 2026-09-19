@@ -87,6 +87,8 @@ QJsonObject paneState(qint64 seq, bool busy)
                                                          QJsonObject{{"id", "m2"}, {"label", "fake · local"}, {"current", true}}}}}},
             {"composer", QJsonObject{{"mode", "auto"}, {"placeholder", "Ask or run…"}, {"modes", QJsonArray{"auto", "shell", "agent"}}}},
             {"context", QJsonObject{{"label", "12% left"}, {"percent_left", 12}}},
+            {"allowance", QJsonObject{{"label", "Free · 9% left"}, {"percent_left", 9}, {"warn", true},
+                                      {"detail", "227,500 of 250,000 tokens today · resets at 02:00"}}},
             {"sessions", QJsonObject{{"can_new", true}, {"can_open", true},
                                      {"rows", QJsonArray{QJsonObject{{"id", "s1"}, {"title", "this one"}, {"when", "14:02"}, {"current", true}},
                                                          QJsonObject{{"id", "s2"}, {"title", "an older one"}, {"when", "13:00"}, {"current", false}}}}}}};
@@ -346,6 +348,35 @@ private slots:
         other.insert(QStringLiteral("pane"), QStringLiteral("p2"));
         pane.handle(other);
         QCOMPARE(rows->count(), 0);
+    }
+
+    void theAllowanceLabelShowsAndHides()
+    {
+        Sent sent;
+        RemotePane pane(QStringLiteral("p1"), QStringLiteral("shell"), QStringLiteral("desk"), sent.sink());
+        pane.setCapability(QStringLiteral("full"), {});
+        pane.handle(paneState(4, false));
+        auto *allowance = pane.findChild<QLabel *>(QStringLiteral("remoteAllowance"));
+        QVERIFY(allowance);
+        // The desktop's words, whole: the chip's label, its detail as the tooltip, and the warn
+        // colour at the percentage the desktop said.
+        QVERIFY(allowance->isVisibleTo(&pane));
+        QCOMPARE(allowance->text(), QStringLiteral("Free · 9% left"));
+        QCOMPARE(allowance->toolTip(), QStringLiteral("227,500 of 250,000 tokens today · resets at 02:00"));
+        QVERIFY(!allowance->styleSheet().isEmpty());
+        // A newer state with no allowance — the pane moved to a provider with a key — hides it.
+        QJsonObject without = paneState(5, false);
+        without.remove(QStringLiteral("allowance"));
+        pane.handle(without);
+        QVERIFY(!allowance->isVisibleTo(&pane));
+        // And one with warn false drops the colour while the label stays.
+        QJsonObject calm = paneState(6, false);
+        calm.insert(QStringLiteral("allowance"), QJsonObject{{"label", "Free · 73% left"}, {"percent_left", 73},
+                                                              {"warn", false}, {"detail", "182,400 of 250,000 tokens today"}});
+        pane.handle(calm);
+        QVERIFY(allowance->isVisibleTo(&pane));
+        QCOMPARE(allowance->text(), QStringLiteral("Free · 73% left"));
+        QVERIFY(allowance->styleSheet().isEmpty());
     }
 
     void modelAndConversations()

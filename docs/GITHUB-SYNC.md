@@ -45,9 +45,9 @@ a *private* plan is not even linked.
 | tab (the card's category folder) | label `tab:<tab id>` |
 | status | label `status:<status>`; `done` closes as **completed**, `dropped` closes as **not planned** |
 | `labels` | the issue's other labels |
-| `assignee` | issue assignee, when the person maps to a login (`login_map`) |
+| `assignee` | issue assignee, when the person maps to a login (`.private/forge-logins.yaml`, §8.1) |
 | card id `#K7Q2` | `<!-- relay-id: K7Q2 -->` in the issue body, and `links.github: owner/repo#123` on the card |
-| thread entries (`comment`, `question`, `decision`, `evidence`, `progress`, `note`) | issue comments |
+| thread entries — `comment`, `question`, `decision`, `note` by default (§8.1) | issue comments |
 | thread `event` entries | nothing — the issue already shows state changes as labels |
 | linked plan cards | a line of bare ids in the footer; plans themselves do not sync |
 
@@ -185,23 +185,64 @@ holds that line, including the case where the forge echoes the token back in an 
   conditional ones.
 - **Resumable.** State per card, written atomically; comments recorded one at a time.
 
-## 8. Protocol (proposed; not yet wired)
+## 8. Protocol (wired 2026-09-18; `AGENT-SESSIONS-PROTOCOL.md` §19.14)
 
 Two messages, on the worker that already owns the board (`board_protocol.BoardCommands`), so the
-Switchboard pane can show the plan and then run it.
+Switchboard pane can show the plan and then run it. Both need a board that exists (an
+uninitialized one answers the "create one first" error), and both take the Switchboard worker's
+busy guard: a sync while an ask or a cleanup is running answers `error {code: "board_busy"}`, and
+a second sync while one is running answers `error {code: "forge_busy"}`.
 
 | Request | Reply |
 |---|---|
 | `forge_sync_plan {id, dry_run: true, repo?, base_url?}` | `forge_sync_planned {id, root, repo, cards, creates, pushed, pulled, conflicts, needs_confirm, cap}` |
 | `forge_sync_run {id, confirm_bulk?, repo?, base_url?}` | `forge_sync_progress {id, root, card, action, done, total}` … then `forge_sync_done {id, root, repo, pushed, pulled, imported, comments_out, comments_in, conflicts, errors, retry_at?, retry_at_text?}` |
 
-Both run on a thread, like `hosted_quota`, so the worker loop never waits on the network; a failure
-answers `error {id, text, code}` and never a traceback. The `repo` and `base_url` come from
-`board.yaml` (`github: {repo, base_url, login_map, create_cap, default_tab}`) when they are not
-given. `forge_sync_progress` is the engine's `on_progress` callback — `{card, title, action,
-number, done, total}` after every card a *run* applies; `plan()` never calls it. After
-`forge_sync_done` the handler emits the usual `board_changed`, since a sync writes card files
-outside `BoardTools`.
+Both run on a thread, like `hosted_quota`, so the worker loop never waits on the network; **exactly
+one** terminal event follows either way, and a failure answers `error {id, root, code, text}` —
+never a traceback, and never a credential. The `repo` and `base_url` come from `board.yaml`'s
+`github:` block when they are not given (§8.1). `forge_sync_progress` is the engine's
+`on_progress` callback — `{card, title, action, number, done, total}` after every card a *run*
+applies; `plan()` never calls it. After `forge_sync_done` the handler emits the usual
+`board_changed`, since a sync writes card files outside `BoardTools`. All three events are
+desktop-only in `remote/wire.py`: they carry local card paths and the desktop's own repository
+configuration, and a phone watching the pane sees the result in `board_changed`.
+
+### 8.1 What is configured, and where (owner, 2026-09-18)
+
+```yaml
+# <board>/board.yaml — committed, the project's own
+github: {repo: owner/name, base_url: 'https://ghe.example.com',
+         create_cap: 20, default_tab: features,
+         comment_kinds: [comment, question, decision, note]}
+```
+
+```yaml
+# <board>/.private/forge-logins.yaml — per user, gitignored, optional (or forge-logins.json)
+Elliott: elliott-ash
+Ana: anab
+```
+
+* **The repository and the caps are the project's**, so everyone who clones it syncs the same
+  board with the same repository and the same bulk ceiling.
+* **The login map is not.** Two people syncing one board do not agree about who `Elliott` is on
+  their forge, and a login is somebody's account name rather than a property of the project, so it
+  lives beside the state file in the gitignored private root and `board.yaml`'s `login_map:` is
+  **not read**. Without a map, `assignee` is simply not synced — a field the engine leaves alone
+  on both sides, which is what it already does for a name it cannot resolve. Either spelling of
+  the file is read, `.yaml` first, as a bare map or under a `logins:` key; an unreadable one is no
+  map rather than a failed sync. Neither file is a card, so `relay-board.py check` stays clean.
+* **`comment_kinds` is which thread kinds become public comments**, and the default is
+  `comment, question, decision, note`: what somebody *said* about the work. `progress` and
+  `evidence` — run logs, screenshot paths, QA folders — are Relay's working record and would be
+  noise on a public tracker, so they stay local unless the block asks for them. `event` entries
+  never go out at all (§2). An unknown kind in the list is refused before anything is sent.
+* **One board, one repository** (§3), and a board whose cards are already linked to one is
+  **refused** when it is pointed at another: `ForgeSync()` raises before any request is made,
+  naming both repositories and how many cards are linked. Moving a board deliberately means
+  clearing `links.github` on those cards and deleting the state file first. The refusal reads the
+  links as well as the state, so losing the state file does not turn a re-point into a second set
+  of issues.
 
 ## 9. Another forge
 

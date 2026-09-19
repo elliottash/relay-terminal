@@ -44,6 +44,22 @@ class CleanTests(unittest.TestCase):
                     {**state(), "pane": "../etc/passwd"}, {**state(), "pane": 7}):
             self.assertIsNone(pane_state.clean(bad), bad if not isinstance(bad, dict) else bad.get("pane"))
 
+    def test_the_allowance_is_the_desktops_words_or_absent(self):
+        """Relay Free's chip: cleaned like the context, warn read off the percentage, and dropped
+        whole when the desktop sent no label (the pane is not on the hosted preset)."""
+        message = state()
+        message["allowance"] = {"label": "Free · 73% left", "percent_left": 73, "warn": True,
+                                "detail": "182,400 of 250,000 tokens today · resets at 02:00",
+                                "preset": "relay-free", "base_url": "https://api.relay-terminal.ai"}
+        cleaned = pane_state.clean(message)
+        self.assertEqual(cleaned["allowance"], {"label": "Free · 73% left", "percent_left": 73,
+                                                "warn": False,
+                                                "detail": "182,400 of 250,000 tokens today · resets at 02:00"})
+        for bad in ({}, {"label": ""}, {"label": "   ", "percent_left": 5}, "Free", 7):
+            message = state()
+            message["allowance"] = bad
+            self.assertNotIn("allowance", pane_state.clean(message), bad)
+
     def test_unknown_fields_are_dropped_at_every_level(self):
         message = state()
         message["api_key"] = "sk-live-0123456789abcdefghij"

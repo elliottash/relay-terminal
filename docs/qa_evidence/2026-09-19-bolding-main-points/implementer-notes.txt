@@ -1,0 +1,26 @@
+
+== dark (theme relay-dark)
+image implementer-dark.png (1440x900)
+  done          5 exact pixels (209 within 24), rows 207..207, 1 row band(s) [(207, 207)], columns 54..58
+           #d8aaf5: 5 pixels
+           plain foreground on these rows: columns 99..300
+  need         10 exact pixels (441 within 24), rows 283..283, 1 row band(s) [(283, 283)], columns 36..49
+           #81c4ff: 10 pixels
+  problem      10 exact pixels (132 within 24), rows 239..245, 2 row band(s) [(239, 240), (245, 245)], columns 27..76
+           #ff8c8f: 10 pixels
+           plain foreground on these rows: columns 111..396
+  plain       172 exact pixels (1017 within 24), rows 88..287, 7 row band(s) [(88, 97), (106, 116), (147, 150), (201, 211), (239, 249), (280, 280), (287, 287)], columns 27..606
+           #d8dce3: 172 pixels
+
+== palette (theme qa-bold)
+image implementer-palette.png (1440x900)
+  done          5 exact pixels (52 within 24), rows 207..207, 1 row band(s) [(207, 207)], columns 54..58
+           #ff80ff: 5 pixels
+           plain foreground on these rows: columns 99..300
+  need         10 exact pixels (150 within 24), rows 283..283, 1 row band(s) [(283, 283)], columns 36..49
+           #8080ff: 10 pixels
+  problem      10 exact pixels (97 within 24), rows 239..245, 2 row band(s) [(239, 240), (245, 245)], columns 27..76
+           #ff8080: 10 pixels
+           plain foreground on these rows: columns 111..396
+  plain       172 exact pixels (1017 within 24), rows 88..287, 7 row band(s) [(88, 97), (106, 116), (147, 150), (201, 211), (239, 249), (280, 280), (287, 287)], columns 27..606
+           #d8dce3: 172 pixels

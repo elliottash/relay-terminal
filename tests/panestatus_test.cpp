@@ -26,6 +26,7 @@ Tokens tokensOf(const relay::theme::ThemeSpec &spec) {
     t.warning = spec.uiColor(QStringLiteral("warning"));
     t.error = spec.uiColor(QStringLiteral("error"));
     t.action = spec.uiColor(QStringLiteral("action"));
+    t.tool = spec.uiColor(QStringLiteral("tool"));
     return t;
 }
 
@@ -71,6 +72,110 @@ private Q_SLOTS:
         QCOMPARE(mostUrgent({State::Idle, State::NeedsYou, State::Failed}), State::NeedsYou);
         QCOMPARE(mostUrgent({}), State::Idle);
         QCOMPARE(stateName(State::NeedsYou), QStringLiteral("needs-you"));
+    }
+
+    // The busy word is the product's own: "Relaying…", not "working" (owner, 2026-09-18, intake
+    // "add \"relaying...\" when working rather than \"working\" or \"warping\""). The stable id
+    // stays "working" — it is a property name, not a label.
+    void theBusyStateSaysRelaying() {
+        QCOMPARE(stateName(State::Working), QStringLiteral("working"));
+        QCOMPARE(stateLabel(State::Working), QStringLiteral("Relaying…"));
+    }
+
+    // Card #V8KT: "its not clear enough if a pane agent or program is running". The live states
+    // are the ones whose marks move; the news states pull the eye by being news and stay still.
+    // Owner, 2026-09-19: "the icons / anims should use blue for terminal work happening and violet
+    // for agent work happening" — which is what stateInk already said, and now carries motion.
+    void liveStatesAndTheirMarks() {
+        QVERIFY(!isLive(State::Idle));
+        QVERIFY(isLive(State::Running));
+        QVERIFY(isLive(State::Subagents));
+        QVERIFY(isLive(State::Working));
+        QVERIFY(!isLive(State::Recommends));
+        QVERIFY(!isLive(State::Done));
+        QVERIFY(!isLive(State::Failed));
+        QVERIFY(!isLive(State::NeedsYou));
+        // The tab's mark: agent work (a turn or subagents) is violet, only commands are blue,
+        // nothing live is nothing at all. Agent work wins the tie, as in the urgency order.
+        QCOMPARE(liveMarker({}), State::Idle);
+        QCOMPARE(liveMarker({State::Idle, State::Done}), State::Idle);
+        QCOMPARE(liveMarker({State::Idle, State::Running}), State::Running);
+        QCOMPARE(liveMarker({State::Running, State::Subagents}), State::Working);
+        QCOMPARE(liveMarker({State::Working, State::Running}), State::Working);
+        const Tokens t = tokensOf(relay::theme::builtinDark());
+        QCOMPARE(stateInk(State::Running, t), t.shell);      // blue: terminal work
+        QCOMPARE(stateInk(State::Working, t), t.agent);      // violet: agent work
+        QCOMPARE(stateInk(State::Subagents, t), t.agent);
+        // The blink (#4E13): full size and a dimmed step alternating over four steps, wrapping.
+        // The dimmed step is a scale down — never an opacity, so the ink keeps its contrast — and
+        // it stays well inside sight; "no animation" is the mark at rest, not a smaller one.
+        QCOMPARE(pulseScale(-1), 1.0);
+        QCOMPARE(pulseScale(0), 1.0);
+        QVERIFY2(pulseScale(1) < 0.7, "the dimmed step must read as dimmed");
+        QVERIFY2(pulseScale(1) >= 0.5, "but never shrink out of sight");
+        QCOMPARE(pulseScale(2), pulseScale(0));
+        QCOMPARE(pulseScale(3), pulseScale(1));
+        QCOMPARE(pulseScale(4), pulseScale(0));
+    }
+
+    // The live state's word is text, so its ink is lifted to 4.5:1 on whatever ground the header
+    // is on — the pane's own background, or the ssh band a running command can sit above.
+    void theStateWordIsLegibleOnEveryGround() {
+        for (const auto &spec : shippedThemes()) {
+            const Tokens t = tokensOf(spec);
+            const QByteArray id = spec.id.toUtf8();
+            QVERIFY2(contrast(stateText(State::Running, t.background, t), t.background) >= 4.5, id.constData());
+            QVERIFY2(contrast(stateText(State::Working, t.background, t), t.background) >= 4.5, id.constData());
+            QVERIFY2(contrast(stateText(State::Subagents, t.background, t), t.background) >= 4.5, id.constData());
+            const QColor band = remoteStyle(t).fill;
+            QVERIFY2(contrast(stateText(State::Running, band, t), band) >= 4.5, id.constData());
+        }
+    }
+
+    // Card #YMSR: the subagent badge in the pane header. "If applicable" is its first rule, so the
+    // count decides whether there is a badge at all; then what it says on hover, and that its
+    // number stays readable on both grounds it can land on — the pane's own header and the ssh
+    // band's fill (the badge sits in the title row, which a remote session repaints).
+    void theSubagentBadgeCountsOnlyLiveAgents() {
+        QVERIFY(subagentBadgeText(0).isEmpty());     // no subagents: no badge, not a "0"
+        QVERIFY(subagentBadgeText(-1).isEmpty());    // and nothing to say about a nonsense count
+        QCOMPARE(subagentBadgeText(1), QStringLiteral("1"));
+        QCOMPARE(subagentBadgeText(12), QStringLiteral("12"));
+        QVERIFY(subagentBadgeTooltip(0, QStringLiteral("Alt+A")).isEmpty());
+        // The count in words, and the key that opens the pane showing those agents.
+        QCOMPARE(subagentBadgeTooltip(1, QStringLiteral("Alt+A")),
+                 QStringLiteral("1 subagent running in this pane · Alt+A opens the subagents pane"));
+        QCOMPARE(subagentBadgeTooltip(3, QStringLiteral("Alt+A")),
+                 QStringLiteral("3 subagents running in this pane · Alt+A opens the subagents pane"));
+        // An unbound key is not a promise of one (the caller passes the live Keymap text).
+        QCOMPARE(subagentBadgeTooltip(2, QString()), QStringLiteral("2 subagents running in this pane"));
+    }
+
+    void theSubagentBadgeIsLegibleOnEveryGround() {
+        const auto themes = shippedThemes();
+        QVERIFY(themes.size() >= 5);
+        for (const auto &spec : themes) {
+            const Tokens t = tokensOf(spec);
+            const QByteArray id = spec.id.toUtf8();
+            for (const QColor &ground : {t.background, remoteStyle(t).fill}) {
+                const BadgeStyle style = subagentBadgeStyle(ground, t);
+                // The number is text, so its ink clears 4.5:1 on the chip's own fill; the star
+                // beside it is a glyph and gets more than the 3:1 it needs from the same ink.
+                QVERIFY2(contrast(style.ink, style.fill) >= 4.5, id.constData());
+                // The chip is a chip: it has a visible edge, and it is not a block of colour.
+                QVERIFY2(contrast(style.line, ground) >= 1.5, id.constData());
+                QVERIFY2(style.line != style.fill, id.constData());
+                QVERIFY2(contrast(style.fill, ground) >= 1.12, id.constData());
+                QVERIFY2(contrast(style.fill, ground) < 2.6, id.constData());
+            }
+            // The violet is the agent's own token, not a colour of its own: a theme that moves
+            // `agent` moves the badge with it (and a theme that set agent == shell still gets a
+            // legible badge, which is what the assertions above are for).
+            Tokens other = t;
+            other.agent = t.shell;
+            QVERIFY2(subagentBadgeStyle(t.background, t).fill != subagentBadgeStyle(t.background, other).fill
+                         || t.agent == t.shell, id.constData());
+        }
     }
 
     // Cards #V7QD and #KP4M: "waiting for 2 subagents, 1 job . . ." in the prompt box. The rule,
@@ -159,6 +264,17 @@ private Q_SLOTS:
         QCOMPARE(resolve(f, 0), State::Recommends);
         f.handoffWaiting = true;                     // the agent's next turn waits on it
         QCOMPARE(resolve(f, 0), State::NeedsYou);
+    }
+
+    // An `ask_user` card is up and the turn is blocked on the answer (#MQ9C). "Working" would be
+    // a lie, and a tab whose pane is behind another would say nothing at all.
+    void anOpenQuestionOutranksTheTurnItBlocks() {
+        Facts f;
+        f.agentBusy = true;
+        QCOMPARE(resolve(f, 0), State::Working);
+        f.questionOpen = true;
+        QCOMPARE(resolve(f, 0), State::NeedsYou);
+        QCOMPARE(mostUrgent({State::Working, resolve(f, 0)}), State::NeedsYou);
     }
 
     void questions() {

@@ -1,0 +1,16 @@
+== relay.log: route events for pane 7455950c at 2026-09-19T01:59Z (21:59 EDT, current session) ==
+2026-09-19T01:59:51.652Z DEBUG relay.gui event type=route pane=7455950c reason=Reads like a request · sent to the agent
+2026-09-19T01:59:51.813Z DEBUG relay.gui event type=route pane=7455950c reason=Reads like a request · sent to the agent
+2026-09-19T01:59:52.143Z DEBUG relay.gui event type=route pane=7455950c reason=Not a runnable command (command not found: new) · sent to the agent
+2026-09-19T01:59:52.375Z DEBUG relay.gui event type=route pane=7455950c reason=Not a runnable command (command not found: new) · sent to the agent
+2026-09-19T01:59:52.535Z DEBUG relay.gui event type=route pane=7455950c reason=Type a shell command or an agent request.
+2026-09-19T02:01:23.063Z DEBUG relay.gui event type=route pane=7455950c reason=Reads like a request · sent to the agent
+2026-09-19T02:01:23.109Z DEBUG relay.gui event type=route pane=7455950c reason=Reads like a request · sent to the agent
+2026-09-19T02:01:23.256Z DEBUG relay.gui event type=route pane=7455950c reason=Type a shell command or an agent request.
+
+== worker.log: the turn that followed (prompt is 159 chars; the visible echo is ~53) ==
+2026-09-19T01:59:52.390Z INFO relay.agent pane=7455950c turn_start session=4e62ce12087147089586ffc7d1fb2721 turn=da613e73ce9d48e09c1969fd7cb8a991 model=glm-5.3 host=api.z.ai mode=build effort=high prompt_chars=159 messages=1 stall_s=60 max_steps=256
+2026-09-19T02:00:00.800Z INFO relay.agent pane=7455950c tool session=4e62ce12087147089586ffc7d1fb2721 turn=da613e73ce9d48e09c1969fd7cb8a991 call=call_e00e9214f287433abd0da44d tool=board_list ok=True ms=57
+
+== session file: the exact submitted text (159 chars, ends with two newlines) ==
+'new card: the introductory agent instructions file was still showing when i didnt have any. it shouldnt show any in that case. just init the default RELAY.MD\n\n'

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import email.utils
 import json
 import os
+import random
 import socket
 import threading
 import time
@@ -13,6 +15,18 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable
+
+from . import logs
+
+_log = logs.get("provider")
+
+
+def _host(base_url: str) -> str:
+    """Provider host for the log. The path, query and key never go near the log file."""
+    try:
+        return urllib.parse.urlsplit(base_url).hostname or ""
+    except ValueError:
+        return ""
 
 MAX_EVENT = 2 * 1024 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
@@ -709,27 +723,127 @@ class ChatProvider:
     _OVERFLOW = ("exceeds the available context size", "exceed_context_size", "context size",
                  "context length", "context window", "maximum context", "too many tokens")
 
+    # ----- transient provider refusals (429, 5xx) ------------------------------------------------
+    # What Claude Code's transport does (the Anthropic SDK compiled into it): a request refused
+    # with 408, 409, 429 or any 5xx is sent again, after the delay a Retry-After header names
+    # when there is one and otherwise after an exponential backoff that starts at 0.5 s, doubles
+    # and stops at 8 s, cut by up to 25 % jitter so panes that share a key do not march in step.
+    # The same policy sits here, in the one place every model call passes through, so a pane
+    # turn, a side call and the key test all inherit it.
+    #
+    # A retry is safe because the status arrives before any content is streamed: nothing the user
+    # has already seen can be repeated. Statuses that describe the request itself (401, 403, 404,
+    # every other 4xx) are raised at once, because sending the same bytes again cannot change
+    # that answer. A local model server is left out of the generic policy: its 5xx are
+    # deterministic (the prompt no longer fits), so a retry would only delay the sentence that
+    # explains it, and its 503-while-loading has the fixed wait of its own below.
+    HTTP_RETRY_STATUSES = frozenset({408, 409, 429})
+    HTTP_RETRY_ATTEMPTS = 6             # retries after the first refusal
+    HTTP_RETRY_BASE_S = 0.5
+    HTTP_RETRY_CEILING_S = 8.0
+    HTTP_RETRY_JITTER = 0.25            # each backoff waits 75-100 % of the computed delay
+    RETRY_AFTER_MAX_S = 60.0            # a Retry-After header is honoured up to a minute
+
     def _open(self, opener, request, emit, cancel: threading.Event, started: float):
-        """Open the response. A local server that answers 503 is still loading its weights
-        (llama-server says so on every route until they are in): wait inside the first-token
-        budget instead of failing a turn that would have worked ten seconds later."""
-        announced = False
+        """Open the response, asking again when the provider's answer is "not now".
+
+        Two refusals are worth another attempt, because nothing has streamed yet and the request
+        is unchanged: a local server still loading its weights (llama-server answers 503 on every
+        route until they are in), and a provider's transient refusal — 429, 408, 409, a 5xx —
+        waited out with the Retry-After the provider sent or the backoff above. Everything else
+        is raised at once.
+        """
+        loading_announced = False
+        retries = 0
         while True:
             try:
                 return opener.open(request, timeout=self.open_timeout)
             except urllib.error.HTTPError as exc:
                 waited = time.monotonic() - started
-                if not (self.config.local and exc.code == 503) or cancel.is_set() \
-                        or waited + self.LOADING_RETRY_S >= self.first_token_timeout:
+                if self.config.local and exc.code == 503:
+                    # The weights are still loading: wait inside the first-token budget instead
+                    # of failing a turn that would have worked ten seconds later.
+                    if cancel.is_set() or waited + self.LOADING_RETRY_S >= self.first_token_timeout:
+                        raise
+                    delay = self.LOADING_RETRY_S
+                    if not loading_announced:
+                        emit({"event": "status", "text": "The local server is loading its model…"})
+                        loading_announced = True
+                else:
+                    delay = None if cancel.is_set() else self._http_retry_wait(exc, retries + 1)
+                    if delay is not None:
+                        note = (f"Provider HTTP {exc.code} · asking again in {self._wait_text(delay)} s "
+                                f"(retry {retries + 1} of {self.HTTP_RETRY_ATTEMPTS})")
+                        emit({"event": "provider_retry", "reason": "http",
+                              "attempt": retries + 1, "max_attempts": self.HTTP_RETRY_ATTEMPTS,
+                              "text": note})
+                        emit({"event": "status", "text": note})
+                if delay is None:
                     raise
+                retries += 1
+                logs.event(_log, "provider_http_retry", level_name="error",
+                           model=self.config.model, host=_host(self.config.base_url),
+                           status=exc.code, attempt=retries, wait_s=round(delay, 2))
                 if getattr(exc, "fp", None) is not None:
                     hard_close(exc.fp)
-                if not announced:
-                    emit({"event": "status", "text": "The local server is loading its model…"})
-                    announced = True
                 self._note_progress()
-                if cancel.wait(self.LOADING_RETRY_S):
+                if cancel.wait(delay):
                     raise Cancelled("Stopped.") from None
+
+    def _http_retry_wait(self, exc: urllib.error.HTTPError, attempt: int) -> float | None:
+        """Seconds to wait before sending this request again, or None when the refusal is final.
+
+        ``attempt`` is the retry being considered, 1-based. A Retry-After header wins over the
+        backoff, because it is the provider naming its own window. ``HostedChatProvider`` reads
+        the refusal body before deciding (a spent allowance lifts at midnight, not in seconds).
+        """
+        if self.config.local:
+            # A local server's failures are deterministic (the loading 503 has its own wait in
+            # ``_open``); a generic retry would only delay the sentence that explains them.
+            return None
+        if attempt > self.HTTP_RETRY_ATTEMPTS:
+            return None
+        if exc.code not in self.HTTP_RETRY_STATUSES and exc.code < 500:
+            return None
+        hinted = self._retry_after_s(exc)
+        if hinted is not None:
+            return hinted
+        delay = min(self.HTTP_RETRY_BASE_S * 2 ** (attempt - 1), self.HTTP_RETRY_CEILING_S)
+        return delay * (1.0 - random.random() * self.HTTP_RETRY_JITTER)
+
+    def _retry_after_s(self, exc: urllib.error.HTTPError) -> float | None:
+        """The delay a ``retry-after-ms`` or ``Retry-After`` header asks for, clamped, or None.
+
+        Retry-After may carry seconds or an HTTP date; a date already in the past means "now".
+        The clamp keeps a misconfigured or hostile endpoint from parking a turn for an hour —
+        an endpoint that means longer than a minute says so in a body the failure text covers.
+        """
+        headers = getattr(exc, "headers", None)
+        if headers is None:
+            return None
+        raw = headers.get("retry-after-ms")
+        if raw is not None:
+            try:
+                return min(max(float(raw.strip()) / 1000.0, 0.0), self.RETRY_AFTER_MAX_S)
+            except ValueError:
+                pass
+        raw = headers.get("Retry-After")
+        if raw is None:
+            return None
+        raw = raw.strip()
+        try:
+            return min(max(float(raw), 0.0), self.RETRY_AFTER_MAX_S)
+        except ValueError:
+            parsed = email.utils.parsedate_tz(raw)
+            if parsed is None:
+                return None
+            return min(max(email.utils.mktime_tz(parsed) - time.time(), 0.0),
+                       self.RETRY_AFTER_MAX_S)
+
+    @staticmethod
+    def _wait_text(seconds: float) -> str:
+        """A wait as the status line shows it: ``8``, ``0.5``, ``0``."""
+        return f"{seconds:.1f}".rstrip("0").rstrip(".") or "0"
 
     def _http_error(self, exc) -> ProviderError:
         """The ProviderError for an HTTP failure. Only the status survives, plus the one phrase a
@@ -843,10 +957,11 @@ class ChatProvider:
             splitter = ThinkSplitter()
 
         def finish_thinking():
-            nonlocal thinking_closed
+            nonlocal thinking_closed, thinking_chars
             thinking_closed = True
             emit({"event": "thinking_done", "elapsed_ms": int((time.monotonic() - thinking_started) * 1000),
                   "chars": thinking_chars})
+            thinking_chars = 0
         while True:
             if cancel.is_set():
                 raise Cancelled("Stopped.")
@@ -912,6 +1027,11 @@ class ChatProvider:
                     reasoning_announced = True
                 if thinking_started is None:
                     thinking_started = started if started is not None else time.monotonic()
+                elif thinking_closed:
+                    # Reasoning resumed after the answer had begun (GLM interleave): a second block,
+                    # clocked from its own start, with its own thinking_done when it ends.
+                    thinking_closed = False
+                    thinking_started = time.monotonic()
                 thinking_chars += len(thinking)
                 emit({"event": "thinking_delta", "text": thinking})
             if thinking_started is not None and not thinking_closed and (
@@ -973,7 +1093,9 @@ class HostedChatProvider(ChatProvider):
     (and made, on first use) just before each call; a 401 is retried once after a forced refresh,
     because the gateway may have rotated it; the ``X-Relay-Quota-*`` reply headers become one
     ``hosted_quota`` event; and a refusal's JSON body, which is Relay's own, picks the wording and
-    the ``code`` the pane branches on. A provider's body is never shown; this one's ``message`` is,
+    the ``code`` the pane branches on — and decides the parent's transient-refusal retry: a rate
+    limit is waited out until its window reopens, a spent allowance is not waited out at all.
+    A provider's body is never shown; this one's ``message`` is,
     only for a code with no sentence of its own, and truncated (``hosted.describe_error``).
     """
 
@@ -989,6 +1111,7 @@ class HostedChatProvider(ChatProvider):
             config.validate()
         self._session = session
         self._quota_headers = None      # the headers of the response just opened, read after it closes
+        self._refusal = None            # (exception, body): an HTTPError's body is readable once
 
     @property
     def session(self):
@@ -1041,15 +1164,41 @@ class HostedChatProvider(ChatProvider):
         self._quota_headers = response.headers
         return response
 
+    def _refusal_body(self, exc) -> bytes:
+        """The refusal body, read once and kept: ``fp`` gives its bytes a single time, and both
+        the retry decision below and the failure text need them."""
+        from . import hosted
+        if self._refusal is not None and self._refusal[0] is exc:
+            return self._refusal[1]
+        body = b""
+        if getattr(exc, "fp", None) is not None:
+            try:
+                body = exc.read(hosted.MAX_BODY)
+            except (OSError, ValueError, AttributeError):
+                body = b""
+        self._refusal = (exc, body)
+        return body
+
+    def _http_retry_wait(self, exc, attempt: int) -> float | None:
+        """The gateway names its refusal in a body only it sends, and that decides the wait:
+        ``quota_exhausted`` lifts at midnight, not in seconds, so it is final here and the pane
+        gets its sentence at once; ``rate_limited`` carries the moment its window reopens
+        (``resets_at``), which is exactly how long to wait."""
+        from . import hosted
+        _, code, resets_at = hosted.describe_error(exc.code, self._refusal_body(exc))
+        if code == "quota_exhausted":
+            return None
+        wait = super()._http_retry_wait(exc, attempt)
+        if wait is not None and code == "rate_limited" and isinstance(resets_at, (int, float)) \
+                and not isinstance(resets_at, bool):
+            wait = min(max(resets_at - time.time(), 0.0), self.RETRY_AFTER_MAX_S)
+        return wait
+
     def _http_error(self, exc) -> ProviderError:
         from . import hosted
         # A refusal carries the quota headers too, and a 429 is exactly when the chip must update.
         self._quota_headers = getattr(exc, "headers", None)
-        try:
-            body = exc.read(hosted.MAX_BODY) if getattr(exc, "fp", None) is not None else b""
-        except (OSError, ValueError, AttributeError):
-            body = b""
-        text, code, resets_at = hosted.describe_error(exc.code, body)
+        text, code, resets_at = hosted.describe_error(exc.code, self._refusal_body(exc))
         return ProviderError(text, code, resets_at)
 
 

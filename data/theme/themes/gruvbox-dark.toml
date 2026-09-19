@@ -27,6 +27,11 @@ error = "#fc7f70"
 # Actions (owner, 2026-09-18). Upstream Gruvbox's own bright orange, so the port keeps its palette:
 # 4.59:1 at worst, dE 39.4 from the red and 35.5 from the yellow.
 action = "#fe8019"
+# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
+# you. Gruvbox's own dim yellow (palette 3) against its bright yellow (palette 11, the amber above):
+# the pair the palette already ships, doing the job it was designed for.
+tool = "#d79921"
 shell = "#8cab9f"
 agent = "#d791a4"
 

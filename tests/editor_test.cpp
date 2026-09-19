@@ -9,7 +9,9 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QTest>
+#include <QTextBlock>
 #include <QTextCursor>
+#include <QTextLayout>
 
 class EditorTests : public QObject {
     Q_OBJECT
@@ -100,6 +102,39 @@ private Q_SLOTS:
         QTest::keyClick(&editor, Qt::Key_Down);
         QCOMPARE(editor.toPlainText(), QStringLiteral("unfinished draft"));
     }
+    // Up browses history only from the box's top row (owner report, 2026-09-19: "the 'up' to
+    // scroll to history should only happen when you are at the top of the rich text prompt box").
+    // A prompt that word-wraps moves the caret up a row at a time; Up from any row but the first
+    // is a cursor move, and Down from any row but the last is its mirror.
+    void arrowsBrowseOnlyFromTheFirstAndLastRows() {
+        RichEditor editor; editor.resize(220, 150); editor.show(); editor.setFocus();
+        QTest::qWait(30);
+        editor.remember(QStringLiteral("git status"));
+        const QString wrapped = QStringLiteral("one two three four five six seven eight nine ten eleven");
+        editor.setPlainText(wrapped);
+        editor.moveCursor(QTextCursor::End);
+        editor.cursorRect();   // lay the block out before judging its rows
+        QCOMPARE(editor.textCursor().blockNumber(), 0);                   // one paragraph,
+        QVERIFY(editor.textCursor().block().layout()->lineCount() > 1);   // wrapped over rows
+        const auto rowOf = [&editor] {
+            const QTextCursor caret = editor.textCursor();
+            const QTextLine row = caret.block().layout()->lineForTextPosition(caret.positionInBlock());
+            return row.isValid() ? row.lineNumber() : 0;
+        };
+        QTest::keyClick(&editor, Qt::Key_Up);   // row above: a cursor move, not a browse
+        QCOMPARE(editor.toPlainText(), wrapped);
+        QVERIFY(editor.textCursor().position() < wrapped.size());
+        for (int i = 0; i < 8 && rowOf() > 0; ++i) QTest::keyClick(&editor, Qt::Key_Up);
+        QCOMPARE(rowOf(), 0);                    // reached the top row still holding the draft
+        QCOMPARE(editor.toPlainText(), wrapped);
+        QTest::keyClick(&editor, Qt::Key_Up);    // the same key now walks back through history
+        QCOMPARE(editor.toPlainText(), QStringLiteral("git status"));
+        editor.setPlainText(wrapped);            // mid-browse, on the top row of a wrapped line
+        editor.moveCursor(QTextCursor::Start);
+        QTest::keyClick(&editor, Qt::Key_Down);  // a cursor move down, not a browse forward
+        QCOMPARE(editor.toPlainText(), wrapped);
+        QCOMPARE(rowOf(), 1);
+    }
     void ghostTextAcceptsWholeOrWord() {
         RichEditor editor;
         editor.setPlainText(QStringLiteral("git"));
@@ -157,7 +192,8 @@ private Q_SLOTS:
         QCOMPARE(editor.toPlainText(), QStringLiteral("@/tmp/a.png @\"/tmp/b c.png\" "));
     }
     // The prompt box's history outlives the box (owner report, 2026-09-18: "i cant do up arrows
-    // to see what i did before"). A new editor on the same file starts where the last one left off.
+    // to see what i did before"). A pane's box reopened on the same file — a restart, or a close
+    // and a "restore last closed" — starts where the last one left off.
     void historyOutlivesTheEditor() {
         QTemporaryDir dir;
         const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
@@ -175,18 +211,32 @@ private Q_SLOTS:
         QTest::keyClick(&second, Qt::Key_Up);
         QCOMPARE(second.toPlainText(), QStringLiteral("git status"));
     }
-    // One history for every pane: a box that is already open picks up what another added when its
-    // next browse begins, and it empties when the history is cleared.
-    void aBrowseTakesInWhatOtherPanesAdded() {
+    // One history per pane (owner report, 2026-09-19: "the up/down history seems to be getting
+    // commands from other panes, not just mine"). Two boxes on two files never see each other's
+    // lines: a pane opened beside another starts empty.
+    void panesKeepSeparateHistories() {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
-        RichEditor pane; pane.useHistoryFile(path);
-        QVERIFY(pane.history().isEmpty());
-        RichEditor other; other.useHistoryFile(path);
+        RichEditor pane; pane.useHistoryFile(dir.filePath(QStringLiteral("pane-aaaa0000.txt")));
+        RichEditor other; other.useHistoryFile(dir.filePath(QStringLiteral("pane-bbbb1111.txt")));
         other.remember(QStringLiteral("ls -la"));
         QTest::keyClick(&pane, Qt::Key_Up);
+        QCOMPARE(pane.toPlainText(), QString());          // nothing of the other pane's
+        QVERIFY(pane.history().isEmpty());
+        QTest::keyClick(&other, Qt::Key_Up);
+        QCOMPARE(other.toPlainText(), QStringLiteral("ls -la"));
+    }
+    // A box re-reads its own file when a browse begins — a prompt written at the door by a paired
+    // phone (Pane::submitRemote) is there on the next Up — and it empties when the file is cleared.
+    void aBrowseTakesInWhatWasWrittenOutsideTheBox() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("pane-aaaa0000.txt"));
+        RichEditor pane; pane.useHistoryFile(path);
+        QVERIFY(pane.history().isEmpty());
+        RichEditor writer; writer.useHistoryFile(path);   // the door, writing the same pane's file
+        writer.remember(QStringLiteral("ls -la"));
+        QTest::keyClick(&pane, Qt::Key_Up);
         QCOMPARE(pane.toPlainText(), QStringLiteral("ls -la"));
-        QVERIFY(relay::prompthistory::clear(path));
+        QVERIFY(QFile::remove(path));
         QTest::keyClick(&pane, Qt::Key_Down);          // back to the draft, which was empty
         QCOMPARE(pane.toPlainText(), QString());
         QTest::keyClick(&pane, Qt::Key_Up);            // the next browse re-reads: there is nothing left
@@ -204,8 +254,8 @@ private Q_SLOTS:
         QTest::keyClick(&pane, Qt::Key_Up);
         QCOMPARE(pane.toPlainText(), QStringLiteral("second"));   // mid-browse, not at the draft
         QVERIFY(!pane.atDraft());
-        QVERIFY(relay::prompthistory::clear(path));
-        RichEditor::forgetHistory(path);
+        QVERIFY(QFile::remove(path));
+        RichEditor::forgetAllHistory();
         QVERIFY(pane.history().isEmpty());
         QCOMPARE(pane.toPlainText(), QStringLiteral("second"));   // what is in the box is the person's now
         QTest::keyClick(&pane, Qt::Key_Up);

@@ -441,6 +441,12 @@ private slots:
         QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("main")}}, false, QString()), QStringList());
         QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("master")}}, false, QString()), QStringList());
         QCOMPARE(badges({}, false, QString()), QStringList());
+        // Live usage (issue #D03W) sits with "open", which it belongs to; an empty tag is absent.
+        QCOMPARE(badges(item, true, QString(), QStringLiteral("cpu 12% · mem 3%")),
+                 QStringList({QStringLiteral("pinned"), QStringLiteral("open"),
+                              QStringLiteral("cpu 12% · mem 3%"), QStringLiteral("unfinished"),
+                              QStringLiteral("edits · 3 files"), QStringLiteral("feature/x")}));
+        QCOMPARE(badges(item, true, QString(), QString()).contains(QStringLiteral("cpu 12% · mem 3%")), false);
     }
 
     void elidesPathsInTheMiddle() {
@@ -580,6 +586,48 @@ private slots:
         for (const QString &tag : row->data(0, kBadgeRole).toStringList())
             QVERIFY(!tag.startsWith(QStringLiteral("closed ")));
         QVERIFY(!reopen->isVisible());
+    }
+
+    // The live usage tag (issue #D03W) arrives with the window's status poll and leaves the same
+    // way, on rows that are already built — no new query, no rebuild that would lose an unfold.
+    void liveUsageTagsComeAndGo() {
+        SessionManager manager;
+        int queries = 0;
+        manager.onQuery = [&queries](const QJsonObject &) { ++queries; };
+        manager.setOpenSessions({QStringLiteral("a")});
+        manager.show();
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("Building"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *row = rowTitled(tree, QStringLiteral("Building"));
+        QVERIFY(row);
+        QVERIFY(row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("open")));
+        QVERIFY(!row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("cpu")));
+        const int asked = queries;
+
+        // The pane's reading rises: the tag appears beside "open", without asking the worker.
+        manager.setLiveUsage({{QStringLiteral("a"), QStringLiteral("cpu 12% · mem 3%")}});
+        row = rowTitled(tree, QStringLiteral("Building"));
+        QVERIFY(row);
+        const QStringList busy = row->data(0, kBadgeRole).toStringList();
+        QVERIFY(busy.contains(QStringLiteral("open")));
+        QVERIFY(busy.contains(QStringLiteral("cpu 12% · mem 3%")));
+        QVERIFY(busy.indexOf(QStringLiteral("open")) < busy.indexOf(QStringLiteral("cpu 12% · mem 3%")));
+        QCOMPARE(queries, asked);
+
+        // A new number is a patch, not a rebuild.
+        manager.setLiveUsage({{QStringLiteral("a"), QStringLiteral("cpu 14% · mem 3%")}});
+        row = rowTitled(tree, QStringLiteral("Building"));
+        QVERIFY(row && row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("cpu 14% · mem 3%")));
+
+        // The pane goes quiet: the tag goes, "open" stays.
+        manager.setLiveUsage({});
+        row = rowTitled(tree, QStringLiteral("Building"));
+        QVERIFY(row);
+        const QStringList idle = row->data(0, kBadgeRole).toStringList();
+        QVERIFY(idle.contains(QStringLiteral("open")));
+        QVERIFY(!idle.join(QLatin1Char(' ')).contains(QStringLiteral("cpu")));
+        QCOMPARE(queries, asked);
     }
 
     void unfoldAsksOnceAndFillsFromTheOverview() {

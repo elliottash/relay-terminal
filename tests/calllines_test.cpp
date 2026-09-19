@@ -385,6 +385,78 @@ private slots:
         QCOMPARE(textOf(rows.first()), QStringLiteral("That turn is no longer kept."));
         QCOMPARE(rows.first().spans.first().fg, palette().muted);
     }
+
+    // ---- reasoning as a fold (foldForMarkdown) --------------------------------------------------
+
+    // A thinking fold's markdown keeps its shape — markers dropped, rows split at newlines — and
+    // its styles become spans: prose muted (reasoning is chrome), bold kept, code in the code ink.
+    void markdownReasoningKeepsItsShapeAndMutesItsProse() {
+        const QVector<FoldLine> rows = foldForMarkdown(
+            QStringLiteral("Plain **bold** and `code`\n"), palette(), {});
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("Plain bold and code")}));
+        for (const relay::FoldSpan &span : rows.first().spans) {
+            if (span.text.contains(QStringLiteral("bold"))) {
+                QVERIFY(span.bold);
+                QCOMPARE(span.fg, palette().muted);
+            } else if (span.text.contains(QStringLiteral("code"))) {
+                QCOMPARE(span.fg, palette().code);
+            } else {
+                QCOMPARE(span.fg, palette().muted);
+            }
+        }
+    }
+
+    void markdownHeadingsLinksQuotesAndProblemsKeepTheirInks() {
+        const QVector<FoldLine> rows = foldForMarkdown(
+            QStringLiteral("## Plan\nsee [docs](https://x/y)\n**Problem:** broke\n> quoted\n"), palette(), {});
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("Plan"), QStringLiteral("see docs (https://x/y)"),
+                                             QStringLiteral("Problem: broke"), QStringLiteral("▎ quoted")}));
+        QVERIFY(rows.at(0).spans.first().bold);                       // a heading is bold ...
+        QCOMPARE(rows.at(0).spans.first().fg, palette().text);        // ... in the plain text ink
+        bool sawLink = false;
+        for (const relay::FoldSpan &span : rows.at(1).spans) {
+            if (span.text == QStringLiteral("docs")) {
+                sawLink = true;
+                QVERIFY(span.underline);
+                QCOMPARE(span.fg, palette().code);
+            }
+        }
+        QVERIFY(sawLink);
+        QVERIFY(rows.at(2).spans.first().bold);
+        QCOMPARE(rows.at(2).spans.first().fg, palette().error);       // **Problem:** is red
+        // A quote: the ▎ marker carries the marker ink, the text is italic and dim.
+        QCOMPARE(rows.at(3).spans.at(0).text.at(0), QChar(0x258e));
+        QCOMPARE(rows.at(3).spans.at(0).fg, palette().text);
+        QVERIFY(rows.at(3).spans.at(1).italic);
+        QVERIFY(rows.at(3).spans.at(1).dim);
+    }
+
+    void aCodeFenceStaysVerbatimInItsOwnInk() {
+        const QVector<FoldLine> rows = foldForMarkdown(QStringLiteral("```sh\n$ make\n```\n"), palette(), {});
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("```sh"), QStringLiteral("$ make"),
+                                             QStringLiteral("```")}));
+        QCOMPARE(rows.at(1).spans.first().fg, palette().code);
+    }
+
+    void emptyReasoningFoldsToNothing() {
+        QVERIFY(foldForMarkdown(QString(), palette(), {}).isEmpty());
+        QVERIFY(foldForMarkdown(QStringLiteral("   \n"), palette(), {}).isEmpty());
+    }
+
+    // The cap keeps the *tail*: the end of the reasoning is what a reader is looking for.
+    void aLongThinkingFoldKeepsItsTail() {
+        QString text;
+        for (int at = 0; at < 30; ++at) text += QStringLiteral("thought %1\n").arg(at);
+        FoldOptions options;
+        options.maxLines = 10;
+        options.openInPane = QStringLiteral("relay://open-call/p/t/thinking");
+        const QStringList rows = textsOf(foldForMarkdown(text, palette(), options));
+        QCOMPARE(rows.size(), 12);   // the note, the last 10 rows, the links row
+        QVERIFY(rows.first().startsWith(QStringLiteral("… 20 earlier lines")));
+        QCOMPARE(rows.at(1), QStringLiteral("thought 20"));
+        QCOMPARE(rows.at(10), QStringLiteral("thought 29"));
+        QCOMPARE(rows.at(11), QStringLiteral("open in pane"));
+    }
 };
 
 QTEST_MAIN(CallLinesTests)

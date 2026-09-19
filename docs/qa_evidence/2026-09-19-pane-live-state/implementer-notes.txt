@@ -1,0 +1,3 @@
+running: tab-bar frames differ in 0..480 pixels across all pairs (0 = identical)
+relaying: tab-bar frames differ in 160..456 pixels across all pairs (0 = identical)
+mix: tab-bar frames differ in 0..444 pixels across all pairs (0 = identical)

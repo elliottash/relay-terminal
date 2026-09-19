@@ -13,4 +13,6 @@ guest: sent a prompt ('run the tests and tell me what broke')
 guest: <- panes
 guest: <- prompt_pending bc2c37cc37141346
 guest: <- prompt_decided bc2c37cc37141346
-guest: <- control owner
+guestguest: done
+ owner
+guest: done

@@ -47,6 +47,11 @@ error = "#931c17"
 # neighbours. That is the same order of separation this theme's greyed destination pair settled on
 # (dE 20.3), and the band carries the bolt glyph and the word "Actions" besides.
 action = "#803700"
+# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
+# you. The dark bronze from [board] below. Brass does not survive a light ground, so the band's metal
+# is oxidised rather than inverted, exactly as the board's is. 4.65:1 on the case beige.
+tool = "#63492b"
 # The destinations. The owner's first call here was a greyed pair — "terminal is dark gray-blue
 # and agent is dark gray-violet", a slate and a pewter so they sat with the plastic — and it did
 # not survive use: "too dark and desaturated, I can't tell them apart from each other or from

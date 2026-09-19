@@ -1,0 +1,27 @@
+== unit tests ==
+Ran 8 tests in 0.059s
+
+OK
+== build the app ==
+In file included from /home/elliott/repos/relay-terminal/src/main.cpp:153:
+/home/elliott/repos/relay-terminal/src/RelayWindow.h: In lambda function:
+/home/elliott/repos/relay-terminal/src/RelayWindow.h:3756:36: error: ‘class RelayWindow’ has no member named ‘m_initSnoozed’
+ 3756 |             situation.snoozed = w->m_initSnoozed.contains(relay::projects::normalize(situation.project));
+      |                                    ^~~~~~~~~~~~~
+/home/elliott/repos/relay-terminal/src/RelayWindow.h: In lambda function:
+/home/elliott/repos/relay-terminal/src/RelayWindow.h:3775:20: error: ‘class RelayWindow’ has no member named ‘m_initSnoozed’
+ 3775 |                 w->m_initSnoozed.insert(relay::projects::normalize(project));
+      |                    ^~~~~~~~~~~~~
+gmake[3]: *** [CMakeFiles/relay.dir/build.make:90: CMakeFiles/relay.dir/src/main.cpp.o] Error 1
+gmake[2]: *** [CMakeFiles/Makefile2:2499: CMakeFiles/relay.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:2506: CMakeFiles/relay.dir/rule] Error 2
+gmake: *** [Makefile:1136: relay] Error 2
+== check on a source checkout ==
+This Relay was not installed from a package — /update upgrades the .deb install.
+exit=1 (expected 1: no dpkg package here)
+== live dry-run, installed version faked to beta.1 ==
+Checking GitHub for the latest release…
+Downloading relay_0.1.0-beta.2_ubuntu24.04_arm64.deb (2.8 MB)…
+Checksum verified.
+Dry run: relay_0.1.0-beta.2_ubuntu24.04_arm64.deb downloaded and verified at /tmp/relay-update-cqph5k7_/relay_0.1.0-beta.2_ubuntu24.04_arm64.deb (not installed).
+exit=0

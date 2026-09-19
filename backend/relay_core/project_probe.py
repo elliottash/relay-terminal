@@ -87,6 +87,11 @@ class TrackerItem:
     priority: str | None = None     # high|medium|low, or None
     labels: list[str] = field(default_factory=list)
     tasks: list[tuple[str, str]] = field(default_factory=list)   # (text, item status)
+    #: Dependencies *between* the entries of `tasks`, keyed by their 1-based position in it.
+    #: A value is either another 1-based position in `tasks`, or the `source_id` of another
+    #: item in the same `group` — which `board_import` turns into that item's card.  Only
+    #: Task Master has these; every other tracker's items are a flat checklist.
+    task_depends: dict[int, list] = field(default_factory=dict)
     depends_on: list[str] = field(default_factory=list)          # source_ids in the same group
     parent: str | None = None       # a source_id in the same group
     #: The set a `depends_on`/`parent` id is resolved inside — a tracker's own root, because
@@ -118,6 +123,9 @@ class TrackerItem:
             out["labels"] = sorted(self.labels)
         if self.tasks:
             out["tasks"] = [{"text": t, "status": s} for t, s in self.tasks]
+            for position, refs in sorted(self.task_depends.items()):
+                if 1 <= position <= len(self.tasks) and refs:
+                    out["tasks"][position - 1]["blocked_by"] = list(refs)
         if self.depends_on:
             out["depends_on"] = sorted(self.depends_on)
         if self.parent:
@@ -1228,6 +1236,49 @@ def _tm_id(value) -> str:
     return str(value).strip()
 
 
+def _tm_subtask_depends(subtasks: Sequence[tuple[int, dict]], positions: dict[str, int],
+                        tag: str, task_id: str, task_ids: set[str]) -> dict[int, list]:
+    """A Task Master subtask's `dependencies`, as `TrackerItem.task_depends`.
+
+    Task Master numbers a subtask inside its parent (`1`, `2`) and writes a dependency either
+    as that bare sibling id or fully qualified (`"4.2"`, `"4"`).  So:
+
+    * a bare id that is a sibling here  -> that sibling's position, a `blocked_by=` marker
+      between two items of the same card;
+    * `"<this task>.<sibling>"`         -> the same thing;
+    * anything else that names another task -> that task's `source_id`, which `board_import`
+      turns into `blocked_by=#CARD` when that task is in the same import, and drops otherwise.
+
+    A dependency on another task's *subtask* becomes a dependency on that task's card: the
+    board has no way to name an item of a card it is not on, and a card is the honest
+    approximation — nearer than dropping it, which is what happened before 2026-09-18.
+    """
+    out: dict[int, list] = {}
+    for position, sub in subtasks:
+        refs: list = []
+        for dep in sub.get("dependencies") or []:
+            value = _tm_id(dep)
+            if not value:
+                continue
+            head, _, tail = value.partition(".")
+            if value in positions:
+                ref = positions[value]
+            elif tail and head == task_id and tail in positions:
+                ref = positions[tail]
+            elif head and head != task_id and head in task_ids:
+                ref = f"{tag}/{head}"
+            else:
+                # A sibling that is not in this card after all, or a task that is not in this
+                # file: dropped rather than written as a marker naming nothing, which is what
+                # `relay-board.py check` would call an error.
+                continue
+            if ref != position and ref not in refs:
+                refs.append(ref)
+        if refs:
+            out[position] = refs
+    return out
+
+
 def _read_taskmaster(project: Path, path: Path) -> list[TrackerItem]:
     text = _read_text(project, path, MAX_JSON_BYTES)
     if text is None:
@@ -1240,6 +1291,9 @@ def _read_taskmaster(project: Path, path: Path) -> list[TrackerItem]:
     out: list[TrackerItem] = []
     order = 0
     for tag, tasks in _tm_task_lists(data):
+        #: Every task id in this tag, so a subtask's dependency on another *task* can be told
+        #: from one on a sibling that is not there.
+        tag_ids = {_tm_id(t.get("id")) for t in tasks if isinstance(t, dict)} - {""}
         for task in tasks:
             if not isinstance(task, dict):
                 continue
@@ -1255,6 +1309,11 @@ def _read_taskmaster(project: Path, path: Path) -> list[TrackerItem]:
                 if value:
                     body_parts.append(value if heading is None else f"### {heading}\n{value}")
             items: list[tuple[str, str]] = []
+            #: Sub-id -> its 1-based position in `items`, so a subtask's `dependencies` can name
+            #: a sibling.  Filled before the dependencies are read, because Task Master lets a
+            #: subtask depend on a later one.
+            positions: dict[str, int] = {}
+            raw_subtasks: list[tuple[int, dict]] = []
             for sub in task.get("subtasks") or []:
                 if not isinstance(sub, dict):
                     continue
@@ -1263,6 +1322,11 @@ def _read_taskmaster(project: Path, path: Path) -> list[TrackerItem]:
                     continue
                 sub_status = TASKMASTER_STATUS.get(str(sub.get("status") or "").strip().lower(), "open")
                 items.append((sub_title[:300], "open" if sub_status == "review" else sub_status))
+                sub_id = _tm_id(sub.get("id"))
+                if sub_id and sub_id not in positions:
+                    positions[sub_id] = len(items)
+                raw_subtasks.append((len(items), sub))
+            task_depends = _tm_subtask_depends(raw_subtasks, positions, tag, task_id, tag_ids)
             labels = ["imported", "taskmaster"]
             if tag and tag != "master":
                 labels.append(tag)
@@ -1272,6 +1336,7 @@ def _read_taskmaster(project: Path, path: Path) -> list[TrackerItem]:
                 status=TASKMASTER_STATUS.get(str(task.get("status") or "").strip().lower(), "open"),
                 priority=str(task.get("priority") or "").strip().lower() or None,
                 labels=labels, tasks=items[:100],
+                task_depends={k: v for k, v in task_depends.items() if k <= 100},
                 depends_on=[f"{tag}/{_tm_id(d)}" for d in (task.get("dependencies") or [])
                             if _tm_id(d)],
                 group=rel, order=order))

@@ -72,9 +72,13 @@ _IP_RE = re.compile(r"^(\d{1,3}(\.\d{1,3}){3}|\[?[0-9a-f:]+\]?)$", re.I)
 # ------------------------------------------------------------------ token resolution
 
 def _run(argv: Sequence[str], stdin: str | None = None, cwd: str | None = None) -> str:
+    # `git credential fill` is the last resort: when nothing is stored, git must fail fast
+    # rather than put a username prompt on the user's terminal (same call as skill_manage's
+    # _git_env).  A failed lookup is an empty string here, exactly like a timeout.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="/bin/false")
     try:
         done = subprocess.run(list(argv), input=stdin, capture_output=True, text=True,
-                              timeout=15, cwd=cwd)
+                              timeout=15, cwd=cwd, env=env)
     except (OSError, subprocess.SubprocessError):
         return ""
     return done.stdout if done.returncode == 0 else ""

@@ -2,6 +2,7 @@
 #include "CallLines.h"
 
 #include "DiffView.h"
+#include "MarkdownAnsi.h"
 
 #include <QJsonArray>
 #include <QStringList>
@@ -364,6 +365,72 @@ void capAndClose(QVector<FoldLine> &out, const Palette &palette, const FoldOptio
     if (!links.spans.isEmpty()) out << links;
 }
 
+// The renderer's ANSI foregrounds as the fold's Palette sees them. Reasoning is chrome around the
+// reply, so its prose is muted; what still has to be findable keeps an ink: code and links the
+// code colour, headings plain text, **Problem:** red.
+QColor markdownFg(int sgr, const Palette &palette) {
+    switch (sgr) {
+    case 31: return palette.error;
+    case 33: case 34: case 36: return palette.code;
+    case 35: return palette.text;
+    default: return palette.muted;
+    }
+}
+
+// The renderer's ANSI into spans, one FoldLine per line. Only what a FoldSpan can say survives —
+// bold, dim, italic, underline and the foreground; anything else the renderer emitted is dropped.
+// Attributes carry across a newline exactly as they would on a grid, and MarkdownAnsi re-states
+// each line's whole style at its start, so a line's first sequence lands as its own.
+void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &palette) {
+    if (out.isEmpty()) out << FoldLine{};
+    FoldSpan span;
+    QString text;
+    const auto flush = [&] {
+        if (text.isEmpty()) return;
+        span.text = text;
+        out.last().spans << span;
+        text.clear();
+    };
+    for (int at = 0; at < ansi.size(); ++at) {
+        const ushort u = ansi.at(at).unicode();
+        if (u == 0x1b) {
+            flush();
+            if (at + 1 >= ansi.size()) break;
+            if (ansi.at(at + 1) != QLatin1Char('[')) { ++at; continue; }   // two-character escape
+            int end = at + 2;
+            while (end < ansi.size() && ansi.at(end).unicode() >= 0x30 && ansi.at(end).unicode() <= 0x3f) ++end;
+            if (end < ansi.size() && ansi.at(end) == QLatin1Char('m')) {
+                const QStringList params = ansi.mid(at + 2, end - at - 2)
+                                               .split(QLatin1Char(';'), Qt::SkipEmptyParts);
+                for (const QString &param : params) {
+                    bool ok = false;
+                    const int n = param.toInt(&ok);
+                    if (!ok) continue;
+                    if (n == 0) { span = FoldSpan{}; continue; }   // a reset clears everything
+                    if (n == 1) span.bold = true;
+                    else if (n == 2) span.dim = true;
+                    else if (n == 3) span.italic = true;
+                    else if (n == 4) span.underline = true;
+                    else if ((n >= 30 && n <= 37) || n == 39 || (n >= 90 && n <= 97))
+                        span.fg = markdownFg(n, palette);
+                    // 9 (crossed out) and the rest: a fold row cannot say them
+                }
+            } else {
+                while (end < ansi.size() && !(ansi.at(end).unicode() >= 0x40 && ansi.at(end).unicode() <= 0x7e)) ++end;
+            }
+            at = end;   // the loop's ++at steps over the final byte
+            continue;
+        }
+        if (u == '\n') {
+            flush();
+            out << FoldLine{};
+            continue;
+        }
+        if (u == '\t' || (u >= 0x20 && u != 0x7f)) text += ansi.at(at);
+    }
+    flush();
+}
+
 }  // namespace
 
 QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette, const FoldOptions &options) {
@@ -426,6 +493,31 @@ QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &p
 
 QVector<FoldLine> foldForNote(const QString &text, const Palette &palette) {
     return {mutedRow(text, palette)};
+}
+
+QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palette,
+                                  const FoldOptions &options) {
+    QVector<FoldLine> out;
+    if (markdown.isEmpty()) return out;
+    MarkdownAnsi renderer;
+    appendMarkdown(out, renderer.feed(markdown) + renderer.finish(), palette);
+    while (!out.isEmpty() && out.first().spans.isEmpty()) out.removeFirst();
+    while (!out.isEmpty() && out.last().spans.isEmpty()) out.removeLast();
+    bool blank = true;
+    for (const FoldLine &line : out)
+        for (const FoldSpan &span : line.spans)
+            if (!span.text.trimmed().isEmpty()) blank = false;
+    if (blank) return {};
+    const int cap = options.maxLines > 0 ? options.maxLines : kFoldLineCap;
+    if (out.size() > cap) {
+        const int earlier = out.size() - cap;
+        out.remove(0, earlier);
+        out.prepend(mutedRow(QStringLiteral("… %1 earlier lines · open in pane")
+                                 .arg(toollabel::thousands(earlier)), palette));
+    }
+    const FoldLine links = linkRow(palette, options);
+    if (!links.spans.isEmpty()) out << links;
+    return out;
 }
 
 }  // namespace relay::calllines

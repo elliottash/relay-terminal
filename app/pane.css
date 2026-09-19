@@ -79,11 +79,14 @@
 }
 
 /* ---- the thinking bubble ------------------------------------------------------------------ */
+/* The phone keeps its own reasoning surface (the desktop's reasoning is a fold in its terminal
+   now, issue T8CN), so it draws from the theme tokens directly: below-surface background, quiet
+   border, muted monospace text — the values the overlay's stylesheet rules carried. */
 .rp-thinking {
   flex: none;
-  background: var(--qss-thinkingOverlay-background);
-  border: var(--qss-thinkingOverlay-border);
-  border-radius: var(--qss-thinkingOverlay-border-radius);
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  border-radius: 8px;
   padding: 4px 10px 6px;
 }
 .rp-thinking-head { display: flex; align-items: center; gap: 2px; }
@@ -113,14 +116,14 @@
    pane.js never replaces it while part of it is selected. Two lines until opened, as on the
    desktop. */
 .rp-thinking-tail {
-  --rp-tail-line: calc(var(--qss-thinkingView-font-size) * var(--rp-line));
+  --rp-tail-line: calc(var(--rt-pt) * 10 * var(--rp-line));
   max-height: calc(var(--rp-tail-line) * 2 + 2px);
   overflow-y: auto;
   padding: 0 8px;
-  color: var(--qss-thinkingView-color);
-  background: var(--qss-thinkingView-background);
-  font-family: var(--qss-thinkingView-font-family);
-  font-size: var(--qss-thinkingView-font-size);
+  color: var(--rt-muted);
+  background: transparent;
+  font-family: var(--rt-mono);
+  font-size: calc(var(--rt-pt) * 10);
   line-height: var(--rp-line);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -288,7 +291,7 @@
   font-size: var(--qss-stripChipLabel-font-size);
   line-height: 1.2;
 }
-.rp-context[data-warn="true"] { color: var(--qss-stripChipLabel-warn-true-color); border-color: var(--qss-stripChipLabel-warn-true-border-color); }
+.rp-context[data-warn="true"], .rp-allowance[data-warn="true"] { color: var(--qss-stripChipLabel-warn-true-color); border-color: var(--qss-stripChipLabel-warn-true-border-color); }
 button.rp-chip, .rp-folder {
   padding: var(--qss-stripChip-padding);
   background: var(--qss-stripChip-background);

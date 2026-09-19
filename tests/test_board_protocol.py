@@ -14,9 +14,15 @@ import time
 import unittest
 from pathlib import Path
 
+import unittest.mock
+
+import fake_github as FG
 from relay_core import board as B
 from relay_core import board_protocol as P
 from relay_core import board_tools as T
+from relay_core import forge_github as GH
+from relay_core import forge_sync as F
+from relay_core import project_probe as PP
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
 
@@ -1338,6 +1344,318 @@ class LegacyConfigureTests(AttachTest):
         self.assertEqual(block["folder"], "issues")
         self.assertEqual(block["state"], "ready")
         self.assertTrue(block["exists"])
+
+
+# ----------------------------------------------- initializing and importing (19.13)
+
+class ProbeAndImportTests(ProtocolTest):
+    """`project_probe`, `board_import_propose`, `board_import_apply`.
+
+    The board is the one `ProtocolTest` built, in `<repo>/issues`; the project is `<repo>`.
+    """
+
+    def setUp(self):
+        super().setUp()
+        (self.repo / "TODO.md").write_text("# TODO\n\n- [ ] Wrap long lines\n"
+                                           "- [ ] Ship the thing\n", encoding="utf-8")
+
+    def error(self, **request):
+        events = self.events
+        events.clear()
+        with self.assertRaises(ValueError) as raised:
+            self.commands.dispatch(request)
+        return str(raised.exception)
+
+    # ---- project_probe
+    def test_project_probe_answers_with_the_survey_and_writes_nothing(self):
+        before = sorted(p.name for p in self.repo.iterdir())
+        events = self.send(type="project_probe", id="p1", project=str(self.repo))
+        [result] = self.of("project_probe_result")
+        self.assertEqual(result["id"], "p1")
+        self.assertEqual(result["project"], str(self.repo))
+        self.assertEqual(result["version"], PP.PROBE_VERSION)
+        self.assertEqual([f["kind"] for f in result["trackers"]], ["checklist"])
+        self.assertTrue(result["board"]["present"])
+        self.assertEqual(result["root"], str(self.root))
+        self.assertEqual(sorted(p.name for p in self.repo.iterdir()), before)
+        self.assertEqual([e for e in events if e["event"] == "error"], [])
+
+    def test_project_probe_may_be_narrowed_to_some_trackers(self):
+        self.send(type="project_probe", id="p1", project=str(self.repo), kinds=["beads"])
+        self.assertEqual(self.of("project_probe_result")[0]["trackers"], [])
+        self.assertIn("unknown tracker kind", self.error(
+            type="project_probe", id="p1", project=str(self.repo), kinds=["jira"]))
+
+    def test_project_probe_never_falls_back_to_the_process_directory(self):
+        for request in ({}, {"project": ""}, {"project": "   "}, {"project": None}):
+            message = self.error(type="project_probe", id="p1", **request)
+            self.assertIn("needs `project`", message)
+            self.assertIn("no default", message)
+
+    def test_a_relative_project_and_a_file_are_both_refused(self):
+        self.assertIn("absolute", self.error(type="project_probe", id="p1", project="./here"))
+        self.assertIn("is not a directory",
+                      self.error(type="project_probe", id="p1", project=str(self.repo / "TODO.md")))
+
+    def test_project_probe_needs_no_board(self):
+        elsewhere = boardless_dir(self)
+        (elsewhere / "TODO.md").write_text("- [ ] alone\n", encoding="utf-8")
+        commands = P.BoardCommands(StubTurns(), self.events.append)
+        self.assertIsNone(commands.configure(str(elsewhere), {}))
+        self.events.clear()
+        commands.dispatch({"type": "project_probe", "id": "p1", "project": str(elsewhere)})
+        [result] = self.of("project_probe_result")
+        self.assertFalse(result["board"]["present"])
+        self.assertNotIn("root", result)
+
+    # ---- board_import_propose
+    def test_propose_lists_the_cards_an_import_would_create(self):
+        self.send(type="board_import_propose", id="i1", project=str(self.repo))
+        [proposals] = self.of("board_import_proposals")
+        self.assertEqual(proposals["id"], "i1")
+        self.assertEqual(proposals["root"], str(self.root))
+        self.assertEqual([p["title"] for p in proposals["proposals"]],
+                         ["Wrap long lines", "Ship the thing"])
+        self.assertEqual(proposals["skipped"], 0)
+        self.assertEqual(self.board.cards(), [])            # nothing was written
+
+    def test_propose_needs_a_project_too(self):
+        self.assertIn("needs `project`", self.error(type="board_import_propose", id="i1"))
+
+    # ---- board_import_apply
+    def keys(self):
+        self.send(type="board_import_propose", id="i1", project=str(self.repo))
+        return [p["source_key"] for p in self.of("board_import_proposals")[0]["proposals"]]
+
+    def test_apply_creates_the_ticked_cards_and_says_where_they_landed(self):
+        keys = self.keys()
+        events = self.send(type="board_import_apply", id="a1", project=str(self.repo),
+                           keys=keys[:1])
+        [imported] = self.of("board_imported")
+        self.assertEqual(imported["id"], "a1")
+        self.assertEqual(imported["root"], str(self.root))
+        self.assertEqual(len(imported["cards"]), 1)
+        card = imported["cards"][0]
+        self.assertEqual(card["source_key"], keys[0])
+        self.assertEqual(card["status"], "inbox")
+        self.assertEqual(card["tab"], "features")
+        self.assertTrue((self.repo / card["path"]).is_file())
+        self.assertEqual(imported["skipped"], [])
+        self.assertTrue([e for e in events if e["event"] == "board_changed"])
+        self.assertEqual(len(self.board.cards()), 1)
+
+    def test_a_key_that_is_already_imported_comes_back_as_skipped(self):
+        keys = self.keys()
+        self.send(type="board_import_apply", id="a1", project=str(self.repo), keys=keys)
+        self.send(type="board_import_apply", id="a2", project=str(self.repo), keys=keys)
+        self.assertEqual(self.of("board_imported")[0]["skipped"], keys)
+        self.assertEqual(len(self.board.cards()), 2)
+
+    def test_apply_takes_a_tab_and_refuses_one_this_board_has_not(self):
+        keys = self.keys()
+        self.send(type="board_import_apply", id="a1", project=str(self.repo), keys=keys[:1],
+                  tab="bugs")
+        self.assertEqual(self.of("board_imported")[0]["cards"][0]["tab"], "bugs")
+        self.assertIn("unknown tab", self.error(type="board_import_apply", id="a2",
+                                                project=str(self.repo), keys=keys[1:],
+                                                tab="nowhere"))
+
+    def test_apply_needs_keys(self):
+        self.assertIn("needs `keys`", self.error(type="board_import_apply", id="a1",
+                                                 project=str(self.repo)))
+        self.assertIn("needs `keys`", self.error(type="board_import_apply", id="a1",
+                                                 project=str(self.repo), keys=[]))
+
+    def test_apply_refuses_a_project_this_pane_is_not_on(self):
+        elsewhere = boardless_dir(self)
+        message = self.error(type="board_import_apply", id="a1", project=str(elsewhere),
+                             keys=["checklist:TODO.md#x"])
+        self.assertIn("Point the pane at that project first", message)
+
+    def test_apply_is_refused_while_the_switchboard_agent_is_busy(self):
+        keys = self.keys()
+        self.turns.busy = True
+        events = self.send(type="board_import_apply", id="a1", project=str(self.repo), keys=keys)
+        [error] = self.of("error")
+        self.assertEqual(error["code"], "board_busy")
+        self.assertEqual(error["id"], "a1")
+        self.assertEqual(self.of("board_imported"), [])
+        self.assertEqual(self.board.cards(), [])
+
+    def test_apply_on_a_pane_with_no_board_says_so(self):
+        elsewhere = boardless_dir(self)
+        commands = P.BoardCommands(StubTurns(), self.events.append)
+        commands.configure(str(elsewhere), {})
+        with self.assertRaises(ValueError) as raised:
+            commands.dispatch({"type": "board_import_apply", "id": "a1", "keys": ["k"]})
+        self.assertEqual(str(raised.exception), P.NO_BOARD_ERROR)
+
+    def test_apply_on_an_uninitialized_board_asks_for_board_init_first(self):
+        elsewhere = boardless_dir(self)
+        commands = P.BoardCommands(StubTurns(), self.events.append)
+        commands.configure(str(elsewhere), {"board": {"project": str(elsewhere),
+                                                      "state": "uninitialized"}})
+        with self.assertRaises(ValueError) as raised:
+            commands.dispatch({"type": "board_import_apply", "id": "a1", "keys": ["k"]})
+        self.assertEqual(str(raised.exception), P.NOT_INITIALIZED_ERROR)
+        self.assertFalse((elsewhere / "switchboard" / B.BOARD_CONFIG).exists())
+
+
+# -------------------------------------------------------- the GitHub sync (19.14)
+
+class ForgeSyncProtocolTests(ProtocolTest):
+    """`forge_sync_plan` / `forge_sync_run` against the in-process fake forge.
+
+    The work runs on a thread, so every test waits for the one terminal event the message
+    promises and then asserts there was exactly one.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.gh = FG.FakeGitHub()
+        self.addCleanup(self.gh.close)
+        previous = os.environ.get("GH_TOKEN")
+        os.environ["GH_TOKEN"] = FG.TOKEN          # never a subprocess, never a real credential
+        self.addCleanup(lambda: os.environ.__setitem__("GH_TOKEN", previous)
+                        if previous is not None else os.environ.pop("GH_TOKEN", None))
+        self.configure_github()
+
+    def configure_github(self, extra: str = ""):
+        (self.root / B.BOARD_CONFIG).write_text(
+            CONFIG + f"github: {{repo: relay/terminal, base_url: '{self.gh.base_url}'{extra}}}\n",
+            encoding="utf-8")
+
+    def wait_for(self, *names, timeout=20.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            found = [e for e in list(self.events) if e.get("event") in names]
+            if found:
+                time.sleep(0.05)                   # let anything that follows it arrive too
+                return found
+            time.sleep(0.02)
+        self.fail(f"no {names} event; got {[e.get('event') for e in self.events]}")
+
+    def terminal(self, *names):
+        found = self.wait_for(*names, "error")
+        self.assertEqual(len(found), 1, f"expected exactly one terminal event, got {found}")
+        return found[0]
+
+    def error(self, **request):
+        self.events.clear()
+        with self.assertRaises(ValueError) as raised:
+            self.commands.dispatch(request)
+        return str(raised.exception)
+
+    def test_a_plan_says_what_would_happen_and_writes_to_neither_side(self):
+        self.make_card()
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_plan", "id": "s1"})
+        planned = self.terminal("forge_sync_planned")
+        self.assertEqual(planned["event"], "forge_sync_planned")
+        self.assertEqual(planned["id"], "s1")
+        self.assertEqual(planned["root"], str(self.root))
+        self.assertEqual(planned["repo"], "relay/terminal")
+        self.assertTrue(planned["dry_run"])
+        self.assertEqual(planned["creates"], 1)
+        self.assertEqual(planned["cap"], F.DEFAULT_CREATE_CAP)
+        self.assertEqual(self.gh.writes, [])
+        self.assertEqual([p["action"] for p in planned["cards"]], ["create"])
+
+    def test_a_run_files_the_issue_reports_progress_and_ends_with_one_done(self):
+        card_id = self.make_card()
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_run", "id": "s2"})
+        done = self.terminal("forge_sync_done")
+        self.assertEqual(done["id"], "s2")
+        self.assertEqual(done["root"], str(self.root))
+        self.assertEqual(done["pushed"], 1)
+        self.assertEqual(len(self.gh.main.issues), 1)
+        progress = [e for e in self.events if e["event"] == "forge_sync_progress"]
+        self.assertEqual([(p["card"], p["done"], p["total"]) for p in progress], [(card_id, 1, 1)])
+        self.assertEqual(progress[0]["root"], str(self.root))
+        # A sync writes card files outside BoardTools, so the pane is told.
+        self.assertTrue([e for e in self.events if e["event"] == "board_changed"])
+
+    def test_the_repository_may_be_named_in_the_message(self):
+        self.gh.add_repo("other/repo")
+        (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        self.make_card()
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_plan", "id": "s3", "repo": "other/repo",
+                                "base_url": self.gh.base_url})
+        self.assertEqual(self.terminal("forge_sync_planned")["repo"], "other/repo")
+
+    def test_a_board_with_no_repository_says_where_to_put_one(self):
+        (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        message = self.error(type="forge_sync_plan", id="s4")
+        self.assertIn("board.yaml", message)
+        self.assertIn("github:", message)
+
+    def test_a_forge_that_refuses_answers_one_error_with_no_token_in_it(self):
+        self.gh.add_repo("dead/repo", has_issues=True)
+        self.make_card()
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_run", "id": "s5", "repo": "missing/repo"})
+        error = self.terminal("forge_sync_done")
+        self.assertEqual(error["event"], "error")
+        self.assertEqual(error["id"], "s5")
+        self.assertEqual(error["root"], str(self.root))
+        self.assertEqual(error["code"], "forge_unavailable")
+        self.assertNotIn(FG.TOKEN, json.dumps(error))
+        self.assertNotIn("Traceback", json.dumps(error))
+        self.assertEqual(self.gh.writes, [])
+
+    def test_a_missing_credential_is_its_own_code_so_the_gui_can_offer_a_sign_in(self):
+        os.environ.pop("GH_TOKEN", None)
+        self.make_card()
+        self.events.clear()
+        # No env token, and no `gh`/`git credential` either: the runner is what a provider
+        # shells out with, and an empty answer is "nothing found".
+        with unittest.mock.patch.object(GH, "_run", return_value=""):
+            self.commands.dispatch({"type": "forge_sync_run", "id": "s12"})
+            error = self.terminal("forge_sync_done")
+        self.assertEqual(error["event"], "error")
+        self.assertEqual(error["code"], "forge_auth")
+        self.assertIn("GH_TOKEN", error["text"])
+        self.assertEqual(self.gh.writes, [])
+
+    def test_a_second_sync_while_one_is_running_is_refused(self):
+        self.make_card()
+        self.events.clear()
+        self.commands._forge_run = "s6"            # a run in flight
+        self.commands.dispatch({"type": "forge_sync_run", "id": "s7"})
+        [error] = self.of("error")
+        self.assertEqual(error["code"], "forge_busy")
+        self.assertEqual(self.gh.writes, [])
+        self.commands._forge_run = None
+
+    def test_a_sync_is_refused_while_the_switchboard_agent_is_busy(self):
+        self.make_card()
+        self.turns.busy = True
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_plan", "id": "s8"})
+        [error] = self.of("error")
+        self.assertEqual(error["code"], "board_busy")
+        self.assertEqual(self.gh.writes, [])
+
+    def test_a_pane_with_no_board_and_an_uninitialized_one_both_refuse(self):
+        elsewhere = boardless_dir(self)
+        commands = P.BoardCommands(StubTurns(), self.events.append)
+        commands.configure(str(elsewhere), {})
+        with self.assertRaises(ValueError) as none:
+            commands.dispatch({"type": "forge_sync_plan", "id": "s9"})
+        self.assertEqual(str(none.exception), P.NO_BOARD_ERROR)
+        commands.configure(str(elsewhere), {"board": {"project": str(elsewhere),
+                                                      "state": "uninitialized"}})
+        with self.assertRaises(ValueError) as fresh:
+            commands.dispatch({"type": "forge_sync_plan", "id": "s10"})
+        self.assertEqual(str(fresh.exception), P.NOT_INITIALIZED_ERROR)
+
+    def test_a_bad_comment_kinds_block_is_reported_before_anything_is_sent(self):
+        self.configure_github(", comment_kinds: [gossip]")
+        self.make_card()
+        self.assertIn("gossip", self.error(type="forge_sync_plan", id="s11"))
+        self.assertEqual(self.gh.writes, [])
 
 
 if __name__ == "__main__":       # pragma: no cover

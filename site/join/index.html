@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join a Relay pane</title>
+  <meta name="robots" content="noindex">
+  <!-- The join app and the rendezvous live at join.relay-terminal.ai (docs/REMOTE-PROTOCOL.md
+       §8, "The hosted address"). An invite link's fragment carries its secret; the script keeps it
+       so a full link sent as relay-terminal.ai/join#… still works. Without script, the refresh
+       lands on the meeting-code form, which is all a person typing a code needs. -->
+  <meta http-equiv="refresh" content="0; url=https://join.relay-terminal.ai/join">
+  <script>location.replace('https://join.relay-terminal.ai/join' + location.hash);</script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main style="max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
+    <p>Taking you to <a href="https://join.relay-terminal.ai/join">join.relay-terminal.ai</a>, where you type
+    the meeting code and PIN you were given.</p>
+  </main>
+</body>
+</html>

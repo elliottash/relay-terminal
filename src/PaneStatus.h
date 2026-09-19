@@ -10,6 +10,15 @@
 //  * Pane states (card #XM0T). A terminal pane is in exactly one State at a time, read off facts
 //    the pane already keeps. The pane header shows its own state; a tab shows the most urgent state
 //    among its panes, so a background tab can say "needs you" without being opened.
+//  * Live states (card #V8KT, owner 2026-09-19: "its not clear enough if a pane agent or program
+//    is running"). Running, Working and Subagents are work happening now: their glyph is the
+//    Relay mark itself, blinking (pulseScale, card #4E13), in the work's own colour — blue for
+//    terminal work, violet for agent work — with the state's word beside the title (stateText).
+//    The same word sits bold above the prompt box: "Relaying <action>…", the action a gerund of
+//    what the agent is doing ("thinking", "reading src/Pane.h"), or the program's name for
+//    terminal work. A tab with anything live carries a blinking dot in that colour (liveMarker),
+//    whatever news its icon is showing. The desktop's reduce-motion signal (a cursor flash time
+//    of 0) stills every one of these marks.
 //  * Remote sessions (#SPBN, owner 2026-09-18). A terminal whose foreground program is ssh, mosh
 //    or telnet is typing into another machine. That is a safety signal, not decoration: it shows
 //    whatever the pane-colour setting says.
@@ -31,7 +40,8 @@ enum class State {
     Done,        // a turn finished while you were not looking
     Failed,      // a turn failed while you were not looking
     NeedsYou,    // blocked on you: a program asks for input, the agent waits on a handed command,
-                 // or a turn you have not seen ended on a question
+                 // the agent asked you a question and is waiting on the answer (#MQ9C), or a turn
+                 // you have not seen ended on a question
 };
 
 int urgency(State state);
@@ -40,6 +50,25 @@ State mostUrgent(const QList<State> &states);
 QString stateName(State state);
 // What the glyph's tooltip says ("Agent needs you").
 QString stateLabel(State state);
+
+// ----- live states (cards #V8KT, #4E13) ----------------------------------------------------------
+// Work happening in the pane right now: a command runs, an agent turn runs, or subagents run.
+// These are the states whose marks move — the Relay mark blinking in the header, a word beside
+// it, a blinking dot on the tab — because "is anything running over there?" is answered by
+// motion, not by a shape you have to know. The news states (done, failed, needs you) stay still:
+// they pull the eye by being news. Owner, 2026-09-19: "the icons / anims should use blue for
+// terminal work happening and violet for agent work happening", and "a blue blinking relay icon
+// (terminal program running) or purple blinking relay icon (agent working)" (#4E13).
+bool isLive(State state);
+// What a tab's live mark says: Working (the agent's violet) when any agent work is live in the
+// tab — a turn or subagents — Running (the terminal's blue) when only commands run, Idle when
+// nothing is. Agent work wins the tie, as it does in the urgency order.
+State liveMarker(const QList<State> &states);
+// How a live mark blinks: full size and a small step alternating (1.0, 0.62) on the caller's
+// clock, a blink the eye catches without waiting for a breath to turn. A scale, never an
+// opacity: the ink keeps its contrast at every step. `phase < 0` is "no animation" — the
+// desktop's reduce-motion signal — and draws the mark at full size.
+qreal pulseScale(int phase);
 
 // Everything the state is decided from. Each field is state a Pane already keeps.
 struct Facts {
@@ -52,6 +81,7 @@ struct Facts {
     quint64 finishSerial = 0;      // bumps on every finished turn
     QString lastOutcome;           // of that turn: "done", "error" or "cancelled"
     bool lastAsked = false;        // the last done turn's reply ended on a question
+    bool questionOpen = false;     // an `ask_user` card is up in the pane, waiting to be answered
 };
 
 // `seenSerial` is the finishSerial the user has already seen (the window records it whenever the
@@ -113,7 +143,7 @@ enum class Glyph { None, Switchboard, Options, Actions, Sessions, Subagent, Turn
 // `action` is the Actions pane's red-orange (owner, 2026-09-18); every theme file names it, and
 // src/Theme.cpp derives one for a user theme that does not.
 struct Tokens {
-    QColor background, text, muted, shell, agent, success, warning, error, action;
+    QColor background, text, muted, shell, agent, success, warning, error, action, tool;
 };
 
 struct TypeStyle {
@@ -167,6 +197,36 @@ OpenButtonStyle openButtonStyle(const TypeStyle &band, bool hovered);
 QColor focusRing(const QColor &ground, const Tokens &tokens);
 // The colour a state glyph is drawn in.
 QColor stateInk(State state, const Tokens &tokens);
+// The colour the state's word is written in: the state's own ink, lifted to at least 4.5:1 on the
+// ground it sits on (a word is text; the glyph keeps the glyph's 3:1).
+QColor stateText(State state, const QColor &ground, const Tokens &tokens);
+
+// ----- the subagent badge (card #YMSR) ---------------------------------------------------------
+// How many agents a pane's own agent has running, as a badge in the pane header (owner,
+// 2026-09-19: "in the pane header, add a badge with a number for number of subagents, if
+// applicable"). The count is of *live* subagents — waiting or running — the same number
+// `Facts::liveSubagents` resolves a state from, so the badge and the state's own mark can never
+// disagree about the pane. An agent that finished is not work happening now, and the strip under
+// the composer is where the ones that ended are read.
+//
+// Zero is not a "0": it is no badge at all. That is what "if applicable" asks for, and it is what
+// keeps a pane that has never started a subagent looking exactly as it did before. The number is
+// the whole badge — the state's word beside it already says whose work it counts.
+QString subagentBadgeText(int live);
+// What the badge says on hover: the count in words, and the key that opens the pane showing those
+// agents. `keys` is the live Keymap text of `agent.subagentPane`, empty when it is unbound; the
+// caller reads it, as SubagentsPanel::setFolded does, so a rebound key is right here too.
+QString subagentBadgeTooltip(int live, const QString &keys);
+
+// The badge's ground, hairline and ink on `ground` — the header's own colour, or the remote band's
+// while an ssh session is up. The agent's violet, tinted the way a chip is; a painter takes all
+// three together, as it does for a type band's TypeStyle.
+struct BadgeStyle {
+    QColor fill;
+    QColor line;
+    QColor ink;
+};
+BadgeStyle subagentBadgeStyle(const QColor &ground, const Tokens &tokens);
 
 // WCAG contrast ratio, 1..21.
 double contrast(const QColor &a, const QColor &b);

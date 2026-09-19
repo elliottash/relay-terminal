@@ -180,9 +180,9 @@ replaces a label with a label that says more; there is no motion and it is in pe
 A 10px brass-bezelled lamp on that same strip, lit amber while a turn runs, dark otherwise. The
 plumbing exists: `m_turnClock` already ticks once a second (`src/Pane.h`), and
 `#requestsChip[state=…]` already encodes running/done/attention (`src/Theme.cpp:167-171`). Today
-"the agent is thinking" is inferred from a floating `#thinkingOverlay` that covers the bottom of
-the terminal and counts seconds in its header (`m_thinking`, `src/Pane.h`); a lamp says the same thing
-from the pane header without covering output. **Cost:** ~25 lines inside the same widget. **Wear risk:
+"the agent is thinking" is read from the `✦ thinking…` fold line in the terminal's own grid (issue
+T8CN; the floating `#thinkingOverlay` this section argued against is gone); a lamp says the same
+thing from the pane header, where it is still visible once the grid has scrolled on. **Cost:** ~25 lines inside the same widget. **Wear risk:
 low if it does not blink** — a steady fill, or at most a 1 Hz opacity breath, and *nothing* under
 reduced motion (§6). **Verdict: do, immediately after #1 — they are one widget.**
 

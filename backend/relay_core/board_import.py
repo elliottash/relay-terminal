@@ -111,7 +111,10 @@ class Proposal:
     body: str = ""
     status: str = "inbox"
     labels: list[str] = field(default_factory=list)
-    tasks: list[dict] = field(default_factory=list)       # {text, status}
+    #: `{text, status}`, plus `blocked_by` on the items that have dependencies: a 1-based
+    #: position in this same list, or the `source_key` of another proposal, which `apply`
+    #: turns into `#CARD` once that card exists.
+    tasks: list[dict] = field(default_factory=list)
     source: dict = field(default_factory=dict)            # {kind, path, group, line|id}
     depends_on: list[str] = field(default_factory=list)   # other proposals' source_keys
     parent_key: str | None = None                         # another proposal's source_key
@@ -278,6 +281,9 @@ def propose(project: str | os.PathLike, finding_kinds: Sequence[str] | None = No
             source["line"] = item.line
         tasks = [{"text": text[:300], "status": ITEM_STATUS_MAP.get(status, "open")}
                  for text, status in item.tasks][:100]
+        for position, refs in (item.task_depends or {}).items():
+            if 1 <= position <= len(tasks) and refs:
+                tasks[position - 1]["blocked_by"] = list(refs)
         proposals.append(Proposal(
             source_key=item.source_key, kind=item.kind, title=item.title.strip()[:200] or "(untitled)",
             body=item.body, status=_status_for(item), labels=_labels_for(item), tasks=tasks,
@@ -306,6 +312,29 @@ def propose(project: str | os.PathLike, finding_kinds: Sequence[str] | None = No
         if proposal.parent_key:
             key = by_source_id.get((proposal.kind, group, proposal.parent_key))
             proposal.parent_key = key if key and key != proposal.source_key else None
+        # An item's own dependencies: a number is a sibling item of this card and travels as
+        # it is; a source id is another tracker item, and becomes that proposal's key, or is
+        # dropped when it is not in this run (the same rule as `depends_on`).
+        for index, task in enumerate(proposal.tasks, 1):
+            refs = task.get("blocked_by")
+            if not refs:
+                task.pop("blocked_by", None)
+                continue
+            out: list = []
+            for ref in refs:
+                if isinstance(ref, bool):
+                    continue
+                if isinstance(ref, int):
+                    if 1 <= ref <= len(proposal.tasks) and ref != index and ref not in out:
+                        out.append(ref)
+                    continue
+                key = by_source_id.get((proposal.kind, group, str(ref)))
+                if key and key != proposal.source_key and key not in out:
+                    out.append(key)
+            if out:
+                task["blocked_by"] = out
+            else:
+                task.pop("blocked_by", None)
     return proposals[:MAX_PROPOSALS]
 
 
@@ -335,6 +364,26 @@ def _tools_for(board, *, actor: str, emit=None) -> T.BoardTools:
         return board
     return T.BoardTools(board, emit=emit, enforce_limits=False, duplicate_check=False,
                         context=T.ToolContext(actor=actor))
+
+
+def _task_arg(task: dict, created: dict) -> dict:
+    """One `## Tasks` item as `board_update_card` takes it.
+
+    `blocked_by` carries two sorts of reference (`Proposal.tasks`): a number, which is another
+    item of this very card and goes through untouched, and another proposal's key, which is a
+    card — written as `#ID` once that card has been created, and dropped when it has not, since
+    a marker naming a card that does not exist is a `relay-board.py check` error.
+    """
+    out = {"text": task["text"], "status": task["status"]}
+    refs: list = []
+    for ref in task.get("blocked_by") or ():
+        if isinstance(ref, int) and not isinstance(ref, bool):
+            refs.append(ref)
+        elif ref in created:
+            refs.append(f"#{created[ref]['id']}")
+    if refs:
+        out["blocked_by"] = refs
+    return out
 
 
 def _fail(result: dict, what: str) -> None:
@@ -408,7 +457,7 @@ def apply(board, proposals: Sequence[Proposal], *, tab: str | None = None,
         if fields:
             args["fields"] = fields
         if proposal.tasks:
-            args["tasks"] = [{"text": t["text"], "status": t["status"]} for t in proposal.tasks]
+            args["tasks"] = [_task_arg(t, created) for t in proposal.tasks]
         update = tools.run("board_update_card", args)
         _fail(update, f"filling in {proposal.source_key}")
         result["hash"] = update.get("hash", result["hash"])

@@ -79,6 +79,9 @@ class RestrictedExecutor(ToolExecutor):
         self.allowed = frozenset(allowed) | extra
         # Its commands end with its run and are not the pane's list to show.
         self.announce_jobs = False
+        # It has no pane, and the user has no idea it is running: it cannot ask them anything
+        # (#MQ9C). A definition that lists ask_user gets the same refusal as any unknown tool.
+        self.can_ask = False
 
     def tools(self) -> list[dict]:
         return [tool for tool in super().tools() if tool["function"]["name"] in self.allowed]

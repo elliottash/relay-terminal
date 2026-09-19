@@ -280,11 +280,14 @@ private slots:
 
     void reasonsAreAClosedSet()
     {
-        QCOMPARE(reasons().size(), 10);
+        QCOMPARE(reasons().size(), 11);
         for (const QString &reason : reasons()) QVERIFY(isReason(reason));
         QVERIFY(isReason(QStringLiteral("switchboard")));
         QVERIFY(isReason(QStringLiteral("init-command")));
         QVERIFY(isReason(QStringLiteral("agent-card")));
+        // The first prompt sent to the agent in a project with no board is trigger (1) of the
+        // init question: a yes attaches the tab with this reason (src/ProjectInit.h).
+        QVERIFY(isReason(QStringLiteral("agent-work")));
         QVERIFY(!isReason(QStringLiteral("because I felt like it")));
         QVERIFY(!isReason(QString()));
         QVERIFY(!isReason(QStringLiteral("Switchboard")));

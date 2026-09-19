@@ -101,6 +101,43 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_the_allowance_chip_is_the_desktops_words(self):
+        state = fixture("allowance")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "allowance")
+                chip = await browser.evaluate(
+                    "(() => { const c = document.querySelector('.rp-allowance');"
+                    " return c && {text: c.textContent, title: c.title, warn: c.dataset.warn,"
+                    " hidden: c.hidden}; })()")
+                # The desktop's words, character for character, with its detail as the title and
+                # the warn style at 10% and below (section 16: the view writes none of them).
+                self.assertEqual(chip["text"], state["allowance"]["label"])
+                self.assertEqual(chip["title"], state["allowance"]["detail"])
+                self.assertEqual(chip["warn"], "true")
+                self.assertFalse(chip["hidden"])
+                for percent, warn in ((10, "true"), (11, "false")):
+                    low = json.dumps({**state, "seq": state["seq"] + percent,
+                                      "allowance": {**state["allowance"], "percent_left": percent,
+                                                    "warn": percent <= 10}})
+                    self.assertTrue(await browser.evaluate(f"window.paneDemo.update({low})"))
+                    self.assertEqual(await browser.evaluate("document.querySelector('.rp-allowance').dataset.warn"),
+                                     warn)
+                # A state that stops carrying one — the pane moved to a provider with a key —
+                # hides the chip again.
+                without = {**state, "seq": state["seq"] + 40}
+                without.pop("allowance")
+                self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(without)})"))
+                self.assertTrue(await browser.evaluate("document.querySelector('.rp-allowance').hidden"))
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_the_cross_sends_queue_remove_naming_the_desktops_row(self):
         state = fixture("busy_queue")
         steer = next(row for row in state["queue"]["rows"] if row["kind"] == "steer")

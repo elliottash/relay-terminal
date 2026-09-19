@@ -273,11 +273,15 @@ class LocalTransportTests(unittest.TestCase):
         self.assertEqual(len(self.server.requests), 3)
         self.assertEqual([e['text'] for e in self.events if e['event'] == 'status'], ['The local server is loading its model…'])
 
-    def test_a_hosted_503_is_not_retried(self):
+    def test_a_hosted_503_is_asked_again(self):
+        # The local wait above is for a server still loading its weights; a hosted provider's 503
+        # is a transient refusal, and since card #VMZP it is asked again like any other.
         self.server.fail(503, {'error': 'overloaded'})
-        with self.assertRaises(ProviderError):
-            self.ask(self.provider(local=False))
-        self.assertEqual(len(self.server.requests), 1)
+        self.server.stream(sse({'content': 'back up'}), sse(finish='stop'), DONE)
+        provider = self.provider(local=False)
+        provider.HTTP_RETRY_BASE_S = provider.HTTP_RETRY_CEILING_S = 0.01
+        self.assertEqual(self.ask(provider)['content'], 'back up')
+        self.assertEqual(len(self.server.requests), 2)
 
     def test_overflow_is_named_and_the_body_is_never_quoted(self):
         body = {'error': {'code': 400, 'type': 'exceed_context_size_error', 'n_ctx': 8192,

@@ -133,7 +133,7 @@ if __package__ in (None, ""):
 
 from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
     cloudflare as cloudflare_mod, email as email_mod, panes as panes_mod, \
-    tailnet as tailnet_mod, terminal as terminal_mod, wire
+    tailnet as tailnet_mod, terminal as terminal_mod, wire, ws
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -171,7 +171,9 @@ def probe_hosted(origin: str, timeout: float = HOSTED_PROBE_TIMEOUT) -> str:
     from urllib.parse import urlsplit
     name = urlsplit(origin).netloc or origin
     try:
-        with urllib.request.urlopen(f"{origin}/v1/health", timeout=timeout) as response:
+        request = urllib.request.Request(f"{origin}/v1/health",
+                                         headers={"User-Agent": ws.USER_AGENT})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             if response.status == 200 and json.loads(response.read()).get("ok"):
                 return ""
     except Exception as error:                     # refused, timed out, TLS, not JSON: all "no"

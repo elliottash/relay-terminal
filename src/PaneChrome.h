@@ -18,6 +18,7 @@
 #include "PaneView.h"
 
 #include "PaneStatus.h"
+#include "PaneUsage.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -50,7 +51,8 @@ namespace ps = relay::panestatus;
 
 inline ps::Tokens tokens() {
     namespace t = relay::theme;
-    return {t::Background, t::Text, t::TextMuted, t::Shell, t::Agent, t::Success, t::Warning, t::Error, t::Action};
+    return {t::Background, t::Text,    t::TextMuted, t::Shell, t::Agent,
+            t::Success,    t::Warning, t::Error,     t::Action, t::Tool};
 }
 
 // "appearance/pane_colours": type (default), group or off. Read once and cached; the Options pane
@@ -193,15 +195,46 @@ inline void paintTypeGlyph(QPainter &p, const QRectF &box, ps::Glyph glyph, cons
     p.restore();
 }
 
-// A pane state's glyph. Each has its own shape so it reads without colour: a ring (idle), a
-// triangle (running), a four-point star (the agent), a star with two dots (subagents), a prompt
-// chevron (a suggested command), a tick (done), a disc with a cross (failed) and a diamond with an
-// exclamation mark (needs you). `ground` is what is under it, for the marks cut into a filled shape.
-inline void paintStateGlyph(QPainter &p, const QRectF &box, ps::State state, const QColor &ink, const QColor &ground) {
+// The Relay mark, one ink: the cord chevron, the dash and the seated tip, redrawn from
+// data/icons/org.relayterminal.Relay-symbolic.svg (16x16) into the glyph box. It is the live
+// states' glyph (card #4E13: "a blue blinking relay icon (terminal program running) or purple
+// blinking relay icon (agent working)") — the app saying its own name where work is happening.
+// `ground` fills the ring's hole, as the other filled shapes do for their cut marks.
+inline void paintRelayMark(QPainter &p, const QRectF &box, const QColor &ink, const QColor &ground) {
     p.save();
     p.setRenderHint(QPainter::Antialiasing);
-    const qreal u = std::min(box.width(), box.height()) / 14.0;
-    const QPointF c = box.center();
+    const qreal u = std::min(box.width(), box.height()) / 16.0;
+    auto at = [&](qreal x, qreal y) { return box.topLeft() + QPointF(x, y) * u; };
+    // The cord: a > shape, stroked with round ends as the icon's own is.
+    p.setPen(QPen(ink, 1.9 * u, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    p.drawPolyline(QPolygonF(QVector<QPointF>{at(2.6, 3.6), at(6.4, 8.0), at(2.6, 12.4)}));
+    // The dash.
+    p.setPen(Qt::NoPen);
+    p.setBrush(ink);
+    p.drawRoundedRect(QRectF(at(7.2, 7.05), at(11.0, 8.95)), 0.95 * u, 0.95 * u);
+    // The seated tip: a filled ring with its hole in the ground's colour.
+    p.drawEllipse(at(12.9, 8.0), 2.35 * u, 2.35 * u);
+    p.setBrush(ground);
+    p.drawEllipse(at(12.9, 8.0), 1.15 * u, 1.15 * u);
+    p.restore();
+}
+
+// A pane state's glyph. Each has its own shape so it reads without colour: a ring (idle), the
+// Relay mark for work happening now (running, working, subagents — card #4E13), a prompt chevron
+// (a suggested command), a tick (done), a disc with a cross (failed) and a diamond with an
+// exclamation mark (needs you). `ground` is what is under it, for the marks cut into a filled shape.
+// A live state blinks by `scale` (pulseScale, cards #V8KT, #4E13) — a scale, never an opacity, so
+// the ink keeps its contrast at every step of the pulse.
+inline void paintStateGlyph(QPainter &p, const QRectF &box, ps::State state, const QColor &ink, const QColor &ground,
+                            qreal scale = 1.0) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    const QRectF sized = scale >= 1.0 ? box
+        : QRectF(box.center() - QPointF(box.width(), box.height()) * scale / 2,
+                 QSizeF(box.width(), box.height()) * scale);
+    const qreal u = std::min(sized.width(), sized.height()) / 14.0;
+    const QPointF c = sized.center();
     auto at = [&](qreal x, qreal y) { return c + QPointF(x, y) * u; };
     QPen pen(ink, std::max(1.0, 1.4 * u), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     p.setPen(pen); p.setBrush(Qt::NoBrush);
@@ -209,20 +242,14 @@ inline void paintStateGlyph(QPainter &p, const QRectF &box, ps::State state, con
     case ps::State::Idle:
         p.drawEllipse(c, 3.6 * u, 3.6 * u);
         break;
-    case ps::State::Running: {
-        p.setBrush(ink);
-        p.drawPolygon(QPolygonF(QVector<QPointF>{at(-3.2, -4.6), at(4.6, 0), at(-3.2, 4.6)}));
-        break;
-    }
+    case ps::State::Running:
     case ps::State::Working:
-        p.setPen(Qt::NoPen); p.setBrush(ink);
-        p.drawPath(fourPointStar(c, 6.2 * u, 1.9 * u));
-        break;
     case ps::State::Subagents:
-        p.setPen(Qt::NoPen); p.setBrush(ink);
-        p.drawPath(fourPointStar(at(-2.2, -1.6), 4.8 * u, 1.5 * u));
-        p.drawEllipse(at(3.6, 3.6), 1.5 * u, 1.5 * u);
-        p.drawEllipse(at(-0.6, 5.0), 1.2 * u, 1.2 * u);
+        // Work happening now is the product's own mark, in the work's colour (#4E13). The
+        // subagent badge beside it says how many; the word beside it says whose work it is.
+        p.restore();
+        paintRelayMark(p, sized, ink, ground);
+        p.save();
         break;
     case ps::State::Recommends:
         p.drawPolyline(QPolygonF(QVector<QPointF>{at(-5, -4), at(-1, 0), at(-5, 4)}));
@@ -250,10 +277,40 @@ inline void paintStateGlyph(QPainter &p, const QRectF &box, ps::State state, con
     p.restore();
 }
 
+// The subagent badge (card #YMSR): the agent's violet chip, the agent's own four-point star and
+// the count beside it, in a `box` of the badge's own size. A free function like the two glyphs
+// above, so a rendering test can paint one and measure it rather than trust its geometry; `radius`
+// comes from the theme's square flag, as the chips' does. An empty text paints nothing at all —
+// "if applicable" is the badge's first rule, and the widget above it is hidden then too.
+// The star is the mark the state glyph uses for agent work (State::Working, and the subagents mark
+// with its dots), so the number reads as agent work even with the colour gone.
+inline void paintSubagentBadge(QPainter &p, const QRectF &box, const QString &text, const ps::BadgeStyle &style,
+                               qreal radius, const QFont &font) {
+    if (text.isEmpty()) return;
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(style.line, 1));
+    p.setBrush(style.fill);
+    p.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
+    p.setPen(Qt::NoPen);
+    p.setBrush(style.ink);
+    p.drawPath(fourPointStar(QPointF(7 + 6, box.center().y()), 5.0, 1.7));
+    p.setFont(font);
+    p.setPen(style.ink);
+    p.drawText(QRectF(7 + 12 + 4, box.top(), box.width() - (7 + 12 + 4) - 6, box.height()),
+               Qt::AlignLeft | Qt::AlignVCenter, text);
+    p.restore();
+}
+
 // The tab's icon: the most urgent state among its terminals, with a red corner mark when one of
 // them is in a remote session (the ⇄ itself when nothing more urgent is going on). A tab with no
-// terminal shows its first special pane's type glyph instead.
-inline QIcon tabIcon(bool hasTerminal, ps::State state, bool remote, ps::Glyph typeGlyph, const QColor &typeInk, qreal dpr) {
+// terminal shows its first special pane's type glyph instead. On top of that, the tab's live mark
+// (cards #V8KT, #4E13): when work is happening in the tab (`live`) the icon blinks if it is
+// itself that work, and otherwise carries a blinking corner dot in the work's own colour — the
+// terminal's blue for a command, the agent's violet for agent work — so a news icon (done, needs
+// you) never hides that a sibling pane is busy.
+inline QIcon tabIcon(bool hasTerminal, ps::State state, bool remote, ps::Glyph typeGlyph, const QColor &typeInk, qreal dpr,
+                     ps::State live = ps::State::Idle, int phase = -1) {
     const int size = 16;
     QPixmap pixmap(QSize(size, size) * dpr);
     pixmap.setDevicePixelRatio(dpr);
@@ -261,19 +318,31 @@ inline QIcon tabIcon(bool hasTerminal, ps::State state, bool remote, ps::Glyph t
     QPainter p(&pixmap);
     const ps::Tokens t = tokens();
     const QRectF box(1, 1, size - 2, size - 2);
+    bool drewStateGlyph = false;
     if (!hasTerminal) {
-        if (typeGlyph == ps::Glyph::None) return {};
+        if (typeGlyph == ps::Glyph::None) { p.end(); return {}; }
         paintTypeGlyph(p, box, typeGlyph, typeInk);
     } else if (remote && ps::urgency(state) <= ps::urgency(ps::State::Running)) {
         paintTypeGlyph(p, box, ps::Glyph::Remote, t.error);
     } else {
-        paintStateGlyph(p, box, state, ps::stateInk(state, t), t.background);
+        drewStateGlyph = true;
+        const bool blinks = live != ps::State::Idle && state == live;
+        paintStateGlyph(p, box, state, ps::stateInk(state, t), t.background, blinks ? ps::pulseScale(phase) : 1.0);
         if (remote) {
             p.setRenderHint(QPainter::Antialiasing);
             p.setPen(QPen(t.background, 1.5));
             p.setBrush(t.error);
             p.drawEllipse(QPointF(size - 3.5, size - 3.5), 3.0, 3.0);
         }
+    }
+    if (hasTerminal && live != ps::State::Idle && !(drewStateGlyph && state == live)) {
+        // The ssh mark keeps its corner; the live dot takes the one across from it.
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(t.background, 1.2));
+        p.setBrush(ps::stateInk(live, t));
+        const QPointF at(remote ? QPointF(3.5, size - 3.5) : QPointF(size - 3.5, size - 3.5));
+        const qreal r = 2.8 * ps::pulseScale(phase);
+        p.drawEllipse(at, r, r);
     }
     p.end();
     return QIcon(pixmap);
@@ -416,7 +485,9 @@ public:
     QString path() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
     // A preview of a file on another machine (#S5SH) has no folder here: its path is an
     // `ssh://host/path`, and the directory part of it names nothing on this disk.
-    QString cwd() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : (m_preview && m_preview->isRemote()) ? QString() : QFileInfo(path()).absolutePath(); }
+    QString cwd() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? m_subagentCwd
+                                 : m_explorer ? (m_explorer->isRemote() ? QString() : m_explorer->root())
+                                 : (m_preview && m_preview->isRemote()) ? QString() : QFileInfo(path()).absolutePath(); }
     QString title() const {
         if (m_settingsView) return m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("Actions") : QStringLiteral("Options");
         if (m_board) return m_board->title();
@@ -428,6 +499,7 @@ public:
         // "nginx.conf" in a tab would be indistinguishable from this machine's: a file on a host
         // is named by its host and its whole path, with the ● of an unsaved edit (#S5SH).
         if (m_preview && m_preview->isRemote()) return m_preview->title();
+        if (m_explorer && m_explorer->isRemote()) return m_explorer->title();
         const QString name = QFileInfo(path()).fileName();
         return name.isEmpty() ? path() : name;
     }
@@ -599,10 +671,15 @@ public:
         const QString host = remote ? relay::panestatus::remoteHost(remoteCommand) : QString();
         const QString program = remote ? QFileInfo(remoteCommand.section(' ', 0, 0)).fileName() : QString();
         if (state != m_state) {
+            const bool wasLive = relay::panestatus::isLive(m_state);
             m_state = state;
             m_glyph->setToolTip(relay::panestatus::stateLabel(state));
             m_glyph->setProperty("paneState", relay::panestatus::stateName(state));
-            m_glyph->update();
+            m_glyph->setLive(relay::panestatus::isLive(state));   // the live glyph blinks (#V8KT, #4E13)
+            m_word->setState(state);                              // ... and says its word
+            // The word takes room from the title, so the title re-elides around it.
+            if (relay::panestatus::isLive(state) != wasLive)
+                if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
         }
         if (remote != m_remote || host != m_remoteHost) {
             m_remote = remote; m_remoteHost = host;
@@ -622,6 +699,19 @@ public:
             m_phoneChip->setVisible(phone);
             if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
         }
+    }
+
+    // The pane's resource meter (issue #D03W). Called by the same 400 ms poll that calls
+    // setStatus(); the chip hides itself when the pane is using nothing worth a read.
+    void setUsage(const relay::usage::Sample &sample) {
+        if (m_usageChip) m_usageChip->setSample(sample);
+    }
+
+    // How many subagents this pane's agent has running, as the badge beside the state's word
+    // (card #YMSR). Same poll; the badge hides itself at zero, which is every pane that has never
+    // started one.
+    void setSubagents(int live) {
+        if (m_subagentBadge) m_subagentBadge->setCount(live);
     }
 
     // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10.3). The chip beside the pane's title
@@ -691,6 +781,9 @@ private:
         QWidget *header = pane->headerWidget();
         if (!row || !header) return;
         m_glyph = new PaneStateGlyph(this);
+        m_word = new PaneStateWord(this);
+        m_subagentBadge = new PaneSubagentBadge(this);
+        m_usageChip = new PaneUsageChip;
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
         m_phoneChip->setText(QStringLiteral("phone"));
@@ -698,8 +791,13 @@ private:
                                                "The share chip under the prompt box shows the code or stops it."));
         m_remoteChip->hide(); m_phoneChip->hide();
         row->insertWidget(0, m_glyph);
-        row->insertWidget(1, m_remoteChip);
-        row->insertWidget(2, m_phoneChip);
+        row->insertWidget(1, m_word);
+        // The subagent badge reads with the state's word: both are what this pane's agent is doing
+        // now (card #YMSR). The safety chips (ssh, phone) keep their places to the right of them.
+        row->insertWidget(2, m_subagentBadge);
+        row->insertWidget(3, m_remoteChip);
+        row->insertWidget(4, m_phoneChip);
+        row->insertWidget(5, m_usageChip);
         m_backdrop = new RemoteBackdrop(pane);
         m_backdrop->hide();
         m_backdrop->lower();
@@ -726,13 +824,28 @@ protected:
     }
 
 private:
-    // The state glyph at the start of a terminal's title row.
+    // The state glyph at the start of a terminal's title row. A live state blinks (cards #V8KT,
+    // #4E13): the glyph pulses on the waiting dots' own clock (Pane::refreshBackgroundWait), and
+    // the desktop's reduce-motion signal — a cursor flash time of 0 — leaves it still at full size.
     class PaneStateGlyph final : public QWidget {
     public:
         explicit PaneStateGlyph(PaneChrome *chrome) : m_chrome(chrome) {
             setObjectName(QStringLiteral("paneStateGlyph"));
-            setFixedSize(14, 14);
+            setFixedSize(16, 16);
             setToolTip(relay::panestatus::stateLabel(relay::panestatus::State::Idle));
+        }
+        void setLive(bool live) {
+            if (live) {
+                if (!m_pulse) {
+                    m_pulse = new QTimer(this);
+                    m_pulse->setInterval(600);   // the waiting dots' clock: four steps, two levels
+                    connect(m_pulse, &QTimer::timeout, this, [this] { ++m_phase; update(); });
+                }
+                if (QApplication::cursorFlashTime() > 0) m_pulse->start();
+            } else if (m_pulse) {
+                m_pulse->stop();
+            }
+            update();
         }
     protected:
         void paintEvent(QPaintEvent *) override {
@@ -741,10 +854,53 @@ private:
             const relay::panestatus::State s = m_chrome->state();
             // The ground under a filled glyph's cut-out mark: the remote band when there is one.
             const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
-            relay::chrome::paintStateGlyph(p, QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), s, relay::panestatus::stateInk(s, t), ground);
+            const bool blinking = m_pulse && m_pulse->isActive();
+            relay::chrome::paintStateGlyph(p, QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), s, relay::panestatus::stateInk(s, t), ground,
+                                           blinking ? relay::panestatus::pulseScale(m_phase) : 1.0);
         }
     private:
         PaneChrome *m_chrome;
+        QTimer *m_pulse = nullptr;
+        int m_phase = 0;
+    };
+
+    // The live state's word beside the glyph — "Command running", "Relaying…", "Subagents
+    // working" — in the state's own colour (the terminal's blue, the agent's violet) lifted to
+    // reading strength on the header's ground (card #V8KT). Painted, not a QLabel, for the same
+    // reason the chips are: the colour follows the state.
+    class PaneStateWord final : public QWidget {
+    public:
+        explicit PaneStateWord(PaneChrome *chrome) : m_chrome(chrome) {
+            setObjectName(QStringLiteral("paneStateWord"));
+            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+            hide();
+        }
+        void setState(relay::panestatus::State state) {
+            setToolTip(relay::panestatus::stateLabel(state));
+            const QString text = relay::panestatus::isLive(state) ? relay::panestatus::stateLabel(state) : QString();
+            if (text == m_text) return;
+            m_text = text;
+            updateGeometry(); update();
+            setVisible(!m_text.isEmpty());   // Pane::updateHeader re-elides the title around it
+        }
+        QSize sizeHint() const override {
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            return {QFontMetrics(bold).horizontalAdvance(m_text) + 2, 18};
+        }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            if (m_text.isEmpty()) return;
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
+            QPainter p(this);
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            p.setFont(bold);
+            p.setPen(relay::panestatus::stateText(m_chrome->state(), ground, t));
+            p.drawText(rect(), Qt::AlignLeft | Qt::AlignVCenter, m_text);
+        }
+    private:
+        PaneChrome *m_chrome;
+        QString m_text;
     };
 
     // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
@@ -790,6 +946,151 @@ private:
         bool m_alarm = false;
     };
 
+    // The pane's resource meter (issue #D03W): "12% 3%" with a die and a memory-module glyph,
+    // right of the phone chip in the header row. Quiet on purpose — plain ink, no band, colours
+    // only when a value is high — and absent while the pane costs nothing worth reading, so an
+    // idle terminal looks exactly as it did before.
+    class PaneUsageChip final : public QWidget {
+    public:
+        explicit PaneUsageChip() {
+            setObjectName(QStringLiteral("paneUsageChip"));
+            setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            setAccessibleName(QStringLiteral("Pane CPU and memory"));
+        }
+        void setSample(const relay::usage::Sample &sample) {
+            m_sample = sample;
+            const bool show = sample.valid && relay::usage::worthShowing(sample) && enabled();
+            if (show == isVisible() && m_text == text()) { update(); return; }
+            m_text = text();
+            setToolTip(QStringLiteral("This pane's share of this machine\\n%1\\n\\n"
+                                      "Counts the shell, the program it is running and this pane's agent "
+                                      "worker, with their children. A remote pane measures the local ssh "
+                                      "client, not the far machine.")
+                           .arg(relay::usage::describe(sample)));
+            setVisible(show);
+            updateGeometry();
+            update();
+            // Appearing or leaving changes what the title has to elide around.
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+        }
+        QSize sizeHint() const override {
+            if (!isVisible() && m_text.isEmpty()) return {0, 0};
+            const QFontMetrics metrics(font());
+            return {7 + kGlyph + 4 + metrics.horizontalAdvance(section(0)) + 10 + kGlyph + 4
+                        + metrics.horizontalAdvance(section(1)) + 7, 18};
+        }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            if (m_text.isEmpty()) return;
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            QPainter p(this);
+            p.setFont(font());
+            p.setRenderHint(QPainter::Antialiasing);
+            const QFontMetrics metrics(font());
+            int x = 7;
+            for (int i = 0; i < 2; ++i) {
+                const double value = i == 0 ? m_sample.cpuPercent : m_sample.ramPercent;
+                const QColor ink = value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
+                p.setPen(QPen(ink, 1.2));
+                if (i == 0) paintDie(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
+                else paintModule(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
+                x += kGlyph + 4;
+                const QString label = section(i);
+                p.setPen(ink);
+                p.drawText(QRectF(x, 0, metrics.horizontalAdvance(label) + 2, height()),
+                           Qt::AlignLeft | Qt::AlignVCenter, label);
+                x += metrics.horizontalAdvance(label);
+            }
+        }
+    private:
+        static constexpr int kGlyph = 13;
+        // A processor die: a square with a smaller square inside, pins on the sides.
+        static void paintDie(QPainter &p, const QRectF &r, const QColor &ink) {
+            p.setPen(QPen(ink, 1.1));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(QRectF(r.center().x() - 3, r.center().y() - 3, 6, 6), 1.5, 1.5);
+            for (int k = -1; k <= 1; ++k) {
+                const qreal y = r.center().y() + k * 2.4;
+                p.drawLine(QPointF(r.left() + 0.5, y), QPointF(r.center().x() - 3, y));
+                p.drawLine(QPointF(r.center().x() + 3, y), QPointF(r.right() - 0.5, y));
+            }
+        }
+        // A memory module: a body with pins along its bottom edge.
+        static void paintModule(QPainter &p, const QRectF &r, const QColor &ink) {
+            p.setPen(QPen(ink, 1.1));
+            p.setBrush(Qt::NoBrush);
+            const QRectF body(r.left() + 1, r.top() + 1.5, r.width() - 2, r.height() - 5.5);
+            p.drawRoundedRect(body, 1.2, 1.2);
+            for (int k = 0; k < 4; ++k) {
+                const qreal x = body.left() + 1.5 + k * 2.6;
+                if (x >= body.right() - 0.5) break;
+                p.drawLine(QPointF(x, body.bottom()), QPointF(x, r.bottom() - 0.5));
+            }
+        }
+        static bool enabled() {
+            return QSettings().value(QStringLiteral("appearance/pane_usage"), true).toBool();
+        }
+        QString section(int i) const {
+            return i == 0 ? m_text.section(QLatin1Char('/'), 0, 0) : m_text.section(QLatin1Char('/'), 1, 1);
+        }
+        QString text() const {
+            if (!m_sample.valid || !relay::usage::worthShowing(m_sample)) return {};
+            return relay::usage::formatPercent(m_sample.cpuPercent) + QLatin1Char('%') + QLatin1Char('/')
+                 + relay::usage::formatPercent(m_sample.ramPercent) + QLatin1Char('%');
+        }
+        relay::usage::Sample m_sample;
+        QString m_text;   // "12%/3%"; empty when the chip is hidden
+    };
+
+    // The subagent badge (card #YMSR): how many agents this pane's agent has running, right of the
+    // state's word. Painted, not a QLabel, for the chips' reason — its ink follows the theme and
+    // the ground it sits on — and hidden at zero, so a pane that has never started a subagent looks
+    // exactly as it did before. A read-out, not a button: a click on the header moves the pane, and
+    // the tooltip is where the key that opens the subagents pane is taught.
+    class PaneSubagentBadge final : public QWidget {
+    public:
+        explicit PaneSubagentBadge(PaneChrome *chrome) : m_chrome(chrome) {
+            setObjectName(QStringLiteral("paneSubagentBadge"));
+            setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            setAccessibleName(QStringLiteral("Subagents running"));
+            hide();
+        }
+        void setCount(int live) {
+            const QString text = relay::panestatus::subagentBadgeText(live);
+            // The key is read live, so a rebound one is right here too; comparing it as well means a
+            // rebind while the count stands still still refreshes the tooltip.
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane"));
+            if (text == m_text && keys == m_keys) return;
+            m_text = text; m_keys = keys;
+            setToolTip(relay::panestatus::subagentBadgeTooltip(live, keys));
+            setVisible(!m_text.isEmpty());
+            updateGeometry();
+            update();
+            // Appearing, leaving or widening changes what the title has to elide around.
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+        }
+        QSize sizeHint() const override {
+            if (m_text.isEmpty()) return {0, 0};
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            return {7 + 12 + 4 + QFontMetrics(bold).horizontalAdvance(m_text) + 7, 18};
+        }
+        QSize minimumSizeHint() const override { return sizeHint(); }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            if (m_text.isEmpty()) return;
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            QPainter p(this);
+            relay::chrome::paintSubagentBadge(p, QRectF(rect()), m_text, relay::panestatus::subagentBadgeStyle(ground, t),
+                                              relay::chrome::paneRadius() > 0 ? 5 : 0, bold);
+        }
+    private:
+        PaneChrome *m_chrome;
+        QString m_text;
+        QString m_keys;
+    };
+
     // The remote band behind a terminal's title row: the error hue, hatched, with a firm line under
     // it. Hatching is a texture no pane type uses, so it reads as "not here" even without colour.
     class RemoteBackdrop final : public QWidget {
@@ -819,7 +1120,10 @@ private:
 
     int m_fullWidth = 0;
     PaneStateGlyph *m_glyph = nullptr;
+    PaneStateWord *m_word = nullptr;
+    PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
+    PaneUsageChip *m_usageChip = nullptr;
     RemoteBackdrop *m_backdrop = nullptr;
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;

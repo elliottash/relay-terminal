@@ -246,6 +246,9 @@ FORWARDED_EVENTS = frozenset({
     # User-facing like model_changed, not routing internals like route: the owner's decision for
     # #EM1E is that Relay says when it swaps to a vision model, and a phone is a user surface.
     "vision_route", "vision_route_ended", "vision_unavailable",
+    # Same call for a plan-mode turn's model (protocol 13.11, #Z0VG): the pane prints a ◆ line
+    # when a plan turn runs on the planning role's model, so a phone watching the pane sees it too.
+    "plan_route", "plan_route_ended",
     # Pane titles and tab labels: what a phone needs to label the panes it is showing. The
     # session summary (protocol 18.4) is the same thing at greater length - this pane's own
     # description, written from this pane's own conversation, which the phone is already watching.
@@ -264,6 +267,11 @@ FORWARDED_EVENTS = frozenset({
     # The agent handing a command to the user's real shell (protocol 22): same reason. The phone
     # only watches; the desktop pane is the one that answers it.
     "terminal_command",
+    # The agent asking the user something (protocol 27, #MQ9C). A phone must see the card: the
+    # turn is blocked on it, and a person holding the phone is exactly who it is waiting for. The
+    # answer travels back as an ordinary prompt from the device, which the desktop pane reads as
+    # the answer, so nothing new goes the other way.
+    "question", "question_closed",
     # The commands the agent left running (backend/relay_core/jobs.py): a phone watching a pane
     # should know a server is still up, for the same reason it sees tool_result.
     "jobs",
@@ -317,6 +325,21 @@ WITHHELD_EVENTS: dict[str, str] = {
     # CLIENT_TYPES, so a remote participant has no way to take part in either.
     "board_state": "desktop-local administration; carries local file paths",
     "board_init_request": "desktop-local administration; the desktop's own dialog",
+    # Initializing a project and importing what is already in it (protocol 19.13). The probe's
+    # answer is a survey of one directory on this machine — every path in it is local, and it is
+    # read for a dialog only the desktop can show; the proposals and what an import created carry
+    # the same paths. Same call as `board_state`: the *cards* an import made reach a phone in the
+    # `board_changed` that follows, which is the part a phone can use.
+    "project_probe_result": "desktop-local administration; local file paths",
+    "board_import_proposals": "desktop-local administration; local file paths",
+    "board_imported": "desktop-local administration; local file paths",
+    # Syncing the board with its GitHub repository (protocol 19.14). Started from the desktop
+    # (`forge_sync_plan`/`forge_sync_run` are not in CLIENT_TYPES), and the plan, the per-card
+    # progress and the summary all name the repository, the local card paths and whatever the
+    # forge refused. The card changes themselves arrive as `board_changed`.
+    "forge_sync_planned": "desktop-local administration; local file paths",
+    "forge_sync_progress": "desktop-local administration; local file paths",
+    "forge_sync_done": "desktop-local administration; local file paths",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",
@@ -351,17 +374,6 @@ WITHHELD_EVENTS: dict[str, str] = {
     # 2026-09-18 because the "denied by default" test had gone red waiting for somebody to; the
     # session that added it can move it to FORWARDED_EVENTS if a phone should show the chip.
     "hosted_quota": "the owner's hosted-account allowance; a reply to the desktop's own request",
-    # The guest event channel of protocol 26.3 (issue GT7X). Everything on it is pane-internal:
-    # `hook` forwards a hook's raw JSON whose tool inputs carry local file paths and contents,
-    # `bridge` carries tool arguments with whole file paths, contents and diffs, and `statusline`,
-    # `state` and `slash` feed desktop surfaces (chips, routing, the `/` popup). The subset a
-    # phone has any use for — the guest's model, context fill and busy flag — already rides
-    # `program_state` beside `guest`, so nothing is lost: same call as `board_created`.
-    "hook": "raw guest hook JSON; tool inputs carry local file paths and contents",
-    "statusline": "shim parse of the guest statusline; the pane-visible subset rides program_state",
-    "state": "guest turn state; guest_busy already rides program_state",
-    "bridge": "guest tool payloads carry local file paths and whole file contents",
-    "slash": "guest slash catalog for the desktop composer popup",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this

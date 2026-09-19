@@ -2,15 +2,21 @@
      edit the card files and regenerate. -->
 # Board
 
-187 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+220 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (108)
+## Features (132)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
+| `#VZ69` | [improving the switchboard functionality](features/2026-09-19-improving-the-switchboard-functionality.md) | inbox |  |  | [8](threads/VZ69.md) |
+| `#9K5H` | [show the thinking trace in the swtichboard as well](features/2026-09-19-show-the-thinking-trace-in-the-swtichboard-as-we.md) | inbox |  |  | [3](threads/9K5H.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
+| `#916B` | [A project picker, a personal inbox and a chip on the tab that says which project it is attached to](features/2026-09-19-project-picker-inbox-and-tab-chip.md) | ready |  | 0/7 |  |
+| `#2Y96` | [The agent's file sandbox is the tab's project, or the directory the pane is in, and never the directory Relay was launched from](features/2026-09-19-agent-sandbox-follows-the-tab-project.md) | ready |  |  |  |
+| `#ZKR0` | [The Switchboard shows the GitHub sync: the plan before the first run, progress, and conflicts](features/2026-09-19-github-sync-in-the-switchboard.md) | ready |  | 0/7 |  |
+| `#4XR8` | [Ctrl+Shift+S pressed on a focused Switchboard closes it: an unclaimed uncommitted edit to adopt or drop](features/2026-09-19-switchboard-key-closes-a-focused-switchboard.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
 | `#SSRQ` | [MCP server support](features/2026-09-17-mcp-support.md) | ready |  |  |  |
 | `#YJK8` | [Portable terminal engine for macOS and Windows](features/2026-09-17-portable-terminal-engine.md) | ready |  |  |  |
@@ -21,14 +27,24 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
-| `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 |  |
+| `#GT7X` | [Claude Code + Codex guest integration (translator first, harness second)](features/2026-09-19-claude-codex-guest-integration.md) | in-progress | agent | 1/8 | [4](threads/GT7X.md) |
+| `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 | [1](threads/97EG.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
+| `#YMSR` | [A subagent badge in the pane header](features/2026-09-19-a-subagent-badge-in-the-pane-header.md) | in-progress | agent |  | [1](threads/YMSR.md) |
+| `#TKS9` | [The open task list under the prompt](features/2026-09-19-the-open-task-list-under-the-prompt.md) | in-progress | agent |  |  |
+| `#6DQ8` | [Calibrate isolation memory limits to system RAM and expose them in Options](features/2026-09-19-calibrate-isolation-memory-limits-to-system-ram.md) | in-progress |  |  | [5](threads/6DQ8.md) |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
+| `#3AZG` | [Cut a new GitHub release with the /connect (join) work so the laptop can install it](features/2026-09-19-cut-a-new-github-release-with-the-connect-join-w.md) | in-progress |  |  | [1](threads/3AZG.md) |
+| `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | in-progress |  |  | [1](threads/JM2M.md) |
+| `#Z0VG` | [Plan-mode turns run on the main model pushed to max reasoning (the "planning" role)](features/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md) | in-progress |  |  | [2](threads/Z0VG.md) |
+| `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
+| `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
 | `#KDK9` | [The Switchboard cleans itself up: `board_cleanup`, its three tools and its changelog](features/needs_qa_llm/2026-09-18-switchboard-cleanup-button.md) | needs-qa-llm | agent |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | agent |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/needs_qa_llm/2026-09-17-aliases-and-workflows.md) | needs-qa-llm | agent |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | agent |  |  |
+| `#MQ9C` | [The planner asks the user questions, in the amber "needs human" ink](features/needs_qa_llm/2026-09-19-the-planner-asks-the-user-questions.md) | needs-qa-llm |  | 10/10 |  |
 | `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | agent |  |  |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/needs_qa_llm/2026-09-17-remote-phone-and-multiplayer.md) | needs-qa-llm | agent |  | [1](threads/W5N2.md) |
@@ -101,8 +117,10 @@
 | `#JH22` | [A Local tier, and /local in the composer](features/needs_qa_llm/2026-09-18-local-tier-and-local-command.md) | needs-qa-llm | agent | 7/7 |  |
 | `#EVW1` | [Board edits: the list's tools sit on the list page, and the header is the way back](features/needs_qa_llm/2026-09-18-in-the-board-put-new-card-at-the-top-of-the-base.md) | needs-qa-llm | agent |  | [4](threads/EVW1.md) |
 | `#XM0T` | [Terminal and agent status icons, with notifications](features/needs_qa_llm/2026-09-18-terminal-and-agent-status-icons-with-notificatio.md) | needs-qa-llm | agent |  | [1](threads/XM0T.md) |
+| `#H7N4` | [Up/Down in the prompt box walks this pane's own history, one file per pane](features/needs_qa_llm/2026-09-19-up-down-in-the-prompt-box-walks-this-pane-s-own.md) | needs-qa-llm | agent |  | [3](threads/H7N4.md) |
 | `#T7BQ` | [Section checkboxes at the top of the board, and room for "Clean up"](features/needs_qa_llm/2026-09-18-section-checkboxes-at-the-top-of-the-board.md) | needs-qa-llm | agent |  |  |
 | `#XS6Q` | [Replace "Ask the agent" on a card with Plan, Edit and Discuss](features/needs_qa_llm/2026-09-18-replace-ask-the-agent-on-a-card-with-plan-edit-a.md) | needs-qa-llm | agent |  | [2](threads/XS6Q.md) |
+| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/needs_qa_llm/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | needs-qa-llm |  | 5/5 | [10](threads/G9VE.md) |
 | `#Y63Z` | [A conversation info button on the pane, with a traceable history including subagent threads](features/needs_qa_llm/2026-09-18-a-conversation-info-button-on-the-pane-with-a-tr.md) | needs-qa-llm | agent |  | [1](threads/Y63Z.md) |
 | `#R6J0` | [Turn the resume-conversations modal into a session manager pane](features/needs_qa_llm/2026-09-18-turn-the-resume-conversations-modal-into-a-sessi.md) | needs-qa-llm | agent |  | [1](threads/R6J0.md) |
 | `#SPBN` | [Distinct headers or colors for each pane type](features/needs_qa_llm/2026-09-18-distinct-headers-or-colors-for-each-pane-type.md) | needs-qa-llm | agent |  | [1](threads/SPBN.md) |
@@ -110,22 +128,33 @@
 | `#D8J3` | [The agent hands a command to the user's terminal: run it, or put it in the prompt box](features/needs_qa_llm/2026-09-18-agent-hands-commands-to-the-terminal.md) | needs-qa-llm | agent | 8/9 |  |
 | `#S5SH` | [SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host](features/needs_qa_llm/2026-09-18-ssh-and-mosh-sessions.md) | needs-qa-llm | agent | 14/14 |  |
 | `#C0PY` | [Copy on highlight works in the info pane and every other read-only pane, not only the terminal](features/needs_qa_llm/2026-09-18-copy-on-highlight-in-panes.md) | needs-qa-llm | agent | 6/6 |  |
+| `#CVHT` | [bolding main points](features/needs_qa_llm/2026-09-19-bolding-main-points.md) | needs-qa-llm | agent |  | [15](threads/CVHT.md) |
+| `#Q7Y9` | [Chord: Ctrl+Alt+Left/Right then Ctrl+Alt+Down docks the pane beneath that neighbor](features/needs_qa_llm/2026-09-19-chord-ctrl-alt-left-right-then-ctrl-alt-down-doc.md) | needs-qa-llm |  | 3/4 | [13](threads/Q7Y9.md) |
+| `#VMZP` | [Retry transient provider refusals (429, 5xx) in the transport](features/needs_qa_llm/2026-09-19-retry-transient-provider-refusals-429-5xx-in-the.md) | needs-qa-llm |  | 6/6 | [7](threads/VMZP.md) |
+| `#4E13` | [Say "relaying…" while an agent turn runs, not "working"](features/needs_qa_llm/2026-09-18-say-relaying-while-an-agent-turn-runs-not-workin.md) | needs-qa-llm | agent | 6/6 | [6](threads/4E13.md) |
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
 | `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
 | `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |
+| `#HDA9` | [/update: download and install the latest release, then restart](features/needs_qa_llm/2026-09-19-update-download-and-install-the-latest-release-t.md) | needs-qa-llm |  |  | [5](threads/HDA9.md) |
+| `#D03W` | [Per-pane CPU and memory meters in the header, tab and session manager](features/needs_qa_llm/2026-09-19-per-pane-cpu-and-memory-meters-in-the-header-tab.md) | needs-qa-llm |  |  | [7](threads/D03W.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (77)
+## Bugs (86)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
+| `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | inbox |  |  | [7](threads/EC58.md) |
+| `#GMSC` | [Missing tests/paneusage_test.cpp breaks cmake generate for the whole tree](changes/2026-09-19-missing-tests-paneusage-test-cpp-breaks-cmake-ge.md) | inbox |  |  | [1](threads/GMSC.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
+| `#T8CN` | [Thinking presentation: collapse in place, markdown, breathing room](changes/2026-09-19-thinking-collapses-in-place.md) | in-progress | agent | 0/7 |  |
+| `#ZYRB` | [Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead](changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md) | in-progress |  |  | [3](threads/ZYRB.md) |
+| `#Y4RX` | [Pane isolation leaks: tmux and Chrome self-scope into app.slice, outside any pane cap](changes/2026-09-19-pane-isolation-leaks-tmux-and-chrome-self-scope.md) | in-progress |  |  | [4](threads/Y4RX.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
@@ -145,7 +174,7 @@
 | `#C4M8` | [The queue strip is one list: steers are rows like the rest](changes/needs_qa_llm/2026-09-18-one-queue-list.md) | needs-qa-llm | agent |  |  |
 | `#P2WD` | [Options and Actions are two panes, open at the same time](changes/needs_qa_llm/2026-09-18-options-and-actions-side-by-side.md) | needs-qa-llm | agent |  |  |
 | `#H7KP` | [Pane buttons that are always there, and a header you can drag](changes/needs_qa_llm/2026-09-18-pane-buttons-and-header-drag.md) | needs-qa-llm | agent |  |  |
-| `#H8VP` | [The prompt box remembers across a restart, and every pane shares one history](changes/needs_qa_llm/2026-09-18-prompt-history-persists.md) | needs-qa-llm | agent |  |  |
+| `#H8VP` | [The prompt box remembers across a restart, and every pane shares one history](changes/needs_qa_llm/2026-09-18-prompt-history-persists.md) | needs-qa-llm | agent |  | [2](threads/H8VP.md) |
 | `#B2XF` | [Every skill reaches the prompt by name, and ~/.claude's nesting is indexed](changes/needs_qa_llm/2026-09-18-skills-every-name-in-the-prompt.md) | needs-qa-llm | agent |  |  |
 | `#HECG` | [Solarized Dark is removed](changes/needs_qa_llm/2026-09-18-solarized-dark-removed.md) | needs-qa-llm | agent |  |  |
 | `#TN4P` | [The agent waited to be asked before using the user's terminal](changes/needs_qa_llm/2026-09-18-the-agent-waits-to-be-asked-in-the-terminal.md) | needs-qa-llm | agent |  |  |
@@ -190,14 +219,18 @@
 | `#Z79Y` | [The output token limit is 128K where 128K is allowed, and each model's own number everywhere else](changes/needs_qa_llm/2026-09-18-output-token-limit-is-per-model.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
 | `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/needs_qa_llm/2026-09-18-markdown-view-labels-say-md.md) | needs-qa-llm | agent |  |  |
+| `#V8KT` | [A running agent or program is not clear enough in a pane](changes/needs_qa_llm/2026-09-19-pane-live-state-not-clear.md) | needs-qa-llm | agent |  | [5](threads/V8KT.md) |
 | `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/needs_qa_llm/2026-09-18-preview-link-has-no-way-back.md) | needs-qa-llm | agent |  |  |
 | `#3W58` | [Markdown files are not rendered as Markdown](changes/needs_qa_llm/2026-09-18-markdown-files-do-not-render.md) | needs-qa-llm | agent |  |  |
 | `#M109` | [The provider dialog: a local server needs no consent box, and the warning says what is wrong](changes/needs_qa_llm/2026-09-18-provider-dialog-local-server-and-specific-warning.md) | needs-qa-llm | agent |  |  |
 | `#E99H` | [File tools refuse absolute paths and parent traversal; the owner does not want that constraint](changes/needs_qa_llm/2026-09-18-file-tools-refuse-absolute-paths-and-parent-trav.md) | needs-qa-llm |  |  | [6](threads/E99H.md) |
 | `#3ES1` | [Changing the model is refused while the agent is working](changes/needs_qa_llm/2026-09-18-changing-the-model-is-refused-while-the-agent-is.md) | needs-qa-llm | agent |  | [1](threads/3ES1.md) |
 | `#W954` | ["command not found" under a request whose first word ends in a comma](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request-whose-first-wo.md) | needs-qa-llm | agent |  | [1](threads/W954.md) |
+| `#N3WC` | ["command not found" under a sentence that names a file](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-sentence-naming-a-fi.md) | needs-qa-llm | agent |  |  |
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
+| `#6GX9` | [A conversation that is still in its first turn is never saved, so the sessions list and full-text search cannot see it](changes/needs_qa_llm/2026-09-19-a-conversation-that-is-still-in-its-first-turn-i.md) | needs-qa-llm |  |  | [5](threads/6GX9.md) |
 | `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
+| `#4OSN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | open | agent | 0/5 |  |
 
 ## Planning (2)
 

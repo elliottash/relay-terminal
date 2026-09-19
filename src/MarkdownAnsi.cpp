@@ -58,6 +58,22 @@ QStringList tableCells(const QString &row) {
     return cells;
 }
 
+// Card #CVHT (bolding main points): the closed keyword lists behind **Done:** / **Need:** /
+// **Problem:**. A bold run is coloured when its *first* word — punctuation stripped, compared
+// case-insensitively — is in one of these lists; anything else stays plain bold, as before.
+const QStringList kDoneWords = {QStringLiteral("done"), QStringLiteral("finished"), QStringLiteral("complete"),
+                                QStringLiteral("completed"), QStringLiteral("ready"), QStringLiteral("success"),
+                                QStringLiteral("passed"), QStringLiteral("fixed"), QStringLiteral("works"),
+                                QStringLiteral("working")};
+const QStringList kProblemWords = {QStringLiteral("problem"), QStringLiteral("error"), QStringLiteral("failed"),
+                                   QStringLiteral("failure"), QStringLiteral("broken"), QStringLiteral("blocked"),
+                                   QStringLiteral("warning"), QStringLiteral("bug")};
+const QStringList kNeedWords = {QStringLiteral("need"), QStringLiteral("needs"), QStringLiteral("question"),
+                                QStringLiteral("waiting"), QStringLiteral("ask"), QStringLiteral("decision")};
+// Enough held characters for the first word of a bold run and a little more; a stray unclosed `**`
+// cannot stall the stream for longer than this.
+constexpr int kBoldHoldMax = 32;
+
 }  // namespace
 
 MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) { m_palette.base = baseSgr; }
@@ -79,6 +95,8 @@ void MarkdownAnsi::resetInline() {
     m_bold = m_italic = m_strike = false;
     m_codeRun = 0;
     m_prev = QChar();
+    m_boldHold.clear();
+    m_boldRole = BoldRole::None;
 }
 
 int MarkdownAnsi::visibleWidth(const QString &rendered) {
@@ -103,6 +121,7 @@ QString MarkdownAnsi::feed(const QString &text) {
 QString MarkdownAnsi::finish() {
     m_final = true;
     QString out = process();
+    flushBoldHold(out);   // an open bold run's held first word still deserves its colour
     if (!m_table.isEmpty()) out += renderTable();
     if (m_lineStarted) out += kReset;
     reset();
@@ -122,7 +141,14 @@ QString MarkdownAnsi::lineBase() const {
 
 QString MarkdownAnsi::style() const {
     QString params = QStringLiteral("0;") + lineBase();
-    if (m_bold) params += QStringLiteral(";1");
+    if (m_bold) {
+        params += QStringLiteral(";1");
+        // Card #CVHT: once a bold run's first word is classified, its role colour holds for the
+        // rest of the run (until the closing marker or the end of the line).
+        if (m_boldRole == BoldRole::Done) params += QLatin1Char(';') + m_palette.done;
+        else if (m_boldRole == BoldRole::Need) params += QLatin1Char(';') + m_palette.need;
+        else if (m_boldRole == BoldRole::Problem) params += QLatin1Char(';') + m_palette.problem;
+    }
     if (m_italic) params += QStringLiteral(";3");
     if (m_strike) params += QStringLiteral(";9");
     if (m_codeRun > 0) params += QLatin1Char(';') + m_palette.inlineCode;
@@ -140,6 +166,7 @@ QString MarkdownAnsi::process() {
         bool lineDone = false;
         while (i < m_pending.size()) {
             if (m_pending.at(i) == QLatin1Char('\n')) {
+                flushBoldHold(out);   // a bold run left open at the line end still gets its colour
                 out += kReset + QLatin1Char('\n');
                 ++i;
                 m_lineStarted = false;
@@ -305,6 +332,13 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
     const auto next = [&](int j) { return atEnd(j) ? QChar(QLatin1Char(' ')) : text.at(j); };
     const auto isSpace = [](QChar ch) { return ch.isNull() || ch.isSpace(); };
 
+    // Card #CVHT: a held first word is classified before any inline marker is handled, so the
+    // markers of a bold run are never mistaken for its text.
+    if (!m_boldHold.isEmpty()
+        && (c == QLatin1Char('*') || c == QLatin1Char('_') || c == QLatin1Char('`')
+            || c == QLatin1Char('~') || c == QLatin1Char('[') || c == QLatin1Char('\\')))
+        flushBoldHold(out);
+
     if (c == QLatin1Char('\\') && m_codeRun == 0) {
         if (atEnd(i + 1) && !m_final) return false;
         const QChar escaped = next(i + 1);
@@ -337,15 +371,16 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
         int left = run > 3 ? 0 : run;
         bool changed = false;
         if (canClose && left > 0) {
-            if (left >= 2 && m_bold) { m_bold = false; left -= 2; changed = true; }
+            if (left >= 2 && m_bold) { m_bold = false; m_boldRole = BoldRole::None; left -= 2; changed = true; }
             if (left >= 1 && m_italic) { m_italic = false; left -= 1; changed = true; }
-            if (left >= 2 && m_bold) { m_bold = false; left -= 2; changed = true; }
+            if (left >= 2 && m_bold) { m_bold = false; m_boldRole = BoldRole::None; left -= 2; changed = true; }
         }
         if (!changed && canOpen && left > 0) {
             if (left >= 2) m_bold = true;
             if (left != 2) m_italic = true;
             left = 0;
             changed = true;
+            if (m_bold) { m_boldRole = BoldRole::None; m_boldHold.clear(); }   // a fresh run: classify it
         }
         if (changed) out += style();
         if (!changed) left = run;
@@ -392,8 +427,40 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
         }
     }
 
+    // Card #CVHT: the first characters of a bold run are held (bounded) until its first word can
+    // be classified, so a role colour can start at the run's very first character.
+    if (m_bold && m_boldRole == BoldRole::None && m_boldHold.size() < kBoldHoldMax) {
+        m_boldHold += c;
+        m_prev = c;
+        ++i;
+        if (m_boldHold.size() >= kBoldHoldMax) flushBoldHold(out);
+        return true;
+    }
+
     out += c; m_prev = c; ++i;
     return true;
+}
+
+// Classifies the held first word of a bold run and emits it in that role's colour (plain bold when
+// the word matches nothing). Card #CVHT.
+void MarkdownAnsi::flushBoldHold(QString &out) {
+    if (m_boldHold.isEmpty()) return;
+    QString word;
+    for (const QChar ch : m_boldHold) {
+        if (ch.isSpace()) break;
+        word += ch;
+    }
+    while (!word.isEmpty() && !word.at(0).isLetterOrNumber()) word.remove(0, 1);
+    while (!word.isEmpty() && !word.back().isLetterOrNumber()) word.chop(1);
+    word = word.toLower();
+    m_boldRole = BoldRole::Plain;
+    if (!word.isEmpty()) {
+        if (kDoneWords.contains(word)) m_boldRole = BoldRole::Done;
+        else if (kNeedWords.contains(word)) m_boldRole = BoldRole::Need;
+        else if (kProblemWords.contains(word)) m_boldRole = BoldRole::Problem;
+    }
+    out += style() + m_boldHold;
+    m_boldHold.clear();
 }
 
 QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {

@@ -22,6 +22,7 @@
 #include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QTextLayout>
 #include <algorithm>
 #include <utility>
 
@@ -73,7 +74,7 @@ void RichEditor::remember(const QString &text) {
         m_history.append(text);
         while (m_history.size() > m_historyMax) m_history.removeFirst();
         // Written now, not at exit: a Relay that is killed rather than quit still remembers this
-        // line, and the pane beside this one sees it on its next browse.
+        // line, and the pane picks it back up if it is ever reopened.
         if (!m_historyPath.isEmpty()) relay::prompthistory::append(m_historyPath, text);
     }
     m_historyIndex = m_history.size();
@@ -97,6 +98,15 @@ void RichEditor::forgetHistory(const QString &path) {
         box->m_history.clear();
         box->m_historyIndex = 0;
         box->m_historyStamp = QString();   // no file: a later one is read when it appears
+        box->m_historySeen = false;
+    }
+}
+
+void RichEditor::forgetAllHistory() {
+    for (RichEditor *box : std::as_const(boxesWithHistoryFiles())) {
+        box->m_history.clear();
+        box->m_historyIndex = 0;
+        box->m_historyStamp = QString();
         box->m_historySeen = false;
     }
 }
@@ -256,11 +266,18 @@ void RichEditor::keyPressEvent(QKeyEvent *event) {
     }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_C) { copy(); return; }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_V) { paste(); return; }
-    // History: Up on the first line and Down on the last line, like a shell prompt.
-    // Alt+arrows are reserved for moving between panes.
+    // History: Up on the first line and Down on the last line, like a shell prompt. The line on
+    // screen, not the paragraph: a prompt that word-wraps moves the caret a row at a time, and Up
+    // browses only from the top row (Down only from the bottom row). Alt+arrows are reserved for
+    // moving between panes.
     const bool up = event->key() == Qt::Key_Up, down = event->key() == Qt::Key_Down;
-    if (mods == Qt::NoModifier && (up || down) && !textCursor().hasSelection()
-        && ((up && textCursor().blockNumber() == 0) || (down && textCursor().blockNumber() == document()->blockCount() - 1))) {
+    const QTextCursor caret = textCursor();
+    const QTextLayout *layout = caret.block().layout();
+    const QTextLine row = layout ? layout->lineForTextPosition(caret.positionInBlock()) : QTextLine();
+    const bool topRow = caret.blockNumber() == 0 && (!row.isValid() || row.lineNumber() == 0);
+    const bool bottomRow = caret.blockNumber() == document()->blockCount() - 1
+        && (!row.isValid() || row.lineNumber() == layout->lineCount() - 1);
+    if (mods == Qt::NoModifier && (up || down) && !caret.hasSelection() && ((up && topRow) || (down && bottomRow))) {
         // A browse begins here: re-read the file first, so this box walks back through what was
         // typed before Relay was last closed and what the other panes have added since.
         if (up && atDraft()) refreshHistory();

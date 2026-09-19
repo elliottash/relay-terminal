@@ -219,6 +219,7 @@ export function mountPane(container, options = {}) {
   const spacer = el('span', 'rp-spacer');
   const clockChip = el('span', 'rp-chip rp-clock');
   const contextChip = el('span', 'rp-chip rp-context');
+  const allowanceChip = el('span', 'rp-chip rp-allowance');
   const modelWrap = el('span', 'rp-model-wrap');
   const model = el('select', 'rp-chip rp-model');
   model.setAttribute('aria-label', 'Model');
@@ -234,7 +235,7 @@ export function mountPane(container, options = {}) {
   const sendMenuButton = button('rp-send-menu', '▾', 'When to send');
   sendMenuButton.setAttribute('aria-haspopup', 'menu');
   sendGroup.append(sendButton, sendMenuButton);
-  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, modelWrap, hostSlot, sendGroup);
+  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, allowanceChip, modelWrap, hostSlot, sendGroup);
   composer.append(line, strip);
 
   // ---- sheets: row actions, the send menu, the session manager -----------------------------
@@ -704,6 +705,13 @@ export function mountPane(container, options = {}) {
     show(contextChip, context ? str(context.label) : '');
     const left = context && typeof context.percent_left === 'number' ? context.percent_left : null;
     contextChip.dataset.warn = left !== null && left <= 15 ? 'true' : 'false';
+    // The Relay Free allowance: the desktop's words, its detail as the title, its warn flag the
+    // same style the context chip warns by. Absent on the pane state: the chip hides (the pane
+    // moved to a provider with a key).
+    const allowance = obj(state.allowance);
+    show(allowanceChip, allowance ? str(allowance.label) : '');
+    allowanceChip.dataset.warn = allowance && allowance.warn === true ? 'true' : 'false';
+    allowanceChip.title = allowance ? str(allowance.detail) : '';
     renderModel();
     const sessions = obj(state.sessions);
     sessionsButton.hidden = !sessions;

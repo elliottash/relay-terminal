@@ -1,0 +1,90 @@
+# Card #4E13 — analysis record (2026-09-19)
+
+## Frame-difference ranges (drive.sh)
+```
+running: tab-bar frames differ in 0..548 px, header in 0..296 px, composer in 0..20640 px (0 = identical)
+relaying: tab-bar frames differ in 0..548 px, header in 0..296 px, composer in 144..492 px (0 = identical)
+spawn: tab-bar frames differ in 0..452 px, header in 0..296 px, composer in 192..568 px (0 = identical)
+```
+
+## Scene analysis (analyze.py)
+```
+=== idle (relay-dark) ===
+  composer OCR: 'Shell commands or agent prompts... ? for help auto ~/project {co} 100% left stub - local ~ 8'
+  comp blue(shell/running): 0 px  bbox=None
+  comp violet(agent/working): 0 px  bbox=None
+  comp green(Done): 200 px  bbox=(2552, 198, 2783, 219)
+  comp amber(Need): 200 px  bbox=(2562, 198, 2783, 221)
+  comp red(Problem): 0 px  bbox=None
+=== running (relay-dark) ===
+  composer a-vs-b differ: 20496 px (state holds still)
+  composer OCR: 'Relaying sleep... Shell commands or agent prompts... ? for help auto ~/project =) 100% left © stub - local ~ @ ¢ @'
+  header   OCR: '| >» Command running project'
+  comp blue(shell/running): 1196 px  bbox=(2598, 258, 2817, 285)
+  comp violet(agent/working): 0 px  bbox=None
+  comp green(Done): 200 px  bbox=(2552, 148, 2783, 169)
+  comp amber(Need): 200 px  bbox=(2562, 148, 2783, 171)
+  comp red(Problem): 0 px  bbox=None
+  head blue(shell/running): 2580 px  bbox=(32, 4, 383, 55)
+  head violet(agent/working): 0 px  bbox=None
+  head green(Done): 4 px  bbox=(60, 116, 61, 117)
+  head amber(Need): 140 px  bbox=(360, 34, 453, 49)
+  head red(Problem): 0 px  bbox=None
+=== relaying (relay-dark) ===
+  composer a-vs-b differ: 320 px (state holds still)
+  composer OCR: 'Relaying thinking... - 5s - step 1/256 - Esc stops Shell commands or agent prompts... ? for help auto ~/project = ©) 100% left stub - local ~|| 4 || %'
+  header   OCR: '| >» Relaying... project'
+  comp blue(shell/running): 0 px  bbox=None
+  comp violet(agent/working): 2752 px  bbox=(2178, 264, 2817, 291)
+  comp green(Done): 0 px  bbox=None
+  comp amber(Need): 0 px  bbox=None
+  comp red(Problem): 0 px  bbox=None
+  head blue(shell/running): 1104 px  bbox=(108, 4, 383, 7)
+  head violet(agent/working): 732 px  bbox=(32, 28, 215, 55)
+  head green(Done): 4 px  bbox=(60, 116, 61, 117)
+  head amber(Need): 140 px  bbox=(242, 34, 335, 49)
+  head red(Problem): 0 px  bbox=None
+=== spawn (relay-dark) ===
+  composer a-vs-b differ: 412 px (state holds still)
+  composer OCR: 'Relaying waiting for 1 subagent... waiting for 1 subagent . auto ~/project {co} 94% left stub - local - @ = © main idle | from the prompt to select main ctx 7.5k - agents ~0 tok @ generalat = scan the project 0:10-Otools-~Otok stuby bg ~x'
+  header   OCR: '| » Subagents working | +1) project'
+  comp blue(shell/running): 312 px  bbox=(52, 412, 71, 431)
+  comp violet(agent/working): 2176 px  bbox=(2354, 136, 2817, 163)
+  comp green(Done): 544 px  bbox=(280, 356, 2691, 429)
+  comp amber(Need): 1076 px  bbox=(90, 356, 2713, 437)
+  comp red(Problem): 0 px  bbox=None
+  head blue(shell/running): 1104 px  bbox=(108, 4, 383, 7)
+  head violet(agent/working): 1420 px  bbox=(36, 28, 419, 55)
+  head green(Done): 4 px  bbox=(60, 116, 61, 117)
+  head amber(Need): 140 px  bbox=(460, 34, 553, 49)
+  head red(Problem): 0 px  bbox=None
+=== labels (relay-dark) ===
+  transcript OCR: 'we? + show the labels > stub Here is where things stand. Done: the build passes and the suite is green. Need: your call on the release date. Problem: the build host is out of disk. A plain bold word stays uncoloured, and so does italics.'
+  term blue(shell/running): 301 px  bbox=(31, 63, 527, 252)
+  term violet(agent/working): 240 px  bbox=(32, 19, 179, 29)
+  term green(Done): 482 px  bbox=(30, 0, 502, 251)
+  term amber(Need): 550 px  bbox=(30, 0, 521, 250)
+  term red(Problem): 183 px  bbox=(31, 66, 283, 242)
+=== labels-beige (ibm-beige) ===
+  transcript OCR: '“we? + show the labels > stub Here is where things stand. Done: the build passes and the suite is green. Need: your call on the release date. Problem: the build host is out of disk. A plain bold word stays uncoloured, and so does italics.'
+  term blue(shell/running): 158 px  bbox=(32, 7, 508, 250)
+  term violet(agent/working): 292 px  bbox=(32, 19, 179, 29)
+  term green(Done): 172 px  bbox=(30, 67, 518, 252)
+  term amber(Need): 667 px  bbox=(30, 0, 520, 252)
+  term red(Problem): 631 px  bbox=(30, 0, 517, 252)
+```
+
+## Labelled-bold word colours (labels_words.py)
+```
+=== labels (relay-dark) ===
+  Done:     at x=30   y=108 core={'green': 58, 'amber': 0, 'red': 0} fringe={'green': 112, 'amber': 0, 'red': 0}  => green
+  Need:     at x=30   y=151 core={'green': 0, 'amber': 60, 'red': 0} fringe={'green': 9, 'amber': 113, 'red': 1}  => amber
+  Problem:  at x=30   y=195 core={'green': 0, 'amber': 0, 'red': 84} fringe={'green': 0, 'amber': 0, 'red': 173}  => red
+  bold      at x=102  y=239 core={'green': 0, 'amber': 6, 'red': 0} fringe={'green': 0, 'amber': 30, 'red': 0}  => plain
+=== labels-beige (ibm-beige) ===
+  Done:     at x=30   y=108 core={'green': 53, 'amber': 0, 'red': 0} fringe={'green': 97, 'amber': 4, 'red': 0}  => green
+  Need:     at x=29   y=151 core={'green': 0, 'amber': 84, 'red': 0} fringe={'green': 0, 'amber': 103, 'red': 1}  => amber
+  Problem:  at x=30   y=195 core={'green': 0, 'amber': 0, 'red': 107} fringe={'green': 0, 'amber': 0, 'red': 165}  => red
+  bold      at x=102  y=239 core={'green': 0, 'amber': 0, 'red': 0} fringe={'green': 8, 'amber': 25, 'red': 18}  => plain
+labels colours: OK
+```

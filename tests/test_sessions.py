@@ -145,8 +145,14 @@ class ContextTests(Base):
         started = self.of('compaction_started')
         self.assertTrue(started)
         self.assertEqual(started[0]['reason'], 'auto')
-        compacted = self.of('compacted')[-1]
-        self.assertLess(compacted['after_tokens'], compacted['before_tokens'])
+        # Auto-compaction fires once per turn while the conversation is over the limit, and a round
+        # that finds nothing left it can compact reports before == after (the first round here does,
+        # on main as well). Which round lands last therefore moves with the size of the tool list —
+        # `ask_user` (#MQ9C) was enough to flip it — so what is asserted is that compaction reduced
+        # the conversation, not that the last of several rounds happened to be a reducing one.
+        compactions = self.of('compacted')
+        self.assertTrue(any(c['after_tokens'] < c['before_tokens'] for c in compactions),
+                        [(c['before_tokens'], c['after_tokens']) for c in compactions])
         # every tool message directly follows its assistant tool-call group
         for messages, _ in provider.requests:
             for i, m in enumerate(messages):
@@ -278,6 +284,47 @@ class SessionTests(Base):
         self.assertEqual(other.messages[1:], agent.messages[1:])
         other.ask('third')
         self.assertEqual(SessionStore(self.sessions).listing()[0]['turns'], 3)
+
+    def test_a_running_turn_is_written_so_it_can_be_found(self):
+        """The file the sessions list and the full-text index are built from appears mid-turn.
+
+        A conversation that is still going has to reach the disk: a long first turn would otherwise
+        be missing from search — and lost if Relay stopped — while the user is looking at it.
+        """
+        provider = ScriptedProvider([tools_msg(call('run_command', {'command': 'sleep 1'})), text('done')])
+        agent = self.agent(provider)
+        path = self.sessions / f'{agent.session_id}.json'
+        done = threading.Event()
+        thread = threading.Thread(target=lambda: (agent.ask('fix the login bug'), done.set()))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 1.5
+            while not path.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(done.is_set(), 'the turn is still running')
+            self.assertTrue(path.exists(), 'the session file is written while the first turn runs')
+            saved = json.loads(path.read_text())
+            self.assertEqual(saved['id'], agent.session_id)
+            self.assertEqual(saved['turns'], 1)
+            self.assertIn('fix the login bug', json.dumps(saved['messages']))
+        finally:
+            done.wait(30)
+
+    def test_the_file_is_not_rewritten_on_every_tool_call(self):
+        """The throttle keeps a long turn from rewriting a large session file on every call."""
+        provider = ScriptedProvider([
+            tools_msg(call('run_command', {'command': 'printf a'}, 'c1'),
+                      call('run_command', {'command': 'printf b'}, 'c2')),
+            tools_msg(call('run_command', {'command': 'printf c'}, 'c3')),
+            text('done')])
+        agent = self.agent(provider)
+        writes = []
+        original = agent.store.save
+        agent.store.save = lambda data: (writes.append(data['turns']), original(data))[1]
+        agent.ask('three quick commands')
+        # One write as the prompt lands and one when the turn ends; the tool calls in between are
+        # inside the throttle window, so a turn that calls tools in a loop writes the file twice.
+        self.assertEqual(writes, [1, 1])
 
     def test_resume_rejects_bad_id(self):
         agent = self.agent(ScriptedProvider())

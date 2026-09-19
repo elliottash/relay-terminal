@@ -20,15 +20,18 @@
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Projects.h"         // which project a tab is attached to, and the registry of known ones
+#include "ProjectInit.h"      // when "Initialize a project … here?" is asked, and by which trigger
 #include "Hints.h"
 #include "Notifications.h"
 #include "ScreenPrompt.h"
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "PaneTitles.h"
+#include "PaneUsage.h"    // the tab-level sum of the panes' CPU / memory
 #include "SshConfig.h"
 #include "TurnTranscript.h"
 #include "SettingsPane.h"
+#include "Isolation.h"        // the per-pane memory limits this page edits
 #include "LocalModelsSettings.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -39,7 +42,6 @@
 #include "ClosedStack.h"
 #include "ClosedList.h"
 #include "RuntimeDirs.h"
-#include "AppPaths.h"       // dataRoot(): where the shipped backend (and the guest installers) live
 #include "Voice.h"
 #include "Aliases.h"
 #include "OutputLinks.h"
@@ -59,6 +61,7 @@
 #include <QMap>
 #include <QSet>
 #include <QAbstractItemView>
+#include <QProcess>
 #include <QAbstractScrollArea>
 #include <QAction>
 #include <QApplication>
@@ -84,7 +87,6 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
-#include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -223,6 +225,13 @@ public:
         return m_projects;
     }
 
+    // "Initialize a project and create a Switchboard here?", raised or answered "Not now" for
+    // these projects (normalized paths) since Relay started (protocol 19.12). A no goes in the
+    // registry above and outlives the process; this outlives nothing, which is the difference
+    // between "no" and "not now". It is the whole process's, not one window's: the same project
+    // open in two windows is asked about once.
+    QSet<QString> &initSnoozed() { return m_initSnoozed; }
+
     // ----- saved window layout: "reopen where I left off" (src/WindowState.h) -------------------
     // Relay keeps one layout file per user and rewrites it, debounced, whenever the windows, tabs,
     // panes, directories or models change, and once more when the last window goes away. A crash
@@ -262,6 +271,7 @@ private:
     bool m_cleanShell = false;
     relay::projects::Registry m_projects;   // the known-projects file, loaded on first use
     bool m_projectsLoaded = false;
+    QSet<QString> m_initSnoozed;            // asked, or "Not now", since this Relay started
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_closedWatchers;
@@ -302,6 +312,9 @@ public:
         // the hint away, whether or not an arrow arrived.
         m_placementTimer.setSingleShot(true);
         connect(&m_placementTimer, &QTimer::timeout, this, [this] { endPlacement(); });
+        // "Move left/right, then ↓ docks it beneath" (#Q7Y9): the twin window, same shape.
+        m_beneathTimer.setSingleShot(true);
+        connect(&m_beneathTimer, &QTimer::timeout, this, [this] { endBeneathDock(); });
         // Pane state glyphs and tab icons (#XM0T), and the remote-session header (#SPBN).
         connect(&m_statusTimer, &QTimer::timeout, this, [this] { refreshPaneStatus(); });
         m_statusTimer.start(kStatusPollMs);
@@ -383,12 +396,7 @@ public:
     // stopBoardWorkers() again (closeEvent has usually run already, and it is idempotent): a
     // window destroyed without being closed must still not leave Switchboard workers behind, and
     // its board panes are about to be destroyed with it.
-    ~RelayWindow() override {
-        qApp->removeEventFilter(this);
-        m_guestClaude.kill();   // a settings read still in flight must not outlive the window
-        m_guestCodex.kill();
-        stopBoardWorkers();
-    }
+    ~RelayWindow() override { qApp->removeEventFilter(this); stopBoardWorkers(); }
 
     // Build a tab from a saved tab. Returns false if no pane could be created. The tab is either
     // a bare layout node or the {"project", "node"} wrapper an attached tab saves as (#JN7X).
@@ -752,6 +760,19 @@ protected:
             }
             if (response.action == Placement::Action::Dismiss) endPlacement();
         }
+        // The chord's window (#Q7Y9): a bare key or a click closes it. Keys with Ctrl, Alt or
+        // Meta held do not — the Move-down key passes through here on its way to the shortcut
+        // that runs it, and other shortcuts close the window through runActionNow.
+        if (m_beneath.armed(m_beneathClock.elapsed())
+            && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
+            && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
+            const auto *pressed = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
+            const bool modifierOnly = pressed && (pressed->key() == Qt::Key_Control || pressed->key() == Qt::Key_Shift
+                                                  || pressed->key() == Qt::Key_Alt || pressed->key() == Qt::Key_Meta
+                                                  || pressed->key() == Qt::Key_AltGr);
+            const bool modified = pressed && (pressed->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
+            if (!modifierOnly && !modified) endBeneathDock();
+        }
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
@@ -936,6 +957,9 @@ private:
 
     void runActionNow(const QString &id) {
         Pane *pane = m_active;
+        // "Move left/right, then ↓ docks it beneath" (#Q7Y9): only Move-down may land inside the
+        // chord's window; any other action closes it, so a stale chord never grabs a later one.
+        if (id != QStringLiteral("pane.moveDown")) endBeneathDock();
         if (id == QStringLiteral("window.new")) m_manager->newWindowAt(activeCwd());
         else if (id == QStringLiteral("window.next")) m_manager->cycle(this, 1);
         else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
@@ -969,7 +993,9 @@ private:
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.moveUp")) moveActive(relay::panes::Direction::Up);
-        else if (id == QStringLiteral("pane.moveDown")) moveActive(relay::panes::Direction::Down);
+        // Inside the chord's window, Move-down docks the pane beneath the neighbor it moved
+        // toward (#Q7Y9); otherwise it moves the pane down as it always did.
+        else if (id == QStringLiteral("pane.moveDown")) { if (!dockBeneathNeighbor()) moveActive(relay::panes::Direction::Down); }
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
@@ -984,6 +1010,10 @@ private:
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) openShortcutsTab();
         else if (id == QStringLiteral("app.settings")) toggleSettingsPane(false);
+        else if (id == QStringLiteral("app.update")) {
+            updateApp();
+            hint(QStringLiteral("update.palette"), QStringLiteral("Next time: type /update in any prompt box"));
+        }
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -1127,9 +1157,6 @@ private:
         view->onSectionShown = [guard](const QString &sectionId) {
             auto *w = windowOf(guard);
             if (w && sectionId == relay::LocalModelsSettings::sectionId()) w->localModels().refresh();
-            // Guests reads the real settings files when its page comes to the front, so the rows
-            // can never claim an install the file does not carry.
-            else if (w && sectionId == QStringLiteral("guests")) w->guestSectionShown();
         };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
@@ -1274,217 +1301,6 @@ private:
         return m_localModels;
     }
     relay::LocalModelsSettings m_localModels;
-
-    // ----- Settings › Guests (protocol 26.4): the installers' front end -------------------------
-    //
-    // Two thin command lines, one JSON object each on stdout: relay_core.guest_install for the
-    // Claude Code settings (project and, behind its own explicit opt-in, global),
-    // relay_core.guest_codex for ~/.codex/config.toml. The rows here never guess at the files:
-    // the section's arrival re-reads status, every apply answers with the installer's own JSON,
-    // and the notice names the file that was written — including the cases where what the user
-    // wrote themselves was kept because it is theirs (their statusline, their notify). Choices
-    // persist under guests/* like any option, but the file is the truth the rows draw from.
-    QString guestProjectDir() const {
-        // The tab's attached project, else the active pane's live directory — where a new pane in
-        // this tab would start, and so whose .claude/settings.json its Claude Code would read.
-        if (const QString attached = tabProject(m_tabs->currentWidget()); !attached.isEmpty())
-            return attached;
-        return activeCwd();
-    }
-
-    void guestSectionShown() {
-        if (!guestProjectDir().isEmpty()) guestClaudeStatus();
-        guestCodexStatus();
-    }
-
-    void guestClaudeApply(bool on, bool global) {
-        m_guestClaudeAction = on ? QStringLiteral("on") : QStringLiteral("off");
-        m_guestClaudeGlobal = global;
-        QStringList arguments;
-        if (global) arguments << QStringLiteral("--global") << QStringLiteral("--global-opt-in");
-        else arguments << QStringLiteral("--project") << guestProjectDir();
-        arguments << (on ? QStringLiteral("--on") : QStringLiteral("--off"));
-        guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"), arguments);
-    }
-
-    void guestClaudeStatus() {
-        m_guestClaudeAction = QStringLiteral("status");
-        guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"),
-                     {QStringLiteral("--project"), guestProjectDir(), QStringLiteral("--status")});
-    }
-
-    void guestCodexApply(bool on) {
-        m_guestCodexAction = on ? QStringLiteral("on") : QStringLiteral("off");
-        guestToolRun(&m_guestCodex, &m_guestCodexOut, QStringLiteral("relay_core.guest_codex"),
-                     {on ? QStringLiteral("--enable") : QStringLiteral("--disable")});
-    }
-
-    void guestCodexStatus() {
-        m_guestCodexAction = QStringLiteral("status");
-        guestToolRun(&m_guestCodex, &m_guestCodexOut, QStringLiteral("relay_core.guest_codex"),
-                     {QStringLiteral("--settings-state")});
-    }
-
-    void ensureGuestTools() {
-        if (m_guestToolsConnected) return;
-        m_guestToolsConnected = true;
-        auto drain = [](QProcess *tool, QByteArray *buffer) {
-            QObject::connect(tool, &QProcess::readyReadStandardOutput, tool, [tool, buffer] {
-                *buffer += tool->readAllStandardOutput();
-                if (buffer->size() > 8 * 1024 * 1024) {
-                    tool->kill();
-                    buffer->clear();
-                }
-            });
-            // Stderr is never part of the protocol, but it must be read or a full pipe stalls the
-            // tool; what it holds (a warning, a traceback) is dropped rather than shown.
-            QObject::connect(tool, &QProcess::readyReadStandardError, tool,
-                             [tool] { tool->readAllStandardError(); });
-        };
-        drain(&m_guestClaude, &m_guestClaudeOut);
-        drain(&m_guestCodex, &m_guestCodexOut);
-        connect(&m_guestClaude, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-            m_guestClaudeAction.clear();
-            notice(QStringLiteral("The Claude Code settings tool failed to start."), 6000);
-        });
-        connect(&m_guestCodex, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-            m_guestCodexAction.clear();
-            notice(QStringLiteral("The codex settings tool failed to start."), 6000);
-        });
-        connect(&m_guestClaude, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
-                [this](int, QProcess::ExitStatus) { guestClaudeDone(); });
-        connect(&m_guestCodex, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
-                [this](int code, QProcess::ExitStatus) { guestCodexDone(code); });
-    }
-
-    bool guestToolRun(QProcess *tool, QByteArray *buffer, const QString &module, const QStringList &arguments) {
-        ensureGuestTools();
-        if (tool->state() != QProcess::NotRunning) {
-            notice(QStringLiteral("Still working on the last Guests change."), 4000);
-            return false;
-        }
-        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
-        if (python.isEmpty()) {
-            notice(QStringLiteral("Guests needs python3 on this machine's PATH."), 6000);
-            return false;
-        }
-        QString backend;
-        try {
-            backend = dataRoot() + QStringLiteral("/backend");
-        } catch (const std::exception &error) {
-            notice(QString::fromUtf8(error.what()), 6000);
-            return false;
-        }
-        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-        // APPENDED, never prepended (protocol 26.4): the user's own PYTHONPATH — a venv, another
-        // checkout — keeps its place in front, so the shipped backend is a fallback, not a hijack.
-        const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
-        environment.insert(QStringLiteral("PYTHONPATH"),
-                           existing.isEmpty() ? backend : existing + QDir::listSeparator() + backend);
-        tool->setProcessEnvironment(environment);
-        buffer->clear();
-        // `-S` like every helper Relay runs, `-u` so the one JSON line is flushed as written.
-        tool->start(python, QStringList{QStringLiteral("-S"), QStringLiteral("-u"),
-                                        QStringLiteral("-m"), module} + arguments);
-        return true;
-    }
-
-    // The first line of stdout, as JSON. Anything after it — a warning, the tail of a traceback —
-    // is not part of the protocol and is ignored rather than parsed around.
-    static QJsonObject guestJson(const QByteArray &output) {
-        const int end = output.indexOf('\n');
-        const QJsonDocument document = QJsonDocument::fromJson(
-            (end < 0 ? output : output.left(end)).trimmed());
-        return document.object();
-    }
-
-    void guestClaudeDone() {
-        const QJsonObject result = guestJson(m_guestClaudeOut);
-        const QString action = m_guestClaudeAction;
-        const bool global = m_guestClaudeGlobal;
-        m_guestClaudeAction.clear();
-        if (action == QStringLiteral("status")) {
-            if (result.value(QStringLiteral("ok")).toBool()) {
-                m_guestClaudeKnown = true;
-                m_guestClaudeInstalled = result.value(QStringLiteral("installed")).toBool();
-                refreshSettingsPanes();
-            }
-            return;   // a failed read leaves the rows at their stored choice; the next try re-reads
-        }
-        const QString key = global ? QStringLiteral("guests/global_install")
-                                   : QStringLiteral("guests/project_install");
-        const QString path = result.value(QStringLiteral("path")).toString();
-        if (!result.value(QStringLiteral("ok")).toBool()) {
-            const QString error = result.value(QStringLiteral("error")).toString();
-            notice(error.isEmpty() ? QStringLiteral("The Claude Code settings change failed.") : error, 8000);
-            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });
-            return;
-        }
-        // `ok` means the writes happened, so the cache takes the choice — `installed` is not read
-        // here: the installer's --on answer carries a list of the entries it added, while --status
-        // carries the bool of the same name. The project row's truth is re-read from the file right
-        // after; the global row drew from its own stored choice all along.
-        if (!global) {
-            m_guestClaudeKnown = true;
-            m_guestClaudeInstalled = action == QStringLiteral("on");
-        }
-        QSettings().setValue(key, action == QStringLiteral("on"));
-        if (action == QStringLiteral("on")) {
-            QString text = QStringLiteral("Guest hooks installed in %1.").arg(path);
-            // The installer kept the user's own statusline: say so, or the missing context chip
-            // reads as the install having failed.
-            if (result.value(QStringLiteral("statusline")).toString() == QStringLiteral("kept"))
-                text += QStringLiteral(" Your own statusline command was kept, so the context chip has nothing to show.");
-            notice(text, 8000);
-        } else if (result.value(QStringLiteral("changed")).toBool()) {
-            notice(QStringLiteral("Relay's guest entries removed from %1.").arg(path), 8000);
-        } else {
-            notice(QStringLiteral("Relay's guest entries were not in %1.").arg(path), 8000);
-        }
-        refreshSettingsPanes();
-        if (!global)
-            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });   // the file has the last word
-    }
-
-    void guestCodexDone(int code) {
-        const QJsonObject result = guestJson(m_guestCodexOut);
-        const QString action = m_guestCodexAction;
-        m_guestCodexAction.clear();
-        if (action == QStringLiteral("status")) {
-            if (result.value(QStringLiteral("ok")).toBool()) {
-                m_guestCodexKnown = true;
-                m_guestCodexEnabled = result.value(QStringLiteral("enabled")).toBool();
-                refreshSettingsPanes();
-            }
-            return;
-        }
-        const QString path = result.value(QStringLiteral("path")).toString();
-        // Exit 3 is the conflict (§26.6): the user's own notify is theirs. The message is the
-        // notice in full, nothing is stored, and the toggle goes back to what the file says.
-        if (code == 3 || !result.value(QStringLiteral("ok")).toBool()) {
-            const QString error = result.value(QStringLiteral("error")).toString();
-            notice(error.isEmpty() ? QStringLiteral("The codex settings change failed.") : error, 8000);
-            refreshSettingsPanes();
-            QTimer::singleShot(0, this, [this] { guestCodexStatus(); });
-            return;
-        }
-        m_guestCodexKnown = true;
-        m_guestCodexEnabled = result.value(QStringLiteral("enabled")).toBool();
-        QSettings().setValue(QStringLiteral("guests/codex_notify"), action == QStringLiteral("on"));
-        notice(action == QStringLiteral("on")
-                   ? QStringLiteral("Codex turn notifications on: a marked notify entry in %1.").arg(path)
-                   : QStringLiteral("Codex turn notifications off."),
-               8000);
-        refreshSettingsPanes();
-    }
-
-    bool m_guestToolsConnected = false;
-    QProcess m_guestClaude, m_guestCodex;
-    QByteArray m_guestClaudeOut, m_guestCodexOut;
-    QString m_guestClaudeAction, m_guestCodexAction;   // status | on | off: what the running call was
-    bool m_guestClaudeGlobal = false;
-    bool m_guestClaudeKnown = false, m_guestClaudeInstalled = false;
-    bool m_guestCodexKnown = false, m_guestCodexEnabled = false;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -1668,8 +1484,27 @@ private:
         general.id = QStringLiteral("general");
         general.title = QStringLiteral("General");
         general.blurb = QStringLiteral("What Relay shows while it works.");
-        general.rows << toggleRow(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"),
-                                  QStringLiteral("Stream reasoning above the prompt; a one-line summary always prints"), true);
+        // Reasoning display (issue T8CN): three ways, not a bool — the reasoning streams into a
+        // fold under a ✦ line that collapses when the block ends (collapse), stays open (always),
+        // or never draws and leaves the single ✦ summary line (never). The row reads through
+        // Pane::thinkingDisplay() so a not-yet-migrated agent/show_thinking shows as what it maps
+        // to, and choosing writes the new key (the old one is retired by the same read).
+        {
+            relay::SettingRow thinking = choiceRow(QStringLiteral("option:thinking_display"),
+                                                  QStringLiteral("Thinking display"),
+                                                  QStringLiteral("How the agent's reasoning is shown: folded into the "
+                                                                 "terminal and collapsed when it ends, always open, "
+                                                                 "or only the ✦ summary line"),
+                                                  {QStringLiteral("collapse"), QStringLiteral("always"), QStringLiteral("never")},
+                                                  {QStringLiteral("Collapse when done"), QStringLiteral("Always open"), QStringLiteral("Never show")},
+                                                  Pane::thinkingDisplay(), QStringLiteral("collapse"),
+                                                  [this](const QString &value) {
+                                                      QSettings().setValue(QStringLiteral("agent/thinking_display"), value);
+                                                      if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/thinking_display"));
+                                                  });
+            thinking.aliases = QStringLiteral("reasoning thinking traces show_thinking");
+            general.rows << thinking;
+        }
         general.rows << toggleRow(QStringLiteral("agent/show_tool_output"), QStringLiteral("Show tool output"),
                                   QStringLiteral("Print what each tool returned, not only the one-line summary"), false);
         {
@@ -1798,6 +1633,17 @@ private:
             colours.aliases = QStringLiteral("color colors colour header tint band pane type group");
             appearance.rows << colours;
         }
+        {
+            // Pane CPU / memory meters (issue #D03W): the chip beside each pane's title and the
+            // suffix in the tab label. The poll re-reads the key within its next tick.
+            relay::SettingRow usage = toggleRow(QStringLiteral("appearance/pane_usage"),
+                                               QStringLiteral("Pane CPU and memory"),
+                                               QStringLiteral("A small CPU % and memory % beside each pane's title, "
+                                                              "and in the tab label, while the pane is using the machine"),
+                                               true, [this](bool) { refreshPaneStatus(); });
+            usage.aliases = QStringLiteral("cpu memory ram usage load percent meter resource");
+            appearance.rows << usage;
+        }
         sections << appearance;
 
         relay::SettingsSection models;
@@ -1832,6 +1678,14 @@ private:
         }
         models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
                                  QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
+        {
+            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a working provider"),
+                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on another "
+                                                                 "provider with a stored key and then Relay Free — that turn only. "
+                                                                 "The pane keeps the model you chose"), true);
+            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
+            models.rows << failover;
+        }
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
                                                 "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
@@ -1871,6 +1725,48 @@ private:
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
+        // Per-pane isolation (src/Isolation.h): the caps scale with the machine (agent RAM/16
+        // clamped to 2–8G, shell RAM/2 clamped to 4–16G), and these rows write the same
+        // [isolation] keys relay.conf takes, so a manual edit and this page agree.
+        terminal.rows << headingRow(QStringLiteral("Memory limits"));
+        terminal.rows << toggleRow(QStringLiteral("isolation/enabled"),
+                                   QStringLiteral("Per-pane memory limits"),
+                                   QStringLiteral("Each pane's shell and agent run in their own systemd scope, so a runaway "
+                                                   "command stops inside its pane; applies to new panes"), true);
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
+                                              QStringLiteral("Agent memory limit"),
+                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("2G"), QStringLiteral("4G"), QStringLiteral("8G"),
+                                               QStringLiteral("16G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::agentDefault()),
+                                               QStringLiteral("2 GiB"), QStringLiteral("4 GiB"), QStringLiteral("8 GiB"),
+                                               QStringLiteral("16 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
+            });
+            row.aliases = QStringLiteral("oom memory isolation worker limit kill");
+            terminal.rows << row;
+        }
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
+                                              QStringLiteral("Shell memory limit"),
+                                              QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
+                                               QStringLiteral("32G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::shellDefault()),
+                                               QStringLiteral("4 GiB"), QStringLiteral("8 GiB"), QStringLiteral("16 GiB"),
+                                               QStringLiteral("32 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/shell_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
+            });
+            row.aliases = QStringLiteral("oom memory isolation shell limit kill");
+            terminal.rows << row;
+        }
         // SSH sessions (#S5SH, docs/SSH-AND-MOSH.md): the wrapper is set up when a pane's shell
         // starts, so the mode applies to new panes; the host lists are read at each login.
         terminal.rows << headingRow(QStringLiteral("SSH"));
@@ -2086,77 +1982,6 @@ private:
                                   QStringLiteral("Load project instruction files automatically"),
                                   QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);
         sections << privacy;
-
-        // Guests (protocol 26.4): what the two installers do, as rows. No row declares a reset:
-        // off is what Relay ships and off is idempotent, so the page needs no button that says
-        // so — and a reset must not reach into files the installer owns.
-        relay::SettingsSection guestSection;
-        guestSection.id = QStringLiteral("guests");
-        guestSection.title = QStringLiteral("Guests");
-        guestSection.blurb = QStringLiteral(
-            "Claude Code and Codex running in Relay's panes reach Relay through marked entries in "
-            "their own settings files. Everything Relay writes is marked, and comes out again "
-            "when its row is turned off; an entry you wrote yourself is never replaced — Relay "
-            "says so and leaves it alone.");
-        {
-            if (guestProjectDir().isEmpty()) {
-                relay::SettingRow row;
-                row.kind = relay::SettingRow::Info;
-                row.id = QStringLiteral("info:guests/project");
-                row.label = QStringLiteral("Open a project folder first: the Claude Code entries "
-                                           "are written into that project's .claude/settings.json.");
-                guestSection.rows << row;
-            } else {
-                relay::SettingRow row;
-                row.kind = relay::SettingRow::Toggle;
-                row.id = QStringLiteral("option:guests/project_install");
-                row.label = QStringLiteral("Claude Code in this project");
-                row.detail = QStringLiteral("Marked hook and statusline entries in this project's "
-                                            ".claude/settings.json: events and the context chip");
-                row.aliases = QStringLiteral("claude code hooks guest settings json install project");
-                row.checked = m_guestClaudeKnown ? m_guestClaudeInstalled
-                    : QSettings().value(QStringLiteral("guests/project_install"), false).toBool();
-                row.onToggle = [this](bool on) { guestClaudeApply(on, false); };
-                guestSection.rows << row;
-            }
-        }
-        {
-            relay::SettingRow row;
-            row.kind = relay::SettingRow::Toggle;
-            row.id = QStringLiteral("option:guests/global_install");
-            row.label = QStringLiteral("Also in ~/.claude/settings.json");
-            row.detail = QStringLiteral("A second, explicit opt-in: the same marked entries in your "
-                                        "global Claude settings, for Claude Code run outside Relay");
-            row.aliases = QStringLiteral("global claude home user settings json opt in everywhere");
-            row.checked = QSettings().value(QStringLiteral("guests/global_install"), false).toBool();
-            row.onToggle = [this](bool on) {
-                // §26.3: the global file is an opt-in on top of the project install, never instead
-                // of it. Refused here — nothing stored, so the row redraws unchecked on its own.
-                const bool project = m_guestClaudeKnown ? m_guestClaudeInstalled
-                    : QSettings().value(QStringLiteral("guests/project_install"), false).toBool();
-                if (!project) {
-                    notice(QStringLiteral("Turn on “Claude Code in this project” first: the global "
-                                          "entries only ever add to the project ones."), 6000);
-                    return;
-                }
-                guestClaudeApply(on, true);
-            };
-            guestSection.rows << row;
-        }
-        {
-            relay::SettingRow row;
-            row.kind = relay::SettingRow::Toggle;
-            row.id = QStringLiteral("option:guests/codex_notify");
-            row.label = QStringLiteral("Codex notifications");
-            row.detail = QStringLiteral("A marked notify entry in ~/.codex/config.toml, so a "
-                                        "finished Codex turn reaches Relay's notification centre");
-            row.aliases = QStringLiteral("codex notify config toml turn finished alert guest");
-            row.checked = m_guestCodexKnown ? m_guestCodexEnabled
-                : QSettings().value(QStringLiteral("guests/codex_notify"), false).toBool();
-            row.onToggle = [this](bool on) { guestCodexApply(on); };
-            guestSection.rows << row;
-        }
-        sections << guestSection;
 
         relay::SettingsSection shortcuts;
         shortcuts.id = QStringLiteral("keyboard");
@@ -2391,11 +2216,11 @@ private:
         items << actionItem(agent, QStringLiteral("Tasks…"),
                             pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · the agent's task list · /tasks")
                                                                      : QStringLiteral("Task list: what the agent is working on · /tasks"), QStringLiteral("agent.requests"));
-        items << actionItem(agent, QStringLiteral("Reasoning panel"),
-                            pane && pane->thinkingPanelVisible()
-                                ? QStringLiteral("Hide the agent's reasoning in this pane")
-                                : QStringLiteral("Show the agent's reasoning · the last turn's, between turns"),
-                            QStringLiteral("agent.thinkingPanel"), pane && pane->thinkingPanelVisible());
+        items << actionItem(agent, QStringLiteral("Reasoning fold"),
+                            pane && pane->thinkingFoldVisible()
+                                ? QStringLiteral("Fold the agent's reasoning away in this pane")
+                                : QStringLiteral("Unfold the agent's reasoning · the last turn's, between turns"),
+                            QStringLiteral("agent.thinkingPanel"), pane && pane->thinkingFoldVisible());
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
@@ -2559,6 +2384,25 @@ private:
             detach.run = [this] { detachTab(m_tabs->currentWidget()); };
             items << detach;
         }
+        // The one passive entry point to "Initialize a project and create a Switchboard here?"
+        // (protocol 19.12). Offered only while the active pane is standing in a project that has
+        // no board: with a board there is nothing to create, and outside a project there is
+        // nothing to create it in. Choosing it here is the slow path, so it teaches `/init`.
+        if (const QString candidate = candidateProject();
+            !candidate.isEmpty() && relay::projects::boardDirOf(candidate).isEmpty()) {
+            PaletteItem init;
+            init.key = QStringLiteral("project.init"); init.section = panes;
+            init.label = QStringLiteral("Initialize a project here…");
+            init.detail = QStringLiteral("%1 · asks first, then creates %2/")
+                              .arg(candidate, relay::projectinit::boardFolderFor(candidate));
+            init.aliases = QStringLiteral("switchboard board project init cards start setup");
+            init.run = [this] {
+                if (!m_active) return;
+                m_active->askProjectInit(relay::projectinit::Trigger::InitCommand);
+                hint(QStringLiteral("init.palette"), QStringLiteral("Next time: type /init in any prompt box"));
+            };
+            items << init;
+        }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
@@ -2589,10 +2433,10 @@ private:
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         items << actionItem(panes, QStringLiteral("Move tab to new window"), QStringLiteral("Keeps its panes running"), QStringLiteral("tab.moveToNewWindow"));
-        items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Or drag the ⠿ grip onto another pane's edge"), QStringLiteral("pane.moveLeft"));
-        items << actionItem(panes, QStringLiteral("Move pane right"), QString(), QStringLiteral("pane.moveRight"));
+        items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Then ↓ docks it beneath · or drag the ⠿ grip"), QStringLiteral("pane.moveLeft"));
+        items << actionItem(panes, QStringLiteral("Move pane right"), QStringLiteral("Then ↓ docks it beneath"), QStringLiteral("pane.moveRight"));
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
-        items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
+        items << actionItem(panes, QStringLiteral("Move pane down"), QStringLiteral("Straight after a left/right move, beneath that neighbor"), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
         items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("The last 25 closed panes, tabs and windows, in the Sessions pane"), QStringLiteral("closed.list"));
         // Any of the last 25, newest first (src/ClosedStack.h). Searching the actions finds them by
@@ -2667,21 +2511,20 @@ private:
             };
             items << hints;
             // The prompt box's Up/Down history outlives a restart (src/PromptHistory.h), so there
-            // has to be a way to forget it. The file goes, and so does the copy every open prompt
-            // box holds — including one part-way through a browse.
+            // has to be a way to forget it. Every pane's file goes, and so does the copy every
+            // open prompt box holds — including one part-way through a browse.
             PaletteItem history; history.key = QStringLiteral("history.clear"); history.section = app;
             history.label = QStringLiteral("Clear prompt history");
             history.detail = QStringLiteral("Forget every line Up recalls, in every pane");
             history.aliases = QStringLiteral("prompt history up arrow forget clear erase commands prompts");
             history.run = [this] {
-                const QString path = relay::prompthistory::defaultPath();
                 if (QMessageBox::question(this, QStringLiteral("Clear prompt history"),
                                           QStringLiteral("Forget every line the prompt box recalls with Up?"),
                                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                     return;
                 QString error;
-                if (!relay::prompthistory::clear(path, &error)) { notice(error, 8000); return; }
-                RichEditor::forgetHistory(path);
+                if (!relay::prompthistory::clearAll(&error)) { notice(error, 8000); return; }
+                RichEditor::forgetAllHistory();
                 notice(QStringLiteral("Prompt history cleared."), 4000);
             };
             items << history;
@@ -3379,6 +3222,67 @@ public:
         });
     }
 
+    // /update and the palette's Update action: scripts/relay-update.py fetches the newest GitHub
+    // release's .deb for this distribution and architecture, checks it against the release's
+    // SHA256SUMS and installs it with pkexec (the password dialog is polkit's, never a prompt the
+    // app could read). Every line it prints becomes the window's notice. When it finishes with the
+    // UPDATED marker, Relay restarts itself: the new binary is started first, then the windows
+    // close through their ordinary path so layout and scrollback are saved for it to reopen.
+    void updateApp() {
+        if (m_updateProcess) { notice(QStringLiteral("An update is already running.")); return; }
+        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        const QString script = dataRoot() + QStringLiteral("/scripts/relay-update.py");
+        if (python.isEmpty() || !QFileInfo::exists(script)) {
+            notice(QStringLiteral("The updater is missing: %1").arg(script));
+            return;
+        }
+        auto *process = new QProcess(this);
+        m_updateProcess = process;
+        m_updateOutput.clear();
+        m_updateInstalled = false;
+        connect(process, &QProcess::readyReadStandardOutput, this, [this, process] {
+            m_updateOutput += process->readAllStandardOutput();
+            int cut;
+            while ((cut = m_updateOutput.indexOf('\n')) >= 0) {   // whole lines only; the rest waits for its newline
+                const QString line = QString::fromUtf8(m_updateOutput.left(cut)).trimmed();
+                m_updateOutput.remove(0, cut + 1);
+                if (line.startsWith(QStringLiteral("UPDATED ")))
+                    m_updateInstalled = true;
+                else if (!line.isEmpty())
+                    notice(line, 20000);
+            }
+        });
+        connect(process, &QProcess::readyReadStandardError, this, [this, process] {
+            // The script prints its errors as notice lines; what lands here is the unexpected
+            // (a traceback), better shown than swallowed.
+            const QString text = QString::fromUtf8(process->readAllStandardError()).simplified();
+            if (!text.isEmpty()) notice(text, 20000);
+        });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) notice(QStringLiteral("The updater could not start."));
+            m_updateProcess = nullptr;
+            process->deleteLater();
+        });
+        connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, process](int code, QProcess::ExitStatus) {
+            m_updateProcess = nullptr;
+            process->deleteLater();
+            if (code != 0 || !m_updateInstalled) return;
+            notice(QStringLiteral("Restarting Relay…"), 4000);
+            // The running process keeps its inode, so the path can be started before it closes;
+            // the arguments this instance was given (a --workspace, say) are the ones to keep.
+            QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                    QCoreApplication::arguments().mid(1));
+            for (QWidget *widget : QApplication::topLevelWidgets())
+                if (auto *window = dynamic_cast<RelayWindow *>(widget)) {
+                    window->m_confirmedClose = true;   // /update was asked for; no close dialog on top of it
+                    window->close();
+                }
+        });
+        process->start(python, {script, QStringLiteral("install")});
+        notice(QStringLiteral("Checking GitHub for the latest Relay…"), 20000);
+    }
+
     void openSharedPaneDialog() {
         QPointer<RelayWindow> self(this);
         relay::RemotePaneDialog::open(this, [self](relay::RemotePane *view) {
@@ -3479,8 +3383,13 @@ public:
     // or, pressed on it, go back to the last terminal pane.
     void toggleBoardPane() {
         QWidget *page = m_tabs->currentWidget();
+        // Pressed while the Switchboard is the pane in focus: close it through the pane's own
+        // close path (closeToolPane — the title-bar button and Esc use it too). It used to hand
+        // focus back and leave the pane open.
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board()) {
-            if (m_active) { setActiveLeaf(m_active); focusLeaf(m_active); }
+            m_boardClosedByToggle = true;
+            closeToolPane(tool);
+            m_boardClosedByToggle = false;
             return;
         }
         const QString workspace = boardWorkspace();
@@ -3505,9 +3414,11 @@ public:
                 return;
             }
         if (workspace.isEmpty()) {
-            // Nothing is created here and nothing is offered: a project with no Switchboard yet
-            // gets one quiet line, and the "Initialize a project and create a Switchboard here?"
-            // question is a later stage's (protocol 19.12).
+            // Trigger (3) of the init question: reaching for the Switchboard in a project that has
+            // none is the clearest moment to offer one (protocol 19.12). Still nothing is created
+            // before the yes, and a project the user has already declined gets the quiet line below
+            // instead — src/ProjectInit.h decides, not this key.
+            if (m_active && m_active->askProjectInit(relay::projectinit::Trigger::Switchboard)) return;
             const QString candidate = candidateProject();
             statusBar()->showMessage(
                 from.isEmpty()
@@ -3951,7 +3862,46 @@ private:
             w->attachTab(page, candidate, reason);
             return w->tabProject(page);
         };
+        // ----- the init question (protocol 19.12): facts in, the pane decides ------------------
+        // The rules are in src/ProjectInit.h and the pixels are in the pane; the window answers
+        // only what it knows. An attached tab reports its own project rather than the pane's
+        // candidate, so a pane that has `cd`-ed into another checkout never raises a question
+        // whose yes would silently re-point the tab (#JN7X's rule, unchanged).
+        pane->onProjectInitSituation = [guard]() -> relay::projectinit::Situation {
+            relay::projectinit::Situation situation;
+            auto *w = windowOf(guard);
+            if (!w) return situation;
+            const QString attached = w->tabProject(w->pageOf(guard));
+            situation.project = attached.isEmpty() ? relay::projects::candidateFor(guard->cwd()) : attached;
+            situation.cwd = guard->cwd();
+            if (situation.project.isEmpty()) return situation;
+            situation.hasBoard = !relay::projects::boardDirOf(situation.project).isEmpty();
+            situation.declined = w->m_manager->projects().isDeclined(situation.project);
+            situation.snoozed = w->m_manager->initSnoozed().contains(relay::projects::normalize(situation.project));
+            // A Pane is always the desktop's own; a guest sees somebody else's through
+            // relay::RemotePane, which has no worker of its own and never draws this question. The
+            // flag is answered all the same so the rule is stated where the question is raised.
+            situation.remote = false;
+            return situation;
+        };
+        pane->onProjectAttach = [guard](const QString &project, const QString &reason) {
+            if (auto *w = windowOf(guard)) w->attachTab(w->pageOf(guard), project, reason);
+        };
+        pane->onProjectInitEvent = [guard](const QString &project, const QString &what) {
+            auto *w = windowOf(guard);
+            if (!w || project.isEmpty()) return;
+            // "Not now" is not a no: it silences trigger (1) — the agent prompt — for the rest of
+            // this Relay session, and every explicit act asks again. Raising the question counts
+            // the same way, so one project is asked about once per session however many panes
+            // stand in it. A no is written to disk instead and nothing asks again, in any tab,
+            // after any restart; `/init` is the one thing that clears it.
+            if (what != QStringLiteral("reconsider"))
+                w->m_manager->initSnoozed().insert(relay::projects::normalize(project));
+            if (what == QStringLiteral("no")) w->m_manager->projects().decline(project);
+            else if (what == QStringLiteral("reconsider")) w->m_manager->projects().undecline(project);
+        };
         pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
+        pane->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
@@ -4297,10 +4247,21 @@ private:
             refreshTabJudgement(page, titles);
             QString title = tabLabelFor(page, titles);
             if (leaves.size() > 1) title += QStringLiteral("  ·  %1").arg(leaves.size());
+            title += tabUsageSuffix(page);
             const QFontMetrics metrics(m_tabs->tabBar()->font());
             m_tabs->setTabText(i, metrics.elidedText(title, Qt::ElideRight, 260));
+            // The suffix is two bare numbers; the tooltip says which is which (issue #D03W).
+            const QString usageLine = [page, this] {
+                QList<relay::usage::Sample> samples;
+                for (QWidget *leaf : leavesIn(page))
+                    if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
+                const relay::usage::Sample combined = relay::usage::combined(samples);
+                return combined.valid ? QStringLiteral("CPU / memory of this tab's panes: ")
+                                          + relay::usage::describe(combined) : QString();
+            }();
             m_tabs->setTabToolTip(i, (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
                                      + (leaf ? leafCwd(leaf) : QString())
+                                     + (usageLine.isEmpty() ? QString() : QStringLiteral("\n\n") + usageLine)
                                      + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab"));
         }
         syncChrome();
@@ -4445,7 +4406,7 @@ private:
         m_placement.arm(0);
         m_placementPane = pane;
         m_placementAnchor = anchor;
-        showPlacementHint(pane);
+        showPaneToast(pane, QStringLiteral("← ↑ ↓ to place"));
         // One timer, restarted on every arming, so the hint can never outlive its window.
         m_placementTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
     }
@@ -4459,9 +4420,11 @@ private:
         m_placementHint = nullptr;
     }
 
-    void showPlacementHint(QWidget *pane) {
+    // The chord (#Q7Y9) and the placement window (#78BN) share this one transient toast:
+    // arming either ends the other, so one label is enough, and whoever armed last owns it.
+    void showPaneToast(QWidget *pane, const QString &text) {
         delete m_placementHint.data();
-        m_placementHint = new QLabel(QStringLiteral("← ↑ ↓ to place"), this);
+        m_placementHint = new QLabel(text, this);
         m_placementHint->setObjectName(QStringLiteral("toast"));
         m_placementHint->setAttribute(Qt::WA_TransparentForMouseEvents);
         m_placementHint->ensurePolished();
@@ -4497,6 +4460,50 @@ private:
         }
         setActiveLeaf(pane); focusLeaf(pane);
         updateTitles();
+    }
+
+    // ----- "move left/right, then ↓ docks it beneath that neighbor" (#Q7Y9) ----------------------
+    //
+    // The twin of the placement window above: there the second key is a bare arrow, here it is
+    // the Move-down action, so the chord follows whatever keys move panes for this user — by
+    // default Ctrl+Alt+Left then Ctrl+Alt+Down docks the pane beneath the neighbor on its left,
+    // and Ctrl+Alt+Right then Ctrl+Alt+Down beneath the one on its right. After two seconds it
+    // is a plain move again; any other action, key or click closes the window without consuming
+    // anything, so nothing typed is ever swallowed.
+    void armBeneathDock(QWidget *pane, QWidget *anchor) {
+        // Re-installing the filter moves it to the front of the application's list again.
+        qApp->installEventFilter(this);
+        m_beneathClock.start();
+        m_beneath.arm(0);
+        m_beneathPane = pane;
+        m_beneathAnchor = anchor;
+        const QString down = Keymap::instance().shortcutText(QStringLiteral("pane.moveDown"));
+        if (!down.isEmpty()) showPaneToast(pane, QStringLiteral("%1 docks it beneath").arg(down));
+        m_beneathTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
+    }
+
+    void endBeneathDock() {
+        const bool open = m_beneath.armed(m_beneathClock.elapsed());
+        m_beneathTimer.stop();
+        m_beneath.cancel();
+        m_beneathPane = nullptr;
+        m_beneathAnchor = nullptr;
+        if (open) { delete m_placementHint.data(); m_placementHint = nullptr; }   // its own toast
+    }
+
+    // The second half of the chord: dock the pane beneath the neighbor it moved toward. The same
+    // takeLeaf + insertBeside pair every other keyboard move uses, so the shell, the agent and
+    // the scrollback all travel with the pane.
+    bool dockBeneathNeighbor() {
+        if (!m_beneath.armed(m_beneathClock.elapsed())) { endBeneathDock(); return false; }
+        QPointer<QWidget> pane(m_beneathPane), anchor(m_beneathAnchor);
+        endBeneathDock();
+        if (!pane || !anchor || !pageOf(pane) || pageOf(pane) != pageOf(anchor)) return false;
+        if (!takeLeaf(pane) || !anchor || !pane) return false;
+        insertBeside(anchor, pane, Qt::Vertical, false);   // beneath the anchor, not above it
+        setActiveLeaf(pane); focusLeaf(pane);
+        updateTitles();
+        return true;
     }
 
     void navigate(relay::panes::Direction direction) {
@@ -4979,11 +4986,18 @@ private:
         namespace ps = relay::panestatus;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
+        // The tab's live mark blinks on the poll's own beat (cards #V8KT, #4E13); a still desktop
+        // (a cursor flash time of 0) draws it at rest.
+        const bool animate = QApplication::cursorFlashTime() > 0;
+        if (animate) ++m_statusPulse;
         QSet<QWidget *> pages;
+        bool relabel = false;
+        QHash<QString, QString> liveUsage;   // session id → tag, for the Sessions pane (#D03W)
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             pages.insert(page);
             QList<ps::State> states;
+            QList<relay::usage::Sample> usage;
             bool remote = false, terminal = false;
             ps::TypeStyle firstType;
             for (QWidget *leaf : leavesIn(page)) {
@@ -4995,6 +5009,10 @@ private:
                 terminal = true;
                 PaneChrome *chrome = chromeOf(pane);
                 if (!chrome) continue;
+                // The pane's resource meter (issue #D03W) is sampled here so every pane is
+                // measured over the same interval this poll keeps.
+                pane->refreshUsage();
+                if (chrome) chrome->setUsage(pane->usageSample());
                 const ps::Facts facts = pane->statusFacts();
                 const bool watched = focused && i == m_tabs->currentIndex() && leaf == m_activeLeaf;
                 if (!watched) chrome->watchedSince = 0;
@@ -5004,23 +5022,67 @@ private:
                 const QString remoteLine = pane->remoteCommandLine();
                 const bool shared = pane->sharedWithPhone();
                 chrome->setStatus(state, remoteLine, shared);
+                // How many subagents this pane's agent has running (card #YMSR): the same count
+                // the state above was resolved from, so the badge and the glyph cannot disagree.
+                chrome->setSubagents(facts.liveSubagents);
                 // Shared with how many people, and who is driving when it is not the owner.
                 const relay::sharing::ChipState chip =
                     relay::RemoteShare::instance().sharingModel().chip(pane->sessionToken(), shared);
                 if (shared) chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
                 if (!remoteLine.isEmpty()) sshSessionSeen(pane, remoteLine);
                 states << state;
+                usage << pane->usageSample();
+                const QString sessionId = pane->sessionId();
+                if (!sessionId.isEmpty()) {
+                    const QString tag = relay::usage::liveTag(pane->usageSample());
+                    if (!tag.isEmpty()) liveUsage.insert(sessionId, tag);
+                }
                 remote = remote || !remoteLine.isEmpty();
             }
+            // The tab label carries the tab's combined usage (issue #D03W); updateTitles()
+            // reads the panes' samples live, so this only asks for a relabel when the text moves.
+            const QString usageText = relay::usage::tabSuffix(relay::usage::combined(usage));
+            if (m_tabUsageKey.value(page) != usageText) {
+                m_tabUsageKey.insert(page, usageText);
+                relabel = true;
+            }
             const ps::State top = ps::mostUrgent(states);
-            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6").arg(terminal).arg(int(top)).arg(remote)
+            // What is live in the tab whatever its icon is showing: a news icon (done, needs you)
+            // must not hide that work is happening in a sibling pane (card #V8KT).
+            const ps::State live = ps::liveMarker(states);
+            const int phase = animate && live != ps::State::Idle ? m_statusPulse : -1;
+            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8").arg(terminal).arg(int(top)).arg(remote)
+                                    .arg(int(live)).arg(phase)
                                     .arg(int(firstType.glyph)).arg(firstType.ink.name(), relay::theme::activeThemeId());
             if (m_tabIconKey.value(page) == key) continue;
             m_tabIconKey.insert(page, key);
-            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink, devicePixelRatioF()));
+            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink,
+                                                          devicePixelRatioF(), live, phase));
         }
         for (auto it = m_tabIconKey.begin(); it != m_tabIconKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
+        for (auto it = m_tabUsageKey.begin(); it != m_tabUsageKey.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageKey.erase(it);
+        // The session manager shows the same reading as a tag on each open conversation's row
+        // (issue #D03W). It never looks at a window itself; like setOpenSessions, this feeds it.
+        if (!liveUsage.isEmpty() || m_fedLiveUsage)
+            for (int i = 0; i < m_tabs->count(); ++i)
+                for (QWidget *leaf : leavesIn(m_tabs->widget(i)))
+                    if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                        tool && tool->kind() == ToolPane::Kind::Sessions)
+                        if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()))
+                            manager->setLiveUsage(liveUsage);
+        m_fedLiveUsage = !liveUsage.isEmpty();
+        if (relabel) updateTitles();
+    }
+
+    // The tab's own share of the machine: every terminal pane in it summed (issue #D03W). Same
+    // shape as tabUsageSuffix() so the poll's key and the label can never disagree.
+    QString tabUsageSuffix(QWidget *page) const {
+        QList<relay::usage::Sample> samples;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
+        return relay::usage::tabSuffix(relay::usage::combined(samples));
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -5139,8 +5201,21 @@ private:
     void dragPaneEnd(QWidget *dragged, const QPoint &global, bool drop) {
         if (m_dropZone) { m_dropZone->hide(); m_dropZone->deleteLater(); m_dropZone = nullptr; }
         if (!drop || !dragged) return;
+        bool taughtBeneath = false;
         const auto target = dropTarget(dragged, global);
         if (target.second == Edge::None) return;
+        // Which side of its drop anchor the pane came from (#Q7Y9): known only here, before
+        // takeLeaf unhooks it. A drop that docks it beneath is the slow path of the chord.
+        const QString sideKey = [&] {
+            QWidget *anchor = target.first;
+            if (target.second != Edge::Bottom || !anchor || !dragged || pageOf(anchor) != pageOf(dragged)) return QString();
+            QWidget *page = pageOf(anchor);
+            const QRect a(anchor->mapTo(page, QPoint(0, 0)), anchor->size());
+            const QRect d(dragged->mapTo(page, QPoint(0, 0)), dragged->size());
+            if (d.right() <= a.left()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveLeft"));
+            if (d.left() >= a.right()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveRight"));
+            return QString();
+        }();
         if (target.second == Edge::TabBar) {
             RelayWindow *w = windowOf(target.first);
             if (w == this && leavesIn(pageOf(dragged)).size() <= 1) return;   // already its own tab here
@@ -5155,9 +5230,20 @@ private:
             w->m_tabs->setCurrentWidget(w->pageOf(dragged));
             w->setActiveLeaf(dragged); focusLeaf(dragged);
             if (w != this) { w->raise(); w->activateWindow(); }
+            // The chord teaches itself the one time it is the faster path: dragged from beside
+            // the anchor and dropped on its bottom edge.
+            if (target.second == Edge::Bottom && !sideKey.isEmpty() && w == windowOf(dragged)) {
+                const QString down = Keymap::instance().shortcutText(QStringLiteral("pane.moveDown"));
+                if (!down.isEmpty()) {
+                    w->hint(QStringLiteral("pane.dockBeneath"),
+                            relay::ShortcutHints::nextTime(QStringLiteral("%1 then %2").arg(sideKey, down),
+                                                           QStringLiteral("dock it beneath")));
+                    taughtBeneath = true;
+                }
+            }
         }
         const QString move = Keymap::instance().shortcutText(QStringLiteral("pane.moveLeft"));
-        if (!move.isEmpty())
+        if (!move.isEmpty() && !taughtBeneath)
             if (auto *w = windowOf(dragged))
                 w->hint(QStringLiteral("pane.drag"), QStringLiteral("Next time: %1 and the other arrows move the focused pane").arg(move));
     }
@@ -5270,6 +5356,7 @@ private:
     // Keyboard move: swap with the neighbor in that direction when they share a splitter,
     // otherwise dock on the neighbor's near side. Repeating keeps moving the pane that way.
     void moveActive(relay::panes::Direction direction) {
+        endBeneathDock();   // a fresh move starts the chord over (#Q7Y9)
         QWidget *current = m_activeLeaf;
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
@@ -5289,6 +5376,9 @@ private:
         }
         setActiveLeaf(current); focusLeaf(current);
         updateTitles();
+        // A left/right move opens the two-second window in which the Move-down key docks the
+        // pane beneath the neighbor it just moved toward (#Q7Y9): Ctrl+Alt+Left, Ctrl+Alt+Down.
+        if (orientation == Qt::Horizontal) armBeneathDock(current, neighbor);
     }
 
     QWidget *neighborOf(QWidget *current, relay::panes::Direction direction) const {
@@ -5349,6 +5439,15 @@ public:
     void closePane(QWidget *pane, bool record) {
         QWidget *page = pageOf(pane);
         if (!page) return;
+        // The Switchboard's own key (Ctrl+Shift+S) closes it too; a board pane closed any other
+        // way — the pane's ×, Ctrl+W — is the slow path that hint names, once.
+        if (!m_boardClosedByToggle)
+            if (auto *closedBoard = dynamic_cast<ToolPane *>(pane); closedBoard && closedBoard->board()) {
+                const QString boardKeys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
+                if (!boardKeys.isEmpty())
+                    hint(QStringLiteral("board.close"),
+                         QStringLiteral("Next time: %1 closes the Switchboard too").arg(boardKeys), 1);
+            }
         // Once per run, the first time something is closed: say how to get it back (owner, 2026-09-17).
         if (record) {
             static bool toldAboutRestore = false;
@@ -5500,9 +5599,17 @@ private:
     QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
     // One per Switchboard pane: "this pane has gone, release its worker if it was the last".
     QList<QMetaObject::Connection> m_boardWorkerHooks;
+    // /update: the one running updater (scripts/relay-update.py), its unread output and whether
+    // its final line was the UPDATED marker the restart waits for. One at a time.
+    QProcess *m_updateProcess = nullptr;
+    QByteArray m_updateOutput;
+    bool m_updateInstalled = false;
     QTabWidget *m_tabs = nullptr;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;
+    // True while toggleBoardPane is closing the Switchboard with its own key, so closePane does
+    // not hint that key to the person who has just used it.
+    bool m_boardClosedByToggle = false;
     QPointer<Pane> m_active;
     bool m_tabShareSyncQueued = false;   // syncTabShares is coalesced to one pass per event loop
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
@@ -5517,10 +5624,18 @@ private:
     relay::panes::PlacementWindow m_placement;
     QElapsedTimer m_placementClock;
     QTimer m_placementTimer;
-    // Pane state glyphs and tab icons (#XM0T): the poll, and each tab's last icon so it is only
-    // repainted when what it shows changes.
+    // "Move left/right, then ↓ docks it beneath" (#Q7Y9): the same shape for the chord's window.
+    relay::panes::PlacementWindow m_beneath;
+    QElapsedTimer m_beneathClock;
+    QTimer m_beneathTimer;
+    QPointer<QWidget> m_beneathPane, m_beneathAnchor;
+    // Pane state glyphs and tab icons (#XM0T, #V8KT): the poll, the live mark's step on that
+    // poll's beat, and each tab's last icon so it is only repainted when what it shows changes.
     QTimer m_statusTimer;
+    int m_statusPulse = 0;
     QHash<QWidget *, QString> m_tabIconKey;
+    QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
+    bool m_fedLiveUsage = false;               // ... and whether any session tag was pushed last poll
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;
     QPointer<QToolButton> m_newTabButton;

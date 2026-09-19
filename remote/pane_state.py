@@ -121,6 +121,7 @@ def clean(message) -> dict | None:
     model = _object(message.get("model"))
     composer = _object(message.get("composer"))
     context = _object(message.get("context"))
+    allowance = _object(message.get("allowance"))
     sessions = _object(message.get("sessions"))
 
     rows = []
@@ -172,7 +173,22 @@ def clean(message) -> dict | None:
     else:
         percent = max(0, min(100, int(percent)))
 
-    return {
+    # The Relay Free chip (docs/RELAY-FREE.md): the desktop's words, no secret, nothing to act on,
+    # so every level sees it — the pane's owner is the one whose allowance it is. `warn` is read
+    # off the cleaned percentage, the same 10% the desktop's chip warns by, and the whole object is
+    # dropped when the desktop sent no label: a pane on a provider with a key publishes none.
+    allowance_left = allowance.get("percent_left")
+    if isinstance(allowance_left, bool) or not isinstance(allowance_left, (int, float)):
+        allowance_left = None
+    else:
+        allowance_left = max(0, min(100, int(allowance_left)))
+    allowance_out = None
+    if _text(allowance.get("label")).strip():
+        allowance_out = {"label": _text(allowance.get("label")), "percent_left": allowance_left,
+                         "warn": allowance_left is not None and allowance_left <= 10,
+                         "detail": _text(allowance.get("detail"))}
+
+    cleaned = {
         "t": "pane_state", "v": VERSION, "pane": pane,
         "turn": {"phase": _enum(turn.get("phase"), PHASES, "idle"),
                  "clock": _text(turn.get("clock")), "busy": _flag(turn.get("busy"))},
@@ -189,6 +205,9 @@ def clean(message) -> dict | None:
         "sessions": {"rows": session_rows, "can_new": _flag(sessions.get("can_new")),
                      "can_open": _flag(sessions.get("can_open"))},
     }
+    if allowance_out is not None:
+        cleaned["allowance"] = allowance_out
+    return cleaned
 
 
 def for_capability(state: dict, capability: str | None) -> dict | None:
@@ -344,6 +363,8 @@ EXAMPLE = {
     "composer": {"mode": "auto", "placeholder": "Shell commands or agent prompts…",
                  "modes": ["auto", "shell", "agent"]},
     "context": {"label": "96% left", "percent_left": 96},
+    "allowance": {"label": "Free · 73% left", "percent_left": 73, "warn": False,
+                  "detail": "182,400 of 250,000 tokens today · resets at 02:00"},
     "sessions": {"rows": [{"id": "s1", "title": "Thinking copy test", "when": "14:02",
                            "current": True, "running": False}],
                  "can_new": True, "can_open": True},

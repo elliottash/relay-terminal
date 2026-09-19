@@ -15,6 +15,7 @@ from unittest import mock
 from relay_core import roles as model_roles
 from relay_core import route_assist
 from relay_core.agent import Agent
+from relay_core.presets import PRESETS
 from relay_core.provider import ProviderConfig
 from relay_core.roles import RoleResolver, validate_roles
 from relay_core.subagents import SubagentFactory
@@ -98,8 +99,19 @@ class DefaultTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
+            if role == "planning":
+                continue
             self.assertTrue(made.resolve(role).is_main, role)
             self.assertEqual(made.resolve(role).model, "house-model")
+        # Plan mode is the one role that is never "same as the main agent" by default: its default
+        # is the main model pushed to max reasoning (owner, 2026-09-19). An endpoint Relay cannot
+        # name has no preset, so effort_style falls back to "kimi" and the knob does move.
+        planning = made.resolve("planning")
+        self.assertFalse(planning.is_main)
+        self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
+                         ("house-model", "https://example.invalid/v1", "k"))
+        self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
+        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "main", "max"))
 
     def test_chores_prefers_openrouter_then_the_fast_agent(self):
         with_or = resolver("kimi", keys=("kimi", "openrouter")).resolve("chores")
@@ -169,6 +181,64 @@ class DefaultTests(unittest.TestCase):
         terminal_use = made.resolve("terminal_use")
         self.assertEqual(terminal_use.model, "kimi-k2.7-code-highspeed")
         self.assertEqual(terminal_use.tier, "flash")
+
+
+# ----- plan mode (owner, 2026-09-19) --------------------------------------------------------------
+class PlanRoleTests(unittest.TestCase):
+    """The planning role: a plan-mode turn runs on the main model pushed to max reasoning."""
+
+    def plan_resolver(self, preset="kimi", extra=None, roles=None, keys=("kimi",)):
+        endpoint = PRESETS[preset]
+        store = {name: f"{name}-key" for name in keys}
+        config = ProviderConfig(endpoint.base_url, endpoint.model, f"{preset}-key", dict(extra or {}), 8192)
+        return RoleResolver(config, preset, validate_roles(roles),
+                            key_lookup=lambda pid: store.get(pid, ""), main_effort="high")
+
+    def test_the_default_is_the_main_model_at_max_reasoning(self):
+        made = self.plan_resolver("kimi", extra={})
+        planning = made.resolve("planning")
+        self.assertFalse(planning.is_main)
+        self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
+                         ("kimi-k3", "https://api.moonshot.ai/v1", "kimi-key"))
+        self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
+        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "main", "max"))
+        self.assertIs(made.planning_target(), planning)
+
+    def test_the_default_raises_whatever_effort_the_pane_already_has(self):
+        # Kimi's "high" and "max" are different requests, so the pane's own effort is the floor.
+        made = self.plan_resolver("kimi", extra={"reasoning_effort": "high"})
+        self.assertEqual(made.resolve("planning").config.extra, {"reasoning_effort": "max"})
+
+    def test_a_pane_already_at_max_has_nothing_to_swap(self):
+        made = self.plan_resolver("kimi", extra={"reasoning_effort": "max"})
+        planning = made.resolve("planning")
+        self.assertTrue(planning.is_main)
+        self.assertEqual(planning.source, "main")
+        self.assertIsNone(made.planning_target())
+
+    def test_a_provider_with_no_effort_knob_stays_on_the_main_agent(self):
+        # Anthropic's compat layer ignores reasoning_effort (presets.EFFORT_MAP["none"]), so
+        # "the main model at max reasoning" is not a request this endpoint can make.
+        made = self.plan_resolver("anthropic", extra={}, keys=())
+        planning = made.resolve("planning")
+        self.assertTrue(planning.is_main)
+        self.assertEqual(planning.config.extra, {})
+        self.assertIsNone(made.planning_target())
+
+    def test_a_configured_planning_role_wins_over_the_default(self):
+        made = self.plan_resolver("kimi", roles={"planning": {"preset": "glm", "model": "glm-5.3"}},
+                                  keys=("kimi", "glm"))
+        planning = made.resolve("planning")
+        self.assertEqual((planning.preset_id, planning.model, planning.source),
+                         ("glm", "glm-5.3", "configured"))
+        self.assertEqual(planning.config.api_key, "glm-key")
+        self.assertIs(made.planning_target(), planning)
+
+    def test_a_configured_planning_role_without_a_key_falls_back_to_main(self):
+        made = self.plan_resolver("kimi", roles={"planning": {"preset": "glm"}}, keys=("kimi",))
+        self.assertTrue(made.resolve("planning").is_main)
+        self.assertIsNone(made.planning_target())
+        self.assertTrue(made.warnings)          # a misconfiguration, unlike the max-effort no-op
 
 
 # ----- configured roles and fallbacks ----------------------------------------------------------
@@ -405,8 +475,11 @@ class TierTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
+            if role == "planning":
+                continue   # not tiered: the main model at max reasoning (see DefaultTests)
             self.assertTrue(made.resolve(role).is_main, role)
         self.assertEqual(made.warnings, [])
+        self.assertEqual(made.resolve("planning").tier, "main")
 
     def test_minimax_flash_is_its_own_highspeed_model(self):
         made = self.tiered("kimi", ("minimax",))

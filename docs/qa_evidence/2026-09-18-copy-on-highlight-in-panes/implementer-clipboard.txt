@@ -1,0 +1,36 @@
+
+===== terminal/copy_on_select = true =====
+
+--- on / terminal pane (the behaviour this matches)
+  CLIPBOARD: To run a command as administrator (user "root"), use "sudo <command>".|See "man sudo_root" for details.
+  PRIMARY  : To run a command as administrator (user "root"), use "sudo <command>".|See "man sudo_root" for details.
+
+--- on / conversation info pane (the ⓘ button / Alt+I)
+  CLIPBOARD: Modelstub · Stub (local:stub) · effort highContext36 / 131.1k tokens · 0.0%Tokens12 in · 24 out · 36 total · 1 request
+  PRIMARY  : Modelstub · Stub (local:stub) · effort highContext36 / 131.1k tokens · 0.0%Tokens12 in · 24 out · 36 total · 1 request
+
+--- on / file preview pane, rendered Markdown (Ctrl+Shift+B, NOTES.md)
+  CLIPBOARD: The quick brown fox jumps over the lazy dog. Highlighting any of these words should copy them.
+  PRIMARY  : The quick brown fox jumps over the lazy dog. Highlighting any of these words should copy them.
+
+--- on / Switchboard card detail (Ctrl+Shift+S, Enter on a card)
+  CLIPBOARD: Potential feature request, deferred by the owner on 2026-09-17. For now Relay keeps Konsole-style horizontal tabs along the top of each window.
+  PRIMARY  : Potential feature request, deferred by the owner on 2026-09-17. For now Relay keeps Konsole-style horizontal tabs along the top of each window.
+
+===== terminal/copy_on_select = false =====
+
+--- off / terminal pane (the behaviour this matches)
+  CLIPBOARD: SENTINEL-nothing-was-copied
+  PRIMARY  : SENTINEL-nothing-was-copied
+
+--- off / conversation info pane (the ⓘ button / Alt+I)
+  CLIPBOARD: SENTINEL-nothing-was-copied
+  PRIMARY  : |Model|stub · Stub (local:stub) · effort high|Context|36 / 131.1k tokens · 0.0%|Tokens|12 in · 24 out · 36 total · 1 request|
+
+--- off / file preview pane, rendered Markdown (Ctrl+Shift+B, NOTES.md)
+  CLIPBOARD: SENTINEL-nothing-was-copied
+  PRIMARY  : The quick brown fox jumps over the lazy dog. Highlighting any of these words should copy them.
+
+--- off / Switchboard card detail (Ctrl+Shift+S, Enter on a card)
+  CLIPBOARD: SENTINEL-nothing-was-copied
+  PRIMARY  : Potential feature request, deferred by the owner on 2026-09-17. For now Relay keeps Konsole-style horizontal tabs along the top of each window.

@@ -1,0 +1,214 @@
+--- fold-stream (header)
+| » Relaying... project
+--- fold-stream (body)
+~/project $
++ please think markdown about ponies
+vy ¢ thinking...
+Weighing the request
+The user asked about pony logistics. What matters:
+« Herding cats is different from herding ponies
+« The stable module already handles feed
+« Distance: the map (https://example.com/map) says 3 km
+open in pane
+--- fold-done (header)
+© Done. The ponies areready— auto
+--- fold-done (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
++ please think markdown about ponies
+
+» + thought for 6 s
+
+» stub
+
+Done. The ponies are ready — early start, three kilometres, light rain expected.
+--- fold-reopened (header)
+© Done. The ponies areready— auto
+--- fold-reopened (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
++ please think markdown about ponies
+vy ¢ thought for 6 s
+Weighing the request
+The user asked about pony logistics. What matters:
+« Herding cats is different from herding ponies
+« The stable module already handles feed
+« Distance: the map (https://example.com/map) says 3 km
+Steps
+1. Count the ponies
+2. Check the weather
+3. Set out early
+| An early start avoids the heat
+A longer line to watch the fold wrap and the new five-pixel line spacing: the quick brown fox jumps over the lazy dog while the terminal measures.
+open in pane
+>» stub
+Done. The ponies are ready — early start, three kilometres, light rain expected.
+--- fold-closed (header)
+© Done. The ponies areready— auto
+--- fold-closed (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
++ please think markdown about ponies
+
+» + thought for 6 s
+
+» stub
+
+Done. The ponies are ready — early start, three kilometres, light rain expected.
+--- always-open (header)
+Oo Done = auto
+--- always-open (body)
+~/project $
+
++ please think quick about ponies
+
+vy ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+» stub
+
+Done.
+--- never-line (header)
+Oo Done = auto
+--- never-line (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please think quick about ponies
+
++ thought for 1s (Ctrl+click)
+
+>» stub
+
+Done.
+--- never-toast (header)
+Oo Done = auto
+--- never-toast (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please think quick about ponies
+
++ thought for 1s (Ctrl+click)
+
+>» stub
+
+Done.
+--- migrate-never (header)
+Oo Done = auto
+--- migrate-never (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please think quick about ponies
+
++ thought for 1s (Ctrl+click)
+
+>» stub
+
+Done.
+--- twoblocks (header)
+© Let me verify the water level auto
+--- twoblocks (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
++ please think twoblocks about the river
+
+» + thought for 1s
+
+» stub
+
+Let me verify the water level.
+
+» + thought for 1s
+
+Verified: ford before noon, and both thinking blocks are shown.
+--- theme-dark-copper (header)
+Oo Done = auto
+--- theme-dark-copper (body)
+~/project $
+
++ please think quick about ponies
+
+y ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+> stub
+
+Done.
+--- theme-gruvbox-dark (header)
+© Done | auto
+--- theme-gruvbox-dark (body)
+~/project $
+
++ please think quick about ponies
+
+y ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+» stub
+
+Done.
+--- theme-ibm-beige (header)
+fo pone fa
+--- theme-ibm-beige (body)
+~/project $
+
++ please think quick about ponies
+
+vy ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+>» stub
+
+Done.
+--- theme-relay-dark (header)
+Oo Done = auto
+--- theme-relay-dark (body)
+~/project $
+
++ please think quick about ponies
+
+vy ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+» stub
+
+Done.
+--- theme-relay-light (header)
+Oo Done = auto
+--- theme-relay-light (body)
+~/project $
+
++ please think quick about ponies
+
+vy ¢ thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+> stub
+
+Done.

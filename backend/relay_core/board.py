@@ -28,7 +28,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 # --------------------------------------------------------------------------- ids
 
@@ -554,6 +554,58 @@ def assign_item_ids(items: Sequence[TaskItem], seed: str | None = None) -> list[
                             if seed is not None else new_item_id(taken))
             taken.add(item.item_id)
     return list(items)
+
+
+def set_task_blockers(items: Sequence[TaskItem], blockers: Mapping[int, Sequence]) -> list[TaskItem]:
+    """Write `blocked_by=` markers on items that are about to be written (format §2.5).
+
+    `blockers` maps a **0-based position in `items`** to what blocks that item.  A reference is
+    either an integer — another position in this same list — or a string: `#K7Q2` for a card,
+    anything else for an item id already on this card.  Positions exist because the thing that
+    blocks a new item is usually another new item, and a new item has no id until it is written;
+    ids are assigned here first, so both halves of a freshly imported list can name each other.
+
+    Raises `BoardError` for a reference that names nothing, an item that blocks itself, or a
+    cycle — all three are `relay-board.py check` errors, and a write must not create one.
+    """
+    assign_item_ids(items)
+    by_position = list(items)
+    known = {i.item_id for i in by_position if i.item_id}
+    for position, refs in (blockers or {}).items():
+        if not isinstance(position, int) or isinstance(position, bool) \
+                or not 0 <= position < len(by_position):
+            raise BoardError(f"blocked_by: {position!r} is not one of the {len(by_position)} items")
+        item = by_position[position]
+        out: list[str] = []
+        for ref in refs or ():
+            if isinstance(ref, bool):
+                raise BoardError("blocked_by: a reference is an item position, an item id or #CARD")
+            if isinstance(ref, int):
+                if not 0 <= ref < len(by_position):
+                    raise BoardError(f"blocked_by: item {ref} is not one of the "
+                                     f"{len(by_position)} items")
+                if ref == position:
+                    raise BoardError(f"blocked_by: item {position} cannot block itself")
+                value = by_position[ref].item_id or ""
+            else:
+                value = str(ref).strip()
+                if value.startswith("#"):
+                    if not valid_id(value[1:].upper()):
+                        raise BoardError(f"blocked_by: {value!r} is not a card id")
+                    value = "#" + value[1:].upper()
+                else:
+                    value = value.lower()
+                    if value not in known:
+                        raise BoardError(f"blocked_by: {value!r} is not an item of this card")
+                    if value == item.item_id:
+                        raise BoardError(f"blocked_by: item {value} cannot block itself")
+            if value and value not in out:
+                out.append(value)
+        item.blocked_by = out
+    cycle = _task_cycle(by_position)
+    if cycle:
+        raise BoardError("blocked_by cycle: " + " -> ".join(cycle))
+    return by_position
 
 
 # ------------------------------------------------------------------------- cards
@@ -1359,6 +1411,95 @@ def new_card(card_type: str, title: str, status: str, *, card_id: str | None = N
         body += f"\n## {ISSUE_HEADING}\n{request.rstrip()}\n"
     card = Card(front=front, body=body, dirty=True)
     return card
+
+
+# ------------------------------------------------------- where a card file belongs
+#
+# One copy of the three things everything that writes a card has to agree on: which tab a
+# card is in, which folder a tab means, and where its file goes when it is created or when
+# its status or tab changes.  `board_tools.BoardTools` and `forge_sync.ForgeSync` both write
+# cards, and each used to carry its own version of all three; the sync's copy silently
+# disagreed about plan and memory cards, which is the kind of drift this section exists to
+# stop.  Tools that want their own error text catch `BoardError` and re-raise.
+
+def tab_folders(board: "Board") -> dict[str, str]:
+    """`{tab id: category folder}` for the tabs that are folders (not filters)."""
+    return {str(t["id"]): str(t["folder"]) for t in board.tabs()
+            if t.get("id") and t.get("folder")}
+
+
+def tab_of(board: "Board", card: Card) -> str:
+    """Which tab a card sits in.  Plans and memories are their own tabs, whatever the config."""
+    if card.type == "plan":
+        return "planning"
+    if card.type == "memory":
+        return "memory"
+    category = board.category_of(card.path) if card.path else ""
+    for tab_id, folder in tab_folders(board).items():
+        if folder == category:
+            return tab_id
+    return category
+
+
+def category_for_tab(board: "Board", tab, *, strict: bool = False) -> str:
+    """The category folder a tab id means.
+
+    `strict` is for the callers that are about to write a card: an unknown tab, or a tab that
+    is a filter across categories rather than a folder, raises `BoardError` instead of being
+    taken at face value.  Readers pass it through unchanged, as they always did.
+    """
+    folders = tab_folders(board)
+    name = str(tab).strip().lower() if tab is not None else ""
+    if not strict:
+        return folders.get(name, name)
+    if name in folders:
+        return folders[name]
+    known = ", ".join(sorted(folders)) or "(none)"
+    if any(str(t.get("id")) == name for t in board.tabs()):
+        raise BoardError(f"tab {tab!r} is a filter across categories, not a folder; "
+                         "pick a category tab for the card.")
+    raise BoardError(f"unknown tab {tab!r}; this board has: {known}")
+
+
+def free_card_path(folder: Path, title: str) -> Path:
+    """A path in `folder` that no file is using yet, for a card titled `title`."""
+    path = folder / card_filename(title)
+    for n in range(2, 60):
+        if not path.exists():
+            return path
+        path = folder / card_filename(f"{title}-{n}")
+    raise BoardError("could not find a free file name for the card.")
+
+
+def write_new_card(board: "Board", card: Card, category: str) -> Path:
+    """Write a brand-new card into its category folder and return the path it landed at.
+
+    The card's `path` is set to it.  Nothing else about the card is touched: the caller has
+    already built the front matter and the body.
+    """
+    folder = board.base_for(card.private) / card.expected_folder(category)
+    folder.mkdir(parents=True, exist_ok=True)
+    card.path = free_card_path(folder, card.title)
+    _atomic_write(card.path, card.to_text())
+    return card.path
+
+
+def card_target_path(board: "Board", card: Card, category: str) -> Path | None:
+    """Where this card's file belongs now, or None when it is already there.
+
+    Called *before* the card is saved, with the status already set on it: the answer is what
+    the new status and category ask for, and the caller decides what an occupied path means.
+    """
+    target = board.base_for(card.private) / card.expected_folder(category) / card.path.name
+    return None if target == card.path else target
+
+
+def move_card_file(card: Card, target: Path) -> Path:
+    """Move a saved card's file to `target` and point the card at it."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(card.path, target)
+    card.path = target
+    return target
 
 
 # --------------------------------------------------------------------- migration

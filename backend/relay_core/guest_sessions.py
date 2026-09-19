@@ -10,14 +10,21 @@ rows to ``ConversationIndex.update_guest()`` (``conv_index`` owns the table), so
 session is a row like any other: listed by the same search, found by the same full-text query,
 dropped from the index when its file goes away, never deleted for real.
 
-A record is what protocol 26.7 says it is::
+A record is what protocol 26.7 says it is, plus the directory that command needs::
 
-    {source, id, title, mtime, workspace, message_count, resume_command}
+    {source, id, title, mtime, workspace, message_count, resume_command, resume_cwd}
 
 `mtime` is the transcript file's; `message_count` counts the main chain's user prompts and
 assistant replies (claude sidechains, tool-result carriers and codex developer messages are
 not conversation messages); `resume_command` is the argv that respawns the guest in the chosen
 pane — ``claude -r <id> [--fork-session]``, ``codex resume <id>`` / ``codex fork <id>``.
+
+**The spawner must chdir to `resume_cwd` before running `resume_command`.** Both guests look a
+session up under the working directory they were started in — claude by the `<cwd-slug>`
+directory its transcripts live in — so `claude -r <id>` run from another directory reports an
+unknown session. `resume_cwd` is the session's own workspace (empty when the transcript never
+named one, and then the pane's own directory is as good a guess as any);
+:func:`resume_spawn` hands the argv and the directory back as one payload.
 
 Search spans all sources because the rows share the one index; the default listing still shows
 Relay's own conversations only, and a query names ``claude``/``codex`` in `sources` to see the
@@ -35,10 +42,12 @@ import os
 import re
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from . import conv_index, guest
+from . import conv_index, guest, logs
+
+log = logs.get("guest_sessions")
 
 # The two source kinds this module serves (the listing itself lives in conv_index, section 26.3).
 GUEST_SOURCES = conv_index.GUEST_SOURCES
@@ -76,15 +85,30 @@ def resume_command(source: str, session_id: str, *, fork: bool = False) -> list[
     return ["codex", "fork" if fork else "resume", session_id]
 
 
+def resume_spawn(source: str, session_id: str, workspace: str | None = None, *,
+                 fork: bool = False) -> dict:
+    """`{argv, cwd}`: what a pane needs to respawn a guest session, in one payload.
+
+    The argv alone is not enough. Both guests resolve a session id against the directory they
+    are started in — claude looks for ``<projects>/<cwd-slug>/<id>.jsonl`` — so the pane must
+    chdir to `cwd` first, or ``claude -r <id>`` reports an unknown session from anywhere but the
+    directory the session was held in. `cwd` is "" when the transcript named no workspace, and
+    the spawner then keeps the pane's own directory.
+    """
+    return {"argv": resume_command(source, session_id, fork=fork), "cwd": str(workspace or "")}
+
+
 def to_record(data: dict, *, fork: bool = False) -> dict:
     """The protocol 26.7 record of one parsed guest session (see the module docstring)."""
+    workspace = str(data.get("workspace") or "")
     return {"source": data.get("source") or "",
             "id": str(data.get("id") or ""),
             "title": " ".join(str(data.get("title") or "").split())[:MAX_TITLE],
             "mtime": float(data.get("mtime") or 0.0),
-            "workspace": str(data.get("workspace") or ""),
+            "workspace": workspace,
             "message_count": int(data.get("message_count") or 0),
-            "resume_command": resume_command(data.get("source") or "", data.get("id") or "", fork=fork)}
+            "resume_command": resume_command(data.get("source") or "", data.get("id") or "", fork=fork),
+            "resume_cwd": workspace}
 
 
 def item_to_record(item: dict, *, fork: bool = False) -> dict:
@@ -93,23 +117,29 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
     guests' files."""
     source = str(item.get("source") or "")
     updated = item.get("updated") or item.get("created") or 0.0
+    workspace = str(item.get("workspace") or "")
     return {"source": source,
             "id": str(item.get("session_id") or item.get("id") or ""),
             "title": " ".join(str(item.get("title") or "").split())[:MAX_TITLE] or "Untitled",
             "mtime": float(updated if isinstance(updated, (int, float)) else 0.0),
-            "workspace": str(item.get("workspace") or ""),
+            "workspace": workspace,
             "message_count": int(item.get("turns") or 0),
             "resume_command": resume_command(source, item.get("session_id") or item.get("id") or "",
-                                             fork=fork)}
+                                             fork=fork),
+            "resume_cwd": workspace}
 
 
 def annotate_items(items, *, fork: bool = False) -> list[dict]:
     """Index items with the protocol 26.7 record fields merged into the guest rows.
 
     A `conversations` answer lists every source at once, so the worker does not have to know
-    which rows are guests: a guest item gains `id`, `mtime`, `message_count` and
-    `resume_command` (the argv the pane spawns to resume it, `--fork-session`/`codex fork`
-    when `fork`), and every other item comes back exactly as the index gave it.
+    which rows are guests: a guest item gains `id`, `mtime`, `message_count`, `resume_command`
+    (the argv the pane spawns to resume it, `--fork-session`/`codex fork` when `fork`) and
+    `resume_cwd` (the directory it must be spawned in — see `resume_spawn`), and every other
+    item comes back exactly as the index gave it.
+
+    `workspace` is restated from the record rather than left to the row so the spawn payload is
+    complete on its own: a caller that reads only the record fields still knows where to run.
     """
     out = []
     for item in items or ():
@@ -119,7 +149,9 @@ def annotate_items(items, *, fork: bool = False) -> list[dict]:
         record = item_to_record(item, fork=fork)
         out.append({**item, "id": record["id"], "mtime": record["mtime"],
                     "message_count": record["message_count"],
-                    "resume_command": record["resume_command"]})
+                    "workspace": record["workspace"],
+                    "resume_command": record["resume_command"],
+                    "resume_cwd": record["resume_cwd"]})
     return out
 
 
@@ -133,7 +165,13 @@ def annotate_items(items, *, fork: bool = False) -> list[dict]:
 
 
 def _epoch(value) -> float | None:
-    """Epoch seconds of a transcript timestamp: ISO 8601 text or a number, else None."""
+    """Epoch seconds of a transcript timestamp: ISO 8601 text or a number, else None.
+
+    Both guests write UTC (claude's trailing ``Z``, codex's rollout stamps). A stamp that names
+    no zone is read as UTC too, not as this machine's local time: Python would otherwise place a
+    naive stamp hours away from the one beside it that did carry the ``Z``, which reorders a
+    session's entries and dates the session itself wrong in the listing.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -141,9 +179,12 @@ def _epoch(value) -> float | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.timestamp()
 
 
 def _one_line(text, cap: int) -> str:
@@ -360,9 +401,13 @@ def _parse_file(path: Path, parser: _Parser) -> dict | None:
     return parser.finish(path, mtime)
 
 
-def _id_from_name(path: Path) -> str:
-    """The session id a transcript file name carries: its trailing UUID (codex's rollout names
-    end in one) or, failing that, the whole stem."""
+def _file_id(path: Path) -> str:
+    """The session id a transcript file's own name carries: its trailing UUID (claude names the
+    file after the session, codex ends the rollout name with the session's UUID) or, failing
+    that, the whole stem.
+
+    This is the one id the module keys a session by — the record's, the index row's and the one
+    `_walk` looks a file up by before it reads it — so all three agree by construction."""
     stem = path.name
     if stem.endswith(".jsonl"):
         stem = stem[: -len(".jsonl")]
@@ -371,14 +416,19 @@ def _id_from_name(path: Path) -> str:
 
 
 def parse_claude_transcript(path: str | Path) -> dict | None:
-    """One claude session as a parsed record; the file's name is the session id when no line
-    says it (an empty transcript is still a session the picker should show)."""
+    """One claude session as a parsed record.
+
+    The file's name is the session id: claude writes ``<slug>/<session-id>.jsonl`` and resolves
+    ``claude -r <id>`` back to that path, so the name is what resumes and what the index row is
+    keyed by. It wins over a `sessionId` line that disagrees (a copied or hand-edited
+    transcript): keyed any other way, the row the last run indexed is not the one `_walk` looks
+    up, its mtime skip never fires and every reconcile re-parses the file. An empty transcript
+    is still a session the picker should show, and it has nothing but its name."""
     path = Path(path)
     parsed = _parse_file(path, _ClaudeParser())
     if parsed is None:
         return None
-    if not parsed["id"]:
-        parsed["id"] = path.stem
+    parsed["id"] = _file_id(path) or parsed["id"]
     if not parsed["workspace"]:
         parsed["workspace"] = claude_workspace_from_slug(path.parent.name)
     return parsed
@@ -405,13 +455,17 @@ def _apply_codex_meta(parsed: dict, meta: dict | None) -> dict:
 
 def parse_codex_rollout(path: str | Path, *, meta: dict | None = None) -> dict | None:
     """One codex rollout as a parsed record. `meta` is the session's row from the threads
-    database (see `codex_thread_meta`); without one the record is the rollout alone."""
+    database (see `codex_thread_meta`); without one the record is the rollout alone.
+
+    The UUID the rollout's name ends in is the thread id the database and ``codex resume`` use,
+    so it is the record's id (and the index's key) whenever the name carries one — the same rule
+    as claude's, and for the same reason: `_walk` looks a file up by its name before reading it
+    (see `parse_claude_transcript`)."""
     path = Path(path)
     parsed = _parse_file(path, _CodexParser())
     if parsed is None:
         return None
-    if not parsed["id"]:
-        parsed["id"] = _id_from_name(path)
+    parsed["id"] = _file_id(path) or parsed["id"]
     return _apply_codex_meta(parsed, meta)
 
 
@@ -440,12 +494,27 @@ def claude_workspace_from_slug(slug: str) -> str:
 def codex_thread_meta(db_path: str | Path | None) -> dict[str, dict]:
     """`{session_id: {workspace, file, name, title, first_user_message}}` from the codex
     threads database. Opened read-only (never a writer, so a running codex keeps it): a
-    missing, busy or unreadable database is simply no metadata, and the rollouts stand alone."""
+    missing, busy or unreadable database is simply no metadata, and the rollouts stand alone —
+    but the reason is logged, because "the guest's titles silently stopped appearing" is not
+    something to debug from an empty pane.
+
+    The read-only URI comes from `Path.as_uri()`, which percent-escapes the path: pasted
+    together by hand, a home directory holding ``?`` (query separator), ``#`` (fragment) or
+    ``%`` (escape introducer) either truncates the file name or decodes into a different one.
+    """
     if not db_path:
         return {}
     try:
-        db = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
-    except sqlite3.Error:
+        uri = Path(db_path).absolute().as_uri() + "?mode=ro"
+    except ValueError as error:           # not a path that can be named as a URI at all
+        logs.event(log, "codex threads database path unusable", level_name="error",
+                   error=type(error).__name__)
+        return {}
+    try:
+        db = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as error:
+        logs.event(log, "codex threads database not opened", level_name="error",
+                   db=Path(db_path).name, error=type(error).__name__)
         return {}
     try:
         columns = {row[1] for row in db.execute("PRAGMA table_info(threads)").fetchall()}
@@ -464,7 +533,9 @@ def codex_thread_meta(db_path: str | Path | None) -> dict[str, dict]:
                                "title": str(item.get("title") or ""),
                                "first_user_message": str(item.get("first_user_message") or "")}
         return out
-    except sqlite3.Error:
+    except sqlite3.Error as error:
+        logs.event(log, "codex threads database not read", level_name="error",
+                   db=Path(db_path).name, error=type(error).__name__)
         return {}
     finally:
         db.close()
@@ -507,9 +578,9 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
     mtime (`known`, keyed by session id) already matches the file's is not read at all.
 
     Returns `(records, unchanged)` — `unchanged` being the session ids that were skipped, which
-    are still indexed and must not be mistaken for files that have gone away. The session id a
-    file carries before it is parsed is the same one its parse falls back to (`path.stem` for
-    claude, the trailing UUID for codex)."""
+    are still indexed and must not be mistaken for files that have gone away. The id a file is
+    looked up by here is `_file_id`, which is also the id its parse puts on the record and the
+    index keys the row by, so the lookup finds the row the last run wrote."""
     records: list[dict] = []
     unchanged: set[str] = set()
     for path in _by_age(paths)[:limit or None]:
@@ -528,12 +599,6 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
     return records, unchanged
 
 
-def _file_id(path: Path) -> str:
-    """The session id a transcript file carries: claude names the file after the session, codex
-    ends the rollout name with the session's UUID."""
-    return path.stem if not CODEX_ROLLOUT.match(path.name) else _id_from_name(path)
-
-
 def _scan(source: str, home: str | None, *, limit: int | None,
           known: dict[str, float | None] | None) -> tuple[list[dict], set[str]]:
     """One guest's transcripts (newest first) and the session ids skipped as unchanged."""
@@ -546,7 +611,7 @@ def _scan(source: str, home: str | None, *, limit: int | None,
         nonlocal meta
         if meta is None:
             meta = codex_thread_meta(guest.codex_state_db(home))
-        return parse_codex_rollout(path, meta=meta.get(_id_from_name(path)))
+        return parse_codex_rollout(path, meta=meta.get(_file_id(path)))
 
     return _walk(_codex_paths(home), parse, limit=limit, known=known)
 
@@ -587,7 +652,12 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
     use pays for the guests' history once and then only for the sessions that changed.
 
     `limit` caps each source at its N newest files — the first run over a long claude history
-    is minutes of parsing, and a pane that only wants to list recent sessions can say so.
+    is minutes of parsing, and a pane that only wants to list recent sessions can say so. **A
+    limited reconcile never removes a row** (`removed` is always 0): it has not looked at the
+    transcripts past the limit, so it cannot tell a session that went away from one it simply
+    did not read, and dropping every id it did not see would empty the pane of everything but
+    the N newest. Only a full reconcile — the one that stats every file — prunes.
+
     Returns `{added, refreshed, removed, ms}` like `ConversationIndex.reconcile()`.
     """
     sources = tuple(source for source in sources if source in GUEST_SOURCES)
@@ -609,10 +679,11 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
             added += row is None
             refreshed += row is not None
     removed = 0
-    for identifier in known:
-        if identifier not in seen:
-            index.delete_session(identifier, remove_files=False)   # index rows only, never files
-            removed += 1
+    if limit is None:                    # a capped scan saw only the newest N: it may not prune
+        for identifier in known:
+            if identifier not in seen:
+                index.delete_session(identifier, remove_files=False)   # rows only, never files
+                removed += 1
     return {"added": added, "refreshed": refreshed, "removed": removed,
             "ms": int((time.time() - started) * 1000)}
 
@@ -720,7 +791,15 @@ class LiveTail:
     and `record()` is the session as it stands, so a running session is in the listing (and
     stays current) without a rescan. Nothing is written anywhere: not the transcript, not the
     guests' directories, not `guest.json` (the event channel belongs to the hooks phase).
+
+    A codex tail also wants the thread's name, which lives in the threads database rather than
+    in the rollout. Reading it is a fresh sqlite connection, a `PRAGMA table_info` and a full
+    `SELECT` over every thread the user has ever had, so it is cached for `META_REFRESH` seconds
+    instead of being paid on every `refresh()` — the pane refreshes its tail as fast as the
+    guest writes, and a thread's name changes about once a session.
     """
+
+    META_REFRESH = 30.0            # seconds between reads of codex's threads database
 
     def __init__(self, path: str | Path, *, source: str | None = None, home: str | None = None):
         self.path = Path(path)
@@ -734,6 +813,9 @@ class LiveTail:
         self._size = -1
         self._mtime: float | None = None
         self._record: dict | None = None
+        # codex's threads database, read at most every `META_REFRESH` seconds (see the class).
+        self._meta: dict[str, dict] = {}
+        self._meta_at: float | None = None
         self.refresh()
 
     def refresh(self) -> dict | None:
@@ -763,22 +845,31 @@ class LiveTail:
         self._record = self._parsed(stat.st_mtime)
         return self._record
 
+    def _thread_meta(self) -> dict[str, dict]:
+        """codex's threads rows, re-read at most every `META_REFRESH` seconds. The whole table
+        is cached, not one row, so a thread that appears in it mid-tail is still found without
+        another read."""
+        now = time.monotonic()
+        if self._meta_at is None or now - self._meta_at >= self.META_REFRESH:
+            self._meta = codex_thread_meta(guest.codex_state_db(self.home))
+            self._meta_at = now
+        return self._meta
+
     def _parsed(self, mtime: float) -> dict | None:
         """The parser's state as a parsed session, with codex's thread name when the database
         has one."""
         meta = None
         if self.source == "codex":
-            meta = codex_thread_meta(guest.codex_state_db(self.home)).get(self._parser.session_id)
+            # The rollout's name carries the thread id before its first line has been read.
+            meta = self._thread_meta().get(_file_id(self.path) or self._parser.session_id)
         parser = self._parser
         finished = parser.finish(self.path, mtime)
+        # The file's name is the session id both guests resume by (see `parse_claude_transcript`).
+        finished["id"] = _file_id(self.path) or finished["id"]
         if self.source == "claude":
-            if not finished["id"]:
-                finished["id"] = self.path.stem
             if not finished["workspace"]:
                 finished["workspace"] = claude_workspace_from_slug(self.path.parent.name)
             return finished
-        if not finished["id"]:
-            finished["id"] = _id_from_name(self.path)
         return _apply_codex_meta(finished, meta)
 
     @property

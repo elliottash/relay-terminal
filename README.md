@@ -23,6 +23,11 @@ sudo apt install ./relay_*_ubuntu24.04_amd64.deb    # or ubuntu26.04 / debian13,
 relay --workspace ~/project
 ```
 
+To upgrade a package install, type `/update` in any prompt box: Relay downloads the newest
+release's `.deb` for its distribution and architecture, checks it against the release's
+`SHA256SUMS`, installs it (pkexec asks for the password) and restarts itself. `relay-update.py
+check` does the same discovery without installing.
+
 A fresh install runs on Relay Free with no key (see "Privacy and your keys"). The AUR packages
 `relay-terminal` and `relay-terminal-git` are prepared but not yet published; see
 [docs/RELEASING.md](docs/RELEASING.md).
@@ -72,7 +77,7 @@ that conflict.
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
-| Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans |
+| Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
 | Ctrl+Shift+Y | Resume a saved session (`/resume`) |
 | Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
 | Ctrl+T, Ctrl+N | New tab, new window |
@@ -280,7 +285,9 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   survives a restart. Hovering a
   pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag
   the grip onto another pane's edge (a drop zone shows) to move the pane there, or onto a tab bar
-  to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane (in the Warp preset these
+  to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane, and Ctrl+Alt+Left or
+  Ctrl+Alt+Right followed by Ctrl+Alt+Down within two seconds docks the pane beneath the neighbor
+  it moved toward (in the Warp preset these
   keys focus panes, so moving is unbound there; GNOME and KDE may take Ctrl+Alt+arrows for
   workspaces). "+" after the tabs opens a tab; hovering a tab shows ⧉ (also in its right-click
   menu) to move it to a new window. Moved panes keep their shell, agent and conversation.
@@ -342,7 +349,7 @@ Marketing, Plans, Memory, Deferred, Done), columns are status, and dragging a ca
 moves the file and records the move. Each card has a thread: the discussion and the audit trail,
 append-only, one entry per write.
 
-- **Ctrl+Shift+S** opens it beside the pane you were in; `n` adds a card, `/` filters
+- **Ctrl+Shift+S** opens it beside the pane you were in (again to close it); `n` adds a card, `/` filters
   (`label:voice`, `status:ready`, `@agent`, `waiting:me`), Enter opens one, `m` moves it,
   `t` sends `#ID` to the composer.
 - **In the terminal**: `#` and a few characters picks a card, `/card <text>` captures one without
