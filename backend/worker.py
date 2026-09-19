@@ -230,7 +230,7 @@ def main():
                                                      {"has_stored_key": bool(sources[p.id]),
                                                       "key_source": sources[p.id]})}
                                   for p in PRESETS.values()]
-                      # Model servers on this machine (protocol 23): no key to store, so
+                      # Model servers on this machine (protocol 28): no key to store, so
                       # has_stored_key stays false and `local` is what makes the row usable.
                       + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
                          for e in localmodels.catalog().values()]})

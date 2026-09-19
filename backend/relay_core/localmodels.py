@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Model servers on this machine: the endpoint registry and the probe (protocol section 23).
+"""Model servers on this machine: the endpoint registry and the probe (protocol section 28).
 
 A local server is not a preset. Its model id and the window it was started with are not knowable
 ahead of time, it has no key and no key page, and every invariant the preset table is tested for
@@ -535,7 +535,7 @@ def detect(spec: dict, *, timeout: float = CONNECT_PROBE_TIMEOUT, wait: float = 
     return out, found
 
 
-# ----- worker protocol (section 23) ----------------------------------------------------------
+# ----- worker protocol (section 28) ----------------------------------------------------------
 def handle(request: dict, emit) -> threading.Thread | None:
     """Answer one of ``TYPES``. ``local_probe`` runs on its own thread so the protocol loop never
     waits on a socket; exactly one event follows every request."""

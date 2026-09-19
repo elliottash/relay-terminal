@@ -84,7 +84,7 @@ def provider_config(request: dict) -> ProviderConfig:
     named = request.get("preset")
     preset = PRESETS.get(named) if isinstance(named, str) else None
     if preset is None and localmodels.is_local_id(named):
-        # A model server on this machine (protocol 23): the registry supplies URL and model.
+        # A model server on this machine (protocol 28): the registry supplies URL and model.
         endpoint = localmodels.find(named)
         if endpoint is None:
             raise ValueError(f"No local endpoint {named!r} is saved. Add it with scripts/relay-local.py add, "

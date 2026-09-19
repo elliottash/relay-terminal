@@ -360,7 +360,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "alias_deleted": "local file paths",
     "alias_import_preview": "unreviewed text read from Warp's database and shell startup files",
     "alias_imported": "local file paths",
-    # Model servers on the desktop (protocol 23, card #24XJ). What serves on the desktop's loopback
+    # Model servers on the desktop (protocol 28, card #24XJ). What serves on the desktop's loopback
     # ports, under which model ids, is provider configuration, and saving or deleting an endpoint
     # is desktop administration. Same call as `presets`.
     "local_probed": "provider configuration and loopback URLs",

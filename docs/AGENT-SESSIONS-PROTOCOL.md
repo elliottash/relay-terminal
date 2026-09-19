@@ -691,6 +691,253 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
 - Not implemented on purpose (owner: "later"): routing between the Main and Flash agent by estimated task
   difficulty.
 
+### 13.7 Main / Flash / Lite / Local tiers (v1.4, 2026-09-17; Local added v1.5, 2026-09-18)
+
+Eight roles were too many knobs for one screen, so the roles modal shows **three** models — Main, Flash and
+Lite — and every role follows one of them. Source: owner, 2026-09-17 ("lets have main, flash, and lite
+presets … then advanced options, which would then reveal the specific actions"). Backend:
+`presets.TIER_DEFAULTS` (the per-provider table) and `roles.RoleResolver._tier` (resolution); tests:
+`tests/test_presets.py` and `tests/test_roles.py`. Additive: a worker that receives no `tiers` and no
+`"tier"` in `roles` resolves exactly as v1.3 did.
+
+| Tier | Used for | Where it comes from |
+|---|---|---|
+| `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`) |
+| `flash` | terminal use, fast panes, summaries, suggestions | `TIER_DEFAULTS[<main preset>]["flash"]` |
+| `lite` | chores and the request audit | `TIER_DEFAULTS[<main preset>]["lite"]` |
+| `local` | panes on the Local agent (`/local`), and any role pinned to it | the `tiers.local` override, else the first saved local endpoint |
+
+**Options.** `configure` and `set_agent_options` accept `tiers`, an object keyed by tier name. `main` is
+rejected — it is the pane's own model. Each value is `null` (restore the provider's default) or
+`{preset?, base_url?, model?, extra?, effort?}` with the same meaning as a `roles` entry. `roles.<name>`
+additionally accepts `{"tier": "main"|"flash"|"lite"|"local", "effort"?}`, which is exclusive with
+`preset`/`base_url`/`model`/`extra`; giving both is an error.
+
+**The Local tier** (v1.5, 2026-09-18; owner: "add a `/local` command that switches to your chosen local
+LLM (make that as a 4th category with main, flash, lite, local)") is the one tier that belongs to no
+provider, so it has no row in `TIER_DEFAULTS` and the per-provider table stays three wide
+(`presets.PROVIDER_TIERS`). `tiers.local` accepts **only** a model server on this machine — a saved
+`local:<slug>` endpoint id (`docs/LOCAL-MODELS.md`, "Worker protocol"), or a plain `http://` loopback `base_url` with its `model` — and a
+hosted preset there is an error. With no override it is the first endpoint in the registry, so one saved
+server just works. A local endpoint needs no key and none is looked up; a server that is simply not
+running is not a fallback case, and the turn fails with the transport's "No model server is answering
+on … start it with …".
+
+**A tier that names only a provider** (`{"preset": "glm-coding"}`, which is what the roles modal writes
+when you pick a provider for a row) runs **that provider's model for that tier**, not its headline model:
+Flash on Z.AI is `glm-5.3-flash`, not `glm-5.3` (`presets.provider_tier_model`). Main on Kimi with Flash
+on the GLM Coding Plan is therefore two choices and no typing. When that provider's own entry for the tier
+points elsewhere — Lite is Gemini through OpenRouter for every provider — the named provider is kept and
+the nearest tier that stays on it is used instead (Lite on Z.AI → `glm-5.3-flash`). An override that also
+names `model` still wins outright.
+
+**Fallback.** A tier whose provider has no stored key steps one tier towards Main — Lite → Flash → Main —
+and the Main tier is the pane's own model, so resolution never hard-fails. The step-down is expected, not a
+misconfiguration, so it appears as `note` on the tier and the role (`"No stored key for the Lite model;
+using Flash."`) and **not** in `model_roles.warnings`; `warnings` stays reserved for a role the user pinned
+explicitly whose key is missing. The Local tier is **not** a step on that ladder — it is a different trade,
+not a smaller model of the same provider — so a Local tier with no endpoint set up falls back to Main
+directly (`presets.tier_fallbacks("local") == ("local", "main")`) with the note
+`"No local model is set up; using Main."`.
+
+**Events.** `configured` and `model_roles` gain `tiers`:
+`{tier: {tier, label, model, preset, base_url, effort, source, using?, note?}}`, where `source` is
+`default` or `configured` and `using` is the tier actually serving it after any step-down. Each role in
+`roles` gains `tier` (the tier it came from, or `null` for `vision` / `route_assist`) and an optional
+`note`. No key material appears in any of it.
+
+**Defaults per provider** (verified against each provider's own documentation on 2026-09-17; the doc URL
+sits next to the entry in `backend/relay_core/presets.py`):
+
+| Default provider | Main | Flash | Lite |
+|---|---|---|---|
+| `glm`, `glm-coding` | `glm-5.3` | `glm-5.3-flash` (`reasoning_effort: low`) | `google/gemini-3.8-flash` on OpenRouter |
+| `kimi` | `kimi-k3` | `kimi-k2.7-code-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `kimi-code` | `k3` | `kimi-for-coding-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `openrouter` | `deepseek/deepseek-v4.1-flash` | `deepseek/deepseek-v4.1-flash` | `google/gemini-3.5-flash-lite` |
+| `minimax` | `MiniMax-M3` | `MiniMax-M2.7-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `anthropic` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `openai` | `gpt-6-astra` | `gpt-5.6-terra` | `gpt-5.6-luna` |
+| `gemini` | `gemini-3.1-pro-preview` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` |
+| custom / unknown endpoint | the pane's model | the pane's model | the pane's model |
+
+`route_assist` is deliberately **not** tiered: it keeps `google/gemini-3.5-flash-lite` on OpenRouter, because
+the routing budget is under a second and that model measured 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8
+Flash. Changing the Lite tier must not move it, so the GUI shows it as its own pinned row with that reason.
+
+### 13.8 Key management commands (v1.4, 2026-09-17)
+
+The keys modal needs three things the protocol did not have. All are additive.
+
+| Message | Reply | Meaning |
+|---|---|---|
+| `remove_key {preset, id?}` | `key_removed {preset, removed: bool}` | delete the keyring entry; `removed: false` when there was none (or `RELAY_KEYRING=off`) |
+| `test_key {preset, id?}` | `key_tested {preset, ok, model, elapsed_ms, error?, reply_chars?}` | one minimal call (two-word prompt, no tools, 256 output tokens) that answers "does this key reach this endpoint" |
+| `import_agent_tools {id?}` | `agent_tools_imported {imported: [{preset, name, model}], skipped: [string]}` | copy an API key out of `~/.claude/settings.json` (`env.ANTHROPIC_API_KEY`) or `~/.codex/auth.json` (`OPENAI_API_KEY`) |
+
+`test_key` runs on a background thread and emits exactly one event. The key is read from the keystore
+inside the worker and never crosses the pipe in either direction; `error` carries the HTTP status only,
+because provider error bodies can quote the submitted request (`provider.ProviderError` already strips
+them). An OAuth login is not an API key and is never imported: Claude Code and Codex both sign in with
+OAuth by default, and those tokens do not work on the OpenAI-compatible endpoints Relay talks to.
+
+The `presets` event gains, per preset, `group` (`subscription` / `aggregator` / `payg`), `key_url` (where
+the user gets a key), `note`, `provider` (the company: "Kimi", "Z.AI (GLM)", "OpenAI (ChatGPT)"…) and
+`plan` ("Coding Plan", "Pay-as-you-go", … — empty when the provider has one entry), and `key_source`
+(`env` / `keyring` / `""`), so the modal can show
+"From RELAY_OPENROUTER_API_KEY" and refuse to offer Remove for something it cannot remove. The event also
+gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row per job — so the GUI never
+keeps a second copy of the backend's tables. The keys modal lists a preset per plan and so uses `label`
+("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
+presets of the same company are both offered.
+
+Since v2.9 (2026-09-18) every row also carries `hosted` (`true` only for Relay Free, 13.9). The Relay
+Free row differs from the others in four fields: `has_stored_key` is always `false` and `key_source`
+is `"included"` (nothing is stored and nothing can be; Add and Remove do not apply), `available`
+says whether this worker can use it at all (`python3-cryptography` imports), and `quota` is the
+last `{limit, used, resets_at}` the worker saw, or `null` before the first exchange. `group` is
+`"included"`, which the modal lists first. `test_key {preset: "relay-free"}` works: it makes one
+real call through the gateway with a token, and no key is looked up.
+
+### 13.9 Relay Free: the hosted provider (v2.9, 2026-09-18)
+
+Relay Free is the `relay-free` preset (owner decision 2026-09-18): an included, quota-limited
+allowance through Relay's own gateway at `https://api.relay-terminal.ai/v1`, so a fresh install's
+first ask works before any key is stored. The gateway speaks the same OpenAI shape as every other
+provider and names its models after the tiers (`relay-main`, `relay-flash`, `relay-lite`), so
+`configure {preset: "relay-free", use_stored_key: true}` is all the GUI sends: no key is looked up
+and none is required (`ProviderConfig.hosted`). The tiers stay on Relay Free (13.7), and `route_assist`
+resolves to `relay-lite` when the main preset is Relay Free and no OpenRouter key is stored. Reasoning
+is medium and below (owner, 2026-09-18): the row's `efforts` are `["low", "medium"]` (effort style
+`relay`), Main defaults to medium and Flash to low, and the gateway clamps any higher request to
+medium rather than refusing it.
+
+**How the worker authenticates.** An X25519 installation key of its own (keyring attribute
+`relay-free-identity`, else `$XDG_DATA_HOME/relay/hosted/identity.key`, mode 0600; separate from
+the remote identity, so regenerating either never breaks the other) proves itself to the gateway
+(`POST /v1/challenge` → HMAC-SHA256 over the challenge keyed by the X25519 shared secret →
+`POST /v1/register`) and receives a short-lived bearer token. The token lives in the worker's
+memory only, is refreshed when missing or within five minutes of expiry, and is retried exactly once
+after an HTTP 401. It never crosses this pipe and is never logged. `RELAY_HOSTED_URL` overrides the
+gateway address (tests point it at a loopback HTTP server).
+
+| Message | Reply | Meaning |
+|---|---|---|
+| `hosted_quota {id?}` | `hosted_quota {id, limit, used, resets_at}` or `error {id, text, code?, resets_at?}` | `GET /v1/quota` on a background thread: the live allowance for the keys modal and the pane's chip |
+
+`hosted_quota` is also emitted **without an `id`** after every model call that went through the
+gateway (the pane's turns, the tiers' side calls, the key test), read from the reply's
+`X-Relay-Quota-Limit`, `-Used` and `-Resets-At` headers, including on a refusal. `limit` and `used`
+are tokens for the day; `resets_at` is unix seconds.
+
+**Refusals.** A gateway error body is Relay's own JSON, `{"error": {"code, message, resets_at"}}`,
+and is the one provider body the worker reads: `code` picks the sentence the user sees, `message`
+is shown only for a code with no sentence of its own, truncated, and nothing else of it is echoed.
+The turn's `error` event then carries `code` and `resets_at` in addition to `text`:
+
+| `code` | HTTP | Meaning |
+|---|---|---|
+| `quota_exhausted` | 429 | the day's allowance is used; `resets_at` says when it returns |
+| `rate_limited` | 429 | too many requests in a short time |
+| `free_unavailable` | 503 | the gateway is closed (spend ceiling, upstream outage) |
+| `token_expired` | 401 | the token was refused; the worker has already registered again and retried once |
+| `bad_request` | 400 | the gateway refused the request's shape |
+
+`error` events from every other provider carry neither field. Without `python3-cryptography` the
+row is `available: false`, a turn on it fails with "Relay Free needs python3-cryptography", and no
+other provider is affected.
+
+### 13.10 The output token limit is per model (v2.9, 2026-09-18)
+
+`max_tokens` on `configure` and `set_model` is **0, or 256–131072**. `0` is the default and means
+*automatic*: ask this model for what its own documentation allows. `ProviderConfig` settles the
+number once, at construction, so the request, the compaction reserve (`window − max_tokens − 24K`)
+and the model-switch ceiling all read the same value.
+
+| Endpoint | Automatic asks for | Source |
+|---|---|---|
+| GLM-5.3 (`glm`, `glm-coding`) | 131,072 | https://docs.z.ai/guides/llm/glm-5.3 |
+| Kimi K3 (`kimi`, `kimi-code`) | 131,072 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart |
+| Claude Opus 5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5/overview |
+| MiniMax M3 (`minimax`) | 131,072 | https://platform.minimax.io/docs/guides/text-generation |
+| GPT-6 Astra (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-astra |
+| Gemini 3.1 Pro (`gemini`) | **65,536** | https://ai.google.dev/gemini-api/docs/gemini-3 |
+| `openrouter`, and any endpoint Relay cannot name | 32,768 | route caps differ per request and are not published |
+| a model server on this machine | a quarter of its served window | `localmodels.clamp_max_tokens` |
+
+**Why not one number, and why not a share of the window.** Output caps are published per model and
+have no fixed relationship to the context window. Gemini 3.1 Pro has a *larger* window than GLM-5.3
+(1,048,576 against 1,000,000) and half the output cap, so a flat 128K default and "10% of the
+window" both ask it for roughly twice what it takes — and a request over the cap is refused, not
+trimmed. The conservative fallback exists for the same reason in the other direction: an aggregator
+picks the endpoint per request and the caps differ across them (OpenRouter's DeepInfra route for
+Kimi K3 allows 16,384). A provider whose gateway rebuilds the request and owns its own output cap
+gets the fallback for the same reason.
+
+A number the user pinned is kept, but never sent above the model's cap. On an endpoint Relay cannot
+name it is sent as given: the user typed that base URL and knows what it takes. A pane at its
+model's cap that still runs out is told to lower the effort rather than to raise a limit that would
+change nothing (#G5MK).
+
+`presets` rows carry `max_output` so the GUI can show it. A stored `provider/max_tokens` of 32768 —
+the old default, which was also the old top of the range — migrates to 0 once at startup
+(`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
+
+### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19)
+
+Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
+default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
+first model request, the way an image turn decides its model (17.3). The role's **default is the pane's
+own model pushed to `max` reasoning**: `roles.RoleResolver._default` applies
+`apply_effort(main.extra, style, "max")` to the pane's own config, so a plan is investigated harder
+without changing the pane's model, preset or key. `planning` is an ordinary settable role —
+`roles.planning` takes the same fields as any other (13.2) — and a model the user picked by hand always
+wins over the default, swapping for the turn whatever the pane's effort is.
+
+When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
+effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
+the main agent, and that is not a swap at all. Two outcomes, as for images:
+
+| Case | What happens |
+|---|---|
+| The role resolves to the main agent (effort already max, or no provider effort knob) | nothing changes; no event |
+| It resolves elsewhere (the default at raised effort, or a hand-picked model) | **that turn only** runs on it, then the pane goes back |
+
+New events:
+
+| Event | When | Fields |
+|---|---|---|
+| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
+| `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `preset`, `was`, `was_preset`, `text` |
+
+Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last, and each is
+followed by a `status`. No event is
+sent when the planning role resolves to the main agent, so a pane whose provider has no effort knob, or
+whose effort is already max, behaves exactly as it did before this section. `source` is the role's own
+resolution source (13.4): `default` for the built-in default, `configured` for a hand-picked one — never
+`main` or `fallback`, which are the cases that send no event at all. `text` is the sentence the pane
+prints: it names the serving model when it is not the pane's own, and otherwise says the pane's model
+runs at `max` reasoning. Both ends of both notes name **model plus preset label**, and so do the two
+`status` lines, which is the one shape all three of Relay's turn swaps share (15.2.2).
+
+**The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the
+conversation is converted to the planning model's reasoning dialect (`adapt_history`), and the context
+window, `max_tokens` and the role's own effort follow the model the turn is now running on — so a
+planning model pinned to another vendor is not sent the pane's dialect, and a compaction inside the turn
+is measured against the window that is actually serving. `_end_plan_turn` puts the pane's own model,
+preset, window, dialect and effort back before the turn's terminal event. Nothing the pane's *own* model
+names changes while the swap is up: the session file, the sessions list, the resume picker and the
+full-text index read `agent._own_model()`, which answers out of the swap (12.6, 15.2.2).
+
+A `set_model` accepted while a plan turn runs is deferred to the turn's end (`applies: "turn_end"`, with
+`in_flight_model` the planning model), exactly like an image turn (section 2): the turn finishes on the
+model it started on, and the switch lands after the restore rather than being undone by it. The GUI
+prints the routing line (`◆ <text>`) and names the serving model in the
+model chip while the turn runs, and clears it on `plan_route_ended` — the same behaviour as
+`vision_route` (17.3). A plan turn that also carries an image nests: the plan swap is decided first and
+the vision swap goes inside it, so the image turn's own restore goes back to the *planning* model and the
+plan restore then goes back to the pane's own.
+
 ## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18)
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
@@ -1163,252 +1410,6 @@ Diagnostics › Log detail) and passed to workers as `RELAY_LOG_LEVEL`; workers 
 **`verbose` additionally writes prompt text** (`turn_prompt`) and is the only level that does; it is
 off by default and labelled "Verbose (includes prompt text)" in the palette. Actions › Diagnostics ›
 Open log folder opens the directory, and "Stop a silent model after…" edits `stall_timeout_s`.
-### 13.7 Main / Flash / Lite / Local tiers (v1.4, 2026-09-17; Local added v1.5, 2026-09-18)
-
-Eight roles were too many knobs for one screen, so the roles modal shows **three** models — Main, Flash and
-Lite — and every role follows one of them. Source: owner, 2026-09-17 ("lets have main, flash, and lite
-presets … then advanced options, which would then reveal the specific actions"). Backend:
-`presets.TIER_DEFAULTS` (the per-provider table) and `roles.RoleResolver._tier` (resolution); tests:
-`tests/test_presets.py` and `tests/test_roles.py`. Additive: a worker that receives no `tiers` and no
-`"tier"` in `roles` resolves exactly as v1.3 did.
-
-| Tier | Used for | Where it comes from |
-|---|---|---|
-| `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`) |
-| `flash` | terminal use, fast panes, summaries, suggestions | `TIER_DEFAULTS[<main preset>]["flash"]` |
-| `lite` | chores and the request audit | `TIER_DEFAULTS[<main preset>]["lite"]` |
-| `local` | panes on the Local agent (`/local`), and any role pinned to it | the `tiers.local` override, else the first saved local endpoint |
-
-**Options.** `configure` and `set_agent_options` accept `tiers`, an object keyed by tier name. `main` is
-rejected — it is the pane's own model. Each value is `null` (restore the provider's default) or
-`{preset?, base_url?, model?, extra?, effort?}` with the same meaning as a `roles` entry. `roles.<name>`
-additionally accepts `{"tier": "main"|"flash"|"lite"|"local", "effort"?}`, which is exclusive with
-`preset`/`base_url`/`model`/`extra`; giving both is an error.
-
-**The Local tier** (v1.5, 2026-09-18; owner: "add a `/local` command that switches to your chosen local
-LLM (make that as a 4th category with main, flash, lite, local)") is the one tier that belongs to no
-provider, so it has no row in `TIER_DEFAULTS` and the per-provider table stays three wide
-(`presets.PROVIDER_TIERS`). `tiers.local` accepts **only** a model server on this machine — a saved
-`local:<slug>` endpoint id (`docs/LOCAL-MODELS.md`, "Worker protocol"), or a plain `http://` loopback `base_url` with its `model` — and a
-hosted preset there is an error. With no override it is the first endpoint in the registry, so one saved
-server just works. A local endpoint needs no key and none is looked up; a server that is simply not
-running is not a fallback case, and the turn fails with the transport's "No model server is answering
-on … start it with …".
-
-**A tier that names only a provider** (`{"preset": "glm-coding"}`, which is what the roles modal writes
-when you pick a provider for a row) runs **that provider's model for that tier**, not its headline model:
-Flash on Z.AI is `glm-5.3-flash`, not `glm-5.3` (`presets.provider_tier_model`). Main on Kimi with Flash
-on the GLM Coding Plan is therefore two choices and no typing. When that provider's own entry for the tier
-points elsewhere — Lite is Gemini through OpenRouter for every provider — the named provider is kept and
-the nearest tier that stays on it is used instead (Lite on Z.AI → `glm-5.3-flash`). An override that also
-names `model` still wins outright.
-
-**Fallback.** A tier whose provider has no stored key steps one tier towards Main — Lite → Flash → Main —
-and the Main tier is the pane's own model, so resolution never hard-fails. The step-down is expected, not a
-misconfiguration, so it appears as `note` on the tier and the role (`"No stored key for the Lite model;
-using Flash."`) and **not** in `model_roles.warnings`; `warnings` stays reserved for a role the user pinned
-explicitly whose key is missing. The Local tier is **not** a step on that ladder — it is a different trade,
-not a smaller model of the same provider — so a Local tier with no endpoint set up falls back to Main
-directly (`presets.tier_fallbacks("local") == ("local", "main")`) with the note
-`"No local model is set up; using Main."`.
-
-**Events.** `configured` and `model_roles` gain `tiers`:
-`{tier: {tier, label, model, preset, base_url, effort, source, using?, note?}}`, where `source` is
-`default` or `configured` and `using` is the tier actually serving it after any step-down. Each role in
-`roles` gains `tier` (the tier it came from, or `null` for `vision` / `route_assist`) and an optional
-`note`. No key material appears in any of it.
-
-**Defaults per provider** (verified against each provider's own documentation on 2026-09-17; the doc URL
-sits next to the entry in `backend/relay_core/presets.py`):
-
-| Default provider | Main | Flash | Lite |
-|---|---|---|---|
-| `glm`, `glm-coding` | `glm-5.3` | `glm-5.3-flash` (`reasoning_effort: low`) | `google/gemini-3.8-flash` on OpenRouter |
-| `kimi` | `kimi-k3` | `kimi-k2.7-code-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
-| `kimi-code` | `k3` | `kimi-for-coding-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
-| `openrouter` | `deepseek/deepseek-v4.1-flash` | `deepseek/deepseek-v4.1-flash` | `google/gemini-3.5-flash-lite` |
-| `minimax` | `MiniMax-M3` | `MiniMax-M2.7-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
-| `anthropic` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
-| `openai` | `gpt-6-astra` | `gpt-5.6-terra` | `gpt-5.6-luna` |
-| `gemini` | `gemini-3.1-pro-preview` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` |
-| custom / unknown endpoint | the pane's model | the pane's model | the pane's model |
-
-`route_assist` is deliberately **not** tiered: it keeps `google/gemini-3.5-flash-lite` on OpenRouter, because
-the routing budget is under a second and that model measured 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8
-Flash. Changing the Lite tier must not move it, so the GUI shows it as its own pinned row with that reason.
-
-### 13.8 Key management commands (v1.4, 2026-09-17)
-
-The keys modal needs three things the protocol did not have. All are additive.
-
-| Message | Reply | Meaning |
-|---|---|---|
-| `remove_key {preset, id?}` | `key_removed {preset, removed: bool}` | delete the keyring entry; `removed: false` when there was none (or `RELAY_KEYRING=off`) |
-| `test_key {preset, id?}` | `key_tested {preset, ok, model, elapsed_ms, error?, reply_chars?}` | one minimal call (two-word prompt, no tools, 256 output tokens) that answers "does this key reach this endpoint" |
-| `import_agent_tools {id?}` | `agent_tools_imported {imported: [{preset, name, model}], skipped: [string]}` | copy an API key out of `~/.claude/settings.json` (`env.ANTHROPIC_API_KEY`) or `~/.codex/auth.json` (`OPENAI_API_KEY`) |
-
-`test_key` runs on a background thread and emits exactly one event. The key is read from the keystore
-inside the worker and never crosses the pipe in either direction; `error` carries the HTTP status only,
-because provider error bodies can quote the submitted request (`provider.ProviderError` already strips
-them). An OAuth login is not an API key and is never imported: Claude Code and Codex both sign in with
-OAuth by default, and those tokens do not work on the OpenAI-compatible endpoints Relay talks to.
-
-The `presets` event gains, per preset, `group` (`subscription` / `aggregator` / `payg`), `key_url` (where
-the user gets a key), `note`, `provider` (the company: "Kimi", "Z.AI (GLM)", "OpenAI (ChatGPT)"…) and
-`plan` ("Coding Plan", "Pay-as-you-go", … — empty when the provider has one entry), and `key_source`
-(`env` / `keyring` / `""`), so the modal can show
-"From RELAY_OPENROUTER_API_KEY" and refuse to offer Remove for something it cannot remove. The event also
-gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row per job — so the GUI never
-keeps a second copy of the backend's tables. The keys modal lists a preset per plan and so uses `label`
-("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
-presets of the same company are both offered.
-
-Since v2.9 (2026-09-18) every row also carries `hosted` (`true` only for Relay Free, 13.9). The Relay
-Free row differs from the others in four fields: `has_stored_key` is always `false` and `key_source`
-is `"included"` (nothing is stored and nothing can be; Add and Remove do not apply), `available`
-says whether this worker can use it at all (`python3-cryptography` imports), and `quota` is the
-last `{limit, used, resets_at}` the worker saw, or `null` before the first exchange. `group` is
-`"included"`, which the modal lists first. `test_key {preset: "relay-free"}` works: it makes one
-real call through the gateway with a token, and no key is looked up.
-
-### 13.9 Relay Free: the hosted provider (v2.9, 2026-09-18)
-
-Relay Free is the `relay-free` preset (owner decision 2026-09-18): an included, quota-limited
-allowance through Relay's own gateway at `https://api.relay-terminal.ai/v1`, so a fresh install's
-first ask works before any key is stored. The gateway speaks the same OpenAI shape as every other
-provider and names its models after the tiers (`relay-main`, `relay-flash`, `relay-lite`), so
-`configure {preset: "relay-free", use_stored_key: true}` is all the GUI sends: no key is looked up
-and none is required (`ProviderConfig.hosted`). The tiers stay on Relay Free (13.7), and `route_assist`
-resolves to `relay-lite` when the main preset is Relay Free and no OpenRouter key is stored. Reasoning
-is medium and below (owner, 2026-09-18): the row's `efforts` are `["low", "medium"]` (effort style
-`relay`), Main defaults to medium and Flash to low, and the gateway clamps any higher request to
-medium rather than refusing it.
-
-**How the worker authenticates.** An X25519 installation key of its own (keyring attribute
-`relay-free-identity`, else `$XDG_DATA_HOME/relay/hosted/identity.key`, mode 0600; separate from
-the remote identity, so regenerating either never breaks the other) proves itself to the gateway
-(`POST /v1/challenge` → HMAC-SHA256 over the challenge keyed by the X25519 shared secret →
-`POST /v1/register`) and receives a short-lived bearer token. The token lives in the worker's
-memory only, is refreshed when missing or within five minutes of expiry, and is retried exactly once
-after an HTTP 401. It never crosses this pipe and is never logged. `RELAY_HOSTED_URL` overrides the
-gateway address (tests point it at a loopback HTTP server).
-
-| Message | Reply | Meaning |
-|---|---|---|
-| `hosted_quota {id?}` | `hosted_quota {id, limit, used, resets_at}` or `error {id, text, code?, resets_at?}` | `GET /v1/quota` on a background thread: the live allowance for the keys modal and the pane's chip |
-
-`hosted_quota` is also emitted **without an `id`** after every model call that went through the
-gateway (the pane's turns, the tiers' side calls, the key test), read from the reply's
-`X-Relay-Quota-Limit`, `-Used` and `-Resets-At` headers, including on a refusal. `limit` and `used`
-are tokens for the day; `resets_at` is unix seconds.
-
-**Refusals.** A gateway error body is Relay's own JSON, `{"error": {"code, message, resets_at"}}`,
-and is the one provider body the worker reads: `code` picks the sentence the user sees, `message`
-is shown only for a code with no sentence of its own, truncated, and nothing else of it is echoed.
-The turn's `error` event then carries `code` and `resets_at` in addition to `text`:
-
-| `code` | HTTP | Meaning |
-|---|---|---|
-| `quota_exhausted` | 429 | the day's allowance is used; `resets_at` says when it returns |
-| `rate_limited` | 429 | too many requests in a short time |
-| `free_unavailable` | 503 | the gateway is closed (spend ceiling, upstream outage) |
-| `token_expired` | 401 | the token was refused; the worker has already registered again and retried once |
-| `bad_request` | 400 | the gateway refused the request's shape |
-
-`error` events from every other provider carry neither field. Without `python3-cryptography` the
-row is `available: false`, a turn on it fails with "Relay Free needs python3-cryptography", and no
-other provider is affected.
-
-### 13.10 The output token limit is per model (v2.9, 2026-09-18)
-
-`max_tokens` on `configure` and `set_model` is **0, or 256–131072**. `0` is the default and means
-*automatic*: ask this model for what its own documentation allows. `ProviderConfig` settles the
-number once, at construction, so the request, the compaction reserve (`window − max_tokens − 24K`)
-and the model-switch ceiling all read the same value.
-
-| Endpoint | Automatic asks for | Source |
-|---|---|---|
-| GLM-5.3 (`glm`, `glm-coding`) | 131,072 | https://docs.z.ai/guides/llm/glm-5.3 |
-| Kimi K3 (`kimi`, `kimi-code`) | 131,072 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart |
-| Claude Opus 5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5/overview |
-| MiniMax M3 (`minimax`) | 131,072 | https://platform.minimax.io/docs/guides/text-generation |
-| GPT-6 Astra (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-astra |
-| Gemini 3.1 Pro (`gemini`) | **65,536** | https://ai.google.dev/gemini-api/docs/gemini-3 |
-| `openrouter`, and any endpoint Relay cannot name | 32,768 | route caps differ per request and are not published |
-| a model server on this machine | a quarter of its served window | `localmodels.clamp_max_tokens` |
-
-**Why not one number, and why not a share of the window.** Output caps are published per model and
-have no fixed relationship to the context window. Gemini 3.1 Pro has a *larger* window than GLM-5.3
-(1,048,576 against 1,000,000) and half the output cap, so a flat 128K default and "10% of the
-window" both ask it for roughly twice what it takes — and a request over the cap is refused, not
-trimmed. The conservative fallback exists for the same reason in the other direction: an aggregator
-picks the endpoint per request and the caps differ across them (OpenRouter's DeepInfra route for
-Kimi K3 allows 16,384). A provider whose gateway rebuilds the request and owns its own output cap
-gets the fallback for the same reason.
-
-A number the user pinned is kept, but never sent above the model's cap. On an endpoint Relay cannot
-name it is sent as given: the user typed that base URL and knows what it takes. A pane at its
-model's cap that still runs out is told to lower the effort rather than to raise a limit that would
-change nothing (#G5MK).
-
-`presets` rows carry `max_output` so the GUI can show it. A stored `provider/max_tokens` of 32768 —
-the old default, which was also the old top of the range — migrates to 0 once at startup
-(`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
-
-### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19)
-
-Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
-default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
-first model request, the way an image turn decides its model (17.3). The role's **default is the pane's
-own model pushed to `max` reasoning**: `roles.RoleResolver._default` applies
-`apply_effort(main.extra, style, "max")` to the pane's own config, so a plan is investigated harder
-without changing the pane's model, preset or key. `planning` is an ordinary settable role —
-`roles.planning` takes the same fields as any other (13.2) — and a model the user picked by hand always
-wins over the default, swapping for the turn whatever the pane's effort is.
-
-When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
-effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
-the main agent, and that is not a swap at all. Two outcomes, as for images:
-
-| Case | What happens |
-|---|---|
-| The role resolves to the main agent (effort already max, or no provider effort knob) | nothing changes; no event |
-| It resolves elsewhere (the default at raised effort, or a hand-picked model) | **that turn only** runs on it, then the pane goes back |
-
-New events:
-
-| Event | When | Fields |
-|---|---|---|
-| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
-| `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `preset`, `was`, `was_preset`, `text` |
-
-Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last, and each is
-followed by a `status`. No event is
-sent when the planning role resolves to the main agent, so a pane whose provider has no effort knob, or
-whose effort is already max, behaves exactly as it did before this section. `source` is the role's own
-resolution source (13.4): `default` for the built-in default, `configured` for a hand-picked one — never
-`main` or `fallback`, which are the cases that send no event at all. `text` is the sentence the pane
-prints: it names the serving model when it is not the pane's own, and otherwise says the pane's model
-runs at `max` reasoning. Both ends of both notes name **model plus preset label**, and so do the two
-`status` lines, which is the one shape all three of Relay's turn swaps share (15.2.2).
-
-**The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the
-conversation is converted to the planning model's reasoning dialect (`adapt_history`), and the context
-window, `max_tokens` and the role's own effort follow the model the turn is now running on — so a
-planning model pinned to another vendor is not sent the pane's dialect, and a compaction inside the turn
-is measured against the window that is actually serving. `_end_plan_turn` puts the pane's own model,
-preset, window, dialect and effort back before the turn's terminal event. Nothing the pane's *own* model
-names changes while the swap is up: the session file, the sessions list, the resume picker and the
-full-text index read `agent._own_model()`, which answers out of the swap (12.6, 15.2.2).
-
-A `set_model` accepted while a plan turn runs is deferred to the turn's end (`applies: "turn_end"`, with
-`in_flight_model` the planning model), exactly like an image turn (section 2): the turn finishes on the
-model it started on, and the switch lands after the restore rather than being undone by it. The GUI
-prints the routing line (`◆ <text>`) and names the serving model in the
-model chip while the turn runs, and clears it on `plan_route_ended` — the same behaviour as
-`vision_route` (17.3). A plan turn that also carries an image nests: the plan swap is decided first and
-the vision swap goes inside it, so the image turn's own restore goes back to the *planning* model and the
-plan restore then goes back to the pane's own.
 
 ## 16. Voice transcription (v1.6, 2026-09-17)
 
@@ -3783,3 +3784,117 @@ own" and no key that dismisses the card: those would each be a mode, and the box
 - **No deadline.** `type_into_program` gives the pane 20 s because a program is waiting; here a
   person is, and a timeout would report "failed" for "still thinking".
 
+
+## 28. Local model servers (card `#24XJ`, shipped 2026-09-18; written down v3.5, 2026-09-19)
+
+A model served on this machine — `llama-server`, Ollama, LM Studio, vLLM, or anything else that
+speaks OpenAI `/v1/chat/completions` on a loopback address — is not a preset: its model id, the
+window it was started with and whether its chat template takes tools are not knowable ahead of
+time, and it has no key. Saved endpoints therefore live in their own registry,
+`$XDG_CONFIG_HOME/relay/local-models.json` (`RELAY_LOCAL_MODELS` overrides the path), and reach the
+rest of the backend as presets with `local: true`. Backend: `backend/relay_core/localmodels.py`
+(`localmodels.TYPES` and `localmodels.handle`, dispatched from `backend/worker.py`); GUI:
+`src/LocalModelsSettings.{h,cpp}`, the Local models section of the Options pane; tests:
+`tests/test_localmodels.py`, `tests/test_local_keyless.py`, `tests/test_local_tier.py`,
+`tests/settingspane_test.cpp`. What a local endpoint is, and everything Relay does differently once
+a turn runs on one, is `docs/LOCAL-MODELS.md`; this section is the four messages only.
+
+**Four messages, one event each.** Every request carries the caller's own `id` and the one event
+that answers it echoes that `id` back, so the GUI matches a reply to the row that asked; it uses
+ids of its own making — `lm-endpoints`, `lm-ep:<endpoint id>`, `lm-find:<port>`, `lm-addr`,
+`lm-save:<endpoint id>`. A **probe** never fails: an address Relay will not touch, a port nothing
+answers on and a server it does not recognise all come back as `local_probed` with `ok: false` and
+a sentence in `error`. A **save** can fail, and then the answer is the ordinary
+`error {id, text, agent_busy}` under the same `id` instead of `local_endpoint_saved`.
+`local_probe`, and `local_endpoint_save` with `detect: true`, run on their own thread so the
+message loop never waits on a socket; the other two answer inline. None of the four is a client
+message (`remote/wire.py` `CLIENT_TYPES`), and all four events are **withheld** from a remote
+client with the same reason as `presets`: what serves on the desktop's loopback ports, under which
+model ids, is provider configuration (`local_endpoint_deleted` is classed as desktop-local
+administration).
+
+### 28.1 `local_probe` → `local_probed`
+
+```
+GUI    → local_probe {id, base_url}
+worker → local_probed {id, base_url, ok, server, state, context_window, models, error?}
+```
+
+| Field | |
+|---|---|
+| `base_url` | the OpenAI base of the server that answered (`…/v1`), whatever form was sent: `http://127.0.0.1:8080` and `http://127.0.0.1:8080/v1` name the same server |
+| `ok` | something answered and was recognised |
+| `server` | `llamacpp`, `ollama`, `lmstudio`, `vllm`, `openai-compatible`, or `""` |
+| `state` | `ready`, `loading`, `sleeping` or `down` |
+| `context_window` | the window the server reports it was started with, or `null` |
+| `models` | `[{id, context_window, tools, thinking}]`, at most 200. `context_window` falls back to the server's; `tools` and `thinking` are `null` when the server does not say |
+| `error` | present only when there is one, and always a sentence a person can act on: a port nothing answers on names the command that would start a server there (`ollama serve`, `lms server start`, `vllm serve`, `llama-server … --jinja`); a non-loopback address, something that answers but is not a model server, and a server that is up but lists no models each say so |
+
+Plain HTTP to `localhost`, `127.0.0.1` or `::1` only, 2 s per request, no `Authorization` header,
+no redirects, no proxy, a bounded body. Probing is never on a timer — a probe wakes a sleeping
+server, which is the whole point of `--sleep-idle-seconds` — so the GUI probes when the section
+comes to the front and when Find servers, Refresh or Add by address is pressed. Find servers is
+four `local_probe`s, one per default port (11434, 1234, 8080, 8000).
+
+### 28.2 `local_endpoints` → `local_endpoints`
+
+```
+GUI    → local_endpoints {id}
+worker → local_endpoints {id, items: [...]}
+```
+
+The saved registry, no network. Each item has the keys of a preset row plus `tools`, `thinking`,
+`first_token_timeout`, `parallel_tool_calls`, `tool_text_recovery` and `tool_arguments_as_object`.
+The registry file is re-read when it changes, so an endpoint saved in one pane's worker is there
+for the next `configure` in another.
+
+### 28.3 `local_endpoint_save` → `local_endpoint_saved`
+
+```
+GUI    → local_endpoint_save {id, endpoint, detect?}
+worker → local_endpoint_saved {id, endpoint, probe?}
+```
+
+`endpoint` is `{base_url, model, id?, label?, server?, context_window?, tools?, thinking?, extra?,
+note?, first_token_timeout?, parallel_tool_calls?, tool_text_recovery?, tool_arguments_as_object?}`;
+`docs/LOCAL-MODELS.md` has the defaults and what each one means. The id is `local:<slug>`, derived
+from `id`, else `label`, else the model. Saving validates before it writes and an invalid endpoint
+is an `error` with a sentence the user can act on — a non-loopback or `https` URL, a URL carrying
+credentials, a query or a fragment, a missing model id, an unknown `server`, a `context_window`
+outside 2,048–4,000,000, a `first_token_timeout` outside 1–1,800 s. An `https` endpoint belongs to
+a custom provider, with a key, and the error says so.
+
+With `detect: true` the server is probed first and what it knows is filled in before the write:
+`base_url` (normalised), `server`, `model` when the server serves exactly one, `context_window`
+(the served window always wins over what the caller wrote — it is a fact, not a preference), and
+`tools`/`thinking` when the caller left them unset. A server still loading its weights is polled
+for up to 120 s rather than reported as having no model. A detect that finds nothing writes
+nothing and answers `error`. The reply carries the probe that was used as `probe`, in the shape of
+`local_probed` above.
+
+Saving or deleting changes the preset list, so the GUI re-requests `presets` afterwards and every
+pane's model dropdown gains or loses the row.
+
+### 28.4 `local_endpoint_delete` → `local_endpoint_deleted`
+
+```
+GUI    → local_endpoint_delete {id, endpoint_id}
+worker → local_endpoint_deleted {id, endpoint_id, removed}
+```
+
+`removed` is `false` when the id was not in the registry (not an error: two panes deleting the same
+row both get an answer). Nothing on disk outside the registry file is touched, and no server is
+stopped — Relay never starts or stops one.
+
+### 28.5 Notes
+
+- A local endpoint is used through the messages that already exist: `configure`, `set_model`, a
+  `tiers` entry, a `roles` entry and `test_key` all accept `preset: "local:<id>"` (13.7 for the
+  tiers; Local is the fourth tier). `use_stored_key` is ignored for one — there is no key, and
+  `keystore` refuses an id containing a colon, so a local id can never reach the keyring.
+- `test_key` on a local endpoint makes the same two-word call it makes for any provider and means
+  "reachable and answering". Unlike a probe it waits out a model load.
+- The `presets` event lists saved endpoints after the built-in rows, with `local: true`, `server`,
+  `group: "local"`, `has_stored_key: false`, `key_source: "local"` and `efforts: []` (an
+  OpenAI-compatible server has no effort knob Relay can rely on). Built-in rows carry
+  `local: false`.

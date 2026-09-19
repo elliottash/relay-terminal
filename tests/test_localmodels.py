@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Model servers on this machine: the registry file, the probe, and the worker messages
-(backend/relay_core/localmodels.py, protocol section 23).
+(backend/relay_core/localmodels.py, protocol section 28).
 
 Two fake servers stand in for the real ones: a llama.cpp `llama-server` (`/health`, `/props`,
 `/v1/models`, and the 503 it answers everything with while the weights load) and an Ollama

@@ -214,26 +214,13 @@ Ollama passes all five.
 
 ## Worker protocol
 
-Four messages, handled by `localmodels.handle`. Each gets exactly one event back. All four events
-are withheld from a remote client (`remote/wire.py`), like `presets`: what serves on the desktop's
-loopback ports is provider configuration.
-
-| Message | Reply |
-|---|---|
-| `local_probe {id?, base_url}` | `local_probed {id, base_url, ok, server, state, context_window, models: [{id, context_window, tools, thinking}], error?}`. `state` is `ready`, `loading`, `sleeping` or `down`. Runs on its own thread, 2 s per request, loopback only, no `Authorization`, no redirects. `base_url` in the reply is the OpenAI base (`…/v1`) whatever was sent. `tools` and `thinking` are `null` when the server does not say. |
-| `local_endpoints {id?}` | `local_endpoints {id, items: [...]}`. No network. |
-| `local_endpoint_save {id?, endpoint, detect?}` | `local_endpoint_saved {id, endpoint, probe?}`. With `detect: true` the server is probed first and fills `base_url`, `server`, `model` (when it serves exactly one), `context_window`, `tools`, `thinking`; a probe that finds nothing answers with `error`. |
-| `local_endpoint_delete {id?, endpoint_id}` | `local_endpoint_deleted {id, endpoint_id, removed}` |
-
-The `presets` event lists saved endpoints after the built-in presets, with the keys of a preset row
-plus `local: true`, `server`, `group: "local"`, `has_stored_key: false`, `key_source: "local"`,
-`efforts: []`, `tools`, `thinking`, `first_token_timeout`, `parallel_tool_calls`,
-`tool_text_recovery` and `tool_arguments_as_object`. Built-in rows carry `local: false`.
-
-`configure`, `set_model`, a `tiers` entry, a `roles` entry and `test_key` all accept
-`preset: "local:<id>"`. `use_stored_key` is ignored for one: there is no key. `test_key` on a local
-endpoint makes the same two-word call and means "reachable and answering"; unlike a probe it waits
-out a model load.
+Four messages — `local_probe`, `local_endpoints`, `local_endpoint_save`, `local_endpoint_delete` —
+handled by `localmodels.handle`, each answered by exactly one event. They are specified in
+[`docs/AGENT-SESSIONS-PROTOCOL.md` section 28](AGENT-SESSIONS-PROTOCOL.md): the fields, the probe's
+`state` and `models`, what `detect: true` fills in, and why all four events are withheld from a
+remote client. A saved endpoint then rides the messages that already exist — `configure`,
+`set_model`, a `tiers` entry, a `roles` entry and `test_key` all accept `preset: "local:<id>"`, and
+the `presets` event lists saved endpoints after the built-in rows with `local: true`.
 
 ## How other harnesses do it
 

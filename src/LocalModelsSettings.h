@@ -12,7 +12,7 @@
 //     `local_endpoint_delete` and `test_key` out, and returns false while the worker is starting.
 //   * `handleEvent` takes `local_endpoints`, `local_probed`, `local_endpoint_saved`,
 //     `local_endpoint_deleted`, a `key_tested` for a `local:` preset and an `error` carrying one of
-//     our request ids back (protocol section 23).
+//     our request ids back (protocol section 28).
 //   * `onPresetsChanged` fires after a save or a delete, so every pane re-reads `presets` and its
 //     model dropdown gains or loses the row.
 //

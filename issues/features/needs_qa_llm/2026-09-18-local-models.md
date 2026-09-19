@@ -62,7 +62,7 @@ research how opencode and other harnesses use local LLMs. in relay, set this up 
   Relay hosts nothing. A loopback server needs no key, and Relay neither hosts nor bills one.
 
 ## What landed
-- `82237ad` backend: `localmodels.py` (registry, probe, worker protocol 23), `localtext.py`
+- `82237ad` backend: `localmodels.py` (registry, probe, the worker messages, now protocol 28), `localtext.py`
   (`<think>` splitter, text tool-call recovery), the `local` paths of `provider.py`, the keyless
   path in `session_protocol.py`, `roles.py` and `keytest.py`, the `presets` event, and the four
   events withheld in `remote/wire.py`. 71 new test cases in four files.
@@ -76,9 +76,12 @@ research how opencode and other harnesses use local LLMs. in relay, set this up 
 - Outside the repo: PrismML llama.cpp fork `1a07bfa5f` and `Ternary-Bonsai-2-27B-PQ2_0.gguf` under
   `/home/elliott/data/llms/`, `llama-bonsai.service` on `127.0.0.1:8080` (not enabled at boot,
   `--sleep-idle-seconds 600`), and `local:bonsai` in `~/.config/relay/local-models.json`.
-- Protocol section 23 is written in `docs/LOCAL-MODELS.md`, not yet in
+- The four worker messages were written in `docs/LOCAL-MODELS.md` and not in
   `docs/AGENT-SESSIONS-PROTOCOL.md`: section 22 there was another session's uncommitted text when
-  this landed, and a section appended after it could not be committed apart from it.
+  this landed, and a section appended after it could not be committed apart from it. They are now
+  **section 28** of the protocol doc (2026-09-19), `docs/LOCAL-MODELS.md` points at it, and the
+  code comments that said "protocol 23" — the number this work expected to get, since taken by
+  tool-call labels — say 28.
 
 ## Second round, the same day
 The owner asked for a Settings section, an agent that sets a model up, and research on what is

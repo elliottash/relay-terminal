@@ -3694,7 +3694,7 @@ private:
             onRouteAssisted(event);
             return true;
         }
-        // Settings › Local models (card #24XJ, protocol 23). A local endpoint has no key and no row
+        // Settings › Local models (card #24XJ, protocol 28). A local endpoint has no key and no row
         // in the keys dialog, so its test result goes to the Settings pane's section instead.
         if (type.startsWith(QStringLiteral("local_"))
             || (type == QStringLiteral("key_tested")
@@ -8785,7 +8785,7 @@ public:
     }
 
     // Settings › Local models talks to this pane's worker, the same connection the keys dialog
-    // uses and never a second one: the four `local_*` messages of protocol 23 and `test_key` for a
+    // uses and never a second one: the four `local_*` messages of protocol 28 and `test_key` for a
     // `local:` preset go out here, and every answer comes back through onLocalModelEvent. False
     // means the worker is still starting and nothing was sent.
     std::function<void(const QJsonObject &event)> onLocalModelEvent;

@@ -35,7 +35,7 @@ TIMEOUT_S = 30
 
 
 def _preset(preset_id: str):
-    """A built-in preset, or a saved model server on this machine in the same shape (protocol 23)."""
+    """A built-in preset, or a saved model server on this machine in the same shape (protocol 28)."""
     if preset_id in PRESETS:
         return PRESETS[preset_id]
     endpoint = localmodels.find(preset_id)
