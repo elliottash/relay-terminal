@@ -60,6 +60,11 @@ struct Tab {
 // "in-progress" -> "In progress"; used for section headers, chips and thread lines.
 QString statusTitle(const QString &status);
 
+// What a section collects when `board.yaml` does not override it (`column_statuses:`), which is
+// `board.COLUMN_STATUSES` on the worker's side. The gear writes an override only where the board
+// wants something else, so a board.yaml stays as short as the board is ordinary.
+QStringList defaultSectionStatuses(const QString &column);
+
 // One clause saying what a section is for ("ready" -> "agreed and not started…"), shown wherever
 // a section is named without its cards. Empty for an id with no definition, so a board that
 // configures a column of its own gets no invented explanation.
@@ -251,6 +256,18 @@ public:
     QList<Column> sections() const;
     // The status a card takes when it is dropped on this section.
     QString dropStatus(const QString &columnId) const;
+    // What this board calls a section: `column_titles:` when it names one, Relay's own wording
+    // otherwise. The id never changes, so this is the only place a section's name comes from.
+    QString sectionTitle(const QString &id) const;
+    // Every status a section may collect, as the worker listed them: what the gear offers when
+    // a new section is given something to hold.
+    QStringList statusChoices() const;
+    // The section list exactly as board.yaml configures it, which is what the gear edits: the
+    // ordered ids, and the statuses each one overrides. `sections()` is the drawn list — it also
+    // holds the lanes a card's status appends and the two that are always last.
+    QStringList columns() const { return m_columns; }
+    QMap<QString, QStringList> columnStatuses() const { return m_columnStatuses; }
+    QMap<QString, QString> columnTitles() const { return m_columnTitles; }
 
     // ---- cards
     const Card *card(const QString &id) const;
@@ -289,6 +306,8 @@ private:
     QList<Tab> m_tabs;
     QStringList m_columns;                       // configured work columns, in order
     QMap<QString, QStringList> m_columnStatuses; // column id -> statuses (from board.yaml)
+    QMap<QString, QString> m_columnTitles;       // column id -> the board's own name for it
+    QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
     QString m_filter;
 };

@@ -40,13 +40,7 @@ int extraStatusRank(const QString &status)
 // Used when the worker sends no column_statuses (an old board.yaml, or a test fixture).
 QStringList fallbackStatuses(const QString &column)
 {
-    if (column == QStringLiteral("waiting"))
-        return {QStringLiteral("needs-review"), QStringLiteral("needs-labels"), QStringLiteral("needs-ab")};
-    if (column == QStringLiteral("needs-qa"))
-        return {QStringLiteral("needs-qa-llm"), QStringLiteral("needs-qa-human")};
-    if (column == QStringLiteral("done"))
-        return {QStringLiteral("done"), QStringLiteral("dropped")};
-    return {column};
+    return defaultSectionStatuses(column);
 }
 
 bool containsCaseless(const QStringList &list, const QString &value)
@@ -79,6 +73,17 @@ int fuzzy(const QString &query, const QString &text)
 }
 
 }  // namespace
+
+QStringList defaultSectionStatuses(const QString &column)
+{
+    if (column == QStringLiteral("waiting"))
+        return {QStringLiteral("needs-review"), QStringLiteral("needs-labels"), QStringLiteral("needs-ab")};
+    if (column == QStringLiteral("needs-qa"))
+        return {QStringLiteral("needs-qa-llm"), QStringLiteral("needs-qa-human")};
+    if (column == QStringLiteral("done"))
+        return {QStringLiteral("done"), QStringLiteral("dropped")};
+    return {column};
+}
 
 QString statusTitle(const QString &status)
 {
@@ -816,6 +821,18 @@ void Model::setConfig(const QJsonObject &config)
     for (auto it = statuses.begin(); it != statuses.end(); ++it)
         m_columnStatuses.insert(it.key(), stringList(it.value()));
 
+    // What this board calls its sections (`column_titles:`), over ids that do not change. It may
+    // name a section that is not in `columns:` — a plan's Draft, Deferred, Verified, Done — since
+    // those exist whenever a card has that status.
+    m_columnTitles.clear();
+    const QJsonObject titles = config.value(QStringLiteral("column_titles")).toObject();
+    for (auto it = titles.begin(); it != titles.end(); ++it) {
+        const QString title = it.value().toString().trimmed();
+        if (!title.isEmpty())
+            m_columnTitles.insert(it.key(), title);
+    }
+    m_statusChoices = stringList(config.value(QStringLiteral("all_statuses")));
+
     m_columns = stringList(config.value(QStringLiteral("columns")));
     if (m_columns.isEmpty())
         m_columns = QStringList{QStringLiteral("inbox"), QStringLiteral("discussing"),
@@ -904,7 +921,7 @@ QList<Column> Model::sections() const
             continue;                    // a configured Done column: it is the last section
         for (const QString &status : statuses)
             collected.insert(status);
-        out << Column{id, statusTitle(id), statuses};
+        out << Column{id, sectionTitle(id), statuses};
     }
     QStringList extras;
     for (const Card &card : m_cards) {
@@ -918,14 +935,38 @@ QList<Column> Model::sections() const
         return ra != rb ? ra < rb : a < b;
     });
     for (const QString &status : std::as_const(extras))
-        out << Column{status, statusTitle(status), {status}};
+        out << Column{status, sectionTitle(status), {status}};
     // Verified, then Done. It carries no statuses on purpose: `sectionIndex` must not learn that
     // "done" lives here, or Done would collect nothing, and `dropStatus` must answer nothing, so
     // no drop and no quick add can land in a section a card can only be *closed* into.
-    out << Column{verifiedSection(), QStringLiteral("Verified"), {}};
-    out << Column{doneSection(), statusTitle(QStringLiteral("done")),
+    out << Column{verifiedSection(), sectionTitle(verifiedSection()), {}};
+    out << Column{doneSection(), sectionTitle(doneSection()),
                   {QStringLiteral("done"), QStringLiteral("dropped")}};
     return out;
+}
+
+// What this section is called: the board's own name for it when `column_titles:` gives one,
+// and Relay's wording otherwise. Renaming a section is a display name over an id that does not
+// change, so nothing that reads a status or a column id goes through here.
+QString Model::sectionTitle(const QString &id) const
+{
+    const QString own = m_columnTitles.value(id);
+    if (!own.isEmpty())
+        return own;
+    return id == verifiedSection() ? QStringLiteral("Verified") : statusTitle(id);
+}
+
+QStringList Model::statusChoices() const
+{
+    if (!m_statusChoices.isEmpty())
+        return m_statusChoices;
+    // An older worker sends no `all_statuses`: fall back to the work statuses, which are the
+    // ones a section on this board can collect anyway.
+    return {QStringLiteral("inbox"), QStringLiteral("discussing"), QStringLiteral("ready"),
+            QStringLiteral("in-progress"), QStringLiteral("needs-review"),
+            QStringLiteral("needs-labels"), QStringLiteral("needs-ab"),
+            QStringLiteral("needs-qa-llm"), QStringLiteral("needs-qa-human"),
+            QStringLiteral("deferred"), QStringLiteral("done"), QStringLiteral("dropped")};
 }
 
 QString Model::dropStatus(const QString &columnId) const

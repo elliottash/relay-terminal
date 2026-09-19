@@ -19,6 +19,7 @@
 #include <functional>
 
 #include "BoardModel.h"
+#include "BoardSections.h"
 
 class QFrame;
 class QHBoxLayout;
@@ -75,6 +76,12 @@ public:
     // By value, not by reference: every caller names a section out of `m_rows`, which the
     // rebuild below replaces.
     void toggleSection(QString columnId);
+
+    // The gear at the end of the section checkboxes: the section list itself, as a page in this
+    // pane. Add, remove, merge and rename go out as one `board_sections` message.
+    void openSections();
+    void closeSections();
+    bool sectionsOpen() const { return m_sectionsOpen; }
 
     // Which sections the checkboxes at the top of the list page are keeping off it:
     // `["deferred", "done"]`, same shape and same home in the layout node as the folded set
@@ -210,6 +217,10 @@ private:
     QWidget *m_checks = nullptr;        // the section checkboxes, wrapping in a narrow pane
     QLayout *m_checksLayout = nullptr;
     QStringList m_checkIds;             // the sections the boxes stand for, in order
+    // The gear at the end of that row, and the page it opens in this pane.
+    board::SectionEditor *m_sections = nullptr;
+    bool m_sectionsOpen = false;
+    QJsonObject m_config;               // the last config block, to notice a section change
     int m_rightInset = 0;
     QLabel *m_count = nullptr;
     QLineEdit *m_filter = nullptr;

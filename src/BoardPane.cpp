@@ -2110,6 +2110,21 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_empty->setWordWrap(true);
     layout->addWidget(m_empty, 1);
 
+    // The gear's page. A sibling of the splitter rather than a window over it (owner: new
+    // surfaces are panes, not floating strips), shown in its place and gone again on Save or
+    // Cancel — the pane keeps its size and its place in the window either way.
+    m_sections = new board::SectionEditor(this);
+    m_sections->hide();
+    m_sections->onClose = [this] { closeSections(); };
+    m_sections->onSave = [this](const QJsonObject &message) {
+        QJsonObject request = message;
+        request.insert(QStringLiteral("type"), QStringLiteral("board_sections"));
+        request.insert(QStringLiteral("reason"), QStringLiteral("edited in the Switchboard"));
+        send(request);
+        closeSections();
+    };
+    layout->addWidget(m_sections, 1);
+
     m_keys = new QLabel(this);
     m_keys->setObjectName(QStringLiteral("boardKeys"));
     m_keys->setTextFormat(Qt::RichText);
@@ -2459,6 +2474,18 @@ void BoardView::syncSectionChecks()
         });
         m_checksLayout->addWidget(box);
     }
+    // After the sections themselves, because it is about the list of them rather than about any
+    // one (owner, 2026-09-19: "put a gear after the list of switchboard sections").
+    auto *gear = new QToolButton(m_checks);
+    gear->setObjectName(QStringLiteral("boardSectionGear"));
+    gear->setText(QStringLiteral("⚙"));
+    gear->setAutoRaise(true);
+    gear->setCursor(Qt::PointingHandCursor);
+    gear->setFocusPolicy(Qt::NoFocus);
+    gear->setToolTip(QStringLiteral("Add, remove, merge or rename the sections. They are a view of "
+                                    "the statuses: no card moves and none of them changes."));
+    connect(gear, &QToolButton::clicked, this, [this] { openSections(); });
+    m_checksLayout->addWidget(gear);
     m_checks->setVisible(!sections.isEmpty());
 }
 
@@ -2640,7 +2667,8 @@ void BoardView::handleEvent(const QJsonObject &event)
     }
     if (type == QStringLiteral("board")) {
         m_open = true;
-        m_model.setConfig(event.value(QStringLiteral("config")).toObject());
+        m_config = event.value(QStringLiteral("config")).toObject();
+        m_model.setConfig(m_config);
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
         const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
         rebuild();
@@ -2655,6 +2683,19 @@ void BoardView::handleEvent(const QJsonObject &event)
         const QJsonArray upserts = event.value(QStringLiteral("upserts")).toArray();
         const QJsonArray gone = event.value(QStringLiteral("removed")).toArray();
         showProblems(event.value(QStringLiteral("problems")).toArray());
+        // The config travels with every change, not only with the full `board` event: the gear
+        // rewrites the section list without touching a card, so the sections would otherwise not
+        // move until the pane was reopened. Before the early return below for the same reason.
+        if (event.contains(QStringLiteral("config"))) {
+            const QJsonObject config = event.value(QStringLiteral("config")).toObject();
+            if (config != m_config) {
+                m_config = config;
+                m_model.setConfig(config);
+                if (m_sectionsOpen)
+                    m_sections->refresh(m_model);
+                rebuild();
+            }
+        }
         // The watcher's refresh after our own write finds nothing new; do not redraw for it.
         if (upserts.isEmpty() && gone.isEmpty())
             return;
@@ -2927,6 +2968,7 @@ void BoardView::updateCounts()
     // Each box says how many cards its section holds right now, so unticking one is a decision
     // taken with the number in view rather than after the fact.
     for (int i = 0; i < m_checkIds.size() && i < m_checksLayout->count(); ++i) {
+        // The last widget in the row is the gear, not a section: qobject_cast skips it.
         auto *box = qobject_cast<QCheckBox *>(m_checksLayout->itemAt(i)->widget());
         if (!box)
             continue;
@@ -3085,6 +3127,32 @@ void BoardView::rebuild()
     m_empty->setVisible(!m_open || empty);
     m_splitter->setVisible(m_open && !empty);
     m_keys->setVisible(m_open && !empty);
+    if (m_sectionsOpen) {        // the gear's page has the pane: a redraw must not push it off
+        m_empty->hide();
+        m_splitter->hide();
+        m_keys->hide();
+    }
+}
+
+// The gear at the end of the section checkboxes: the section list itself, editable. It is a page
+// in this pane, so the board stays where it is and Esc or Cancel comes straight back.
+void BoardView::openSections()
+{
+    if (!m_open)
+        return;
+    m_sectionsOpen = true;
+    m_sections->setModel(m_model);
+    m_sections->show();
+    rebuild();
+}
+
+void BoardView::closeSections()
+{
+    if (!m_sectionsOpen)
+        return;
+    m_sectionsOpen = false;
+    m_sections->hide();
+    rebuild();
 }
 
 // A section folds and unfolds; which sections are folded is saved with the window's layout.
