@@ -13,6 +13,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFile>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
@@ -49,6 +50,24 @@ private Q_SLOTS:
         QCOMPARE(specFor(QStringLiteral("gruvbox-dark")).id, QStringLiteral("gruvbox-dark"));
         QVERIFY(specFor(QStringLiteral("no-such-theme")).id != QStringLiteral("no-such-theme"));
         QCOMPARE(activeThemeId(), QStringLiteral("ibm-beige"));   // looking one up activates nothing
+    }
+
+    // The tick in a checked box is drawn on the accent, so its ink follows the accent: the dark
+    // glyph on copper, the light one on IBM Beige's navy, where the dark one could not be seen
+    // (owner, 2026-09-19). A light theme also gets the darker chevrons. Both files must exist.
+    void theTickAndTheChevronsTakeTheInkTheirGroundNeeds() {
+        QVERIFY(setActiveTheme(QStringLiteral("ibm-beige"), false));
+        QString css = qApp->styleSheet();
+        QVERIFY2(css.contains(QStringLiteral("/icons/check-light.svg")), "Beige's navy accent still gets the dark tick");
+        QVERIFY(!css.contains(QStringLiteral("/icons/check.svg")));
+        QVERIFY(css.contains(QStringLiteral("/icons/chevron-down-dark.svg")));
+        QVERIFY(setActiveTheme(QStringLiteral("dark-copper"), false));
+        css = qApp->styleSheet();
+        QVERIFY2(css.contains(QStringLiteral("/icons/check.svg")), "copper is a light accent: the dark tick");
+        QVERIFY(!css.contains(QStringLiteral("/icons/check-light.svg")));
+        QVERIFY(css.contains(QStringLiteral("/icons/chevron-down.svg")));
+        for (const char *name : {"check-light.svg", "chevron-down-dark.svg", "chevron-up-dark.svg"})
+            QVERIFY2(QFile::exists(QStringLiteral(RELAY_SOURCE_DIR "/data/theme/icons/") + QString::fromLatin1(name)), name);
     }
 
     void theThemeItAsksForIsGone() {

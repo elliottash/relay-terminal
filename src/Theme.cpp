@@ -722,6 +722,28 @@ QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
         css.remove(QRegularExpression(QStringLiteral(R"([^\n]*url\(@icons[^\n]*\n)")));
     }
     for (const auto &token : tokens) css.replace(token.first, token.second);
+    // The icons are files with a fixed stroke, so the ones whose ground changes with the theme come
+    // in two inks (owner, 2026-09-19, on IBM Beige: "the background blue in the options menu
+    // checkboxes is too dark … you cant see the check"). The tick sits on @accent — a dark glyph on
+    // copper or cyan, a light one on Beige's navy — so it takes whichever ink contrasts more with
+    // this theme's accent. The chevrons sit on the chrome: the grey that reads on charcoal is 2.2:1
+    // on beige, so a light theme gets the darker pair.
+    {
+        const auto luminance = [](const QColor &c) {
+            const auto channel = [](double v) { return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+            return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF());
+        };
+        const auto contrast = [&luminance](const QColor &a, const QColor &b) {
+            const double la = luminance(a), lb = luminance(b);
+            return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+        };
+        if (contrast(QColor(0xf4, 0xf2, 0xee), Accent) > contrast(QColor(0x06, 0x1a, 0x22), Accent))
+            css.replace(QStringLiteral("/icons/check.svg"), QStringLiteral("/icons/check-light.svg"));
+        if (spec.isLight()) {
+            css.replace(QStringLiteral("/icons/chevron-down.svg"), QStringLiteral("/icons/chevron-down-dark.svg"));
+            css.replace(QStringLiteral("/icons/chevron-up.svg"), QStringLiteral("/icons/chevron-up-dark.svg"));
+        }
+    }
     // `[flags] square = true`: no rounded corners anywhere, as on the owner's other sites and on
     // a 1995 desktop. One pass over the finished sheet rather than a token in every rule.
     if (spec.flag(QStringLiteral("square")))
