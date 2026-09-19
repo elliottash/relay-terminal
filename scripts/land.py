@@ -1234,8 +1234,10 @@ def cmd_commit(args, log):
     claimed = dict(meta.get("paths") or {})
     whole = [norm_path(repo, p) for p in (args.whole or [])]
 
-    wanted = [norm_path(repo, p) for p in args.paths] if args.paths else \
-        sorted(set(claimed) | set(whole))
+    # A --whole path is an explicit request and is landed whether or not --paths names it too;
+    # a landing that silently dropped one (a moved card, 6c68a2a) looked like success.
+    wanted = sorted(set(norm_path(repo, p) for p in args.paths) | set(whole)) if args.paths \
+        else sorted(set(claimed) | set(whole))
     paths, dropped = [], []
     for path in wanted:
         if excluded(path):

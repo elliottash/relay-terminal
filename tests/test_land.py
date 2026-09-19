@@ -256,6 +256,14 @@ class LandingHunks(LandCase):
         self.assertIn("--base main", out.stdout + out.stderr)
         self.assertNotIn("EARLY", self.tip_text("f.txt"))     # nothing landed, as before
 
+    def test_a_whole_path_lands_even_when_paths_names_only_others(self):
+        self.land("begin", "mine", "f.txt")
+        edit_line(self.repo / "f.txt", 2, "MINE")
+        write(self.repo / "g.txt", "WHOLE-G\n")             # never claimed: --whole
+        self.land("commit", "mine", "-m", "x", "--paths", "f.txt", "--whole", "g.txt")
+        self.assertIn("MINE", self.tip_text("f.txt"))
+        self.assertEqual(self.tip_text("g.txt"), "WHOLE-G\n")
+
     def test_a_path_without_begin_is_refused_until_whole(self):
         edit_line(self.repo / "f.txt", 3, "UNCLAIMED")
         out = self.land("commit", "mine", "-m", "x", "--paths", "f.txt", expect=1)
