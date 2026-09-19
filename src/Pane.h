@@ -560,9 +560,14 @@ public:
         // the setting turns the measuring off as well as the three labels, and the baseline goes
         // with it so switching back on reads a fresh interval rather than averaging the gap.
         if (!relay::usage::metersEnabled()) { clearUsage(); return; }
-        QList<qint64> roots;
-        if (const int shell = shellPid(); shell > 0) roots << shell;
-        if (m_worker.state() == QProcess::Running) roots << qint64(m_worker.processId());
+        // The two roots are named, so the breakdown in the chip's tooltip can say "shell" and
+        // "agent worker" where "bash" and "python3" would leave the reader to guess which
+        // python3 that is. Everything else under them is named after its comm.
+        QList<relay::usage::Root> roots;
+        if (const int shell = shellPid(); shell > 0)
+            roots << relay::usage::Root{shell, QStringLiteral("shell")};
+        if (m_worker.state() == QProcess::Running)
+            roots << relay::usage::Root{qint64(m_worker.processId()), QStringLiteral("agent worker")};
         m_usageSample = m_usageMeter.update(roots);
     }
     // Forget the reading and its baseline (the meters were switched off, or the pane's processes
@@ -12634,15 +12639,15 @@ private:
         if (shell <= 0) return false;
         const QString tty = QFileInfo(QStringLiteral("/proc/%1/fd/0").arg(shell)).symLinkTarget();
         if (tty.isEmpty()) return false;
-        QList<int> pids{shell};
-        for (int i = 0; i < pids.size() && pids.size() < 64; ++i) {
-            QFile children(QStringLiteral("/proc/%1/task/%1/children").arg(pids[i]));
-            if (!children.open(QIODevice::ReadOnly)) continue;
-            for (const QByteArray &child : children.readAll().simplified().split(' ')) {
-                bool ok = false; const int pid = child.toInt(&ok);
-                if (ok && pid > 0) pids.append(pid);
-            }
-        }
+        // The tree comes from relay::usage::walkTrees, the one /proc walk in the program (the
+        // usage meter is the other reader). It follows every thread's children, so a process a
+        // threaded program forked is in the list here too; Detail::PidsOnly keeps this 250 ms
+        // poll as cheap as its own walk was, opening no stat or statm, and 64 is the cap it has
+        // always used.
+        QList<int> pids;
+        for (const relay::usage::ProcessInfo &info :
+             relay::usage::walkTrees({shell}, 64, relay::usage::Detail::PidsOnly))
+            pids.append(int(info.pid));
         for (int pid : std::as_const(pids)) {
             QFile syscallFile(QStringLiteral("/proc/%1/syscall").arg(pid));
             if (!syscallFile.open(QIODevice::ReadOnly)) continue;

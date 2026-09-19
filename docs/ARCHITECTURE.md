@@ -347,14 +347,35 @@ shell is running (an ssh client included), and the pane's agent worker with its 
 from `/proc` on the same 400 ms poll that resolves the states, so every pane is measured over the
 same interval. The rules and the arithmetic are `src/PaneUsage.{h,cpp}` (`relay-paneusage`,
 `relay::usage`, tests `tests/paneusage_test.cpp`): `/proc/<pid>/stat` and `/proc/<pid>/statm` are
-summed over a walk of `/proc/<pid>/task/<pid>/children` (capped at 256 processes), CPU ticks over
-the interval become a percentage *of the machine* (100 = every core), resident pages a percentage
-of physical memory. Each process contributes `cutime`/`cstime` as well as `utime`/`stime`, so the
+summed over a tree walk (capped at 256 processes), CPU ticks over the interval become a percentage
+*of the machine* (100 = every core), resident pages a percentage of physical memory.
+The walk is `relay::usage::walkTrees()`, and it is **the** `/proc` walk in the
+program: it reads `/proc/<pid>/task/<tid>/children` for *every* thread, not the main thread's list
+alone — a subprocess the Python worker spawns from a worker thread is parented to that thread, so
+a walk of `task/<pid>/children` never saw it and its CPU went unmeasured until the worker reaped
+it — and `Pane::programWaitingForInput()` goes through the same function on its own 250 ms poll,
+asking for `Detail::PidsOnly` so that poll still opens no `stat` or `statm` and keeping its own cap
+of 64. `relay::usage::setProcRoot()` points the walk at a directory a test built, which is how a
+process under a non-main thread can be arranged on purpose. Each process contributes
+`cutime`/`cstime` as well as `utime`/`stime`, so the
 children it has already reaped still count — without that, a build whose compilers each live for
 less than one poll interval reads as an idle pane. A poll that reads nothing drops the baseline
 rather than zeroing it, so the reading after a blind tick is a fresh baseline and not a spurious
 100 %. Memory is a sum of resident sets, which counts pages two processes share more than once;
 the tooltips say so.
+
+A reading also carries **who it is made of**: per-process CPU (that process's own tick delta
+between two polls, keyed by pid *and* `starttime`, so a pid the kernel handed out again is a new
+process and not a whole lifetime of ticks in one interval) and resident memory, sorted by CPU then
+memory, cut to the busiest five and to the rows whose two percentages do not both round to zero
+(`relay::usage::topProcesses`). `combined()` merges the panes' rows the way it sums their numbers,
+so a tab names the tab's busiest processes and not each pane's. The two roots are named on their
+lines — "shell" and "agent worker" — and everything else by its `comm`. A child that has already
+exited still counts toward the sum, through its parent's `cutime`/`cstime`, and has no line of its
+own: there is no longer a process to name. The breakdown shows in the two places with room for it,
+one `<name> · <cpu>% cpu · <mem>% mem` per line: the usage chip's tooltip (written when the tooltip
+is asked for, since the lines move faster than the number the chip paints) and the usage section of
+the tab's tooltip. The chip and the label stay the sum alone.
 
 It shows three ways: a chip in the pane's header row right of the state's word
 (`PaneChrome::PaneUsageChip`, a die and a memory-module glyph, muted ink that only warns at

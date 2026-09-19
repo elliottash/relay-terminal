@@ -5529,10 +5529,16 @@ private:
         QString usageLine;
         if (relay::usage::metersEnabled()) {
             const relay::usage::Sample summed = tabUsageSample(page);
-            if (summed.valid)
+            if (summed.valid) {
+                // Which processes the tab's number is made of, the busiest first — the panes'
+                // breakdowns merged, so this names the tab's busiest processes rather than each
+                // pane's. The label itself stays the two bare percentages.
+                const QString breakdown = relay::usage::processBreakdown(summed);
                 usageLine = QStringLiteral("CPU / memory of this tab's panes: ")
                             + relay::usage::describe(summed) + QStringLiteral("\n")
+                            + (breakdown.isEmpty() ? QString() : breakdown + QStringLiteral("\n"))
                             + relay::usage::memoryNote();
+            }
         }
         return (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
                + (leaf ? leafCwd(leaf) : QString())
