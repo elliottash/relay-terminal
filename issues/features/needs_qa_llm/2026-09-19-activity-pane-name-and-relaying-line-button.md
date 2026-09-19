@@ -12,7 +12,7 @@ rank: zzzzzzzy
 created: '2026-09-19'
 acceptance: the pane that card #QT8C calls "agent internals" is called "Activity" in every user-facing place (keymap label, palette row, pane band and title, hint text, docs), and a violet relay-icon button at the left of the "Relaying – …" line above the prompt box opens it, with the key in its tooltip and a shortcut hint on first use
 source: 'issues/feature_intake.txt, 2026-09-19'
-links: {plans: [], commits: [c132851, 4eb3bee, 84deb03], evidence: [docs/qa_evidence/2026-09-19-activity-pane-button/], related: [QT8C, RR0G, 0STR, HQ2B, 4E13], github: null}
+links: {plans: [], commits: [c132851, 4eb3bee, 84deb03, 49cdfee], evidence: [docs/qa_evidence/2026-09-19-activity-pane-button/], related: [QT8C, RR0G, 0STR, HQ2B, 4E13], github: null}
 ---
 # The internals pane is called "Activity", and a relay-icon button on the Relaying line opens it
 
@@ -107,8 +107,8 @@ pane forward instead of making a second one, and `fromMouse` is what fires the `
 hint. The pane header's state glyph was left alone: the owner chose the line only.
 
 The commits: `c132851` (the docs and the #QT8C card's rename line), `4eb3bee` (the palette row),
-`84deb03` (the mark's own header), and the commit that carries this card (the button, `src/Pane.h`,
-and the architecture paragraph). The rename's code strings — the keymap label, the band, the view's
+`84deb03` (the mark's own header) and `49cdfee` (the button itself, `src/Pane.h`, the
+architecture paragraph and this card). The rename's code strings — the keymap label, the band, the view's
 title, the two test headers — were written in this shared checkout a few minutes before the AGPL
 relicence committed the whole working tree, so they reached `main` inside `d0e1628`.
 
