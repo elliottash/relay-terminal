@@ -76,6 +76,16 @@ MAX_CLEANUP_ROSTER = 400
 MAX_CLEANUP_NOTE = 4000
 
 
+def _card_turn_limit(settings: dict) -> int:
+    """`board.limits.max_card_turns`, or the module default.  Out-of-range values are clamped
+    rather than refused: a board block is settings, and a pane must still open."""
+    limits = settings.get("limits")
+    value = limits.get("max_card_turns") if isinstance(limits, dict) else None
+    if not isinstance(value, int) or isinstance(value, bool):
+        return board_turns.MAX_RUNNING
+    return max(1, min(board_turns.MAX_CARD_TURNS_CEILING, value))
+
+
 def _turn_phrase(mode: str | None) -> str:
     """What a running card turn is called in a refusal: "a plan", "a question", "a turn"."""
     return {"plan": "a plan", "discuss": "a question"}.get(mode or "", "a turn")
@@ -247,6 +257,10 @@ class BoardCommands:
             self.tools = None
         else:
             self.tools = self._build(board, state, settings, actor="owner")
+        # `limits.max_card_turns`: how many cards the agent may work at once (19.16). It rides in
+        # the same block as the write ceilings — `BoardTools` ignores the keys that are not its
+        # own — so one `board` block carries every limit the GUI has an option for.
+        self.cards.set_max_running(_card_turn_limit(settings))
         if agent:
             self._attach_agent_tools(workspace, settings)
         return self.state_block()
@@ -390,6 +404,7 @@ class BoardCommands:
                       roles=main.roles, board=tools, effort=getattr(main, "effort", None),
                       track_requests=False, todo_tool=False, completion_check=False,
                       stall_timeout_s=main.stall_timeout_s,
+                      first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
                       failover=getattr(main, "failover", True),
                       failover_hosted=getattr(main, "failover_hosted", False))
         # Options › Security (#3KB7): a card turn reads the repository, so the owner's extra

@@ -1450,6 +1450,21 @@ private:
         return row;
     }
 
+    // A row whose value the Switchboard workers carry too: they are configured once per board
+    // root and never see `set_agent_options`, so the change has to be pushed to them here.
+    void alsoBoardWorkers(relay::SettingRow &row) {
+        const auto number = row.onNumber;
+        const auto reset = row.reset;
+        row.onNumber = [this, number](int value) {
+            if (number) number(value);
+            reconfigureBoardWorkers();
+        };
+        row.reset = [this, reset] {
+            if (reset) reset();
+            reconfigureBoardWorkers();
+        };
+    }
+
     relay::SettingRow numberRow(const QString &key, const QString &label, const QString &detail,
                                 int fallback, int minimum, int maximum, const QString &suffix = QString()) {
         relay::SettingRow row;
@@ -2268,6 +2283,20 @@ private:
             agent.rows << hiddenFolder;
         }
         {
+            // Protocol 19.16: a card's Plan or Discuss runs on that card's own agent, so several
+            // cards can be worked at once. Every one of them is a paid provider stream, which is
+            // why there is a number here at all; the one past it is refused on the card, naming
+            // the cards that are running.
+            relay::SettingRow cardTurns =
+                numberRow(QStringLiteral("board/max_card_turns"),
+                          QStringLiteral("Cards the agent works at once"),
+                          QStringLiteral("Plan or Discuss turns running together on different cards"),
+                          3, 1, 12);
+            cardTurns.aliases = QStringLiteral("switchboard cards parallel concurrent plan discuss turns at once");
+            alsoBoardWorkers(cardTurns);
+            agent.rows << cardTurns;
+        }
+        {
             // The personal inbox board was dropped 2026-09-19 (#916B): a card filed in a tab with
             // no project attached now goes here if it is set, else through the project picker.
             relay::SettingRow defaultProject =
@@ -2304,6 +2333,20 @@ private:
                                                 60, 1, 1800, QStringLiteral(" s"));
             stall.aliases = QStringLiteral("stall timeout hang stuck thinking silent retry");
             agent.rows << stall;
+            // The wait for the *first* chunk is a different thing from the gaps between chunks:
+            // prefill, queueing and routing on a prompt that may be hundreds of thousands of
+            // tokens. A minute of silence in the middle of an answer is a dead stream; a minute
+            // before it starts is an ordinary large prompt. 0 keeps both on the one number, which
+            // is what Relay did before this row (a local endpoint has always had its own budget).
+            relay::SettingRow firstToken =
+                numberRow(QStringLiteral("agent/first_token_timeout_s"),
+                          QStringLiteral("Wait longer for the first token"),
+                          QStringLiteral("Extra patience before the model's first output, for a big "
+                                         "prompt or a busy provider (0: use the limit above)"),
+                          0, 0, 1800, QStringLiteral(" s"));
+            firstToken.aliases = QStringLiteral("first token prefill timeout slow start deadline patience");
+            alsoBoardWorkers(firstToken);
+            agent.rows << firstToken;
         }
         agent.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
                                 QStringLiteral("A small side call flags asks that may be unaddressed"), false);
@@ -4349,8 +4392,25 @@ public:
         if (!roles.isEmpty()) configure.insert(QStringLiteral("roles"), roles);
         const QJsonObject tiers = Pane::tiersObject();
         if (!tiers.isEmpty()) configure.insert(QStringLiteral("tiers"), tiers);
+        // The same turn limits a pane's agent runs under (protocol 12.1, 15.1): a card's Plan is
+        // a turn like any other, and its agent is built from this one's provider and deadlines.
+        const QJsonObject limits = Pane::turnOptions();
+        for (auto it = limits.begin(); it != limits.end(); ++it) configure.insert(it.key(), it.value());
+        // How many cards this board may work at once (protocol 19.16), in the block that already
+        // carries the board's other ceilings.
+        configure.insert(QStringLiteral("board"), QJsonObject{
+            {QStringLiteral("limits"), QJsonObject{
+                {QStringLiteral("max_card_turns"),
+                 std::clamp(settings.value(QStringLiteral("board/max_card_turns"), 3).toInt(), 1, 12)}}}});
         // Only this board root's worker: another project's board in the same window keeps its own.
         if (relay::BoardWorker *worker = boardWorker(workspace)) worker->start(configure);
+    }
+
+    // A setting the Switchboard workers carry changed: re-send `configure` to every live one.
+    // `BoardWorker::start` on a running process is exactly that (and a no-op when nothing moved).
+    void reconfigureBoardWorkers() {
+        for (const QString &workspace : m_boardWorkers.keys())
+            if (m_boardWorkers.value(workspace)) startBoardWorker(workspace);
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},

@@ -2330,7 +2330,9 @@ verbose`, setting `logging/level`, passed to workers as `RELAY_LOG_LEVEL`). **`v
 prompt text** and is the only level that does; it is off by default and says so in the menu.
 
 Related: Actions > Diagnostics > "Stop a silent model after..." sets `stall_timeout_s`, the idle
-deadline that ends a turn whose model has gone quiet (docs/AGENT-SESSIONS-PROTOCOL.md section 15).
+deadline that ends a turn whose model has gone quiet, and "Wait longer for the first token" sets
+`first_token_timeout_s`, a longer budget for the first chunk alone — prefill on a large prompt is
+not a stalled stream (docs/AGENT-SESSIONS-PROTOCOL.md section 15.1).
 
 ## 14. Theme
 

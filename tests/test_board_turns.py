@@ -160,6 +160,31 @@ class RunningTests(PoolTest):
         while time.time() < deadline and pool.count():
             time.sleep(0.005)
 
+    def test_the_cap_is_the_owners_number_and_a_running_turn_is_never_cut_off(self):
+        """Options › Agent › Switchboard, through `board.limits.max_card_turns` (19.16)."""
+        self.assertEqual(self.pool.max_running, board_turns.MAX_RUNNING)
+        self.assertEqual(self.pool.set_max_running(1), 1)
+        self.hold("AAAA")
+        self.hold("BBBB")
+        self.pool.start("AAAA", "plan", "one")
+        self.wait_running()
+        with self.assertRaises(ValueError) as caught:
+            self.pool.start("BBBB", "plan", "two")
+        self.assertIn("1 card turns are already running", str(caught.exception))
+        self.assertTrue(self.pool.full())
+        # Raising it lets the next one in; lowering it never stops what is already running.
+        self.pool.set_max_running(2)
+        self.pool.start("BBBB", "plan", "two")
+        self.wait_running(2)
+        self.pool.set_max_running(1)
+        self.assertEqual(len(self.pool.running_cards()), 2)
+        self.gates["AAAA"].set()
+        self.gates["BBBB"].set()
+        self.wait_idle()
+        # Out of range is clamped, not refused: a board block is settings, and the pane must open.
+        self.assertEqual(self.pool.set_max_running(0), 1)
+        self.assertEqual(self.pool.set_max_running(9999), board_turns.MAX_CARD_TURNS_CEILING)
+
     def test_the_scope_is_opened_for_the_turn_and_closed_after_it(self):
         self.pool.start("AAAA", "plan", "one")
         self.wait_idle()

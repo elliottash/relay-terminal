@@ -35,8 +35,13 @@ from typing import Callable
 
 #: Card turns running at once.  Three is a working desk: the owner plans a couple of cards while
 #: discussing a third.  Every one of them is a paid provider stream, so this is deliberately not
-#: "as many as you can click" — the fourth is refused with the running cards named.
+#: "as many as you can click" — the one past the limit is refused with the running cards named.
+#: Options › Agent › Switchboard sets it per install (`board.limits.max_card_turns`, 19.16).
 MAX_RUNNING = 3
+
+#: The most the option may ask for.  Not a technical limit — a thread and a conversation each are
+#: cheap — but a spending one: every running turn is a provider stream nobody is reading yet.
+MAX_CARD_TURNS_CEILING = 12
 
 #: Card conversations kept for a follow-up.  Each is an `Agent` holding its messages, so this is
 #: a memory ceiling, not a policy: past it the least recently used card reseeds from its file.
@@ -123,6 +128,18 @@ class CardTurns:
         with self._lock:
             return self._sessions.get(card_id)
 
+    @property
+    def max_running(self) -> int:
+        return self._max_running
+
+    def set_max_running(self, value: int) -> int:
+        """The owner's number, from `board.limits.max_card_turns`.  Turns already running are
+        never stopped by lowering it: the limit is a gate on starting, and the ones over it
+        simply finish."""
+        self._max_running = max(1, min(MAX_CARD_TURNS_CEILING, int(value)))
+        self._max_sessions = max(self._max_running, self._max_sessions)
+        return self._max_running
+
     def mode_of(self, card_id: str) -> str | None:
         session = self.session(card_id)
         return session.mode if session and session.active else None
@@ -144,6 +161,11 @@ class CardTurns:
             session = self._sessions.get(card_id)
             if session is not None and session.active:
                 raise ValueError(f"A turn is already running on #{card_id}.")
+            # The caller (`BoardCommands._busy_error`) checks this first, so it can refuse with a
+            # sentence naming the cards. Checked again here because the limit guards spending: a
+            # second caller must not be able to open a stream past it.
+            if len([s for s in self._sessions.values() if s.active]) >= self._max_running:
+                raise ValueError(f"{self._max_running} card turns are already running.")
             if session is None:
                 session = self._new_session(card_id)
             self._sessions.move_to_end(card_id)

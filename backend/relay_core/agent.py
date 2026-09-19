@@ -34,7 +34,7 @@ from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
                        ProviderStalled, ProviderTruncated, make_provider, message_images,
-                       validate_stall_timeout)
+                       validate_first_token_timeout, validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
@@ -75,6 +75,18 @@ def _provider_for(config: ProviderConfig, stall_timeout: float):
     """The transport for a config. A hosted config (Relay Free) always gets the hosted one; every
     other goes through this module's ``ChatProvider`` name, which tests stand in for."""
     return make_provider(config, stall_timeout) if config.hosted else ChatProvider(config, stall_timeout)
+
+
+def _with_first_token(transport, seconds: float):
+    """Give a transport the pane's first-token budget (15.1), if it has one and the pane set one.
+
+    Told to the provider rather than passed to `_provider_for`, whose two arguments are what the
+    tests' stand-in takes; a stub transport without the setter is simply left alone.
+    """
+    setter = getattr(transport, "set_first_token_timeout", None)
+    if seconds and callable(setter):
+        setter(seconds)
+    return transport
 
 
 def _error_text(event: dict) -> str | None:
@@ -131,6 +143,10 @@ def validate_turn_options(request: dict) -> dict:
             out[key] = request[key]
     if request.get("stall_timeout_s") is not None:
         out["stall_timeout_s"] = validate_stall_timeout(request["stall_timeout_s"])
+    # The wait for the *first* usable chunk, which is prefill, queueing and routing rather than
+    # silence in the middle of an answer; 0 keeps it on the idle deadline, as it was before.
+    if request.get("first_token_timeout_s") is not None:
+        out["first_token_timeout_s"] = validate_first_token_timeout(request["first_token_timeout_s"])
     # Options › Security (#3KB7). Validated here so a bad rule is refused before anything changes,
     # and returned under one key rather than three: it is handed to the executor's policy, not set
     # on the Agent, so nothing between here and there has to know the individual names.
@@ -316,7 +332,8 @@ class Agent:
                  max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
                  max_program_writes: int = DEFAULT_MAX_WRITES,
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
-                 stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, failover: bool = True,
+                 stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
+                 first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False,
                  roles=None, board=None, security_options: dict | None = None):
         self.emit = emit
@@ -327,6 +344,8 @@ class Agent:
         self.roles = roles
         # Idle deadline for a streamed model call, in seconds (protocol 15).
         self.stall_timeout_s = validate_stall_timeout(stall_timeout_s)
+        # Extra room for the first usable chunk only (0: none). See `provider.first_token_timeout`.
+        self.first_token_timeout_s = validate_first_token_timeout(first_token_timeout_s)
         # Whether a turn whose provider keeps failing may continue on another one (card #G9VE).
         self.failover = failover
         # Whether Relay Free may be one of those providers (owner, 2026-09-19). Off by default and
@@ -522,7 +541,7 @@ class Agent:
             self.set_security(policy_keys)
         if "todo_tool" in request:
             self.refresh_system_prompt()
-        if "stall_timeout_s" in request:
+        if "stall_timeout_s" in request or "first_token_timeout_s" in request:
             self._apply_stall_timeout()
         return self.options()
 
@@ -541,14 +560,18 @@ class Agent:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
                 "completion_check": self.completion_check, "audit_requests": self.audit_requests,
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
+                "first_token_timeout_s": self.first_token_timeout_s,
                 "max_program_writes": self.max_program_writes, "failover": self.failover,
                 "failover_hosted": self.failover_hosted}
 
     def _apply_stall_timeout(self) -> None:
-        """Push the pane's idle deadline onto the transport (also after a model switch)."""
+        """Push the pane's two deadlines onto the transport (also after a model switch)."""
         setter = getattr(self.provider, "set_stall_timeout", None)
         if callable(setter):
             setter(self.stall_timeout_s)
+        first = getattr(self.provider, "set_first_token_timeout", None)
+        if callable(first):
+            first(self.first_token_timeout_s)
 
     def _todos_enabled(self) -> bool:
         return self.track_requests and self.todo_tool
@@ -644,7 +667,8 @@ class Agent:
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider:
-            self.provider = _provider_for(config, self.stall_timeout_s)
+            self.provider = _with_first_token(_provider_for(config, self.stall_timeout_s),
+                                              self.first_token_timeout_s)
         self._adopt_model(config, preset, context_window)
 
     def _adopt_model(self, config: ProviderConfig, preset, context_window: int | None = None) -> None:
@@ -901,7 +925,8 @@ class Agent:
         declines = self._injected_provider and not getattr(self.provider, "serves_side_calls", True)
         if self._injected_provider and not declines:
             return self.provider
-        make = lambda cfg: _provider_for(cfg, self.stall_timeout_s)   # noqa: E731 - side calls share the deadline
+        make = lambda cfg: _with_first_token(   # noqa: E731 - side calls share the deadlines
+            _provider_for(cfg, self.stall_timeout_s), self.first_token_timeout_s)
         resolved = self.roles.resolve(role) if role is not None and self.roles is not None else None
         if resolved is not None and not resolved.is_main:
             # A role's model was picked for this job: its own params (and its effort, already applied
@@ -1454,7 +1479,8 @@ class Agent:
         """
         if not swap["adopted"]:
             return
-        self.provider = _provider_for(target.config, self.stall_timeout_s)
+        self.provider = _with_first_token(_provider_for(target.config, self.stall_timeout_s),
+                                          self.first_token_timeout_s)
         self.effort = None
         self._adopt_model(target.config, swap["to_preset"])
 
@@ -1793,7 +1819,8 @@ class Agent:
         # The note belongs in the transcript, not inside the thinking overlay the dead call opened.
         self._close_thinking(record)
         target_preset = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
-        self.provider = _provider_for(target.config, self.stall_timeout_s)
+        self.provider = _with_first_token(_provider_for(target.config, self.stall_timeout_s),
+                                          self.first_token_timeout_s)
         # Not `self.config = ...`: the new provider also needs the history in its own dialect, its
         # own context window and this pane's effort in its own words.
         self._adopt_model(target.config, target_preset)

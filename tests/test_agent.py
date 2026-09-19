@@ -160,6 +160,16 @@ class StallRetryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.set_options({'stall_timeout_s': 0})
 
+    def test_the_first_token_may_be_given_longer_than_the_gaps_between_chunks(self):
+        """Options › "Wait longer for the first token": prefill on a big prompt is not a stall."""
+        provider = self.StallingProvider(stalls=0)
+        agent = self.agent(provider, [])
+        self.assertEqual(agent.options()['first_token_timeout_s'], 0.0)      # off: one deadline
+        self.assertEqual(agent.set_options({'first_token_timeout_s': 240})['first_token_timeout_s'], 240.0)
+        self.assertEqual(agent.set_options({'first_token_timeout_s': 0})['first_token_timeout_s'], 0.0)
+        with self.assertRaises(ValueError):
+            agent.set_options({'first_token_timeout_s': 3600})
+
 
 class TruncationRetryTests(unittest.TestCase):
     """A step that spends its whole output budget without producing anything is taken again once.

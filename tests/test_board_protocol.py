@@ -20,6 +20,7 @@ import fake_cards
 import fake_github as FG
 from relay_core import board as B
 from relay_core import board_protocol as P
+from relay_core import board_turns
 from relay_core import board_tools as T
 from relay_core import forge_github as GH
 from relay_core import forge_sync as F
@@ -376,6 +377,27 @@ class AskTests(ProtocolTest):
             self.commands.dispatch({"type": "board_ask", "card": "AAAA", "text": "x"})
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_ask", "card": card_id, "text": "  "})
+
+    def test_the_board_block_sets_how_many_cards_may_run_at_once(self):
+        """Options › Agent › Switchboard → `board.limits.max_card_turns` (19.16)."""
+        self.assertEqual(self.commands.cards.max_running, 3)
+        self.commands.configure(str(self.repo), {"board": {"limits": {"max_card_turns": 1}}})
+        self.cards = fake_cards.CardAgents(self.commands, str(self.repo), self.events)
+        self.assertEqual(self.commands.cards.max_running, 1)
+        first = self.make_card()
+        second = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.cards.hold(first)
+        self.send(type="board_ask", card=first, mode="plan")
+        self.assertTrue(self.cards.wait_running())
+        events = self.send(type="board_ask", id="a2", card=second, mode="plan")
+        refusal = [e for e in events if e.get("code") == "board_busy"][0]
+        self.assertEqual(refusal["cards"], [first])
+        self.assertIn(f"#{first}", refusal["text"])
+        self.cards.agent(first).release()
+        self.assertTrue(self.cards.wait())
+        # A silly number is clamped rather than refused: the pane must still open.
+        self.commands.configure(str(self.repo), {"board": {"limits": {"max_card_turns": 99}}})
+        self.assertEqual(self.commands.cards.max_running, board_turns.MAX_CARD_TURNS_CEILING)
 
     def test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs(self):
         card_id = self.make_card()

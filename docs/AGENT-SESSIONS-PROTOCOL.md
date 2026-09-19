@@ -1239,6 +1239,7 @@ return it:
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `stall_timeout_s` | number 1–1800 | 60 | seconds the model may send **nothing usable** before the turn ends |
+| `first_token_timeout_s` | number 0 or 1–1800 | 0 | a longer budget for the **first** usable chunk only; 0 keeps it on the deadline above |
 
 "Nothing usable" means no answer text, reasoning, tool-call fragment, `usage` or `[DONE]`. SSE
 comments (`: ping`), empty deltas and choice-less events are keepalives and do **not** reset it.
@@ -1247,10 +1248,21 @@ byte resets it, so a keepalive-only stream never times out (measured 2026-09-17:
 every 0.2 s read for 8 s against a 2 s timeout without raising). The deadline is therefore enforced
 by a watchdog that closes the response; the socket timeout stays as a backstop.
 
-The same deadline is the budget for the response headers (`max(30 s, stall_timeout_s)`), because a
+**The first chunk and the gaps between chunks are different waits** (2026-09-19). Silence in the
+middle of an answer is a dead stream; silence before it starts is prefill, queueing and routing,
+and a prompt of a few hundred thousand tokens can take a provider more than a minute to read.
+`first_token_timeout_s` is a **floor under the first-token wait, never a cap**: the effective
+budget is `max(stall_timeout_s, first_token_timeout_s)` until the first usable chunk arrives, and
+`stall_timeout_s` alone from there on. 0 (the default) is what Relay did before the option — one
+number for both. A **local** endpoint's own `first_token_timeout` (`localmodels.py`, 300 s by
+default, for weights that have to be loaded) still applies and the larger of the two wins.
+
+The first-token budget is also the budget for the response headers (`max(30 s, …)`), because a
 provider may withhold its `200` until the first token is ready. `RELAY_PROVIDER_TIMEOUT` (seconds,
-clamped 5–900) overrides the option in the worker's environment; the GUI passes the pane's setting
-through `stall_timeout_s`.
+clamped 5–900) overrides `stall_timeout_s` in the worker's environment; the GUI passes the pane's
+settings through, from Options › Agent › Turn limits ("Stop a silent model after", "Wait longer for
+the first token"), and the Switchboard's own worker is configured with the same block, so a card's
+Plan runs under the deadlines the panes run under.
 
 When the deadline expires the response is closed with `shutdown()` plus `close()`, so no connection
 outlives its turn, and the turn fails with
@@ -2549,12 +2561,20 @@ turn with no change to the tools themselves.
 |---|---|
 | a turn is already running on **that card** | two agents writing one card's `## Plan` would each undo the other, and its thread would interleave two answers |
 | a **cleanup** is running | it merges, splits and moves the very cards the turns are talking about (19.9) |
-| **three** card turns are already running | `board_turns.MAX_RUNNING`; a board of a hundred cards must not open a hundred paid streams from a hundred clicks |
+| **`board.limits.max_card_turns`** turns are already running (default 3) | a board of a hundred cards must not open a hundred paid streams from a hundred clicks |
 
 A cleanup, an import and a GitHub sync are refused in turn while any card turn runs. The error
 gains **`cards`**, the ids running right now, beside the `card_id` and `cleanup_running` it already
 carried; its text names them ("busy with turns on #A, #B and #C"). Nothing is written to a card by
 a refused ask, exactly as before.
+
+**How many at once** is `board.limits.max_card_turns` in the `board` block of `configure` (19.1),
+beside the write ceilings — `BoardTools` ignores the keys that are not its own, so one block
+carries every limit the GUI has an option for. Options › Agent › Switchboard ("Cards the agent
+works at once") writes it, 1 to `board_turns.MAX_CARD_TURNS_CEILING` (12), and a value outside that
+is clamped rather than refused: a board block is settings, and the pane must still open. Lowering
+it never stops a turn that is already running — it is a gate on starting — and the window re-sends
+`configure` to each live Switchboard worker when the option changes, so it applies without a restart.
 
 **Conversations.** A card's session outlives its turn, so a second question on an unchanged card
 continues where it left off — which the single conversation could only do for whichever card was

@@ -241,6 +241,48 @@ class HTTPTests(unittest.TestCase):
         self.assertIn('401', str(ctx.exception))
 
 
+class DeadlineTests(unittest.TestCase):
+    """The two deadlines: the gap between chunks, and the wait for the first one (15.1)."""
+
+    def provider(self, **kw):
+        config = ProviderConfig(base_url="https://example.invalid/v1", model="m/1", api_key="k")
+        return ChatProvider(config, **kw)
+
+    def test_without_the_option_the_first_token_waits_the_idle_deadline(self):
+        provider = self.provider(stall_timeout=60)
+        self.assertEqual(provider.first_token_timeout, 60.0)
+        self.assertEqual(provider.deadline, 60.0)                 # nothing streamed yet
+
+    def test_the_first_token_budget_is_a_floor_under_the_idle_deadline_not_a_cap(self):
+        provider = self.provider(stall_timeout=60, first_token_timeout=180)
+        self.assertEqual(provider.first_token_timeout, 180.0)
+        self.assertEqual(provider.deadline, 180.0)
+        provider._note_progress(usable=True)                      # the answer has started
+        self.assertEqual(provider.deadline, 60.0)                 # gaps keep the short deadline
+        # Asking for less than the idle deadline changes nothing: it is a floor, not a cap.
+        self.assertEqual(self.provider(stall_timeout=120, first_token_timeout=30).first_token_timeout, 120.0)
+
+    def test_the_header_budget_follows_the_first_token_budget(self):
+        provider = self.provider(stall_timeout=60, first_token_timeout=300)
+        self.assertEqual(provider.open_timeout, 300.0)            # max(CONNECT_TIMEOUT, first token)
+
+    def test_it_can_be_set_and_cleared_while_the_provider_lives(self):
+        provider = self.provider(stall_timeout=60)
+        self.assertEqual(provider.set_first_token_timeout(240), 240.0)
+        self.assertEqual(provider.set_first_token_timeout(0), 60.0)   # back on the idle deadline
+        with self.assertRaises(ValueError):
+            provider.set_first_token_timeout(4000)
+
+    def test_a_local_endpoint_keeps_its_own_longer_budget(self):
+        config = ProviderConfig(base_url="http://127.0.0.1:8080/v1", model="m/1", api_key="",
+                                local=True, first_token_timeout=300)
+        provider = ChatProvider(config, stall_timeout=60)
+        self.assertEqual(provider.first_token_timeout, 300.0)
+        # And the larger of the two wins when the option asks for more.
+        provider.set_first_token_timeout(600)
+        self.assertEqual(provider.first_token_timeout, 600.0)
+
+
 class StallTests(unittest.TestCase):
     """Issue SQAM: the idle deadline must cover every streamed chunk, and no socket may outlive a turn.
 

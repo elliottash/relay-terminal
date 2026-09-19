@@ -107,6 +107,13 @@ def env_stall_timeout() -> float | None:
         return None
 
 
+def validate_first_token_timeout(value) -> float:
+    """The extra budget for the first usable chunk: 0 (follow the idle deadline) or a stall value."""
+    if value in (None, 0, 0.0, ""):
+        return 0.0
+    return validate_stall_timeout(value)
+
+
 def validate_stall_timeout(value) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"stall_timeout_s must be a number from {MIN_STALL_TIMEOUT:g} to {MAX_STALL_TIMEOUT:g}.")
@@ -483,10 +490,17 @@ class ProviderConfig:
             validate_stall_timeout(self.first_token_timeout)
 
 class ChatProvider:
-    def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT):
+    def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT,
+                 first_token_timeout: float = 0.0):
         config.validate()
         self.config = config
         self._stall_timeout = validate_stall_timeout(stall_timeout)
+        # A longer budget for the *first* usable chunk than for the gaps between chunks, 0 for
+        # "the same as the idle deadline" (the default, and what this did before the option).
+        # Waiting for the first token is prefill, queueing and routing on a prompt that may be
+        # hundreds of thousands of tokens; a gap that long *after* the answer has started is a
+        # dead stream. A local endpoint has had its own such budget since local models landed.
+        self._first_token_timeout = validate_first_token_timeout(first_token_timeout)
         self._response = None
         # The last response this provider opened, kept (closed) so the socket-hygiene check after a
         # turn can prove it was closed. It holds no file descriptor once closed.
@@ -502,12 +516,15 @@ class ChatProvider:
 
     @property
     def first_token_timeout(self) -> float:
-        """How long the first usable chunk may take. The idle deadline for a hosted provider; for a
-        local server the longer budget of its endpoint, because loading the weights and reading a
-        long prompt produce no bytes at all. opencode, Codex and Qwen Code all allow 300 s here."""
-        if self.config.local and self.config.first_token_timeout:
-            return max(self.stall_timeout, float(self.config.first_token_timeout))
-        return self.stall_timeout
+        """How long the first usable chunk may take: the idle deadline unless something asked for
+        more. A local server's endpoint carries its own budget, because loading the weights and
+        reading a long prompt produce no bytes at all (opencode, Codex and Qwen Code all allow
+        300 s there); the pane's `first_token_timeout_s` option is the same thing for any provider,
+        for the prompt that takes a provider more than a minute to read. The larger of the two
+        wins, and neither can make the wait *shorter* than the idle deadline."""
+        asked = max(float(self._first_token_timeout),
+                    float(self.config.first_token_timeout or 0.0) if self.config.local else 0.0)
+        return max(self.stall_timeout, asked) if asked else self.stall_timeout
 
     @property
     def deadline(self) -> float:
@@ -578,6 +595,11 @@ class ChatProvider:
     def set_stall_timeout(self, seconds) -> float:
         self._stall_timeout = validate_stall_timeout(seconds)
         return self.stall_timeout
+
+    def set_first_token_timeout(self, seconds) -> float:
+        """0 puts the first chunk back on the idle deadline; anything else is a floor under it."""
+        self._first_token_timeout = validate_first_token_timeout(seconds)
+        return self.first_token_timeout
 
     def cancel(self) -> None:
         """Close the in-flight response now. Deterministic, not best effort.
@@ -1205,8 +1227,8 @@ class HostedChatProvider(ChatProvider):
     """
 
     def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT,
-                 session=None):
-        super().__init__(config, stall_timeout)
+                 session=None, first_token_timeout: float = 0.0):
+        super().__init__(config, stall_timeout, first_token_timeout)
         from . import hosted
         # RELAY_HOSTED_URL (tests, a local gateway) applies here, the one place every hosted call
         # passes through, so the pane's model, each tier and the key test all follow it.
@@ -1329,12 +1351,13 @@ class HostedChatProvider(ChatProvider):
         return ProviderError(text, code, resets_at)
 
 
-def make_provider(config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT) -> ChatProvider:
+def make_provider(config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT,
+                  first_token_timeout: float = 0.0) -> ChatProvider:
     """The transport for a config: Relay's hosted one for a ``hosted`` config, the plain one otherwise.
 
     Every place that builds a provider for a turn goes through here (agent.py, keytest.py), so a
     hosted config can never be sent with an empty Authorization header by a caller that forgot.
     """
     if config.hosted:
-        return HostedChatProvider(config, stall_timeout)
-    return ChatProvider(config, stall_timeout)
+        return HostedChatProvider(config, stall_timeout, first_token_timeout=first_token_timeout)
+    return ChatProvider(config, stall_timeout, first_token_timeout)
