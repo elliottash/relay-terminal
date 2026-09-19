@@ -14,6 +14,7 @@
 #include <QDropEvent>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QFocusEvent>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QHash>
@@ -3366,7 +3367,7 @@ void BoardView::updateDetailLayout()
         "<b>v</b> verify &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
-        "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
+        "&nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b>/<b>Tab</b> reply &nbsp; "
@@ -3884,6 +3885,17 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         closeDetail();
         return true;
     }
+    // On the main page Esc is the way to the filter bar (#K9X6). An open card has gone back
+    // above; an active filter comes off next — the same first Esc as inside the box — and with
+    // nothing left to undo the bar itself takes the focus and selects what is in it. The list
+    // reaches this through its own event filter, so the rule lives here once for the whole page.
+    if (key->key() == Qt::Key_Escape) {
+        if (!m_filter->text().isEmpty())
+            m_filter->clear();
+        else
+            focusFilter();
+        return true;
+    }
     return false;
 }
 
@@ -3922,6 +3934,13 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         if (m_quickAdd->text().trimmed().isEmpty())
             closeQuickAdd();
         return false;
+    }
+    // Clicking into the filter is the mouse way there; Esc reaches the bar from anywhere on
+    // the main page (#K9X6), so that is the hint. Keyboard focus (`/`, Esc itself, Tab) is
+    // already the fast path and says nothing.
+    if (object == m_filter && event->type() == QEvent::FocusIn
+        && static_cast<QFocusEvent *>(event)->reason() == Qt::MouseFocusReason && onHint) {
+        onHint(QStringLiteral("board.filter"), QStringLiteral("Esc"));
     }
     if (event->type() != QEvent::KeyPress)
         return QWidget::eventFilter(object, event);
@@ -4008,12 +4027,6 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         case Qt::Key_Enter:
             openSelected();
             return true;
-        case Qt::Key_Escape:
-            if (!m_filter->text().isEmpty()) {
-                m_filter->clear();
-                return true;
-            }
-            return false;
         default:
             break;
         }

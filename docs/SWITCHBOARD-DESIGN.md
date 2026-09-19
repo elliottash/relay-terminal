@@ -158,10 +158,11 @@ thread. Its model chip defaults to the anchor pane's preset.
 
 `board.*` Keymap actions, active when the Board has focus: arrows select; Enter/Esc open/close; `n` new; `m` move
 (popup, digits pick a column, Tab lists tabs); Alt+Shift+Left/Right move a column, Alt+Shift+Up/Down reorder; `/`
-filter (`label:`, `status:`, `@agent`, `waiting:me`, text); `l` labels; `a` assign; `c` reply; `t` insert `#ID` into the
+or Esc filter (`label:`, `status:`, `@agent`, `waiting:me`, text) — on the main page Esc lands in the filter bar,
+taking an active filter off first (#K9X6); `l` labels; `a` assign; `c` reply; `t` insert `#ID` into the
 anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pane; Ctrl+PgUp/PgDn switch tabs; `?` keys.
 **Hints** (WARP.md rule, live Keymap text): palette/button → Ctrl+Shift+S; mouse drag → `m`; clicking `+` → `n`;
-"Send to terminal" button → `t`; typed `/board` → the open shortcut.
+"Send to terminal" button → `t`; typed `/board` → the open shortcut; clicking into the filter → `Esc`.
 
 ### 4.5 As built (UX pass, 2026-09-17)
 

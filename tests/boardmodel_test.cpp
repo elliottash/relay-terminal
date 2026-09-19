@@ -7,7 +7,9 @@
 #include "Projects.h"
 #include "BoardPane.h"
 
+#include <QApplication>
 #include <QCheckBox>
+#include <QFocusEvent>
 #include <QFrame>
 #include <QJsonArray>
 #include <QLabel>
@@ -147,6 +149,7 @@ private slots:
     void arrowsFoldASectionAndTheFoldIsSaved();
     void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
     void theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack();
+    void escOnTheMainPageGoesToTheFilterBar();
     void aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone();
     void aChangeRefillsTheListInPlace();
     void theOpenCardRefetchesOnlyForItsOwnChanges();
@@ -851,6 +854,67 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
     view.findChild<QToolButton *>(QStringLiteral("boardCleanup"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
     QCOMPARE(sent.last().value("dry_run").toBool(), true);
+}
+
+// Esc is the way to the filter bar from anywhere on the main page (#K9X6). An active filter
+// comes off first — the same first Esc as inside the box — and once there is nothing to undo
+// the bar itself takes the focus, so the key always does one visible thing. A card still goes
+// back first, and inside the box Esc still hands the keyboard to the list.
+void BoardModelTests::escOnTheMainPageGoesToTheFilterBar()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
+    view.handleEvent(opened({row("K7Q2", "ready", "features")}));
+
+    QListWidget *list = listOf(view);
+    QLineEdit *filter = view.findChild<QLineEdit *>(QStringLiteral("boardFilter"));
+    QVERIFY(list);
+    QVERIFY(filter);
+
+    // From the list, and from the view itself (where an empty board leaves the keys), Esc
+    // lands in the filter bar: the rule is the page's, not the list's.
+    QTest::keyClick(list, Qt::Key_Escape);
+    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(filter));
+    list->setFocus();
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(filter));
+
+    // An active filter comes off first — its matches come back — and the keyboard stays
+    // where it was, ready to walk the unfiltered list.
+    filter->setText(QStringLiteral("zzz"));
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")), -1);
+    list->setFocus();
+    QTest::keyClick(list, Qt::Key_Escape);
+    QCOMPARE(filter->text(), QString());
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) >= 0);
+
+    // Inside the box Esc keeps its two old steps: the text off, then the keyboard to the list.
+    filter->setText(QStringLiteral("zzz"));
+    QTest::keyClick(filter, Qt::Key_Escape);
+    QCOMPARE(filter->text(), QString());
+    QTest::keyClick(filter, Qt::Key_Escape);
+    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(list));
+
+    // A card that has the pane goes back first; the next Esc is the filter bar.
+    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
+                                 {"title", "K7Q2 card"}, {"status", "ready"}, {"tab", "features"},
+                                 {"body", "text"}, {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QVERIFY(!view.detailOpen());
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(filter));
+
+    // Clicking into the box is the mouse way there, so that is what the hint names — and a
+    // focus the keyboard brought (`/`, Tab) is already the fast path and says nothing.
+    QString hinted;
+    view.onHint = [&hinted](const QString &id, const QString &keys) {
+        hinted = id + QLatin1Char(':') + keys;
+    };
+    QApplication::sendEvent(filter, new QFocusEvent(QEvent::FocusIn, Qt::MouseFocusReason));
+    QCOMPARE(hinted, QStringLiteral("board.filter:Esc"));
+    QApplication::sendEvent(filter, new QFocusEvent(QEvent::FocusIn, Qt::OtherFocusReason));
+    QCOMPARE(hinted, QStringLiteral("board.filter:Esc"));
 }
 
 // ---- the view's answers to the worker ------------------------------------------------------
