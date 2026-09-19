@@ -340,11 +340,13 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
+| `failover_hosted` | bool | false | Relay Free may be one of those providers (15.2.2) |
 
 `configured` gains these fields. `set_agent_options` applies them to the pane's agent at once (limits are
 read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
-`max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents are not affected:
-they keep their definition's `max_steps`, get `max(24, 3 × max_steps)` tool calls and no ledger or todos.
+`max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents keep their definition's `max_steps`, get
+`max(24, 3 × max_steps)` tool calls and no ledger or todos; of the switches above they follow only
+`failover` and `failover_hosted`, read from the pane when each subagent starts (15.2.2).
 
 ### 12.2 Turn limits (G1)
 
@@ -938,6 +940,9 @@ model chip while the turn runs, and clears it on `plan_route_ended` — the same
 the vision swap goes inside it, so the image turn's own restore goes back to the *planning* model and the
 plan restore then goes back to the pane's own.
 
+A planning model whose provider will not answer no longer fails the turn: the routing ends and the
+rest of the turn runs on the pane's own model (15.2.3).
+
 ## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18)
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
@@ -1255,15 +1260,16 @@ started answer does not, because that text is already on the user's screen.
 
 New event, emitted before the retried model call:
 
-`provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended",
-attempt, max_attempts, seconds, step, text}`
+`provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended" |
+"route_dropped", attempt, max_attempts, seconds, step, text}`
 
 `seconds` is sent only for `"stall"`; `step` is sent by everything the agent emits and not by
 `"http"` or `"failover_ended"` (the transport does not know the step, and the restore is not at one);
 `turn_id` is absent only for `"http"`, which the transport
 emits without knowing the turn. `"http"` is the transport's retry of a refused request (below);
 `"failover"` and `"failover_ended"` are the move to another provider and the return from it
-(15.2.2), and name the model and preset they move from and to.
+(15.2.2), and name the model and preset they move from and to. `"route_dropped"` is a plan or image
+turn giving up its routed model and finishing on the pane's own (15.2.3).
 
 Since 2026-09-19 the transport itself also retries a *refused* request from a provider that is not
 a local model server: HTTP 408, 409, 429, 500, 502, 503, 504 and 529, and only those. A status the
@@ -1287,7 +1293,20 @@ refusal becomes the answer there and then, and the transport logs `provider_retr
 Relay's own gateway decides the wait from its error body: a `rate_limited` window is waited out
 until it reopens, a spent `quota_exhausted` allowance is never waited out; the 401 token refresh
 (13.9) makes a second HTTP call for the same request and continues the first's count and budget
-rather than starting a fresh six. A local model server is excluded — its 5xx are deterministic,
+rather than starting a fresh six.
+
+**The gateway owns the retries it has already made** (owner, 2026-09-19). `gateway/proxy.py` fails a
+request over from one upstream to the next before the first byte, over exactly the status set above
+(`proxy.RETRYABLE_STATUSES`, which `tests/test_gateway.py` asserts equals
+`ChatProvider.HTTP_RETRY_STATUSES` — the gateway box runs `gateway/` and `remote/` only, so the two
+cannot share a module). A refusal it returns after more than one upstream carries `retried` in its
+error body — `{"error": {"code": …, "message": …, "retried": n}}` — and `HostedChatProvider` treats
+such a refusal as **final**: retrying it here would re-run the gateway's whole chain, so a hosted
+429 or 5xx was being paid for twice, once on each side. A `rate_limited` window the gateway reports
+is still honoured, because that is the gateway's own door and not an upstream's, and a refusal with
+no `retried` (one upstream, or the gateway's own admission checks) is retried exactly as before.
+
+A local model server is excluded — its 5xx are deterministic,
 and its loading 503 keeps its own fixed wait inside the first-token budget.
 
 The two layers do not wait twice over: the transport's budget is spent inside one `complete()`, and
@@ -1329,7 +1348,7 @@ short by the single largest request of the turn.
 When a provider fails a step even after those retries (a stall included; a truncated step is a
 budget problem, not a provider that will not answer), the agent continues the turn on the next
 provider that can run it without setup: the same tier's model — Main or Flash — on every other
-preset with a stored key, then Relay Free. Each is asked once, at most two besides the pane's own,
+preset with a stored key, then Relay Free where the pane allows it. Each is asked once, at most two besides the pane's own,
 and never a provider without a stored key, a local endpoint, one already tried this turn, or one
 whose endpoint has the same hostname as a preset already tried (Z.AI's standard API and its Coding
 Plan are two keys for one service, and a service that is down is down for both). A step that has
@@ -1367,11 +1386,56 @@ prefixed with what else was tried ("glm-5.3 failed; kimi-k3 (Kimi · K3) and Rel
 and carries `code`/`resets_at` only when that first failure had them: a spare provider's spent
 allowance is not what this pane should offer a key for (13.9).
 
-Subagents and side calls do not fail over (no resolver, injected provider); the whole behaviour is
-the `failover` agent option (12.1), on by default, from Options › Models › "Fall over to a working
-provider".
+**Relay Free is opt-in as a target** (owner, 2026-09-19). Every other candidate is a provider the
+user set up themselves, with a key they chose to store; Relay's hosted service is not — it is
+another company's terms and a shared allowance — so a pane running on the user's own key never
+lands there unless they said it may. The switch is `failover_hosted` (12.1), **off** by default,
+from Options › Models › "Allow Relay Free as a fallback when my own provider keeps failing", right
+under the failover toggle. Keyed presets of the same tier are tried whatever it says.
+`RoleResolver.failover_candidates(..., allow_hosted=)` is where it lands, and the agent decides the
+value once per turn, with the pane's own tier, so a hosted spare cannot widen the chain on the
+second move. A pane already running on Relay Free passes `True`: it has nothing left to opt into.
+When the turn does move there the note says so plainly — "… keeps failing; continuing this turn on
+Relay's hosted service (Relay Free)." — because that is the one target the user had to allow.
+
+**Subagents fail over too, following the parent's chain** (owner, 2026-09-19). `subagents.py` builds
+each subagent's `Agent` with the pane's role resolver, its preset and both switches above, read from
+the pane when the subagent starts, so a Flash subagent whose provider keeps failing continues within
+Flash exactly as a Flash pane does. Before this it built one *without* a resolver, and
+`_begin_failover` refuses every move without one, so a subagent never failed over at all. An
+injected provider is still never replaced — a guest harness, or a test's factory — because
+`Agent._injected_provider` refuses the swap the same way it refuses `set_model`'s. Side calls (a
+title, a recap, compaction, `route_assist`) still do not fail over: they have no turn to move.
 
 The GUI prints `text` as a note line.
+
+#### 15.2.3 A routed step whose provider is down: back to the pane's own model
+
+A plan turn runs on the planning model (13.11) and an image turn on the vision model (17.3), and
+while either is up a failover is refused: each has already made its own choice for this turn.
+That left a plan turn whose pinned planning model's provider was down failing outright, with the
+pane's own model sitting there able to answer (owner, 2026-09-19).
+
+Such a step now drops back one step first. When a routed step fails with a `ProviderError` that
+would otherwise have started a failover, the routing **ends** — `vision_route_ended` and/or
+`plan_route_ended`, innermost first, so the pane is on its own model again — and the rest of the
+turn runs there. The move emits
+
+`provider_retry {turn_id, reason: "route_dropped", attempt: 1, max_attempts: 1, from_model,
+to_model, to_preset, step, text}`
+
+plus a `status`, and logs `provider_route_dropped`. `text` is
+`Planning model <model> (<preset label>) is not answering; continuing on <pane model> (<preset
+label>).`, or `Vision model …` for an image turn. Only if the pane's own model fails as well does
+the ordinary chain of 15.2.2 start — the user's own model before anyone else's — and that chain
+begins with the dropped provider already marked as tried, since it has just refused.
+
+Three things it does not do. It never moves a step that has already streamed part of an answer, for
+the reason 15.2 gives. It is refused for an injected provider and on cancel, like a failover. And it
+is **not** gated on the `failover` option: this is not a move to another provider but a return to
+the one the pane already has. One exception of its own: an image turn is not dropped back when the
+pane's own model cannot read images, since that is why the turn was routed — the pictures would only
+reach a model that refuses them, and the vision provider's failure is reported as before.
 
 ### 15.3 Socket hygiene
 
@@ -1556,7 +1620,8 @@ with the same `text`: refused, not failed — nothing was sent to the provider, 
 the conversation so it can be re-sent once a model is chosen. The GUI shows the routing line in the
 pane and names the serving model in the model chip while the turn runs. Both ends of both notes name
 **model plus preset label**, and so do the two `status` lines: the one shape all three of Relay's turn
-swaps share (15.2.2).
+swaps share (15.2.2). A vision model whose provider will not answer ends the routing and finishes the
+turn on the pane's own model, when that model can read images at all (15.2.3).
 
 **The swap is a model change, not a swapped socket**, exactly as a failover's is (15.2.2) and a plan
 turn's is (13.11): the conversation is converted to the vision model's reasoning dialect
