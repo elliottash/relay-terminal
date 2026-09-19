@@ -20,17 +20,28 @@ Credentials never reach this repository or a log. They are read, in order, from:
   ordinary `~/.aws/credentials`;
 * the default boto3 chain, so an instance role or `AWS_PROFILE` works too.
 
-`RELAY_MAIL_FROM` is the sender, and the region is `RELAY_AWS_REGION` or the profile's own. Nothing
-is sent unless a sender is configured: an invite that arrives from an unverified address is worse
-than one the owner pastes into a chat window himself.
+The sender and region come from `RELAY_MAIL_FROM` and `RELAY_AWS_REGION`, else from
+``~/.config/relay/email.json`` (``{"from": …, "region": …, "profile": …}``), so the dialog works
+after a restart without anybody exporting anything. The region defaults to **us-east-1**: that is
+where this account's verified identities and production access are, and SES verification is
+per-region — the same credentials in another region are a fresh sandbox with nothing verified,
+which is exactly the wrong answer to look at for twenty minutes.
+
+Nothing is sent unless a sender is configured: an invite that arrives from an unverified address is
+worse than one the owner pastes into a chat window himself.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+from pathlib import Path
 from dataclasses import dataclass
 
 DEFAULT_PROFILE = "eth-luth-admin"
+# Per-region, and this is the one with production access and the verified domains.
+DEFAULT_REGION = "us-east-1"
+CONFIG = Path.home() / ".config" / "relay" / "email.json"
 
 # Deliberately loose: the address is typed by the owner, and the check exists to catch a slip
 # before an invite is spent, not to be a specification.
@@ -58,15 +69,28 @@ def configured() -> Mailer:
     except ImportError:
         return Mailer(reason="boto3 is not installed here, so Relay cannot reach SES. "
                              "Copy the link instead, or `pip install boto3`.")
-    sender = (os.environ.get("RELAY_MAIL_FROM") or "").strip()
+    stored = _stored()
+    sender = (os.environ.get("RELAY_MAIL_FROM") or stored.get("from") or "").strip()
     if not sender:
-        return Mailer(reason="No sender address: set RELAY_MAIL_FROM to an address SES has "
-                             "verified, then try again.")
-    region = (os.environ.get("RELAY_AWS_REGION") or os.environ.get("AWS_SES_REGION") or "").strip()
-    profile = (os.environ.get("RELAY_AWS_PROFILE") or "").strip()
+        return Mailer(reason=f"No sender address: set RELAY_MAIL_FROM, or put "
+                             f'{{"from": "invites@your-domain"}} in {CONFIG}, using an address '
+                             f"SES has verified.")
+    region = (os.environ.get("RELAY_AWS_REGION") or os.environ.get("AWS_SES_REGION")
+              or stored.get("region") or DEFAULT_REGION).strip()
+    profile = (os.environ.get("RELAY_AWS_PROFILE") or stored.get("profile") or "").strip()
     if not profile and not os.environ.get("AWS_SES_ACCESS_KEY_ID"):
         profile = DEFAULT_PROFILE if _has_profile(DEFAULT_PROFILE) else ""
     return Mailer(sender=sender, region=region, profile=profile)
+
+
+def _stored() -> dict:
+    """``~/.config/relay/email.json``, or {} — a missing or broken file is not an error, it is the
+    ordinary case of nobody having configured email yet."""
+    try:
+        data = json.loads(CONFIG.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def _has_profile(name: str) -> bool:
