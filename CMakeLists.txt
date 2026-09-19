@@ -220,6 +220,13 @@ target_include_directories(relay-queuenav PUBLIC src)
 target_link_libraries(relay-queuenav PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-queuenav PRIVATE -Wall -Wextra -Wpedantic)
 
+# Queue submit policy (#N8VK): when a submitted agent prompt starts its turn at once and when it
+# queues. Pure rules, no widgets.
+add_library(relay-queuesubmit STATIC src/QueueSubmit.cpp src/QueueSubmit.h)
+target_include_directories(relay-queuesubmit PUBLIC src)
+target_link_libraries(relay-queuesubmit PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-queuesubmit PRIVATE -Wall -Wextra -Wpedantic)
+
 # pane_state (relay-terminal-71): a pane as a paired phone draws it, and the publisher that
 # coalesces its changes. Plain inputs in, the v1 JSON out; QtCore only, so it is tested headless.
 add_library(relay-panestate STATIC src/PaneState.cpp src/PaneState.h)
@@ -409,7 +416,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -529,6 +536,9 @@ if(BUILD_TESTING)
     add_executable(relay-queuenav-tests tests/queuenav_test.cpp)
     target_link_libraries(relay-queuenav-tests PRIVATE relay-queuenav ${RELAY_QT}::Test)
     add_test(NAME queuenav COMMAND relay-queuenav-tests)
+    add_executable(relay-queuesubmit-tests tests/queuesubmit_test.cpp)
+    target_link_libraries(relay-queuesubmit-tests PRIVATE relay-queuesubmit ${RELAY_QT}::Test)
+    add_test(NAME queuesubmit COMMAND relay-queuesubmit-tests)
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
     add_test(NAME panestate COMMAND relay-panestate-tests)
@@ -588,7 +598,7 @@ if(BUILD_TESTING)
         relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents
         relay-requests relay-conversations relay-completion relay-fileindex relay-backends
         relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes
-        relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage
+        relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage
         relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen
         relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing
         relay-remotepane relay-panestate ${RELAY_QT}::Widgets ${RELAY_QT}::Test)

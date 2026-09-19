@@ -1,0 +1,7 @@
+2026-09-19T16:17:28.499Z INFO relay.worker pane=97f14954 worker_start version=0.1.0 pid=429411 level=info
+2026-09-19T16:17:28.530Z INFO relay.worker pane=97f14954 configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=94e327d3b7904e0889eb3409b71a2932
+2026-09-19T16:17:37.590Z INFO relay.agent pane=97f14954 turn_start session=94e327d3b7904e0889eb3409b71a2932 turn=36452fb963a7402882a0a6a9f613b307 model=stub host=127.0.0.1 mode=build effort=high prompt_chars=36 messages=1 stall_s=60 max_steps=256
+2026-09-19T16:17:40.581Z INFO relay.agent pane=97f14954 turn_end session=94e327d3b7904e0889eb3409b71a2932 turn=36452fb963a7402882a0a6a9f613b307 outcome=cancelled ms=2990 thinking_ms=0 tools=0 retries=0 open_items=1
+2026-09-19T16:17:40.583Z INFO relay.agent pane=97f14954 turn_start session=94e327d3b7904e0889eb3409b71a2932 turn=8e51710e2ffa47abb204fe6837345f66 model=stub host=127.0.0.1 mode=build effort=high prompt_chars=19 messages=3 stall_s=60 max_steps=256
+2026-09-19T16:17:44.239Z INFO relay.agent pane=97f14954 turn_end session=94e327d3b7904e0889eb3409b71a2932 turn=8e51710e2ffa47abb204fe6837345f66 outcome=cancelled ms=3655 thinking_ms=0 tools=0 retries=0 open_items=1
+2026-09-19T16:17:44.240Z INFO relay.worker pane=97f14954 worker_stop pid=429411

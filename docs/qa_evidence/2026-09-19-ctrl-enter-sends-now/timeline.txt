@@ -1,0 +1,8 @@
+1789834611.849468702 queue: sleep entered
+1789834613.503299288 queue: echo queued behind the sleep
+1789834615.103354765 queue: Ctrl+Enter on the agent prompt
+1789834635.158788537 star: sleep entered
+1789834636.728341092 star: echo queued behind the sleep
+1789834637.942472762 star: Enter on a *-prefixed prompt
+1789834657.630686201 busy: slow turn submitted
+1789834660.671723925 busy: Ctrl+Enter during the turn

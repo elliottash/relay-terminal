@@ -1,0 +1,75 @@
+--- queue-mid
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+sleep 8
+Next queued prompt...
+QUEUE t select a row - Ctrl+t! move - Shift+Del remove
+»running $ sleep 8
+$ echo queued-behind x
+Agent: stub — output will also print in the terminal when sleep exits x
+» stub
+Received. Done.
+--- queue-after
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
+sleep 8
+
+~/project $
+
+echo queued-behind
+
+queued- behind
+
+~/project $
+
++ the agent was asked while the shell slept
+> stub
+
+Received. Done.
+--- star-mid
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+sleep 6
+Next queued prompt...
+QUEUE t select a row - Ctrl+t! move - Shift+Del remove
+»running $ sleep 6
+$ echo star-tail x
+Agent: stub — output will also print in the terminal when sleep exits x
+» stub
+Received. Done.
+--- star-after
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
+sleep 6
+
+~/project $
+
+echo star-tail
+
+star-tail
+
+~/project $
+
++ the star prefix asked too
+> stub
+
+Received. Done.
+--- busy-mid
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+~/project $
+> stub
+Pondering. Still pondering.
+Interrupting the current turn; completed actions are not rolled back.
+Stopped. Actions that already ran are not rolled back.
+> stub
+Pondering. Still pondering. Nearly there.
+Next queued prompt...
