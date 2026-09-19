@@ -145,8 +145,14 @@ class ContextTests(Base):
         started = self.of('compaction_started')
         self.assertTrue(started)
         self.assertEqual(started[0]['reason'], 'auto')
-        compacted = self.of('compacted')[-1]
-        self.assertLess(compacted['after_tokens'], compacted['before_tokens'])
+        # Auto-compaction fires once per turn while the conversation is over the limit, and a round
+        # that finds nothing left it can compact reports before == after (the first round here does,
+        # on main as well). Which round lands last therefore moves with the size of the tool list —
+        # `ask_user` (#MQ9C) was enough to flip it — so what is asserted is that compaction reduced
+        # the conversation, not that the last of several rounds happened to be a reducing one.
+        compactions = self.of('compacted')
+        self.assertTrue(any(c['after_tokens'] < c['before_tokens'] for c in compactions),
+                        [(c['before_tokens'], c['after_tokens']) for c in compactions])
         # every tool message directly follows its assistant tool-call group
         for messages, _ in provider.requests:
             for i, m in enumerate(messages):

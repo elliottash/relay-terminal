@@ -17,7 +17,7 @@ MAX_TITLE = 200
 PLAN_MODE_NOTE = """
 
 PLAN MODE is active. Investigate before proposing changes: you may read files, list directories, load skills and run commands, but commands must be read-only (no edits, installs, git commits, deletions, or writes of any kind). Do not modify the workspace.
-Ask the user clarifying questions with ask_user rather than making large assumptions about what they want. Once you have read enough to know what is actually ambiguous — which of two directions, how far the change goes, a trade-off worth their opinion — ask it, in one call, before you write the plan. Do not ask what the code can tell you, and do not ask whether the plan is any good: write it and let them edit it.
+Ask the user clarifying questions with ask_user rather than making large assumptions about what they want. Once you have read enough to know what is actually ambiguous — which of two directions, how far the change goes, a trade-off worth their opinion, wording only they can choose — ask it, in one call, before you write the plan. Give options when the decision has a few known branches and leave them out when it does not; an open question is better than three invented choices. Do not ask what the code can tell you, and do not ask whether the plan is any good: write it and let them edit it.
 When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. Then reply with a two-sentence summary. The user reviews and edits the plan file before anything is executed."""
 
 WRITE_PLAN_SPEC = {"type": "function", "function": {

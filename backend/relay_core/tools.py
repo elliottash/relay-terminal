@@ -240,8 +240,9 @@ class ToolExecutor:
         # them; see relay_core/terminal_handoff.py.
         self.terminal = TerminalHandoff(emit, cancel)
         # Asking the user a question and waiting for the answer; see relay_core/questions.py.
-        # The tool is offered by the Agent, in plan mode only; `can_ask` is off for a subagent's
-        # executor, which cannot see the pane the card would be drawn in.
+        # Offered in both modes (owner, 2026-09-19: "let the non-plan agent use the questions as
+        # well (like warp / claude)"); `can_ask` is off for a subagent's executor, which cannot see
+        # the pane the card would be drawn in.
         self.questions = Questions(emit, cancel)
         self.can_ask = True
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
@@ -316,6 +317,8 @@ class ToolExecutor:
             tools = tools + [self.program.tool_spec()]
         if self.terminal.available():
             tools = tools + [self.terminal.tool_spec()]
+        if self.can_ask:
+            tools = tools + [self.questions.tool_spec()]
         return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:

@@ -3019,20 +3019,20 @@ away before it was answered.
 | `questions` | 1–4 questions, asked together |
 | `.header` | two or three words naming the decision, at most 30 characters |
 | `.question` | the question in full, at most 300 characters |
-| `.options` | 2–5 `{label (≤60), description (≤200), recommended?}` |
-| `.multiple` | let the user pick more than one (default `false`) |
+| `.options` | **optional**: 2–5 `{label (≤60), description (≤200), recommended?}`. Omitted or empty is an open question the user types the answer to (owner, 2026-09-19: "dont force multiple choice -- allow open-ended questions") |
+| `.multiple` | let the user pick more than one (default `false`); needs options |
 
-Refused, with a sentence the model gets to act on: an option labelled "Type your own answer" (the
-pane always offers one, as opencode's `question` tool does, so a catch-all option would be
-duplicated), two options with the same label, two recommendations in one question, and more than
-`MAX_ASKS_PER_TURN` (6) calls in one turn — the last returns `{ok: false, refused: "cap"}` telling
-the model to decide and say which way it went.
+Refused, with a sentence the model gets to act on: exactly one option (neither a choice nor an
+open question — it is "is this all right?", which is not a question), `multiple` without options, an
+option labelled "Type your own answer" (the pane always offers one, as opencode's `question` tool
+does, so a catch-all option would be duplicated), two options with the same label, two
+recommendations in one question, and more than `MAX_ASKS_PER_TURN` (6) calls in one turn — the last
+returns `{ok: false, refused: "cap"}` telling the model to decide and say which way it went.
 
-The tool is **plan mode's**: `Agent.tools()` adds it beside `write_plan`, and a call in build mode
-is refused with a sentence telling the model to end its turn on the question instead. A spec costs
-its tokens on every turn of every pane, and it is the planner the card was asked for. It is **never
-offered to a subagent** either: it cannot see the pane and the user does not know it is running
-(`subagents.RestrictedExecutor` sets `can_ask = False`).
+The tool is offered **in both modes** (owner, 2026-09-19: "let the non-plan agent use the questions
+as well (like warp / claude)"), which is what opencode does for its `build` and `plan` agents; only
+plan mode's prompt pushes it. It is **never offered to a subagent**: it cannot see the pane and the
+user does not know it is running (`subagents.RestrictedExecutor` sets `can_ask = False`).
 
 The result is `{ok: true, answers: [{header, question, answer}], summary, note?}`. `answer` is the
 chosen labels joined with ", ", or the user's own words, or `"Unanswered"`. `note` appears when
@@ -3047,16 +3047,18 @@ present, `recommended` present only on the recommended option. The pane draws it
 question_answer {id, answers: [["This file only"], [], ["neither: delete it"]]}
 ```
 
-one list per question, in order: the labels chosen, the user's own text for an answer they typed,
-or an empty list for one they skipped. A dismissed card is every question skipped. An `id` nobody
-is waiting on is ignored — a click landing after Stop is the user being late, not an error.
+one list per question, in order: the labels chosen, the user's own text for an answer they typed
+(always the case for an open question), or an empty list for one they skipped. A dismissed card is
+every question skipped. An `id` nobody is waiting on is ignored — a click landing after Stop is the
+user being late, not an error.
 
 ### 27.4 What the user sees (GUI, card #4E13)
 
 A question is the "needs human" state, so the card is drawn in the theme's amber `warning` ink, the
 pane's status glyph and its tab go to `NeedsYou` while it is open, and the pane's notification says
-the agent needs you. The card is keyboard-first: number keys choose, Enter confirms, `t` types an
-answer of your own, Esc skips. This is the visual language #4E13 asked for — amber is the colour of
+the agent needs you. The card is keyboard-first: with options a number chooses and `0` skips; an open question takes
+whatever you type; `/skip` passes on either; and Ctrl+Shift+Enter still runs a shell command,
+because a question from the agent must not take the terminal away. This is the visual language #4E13 asked for — amber is the colour of
 something waiting on a person.
 
 ### 27.5 Deviations from the harnesses this follows

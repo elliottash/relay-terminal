@@ -27,6 +27,9 @@ QUESTIONS = [
          {"label": "ctest", "description": "The C++ suite."},
          {"label": "scripts/test.sh", "description": "Backend and Bash."},
          {"label": "A live pane", "description": "Drive the app under Xvfb."}]},
+    # No options: an open question (owner, 2026-09-19). The pane takes whatever is typed.
+    {"header": "Wording",
+     "question": "What should the deprecation note on the old name say?"},
 ]
 
 

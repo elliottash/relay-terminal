@@ -83,8 +83,12 @@ choice or multi-select, a recommendation, an explanation under each option, keyb
 
 ## The shape Relay takes
 
-- Tool `ask_user`, opencode's schema plus Warp's explicit recommendation, offered in plan mode only
-  and never to a subagent (it cannot see the pane, #C1HH's rule).
+- Tool `ask_user`, opencode's schema plus Warp's explicit recommendation, offered in both modes
+  (owner, 2026-09-19: "let the non-plan agent use the questions as well (like warp / claude)") and
+  never to a subagent (it cannot see the pane, #C1HH's rule).
+- **`options` is optional** (owner, same day: "dont force multiple choice -- allow open-ended
+  questions"). With options a number is the whole answer; without them the question is open and the
+  prompt box takes the words. `/skip` passes on either.
 - A blocking round trip on the pattern of `type_into_program` (`program_input.py`): the worker emits
   `question`, the pane draws it, the pane answers `question_answer`, the turn thread wakes. Unlike
   that one it has no reply deadline — the user may be away — only Stop and a new prompt end it.
@@ -119,10 +123,15 @@ gained `Facts::questionOpen`.
 - **A button row.** The card is text in the terminal and the keyboard answers it, because that is
   what Relay is; opencode's TUI does the same. Whether it should also be clickable, the way the
   Switchboard's cards are, is the owner's call about how far the pane's chrome goes.
-- **Whether a building agent should ask too.** It is plan mode's tool today: the card asked for the
-  planner, and 386 tokens of spec on every turn of every pane is not free — with it in the build
-  list, `test_auto_compaction_summarizes_and_keeps_tool_groups_intact` goes red on an 8000-token
-  window, which is the test noticing exactly that cost. A build turn that needs the user still ends
-  on a question and the pane reads that as "needs you". Warp makes asking a per-profile permission
-  with three settings ("may not ask" / "suppressed during auto-approval" / "always available"); if
-  the owner wants that, this is where it goes.
+- **Whether asking should be a permission.** Warp makes it a per-profile setting with three states
+  ("may not ask" / "suppressed during auto-approval" / "always available"). Relay offers the tool
+  unconditionally in both modes, which is opencode's arrangement. If the owner ever wants a pane
+  that must not interrupt — an unattended run, a scheduled turn — that setting is where it goes.
+- **Auto-compaction announces rounds that do nothing.** While a conversation is over the limit,
+  compaction runs once per turn, and a round with nothing left it can compact still emits
+  `compaction_started` / `compacted` with `before == after` and still pays for a side-model call.
+  It already did that on main (the first round of
+  `test_auto_compaction_summarizes_and_keeps_tool_groups_intact` is one); adding a tool spec to the
+  list only changed which round lands last, which is why that test now asserts that *a* round
+  reduced rather than that the last one did. Whoever owns compaction should decide whether a no-op
+  round should be skipped, or reported as one.

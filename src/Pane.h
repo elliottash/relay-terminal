@@ -1499,8 +1499,9 @@ public:
     //
     // It is printed into the terminal rather than put in a widget over it, in the amber the rest
     // of Relay's "needs you" marks use (#4E13: "questions or items needing human response could be
-    // in bold amber"). Numbers answer it, so the keyboard is enough: "2", "1,3" for a multiple
-    // choice, "0" to skip, and anything else is taken as the user's own words. Questions in one
+    // in bold amber"). The keyboard is enough: with options, "2" picks one and "1,3" picks two;
+    // without them the question is open and whatever you type is the answer; `/skip` leaves any
+    // question unanswered, and so does "0" when there are numbers to be clear of. Questions in one
     // call are asked one at a time; answering the last one sends them all back together.
     struct Ask {
         QString id;
@@ -1575,10 +1576,13 @@ private:
             if (!description.isEmpty())
                 printInline(QStringLiteral("     %1\n").arg(description), Ink::Note);
         }
-        printInline(QStringLiteral("  0  Skip this one\n"), Ink::Note);
-        printInline(multiple ? QStringLiteral("  Answer with numbers (\"1,3\"), or type your own.\n")
-                             : QStringLiteral("  Answer with a number, or type your own.\n"), Ink::Note);
-        printInline(QStringLiteral("  Ctrl+Shift+Enter still runs a command.\n"), Ink::Note);
+        if (!options.isEmpty()) printInline(QStringLiteral("  0  Skip this one\n"), Ink::Note);
+        printInline(options.isEmpty()
+                        ? QStringLiteral("  Type your answer · /skip to pass · Ctrl+Shift+Enter still runs a command.\n")
+                        : (multiple
+                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · Ctrl+Shift+Enter still runs a command.\n")
+                               : QStringLiteral("  A number, or your own words · Ctrl+Shift+Enter still runs a command.\n")),
+                    Ink::Note);
         closeInline();
     }
 
@@ -1588,17 +1592,24 @@ private:
         const QJsonObject question = questionAt(m_ask.current);
         const int count = questionOptions(question).size();
         const QString header = question.value(QStringLiteral("header")).toString();
+        if (count == 0)
+            return {QStringLiteral("%1 · type your answer, or /skip").arg(header),
+                    QStringLiteral("type your answer, or /skip"),
+                    QStringLiteral("answer the question")};
         return {QStringLiteral("%1 · 1–%2, 0 to skip, or your own words").arg(header).arg(count),
                 QStringLiteral("1–%1, 0 to skip, or your own words").arg(count),
                 QStringLiteral("1–%1, or your own words").arg(count),
                 QStringLiteral("answer the question")};
     }
 
-    // The text in the prompt box, read as an answer. Numbers pick options; "0" skips; anything
-    // else is the user's own words, which is the whole point of not making this a button row.
+    // The text in the prompt box, read as an answer. `/skip` always skips. With options, numbers
+    // pick them and "0" skips; anything else is the user's own words, which is the whole point of
+    // not making this a button row. An open question has no numbers to read: it is all own words.
     QStringList readAnswer(const QString &text) const {
+        if (text.trimmed().compare(QStringLiteral("/skip"), Qt::CaseInsensitive) == 0) return {};
         const QJsonObject question = questionAt(m_ask.current);
         const QJsonArray options = questionOptions(question);
+        if (options.isEmpty()) return {text.trimmed()};
         const bool multiple = question.value(QStringLiteral("multiple")).toBool();
         static const QRegularExpression numbers(QStringLiteral("^\\s*\\d+(?:\\s*[,\\s]\\s*\\d+)*\\s*$"));
         if (!numbers.match(text).hasMatch()) return {text.trimmed()};

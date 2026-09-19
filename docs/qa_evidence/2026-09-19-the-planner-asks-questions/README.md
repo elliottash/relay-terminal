@@ -14,8 +14,9 @@ and `TMPDIR`) against `stub-provider.py` on loopback — a planner that answers 
 |---|---|
 | `implementer-card.png` | Plan mode, the first question. The card is in the amber "needs human" ink; option 1 carries the model's `← recommended`; the descriptions are muted; `0` skips. The prompt box invites the answer ("Scope · 1–3, 0 to skip, or your own words") and the turn clock says **waiting for your answer · 6 s**, not "thinking" — the turn really is blocked inside the tool. |
 | `implementer-card-tab.png` | The tab bar with the asking pane in the background: the amber `needs-you` glyph, from `panestatus::resolve` (`questionOpen` outranks `Working`). |
-| `implementer-second.png` | `1` answered the first question — echoed as `✦ Scope: This file only` in the agent's violet, the way any line the user sends the agent is — and the second, multiple-choice question is up ("Answer with numbers (\"1,3\")"). |
-| `implementer-answered.png` | `1,2` answered it. The turn resumed, `write_plan` quoted both answers back into the plan (`## What you told me`), the plan pane opened with Execute / Execute in fresh context / Keep planning, and the folded line reads `asked you about Scope, Checks · 17 s`. |
+| `implementer-second.png` | `1` answered the first question — echoed as `✦ Scope: This file only` in the agent's violet, the way any line the user sends the agent is — and the second, multi-select question is up ("Numbers (\"1,3\"), or your own words"). |
+| `implementer-open.png` | The third question has **no options at all**: no numbered list, no `0`, the footer reads "Type your answer · /skip to pass" and the prompt box says "Wording · type your answer, or /skip". |
+| `implementer-answered.png` | All three answered, the last in the user's own sentence. The turn resumed, `write_plan` quoted both answers back into the plan (`## What you told me`), the plan pane opened with Execute / Execute in fresh context / Keep planning, and the folded line reads `asked you about Scope, Checks · 17 s`. |
 
 ## What a QA session should check
 
@@ -31,8 +32,10 @@ and `TMPDIR`) against `stub-provider.py` on loopback — a planner that answers 
 - [ ] `/new` and an agent-worker restart both take the card down.
 - [ ] Typing an option out in full instead of its number shows the "Next time: just type 2" hint
       once, and an answer in the user's own words does not.
-- [ ] Build mode does not carry the tool: `Shift+Tab` back to BUILD and the agent has no `ask_user`
-      (it ends its turn on the question instead, which the pane already shows as "needs you").
+- [ ] Build mode carries the tool too: `Shift+Tab` back to BUILD and a turn can still ask.
+- [ ] An open question (no `options`) prints with no numbered list, the prompt box says "type your
+      answer, or /skip", and whatever is typed comes back as the answer.
+- [ ] `/skip` passes on both kinds.
 - [ ] A subagent cannot ask: `ask_user` is not in its tool list (`tests/test_questions.py` covers
       the refusal; a live check would need a subagent definition that names it).
 - [ ] On a paired phone: the card is readable in the pane and a line typed there answers it.

@@ -9,8 +9,9 @@
 # Shots:
 #   implementer-card.png        the amber card for question 1, in plan mode, the turn blocked on it
 #   implementer-card-tab.png    the tab bar, cropped: the background tab says "needs you"
-#   implementer-second.png      question 2 after "1" answered the first: the multiple-choice one
-#   implementer-answered.png    both answered, the plan written from them
+#   implementer-second.png      question 2 after "1" answered the first: the multi-select one
+#   implementer-open.png        question 3: no options at all, the prompt box takes the words
+#   implementer-answered.png    all three answered, the plan written from them
 #
 # Isolation is off in the sandbox: the worker is normally launched under `systemd-run --user`, and
 # XDG_RUNTIME_DIR points at the sandbox here, so there is no user bus to place the scope on and the
@@ -101,6 +102,8 @@ shot card-tab 900x64+0+0
 k ctrl+w; sleep 2                        # back to the pane that is asking
 t '1'; k Return; sleep 3
 shot second
-t '1,2'; k Return; sleep 6
+t '1,2'; k Return; sleep 3
+shot open                                # the third question has no options: it is open
+t 'Say it moves to parseDocument() in 2.0.'; k Return; sleep 6
 shot answered
 echo "shots in $out"

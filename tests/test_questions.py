@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""`ask_user`: validation, the blocking round trip, skipping, the cap and Stop.
+"""`ask_user`: validation, open and multiple-choice questions, the round trip, skipping, Stop.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.
 Card: issues/features/2026-09-19-the-planner-asks-the-user-questions.md (#MQ9C).
@@ -17,6 +17,10 @@ from relay_core.questions import MAX_ASKS_PER_TURN, Questions
 from relay_core.subagents import RestrictedExecutor
 from relay_core.tools import ToolExecutor
 
+
+OPEN = {"questions": [{
+    "header": "Wording",
+    "question": "What should the error message say when the file is missing?"}]}
 
 ASK = {"questions": [{
     "header": "Scope",
@@ -73,10 +77,22 @@ class ValidationTests(QuestionsTestCase):
         self.assertIn("ASK THE USER", preview)
         self.assertIn("How far should the rename go?", preview)
 
+    def test_a_question_with_no_options_is_open(self):
+        # Owner, 2026-09-19: "dont force multiple choice -- allow open-ended questions".
+        payload, preview = self.questions.prepare(OPEN)
+        question = payload["questions"][0]
+        self.assertEqual(question["options"], [])
+        self.assertFalse(question["multiple"])
+        self.assertIn("(open)", preview)
+
     def test_one_option_is_not_a_question(self):
         args = {"questions": [{**ASK["questions"][0], "options": ASK["questions"][0]["options"][:1]}]}
         with self.assertRaises(ValueError):
             self.questions.prepare(args)
+
+    def test_multiple_needs_something_to_choose_between(self):
+        with self.assertRaisesRegex(ValueError, "options to choose between"):
+            self.questions.prepare({"questions": [{**OPEN["questions"][0], "multiple": True}]})
 
     def test_a_catch_all_option_is_refused_because_the_pane_offers_one(self):
         args = {"questions": [{**ASK["questions"][0],
@@ -119,6 +135,12 @@ class RoundTripTests(QuestionsTestCase):
     def test_several_chosen_answers_come_back_as_one_line(self):
         self.wire(lambda event: {"answers": [["This file only", "The whole package"]]})
         self.assertEqual(self.ask()["answers"][0]["answer"], "This file only, The whole package")
+
+    def test_an_open_question_comes_back_as_the_words_they_typed(self):
+        self.wire(lambda event: {"answers": [["Say which file, and what to do about it."]]})
+        result = self.ask(OPEN)
+        self.assertEqual(result["answers"][0]["answer"], "Say which file, and what to do about it.")
+        self.assertEqual(self.questions._pending, {})
 
     def test_the_users_own_words_are_the_answer(self):
         self.wire(lambda event: {"answers": [["neither: delete the function"]]})
@@ -176,9 +198,9 @@ class ToolListTests(unittest.TestCase):
     def names(self, executor):
         return [tool["function"]["name"] for tool in executor.tools()]
 
-    def test_build_mode_carries_no_question_tool(self):
-        # A tool spec costs its tokens on every turn; the card is plan mode's.
-        self.assertNotIn("ask_user", self.names(self.executor()))
+    def test_the_pane_agent_can_ask_in_either_mode(self):
+        # Owner, 2026-09-19: "let the non-plan agent use the questions as well (like warp / claude)".
+        self.assertIn("ask_user", self.names(self.executor()))
 
     def test_a_subagent_cannot_reach_the_user(self):
         subagent = RestrictedExecutor("/tmp", lambda event: None, threading.Event(), None,
@@ -192,17 +214,15 @@ class ToolListTests(unittest.TestCase):
         self.assertIn("ask_user", PLAN_MODE_NOTE)
         self.assertLess(PLAN_MODE_NOTE.index("ask_user"), PLAN_MODE_NOTE.index("write_plan"))
 
-    def test_the_planner_is_handed_the_tool_and_a_builder_is_not(self):
+    def test_both_modes_hand_the_agent_the_tool(self):
         with tempfile.TemporaryDirectory() as root:
             agent = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(Path(root)),
                           lambda event: None, provider=object())
-            self.assertNotIn("ask_user", [t["function"]["name"] for t in agent.tools()])
-            with self.assertRaisesRegex(ValueError, "only available in plan mode"):
-                agent._prepare("ask_user", ASK)
-            agent.set_mode("plan")
-            self.assertIn("ask_user", [t["function"]["name"] for t in agent.tools()])
-            prepared = agent._prepare("ask_user", ASK)
-            self.assertEqual(prepared.name, "ask_user")
+            for mode in ("build", "plan"):
+                agent.set_mode(mode)
+                self.assertIn("ask_user", [t["function"]["name"] for t in agent.tools()], mode)
+                self.assertEqual(agent._prepare("ask_user", ASK).name, "ask_user", mode)
+                self.assertEqual(agent._prepare("ask_user", OPEN).name, "ask_user", mode)
 
 
 if __name__ == "__main__":

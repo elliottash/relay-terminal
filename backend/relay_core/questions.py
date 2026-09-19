@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""`ask_user`: the agent asks the user a numbered multiple-choice question and waits for the answer.
+"""`ask_user`: the agent asks the user a question and waits for the answer.
 
 Card #MQ9C. Plan mode had no way to reach the user between "investigate" and `write_plan`, so a
 planner that was unsure guessed. Every other harness asks during planning (the card quotes
@@ -19,10 +19,16 @@ What it does *not* share with `type_into_program`:
   A skipped question comes back as `Unanswered`, and the model is told to carry on with its own
   judgment rather than ask the same thing again.
 
-It is plan mode's tool. A spec costs its tokens on every turn of every pane, and it is the
-planner that must not guess; a build turn that needs the user still ends on a question, which the
-pane already reads as "needs you". A subagent never gets it either: it cannot see the pane and the
-user has no idea it exists (`subagents.RestrictedExecutor`).
+A question may be a **multiple choice** or **open** — `options` is optional (owner, 2026-09-19:
+"dont force multiple choice -- allow open-ended questions"). Options are for a decision with known
+branches, where naming them is a kindness and a number is the whole answer; an open question is for
+the ones a list would falsify ("what should the error message say?"). A model that invents two
+options to satisfy a schema asks a worse question than one that just asks.
+
+Both modes carry it (owner, 2026-09-19: "let the non-plan agent use the questions as well (like
+warp / claude)"), which is what opencode does for its `build` and `plan` agents and what Warp does
+with a per-profile permission. A subagent never gets it: it cannot see the pane and the user has no
+idea it exists (`subagents.RestrictedExecutor`).
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.
 """
@@ -44,6 +50,7 @@ MAX_DESCRIPTION = 200
 MAX_ASKS_PER_TURN = 6      # stops a loop from interviewing the user
 CUSTOM_LABEL = "Type your own answer"
 UNANSWERED = "Unanswered"
+SKIP_WORD = "/skip"        # what the pane types to leave a question unanswered
 
 _CALL_IDS = itertools.count(1)
 
@@ -52,11 +59,14 @@ SPEC = {
     "function": {
         "name": "ask_user",
         "description": (
-            "Ask the user multiple-choice questions and wait for the answer. For what the code "
-            "cannot tell you: which direction they want, how far a change goes, a trade-off worth "
-            "their opinion. Ask before you write the plan, not after. Do not ask permission to use "
-            "a tool, and do not ask whether your plan is good — write it and let them edit it. The "
-            "turn stops until they answer: ask everything in one call."),
+            "Ask the user a question and wait for the answer. For what the code cannot tell you: "
+            "which direction they want, how far a change goes, a trade-off worth their opinion, "
+            "wording only they can choose. Give `options` when the decision really has a few known "
+            "branches — then a number is the whole answer — and leave them out for an open "
+            "question rather than inventing choices to fill the field. In plan mode ask before you "
+            "write the plan. Do not ask permission to use a tool, and do not ask whether your plan "
+            "is good — write it and let them edit it. The turn stops until they answer: ask "
+            "everything in one call."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -72,7 +82,8 @@ SPEC = {
                             "question": {"type": "string", "description": "The question, in one sentence."},
                             "options": {
                                 "type": "array",
-                                "description": f"{MIN_OPTIONS}-{MAX_OPTIONS} answers. No \"Other\" or "
+                                "description": f"Optional: {MIN_OPTIONS}-{MAX_OPTIONS} answers to choose "
+                                               f"between. Omit for an open question. No \"Other\" or "
                                                f"catch-all option: \"{CUSTOM_LABEL}\" is always offered.",
                                 "items": {
                                     "type": "object",
@@ -88,7 +99,7 @@ SPEC = {
                             },
                             "multiple": {"type": "boolean", "description": "Let them pick more than one."},
                         },
-                        "required": ["header", "question", "options"],
+                        "required": ["header", "question"],
                         "additionalProperties": False,
                     },
                 },
@@ -122,12 +133,19 @@ def validate(args) -> list[dict]:
     for index, item in enumerate(items, 1):
         if not isinstance(item, dict) or set(item) - {"header", "question", "options", "multiple"}:
             raise ValueError(f"Question {index} has an unknown field.")
-        options = item.get("options")
-        if not isinstance(options, list) or not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
-            raise ValueError(f"Question {index} must offer {MIN_OPTIONS} to {MAX_OPTIONS} options.")
+        # No options is an open question: the user types the answer. One option is neither, and is
+        # the shape a model reaches for when it means "is this all right?" — which is not a question.
+        options = item.get("options", [])
+        if options is None:
+            options = []
+        if not isinstance(options, list) or (options and not MIN_OPTIONS <= len(options) <= MAX_OPTIONS):
+            raise ValueError(f"Question {index}: give {MIN_OPTIONS} to {MAX_OPTIONS} options, or none "
+                             "at all for an open question.")
         multiple = item.get("multiple", False)
         if type(multiple) is not bool:
             raise ValueError(f"Question {index}: multiple must be true or false.")
+        if multiple and not options:
+            raise ValueError(f"Question {index}: multiple needs options to choose between.")
         built, labels, recommended = [], set(), False
         for option in options:
             if not isinstance(option, dict) or set(option) - {"label", "description", "recommended"}:
@@ -162,6 +180,8 @@ def preview(questions: list[dict]) -> str:
     for question in questions:
         lines.append(f"{question['header']}: {question['question']}")
         lines += [f"  · {option['label']}" for option in question["options"]]
+        if not question["options"]:
+            lines.append("  · (open)")
     return "ASK THE USER\n\n" + "\n".join(lines)
 
 

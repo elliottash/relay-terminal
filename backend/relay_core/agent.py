@@ -538,13 +538,7 @@ class Agent:
             extra = extra + self.board.tool_specs()
         if self.mode == "plan":
             # Subagents may write files, so plan mode does not offer them either.
-            # ask_user is plan mode's (#MQ9C): it is the planner that must not guess, and a tool
-            # spec costs its tokens on every turn of every pane, so build mode does not carry one
-            # it was never told to use. A build turn that needs the user still ends on a question,
-            # which the pane already reads as "needs you".
-            asking = [self.executor.questions.tool_spec()] if self.executor.can_ask else []
-            return ([t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS]
-                    + [WRITE_PLAN_SPEC] + asking + extra)
+            return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
         if self.subagents is not None:
             tools = tools + self.subagents.tool_specs()
         return tools + extra
@@ -1735,9 +1729,6 @@ class Agent:
             items = args.get("items") if isinstance(args.get("items"), list) else []
             lines = [f"[{i.get('status')}] {str(i.get('text'))[:80]}" for i in items[:20] if isinstance(i, dict)]
             return Prepared(name, args, "UPDATE TODOS\n\n" + ("\n".join(lines) or "(empty list)"))
-        if name == "ask_user" and self.mode != "plan":
-            raise ValueError("ask_user is only available in plan mode. Say what you need in your reply "
-                             "and end on the question; the pane shows that as needing the user.")
         if name == "write_plan":
             if self.mode != "plan":
                 raise ValueError("write_plan is only available in plan mode.")

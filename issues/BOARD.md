@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-193 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+195 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (114)
+## Features (116)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -21,7 +21,7 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
-| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | ready |  |  | [3](threads/G9VE.md) |
+| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | ready |  |  | [10](threads/G9VE.md) |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 |  |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
@@ -107,6 +107,7 @@
 | `#XM0T` | [Terminal and agent status icons, with notifications](features/needs_qa_llm/2026-09-18-terminal-and-agent-status-icons-with-notificatio.md) | needs-qa-llm | agent |  | [1](threads/XM0T.md) |
 | `#T7BQ` | [Section checkboxes at the top of the board, and room for "Clean up"](features/needs_qa_llm/2026-09-18-section-checkboxes-at-the-top-of-the-board.md) | needs-qa-llm | agent |  |  |
 | `#XS6Q` | [Replace "Ask the agent" on a card with Plan, Edit and Discuss](features/needs_qa_llm/2026-09-18-replace-ask-the-agent-on-a-card-with-plan-edit-a.md) | needs-qa-llm | agent |  | [2](threads/XS6Q.md) |
+| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/needs_qa_llm/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | needs-qa-llm |  | 5/5 | [10](threads/G9VE.md) |
 | `#Y63Z` | [A conversation info button on the pane, with a traceable history including subagent threads](features/needs_qa_llm/2026-09-18-a-conversation-info-button-on-the-pane-with-a-tr.md) | needs-qa-llm | agent |  | [1](threads/Y63Z.md) |
 | `#R6J0` | [Turn the resume-conversations modal into a session manager pane](features/needs_qa_llm/2026-09-18-turn-the-resume-conversations-modal-into-a-sessi.md) | needs-qa-llm | agent |  | [1](threads/R6J0.md) |
 | `#SPBN` | [Distinct headers or colors for each pane type](features/needs_qa_llm/2026-09-18-distinct-headers-or-colors-for-each-pane-type.md) | needs-qa-llm | agent |  | [1](threads/SPBN.md) |
@@ -119,6 +120,7 @@
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
 | `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
 | `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |
+| `#D03W` | [Per-pane CPU and memory meters in the header, tab and session manager](features/needs_qa_llm/2026-09-19-per-pane-cpu-and-memory-meters-in-the-header-tab.md) | needs-qa-llm |  |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
