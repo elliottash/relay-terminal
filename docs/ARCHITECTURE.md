@@ -1451,9 +1451,10 @@ in every pane of every window. Only an explicit project action attaches: opening
 `/card`, picking a card with `#`, Execute-from-card. `RelayWindow::attachTab()` is the one funnel —
 the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
 the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
-worker **without ending its conversation**. An attached tab wears a **chip** with its project's name
-at the left of its label (`RelayWindow::syncTabProjectChip`, in the tab's left box); one click detaches, and "Detach this tab from <project>" stays in the palette as the
-keyboard path — either closes nothing. An unattached tab shows nothing at all. In a tab with no
+worker **without ending its conversation**. Nothing on the tab header names the attachment (the
+attached-project chip went with the theme swatch and the ⧉ button; owner, 2026-09-19); "Detach
+this tab from <project>" in the palette is the one way to detach, and it closes nothing — an open
+Switchboard stays open. An unattached tab shows nothing at all. In a tab with no
 project whose pane stands in no candidate (`~/Downloads`), Ctrl+Shift+S, `/card` and the palette's
 "Attach this tab to a project…" open the **project picker** instead (`src/ProjectPicker.{h,cpp}`,
 library `relay-projectpicker`, hosted like the ⓘ view with `paneType` `projects`; card #916B): the

@@ -1,0 +1,7 @@
+tesseract (psm 7) on the tab row of the owner's live window (pre-change build), first tab:
+  U relay-terminal » relay-terminal - 6 - cpu 14% - mem 2%
+  (the first 'relay-terminal' is the chip pill; the second is the tab label)
+
+tesseract (psm 7) on the tab row of this build, restored attached tab:
+  © relay-terminal - 2 - cpu00%-memo... x +
+  (one name only: the label; no chip)

@@ -4337,100 +4337,9 @@ public:
         const QString was = m_tabProject.take(page);
         repointTabPanes(page);
         m_manager->scheduleSave();
-        updateTitles();   // the chip goes with the attachment
+        updateTitles();   // the tab label follows the attachment (it names the project)
         statusBar()->showMessage(QStringLiteral("This tab is no longer attached to %1.")
                                      .arg(relay::projects::nameFor(was)), 9000);
-    }
-
-    // ----- the chip on an attached tab (#916B) ------------------------------------------------
-    // An attached tab wears its project's name at the left of its label, and one click on it
-    // detaches. An unattached tab shows nothing at all: there is no "not attached" state to
-    // advertise, because unattached is the ordinary state. It lives in the tab's left box
-    // (tabLeftBox), so it moves with the tab and goes with it.
-    //
-    // The left box itself: one per tab, made for the project chip when a tab has one. A QTabBar
-    // side slot holds one widget, and the chip is what this tab puts there.
-    //
-    // The caller goes from here straight to `box->layout()`, so what this returns must have one.
-    // The slot cannot simply be trusted to hold ours: QTabBar owns a side widget and deleteLater()s
-    // it when its tab is removed, and `tabButton()` hands back whatever raw pointer it holds — so a
-    // box on its way out, or any widget this window did not put there, would arrive as a null
-    // layout() and the `->addWidget()` after it would run on a null `this`. That is the crash a
-    // sibling session caught under gdb on 2026-09-19 (QLayout::parentWidget() ← QLayout::addWidget
-    // ← syncTabProjectChip ← updateTitles): what the frames show is the dereference, not what
-    // emptied the slot, so this makes the dereference safe whatever did. m_tabLeftBoxes answers
-    // "is that pointer still one of mine" without touching it — a QPointer to a destroyed widget
-    // is null, and a stale pointer from the bar matches nothing.
-    QWidget *tabLeftBox(int index) {
-        QTabBar *bar = m_tabs->tabBar();
-        QWidget *existing = bar->tabButton(index, QTabBar::LeftSide);
-        if (existing && isLiveTabLeftBox(existing) && existing->layout()) return existing;
-        auto *box = new QWidget(bar);
-        box->setObjectName(QStringLiteral("tabLeftBox"));
-        auto *row = new QHBoxLayout(box);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(2);
-        m_tabLeftBoxes.append(QPointer<QWidget>(box));
-        bar->setTabButton(index, QTabBar::LeftSide, box);
-        return box;
-    }
-    // Our own boxes, as guards. Sweeping the dead ones here keeps the list the length of the tab
-    // bar rather than of the session.
-    bool isLiveTabLeftBox(const QWidget *candidate) {
-        bool live = false;
-        for (auto it = m_tabLeftBoxes.begin(); it != m_tabLeftBoxes.end();) {
-            if (it->isNull()) { it = m_tabLeftBoxes.erase(it); continue; }
-            if (it->data() == candidate) live = true;
-            ++it;
-        }
-        return live;
-    }
-    QList<QPointer<QWidget>> m_tabLeftBoxes;   // declared here, beside its only two users
-    // A child came or went: the tab's width is cached from the box's size hint, and the one way
-    // to have QTabBar read it again is to set the slot afresh. The bar moves a side widget but
-    // never resizes it, so the box takes its own hint here — after the children's visibility is
-    // settled, since a layout's hint leaves hidden widgets out.
-    void relayoutTabLeftBox(int index) {
-        QTabBar *bar = m_tabs->tabBar();
-        QWidget *box = bar->tabButton(index, QTabBar::LeftSide);
-        if (!box) return;
-        box->adjustSize();
-        bar->setTabButton(index, QTabBar::LeftSide, nullptr);
-        bar->setTabButton(index, QTabBar::LeftSide, box);
-    }
-
-    void syncTabProjectChip(int index, QWidget *page) {
-        const QString project = tabProject(page);
-        QWidget *box = tabLeftBox(index);
-        auto *chip = box->findChild<QToolButton *>(QStringLiteral("tabProjectChip"), Qt::FindDirectChildrenOnly);
-        if (project.isEmpty()) {
-            if (chip) { chip->hide(); chip->setParent(nullptr); chip->deleteLater(); relayoutTabLeftBox(index); }
-            return;
-        }
-        if (chip && chip->property("project").toString() == project) return;
-        if (chip) { chip->hide(); chip->setParent(nullptr); chip->deleteLater(); }
-        chip = new QToolButton(box);
-        chip->setObjectName(QStringLiteral("tabProjectChip"));
-        chip->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        chip->setAutoRaise(true);
-        chip->setFocusPolicy(Qt::NoFocus);
-        chip->setCursor(Qt::PointingHandCursor);
-        chip->setText(relay::projects::nameFor(project));
-        chip->setProperty("project", project);
-        chip->setToolTip(QStringLiteral("This tab is attached to %1 · click to detach it (its panes lose the card tools; "
-                                        "an open Switchboard stays open)").arg(project));
-        QPointer<QWidget> pageGuard(page);
-        connect(chip, &QToolButton::clicked, this, [this, pageGuard] {
-            if (!pageGuard) return;
-            detachTab(pageGuard);
-            // The mouse is the slow path; the palette has the same action for the keyboard.
-            hint(QStringLiteral("project.detach.chip"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")),
-                                                QStringLiteral("then “Detach this tab”")));
-        });
-        box->layout()->addWidget(chip);
-        chip->show();                     // a child added to a shown box is otherwise shown a turn later
-        relayoutTabLeftBox(index);
     }
 
     // The project this tab is attached to, or an empty string. The one reader.
@@ -5485,7 +5394,6 @@ private:
             const QStringList titles = paneTitlesIn(page);
             m_tabs->setTabText(i, tabLabelText(page, titles));
             m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
-            syncTabProjectChip(i, page);
         }
         syncChrome();
         // Which tool panes this tab holds decides which title-bar buttons are lit, and this runs
