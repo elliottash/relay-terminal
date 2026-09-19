@@ -12,7 +12,7 @@ rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
 source: 'owner, 2026-09-18: "you also still cant pick the main model options" and "i think advanced options should be separate from the providers. i might want to pick kimi k3 for main agents and glm 5.3 flash for subagents, for example."'
-links: {plans: [], commits: [], evidence: [2026-09-18-reasoning-levels-and-model-roles], related: [EFRT], github: null}
+links: {plans: [], commits: [6d98590], evidence: ['docs/qa_evidence/2026-09-18-reasoning-levels-and-model-roles/'], related: [EFRT], github: null}
 ---
 # Model roles: the Main row has its own controls, and a job can name its own provider
 

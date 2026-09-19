@@ -12,7 +12,7 @@ rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
 source: 'owner, 2026-09-18: "i noticed an inconsistency where, in the models options page, there was low, medium, high, max reasoning. but in the model roles, there were only 3 options"'
-links: {plans: [], commits: [], evidence: [2026-09-18-reasoning-levels-and-model-roles], related: [RLMN], github: null}
+links: {plans: [], commits: [b63f8d2], evidence: ['docs/qa_evidence/2026-09-18-reasoning-levels-and-model-roles/'], related: [RLMN], github: null}
 ---
 # Every reasoning-effort picker offers the same levels, and never drops "high"
 

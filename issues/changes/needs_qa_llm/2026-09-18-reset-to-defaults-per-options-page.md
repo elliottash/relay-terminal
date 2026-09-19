@@ -12,7 +12,7 @@ rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
 source: 'owner, 2026-09-18: "also add a reset to defaults button on options pages"'
-links: {plans: [], commits: [], evidence: [2026-09-18-reset-to-defaults], related: [P2WD], github: null}
+links: {plans: [], commits: [a98bb81], evidence: ['docs/qa_evidence/2026-09-18-reset-to-defaults/'], related: [P2WD], github: null}
 ---
 # Every Options page can be put back to how Relay ships
 
