@@ -283,6 +283,9 @@ void RemoteShare::handle(const QJsonObject &message)
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.conversationNew)
             it->hooks.conversationNew(message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("invite_sent")) {
+        emit inviteSent(message.value(QStringLiteral("ok")).toBool(),
+                        message.value(QStringLiteral("message")).toString());
     } else if (kind == QLatin1String("conversation_open")) {
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.conversationOpen)
@@ -630,6 +633,15 @@ void RemoteShare::answerPrompt(const QString &promptId, bool approve)
     emit sharingModelChanged();
 }
 
+void RemoteShare::emailInvite(const QString &url, const QString &to, const QString &role,
+                              const QString &expiry, const QString &pane)
+{
+    // The owner's own name on the mail, from the desktop's name — a colleague should see who is
+    // sharing, not a machine id. Nothing about the link changes: this posts what is on screen.
+    send({{"t", "invite_email"}, {"url", url}, {"to", to}, {"role", role},
+          {"expiry", expiry}, {"pane", pane}, {"from_name", qEnvironmentVariable("RELAY_MAIL_NAME")}});
+}
+
 void RemoteShare::pauseShare(const QString &paneId, bool on)
 {
     send({{"t", "share_pause"}, {"pane", paneId}, {"on", on}});
@@ -849,7 +861,30 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
         QGuiApplication::clipboard()->setText(m_inviteLink);
         m_inviteCopy->setText(QStringLiteral("Copied"));
     });
-    linkColumn->addWidget(m_inviteCopy, 0, Qt::AlignLeft);
+    auto *sendRow = new QHBoxLayout;
+    sendRow->addWidget(m_inviteCopy, 0, Qt::AlignLeft);
+    // Email is the same act as copying: for a colleague who is not in the room, and who a chat
+    // window would not reach. The link is unchanged — one use over a public address, and they
+    // still have to knock.
+    m_inviteTo = new QLineEdit;
+    m_inviteTo->setPlaceholderText(QStringLiteral("or email it to…"));
+    m_inviteTo->setClearButtonEnabled(true);
+    m_inviteTo->hide();
+    sendRow->addWidget(m_inviteTo, 1);
+    m_inviteSend = new QPushButton(QStringLiteral("Send"));
+    m_inviteSend->setAutoDefault(false);
+    m_inviteSend->hide();
+    connect(m_inviteSend, &QPushButton::clicked, this, [this] {
+        const QString to = m_inviteTo->text().trimmed();
+        if (m_inviteLink.isEmpty() || to.isEmpty()) return;
+        m_inviteSend->setEnabled(false);
+        m_inviteNote->setText(QStringLiteral("Sending to %1…").arg(to));
+        RemoteShare::instance().emailInvite(m_inviteLink, to, m_inviteRoleValue,
+                                            m_inviteExpiryText, windowTitle());
+    });
+    connect(m_inviteTo, &QLineEdit::returnPressed, m_inviteSend, &QPushButton::click);
+    sendRow->addWidget(m_inviteSend);
+    linkColumn->addLayout(sendRow);
     linkColumn->addStretch(1);
     linkRow->addLayout(linkColumn, 1);
     column->addLayout(linkRow);
@@ -895,6 +930,12 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     connect(&share, &RemoteShare::devicesChanged, this, &RemoteShareDialog::showDevices);
     connect(&share, &RemoteShare::addressesChanged, this, &RemoteShareDialog::showAddresses);
     connect(&share, &RemoteShare::inviteReady, this, &RemoteShareDialog::showInvite);
+    connect(&share, &RemoteShare::inviteSent, this, [this](bool ok, const QString &message) {
+        m_inviteNote->setText(message);
+        m_inviteSend->setEnabled(true);
+        if (ok) m_inviteTo->clear();   // one link, one person: the next one needs a new link
+        fit();
+    });
     showAddresses(share.addresses());
     connect(&share, &RemoteShare::failed, this, [this](const QString &message) {
         m_status->setText(message);
@@ -1004,6 +1045,12 @@ void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const
     m_inviteUrl->show();
     m_inviteCopy->setText(QStringLiteral("Copy link"));
     m_inviteCopy->show();
+    m_inviteRoleValue = role;
+    m_inviteExpiryText = QStringLiteral("expires in %1").arg(sharing::expiryText(expires));
+    m_inviteTo->clear();
+    m_inviteTo->show();
+    m_inviteSend->setEnabled(true);
+    m_inviteSend->show();
     // In the invite section, not in the status line at the top: that line is about the pairing QR
     // still on screen above, and two different things were claiming it.
     m_inviteNote->setText(QStringLiteral("Send this to the person you want on this pane. It lets in "

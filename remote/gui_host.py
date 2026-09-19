@@ -29,6 +29,8 @@ the GUI never links a crypto library and this process never touches a widget.
   GUI → here, multiplayer (section 10.5). Desktop only: every one of these names is in
   wire.OWNER_ONLY, so the same message over the wire from any device is refused.
     {"t":"invite_create","pane":"p1","role":"viewer","expires":86400,"uses":1}  → `invite`
+    {"t":"invite_email","url":"<the link just minted>","to":"alice@example.com","role":"viewer",
+     "expiry":"expires in 24 hours","pane":"relay-terminal","from_name":"Elliott"}  → `invite_sent`
     {"t":"invite_revoke","id":"<invite id>"}
     {"t":"knock_answer","participant":"<id>","admit":true,"role":"viewer"}   the dialog's answer
     {"t":"role_set","participant":"<id>","role":"editor"}
@@ -102,8 +104,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
-    cloudflare as cloudflare_mod, panes as panes_mod, tailnet as tailnet_mod, \
-    terminal as terminal_mod, wire
+    cloudflare as cloudflare_mod, email as email_mod, panes as panes_mod, \
+    tailnet as tailnet_mod, terminal as terminal_mod, wire
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -536,6 +538,8 @@ class Sidecar:
         # the owner's own phone included — is refused `not_permitted` before it is dispatched.
         elif kind == "invite_create":
             await self.invite_create(message)
+        elif kind == "invite_email":
+            await self.invite_email(message)
         elif kind == "invite_revoke":
             if self.host is not None and self.host.invite_revoke(str(message.get("id", ""))):
                 self.report_participants()
@@ -846,6 +850,27 @@ class Sidecar:
         if self.served_by_cloudflare:
             reply["note"] = "Over a public link, one link admits one person."
         self.emit(reply)
+
+    async def invite_email(self, message: dict) -> None:
+        """``invite_email {url, to, role, expires, pane, from_name}`` → ``invite_sent {ok, message}``.
+
+        The link is the one the dialog is already showing: this posts it, it does not mint it, so
+        an email cannot quietly create a second way in. Desktop only, like every other invite name.
+        """
+        url = str(message.get("url") or "")
+        to = str(message.get("to") or "")
+        if not url:
+            self.emit({"t": "invite_sent", "ok": False, "message": "Make a link first."})
+            return
+        role = str(message.get("role") or wire.VIEWER)
+        role_sentence = ("They will be able to type in it." if role == wire.EDITOR
+                         else "They will be able to watch it, not type in it.")
+        expiry = str(message.get("expiry") or "expires")
+        # SES is a network call: off the event loop, so a slow send cannot hold the dialog.
+        ok, said = await asyncio.to_thread(
+            email_mod.send, to, url, role_sentence=role_sentence, expiry=expiry,
+            pane=str(message.get("pane") or ""), sender_name=str(message.get("from_name") or ""))
+        self.emit({"t": "invite_sent", "ok": ok, "message": said})
 
     async def knock(self, request: host_mod.KnockRequest) -> tuple[bool, str]:
         """``knock {participant, name, platform, code, role, pane}`` → ``knock_answer``.
