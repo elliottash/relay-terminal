@@ -22,7 +22,7 @@
 //   * Boards that already live at `switchboard/board.yaml` or `issues/board.yaml` keep working
 //     exactly as they are; they are found by the same walk and used where they are. Nothing moves
 //     by itself: `boardFolders()` is the one precedence order, and the one action that renames a
-//     folder is the user's own "Hide this board's folder" (backend `board_folder`, protocol 19.15).
+//     folder is the user's own "Hide this board's folder" (backend `board_folder`, protocol 19.17).
 //   * The registry of known projects is removable: every record carries why it became known and
 //     when. A "no, do not make a Switchboard here" answer is remembered too (`decline()`), so the
 //     same project is not asked about twice; an explicit `/init` clears it.

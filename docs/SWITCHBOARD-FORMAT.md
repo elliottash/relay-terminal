@@ -4,12 +4,24 @@ The Switchboard **is** a folder in the project: plain Markdown in git that works
 GitHub and in any editor. This is the normative reference for the bytes; the product design is in
 [`SWITCHBOARD-DESIGN.md`](SWITCHBOARD-DESIGN.md) and [`TASKS-AND-MEMORY-DESIGN.md`](TASKS-AND-MEMORY-DESIGN.md).
 
-**The folder is `switchboard/`** on a board created from 2026-09-18 on, and `issues/` on one that
-existed before that — including this repository's own, which stays `issues/` and is never
-converted. Both names are in `board.BOARD_FOLDERS`, newest first, and every lookup walks that one
-list in that one order, so `switchboard/board.yaml` wins in a project that somehow has both. The
-trees below are written with `issues/` because that is the one in this repository; read the first
-path element as *the board folder*, whichever of the two a project has.
+**The folder is `.switchboard/`** on a board created from 2026-09-19 on — hidden, so the cards do
+not clutter the project's root listing — `switchboard/` on one created between 2026-09-18 and
+then, and `issues/` on one that existed before either, including this repository's own, which
+stays `issues/` and is never converted. All three names are in `board.BOARD_FOLDERS`
+(`relay::projects::boardFolders()` on the GUI side), newest first, and every lookup walks that one
+list in that one order, so `.switchboard/board.yaml` wins in a project that somehow has more than
+one. Nothing moves a board that already exists — the only thing that renames one is the explicit
+"Hide this board's folder" / "Show this board's folder" action (protocol 19.17). The trees below
+are written with `issues/` because that is the one in this repository; read the first path element
+as *the board folder*, whichever of the three a project has.
+
+**A hidden folder is invisible to a plain `grep`/`rg` over the project**, which is the point — an
+agent working the codebase should not turn up a card on every unrelated search — but it also means
+an agent reaching for the cards with a bare `rg` finds nothing and may conclude there is no board.
+Ripgrep and similar tools skip dotted directories by default; an agent that wants the cards should
+use the board tools (`board_read`, `board_card_get`, …), read the generated `BOARD.md` index, or
+pass `--hidden` (`rg --hidden` / `grep -r` without ripgrep's default) to see into `.switchboard/`
+the way it already sees into `switchboard/` or `issues/`.
 
 Implementation: `backend/relay_core/board.py` (parsing, ids, ranks, task markers, thread appends,
 atomic hash-checked writes, the check rules) and `scripts/relay-board.py` (`check`, `index`,
