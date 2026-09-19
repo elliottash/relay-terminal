@@ -2583,9 +2583,19 @@ private:
 public:
 
     // Settings changed in Actions › Agent options.
+    // Options › Security: whether a program may write the system clipboard (OSC 52, card #3KB7).
+    // Applied when the backend is built and again whenever the setting changes.
+    void applyClipboardPolicy() {
+        if (!m_backend || !terminalCan(relay::TerminalBackend::ClipboardWrite)) return;
+        m_backend->setClipboardWriteAllowed(
+            QSettings().value(QStringLiteral("security/clipboard_write"), false).toBool());
+    }
+
     void agentOptionsChanged(const QString &key) {
         // Voice settings are the GUI's own: the recorder, the chip and its tooltip, never the agent.
         if (key.startsWith(QStringLiteral("voice/"))) { updateVoiceChip(); return; }
+        // The clipboard switch is the terminal's, not the worker's: it never leaves the GUI.
+        if (key == QStringLiteral("security/clipboard_write")) { applyClipboardPolicy(); return; }
         if (key == QStringLiteral("agent/max_auto_turns")) {
             if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
             return;
@@ -7852,6 +7862,11 @@ private:
         // OSC 8 URI under this prefix is an anchor the view owns, and a click on one that has no
         // content yet comes back here for it. A backend without the capability ignores both, and
         // the lines are anchored to relay://open-call instead (callAnchor).
+        // OSC 52 (Options › Security, card #3KB7): a program — or a command the agent runs — may
+        // put text on the system clipboard. Off unless the user turned it on, because output is
+        // untrusted and would otherwise be able to replace what they are about to paste. Reads are
+        // never answered and have no setting.
+        applyClipboardPolicy();
         if (terminalCan(relay::TerminalBackend::Folds)) {
             m_backend->setFoldPrefix(QString(relay::calllines::kFoldPrefix));
             m_backend->onFoldRequested = [this](const QString &uri) { foldRequested(uri); };

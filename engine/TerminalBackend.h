@@ -163,7 +163,17 @@ public:
         LinkWalk = 1 << 11,        // stepLink(): keyboard walk over the links in the output
         LineDiscipline = 1 << 12,  // termiosFlags(): ICANON/ECHO of the terminal, cheaply
         Folds = 1 << 13,           // setFoldContent(): tool-call detail unfolded inside the grid
+        ClipboardWrite = 1 << 14,  // setClipboardWriteAllowed(): OSC 52 writes, off unless the host says
     };
+
+    // ---- clipboard (OSC 52); needs the ClipboardWrite capability
+    //
+    // A program — including a command the agent runs — asking the terminal to put text on the
+    // system clipboard. Off unless the host turns it on (Options › Security, card #3KB7),
+    // because output is untrusted: anything that reaches the screen could otherwise replace
+    // what the user is about to paste. Reads (OSC 52 with "?") are never answered at all and
+    // have no switch: a program must not be able to read the user's clipboard.
+    virtual void setClipboardWriteAllowed(bool allowed) { Q_UNUSED(allowed); }
 
     // ICANON/ECHO of the terminal the shell is reading. Together with
     // foregroundProcessId() this is everything the host needs to know whether the

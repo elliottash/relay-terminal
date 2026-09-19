@@ -84,6 +84,7 @@ public:
     void setFoldExpanded(const QString &uri, bool expanded) override;
     bool foldExpanded(const QString &uri) const override;
     void removeFold(const QString &uri) override;
+    void setClipboardWriteAllowed(bool allowed) override;
     void clearFolds() override;
     QStringList expandedFolds() const override;
     bool toggleFold(const QString &uri) override;

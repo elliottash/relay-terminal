@@ -2134,6 +2134,12 @@ private:
                                  QStringLiteral("\\.vault$ credentials"),
                                  QStringLiteral("\\s+"),
                                  QStringLiteral("secret redact pattern regex"));
+        security.rows << toggleRow(QStringLiteral("security/clipboard_write"),
+                                   QStringLiteral("Let the terminal put text on your clipboard"),
+                                   QStringLiteral("OSC 52, off by default. Lets a command — including one the agent "
+                                                  "runs — copy for you, and lets anything else that reaches the "
+                                                  "screen replace what you are about to paste. Reading your "
+                                                  "clipboard is never allowed and has no switch."), false);
         sections << security;
 
 

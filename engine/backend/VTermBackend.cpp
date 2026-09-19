@@ -138,7 +138,13 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline | Folds;
+        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline | Folds | ClipboardWrite;
+}
+
+void VTermBackend::setClipboardWriteAllowed(bool allowed)
+{
+    if (m_view)
+        m_view->setClipboardWriteAllowed(allowed);
 }
 
 // ---- folds (#TK9C): straight through to the view, which owns the layer.
