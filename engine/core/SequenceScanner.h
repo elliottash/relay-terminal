@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Incremental scanner for the few sequences a core processes internally but
-// Relay needs as ordered events: OSC 133 prompt marks and alternate-screen
-// switches (CSI ? 47/1047/1049 h/l). Cores without such callbacks
-// (libghostty-vt) split feed() at the end of each hit and then query their
-// state, so events arrive in stream order with the right cursor position, even
-// when a program enters and leaves the alternate screen within one read.
+// Relay needs as ordered events: OSC 133 prompt marks, Relay's own OSC 7772 row
+// roles and alternate-screen switches (CSI ? 47/1047/1049 h/l). Cores without
+// such callbacks (libghostty-vt) split feed() at the end of each hit and then
+// query their state, so events arrive in stream order with the right cursor
+// position, even when a program enters and leaves the alternate screen within
+// one read.
 //
 // Fast path: memchr for ESC, so plain text costs almost nothing.
 #pragma once
+
+#include "CellTypes.h"
 
 #include <cstddef>
 #include <cstring>
@@ -18,10 +21,13 @@ namespace relay {
 class SequenceScanner {
 public:
     struct Hit {
-        enum Kind { PromptMark, AltScreen } kind = PromptMark;
+        enum Kind { PromptMark, RowRole, AltScreen } kind = PromptMark;
         size_t end = 0;    // offset just past the sequence within the chunk
         char mark = 0;     // PromptMark: 'A', 'B', 'C', 'D'
         int exitCode = -1; // PromptMark 'D'
+        // Qualified: Hit's own Kind enumerator is named PromptMark and shadows
+        // the type within this struct.
+        ::relay::PromptMark role {}; // RowRole: MarkUserShell / MarkUserAgent
     };
 
     // Scan data[from, len). Returns true for the first complete hit ending in
@@ -53,6 +59,10 @@ public:
                     m_buf.clear();
                     m_state = State::Osc133;
                     ++i;
+                } else if (c == ';' && m_buf == "7772") {
+                    m_buf.clear();
+                    m_state = State::Osc7772;
+                    ++i;
                 } else {
                     m_state = State::Ground; // other OSC: payload is skipped by the ESC search
                 }
@@ -75,6 +85,29 @@ public:
                 if (c == '\\') {
                     ++i;
                     if (finishOsc(hit, i))
+                        return true;
+                } else {
+                    m_state = State::Esc; // aborted; reinterpret this byte after ESC
+                }
+                break;
+            case State::Osc7772:
+                if (c == 0x07) {
+                    ++i;
+                    if (finishRowRole(hit, i))
+                        return true;
+                } else if (c == 0x1b) {
+                    m_state = State::Osc7772Esc;
+                    ++i;
+                } else {
+                    if (m_buf.size() < 16)
+                        m_buf.push_back(c);
+                    ++i;
+                }
+                break;
+            case State::Osc7772Esc:
+                if (c == '\\') {
+                    ++i;
+                    if (finishRowRole(hit, i))
                         return true;
                 } else {
                     m_state = State::Esc; // aborted; reinterpret this byte after ESC
@@ -108,7 +141,7 @@ public:
     void reset() { m_state = State::Ground; }
 
 private:
-    enum class State { Ground, Esc, OscNumber, Osc133, Osc133Esc, Csi };
+    enum class State { Ground, Esc, OscNumber, Osc133, Osc133Esc, Osc7772, Osc7772Esc, Csi };
 
     bool isAltScreenMode() const
     {
@@ -149,6 +182,24 @@ private:
             if (any)
                 hit->exitCode = code;
         }
+        return true;
+    }
+
+    // OSC 7772;shell / ;agent — Relay's row role (CellTypes.h). Anything else
+    // in the body marks nothing, exactly as in LibVtermCore's handler.
+    bool finishRowRole(Hit *hit, size_t end)
+    {
+        m_state = State::Ground;
+        if (m_buf == "shell")
+            hit->role = MarkUserShell;
+        else if (m_buf == "agent")
+            hit->role = MarkUserAgent;
+        else
+            return false;
+        hit->kind = Hit::RowRole;
+        hit->end = end;
+        hit->mark = 0;
+        hit->exitCode = -1;
         return true;
     }
 

@@ -2447,8 +2447,12 @@ runs again on `themeChanged()`. Nothing is rewritten: the same rows are repainte
 theme's colours, scrollback included. A shell command is echoed by the shell, not by Relay, so with
 shell integration on its row (OSC 133;A) sits on `promptBand`, a tint of the shell colour, since
 that row's ink is the shell's own PS1. Options › Terminal › "Band behind what you typed": channel,
-the theme's raised surface, or none (no band, the destination colour as the ink). GhosttyCore does
-not parse OSC 7772 yet — it is not built on this machine — so under it the line is bold and unbanded.
+the theme's raised surface, or none (no band, the destination colour as the ink). GhosttyCore
+parses OSC 7772 too, though libghostty-vt itself ignores it: the SequenceScanner (which already
+splits `feed()` for the OSC 133 events) hands the role to the adapter, which keeps every marked
+row as a tracked grid ref — the same mechanism the selection anchor uses — and ORs the bits into
+that row wherever the viewport or the paged history shows it, so the role scrolls, reflows and
+trims with the line under Ghostty exactly as `relay_marks` do under libvterm.
 
 **A tab owns its theme** (owner, 2026-09-19: "add an option, on by default, that themes are tab
 specific … the theme that you have in the options menu is the default for when relay opens and new

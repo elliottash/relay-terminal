@@ -1,0 +1,10 @@
+1/1 Test #45: relay-engine-tests ...............   Passed   20.77 sec
+100% tests passed, 0 tests failed out of 1
+
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::theRowRoleOscMarksItsLine(ghostty)
+PASS   : CoreTest::theRowRoleOscMarksItsLine(libvterm)
+PASS   : CoreTest::osc133PromptMarks(ghostty)
+PASS   : CoreTest::osc133PromptMarks(libvterm)
+PASS   : CoreTest::cleanupTestCase()
+Totals: 6 passed, 0 failed, 0 skipped, 0 blacklisted, 1ms

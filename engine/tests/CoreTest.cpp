@@ -218,6 +218,23 @@ private slots:
         QCOMPARE(int(f.lines[2].marks), int(MarkUserShell));
         QCOMPARE(int(f.lines[3].marks), 0);
         QCOMPARE(h.marks.size(), 0);   // a role is not a prompt mark: no promptMark event
+        // The role makes the trip to history and back: the paged history keeps
+        // it, and so does a viewport scrolled up onto the row (the libvterm
+        // fork widened relay_marks for this; GhosttyCore tracks the row by ref).
+        Harness s(core, 4, 20);
+        s.feed("\x1b]7772;agent\x1b\\* fix it\r\n");
+        for (int i = 0; i < 6; ++i)
+            s.feed("filler\r\n");
+        const int total = s.vt->historyRows();
+        QVERIFY(total >= 2);
+        std::vector<Line> hist;
+        s.vt->historyLines(0, total, &hist);
+        QCOMPARE(int(hist.size()), total);
+        QCOMPARE(int(hist[0].marks), int(MarkUserAgent));
+        QCOMPARE(int(hist[1].marks), 0);
+        s.vt->scrollViewportToTop();
+        const ViewportFrame up = s.frame();
+        QCOMPARE(int(up.lines[0].marks), int(MarkUserAgent));
     }
 
     void osc133PromptMarks()

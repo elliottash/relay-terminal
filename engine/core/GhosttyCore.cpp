@@ -17,6 +17,7 @@
 #include <ghostty/vt.h>
 
 #include <algorithm>
+#include <map>
 #include <unordered_map>
 
 namespace relay {
@@ -176,6 +177,20 @@ struct GhosttyCore::Impl {
     QString title;
     SequenceScanner scanner;
 
+    // Row roles (OSC 7772;shell/agent, CellTypes.h): libghostty-vt has no
+    // storage for them, so every marked row is held as a tracked grid ref —
+    // the same mechanism the selection anchor uses — with its bits. The ref
+    // follows the row through scrolling, reflow and scrollback trimming, which
+    // is what the libvterm fork's relay_marks get from living in the line.
+    struct RoleMark {
+        GhosttyTrackedGridRef ref = nullptr;
+        uint8_t bits = 0;
+        bool onAlt = false;
+    };
+    // Mutable only so the const historyLines() can prune dead refs; a prune
+    // touches no state the terminal observes.
+    mutable std::vector<RoleMark> roleMarks;
+
     std::unordered_map<std::string, uint32_t> linkIds;
     std::vector<QString> linkUris{QString()};
 
@@ -314,6 +329,67 @@ struct GhosttyCore::Impl {
         return ghostty_terminal_grid_ref(t, p, ref) == GHOSTTY_SUCCESS;
     }
 
+    // The cursor's row, tagged with a role the moment OSC 7772 goes through:
+    // libghostty-vt ignores the sequence, but the scanner split feed() at its
+    // end, so the cursor still sits on the row the role belongs to. SCREEN y
+    // counts the scrollback, the cursor's Y does not; never on the alternate
+    // screen, which a full-screen program owns (as with the selection anchor).
+    void trackRowRole(PromptMark role)
+    {
+        if (!role || alt)
+            return;
+        uint16_t x = 0, y = 0;
+        ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_CURSOR_X, &x);
+        ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
+        GhosttyPoint p;
+        p.tag = GHOSTTY_POINT_TAG_SCREEN;
+        p.value.coordinate.x = x;
+        p.value.coordinate.y = uint32_t(q->historyRows() + y);
+        GhosttyTrackedGridRef ref = nullptr;
+        ghostty_terminal_grid_ref_track(t, p, &ref);
+        if (ref)
+            roleMarks.push_back({ref, uint8_t(role), false});
+    }
+
+    void freeRoleMarks()
+    {
+        for (RoleMark &m : roleMarks)
+            ghostty_tracked_grid_ref_free(m.ref);
+        roleMarks.clear();
+    }
+
+    // Role bits by absolute row (SCREEN coordinates: 0 = oldest scrollback
+    // line, the space historyRows(), historyLines() and viewportTop() use).
+    // Refs whose row left the retained scrollback report no value and are
+    // dropped, so the vector only ever holds live marks; a ref from the other
+    // screen is skipped, not dropped — it becomes addressable again when that
+    // screen is back.
+    std::map<int, uint8_t> roleMarkMap() const
+    {
+        std::map<int, uint8_t> out;
+        for (size_t i = 0; i < roleMarks.size();) {
+            const RoleMark &m = roleMarks[i];
+            if (m.onAlt != alt) {
+                ++i;
+                continue;
+            }
+            GhosttyPointCoordinate at{0, 0};
+            if (ghostty_tracked_grid_ref_has_value(m.ref)
+                && ghostty_tracked_grid_ref_point(m.ref, GHOSTTY_POINT_TAG_SCREEN, &at) == GHOSTTY_SUCCESS) {
+                out[int(at.y)] |= m.bits;
+                ++i;
+                continue;
+            }
+            if (ghostty_tracked_grid_ref_has_value(m.ref)) {
+                ++i; // addressable, just not in SCREEN coordinates right now
+                continue;
+            }
+            ghostty_tracked_grid_ref_free(m.ref);
+            roleMarks.erase(roleMarks.begin() + long(i));
+        }
+        return out;
+    }
+
     QString formatSelection(const GhosttySelection *sel, bool unwrap) const
     {
         GhosttyTerminalSelectionFormatOptions opts = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
@@ -444,6 +520,7 @@ GhosttyCore::~GhosttyCore()
         ghostty_search_free(d->search);
     if (d->selAnchor)
         ghostty_tracked_grid_ref_free(d->selAnchor);
+    d->freeRoleMarks();
     ghostty_mouse_event_free(d->mouseEvent);
     ghostty_mouse_encoder_free(d->mouseEncoder);
     ghostty_key_event_free(d->keyEvent);
@@ -463,6 +540,8 @@ void GhosttyCore::feed(const char *data, size_t len)
         off = hit.end;
         if (hit.kind == SequenceScanner::Hit::AltScreen) {
             d->checkAltScreen();
+        } else if (hit.kind == SequenceScanner::Hit::RowRole) {
+            d->trackRowRole(hit.role);
         } else if (events.promptMark) {
             uint16_t y = 0;
             ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
@@ -568,6 +647,12 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
     if (ghostty_render_state_get(d->rs, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &d->rows) != GHOSTTY_SUCCESS)
         return false;
 
+    // Row roles by absolute row, and the viewport's offset in that space, so a
+    // marked row keeps its band wherever the viewport is (and after it has
+    // scrolled into history).
+    const std::map<int, uint8_t> roles = d->roleMarkMap();
+    const int roleTop = int(d->scrollbar().offset);
+
     static const GhosttyRenderStateRowCellsData cellKeys[] = {
         GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
         GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
@@ -597,6 +682,11 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
             ghostty_row_get(raw, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT, &sp);
             if (sp == GHOSTTY_ROW_SEMANTIC_PROMPT)
                 line.marks |= MarkPromptStart;
+        }
+        if (!roles.empty()) {
+            const auto it = roles.find(roleTop + y);
+            if (it != roles.end())
+                line.marks |= it->second;
         }
         GhosttyRenderStateRowSelection rsel = GHOSTTY_INIT_SIZED(GhosttyRenderStateRowSelection);
         if (ghostty_render_state_row_get(d->rows, GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION, &rsel) == GHOSTTY_SUCCESS) {
@@ -754,11 +844,16 @@ int GhosttyCore::historyLines(int fromRow, int count, std::vector<Line> *out) co
     };
 
     out->resize(size_t(want));
+    // Row roles travel with the line into history (OSC 7772, CellTypes.h).
+    const std::map<int, uint8_t> roles = d->roleMarkMap();
     std::vector<uint32_t> cps;
     std::string uri;
     for (int i = 0; i < want; ++i) {
         Line &line = (*out)[size_t(i)];
         const int y = from + i;
+        const auto it = roles.find(y);
+        if (it != roles.end())
+            line.marks |= it->second;
         GhosttyGridRef rowRef;
         if (!d->gridRef(GHOSTTY_POINT_TAG_HISTORY, 0, y, &rowRef))
             continue;
@@ -1324,6 +1419,7 @@ void GhosttyCore::reset()
 {
     ghostty_terminal_reset(d->t);
     d->scanner.reset();
+    d->freeRoleMarks(); // the reset cleared the screens the refs point into
     d->checkAltScreen();
 }
 
