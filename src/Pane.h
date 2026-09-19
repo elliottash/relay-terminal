@@ -28,6 +28,7 @@
 #include "ScreenPrompt.h"
 #include "PaneLayout.h"
 #include "QueueNav.h"
+#include "QueueSubmit.h"   // when a submitted agent prompt starts its turn at once (#N8VK)
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
@@ -7890,13 +7891,20 @@ private:
                                    .arg(name, close.join(QStringLiteral(" or /"))));
             return;
         }
-        if (!m_workerReady) {
+        QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
+        // An explicit agent submit never needed the worker's router (#N8VK): the verdict cannot
+        // change where a forced-agent prompt goes, and the round trip made it refusable ("Local
+        // router is not ready" while the worker was still starting) and losable ("Input changed
+        // during routing") for a prompt whose destination was never in question. The refusal and
+        // the one-submission guard below stay for shell and auto; the local dispatch further down
+        // takes an explicit agent submit from there.
+        if (!m_workerReady && mode != QStringLiteral("agent")) {
             if (submit) status(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
             return;
         }
-        if (submit && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
+        if (submit && mode != QStringLiteral("agent")
+            && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);
-        QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
         // A program is blocked reading a line from the terminal: the prompt box answers it
         // instead of queueing a command (issue decision 5). Agent submissions still go to the
         // agent, so Ctrl+Enter and `*` keep working while a program waits.
@@ -7908,6 +7916,19 @@ private:
         // is worked out and after a waiting program has had its line (issue G8DK).
         if (submit && tryRunAliasTyped(m_editor->toPlainText(), mode)) {
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+            return;
+        }
+        // The explicit agent submit itself (#N8VK): straight to submitAgent(), which starts the
+        // turn at once whenever the agent is free (relay::queuesubmit) instead of waiting on a
+        // route reply. The handoff flags are consumed here as dispatch() would consume them.
+        if (submit && mode == QStringLiteral("agent")) {
+            const QString typed = m_editor->toPlainText();
+            if (typed.trimmed().isEmpty()) return;
+            m_handoffChain = 0;   // the user typed something: a chain of hand-overs starts over
+            m_handoffPrefill = false; m_handoffPrefix = false; m_handoffOffered = false;
+            if (!m_prefixMode.isEmpty()) clearPrefixMode(true);   // one submission only
+            setRouteText(QStringLiteral("AGENT · explicit"));
+            submitAgent(typed, true);
             return;
         }
         if (submit) {
@@ -9980,7 +10001,7 @@ private:
             .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_cwd), command, problem);
         // Fix turns continue the command the user just ran, so they go ahead of queued items.
         QueueEntry entry; entry.agent = true; entry.fix = true; entry.text = prompt;
-        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+        if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
         else { entry.id = ++m_entrySerial; m_entries.prepend(entry); rebuildQueueStrip(); pumpQueue(); }
     }
 
@@ -10048,7 +10069,7 @@ private:
         entry.text = relay::input::handoffReport(command, status, output);
         // Defer until Readline has drawn the prompt, as the fix loop does.
         QTimer::singleShot(200, this, [this, entry]() mutable {
-            if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+            if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
             else { entry.id = ++m_entrySerial; m_entries.prepend(entry); rebuildQueueStrip(); pumpQueue(); }
         });
     }
@@ -10466,9 +10487,19 @@ private:
         updatePaths();
     }
 
-    // Agent prompts and terminal commands share one queue per pane, in the order entered. An item
-    // starts at once when nothing is queued ahead of it and its resource (agent or shell) is free;
-    // otherwise it waits. The worker only ever receives one agent turn at a time from here.
+    // The queue-submit rule's view of this pane right now (#N8VK): a turn the worker has reported
+    // running, and an agent entry that has left the queue without that report yet.
+    relay::queuesubmit::State queueSubmitState() const {
+        relay::queuesubmit::State state;
+        state.agentBusy = m_agentBusy;
+        state.agentTurnStarting = m_activeValid && m_active.agent;
+        return state;
+    }
+
+    // Agent prompts and terminal commands share one queue per pane, as two resources: an agent
+    // prompt starts at once whenever the agent itself is free, whatever shell work is running or
+    // queued ahead of it (relay::queuesubmit, #N8VK); a shell command waits for the terminal.
+    // The worker only ever receives one agent turn at a time from here.
     void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString(),
                      const QString &shellText = QString()) {
         if (!m_configured) {
@@ -10504,7 +10535,11 @@ private:
             printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
             return;
         }
-        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) {
+        // Ctrl+Enter, the `*` prefix, AGENT-mode Enter and every other door into here are the
+        // same submission: when the agent itself is free it starts now, bypassing the queue
+        // exactly as the interrupt branch above does, and the queued items keep their order
+        // (#N8VK). Only a busy — or just-started — agent turn sends a prompt to the back.
+        if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) {
             startAgentEntry(entry, false);
             return;
         }
@@ -10652,10 +10687,15 @@ private:
         m_entries.append(entry);
         m_selected = -1;
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
-        status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
-                           : !entry.guest.isEmpty()
-                               ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
-                               : QStringLiteral("Queued · the command runs when the terminal is free"));
+        // The steer offer ("Enter again…") promises a running turn to steer into; an entry queued
+        // while a turn is merely starting has none yet, so it says only that it waits (#N8VK).
+        status(entry.agent
+                   ? (m_agentBusy
+                          ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
+                          : QStringLiteral("Queued · the agent prompt runs when its turn comes"))
+                   : !entry.guest.isEmpty()
+                       ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
+                       : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -13817,7 +13857,7 @@ private:
         entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
         noteWorkCard(m_boardTaskCard);
         m_boardTask.clear(); m_boardTaskCard.clear();
-        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+        if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
         else enqueue(entry);
     }
     QString m_lastPlanPath;      // the plan this pane's agent wrote last

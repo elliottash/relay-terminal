@@ -1705,6 +1705,15 @@ bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, 
 "PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
 Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
 
+**An agent submit does not wait behind shell work** (2026-09-19, #N8VK). The one list is two
+resources: an agent prompt contends with the agent alone, a command with the terminal.
+`src/QueueSubmit.{h,cpp}` (`relay::queuesubmit::decide`) holds the start rule — an agent prompt
+submitted while the agent itself is free starts its turn at once, bypassing the list exactly as
+an interrupt does, and the queued items keep their order; only a busy (or just-started) agent
+turn sends a prompt to the back. `submitAgent`, `startFix`, `finishHandoff` and `runBoardTask`
+all go through it. The router is asked only for `auto`: an explicit agent submit (Ctrl+Enter,
+the `*` prefix, AGENT mode) is dispatched locally, with no `route` round trip to wait on.
+
 **One list, in delivery order** (2026-09-18, #C4M8). Under "▸ running", `m_queueList` holds every
 row the pane will deliver: first the steers still waiting for the running turn's next tool call
 (`m_steering`, drawn "↪ next tool call ✦" in the agent colour), then the queued prompts and
