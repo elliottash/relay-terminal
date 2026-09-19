@@ -2,16 +2,16 @@
 id: RR0G
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
 assignee: agent
-implemented_by: "Claude Opus 5 subagent of a Claude Fable 5.1 session, 2026-09-19"
+implemented_by: Claude Opus 5 subagent of a Claude Fable 5.1 session, 2026-09-19
 rank: zzzzzzza
 created: '2026-09-19'
 acceptance: every state of the busy line above the prompt box shows a spaced en dash after "Relaying" — the agent turn, a turn blocked on background work, a turn blocked on a question, and a terminal program
-source: 'issues/feature_intake.txt, 2026-09-19'
+source: issues/feature_intake.txt, 2026-09-19
 links: {commits: [b81c5a1], evidence: [docs/qa_evidence/2026-09-19-relaying-dash/], github: null, plans: [], related: [4E13, HQ2B, 4X53, 0STR]}
 ---
 # A dash after "Relaying"

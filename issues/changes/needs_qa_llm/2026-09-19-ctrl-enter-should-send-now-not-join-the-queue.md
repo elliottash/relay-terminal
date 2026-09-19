@@ -2,7 +2,7 @@
 id: N8VK
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent
@@ -12,7 +12,7 @@ rank: zzzzzz
 created: '2026-09-19'
 acceptance: Ctrl+Enter on an agent prompt starts that turn immediately whenever the agent itself is free, whatever else is in the queue, and interrupts the turn when the agent is busy, as it already does
 source: 'issues/feature_intake.txt, 2026-09-19: "ctrl + enter should send immediately"'
-links: {plans: [], commits: [ad7b455, d633d6b], evidence: [docs/qa_evidence/2026-09-19-ctrl-enter-sends-now/], related: [C4M8, KJ44], github: null}
+links: {plans: [], commits: [8584b96, d26cbb4], evidence: [docs/qa_evidence/2026-09-19-ctrl-enter-sends-now/], related: [C4M8, KJ44], github: null}
 ---
 # Ctrl+Enter should send now, not join the back of the queue
 
@@ -20,7 +20,7 @@ links: {plans: [], commits: [ad7b455, d633d6b], evidence: [docs/qa_evidence/2026
 
 ctrl + enter should send immediately
 
-## Reproduced (2026-09-19, live under Xvfb, `main` at `7241a40`)
+## Reproduced (2026-09-19, live under Xvfb, `main` at `450567e`)
 
 Ctrl+Enter is `agent.interrupt` (`src/Keymap.h:284`, "Send to the agent; while it is busy, interrupt
 it and send now") and lands in `interruptAgentWithPrompt()` (`src/Pane.h:709`). Two of its three
@@ -59,11 +59,11 @@ itself already knows better: `pumpQueue()` (`src/Pane.h:10067`) gates an agent h
 order that makes the agent prompt wait.
 
 ## Tasks
-- [x] `submitAgent()`: an explicit agent submit starts now whenever the agent itself is free, whatever else is in the queue — the same "bypasses the queue, queued items keep their order" rule the interrupt branch already follows (t:c7)
-- [x] One rule for all three keys — Ctrl+Enter, Enter in AGENT mode, the `*` prefix — and for every other door into `submitAgent` ("Continue", `/skill`, delegate, remote prompts, Execute's board task, fix and handoff turns): the same submission by another key (t:d2)
-- [x] The toast: a prompt that starts now never shows a Queued toast, and an entry queued with no running turn no longer offers "Enter again to send at the next tool call" (t:f4)
-- [x] `src/QueueSubmit.{h,cpp}` + `tests/queuesubmit_test.cpp` (ctest `queuesubmit`, 8/8): the reproduction as a state — shell work running and queued cannot hold an agent prompt back, a busy or just-started turn can (t:h6)
-- [x] An explicit agent submit is dispatched locally in `requestRoute()`; the `route` round trip, the "Local router is not ready" refusal and the "Input changed during routing" drop no longer apply to it; the router is asked for `auto` (and shell, which needs the validity check) (t:j1)
+- [x] `submitAgent()`: an explicit agent submit starts now whenever the agent itself is free, whatever else is in the queue — the same "bypasses the queue, queued items keep their order" rule the interrupt branch already follows (t:c7) <!-- t:wh -->
+- [x] One rule for all three keys — Ctrl+Enter, Enter in AGENT mode, the `*` prefix — and for every other door into `submitAgent` ("Continue", `/skill`, delegate, remote prompts, Execute's board task, fix and handoff turns): the same submission by another key (t:d2) <!-- t:1m -->
+- [x] The toast: a prompt that starts now never shows a Queued toast, and an entry queued with no running turn no longer offers "Enter again to send at the next tool call" (t:f4) <!-- t:jb -->
+- [x] `src/QueueSubmit.{h,cpp}` + `tests/queuesubmit_test.cpp` (ctest `queuesubmit`, 8/8): the reproduction as a state — shell work running and queued cannot hold an agent prompt back, a busy or just-started turn can (t:h6) <!-- t:6g -->
+- [x] An explicit agent submit is dispatched locally in `requestRoute()`; the `route` round trip, the "Local router is not ready" refusal and the "Input changed during routing" drop no longer apply to it; the router is asked for `auto` (and shell, which needs the validity check) (t:j1) <!-- t:d1 -->
 
 ## Decisions
 

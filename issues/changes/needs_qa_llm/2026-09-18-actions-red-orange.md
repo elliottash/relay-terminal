@@ -2,7 +2,7 @@
 id: SRM2
 type: work
 status: needs-qa-llm
-labels: [change, theme]
+labels: [change, feature, theme]
 component: [gui, theme]
 milestone: desktop-alpha
 workstream: terminal
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'The Actions pane wears a red-orange band and glyph in every shipped theme, told apart from the error state and the ssh band, at 4.5:1 for the label and 3:1 for the glyph; Options keeps the green'
+acceptance: The Actions pane wears a red-orange band and glyph in every shipped theme, told apart from the error state and the ssh band, at 4.5:1 for the label and 3:1 for the glyph; Options keeps the green
 source: 'owner, 2026-09-18: "make actions red-orange"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/'], related: [SPBN, N50J, HECG], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/], related: [SPBN, N50J, HECG], github: null}
 ---
 # Actions is red-orange, its own hue
 

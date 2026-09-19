@@ -2,7 +2,7 @@
 id: HECG
 type: work
 status: needs-qa-llm
-labels: [change, theme]
+labels: [change, feature, theme]
 component: [theme]
 milestone: desktop-alpha
 workstream: terminal
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'data/theme/themes/solarized-dark.toml is gone, nothing in the app, tests or docs names it, and a profile still carrying theme/name=solarized-dark starts on Relay Dark with a whole palette'
+acceptance: data/theme/themes/solarized-dark.toml is gone, nothing in the app, tests or docs names it, and a profile still carrying theme/name=solarized-dark starts on Relay Dark with a whole palette
 source: 'owner, 2026-09-18: "remove the solarized dark theme"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/'], related: [N50J], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/], related: [N50J], github: null}
 ---
 # Solarized Dark is removed
 

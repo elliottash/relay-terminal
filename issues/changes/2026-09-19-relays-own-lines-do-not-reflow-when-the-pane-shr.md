@@ -1,7 +1,7 @@
 ---
 id: R2WQ
 type: work
-status: ready
+status: in-progress
 labels: [change, bug]
 component: [gui]
 milestone: desktop-alpha
@@ -11,7 +11,7 @@ rank: b
 created: '2026-09-19'
 acceptance: 'An agent reply printed at one pane width still reads as wrapped prose after the pane is made narrower and wider again: no row ends mid-word, no stranded short rows from the old width, bullets still hang under their text. `relay-wordwrap-tests`, `relay-engine-tests` and `ctest` pass; QA confirms it live at three widths with both cores'
 source: 'owner in chat, 2026-09-19, with two screenshots of the same reply wide and narrow: "check out this linre break / word wrap issue. if i shrink the pane, the lines break improperly. can you fix that?"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-19-relays-own-lines-do-not-reflow/'], related: [TW84, SB7K, TK9C], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-relays-own-lines-do-not-reflow/], related: [TW84, SB7K, TK9C], github: null}
 ---
 # Relay's own lines do not reflow when the pane is resized
 

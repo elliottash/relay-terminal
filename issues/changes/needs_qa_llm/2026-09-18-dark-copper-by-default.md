@@ -2,7 +2,7 @@
 id: DKCV
 type: work
 status: needs-qa-llm
-labels: [theme]
+labels: [feature, theme]
 component: [gui, theme]
 milestone: beta
 workstream: terminal
@@ -12,7 +12,7 @@ rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
 source: 'owner, 2026-09-18, feature intake: "use dark copper by default on all builds"'
-links: {plans: [], commits: [a6ab586], evidence: ['docs/qa_evidence/2026-09-18-dark-copper-default/'], related: [0JA7], github: null}
+links: {plans: [], commits: [a6ab586], evidence: [docs/qa_evidence/2026-09-18-dark-copper-default/], related: [0JA7], github: null}
 ---
 # Dark Copper is the theme every build starts on
 

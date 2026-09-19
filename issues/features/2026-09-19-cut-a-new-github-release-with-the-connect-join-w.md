@@ -1,7 +1,7 @@
 ---
 id: 3AZG
 type: work
-status: in-progress
+status: ready
 labels: [feature, packaging, remote]
 rank: zzzzzx
 created: '2026-09-19'

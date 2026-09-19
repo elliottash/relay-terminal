@@ -2,7 +2,7 @@
 id: V8KT
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, bug]
 assignee: agent
 implemented_by: Warp agent (Oz; model unspecified), 2026-09-19
 rank: zzzz103

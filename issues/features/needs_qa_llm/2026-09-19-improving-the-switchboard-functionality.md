@@ -2,6 +2,7 @@
 id: VZ69
 type: work
 status: needs-qa-llm
+labels: [feature, switchboard]
 assignee: agent
 implemented_by: claude-opus-5
 rank: zzzzzx

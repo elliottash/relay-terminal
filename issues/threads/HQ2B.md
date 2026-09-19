@@ -18,3 +18,6 @@ Landed in 7a5221b (main): PaneBusyLine draws Qt::AlignLeft in the normal weight,
 
 <!-- relay:entry 20260919T161836Z-kj author=agent kind=event model=glm-5.3 pane=f997f065 turn=25c2c83c430b4960be9088b8492e2ee5/fd2d0bde4aef48288e8114906071580d -->
 - ✦ agent moved this card · In progress → Needs QA (LLM) · Implemented in 7a5221b; verified under Xvfb in every state the line can show, evidence in docs/qa_evidence/2026-09-19-relaying-line-left-normal/ · evidence docs/qa_evidence/2026-09-19-relaying-line-left-normal/
+
+<!-- relay:entry 20260919T200629Z-kn author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
+- ✦ agent updated this card · labels: ["change"] → ["change", "feature"]

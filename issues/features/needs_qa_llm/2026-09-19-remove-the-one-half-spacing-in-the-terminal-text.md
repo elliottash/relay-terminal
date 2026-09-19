@@ -7,7 +7,7 @@ assignee: agent
 implemented_by: glm/glm-5.3
 rank: zzzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-single-spaced-terminal-rows/], related: [], github: null}
+links: {commits: [8408b58b], evidence: [docs/qa_evidence/2026-09-19-single-spaced-terminal-rows/], github: null, plans: [], related: []}
 ---
 # remove the one-half spacing in the terminal text.
 

@@ -1,9 +1,7 @@
 # Switchboard configuration. Format: docs/SWITCHBOARD-FORMAT.md
 version: 1
-tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
-  {id: design, folder: design}, {id: marketing, folder: marketing},
-  {id: planning, folder: planning},
-  {id: deferred, filter: "status:deferred"}, {id: done, filter: "status:done,dropped"}]
-columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]
+tabs: [{id: features, folder: features}, {id: bugs, folder: changes}, {id: design, folder: design}, {id: marketing, folder: marketing}, {id: planning, folder: planning}, {id: deferred, filter: 'status:deferred'}, {id: done, filter: 'status:done,dropped'}]
+columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, deferred, done]
+column_titles: {deferred: Deferred}
 agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}

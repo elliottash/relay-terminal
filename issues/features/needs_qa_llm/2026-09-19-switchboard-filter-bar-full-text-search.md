@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 rank: zzzzzzzzw
 created: '2026-09-19'
 source: pane 1, 2026-09-19
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-board-filter-full-text/], related: [], github: null}
+links: {plans: [], commits: [9973dcbf], evidence: [docs/qa_evidence/2026-09-19-board-filter-full-text/], related: [], github: null}
 ---
 # Switchboard filter bar: full text search
 

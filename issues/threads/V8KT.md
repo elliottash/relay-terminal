@@ -48,3 +48,6 @@ Root-cause fixes (no downstream patching):
 - New rendering test `tests/pulsepaint_test.cpp` (+ `pulsepaint_paint.cpp`, which keeps `PaneChrome.h` out of the moc'd TU — `Keymap.h`'s raw string literal breaks moc) pins the property the aliasing hid: every *adjacent* pulse step visibly moves the painted tab icon, corner dot and header glyph, at dpr 1 and 2. Registered as `pulsepaint` in CMake (offscreen); passes.
 
 Full build clean; `ctest -R pulsepaint` passes; `analyze.py` on the regenerated frames confirms violet star/word and 336 px (bar) / 176 px (head) movement between adjacent relaying frames.
+
+<!-- relay:entry 20260919T200544Z-nc author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
+- ✦ agent updated this card · labels: ["change"] → ["change", "bug"]

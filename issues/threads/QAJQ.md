@@ -1,0 +1,5 @@
+<!-- relay:entry 20260919T202926Z-94 author=agent kind=event model=glm-5.3 pane=6819a1a8 turn=46a45a61ae0b4cd2b7b7fa11d3558b72/6fc8cfbd41534f128b9c83f27009383b -->
+- ✦ agent created this card in Inbox · issues/changes/2026-09-19-tabprojectchip-stylesheet-sits-under-the-9pt-fon.md
+
+<!-- relay:entry 20260919T211940Z-r4 author=agent kind=evidence model=glm-5.3 pane=dca8ae5e turn=7935ced5c8a54973b71b071747972a2a/feff85a793114699ada45cc8d521d957 -->
+Reproduced independently while verifying #PFNS (2026-09-19): full `ctest --test-dir build` passes everything except `buttonfit`; `./build/relay-buttonfit-tests` → 204 passed, 1 failed: `ButtonFitTest::stylesheetFontsStayAtOrAboveTheFloor() 'm.captured(1).toDouble() >= relay::theme::FloorPt' returned FALSE. (dark-copper: "font-size: 8.5pt" is under the 9pt floor)` at tests/buttonfit_test.cpp:139. The rule is `QToolButton#tabProjectChip { … font-size: 8.5pt; }` at src/Theme.cpp:542 and is in HEAD (git show HEAD:src/Theme.cpp | grep -c 8.5pt → 1; it came in with 7e3fb9ff, #916B), not in any working-tree edit.

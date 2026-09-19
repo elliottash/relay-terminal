@@ -1,8 +1,10 @@
 ---
 id: 5AWD
 type: work
-status: needs-qa-llm
+status: in-progress
+labels: [feature, terminal]
 assignee: agent
+implemented_by: glm/glm-5.3-flash
 rank: zzzzzzzi
 created: '2026-09-19'
 links: {plans: [], commits: [2a6fa27], evidence: [docs/qa_evidence/2026-09-19-helpful-line-breaks/README.md], related: [], github: null}

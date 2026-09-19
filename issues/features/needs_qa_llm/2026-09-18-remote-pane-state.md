@@ -1,17 +1,17 @@
 ---
 id: 0VT4
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature]
 component: [gui, remote]
 milestone: desktop-alpha
 workstream: remote
 assignee: agent
-implemented_by: Claude Opus 5 (Claude Code, relay-terminal-71), 2026-09-18
+implemented_by: glm/glm-5.3
 rank: b
 created: '2026-09-18'
-acceptance: 'A paired phone, tablet or laptop browser draws the pane from `pane_state` — queue rows with the actions each offers, the reasoning, the turn clock, the model and its choices, the prompt box, the context chip, the session list — formatting nothing of the pane''s own work itself (the words on its own controls — the touch action sheet, the send menu, "New conversation", the accessibility labels — are the view''s); it can steer, switch models, start a new conversation and edit or withdraw a queue row; a guest never receives `pane_state`; the web view''s colours are generated from `src/Theme.cpp`'
-source: 'owner, 2026-09-18'
+acceptance: A paired phone, tablet or laptop browser draws the pane from `pane_state` — queue rows with the actions each offers, the reasoning, the turn clock, the model and its choices, the prompt box, the context chip, the session list — formatting nothing of the pane's own work itself (the words on its own controls — the touch action sheet, the send menu, "New conversation", the accessibility labels — are the view's); it can steer, switch models, start a new conversation and edit or withdraw a queue row; a guest never receives `pane_state`; the web view's colours are generated from `src/Theme.cpp`
+source: owner, 2026-09-18
 links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-web-pane-view/], related: [W5N2, C4M8, HEFA, Y4GE], github: null}
 ---
 # One pane model, two views: the phone draws the desktop's pane

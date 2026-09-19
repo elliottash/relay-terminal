@@ -2,7 +2,7 @@
 id: CSMK
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'Alt+I opens the conversation-info pane in every preset, and a session row whose conversation is in the recently-closed list says "closed N min ago" and offers "Reopen where it was"'
+acceptance: Alt+I opens the conversation-info pane in every preset, and a session row whose conversation is in the recently-closed list says "closed N min ago" and offers "Reopen where it was"
 source: 'owner, 2026-09-18: "the (i) view hotkey could be alt+i or alt+1?" and "session rows \"closed mins ago\" should be added"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/'], related: [Y63Z, R6J0, SM4R, RC7Z], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-actions-red-orange-and-lit-buttons/], related: [Y63Z, R6J0, SM4R, RC7Z], github: null}
 ---
 # Alt+I opens the ⓘ view, and a session row says when it was closed
 

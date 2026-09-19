@@ -2,6 +2,7 @@
 id: 5G43
 type: work
 status: needs-qa-llm
+labels: [bug, switchboard]
 implemented_by: glm/glm-5.3
 rank: zzzzzzzy
 created: '2026-09-19'

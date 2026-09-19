@@ -1,13 +1,13 @@
 ---
 id: DJX7
 type: work
-status: needs-qa-llm
+status: dropped
 labels: [bug, switchboard]
 implemented_by: glm/glm-5.3
 rank: zzzzzzr
 created: '2026-09-19'
 source: 'pane, 2026-09-19, while landing #N8VK'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-land-py-card-move-one-commit/], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-land-py-card-move-one-commit/], related: [], github: null, merged_into: BTYE}
 ---
 # land.py's name gate cannot land a card move in one commit (rename collapse)
 
@@ -21,3 +21,8 @@ Fixed in `de3510f` (all three `git diff --name-only` gate diffs in `scripts/land
 - [ ] End-to-end: a card move (delete + add of the same bytes) lands in one `land.py commit` without a name-gate failure — done live by #5G43's move in this same landing.
 
 Evidence: docs/qa_evidence/2026-09-19-land-py-card-move-one-commit/
+
+## Resolution
+Merged into [#BTYE](../needs_qa_llm/2026-09-19-land-py-s-name-gate-refuses-a-moved-file-git-rep.md) on 2026-09-19: Same fault, same fix: land.py's name gate collapsed a card move into one rename line; both name fix de3510f (--no-renames on the gate diffs), and #BTYE's resolution already records #DJX7 as the same fault filed the same day.
+
+Nothing was thrown away: the text above is also kept on #BTYE under `## Merged in`, and this card stays here so `#DJX7` keeps resolving.

@@ -2,7 +2,7 @@
 id: 99T0
 type: work
 status: needs-qa-llm
-labels: [tests, flake]
+labels: [bug, tests, flake]
 component: [worker, agent]
 workstream: agent
 assignee: agent

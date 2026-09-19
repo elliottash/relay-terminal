@@ -1,7 +1,9 @@
 ---
 id: 9K5H
 type: work
-status: inbox
+status: in-progress
+labels: [feature, switchboard]
+assignee: agent
 rank: zzzzzzi
 created: '2026-09-19'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}

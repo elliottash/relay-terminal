@@ -2,7 +2,7 @@
 id: SHE3
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent

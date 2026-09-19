@@ -2,7 +2,7 @@
 id: K7RY
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: settings
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Fable 5.1 (Claude Code), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'Ctrl+Shift+A opens the Settings pane on Actions, Ctrl+Shift+O (and the gear, and Ctrl+,) opens it on the options, each key moves an open pane to its side and closes it from its own side; Ctrl+Shift+Y runs /resume; none of the three has a plain-Ctrl twin; no preset reports a key conflict.'
+acceptance: Ctrl+Shift+A opens the Settings pane on Actions, Ctrl+Shift+O (and the gear, and Ctrl+,) opens it on the options, each key moves an open pane to its side and closes it from its own side; Ctrl+Shift+Y runs /resume; none of the three has a plain-Ctrl twin; no preset reports a key conflict.
 source: 'owner, in session 2026-09-18: "i want ... ctrl shift o for options ... ctrl shift y for /resume (same as warp) ... then ctrl shift a for actions (and actually remove ctrl o and ctrl y on their own, to avoid confusion)"'
-links: {plans: [], commits: [ae0fead], evidence: ['docs/qa_evidence/2026-09-18-actions-and-options-keys/'], related: [V4NA], github: null}
+links: {plans: [], commits: [ae0fead], evidence: [docs/qa_evidence/2026-09-18-actions-and-options-keys/], related: [V4NA], github: null}
 ---
 # Actions, Options and Resume each get one Ctrl+Shift key
 

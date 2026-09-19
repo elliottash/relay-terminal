@@ -2,7 +2,7 @@
 id: M109
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: providers

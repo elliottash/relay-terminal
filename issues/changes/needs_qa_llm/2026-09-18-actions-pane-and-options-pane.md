@@ -2,7 +2,7 @@
 id: V4NA
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: settings
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Fable 5.1 (Claude Code, session relay-terminal-ad), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'Ctrl+Shift+A opens an Actions pane that is one filterable list with no tabs; Ctrl+Shift+O opens an Options pane that holds only what persists; either key swaps an open pane in place; an option found from Actions is a row that opens Options on it; no verb is a button row in Options; the pane sets paneType "actions"/"options" for the pane chrome.'
+acceptance: Ctrl+Shift+A opens an Actions pane that is one filterable list with no tabs; Ctrl+Shift+O opens an Options pane that holds only what persists; either key swaps an open pane in place; an option found from Actions is a row that opens Options on it; no verb is a button row in Options; the pane sets paneType "actions"/"options" for the pane chrome.
 source: 'owner, in session 2026-09-18: "help me distinguish the current options menu from an actions menu that we still need ... these are not persistent settings but things that matter now and you might choose regularly or change back and forth ... and in turn, we can move stuff out of options and into actions"; then "do it, and coordinate with this agent" (session relay-terminal-93, cards #SPBN #XM0T #R6J0).'
-links: {plans: [], commits: [246847c], evidence: ['docs/qa_evidence/2026-09-18-actions-pane-and-options-pane/'], related: [K7RY, SPBN, XM0T, R6J0], github: null}
+links: {plans: [], commits: [246847c], evidence: [docs/qa_evidence/2026-09-18-actions-pane-and-options-pane/], related: [K7RY, SPBN, XM0T, R6J0], github: null}
 ---
 # The Actions pane and the Options pane
 

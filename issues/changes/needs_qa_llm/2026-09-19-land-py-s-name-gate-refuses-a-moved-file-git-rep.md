@@ -2,14 +2,14 @@
 id: BTYE
 type: work
 status: needs-qa-llm
-labels: [bug, tooling]
+labels: [bug, tooling, switchboard]
 component: [worker]
-rank: zzzzzzzi
 implemented_by: Claude Fable 5.1, 2026-09-19
+rank: zzzzzzzi
 created: '2026-09-19'
 acceptance: a commit that deletes one claimed path and adds another lands without a workaround, and a test in the script's own suite moves a file
 source: 'found by the #T71W session (Claude Fable 5.1 in Claude Code), 2026-09-19, landing 7d1a7bc'
-links: {plans: [], commits: [de3510f], evidence: [], related: [T71W], github: null}
+links: {plans: [], commits: [de3510f], evidence: [], related: [T71W], github: null, merged_from: [DJX7]}
 ---
 # land.py's name gate refuses a moved file: git reports a rename as one path
 
@@ -38,3 +38,19 @@ this sweep did not touch it — whoever owns it can close it against this commit
 - [ ] Move a card to a QA lane in one `land.py commit` (delete the old path, add the new): it lands, with no `GIT_CONFIG_*` workaround.
 - [ ] `python3 -m pytest tests/test_land.py` passes.
 - [ ] A `repair` that touches a moved path is still gated correctly.
+
+## Merged in
+### #DJX7 — land.py's name gate cannot land a card move in one commit (rename collapse) (2026-09-19)
+
+Merged from `issues/changes/needs_qa_llm/2026-09-19-land-py-s-name-gate-cannot-land-a-card-move-in-o.md` (needs-qa-llm): Same fault, same fix: land.py's name gate collapsed a card move into one rename line; both name fix de3510f (--no-renames on the gate diffs), and #BTYE's resolution already records #DJX7 as the same fault filed the same day.
+
+#### Issue
+Landing a card move (delete old path + add new path in one land.py commit) always fails the name gate: `git diff --name-only tip new` collapses the pair into one rename line (R096, the card file is 96 % similar), so `touched` lists only the destination while `entries` lists both — "name gate failed … Nothing was landed". Measured 2026-09-19: a commit whose tree verifiably lacks the old path (ls-tree empty) still diffs as a single rename. Workaround used: land the move as two commits (add, then delete). Fix: pass `--no-renames` to the gate's `git diff --name-only` (scripts/land.py, cmd_commit).
+
+#### QA checklist
+Fixed in `de3510f` (all three `git diff --name-only` gate diffs in `scripts/land.py` pass `--no-renames`; regression test in `tests/test_land.py`).
+
+- [ ] `verify.log`: the three `--no-renames` call sites at HEAD (lines 1420, 1660, 1727); `tests/test_land.py` green in the full `./scripts/test.sh` run.
+- [ ] End-to-end: a card move (delete + add of the same bytes) lands in one `land.py commit` without a name-gate failure — done live by #5G43's move in this same landing.
+
+Evidence: docs/qa_evidence/2026-09-19-land-py-card-move-one-commit/

@@ -2,7 +2,7 @@
 id: XZZB
 type: work
 status: needs-qa-llm
-labels: [settings, gui, ux]
+labels: [feature, settings, gui, ux]
 rank: i
 created: '2026-09-17'
 source: pane 1, 2026-09-17

@@ -2,7 +2,7 @@
 id: K7VJ
 type: work
 status: needs-qa-llm
-labels: [change, theme]
+labels: [change, bug, theme]
 component: [theme]
 milestone: desktop-alpha
 workstream: terminal
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: c
 created: '2026-09-18'
-acceptance: 'On both light themes the terminal and agent colours are told apart from each other and from ordinary text at a glance; every shipped theme still clears 4.5:1 on background, surface, surface_raised and every moulded face; relay-theme-tests and relay-panestatus-tests pass and app/pane-theme.css is regenerated'
+acceptance: On both light themes the terminal and agent colours are told apart from each other and from ordinary text at a glance; every shipped theme still clears 4.5:1 on background, surface, surface_raised and every moulded face; relay-theme-tests and relay-panestatus-tests pass and app/pane-theme.css is regenerated
 source: 'owner, 2026-09-18: "in the light theme, the terminal and agent colors (cyan and violet) are too dark and desaturated" / "i cant really tell them apart from each other or from regular dark text" / "no, i meant the ibm beige theme" / "the ibm beige terminal and agents are still a little hard to pick out for me"'
-links: {plans: [], commits: [cae5879, 879518d, 0278822], evidence: ['docs/qa_evidence/2026-09-18-options-and-actions-side-by-side/'], related: [0JA7], github: null}
+links: {plans: [], commits: [cae5879, 879518d, 278822], evidence: [docs/qa_evidence/2026-09-18-options-and-actions-side-by-side/], related: [0JA7], github: null}
 ---
 # The light themes' terminal and agent colours are colours, not greys
 

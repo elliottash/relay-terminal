@@ -2,11 +2,12 @@
 id: EC58
 type: work
 status: needs-qa-llm
+labels: [bug, gui]
+assignee: agent
+implemented_by: Claude Fable 5.1 (batch review), 2026-09-19
 rank: zzzzzt
 created: '2026-09-19'
 links: {plans: [], commits: [], evidence: [], related: [TK9C], github: null}
-assignee: agent
-implemented_by: Claude Fable 5.1 (batch review), 2026-09-19
 ---
 # "The details of this call is not available in this call any more" bug.
 

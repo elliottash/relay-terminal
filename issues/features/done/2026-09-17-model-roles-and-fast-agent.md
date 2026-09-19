@@ -1,7 +1,7 @@
 ---
 id: KH72
 type: work
-status: needs-qa-llm
+status: dropped
 labels: [feature]
 component: [worker, gui]
 milestone: desktop-alpha
@@ -12,7 +12,7 @@ rank: m2
 created: '2026-09-17'
 acceptance: each role's model is pickable in Agent options; unset roles follow the main agent; the fast agent's per-provider default is applied; side calls and subagents visibly use their role's model
 source: 'owner in chat, 2026-09-17: "these should all be pickable in settings. main agent, terminal use agent, subagent, switchboad agent. the default is they are the same (the main agent). ... you can also designate a fast agent, which is used by default in the panes, which would be deepseek for example, or gemini 3.8 flash. later on we can add routing between the main agent and fast agent in the main terminal based on estimated task difficulty." and "if you have glm as your agent, the fast agent is glm 5.3 flash by default. if openrouter, you can pick deepseek v4.1 flash or gemini 3.8 flash. does kimi have a fast model?"'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [], related: [], github: null, merged_into: 4WHD}
 ---
 # Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision
 
@@ -58,3 +58,8 @@ the main terminal based on estimated task difficulty"): no difficulty estimate a
 routing. A pane is on one agent at a time; the user switches with Alt+F or the palette, and new panes start
 on the fast agent. When that routing is picked up, it should build on `roles.RoleResolver.resolve("fast")`
 and the existing `set_agent_role` command rather than a second resolution path.
+
+## Resolution
+Merged into [#4WHD](../needs_qa_llm/2026-09-17-model-roles.md) on 2026-09-19: Same request, one delivery: #KH72 is the owner's model-roles ask with the measurements, #4WHD the implementation record KH72's own body points to (same worktree, same day, same evidence folder); 4WHD carries the QA checklist.
+
+Nothing was thrown away: the text above is also kept on #4WHD under `## Merged in`, and this card stays here so `#KH72` keeps resolving.

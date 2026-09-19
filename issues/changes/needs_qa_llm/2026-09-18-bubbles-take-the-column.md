@@ -2,7 +2,7 @@
 id: N3WD
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code, subagent), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'With the reasoning panel or the queue strip up, the terminal shrinks and its last lines stay visible; the PTY reflows; a terminal at the newest output stays there; a pane too short to draw a bubble legibly shows none; `ctest` passes'
+acceptance: With the reasoning panel or the queue strip up, the terminal shrinks and its last lines stay visible; the PTY reflows; a terminal at the newest output stays there; a pane too short to draw a bubble legibly shows none; `ctest` passes
 source: 'owner, 2026-09-18: "when there is a thinking bubble, or a queue bubble, the terminal needs to move up, rather than being covered up" and "ok hide it" on the too-short case'
-links: {plans: [], commits: [455c475, cefdb02], evidence: ['docs/qa_evidence/2026-09-18-bubbles-take-the-column/'], related: [], github: null}
+links: {plans: [], commits: [455c475, cefdb02], evidence: [docs/qa_evidence/2026-09-18-bubbles-take-the-column/], related: [], github: null}
 ---
 # The thinking and queue bubbles move the terminal up instead of covering it
 

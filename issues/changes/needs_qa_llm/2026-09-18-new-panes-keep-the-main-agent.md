@@ -2,7 +2,7 @@
 id: K9SR
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent
@@ -10,7 +10,7 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: c
 created: '2026-09-18'
-acceptance: 'A new pane starts on the Main agent; Settings › Agent › "New panes use the Flash agent" restores the old behaviour; Alt+F still switches one pane either way'
+acceptance: A new pane starts on the Main agent; Settings › Agent › "New panes use the Flash agent" restores the old behaviour; Alt+F still switches one pane either way
 source: 'owner, 2026-09-18: "it also keeps changing from glm 5.3 to glm 5.3 flash"'
 links: {plans: [], commits: [cb010d8], evidence: [], related: [], github: null}
 ---

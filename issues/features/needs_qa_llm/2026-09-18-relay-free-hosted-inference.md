@@ -1,15 +1,16 @@
 ---
 id: HG7K
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature, providers, privacy]
 component: [worker, gui, gateway]
 milestone: desktop-alpha
 workstream: providers
+implemented_by: glm/glm-5.3
 rank: zzzzzn
 created: '2026-09-18'
 source: owner, in a Claude Code session, 2026-09-18, with a written spec ("Relay Free Hosted Inference")
-links: {plans: ['docs/RELAY-FREE.md', 'docs/RELAY-FREE-HANDOFF.md'], commits: ['6e83ee9'], evidence: ['docs/qa_evidence/2026-09-18-relay-free/'], related: ['24XJ', 'W5N2'], github: null}
+links: {plans: [docs/RELAY-FREE.md, docs/RELAY-FREE-HANDOFF.md], commits: [6e83ee9], evidence: [docs/qa_evidence/2026-09-18-relay-free/], related: [24XJ, W5N2], github: null}
 ---
 # Relay Free: the agent works on a fresh install, with no API key
 

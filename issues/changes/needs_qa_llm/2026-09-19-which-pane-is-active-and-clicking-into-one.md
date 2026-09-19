@@ -2,7 +2,7 @@
 id: H3TQ
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, bug]
 component: [gui, theme]
 milestone: desktop-alpha
 workstream: terminal

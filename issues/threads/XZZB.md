@@ -12,3 +12,6 @@
 
 <!-- relay:entry 20260918T022828Z-n1 author=agent kind=event model=glm-5.3 pane=b9367dd8 turn=741682b6e54745c89ed65136add61ee2/ad58824f557b4a55ad93803703adf640 -->
 - ✦ agent updated this card · appended to `## Notes`
+
+<!-- relay:entry 20260919T200441Z-sy author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
+- ✦ agent updated this card · labels: ["settings", "gui", "ux"] → ["feature", "settings", "gui", "ux"]

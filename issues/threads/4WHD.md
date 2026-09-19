@@ -1,0 +1,2 @@
+<!-- relay:entry 20260919T200223Z-g1 author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
+- ✦ agent merged #KH72 into this card · Same request, one delivery: #KH72 is the owner's model-roles ask with the measurements, #4WHD the implementation record KH72's own body points to (same worktree, same day, same evidence folder); 4WHD carries the QA checklist.

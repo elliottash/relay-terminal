@@ -1,15 +1,14 @@
 ---
 id: 27YQ
-# Renumbered 2026-09-18: O is not Crockford base32, so no board tool could address OT32.
-aliases: [OT32]
 type: work
 status: needs-qa-llm
-labels: [change]
+labels: [change, feature]
 component: [gui, providers]
 milestone: desktop-alpha
 workstream: providers
 assignee: agent
 implemented_by: Claude Fable 5.1 (Claude Code), 2026-09-18
+aliases: [OT32]
 rank: c
 created: '2026-09-18'
 acceptance: 'With no `provider/max_tokens` in relay.conf, Settings › Models shows "Output token limit" 32768 and the agent requests `max_tokens: 32768`; a saved value is kept; `ctest` and `./scripts/test.sh` pass'

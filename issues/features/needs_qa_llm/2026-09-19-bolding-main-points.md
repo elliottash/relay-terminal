@@ -2,6 +2,7 @@
 id: CVHT
 type: work
 status: needs-qa-llm
+labels: [feature, terminal]
 assignee: agent
 implemented_by: claude
 rank: zzzzzt

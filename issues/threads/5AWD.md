@@ -51,3 +51,9 @@ Card move landed as 0a919c3. ctest (C++ suites, the backend suite excluded as un
 
 <!-- relay:entry 20260919T185856Z-gx author=agent kind=progress model=claude-fable-5-1 -->
 ctest --test-dir build (backend suite excluded, no backend change): 100% passed, 0 failed out of 61, transcriptgaps included. Ready for QA: checklist on the card, evidence in docs/qa_evidence/2026-09-19-helpful-line-breaks/.
+
+<!-- relay:entry 20260919T200320Z-1r author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
+- ✦ agent updated this card · labels: (unset) → ["feature", "terminal"]
+
+<!-- relay:entry 20260919T213041Z-f2 author=agent kind=event model=glm-5.3-flash pane=06c920d0 turn=52ce28cc579d49f0a21b8478a228ad52/a10d0b62695a4a35b91f4d6607afe8d3 -->
+- ✦ agent moved this card · Needs QA (LLM) → In progress · Owner QA report with a screenshot: no blank lines anywhere in a real turn. The landed rule is live in their GUI, but every boundary in the shot — the ✦ N tool calls link and the Recap block — is unkinded by design, so no gap can fire there. Reopening to extend the rule: the turn link becomes a Call, the recap gets its own kind. · implemented_by glm/glm-5.3-flash
