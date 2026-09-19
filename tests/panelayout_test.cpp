@@ -11,6 +11,7 @@
 #include "PaneLayout.h"
 
 #include <QLabel>
+#include <QMap>
 #include <QSplitter>
 #include <QStringList>
 #include <QTest>
@@ -48,6 +49,65 @@ QWidget *paneNamed(QSplitter *splitter, const QString &name) {
 
 void swap(QSplitter *splitter, const QString &current, const QString &neighbor) {
     swapInSplitter(splitter, paneNamed(splitter, current), paneNamed(splitter, neighbor));
+}
+
+// ----- the pane header's give-way ladder ---------------------------------------------------------
+
+// A header with everything on, in a pane that is wide enough for all of it: the state glyph and the
+// state's word, the title, the directory, an ssh chip whose "user@host" is wider than the chip's
+// 150 px floor, the phone chip, the usage meter and the subagent badge. The numbers are roughly
+// what those elements measure with the app font, and every threshold below is derived from them
+// rather than written down, so the tests say what the order is and not what the font is.
+HeaderWants everythingOn() {
+    HeaderWants wants;
+    wants.title = 180;            // "Fixing the pane drag"
+    wants.directory = 240;        // "TERMINAL  ~/src/relay-terminal"
+    wants.stateWord = 112;        // "Subagents working"
+    wants.stateWordShort = 62;    // "Subagents"
+    wants.ssh = 170;              // "⇄ elliott@sphinxpad"
+    wants.sshHost = 120;          // "⇄ sphinxpad"
+    wants.sshEllipsis = 40;       // "⇄ …": the chip cannot go under this
+    wants.usage = 78;             // "12% 41%"
+    wants.usageCpu = 44;          // "12%"
+    wants.glyph = 16;
+    wants.badge = 96;             // "2 subagents"
+    wants.chips = 52;             // the phone chip
+    wants.fixed = 32 + 6 * 8;     // the hover button row's room and the row's spacing
+    return wants;
+}
+
+// What the elements that never give way, plus the row itself, have taken before the ladder starts.
+int hardWidth(const HeaderWants &w) { return w.fixed + w.glyph + w.badge + w.chips; }
+
+// The header width at which everything is whole and there is not a pixel to spare.
+int fullWidth(const HeaderWants &w) {
+    return hardWidth(w) + w.title + w.directory + w.stateWord + w.ssh + w.usage;
+}
+
+// Nothing is left to the layout to squeeze, so the whole row must fit in the header.
+bool fits(const HeaderWants &w, const HeaderFit &fit, int width) {
+    return hardWidth(w) + fit.title + fit.directory + fit.wordPx + fit.sshPx + fit.usagePx <= width;
+}
+
+// How far down the ladder a fit is: 0 nothing has given way, then one per step of the owner's
+// order, 9 every rung taken. Written for everythingOn(), where each element really is there.
+int rung(const HeaderWants &w, const HeaderFit &fit) {
+    if (fit.usage == UsageForm::CpuOnly) return 9;
+    if (fit.ssh == SshForm::HostOnly) return fit.sshPx < w.sshHost ? 8 : 7;
+    if (fit.sshPx < w.ssh) return 6;
+    if (fit.word == WordForm::Hidden) return 5;
+    if (fit.word == WordForm::Short) return 4;
+    if (fit.title < w.title) return 3;
+    if (fit.directory == 0) return 2;
+    if (fit.directory < w.directory) return 1;
+    return 0;
+}
+
+// A fit as one comparable line, so two sweeps of the same widths can be compared whole.
+QString describe(const HeaderFit &fit) {
+    return QStringLiteral("t%1 d%2 w%3/%4 s%5/%6 u%7/%8 short%9")
+        .arg(fit.title).arg(fit.directory).arg(int(fit.word)).arg(fit.wordPx)
+        .arg(int(fit.ssh)).arg(fit.sshPx).arg(int(fit.usage)).arg(fit.usagePx).arg(fit.shortfall);
 }
 
 }  // namespace
@@ -397,57 +457,199 @@ private Q_SLOTS:
         QVERIFY(!chordKeyKeepsWindow(Qt::Key_Up, QStringLiteral("pane.moveUp")));
     }
 
-    // ----- the pane header's two elided labels ------------------------------------------------
+    // ----- the pane header's give-way ladder (owner, 2026-09-19) ------------------------------
 
-    // A crowded header at 820 px: the state glyph and word, the subagent badge and the ssh, phone
-    // and usage chips are all up, and the pane still shows a title and a directory that fit. The
-    // widths below are what those chips measure with the app font (glyph 16, "working" 62, "2
-    // subagents" 96, "ssh sphinxpad" 104, "phone" 52, "12% / 41%" 78, plus 8 px of spacing each
-    // and the 32 px the hover button row is kept clear of).
-    void aCrowdedHeaderStillFitsAtEightHundredAndTwenty() {
-        const int taken = 16 + 62 + 96 + 104 + 52 + 78 + 6 * 8 + 32;
-        const int wanted = 420;   // "TERMINAL  ~/src/relay-terminal" and then some
-        const HeaderSplit split = headerSplit(820, taken, wanted);
-        QVERIFY2(split.directory > 0, "the directory was dropped although there was room for it");
-        QVERIFY(split.directory >= kDirectoryFloorPx);
-        QVERIFY(split.title >= kTitleFloorPx);
-        // The whole row fits: nothing is left to the layout to clip mid-glyph.
-        QVERIFY2(split.title + split.directory + taken <= 820,
-                 qPrintable(QStringLiteral("title %1 + directory %2 + chrome %3 > 820")
-                                .arg(split.title).arg(split.directory).arg(taken)));
+    // Everything is on and the header is exactly as wide as the row wants: nothing has given way.
+    void aFullHeaderGivesNothingAway() {
+        const HeaderWants w = everythingOn();
+        const HeaderFit fit = headerFit(fullWidth(w), w);
+        QCOMPARE(rung(w, fit), 0);
+        QCOMPARE(fit.directory, w.directory);
+        QCOMPARE(fit.title, w.title);
+        QCOMPARE(fit.word, WordForm::Full);
+        QCOMPARE(fit.wordPx, w.stateWord);
+        QCOMPARE(fit.ssh, SshForm::UserAndHost);
+        QCOMPARE(fit.sshPx, w.ssh);
+        QCOMPARE(fit.usage, UsageForm::CpuAndMemory);
+        QCOMPARE(fit.usagePx, w.usage);
+        QCOMPARE(fit.shortfall, 0);
+        QVERIFY(fits(w, fit, fullWidth(w)));
     }
 
-    // The title is served first, and a directory with no room for a legible tail is dropped
-    // rather than shown as the half glyph a squeezed QLabel used to paint.
-    void theDirectoryGivesWayToTheTitleAndThenGoes() {
-        // Room for both: the directory takes what it asked for and the title keeps the rest.
-        const HeaderSplit roomy = headerSplit(900, 100, 300);
-        QCOMPARE(roomy.directory, 300);
-        QCOMPARE(roomy.title, 500);
-        // Squeezed: the title keeps its floor, the directory elides into what is left.
-        const HeaderSplit tight = headerSplit(300, 100, 300);
-        QCOMPARE(tight.title, kTitleFloorPx);
-        QCOMPARE(tight.directory, 120);
-        // No legible tail left: no directory at all, and every pixel goes to the title.
-        const HeaderSplit crammed = headerSplit(220, 100, 300);
-        QCOMPARE(crammed.directory, 0);
-        QCOMPARE(crammed.title, 120);
-        // Narrower than the title's own floor: the title still gets it, and nothing else does.
-        const HeaderSplit tiny = headerSplit(120, 100, 300);
-        QCOMPARE(tiny.directory, 0);
-        QCOMPARE(tiny.title, kTitleFloorPx);
-        // Nothing to show: no width is reserved for it.
-        QCOMPARE(headerSplit(900, 100, 0).directory, 0);
-        QCOMPARE(headerSplit(900, 100, 0).title, 800);
+    // Rung 1: the directory is the first to give, eliding from the left to its floor and then going
+    // altogether, while the title is still whole.
+    void theDirectoryGivesWayFirst() {
+        const HeaderWants w = everythingOn();
+        const HeaderFit elided = headerFit(fullWidth(w) - 100, w);
+        QCOMPARE(rung(w, elided), 1);
+        QCOMPARE(elided.directory, w.directory - 100);
+        QCOMPARE(elided.title, w.title);
+        QVERIFY(elided.directory >= kDirectoryFloorPx);
+
+        // One pixel under the floor is no path at all, never a stub.
+        const int floorAt = fullWidth(w) - (w.directory - kDirectoryFloorPx);
+        QCOMPARE(headerFit(floorAt, w).directory, kDirectoryFloorPx);
+        QCOMPARE(headerFit(floorAt - 1, w).directory, 0);
+        QCOMPARE(headerFit(floorAt - 1, w).title, w.title);   // the title has not started yet
     }
 
-    // The split must not depend on what the split decided, or showing the directory would change
-    // the room for the directory and the header would flicker between two answers.
-    void theSplitDoesNotMoveWithTheDirectoryItChose() {
-        for (int wanted : {0, 40, 200, 900}) {
-            const HeaderSplit split = headerSplit(820, 260, wanted);
-            QCOMPARE(split.title + split.directory, 560);
+    // Rung 2: with the directory gone the title elides, down to its floor and no further.
+    void thenTheTitleElidesToItsFloor() {
+        const HeaderWants w = everythingOn();
+        // The width at which the title has exactly its full text and nothing to spare.
+        const int titleFull = fullWidth(w) - w.directory;
+        QCOMPARE(headerFit(titleFull, w).title, w.title);
+        QCOMPARE(headerFit(titleFull, w).directory, 0);
+        QCOMPARE(headerFit(titleFull - 40, w).title, w.title - 40);
+        QCOMPARE(rung(w, headerFit(titleFull - 40, w)), 3);
+        // The floor, and then the word is what gives instead.
+        const int titleAtFloor = titleFull - (w.title - kTitleFloorPx);
+        QCOMPARE(headerFit(titleAtFloor, w).title, kTitleFloorPx);
+        QCOMPARE(headerFit(titleAtFloor, w).word, WordForm::Full);
+        QCOMPARE(headerFit(titleAtFloor - 1, w).title, kTitleFloorPx);
+        QVERIFY(headerFit(titleAtFloor - 1, w).word != WordForm::Full);
+    }
+
+    // Rung 3: the state word goes to its short form, then leaves the glyph to say it.
+    void thenTheStateWordShortensAndThenGoes() {
+        const HeaderWants w = everythingOn();
+        const int wordFull = fullWidth(w) - w.directory - (w.title - kTitleFloorPx);
+        QCOMPARE(headerFit(wordFull, w).word, WordForm::Full);
+        const HeaderFit shortened = headerFit(wordFull - 1, w);
+        QCOMPARE(shortened.word, WordForm::Short);
+        QCOMPARE(shortened.wordPx, w.stateWordShort);
+        QCOMPARE(shortened.title, kTitleFloorPx);      // the title gave way before the word did
+        QCOMPARE(shortened.ssh, SshForm::UserAndHost); // and the chips have not started
+        QCOMPARE(shortened.sshPx, w.ssh);
+
+        const HeaderFit gone = headerFit(wordFull - (w.stateWord - w.stateWordShort) - 1, w);
+        QCOMPARE(gone.word, WordForm::Hidden);
+        QCOMPARE(gone.wordPx, 0);
+        QCOMPARE(gone.sshPx, w.ssh);                   // still the chips' turn next, not now
+    }
+
+    // Rung 4: the ssh chip is squeezed to its 150 px floor, then drops the `user@` and shows the
+    // host alone below that floor, then elides the host itself.
+    void thenTheSshChipKeepsOnlyTheHost() {
+        const HeaderWants w = everythingOn();
+        const int sshFull = fullWidth(w) - w.directory - (w.title - kTitleFloorPx) - w.stateWord;
+        QCOMPARE(headerFit(sshFull, w).sshPx, w.ssh);
+        QCOMPARE(headerFit(sshFull, w).ssh, SshForm::UserAndHost);
+        // Squeezed, still user@host: the chip elides its own text into what it is given.
+        const HeaderFit squeezed = headerFit(sshFull - 10, w);
+        QCOMPARE(squeezed.ssh, SshForm::UserAndHost);
+        QCOMPARE(squeezed.sshPx, w.ssh - 10);
+        // At the floor it drops the user. Below the host's own width the host elides, and the chip
+        // never goes under the width of the glyph and one ellipsis.
+        const HeaderFit host = headerFit(sshFull - (w.ssh - kSshFloorPx) - 1, w);
+        QCOMPARE(host.ssh, SshForm::HostOnly);
+        QCOMPARE(host.sshPx, kSshFloorPx - 1);
+        const HeaderFit tight = headerFit(sshFull - (w.ssh - w.sshEllipsis), w);
+        QCOMPARE(tight.ssh, SshForm::HostOnly);
+        QCOMPARE(tight.sshPx, w.sshEllipsis);
+        QVERIFY(headerFit(200, w).sshPx >= w.sshEllipsis);
+    }
+
+    // Rung 5, the last one: the usage chip collapses to CPU alone, and it happens exactly when the
+    // ssh chip has reached its floor — not before, since the meter outlives the host.
+    void andLastTheUsageChipKeepsOnlyTheCpu() {
+        const HeaderWants w = everythingOn();
+        int collapsed = 0;
+        for (int width = fullWidth(w); width >= 100; --width)
+            if (headerFit(width, w).usage == UsageForm::CpuOnly) { collapsed = width; break; }
+        QVERIFY2(collapsed > 0, "the usage chip never collapsed, however narrow the header got");
+        QCOMPARE(headerFit(collapsed, w).usagePx, w.usageCpu);
+        QCOMPARE(headerFit(collapsed + 1, w).usage, UsageForm::CpuAndMemory);
+        // The rung below it has been taken to the last pixel, and the badge and the glyph have not.
+        QCOMPARE(headerFit(collapsed, w).sshPx, w.sshEllipsis);
+        QCOMPARE(headerFit(collapsed, w).title, kTitleFloorPx);
+        QCOMPARE(headerFit(collapsed, w).shortfall, 0);
+        // Past the last rung the header is simply too narrow, and it says so rather than taking
+        // the badge apart.
+        QVERIFY(headerFit(collapsed - 40, w).shortfall > 0);
+        QCOMPARE(headerFit(collapsed - 40, w).title, kTitleFloorPx);
+        QCOMPARE(headerFit(collapsed - 40, w).sshPx, w.sshEllipsis);
+    }
+
+    // Every rung is reached, in this order and no other, as the pane narrows.
+    void theRungsComeInTheDecidedOrder() {
+        const HeaderWants w = everythingOn();
+        QList<int> seen;
+        for (int width = fullWidth(w) + 60; width >= 200; --width) {
+            const int step = rung(w, headerFit(width, w));
+            if (seen.isEmpty() || seen.last() != step) {
+                QVERIFY2(seen.isEmpty() || step == seen.last() + 1,
+                         qPrintable(QStringLiteral("at %1 px the ladder jumped from rung %2 to rung %3")
+                                        .arg(width).arg(seen.isEmpty() ? -1 : seen.last()).arg(step)));
+                seen.append(step);
+            }
         }
+        QCOMPARE(seen, QList<int>({0, 1, 2, 3, 4, 5, 6, 7, 8, 9}));
+    }
+
+    // Widening gives the elements back in the reverse order: the fit at a width is the same whether
+    // the pane has just been narrowed to it or just widened to it, because it is a function of the
+    // width alone. Nothing here can oscillate: applying a fit changes what the chips ask for, the
+    // row is laid out again and this function is asked again — and it must answer the same thing.
+    void theLadderIsAFunctionOfTheWidthAlone() {
+        const HeaderWants w = everythingOn();
+        QMap<int, QString> narrowing, widening;
+        for (int width = fullWidth(w) + 60; width >= 200; --width) narrowing.insert(width, describe(headerFit(width, w)));
+        for (int width = 200; width <= fullWidth(w) + 60; ++width) widening.insert(width, describe(headerFit(width, w)));
+        QCOMPARE(narrowing, widening);
+        // And nothing an element shows ever shrinks as the header grows.
+        HeaderFit last = headerFit(200, w);
+        for (int width = 200; width <= fullWidth(w) + 60; ++width) {
+            const HeaderFit fit = headerFit(width, w);
+            QVERIFY2(rung(w, fit) <= rung(w, last), qPrintable(QStringLiteral("rung went up at %1 px").arg(width)));
+            QVERIFY(fit.title >= last.title);
+            QVERIFY(fit.directory >= last.directory);
+            QVERIFY(fit.wordPx >= last.wordPx);
+            QVERIFY(fit.sshPx >= last.sshPx);
+            QVERIFY(fit.usagePx >= last.usagePx);
+            QVERIFY2(fits(w, fit, width) || fit.shortfall > 0,
+                     qPrintable(QStringLiteral("the row does not fit in %1 px").arg(width)));
+            last = fit;
+        }
+    }
+
+    // A chip that is not there takes no room and is never asked to give way; the ladder is the same
+    // ladder with one rung missing.
+    void anAbsentChipCostsNothing() {
+        HeaderWants w = everythingOn();
+        w.ssh = w.sshHost = w.sshEllipsis = 0;           // a local pane
+        for (int width : {1200, 800, 600, 420, 300}) {
+            const HeaderFit fit = headerFit(width, w);
+            QCOMPARE(fit.sshPx, 0);
+            QVERIFY(fits(w, fit, width) || fit.shortfall > 0);
+        }
+        // Without the chip the title and the directory keep their room for longer.
+        QVERIFY(headerFit(700, w).directory > headerFit(700, everythingOn()).directory);
+
+        HeaderWants idle = everythingOn();
+        idle.stateWord = idle.stateWordShort = 0;        // no live state: the glyph alone
+        for (int width : {1200, 800, 600, 420, 300}) {
+            QCOMPARE(headerFit(width, idle).word, WordForm::Hidden);
+            QCOMPARE(headerFit(width, idle).wordPx, 0);
+        }
+        HeaderWants quiet = everythingOn();
+        quiet.usage = quiet.usageCpu = 0;                // a pane costing nothing worth reading
+        for (int width : {1200, 800, 600, 420, 300}) QCOMPARE(headerFit(width, quiet).usagePx, 0);
+        // The badge and the glyph never give way, so their room is simply gone from the ladder.
+        HeaderWants noBadge = everythingOn();
+        noBadge.badge = 0;
+        QVERIFY(headerFit(800, noBadge).directory > headerFit(800, everythingOn()).directory);
+    }
+
+    // A title shorter than its floor asks for what it is: the floor is a limit on eliding, not a
+    // reservation, and the directory has the rest.
+    void aShortTitleDoesNotHoardItsFloor() {
+        HeaderWants w = everythingOn();
+        w.title = 30;
+        const HeaderFit fit = headerFit(fullWidth(w), w);
+        QCOMPARE(fit.title, 30);
+        QCOMPARE(fit.directory, w.directory);
+        QVERIFY(fits(w, fit, fullWidth(w)));
     }
 };
 

@@ -46,29 +46,79 @@ int neighborIndex(const QRect &from, const QList<QRect> &candidates, Direction d
 // Ctrl+Alt+Down do nothing. Pane sizes are kept.
 void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor);
 
-// ----- the pane header's two elided labels ----------------------------------------------------
+// ----- the pane header: the order in which it gives way (owner, 2026-09-19) --------------------
 //
-// A pane header is the title on the left and the directory on the right, with the state glyph,
-// the subagent badge and the ssh / phone / usage chips between them (PaneChrome puts those at the
-// front of the row). Both labels are elided by hand rather than left to the layout: a QLabel that
-// the layout has squeezed clips its text mid-glyph, which is how a crowded header came to end in
-// a stray half of a character instead of a path.
+// A pane header is the title on the left and the directory on the right, with the state glyph, the
+// state's word, the subagent badge and the ssh / phone / usage chips between them (PaneChrome puts
+// those at the front of the row). With everything on it wants about 470 px, and a pane in a
+// three-pane row has far less. So the elements give way in one fixed order, and when the pane
+// widens again they come back in exactly the reverse one:
 //
-// `taken` is what everything that is not one of the two labels has already claimed — chips,
-// badge, spacing, the right inset PaneChrome asks for. `directoryWanted` is the width the
-// directory would like (its full text). The title is served first down to its floor; the
-// directory gets what is left, and is dropped entirely rather than shown as a stub when that is
-// less than a legible tail. The result always fits: title + directory + taken <= headerWidth
-// whenever the header is at least kTitleFloorPx + taken wide.
+//   1. the directory elides from the left down to its legible floor, and then goes — below that
+//      floor "…/x" says nothing, so no path is better than a stub;
+//   2. the title elides (ElideRight) down to its own floor;
+//   3. the state word goes to its short form (`relay::panestatus::stateLabelShort`: "Running",
+//      "Subagents") and then goes, leaving the glyph, which says it too;
+//   4. the ssh chip is squeezed to its 150 px floor (eliding user@host in the middle), then drops
+//      the `user@` and shows the host alone — below its floor, which is what rung 4 is for — and
+//      below the host's own width elides the host with a whole ellipsis;
+//   5. the usage chip collapses to CPU alone: no memory half and no separator;
+//   6. nothing else gives. The subagent badge stays whole and the state glyph stays, always.
+//
+// Nothing is ever drawn as a partial glyph or cut mid-letter: each step either elides by whole
+// glyphs or leaves its element out. Both labels are therefore elided by hand rather than left to
+// the layout, which clips a squeezed QLabel mid-glyph — that is how a crowded header came to end
+// in a stray half of a character instead of a path.
+//
+// The whole ladder is this one function, and it reads nothing but the header's width and the
+// natural widths of the elements. In particular it never reads what an element is showing *now*:
+// the chips are painted widgets whose sizeHint follows the form this function chose, so an answer
+// that depended on the current form would feed itself, and the header would flicker between two
+// rungs for ever. `Pane::updateHeader()` applies the answer, Qt lays the row out again, and asks
+// again — the second answer has to be the first one. Tests: tests/panelayout_test.cpp.
 inline constexpr int kTitleFloorPx = 80;       // never elide a title into less than this
 inline constexpr int kDirectoryFloorPx = 56;   // below this "…/x" says nothing; show no path
+inline constexpr int kSshFloorPx = 150;        // a chip still showing user@ is not squeezed below this
 
-struct HeaderSplit {
-    int title = 0;       // px the title may elide into; never below kTitleFloorPx
-    int directory = 0;   // px the directory may elide into; 0 means "do not show it at all"
+// What each element would take if it had the room, in pixels, as the row measures it now. 0 means
+// the element is not in this header at all. The caller folds the row's spacing, its margins and
+// the room the hover button row is kept clear of into `fixed`.
+struct HeaderWants {
+    int title = 0;            // the title's full text
+    int directory = 0;        // the directory line's full text
+    int stateWord = 0;        // the live state's word, long form ("Subagents working")
+    int stateWordShort = 0;   // the same word, short form ("Subagents")
+    int ssh = 0;              // the ssh chip showing "⇄ user@host"
+    int sshHost = 0;          // the same chip showing the host alone
+    int sshEllipsis = 0;      // the same chip with the host elided to one ellipsis: its hard floor
+    int usage = 0;            // the usage chip, CPU and memory
+    int usageCpu = 0;         // the same chip, CPU alone
+    int glyph = 0;            // the state glyph, which never gives way
+    int badge = 0;            // the subagent badge, which is whole or absent
+    int chips = 0;            // the phone / sharing chip and anything else that never shrinks
+    int fixed = 0;            // margins, the row's spacing, the button row's room
 };
 
-HeaderSplit headerSplit(int headerWidth, int taken, int directoryWanted);
+enum class WordForm { Full, Short, Hidden };
+enum class SshForm { UserAndHost, HostOnly };
+enum class UsageForm { CpuAndMemory, CpuOnly };
+
+// What each element shows and how much room it is given. The px values are what the caller hands
+// each widget as its width: their sum plus `HeaderWants::fixed` and the elements that cannot give
+// way is at most `headerWidth`, unless `shortfall` says the header is narrower than what stays.
+struct HeaderFit {
+    int title = 0;            // px the title may elide (ElideRight) into; 0 only when there is none
+    int directory = 0;        // px the directory may elide (ElideLeft) into; 0 means do not show it
+    WordForm word = WordForm::Hidden;
+    int wordPx = 0;           // px for the state word; 0 when it is not shown
+    SshForm ssh = SshForm::UserAndHost;
+    int sshPx = 0;            // px for the ssh chip, which elides its text into them; 0 when absent
+    UsageForm usage = UsageForm::CpuAndMemory;
+    int usagePx = 0;          // px for the usage chip; 0 when absent
+    int shortfall = 0;        // px by which what cannot give way still exceeds the header
+};
+
+HeaderFit headerFit(int headerWidth, const HeaderWants &wants);
 
 // The edge of a pane that a drop at `local` (a point inside a pane of `size`) belongs to: the
 // nearest edge wins. Dropping just past the divider between two panes therefore names the edge

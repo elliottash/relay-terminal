@@ -88,7 +88,9 @@ in the pane header, add a badge with a number for number of subagents, if applic
 - [ ] A main turn still running with a subagent live: the badge reads 1 beside "Relaying…".
 - [ ] Hovering the badge: "N subagents running in this pane · <key> opens the subagents pane", with
       the live Keymap text (rebinding `agent.subagentPane` changes it).
-- [ ] In a narrow pane the title elides first and the badge stays whole; with an ssh session up the
+- [ ] In a narrow pane the badge stays whole and the others give way in the owner's order of
+      2026-09-19 (the directory, then the title, then the state's word, then the ssh chip's `user@`,
+      then the usage meter's memory half — `relay::panes::headerFit`); with an ssh session up the
       badge is still legible on the hatched band, and the band's own colours are unchanged.
 - [ ] Pressing or dragging the badge moves the pane like any other press on the header; the badge
       has no action of its own.

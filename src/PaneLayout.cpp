@@ -93,18 +93,85 @@ PlacementWindow::Response PlacementWindow::mousePress(qint64 nowMs) {
     return {Action::Dismiss, Direction::Right};
 }
 
-HeaderSplit headerSplit(int headerWidth, int taken, int directoryWanted) {
-    HeaderSplit split;
-    const int free = std::max(0, headerWidth - std::max(0, taken));
-    // What is left once the title has its floor. Computed from the header and the chips only, so
-    // it does not move when the directory's own width does: showing or hiding the path cannot
-    // change the answer, and the two cannot oscillate against each other.
-    const int forDirectory = free - kTitleFloorPx;
-    split.directory = directoryWanted <= 0 || forDirectory < kDirectoryFloorPx
-                          ? 0
-                          : std::min(directoryWanted, forDirectory);
-    split.title = std::max(kTitleFloorPx, free - split.directory);
-    return split;
+// The give-way ladder (owner, 2026-09-19; the order and the reasoning are in PaneLayout.h).
+//
+// One pass, the elements served in the REVERSE of the give-way order — the usage chip first, the
+// directory last. Each of them is served against the header minus what the elements ABOVE it in
+// the order would take at their FULL width, and minus the floors of the elements below it. Serving
+// the usage chip against "the header minus everybody else's floor" is exactly what "the usage chip
+// gives way last" means, and the same line read the other way is what "the directory gives way
+// first" means; written as a list of rungs instead it would have been a dozen thresholds to keep in
+// step with one another. The thresholds do meet: the title reaches its floor at the same width at
+// which the word starts to shorten, and the ssh chip reaches its floor at the same width at which
+// the usage chip collapses.
+//
+// Full widths and not granted ones, because an element that has just given way must not hand its
+// pixels to one that gave way before it: a title fed the pixels of a word that had just gone would
+// grow as the pane narrowed and shrink as it widened — the give-way order run backwards. Those
+// pixels are simply not spent, and the stretch in the middle of the header row takes them, which
+// is what it does with the empty space a narrow header has anyway.
+//
+// Every grant is therefore a clamp of a width-plus-a-constant, so it never falls as the header
+// grows: the elements come back in the reverse order for free, and no width has two answers.
+HeaderFit headerFit(int headerWidth, const HeaderWants &wants) {
+    const auto positive = [](int value) { return std::max(0, value); };
+    const int titleWant = positive(wants.title);
+    // A title narrower than the floor asks for what it is, so the directory is not kept out by room
+    // the title could not use.
+    const int titleFloor = std::min(titleWant, kTitleFloorPx);
+    const int directoryWant = positive(wants.directory);
+    const int directoryFloor = directoryWant > 0 ? std::min(directoryWant, kDirectoryFloorPx) : 0;
+    const int wordFull = positive(wants.stateWord);
+    const int wordShort = wordFull > 0 ? std::min(wordFull, positive(wants.stateWordShort)) : 0;
+    // No form of the ssh chip is wider than the form above it, whatever the host is called: a host
+    // whose own name is wider than the 150 px floor is elided into it rather than making the chip
+    // grow at the moment it drops the `user@`, which would undo the rung above.
+    const int sshFull = positive(wants.ssh);
+    const int sshSqueezed = sshFull > 0 ? std::min(sshFull, kSshFloorPx) : 0;
+    const int sshHost = std::min(sshSqueezed, positive(wants.sshHost));
+    const int sshFloor = std::min(sshHost, positive(wants.sshEllipsis));
+    const int usageFull = positive(wants.usage);
+    const int usageFloor = usageFull > 0 ? std::min(usageFull, positive(wants.usageCpu)) : 0;
+
+    // What the glyph, the badge, the chips that never shrink and the row itself have taken already.
+    const int fixed = positive(wants.fixed) + positive(wants.glyph) + positive(wants.badge) + positive(wants.chips);
+    const int room = headerWidth - fixed;
+
+    HeaderFit fit;
+    // 5. The usage chip: whole while everything that outlives it still has its floor, CPU alone
+    // after that. The memory half and the separator go together — "12%/" is not a reading.
+    // Its two forms are the only two widths it has — it paints a number, it does not elide one —
+    // so the allowance only picks the form and the form then says the width.
+    fit.usage = room - sshFloor - titleFloor >= usageFull ? UsageForm::CpuAndMemory : UsageForm::CpuOnly;
+    fit.usagePx = fit.usage == UsageForm::CpuAndMemory ? usageFull : usageFloor;
+
+    // 4. The ssh chip: "user@host" down to the 150 px floor, then the host alone, then the host
+    // elided to one ellipsis. The chip elides its own text into what it is given; the form only
+    // says which of the two texts it elides.
+    fit.sshPx = std::clamp(sshFull, sshFloor, std::max(sshFloor, room - usageFull - titleFloor));
+    fit.ssh = fit.sshPx >= sshSqueezed ? SshForm::UserAndHost : SshForm::HostOnly;
+
+    // 3. The state word: the long form, then the short one, then nothing at all, since the glyph
+    // beside it and its tooltip both still say the state.
+    const int forWord = room - usageFull - sshFull - titleFloor;
+    fit.word = wordFull > 0 && forWord >= wordFull    ? WordForm::Full
+               : wordShort > 0 && forWord >= wordShort ? WordForm::Short
+                                                       : WordForm::Hidden;
+    fit.wordPx = fit.word == WordForm::Full ? wordFull : fit.word == WordForm::Short ? wordShort : 0;
+
+    // 2. The title, elided from the right down to its floor.
+    const int forTitle = room - usageFull - sshFull - wordFull;
+    fit.title = std::clamp(titleWant, titleFloor, std::max(titleFloor, forTitle));
+
+    // 1. The directory gives way first: it has what is left once everything else is whole, and goes
+    // rather than shows a stub when that is less than a legible tail.
+    const int forDirectory = forTitle - titleWant;
+    fit.directory = directoryWant > 0 && forDirectory >= directoryFloor ? std::min(directoryWant, forDirectory) : 0;
+
+    // What is left when everything has given way all it can: the caller cannot do anything about it
+    // (the badge and the glyph stay whole), but a test can say when a header is past its last rung.
+    fit.shortfall = std::max(0, usageFloor + sshFloor + titleFloor - room);
+    return fit;
 }
 
 Direction dropEdge(const QPoint &local, const QSize &size) {

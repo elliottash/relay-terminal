@@ -108,12 +108,45 @@ logged as `runtime_sweep` only when something was removed or failed.
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
 
 Pane anatomy, top to bottom: the header (the pane title on the left, the directory on the right;
-clicking the directory opens the explorer), an optional
+clicking the directory opens the explorer, and what the row does when it runs out of room is the
+give-way ladder below), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
 frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
 key hints). Overlays float over the terminal without resizing it (a resize makes the idle shell
 redraw its prompt in the middle of inline output): the agent queue strip, the thinking panel,
 toasts and the pane button row.
+
+**The pane header as it narrows** (owner, 2026-09-19). With everything on — the state glyph and
+its word, the title, the directory, the ssh chip, the phone chip, the usage meter and the subagent
+badge — the row wants about 470 px, and a pane in a three-pane row has far less. The elements give
+way in one decided order, and when the pane widens again they come back in exactly the reverse one:
+(1) the directory elides from the left to its legible floor and then goes altogether, since below
+that floor "…/x" says nothing a stub could be worth; (2) the title elides (ElideRight) down to its
+own floor; (3) the state's word goes to its short form (`stateLabelShort`: "Running", "Subagents")
+and then goes, leaving the glyph, which says it too; (4) the ssh chip is squeezed to its 150 px
+floor and then drops the `user@` for the host alone — that is what going *below* the floor buys —
+and below the host's own width elides the host; (5) the usage meter collapses to CPU alone, with
+neither the memory half nor the separator; (6) nothing else gives: the subagent badge stays whole
+and the glyph stays, always. Nothing is ever drawn as a partial glyph or cut mid-letter: each step
+either elides by whole glyphs or leaves its element out, and both labels are elided by hand rather
+than left to the layout, which clips a squeezed QLabel mid-glyph — that is how a crowded header came
+to end in a stray half of a character instead of a path.
+
+The whole ladder is one pure function, `relay::panes::headerFit()` in `src/PaneLayout.{h,cpp}`
+(floors `kTitleFloorPx`, `kDirectoryFloorPx`, `kSshFloorPx`; tests `tests/panelayout_test.cpp`,
+including the rung order, the reverse path and that the answer is a function of the width alone).
+It is given the header's width and every element's *natural* widths, and never what an element is
+showing at this moment: `Pane::updateHeader()` applies the answer, which changes what those widgets
+ask for, so Qt lays the row out and asks again — an answer that read the current forms would feed
+itself and the header would flicker between two rungs for ever. Each element is served against the
+header minus the *full* widths of the elements above it in the order and the floors of those below,
+which is why the thresholds meet (the title reaches its floor at the same width at which the word
+starts to shorten) and why a word that has just gone cannot hand its pixels back to the title, which
+gave way before it — that would be the order run backwards, the title growing as the pane narrowed.
+The unspent pixels go to the stretch in the middle of the row. `Pane` owns the two labels and
+`PaneChrome` owns everything else in the row, so the two halves meet over the ladder:
+`Pane::onHeaderWants` collects the chips' natural widths and `Pane::onHeaderFit` hands each chip the
+form and the room it was given (`PaneChrome::measureHeader`, `PaneChrome::applyHeaderFit`).
 
 Layout rules:
 
@@ -307,8 +340,9 @@ never an opacity, so the ink keeps its contrast), the state's word sits beside i
 running", "Relaying…", "Subagents working" — `stateLabel`) in the work's own colour lifted to 4.5:1
 on the header's ground (`stateText`) — shortened to one word (`stateLabelShort`: "Running",
 "Subagents") when the row has run out of room for the full one, and left out rather than cut in
-half when even that does not fit, since the glyph and the tooltip still say it — and a tab with
-anything live carries a blinking corner dot
+half when even that does not fit, since the glyph and the tooltip still say it; which of the three
+it shows is rung 3 of the give-way ladder above, not the word's own reading of its width — and a
+tab with anything live carries a blinking corner dot
 in that colour (`liveMarker`: the agent's violet whenever agent work — a turn or subagents — is
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
@@ -333,7 +367,9 @@ under the composer is where the ones that ended are read. Zero is not a "0":
 hides itself, which is what "if applicable" asks for and what keeps a pane that has never
 started a subagent looking exactly as it did before. Its tooltip says the count in words and
 teaches the key that opens the subagents pane (Alt+A, `agent.subagentPane`, read live as the
-folded strip does). It is a read-out, not a button: a press on the header moves the pane.
+folded strip does). It is a read-out, not a button: a press on the header moves the pane. It never
+gives way either: however narrow the pane, the badge is whole or it is not there, and the give-way
+ladder above takes its room from the other elements in the order the owner set.
 `relay::panestatus::subagentBadgeStyle` is the chip's fill, hairline and ink on whatever ground
 it lands on — the pane's background, or the ssh band's fill, which is where a mid-tone ground
 exposed `atLeast` choosing its pole by `isLight`'s 0.35 split rather than by measured contrast
@@ -361,7 +397,9 @@ process under a non-main thread can be arranged on purpose. Each process contrib
 children it has already reaped still count — without that, a build whose compilers each live for
 less than one poll interval reads as an idle pane. A poll that reads nothing drops the baseline
 rather than zeroing it, so the reading after a blind tick is a fresh baseline and not a spurious
-100 %. Memory is a sum of resident sets, which counts pages two processes share more than once;
+100 %. The meter is the last thing in the header to give way, and all it gives is its memory half
+and the separator with it — rung 5 of the give-way ladder — so a narrow pane still says what it is
+costing in CPU. Memory is a sum of resident sets, which counts pages two processes share more than once;
 the tooltips say so.
 
 A reading also carries **who it is made of**: per-process CPU (that process's own tick delta

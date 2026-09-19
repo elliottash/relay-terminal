@@ -721,6 +721,58 @@ public:
         if (m_subagentBadge) m_subagentBadge->setCount(live);
     }
 
+    // ----- the header's give-way ladder (owner, 2026-09-19) --------------------------------------
+    // The Pane owns the title and the directory; PaneChrome owns everything else in that row. So
+    // `Pane::updateHeader()` asks this half for what it would take at its natural width, hands the
+    // lot to relay::panes::headerFit(), and gives the answer back here. Natural widths only: what a
+    // chip is showing at this moment is never an input, because this answer decides it — an input
+    // that read it would feed itself and the header would flicker between two rungs for ever.
+
+    // What this chrome's share of the row wants, and which widgets that share is, so the Pane can
+    // measure anything else in the row the ordinary way. Each visible widget's layout spacing is
+    // spent whatever form it is in, so the spacing goes to `fixed` and the forms only carry widths.
+    void measureHeader(relay::panes::HeaderWants &wants, QList<QWidget *> &mine) {
+        auto *pane = dynamic_cast<Pane *>(parentWidget());
+        QHBoxLayout *row = pane ? pane->headerLayout() : nullptr;
+        if (!row) return;
+        const int gap = row->spacing();
+        const auto shown = [&mine](QWidget *widget) {
+            if (widget) mine.append(widget);
+            return widget && !widget->isHidden();
+        };
+        if (shown(m_glyph)) { wants.fixed += gap; wants.glyph = m_glyph->sizeHint().width(); }
+        if (shown(m_word)) {
+            wants.fixed += gap;
+            wants.stateWord = m_word->fullWidth();
+            wants.stateWordShort = m_word->shortWidth();
+        }
+        if (shown(m_subagentBadge)) { wants.fixed += gap; wants.badge = m_subagentBadge->sizeHint().width(); }
+        if (shown(m_remoteChip)) {
+            wants.fixed += gap;
+            wants.ssh = m_remoteChip->fullWidth();
+            wants.sshHost = m_remoteChip->hostWidth();
+            wants.sshEllipsis = m_remoteChip->ellipsisWidth();
+        }
+        // The phone chip is in the row but not on the ladder: it is never asked to give way.
+        if (shown(m_phoneChip)) { wants.fixed += gap; wants.chips += m_phoneChip->sizeHint().width(); }
+        if (shown(m_usageChip)) {
+            wants.fixed += gap;
+            wants.usage = m_usageChip->fullWidth();
+            wants.usageCpu = m_usageChip->cpuWidth();
+        }
+    }
+
+    // What the ladder decided. Each widget's size hint follows the form it is given, so the row the
+    // layout then builds is the row the ladder measured.
+    void applyHeaderFit(const relay::panes::HeaderFit &fit) {
+        if (m_word) m_word->setForm(fit.word);
+        if (m_remoteChip) {
+            m_remoteChip->setForm(fit.ssh);
+            m_remoteChip->setAllowedWidth(fit.sshPx);
+        }
+        if (m_usageChip) m_usageChip->setCpuOnly(fit.usage == relay::panes::UsageForm::CpuOnly);
+    }
+
     // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10.3). The chip beside the pane's title
     // is the one thing always on screen while a pane is shared, so it is where "and two other
     // people are watching" and "alice has the keyboard" have to be said. A guest driving gets the
@@ -808,6 +860,14 @@ private:
         m_backdrop = new RemoteBackdrop(pane);
         m_backdrop->hide();
         m_backdrop->lower();
+        // The two halves of the header's give-way ladder meet here (measureHeader, applyHeaderFit).
+        QPointer<PaneChrome> guard(this);
+        pane->onHeaderWants = [guard](relay::panes::HeaderWants &wants, QList<QWidget *> &mine) {
+            if (guard) guard->measureHeader(wants, mine);
+        };
+        pane->onHeaderFit = [guard](const relay::panes::HeaderFit &fit) {
+            if (guard) guard->applyHeaderFit(fit);
+        };
         header->installEventFilter(this);
         pane->installEventFilter(this);
     }
@@ -899,18 +959,36 @@ private:
             updateGeometry(); update();
             setVisible(!m_text.isEmpty());   // Pane::updateHeader re-elides the title around it
         }
-        QSize sizeHint() const override {
-            return {advance(m_text) + 2, 18};
+        // Rung 3 of the header's give-way ladder (relay::panes::headerFit): the row can end up
+        // narrower than the word asked for — three panes to a window, with the usage chip and the
+        // subagent badge beside it. Then the short form, and when even that does not fit, nothing:
+        // a word cut off mid-letter says less than the glyph already does, and the tooltip still
+        // spells the state out. The ladder picks the form and the width follows it, so the word no
+        // longer holds room open for text it has decided not to paint.
+        void setForm(relay::panes::WordForm form) {
+            if (form == m_form) return;
+            m_form = form;
+            updateGeometry(); update();
         }
+        int fullWidth() const { return m_text.isEmpty() ? 0 : advance(m_text) + 2; }
+        int shortWidth() const { return m_short.isEmpty() ? 0 : advance(m_short) + 2; }
+        QSize sizeHint() const override {
+            return {m_form == relay::panes::WordForm::Full      ? fullWidth()
+                    : m_form == relay::panes::WordForm::Short   ? shortWidth()
+                                                                : 0,
+                    18};
+        }
+        QSize minimumSizeHint() const override { return {0, 18}; }
     protected:
         void paintEvent(QPaintEvent *) override {
             if (m_text.isEmpty()) return;
-            // The row can end up narrower than the word asked for — three panes to a window, with
-            // the usage chip and the subagent badge beside it. Then the short form, and when even
-            // that does not fit, nothing: a word cut off mid-letter says less than the glyph
-            // already does, and the tooltip still spells the state out.
-            const QString text = advance(m_text) <= width() ? m_text
-                                 : advance(m_short) <= width() ? m_short : QString();
+            QString text = m_form == relay::panes::WordForm::Full    ? m_text
+                           : m_form == relay::panes::WordForm::Short ? m_short
+                                                                     : QString();
+            // The ladder says which form this is. Should the row have been squeezed below what it
+            // granted anyway — a header narrower than the badge and the glyph and the chips' floors
+            // put together — the word gives way again rather than lose a letter to the clip.
+            if (advance(text) > width()) text = advance(m_short) <= width() ? m_short : QString();
             if (text.isEmpty()) return;
             const relay::panestatus::Tokens t = relay::chrome::tokens();
             const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
@@ -928,6 +1006,7 @@ private:
         }
         PaneChrome *m_chrome;
         QString m_text, m_short;
+        relay::panes::WordForm m_form = relay::panes::WordForm::Full;
     };
 
     // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
@@ -937,17 +1016,36 @@ private:
             setObjectName(glyph == relay::panestatus::Glyph::Remote ? QStringLiteral("paneRemoteChip") : QStringLiteral("panePhoneChip"));
             setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         }
-        void setText(const QString &text) { if (m_text == text) return; m_text = text; updateGeometry(); update(); }
+        // The chip's own text, and — rung 4 of the ladder — the host on its own, which is what is
+        // left of an "me@box" once the header cannot keep the chip at its 150 px floor. It is
+        // derived here rather than passed in, so the phone chip, whose text has no `@` in it, has
+        // one form and never gives way.
+        void setText(const QString &text) {
+            if (m_text == text) return;
+            m_text = text;
+            m_host = text.contains(QLatin1Char('@')) ? text.section(QLatin1Char('@'), -1) : text;
+            updateGeometry(); update();
+        }
+        // Which of the two texts the chip paints, and the room the ladder gave it to paint it in.
+        // The chip elides into that room itself, by whole glyphs, down to the glyph and a single
+        // ellipsis — never half a letter of a host name.
+        void setForm(relay::panes::SshForm form) { if (form == m_form) return; m_form = form; updateGeometry(); update(); }
+        void setAllowedWidth(int pixels) { if (pixels == m_allowed) return; m_allowed = pixels; updateGeometry(); update(); }
+        int fullWidth() const { return chipWidth(m_text); }
+        int hostWidth() const { return chipWidth(m_host); }
+        int ellipsisWidth() const { return chipWidth(QStringLiteral("…")); }
         // A phone chip that has to be noticed: painted as the remote-session chip is, because
         // "somebody else's keys are landing here" is the same warning.
         void setAlarm(bool alarm) { if (m_alarm == alarm) return; m_alarm = alarm; update(); }
         QSize sizeHint() const override {
-            QFont bold = font(); bold.setWeight(QFont::DemiBold);
-            const int text = std::min(220, QFontMetrics(bold).horizontalAdvance(m_text));
-            return {7 + 12 + 5 + text + 8, 18};
+            const int natural = m_form == relay::panes::SshForm::HostOnly ? hostWidth() : fullWidth();
+            return {m_allowed > 0 ? std::min(natural, m_allowed) : natural, 18};
         }
-        // The host stays readable in a narrow pane: the title gives way first (Pane::updateHeader).
-        QSize minimumSizeHint() const override { return {std::min(sizeHint().width(), 150), 18}; }
+        // Only a chip the ladder is driving may be squeezed at all, and never under the glyph and
+        // one ellipsis. The phone chip is not on the ladder, so its minimum is what it shows.
+        QSize minimumSizeHint() const override {
+            return {m_allowed > 0 ? std::min(sizeHint().width(), ellipsisWidth()) : sizeHint().width(), 18};
+        }
     protected:
         void paintEvent(QPaintEvent *) override {
             const relay::panestatus::Tokens t = relay::chrome::tokens();
@@ -965,11 +1063,22 @@ private:
             p.setFont(bold);
             p.setPen(remote ? t.text : style.text);
             const QRectF text(7 + 12 + 5, 0, width() - (7 + 12 + 5) - 6, height());
-            p.drawText(text, Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(bold).elidedText(m_text, Qt::ElideMiddle, int(text.width())));
+            // "me@box" loses its middle, so both the user and the machine survive; a host on its
+            // own loses its tail, so the name that says which machine it is comes first.
+            const bool host = m_form == relay::panes::SshForm::HostOnly;
+            p.drawText(text, Qt::AlignLeft | Qt::AlignVCenter,
+                       QFontMetrics(bold).elidedText(host ? m_host : m_text, host ? Qt::ElideRight : Qt::ElideMiddle,
+                                                     int(text.width())));
         }
     private:
+        int chipWidth(const QString &text) const {
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            return 7 + 12 + 5 + std::min(220, QFontMetrics(bold).horizontalAdvance(text)) + 8;
+        }
         relay::panestatus::Glyph m_glyph;
-        QString m_text;
+        QString m_text, m_host;
+        relay::panes::SshForm m_form = relay::panes::SshForm::UserAndHost;
+        int m_allowed = 0;               // 0 = the ladder is not driving this chip
         bool m_alarm = false;
     };
 
@@ -1036,15 +1145,19 @@ private:
             if (e->type() == QEvent::ToolTip) setToolTip(tooltipFor(m_sample));
             return QWidget::event(e);
         }
-        QSize sizeHint() const override {
-            if (m_text.isEmpty()) return {0, 0};
-            const QFontMetrics metrics(font());
-            int width = 7;
-            if (!section(0).isEmpty()) width += kGlyph + 4 + metrics.horizontalAdvance(section(0));
-            if (!section(1).isEmpty())
-                width += (section(0).isEmpty() ? 0 : 10) + kGlyph + 4 + metrics.horizontalAdvance(section(1));
-            return {width + 7, 18};
+        // Rung 5 of the header's give-way ladder (relay::panes::headerFit), and the last rung there
+        // is: the CPU half alone, with neither the memory half nor the separator, which is what
+        // makes room for the ssh chip's host and the title's floor in a three-pane row.
+        void setCpuOnly(bool cpuOnly) {
+            if (cpuOnly == m_cpuOnly) return;
+            m_cpuOnly = cpuOnly;
+            updateGeometry();
+            update();
         }
+        int fullWidth() const { return widthFor(false); }
+        int cpuWidth() const { return widthFor(true); }
+        QSize sizeHint() const override { return {widthFor(m_cpuOnly), 18}; }
+        QSize minimumSizeHint() const override { return sizeHint(); }
     protected:
         void paintEvent(QPaintEvent *) override {
             if (m_text.isEmpty()) return;
@@ -1060,6 +1173,8 @@ private:
                 const QString label = section(i);
                 if (label.isEmpty()) continue;
                 if (x > 7) x += 10;
+                // Same guard as the state's word: a half that has no room is left out whole.
+                if (x + kGlyph + 4 + metrics.horizontalAdvance(label) > width()) break;
                 const double value = i == 0 ? m_sample.cpuPercent : m_sample.ramPercent;
                 const QColor ink = value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
                 p.setPen(QPen(ink, 1.2));
@@ -1098,9 +1213,25 @@ private:
             }
         }
         // Either half may be absent, so the text carries the separator either way: "12%/3%",
-        // "12%/" for CPU alone, "/3%" for memory alone.
+        // "12%/" for CPU alone, "/3%" for memory alone. Collapsed by the ladder, the memory half is
+        // absent too — and it is not drawn in a width that has no room for it, which is what would
+        // print half a digit.
         QString section(int i) const {
+            if (i == 1 && m_cpuOnly) return {};
             return i == 0 ? m_text.section(QLatin1Char('/'), 0, 0) : m_text.section(QLatin1Char('/'), 1, 1);
+        }
+        // What the chip measures with the halves it would then show. A collapsed chip with nothing
+        // in its CPU half has nothing left to show, so it takes no room rather than an empty box.
+        int widthFor(bool cpuOnly) const {
+            if (m_text.isEmpty()) return 0;
+            const QString cpu = m_text.section(QLatin1Char('/'), 0, 0);
+            const QString memory = cpuOnly ? QString() : m_text.section(QLatin1Char('/'), 1, 1);
+            if (cpu.isEmpty() && memory.isEmpty()) return 0;
+            const QFontMetrics metrics(font());
+            int width = 7;
+            if (!cpu.isEmpty()) width += kGlyph + 4 + metrics.horizontalAdvance(cpu);
+            if (!memory.isEmpty()) width += (cpu.isEmpty() ? 0 : 10) + kGlyph + 4 + metrics.horizontalAdvance(memory);
+            return width + 7;
         }
         QString text() const {
             QString out;
@@ -1120,6 +1251,7 @@ private:
         relay::usage::Sample m_sample;
         QString m_text;      // "12%/3%"; empty when the chip is hidden
         bool m_shown = false; // what this chip was last told, not the recursive isVisible()
+        bool m_cpuOnly = false;  // the ladder's last rung: the CPU half and nothing else
         int m_inkBucket = 0;
     };
 

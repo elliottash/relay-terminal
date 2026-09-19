@@ -153,8 +153,10 @@ the "same work" rule, joining and shortening). `./scripts/test.sh` 522 tests, `c
 7. **Fallback.** Point a pane at an endpoint that fails (or set the chores role to a provider with
    no key) and send a prompt. The header must still fill in — with the first prompt's text — rather
    than stay on the directory, and the failure must not appear as an error toast or stop the turn.
-8. **Narrow panes.** Split until a pane is narrow: the title elides with "…", the directory stays
-   readable and, while the pane-button row is showing, the directory is not underneath it.
+8. **Narrow panes.** Split until a pane is narrow. The give-way order is the owner's, 2026-09-19
+   (`relay::panes::headerFit`): the directory goes first — readable, then gone, never a stub — and
+   only then does the title elide with "…". While the pane-button row is showing, the directory is
+   not underneath it, and nothing anywhere in the row ends in half a character.
 9. **Privacy and cost.** Nothing new leaves the machine except the conversation text the title call
    sends to the pane's own provider on the chores role. Check `~/.local/share/relay/logs/` for a
    title call that logged a prompt (there should be none; only a `title_failed` line with an

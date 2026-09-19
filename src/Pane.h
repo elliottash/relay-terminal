@@ -13722,35 +13722,56 @@ public:
         updateHeader();
     }
 
+    // The header's give-way ladder (`relay::panes::headerFit`, owner's decision 2026-09-19). Every
+    // element in this row — the state glyph and its word, the title, the directory, the ssh, phone
+    // and usage chips, the subagent badge (#XM0T, #SPBN, #D03W, #YMSR) — is measured at its natural
+    // width, the ladder says what each of them shows in the room there is, and this applies it. The
+    // labels are elided by hand rather than left to the layout, which clips a squeezed QLabel
+    // mid-glyph: that is how a crowded header came to end in a stray half of a character.
+    //
+    // PaneChrome owns everything in the row except the two labels, so it fills in its own share
+    // through `onHeaderWants` and is handed the answer through `onHeaderFit`. Applying the answer
+    // changes what those widgets ask for, Qt lays the row out again and this runs again — which is
+    // safe only because the ladder reads natural widths alone and so answers the same thing twice.
+    std::function<void(relay::panes::HeaderWants &wants, QList<QWidget *> &mine)> onHeaderWants;
+    std::function<void(const relay::panes::HeaderFit &fit)> onHeaderFit;
+
     void updateHeader() {
         if (!m_titleLabel) return;
         const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
         const QFontMetrics metrics(m_titleLabel->font());
-        // What neither label gets: the badge, the margins and the hover button row.
-        int taken = (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
-                    + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
-        // What PaneChrome put in the row too: the state glyph and word, the subagent badge and
-        // the ssh / phone / usage chips (#XM0T, #SPBN, #D03W, #YMSR).
+        const QFontMetrics cwdMetrics(m_cwdLabel ? m_cwdLabel->font() : m_titleLabel->font());
+        relay::panes::HeaderWants wants;
+        wants.title = metrics.horizontalAdvance(shown);
+        wants.directory = m_cwdLabel && !m_cwdText.isEmpty() ? cwdMetrics.horizontalAdvance(m_cwdText) : 0;
+        // What no element on the ladder can have: the `auto` badge, the margins, and the room the
+        // hover button row is kept clear of.
+        wants.fixed = (m_titleAuto && m_titleAuto->isVisible()
+                           ? m_titleAuto->sizeHint().width() + (m_headerLayout ? m_headerLayout->spacing() : 0)
+                           : 0)
+                      + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
+        QList<QWidget *> chrome;
+        if (onHeaderWants) onHeaderWants(wants, chrome);
+        // Anything else that has been put in this row keeps its whole width: it is not on the ladder.
         for (int i = 0; m_headerLayout && i < m_headerLayout->count(); ++i)
             if (QWidget *w = m_headerLayout->itemAt(i)->widget(); w && !w->isHidden() && w != m_titleLabel
-                && w != m_titleEdit && w != m_titleAuto && w != m_cwdLabel)
-                taken += w->sizeHint().width() + m_headerLayout->spacing();
-        // Both labels are elided by hand to what is actually left (relay::panes::headerSplit):
-        // the title first, down to its floor, then the directory. A directory the layout squeezed
-        // instead used to lose its last glyph to a clip and print half a character.
+                && w != m_titleEdit && w != m_titleAuto && w != m_cwdLabel && !chrome.contains(w))
+                wants.chips += w->sizeHint().width() + m_headerLayout->spacing();
         const int header = m_headerWidget ? m_headerWidget->width() : width();
-        const QFontMetrics cwdMetrics(m_cwdLabel ? m_cwdLabel->font() : m_titleLabel->font());
-        const int wanted = m_cwdLabel && !m_cwdText.isEmpty() ? cwdMetrics.horizontalAdvance(m_cwdText) : 0;
-        const relay::panes::HeaderSplit split = relay::panes::headerSplit(header, taken, wanted);
+        const relay::panes::HeaderFit fit = relay::panes::headerFit(header, wants);
+        if (onHeaderFit) onHeaderFit(fit);
         if (m_cwdLabel) {
-            // Hiding it keeps `taken` the same — the loop above skips the directory — so the
-            // split cannot change because of what the split decided.
-            m_cwdLabel->setVisible(split.directory > 0);
-            m_cwdLabel->setText(split.directory >= wanted
+            // Hiding it cannot change the answer: the ladder was told the directory's full width
+            // and never what became of it, so the two cannot chase each other.
+            m_cwdLabel->setVisible(fit.directory > 0);
+            m_cwdLabel->setText(fit.directory >= wants.directory
                                     ? m_cwdText
-                                    : cwdMetrics.elidedText(m_cwdText, Qt::ElideLeft, split.directory));
+                                    : cwdMetrics.elidedText(m_cwdText, Qt::ElideLeft, fit.directory));
         }
-        m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, split.title));
+        // elidedText() at exactly the text's own advance can still round to an ellipsis, so a title
+        // that was granted everything it asked for is set as it is.
+        m_titleLabel->setText(fit.title >= wants.title ? shown
+                                                      : metrics.elidedText(shown, Qt::ElideRight, fit.title));
         m_titleLabel->setToolTip(headerTooltip());
         if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
         // The badge says the name is still the model's to change; a hand-set one loses it.
