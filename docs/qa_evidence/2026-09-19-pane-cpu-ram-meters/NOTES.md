@@ -58,6 +58,21 @@ round to 0 % on both axes are dropped, and a tab's tooltip merges its panes' row
 back, so it names the tab's busiest processes and not each pane's. The chip and the tab label are
 unchanged — still the sum alone, so nothing on screen grows or moves.
 
-Not pictured: the breakdown under Xvfb. A tooltip needs a hover the smoke script has no way to
-hold, and what it would show (`yes · 20% cpu · 0% mem`, five times) is what the unit tests assert
-line for line. `relay-paneusage-tests` is 19 tests now.
+`review-chip-tooltip-breakdown-2026-09-19.png` is that tooltip on a real run (Xvfb, isolated
+`HOME`/`XDG_*`/`TMPDIR`, one pane running `for i in 1 2 3 4; do yes > /dev/null & done`). The chip
+reads `20%` and the tab `ws · 20% cpu`, and hovering the chip gives
+
+    This pane's share of this machine
+    CPU 20% · memory 12 MiB (0%)
+
+    yes · 5% cpu · 0% mem
+    yes · 5% cpu · 0% mem
+    yes · 5% cpu · 0% mem
+    yes · 5% cpu · 0% mem
+
+    Counts the shell, the program it is running and this pane's agent worker, with their children…
+
+— four rows of 5 % summing to the 20 % on the chip. The shell has no row: it is idle and small, and
+a line reading `0% cpu · 0% mem` names nothing. The smoke script needed two fixes to get here, both
+of them stale strings rather than bugs: the window is called `Relay`, not `relay-terminal`, and
+`-w` wants a directory that exists. `relay-paneusage-tests` is 19 tests now.
