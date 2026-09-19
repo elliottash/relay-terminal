@@ -70,6 +70,31 @@ private Q_SLOTS:
             QVERIFY2(QFile::exists(QStringLiteral(RELAY_SOURCE_DIR "/data/theme/icons/") + QString::fromLatin1(name)), name);
     }
 
+    // The pane's button row is in every pane at all times: nothing appears, lifts or rearranges
+    // under the pointer (1b270ef). What went with the hover row was the raised tile and the outline
+    // it carried, so the permanent row read as three grey glyphs floating on the header — "the
+    // permanent pane icons should use the brighter outline that we had with the dynamic pane icons"
+    // (owner, card #0T2R). The tile is back, permanently. `@raised` is the top of the ground stack,
+    // so a hovered button cannot lift off the row by ground — `background: @surface` would now make
+    // it darker than the row it sits on — and lifts by ink and a stronger outline instead.
+    void thePaneButtonRowKeepsTheTileAndTheOutline() {
+        for (const char *id : {"dark-copper", "ibm-beige", "relay-dark"}) {
+            QVERIFY2(setActiveTheme(QString::fromLatin1(id), false), id);
+            const QString css = qApp->styleSheet();
+            // The radius is the theme's own (IBM Beige is square), the tile and the outline are not.
+            QVERIFY2(css.contains(QStringLiteral("QFrame#paneChrome { background: %1; border: 1px solid %2; "
+                                                 "border-radius:").arg(SurfaceRaised.name(), Border.name())), id);
+            QVERIFY2(css.contains(QStringLiteral("QToolButton#paneChromeButton:hover { color: %1; border-color: %2; }")
+                                      .arg(Text.name(), BorderStrong.name())), id);
+            // A hovered button must not take a ground of its own: on this tile any of them is darker.
+            QVERIFY2(!css.contains(QStringLiteral("QToolButton#paneChromeButton:hover { color: %1; border-color: %2; "
+                                                  "background:").arg(Text.name(), BorderStrong.name())), id);
+            // A metal or plastic theme gives the tile the face it gives every other raised chip,
+            // rather than leaving it the one flat rectangle in the window.
+            QVERIFY2(!css.contains(QStringLiteral("QToolButton#workChip, QMenu,")), id);
+        }
+    }
+
     void theThemeItAsksForIsGone() {
         for (const ThemeChoice &choice : availableThemes())
             QVERIFY2(choice.id != QStringLiteral("solarized-dark"), "solarized-dark is still on offer");

@@ -144,7 +144,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
@@ -173,7 +173,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
@@ -495,13 +495,15 @@ QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-
 QComboBox#statusPicker:hover { color: @text; border-color: @accent; }
 QComboBox#statusPicker::drop-down { border: none; width: 12px; }
 QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
-/* The pane's button row. It is on screen in every pane, so at rest it is three quiet glyphs on
-   the pane's own ground; the pane under the mouse ("hot") gets the raised tile, the grip and the
-   second split button. */
-/* The pane's buttons are always there and always the same: no tile under the pointer. */
-QFrame#paneChrome { background: transparent; border: 1px solid transparent; border-radius: 6px; }
+/* The pane's button row. It is on screen in every pane, always the same: nothing appears, lifts or
+   rearranges under the pointer. It keeps the raised tile and the outline the hover row used to have
+   (card #0T2R) — without them the permanent row read as three grey glyphs floating on the header,
+   dimmer than the row it replaced, and nothing said they were buttons. */
+QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
 QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
-QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
+/* @raised is the top of the ground stack, so a hovered button cannot lift off the row by ground:
+   it lifts by ink and a stronger outline instead, the way projectInitButton does. */
+QToolButton#paneChromeButton:hover { color: @text; border-color: @borderStrong; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
 /* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
    on the left and the bell, the actions gear and the window buttons on the right. */

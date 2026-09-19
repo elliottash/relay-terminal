@@ -1,0 +1,6 @@
+qt.qpa.theme.dbus: Session DBus not running.
+qt.qpa.theme.dbus: Application will not react to KDE setting changes.
+ Check your DBus installation.
+Ignoring window icon: Size 65538 exceeds maximum xcb request length 0.
+Ignoring window icon: Size 65538 exceeds maximum xcb request length 0.
+The X11 connection broke (error 1). Did the X11 server die?
