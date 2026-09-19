@@ -1321,9 +1321,14 @@ to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's S
 ## 10a. The Switchboard pane
 
 The Switchboard **is** a folder in the project shown as a board: one card per issue, plan or
-memory, a thread per card, and an agent that writes to it. The folder is `switchboard/` on a board
-made from 2026-09-18 on and `issues/` on one filed before that; its `board.yaml` is the marker, and
-that marker is the switch — everything here is inert without it. Design:
+memory, a thread per card, and an agent that writes to it. The folder is `.switchboard/` (hidden,
+so the cards do not clutter the project's listing and a ripgrep-based agent does not match every
+card on every code search) on a board made from 2026-09-19 on, `switchboard/` on one made between
+2026-09-18 and then, and `issues/` on one filed before either — `board.BOARD_FOLDERS` /
+`relay::projects::boardFolders()`, read in that order, and the only one a project ever keeps is the
+one it already has: nothing moves by itself, except the explicit "Hide this board's folder" /
+"Show this board's folder" action (protocol 19.17). Its `board.yaml` is the marker, and that marker
+is the switch — everything here is inert without it. Design:
 `docs/SWITCHBOARD-DESIGN.md`; bytes: `docs/SWITCHBOARD-FORMAT.md`; protocol:
 `docs/AGENT-SESSIONS-PROTOCOL.md` section 19.
 
@@ -2600,7 +2605,7 @@ of the platform and of the engine itself.
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
-| `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying `switchboard/board.yaml` then `issues/board.yaml` at each level |
+| `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
 | `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
