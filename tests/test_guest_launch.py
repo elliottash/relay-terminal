@@ -106,6 +106,57 @@ class Argv(unittest.TestCase):
                 # No "Hooks need review" screen in front of a resumed session either.
                 self.assertIn("--dangerously-bypass-hook-trust", argv)
 
+    def test_claude_takes_the_panes_model_and_effort_after_the_bypass(self):
+        argv = guest_launch.claude_argv("/s", model="fable", effort="xhigh")
+        self.assertEqual(["claude", "--settings", "/s", "--dangerously-skip-permissions",
+                          "--model", "fable", "--effort", "xhigh"], argv)
+        # A resumed row keeps its own words, and they stay last.
+        argv = guest_launch.claude_argv("/s", ["-r", "abc"], model="opus", effort="max")
+        self.assertEqual(["-r", "abc"], argv[-2:])
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+
+    def test_claude_does_not_repeat_a_model_or_effort_the_row_already_names(self):
+        argv = guest_launch.claude_argv("/s", ["--model=haiku", "--effort", "low", "-r", "abc"],
+                                        model="opus", effort="max")
+        self.assertEqual(argv.count("--model"), 0)       # only the row's `--model=haiku`
+        self.assertEqual(argv.count("--effort"), 1)
+        self.assertEqual(argv[argv.index("--effort") + 1], "low")
+        self.assertNotIn("opus", argv)
+        self.assertNotIn("max", argv)
+
+    def test_codex_takes_the_model_and_the_effort_as_a_flag_and_an_override(self):
+        argv = guest_launch.codex_argv("/py", model="gpt-5.6-sol", effort="ultra")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-5.6-sol")
+        overrides = [argv[i + 1] for i, word in enumerate(argv) if word == "-c"]
+        self.assertIn('model_reasoning_effort="ultra"', overrides)
+        # The flags stay in front of the bypass pair, which stays last.
+        self.assertEqual(["--dangerously-bypass-approvals-and-sandbox",
+                          "--dangerously-bypass-hook-trust"], argv[-2:])
+
+    def test_codex_resume_keeps_the_id_last_with_the_model_and_effort_in_the_flags(self):
+        argv = guest_launch.codex_argv("/py", ["resume", "0195-abc"], model="gpt-5.5",
+                                       effort="high")
+        self.assertEqual(["codex", "resume"], argv[:2])
+        self.assertEqual("0195-abc", argv[-1])
+        self.assertLess(argv.index("-m"), argv.index("0195-abc"))
+        self.assertIn('model_reasoning_effort="high"', argv)
+
+    def test_codex_does_not_repeat_what_the_row_already_names(self):
+        argv = guest_launch.codex_argv(
+            "/py", ["resume", "-m", "gpt-5.5", "-c", 'model_reasoning_effort="low"', "0195-abc"],
+            model="gpt-6-astra", effort="max")
+        self.assertEqual(argv.count("-m"), 1)
+        self.assertNotIn("gpt-6-astra", argv)
+        self.assertNotIn('model_reasoning_effort="max"', argv)
+        self.assertIn('model_reasoning_effort="low"', argv)
+
+    def test_the_effort_override_parses_as_toml(self):
+        import tomllib
+        argv = guest_launch.codex_argv("/py", effort="xhigh")
+        override = next(w for w in argv if w.startswith(guest_launch.CODEX_EFFORT_KEY + "="))
+        key, _, value = override.partition("=")
+        self.assertEqual(tomllib.loads(f"{key} = {value}"), {key: "xhigh"})
+
     def test_the_overrides_parse_as_toml(self):
         """`-c` values are parsed as TOML by codex; a value that does not parse is taken as a raw
         string, which for `notify` would be a program named after the whole array."""
@@ -262,6 +313,19 @@ class Cli(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual(["codex", "resume"], out["argv"][:2])
         self.assertEqual("abc", out["argv"][-1])
+
+    def test_the_model_and_effort_flags_reach_the_command(self):
+        with tempfile.TemporaryDirectory() as root:
+            code, out = self.run_cli("claude", "--runtime-dir", root, "--home", root,
+                                     "--model", "sonnet", "--effort", "high")
+            self.assertEqual(0, code)
+            self.assertEqual(out["argv"][out["argv"].index("--effort") + 1], "high")
+            self.assertIn("--model sonnet", out["command"])
+            code, out = self.run_cli("codex", "--runtime-dir", root, "--home", root,
+                                     "--python", "/py", "--model", "gpt-5.5", "--effort", "max")
+        self.assertEqual(0, code)
+        self.assertEqual(out["argv"][out["argv"].index("-m") + 1], "gpt-5.5")
+        self.assertIn('model_reasoning_effort="max"', out["argv"])
 
     def test_a_bad_guest_is_reported_not_raised(self):
         with tempfile.TemporaryDirectory() as root:

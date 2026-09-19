@@ -20,6 +20,13 @@ one command:
   finished turn into a Relay notification and the `tui.notification_condition` it needs — plus
   `--dangerously-bypass-approvals-and-sandbox`, Codex's spelling of the same rule.
 
+**The model and the reasoning effort** (owner, 2026-09-19: "you should be able to pick the model
+and reasoning effort for those"). The pane passes what Options is set to and it travels on the
+same command line: claude takes `--model <alias|full name>` and `--effort <low|medium|high|xhigh|
+max>`, codex `-m <slug>` and `-c model_reasoning_effort="<level>"`. A sessions row's own `extra`
+wins: if it already names one of these, the pane's setting is not added a second time (claude
+refuses a repeated `--model`, and a second `-c` for the same key is just noise).
+
 **The stopgap's leftovers.** Until this module, Options › Guests wrote marked entries into
 `.claude/settings.local.json`, `~/.claude/settings.json` and `~/.codex/config.toml`. A claude
 started with `--settings` *and* a project file still holding those entries would run every hook
@@ -29,8 +36,9 @@ installers' own "off"), and reports which files it touched. That migration is th
 two modules stay as libraries; their command lines are gone.
 
 Verified against the installed CLIs on 2026-09-19 (Claude Code 2.1.278: `--settings
-<file-or-json>`, `--dangerously-skip-permissions`, `-r`, `--fork-session`; Codex 0.155.1:
-`-c <key=value>` on the plain launch and on `resume` / `fork`,
+<file-or-json>`, `--dangerously-skip-permissions`, `-r`, `--fork-session`, `--model <alias>` and
+`--effort <level>` with levels low, medium, high, xhigh, max; Codex 0.155.1:
+`-c <key=value>` on the plain launch and on `resume` / `fork`, `-m <slug>`,
 `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust` on all three).
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 26.9. Card:
@@ -51,6 +59,9 @@ from . import guest, guest_codex, guest_install
 SETTINGS_DIR = "guest"                        # under the pane's runtime dir, mode 0700
 CLAUDE_SETTINGS_NAME = "claude-settings.json"  # what `claude --settings` is handed
 CLAUDE_BYPASS = "--dangerously-skip-permissions"
+# The codex config key `-c` sets for the reasoning effort, the same one `codex app-server`'s
+# `thread/start` takes in its `config` map.
+CODEX_EFFORT_KEY = "model_reasoning_effort"
 CODEX_BYPASS = "--dangerously-bypass-approvals-and-sandbox"
 # Codex stops on a full-screen "Hooks need review" dialog whenever an enabled hook's hash is not
 # the one it has on record — any plugin's hooks, not Relay's (Relay adds none; the owner met it
@@ -128,10 +139,28 @@ def write_claude_settings(runtime_dir: str, cwd: str | None = None, home: str | 
     return path
 
 
-def claude_argv(settings_path: str, extra=()) -> list[str]:
-    """`claude --settings <file> --dangerously-skip-permissions [extra…]`. `extra` is what a
-    sessions row adds (`-r <id>`, `--fork-session`) and is passed through untouched."""
-    return ["claude", "--settings", settings_path, CLAUDE_BYPASS, *extra]
+def _names(extra) -> set:
+    """The option names `extra` already carries, `--flag=value` counted as `--flag`."""
+    return {word.split("=", 1)[0] for word in extra if isinstance(word, str) and word.startswith("-")}
+
+
+def claude_argv(settings_path: str, extra=(), model: str | None = None,
+                effort: str | None = None) -> list[str]:
+    """`claude --settings <file> --dangerously-skip-permissions [--model M] [--effort E]
+    [extra…]`.
+
+    `extra` is what a sessions row adds (`-r <id>`, `--fork-session`) and is passed through
+    untouched; a `--model` or `--effort` already in it is the row's own choice and wins, because
+    claude refuses the same option twice.
+    """
+    extra = list(extra)
+    named = _names(extra)
+    flags: list[str] = []
+    if model and "--model" not in named:
+        flags += ["--model", model]
+    if effort and "--effort" not in named:
+        flags += ["--effort", effort]
+    return ["claude", "--settings", settings_path, CLAUDE_BYPASS, *flags, *extra]
 
 
 # Flags in `extra` that already say which session this claude is: a new id must not be forced
@@ -177,18 +206,28 @@ def codex_overrides(python: str | None = None) -> list[str]:
                   f"=\"{guest_codex.NOTIFICATION_CONDITION_VALUE}\""]
 
 
-def codex_argv(python: str | None = None, extra=()) -> list[str]:
-    """`codex [resume|fork] -c … --dangerously-bypass-approvals-and-sandbox
-    --dangerously-bypass-hook-trust [rest…]`.
+def codex_argv(python: str | None = None, extra=(), model: str | None = None,
+               effort: str | None = None) -> list[str]:
+    """`codex [resume|fork] -c … [-m M] [-c model_reasoning_effort="E"]
+    --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust [rest…]`.
 
-    A sessions row's `extra` starts with the subcommand (`resume <id>`, `fork <id>`), which has
-    to stay in front of the flags; anything else is appended after them.
+    A sessions row's `extra` starts with the subcommand (`resume <id>`, `fork <id>`), which has to
+    stay in front of the flags; anything else is appended after them — so the model and the effort
+    go with the other flags, before a resumed thread's id, exactly as the overrides do. A row that
+    already names the model (`-m`/`--model`) or the effort keeps its own.
     """
     extra = list(extra)
-    flags = [*codex_overrides(python), CODEX_BYPASS, CODEX_HOOK_TRUST]
+    rest = extra[1:] if extra and extra[0] in CODEX_SUBCOMMANDS else extra
+    named = _names(rest)
+    flags = list(codex_overrides(python))
+    if model and not named & {"-m", "--model"}:
+        flags += ["-m", model]
+    if effort and not any(word.startswith(CODEX_EFFORT_KEY + "=") for word in rest):
+        flags += ["-c", f'{CODEX_EFFORT_KEY}="{effort}"']
+    flags += [CODEX_BYPASS, CODEX_HOOK_TRUST]
     if extra and extra[0] in CODEX_SUBCOMMANDS:
-        return ["codex", extra[0], *flags, *extra[1:]]
-    return ["codex", *flags, *extra]
+        return ["codex", extra[0], *flags, *rest]
+    return ["codex", *flags, *rest]
 
 
 # ----- the stopgap's leftovers ----------------------------------------------------------------
@@ -222,7 +261,8 @@ def clean_legacy(cwd: str | None, home: str | None = None) -> list[str]:
 
 
 def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: int = 0,
-                 extra=(), home: str | None = None, python: str | None = None) -> dict:
+                 extra=(), home: str | None = None, python: str | None = None,
+                 model: str | None = None, effort: str | None = None) -> dict:
     """Everything the pane needs to start `guest_id` in its shell, in one payload:
 
         {"guest", "argv", "env", "command", "settings", "legacy", "session_id"}
@@ -233,6 +273,9 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
     settings file's path (empty for codex); `legacy` lists the stopgap files that were cleaned;
     `session_id` is the guest session this launch will write (`claude_session`; a resumed codex
     thread's id; "" when the guest picks one Relay cannot know in advance).
+
+    `model` and `effort` are what the pane's Options is set to for this guest; each is left out
+    when it is empty or when `extra` already names it (26.9, owner 2026-09-19).
     """
     spec = guest.spec(guest_id)   # ValueError for anything the registry does not know
     legacy = clean_legacy(cwd, home)
@@ -242,11 +285,11 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
     if spec.id == "claude":
         settings = write_claude_settings(runtime_dir, cwd, home)
         extra, session_id = claude_session(extra)
-        argv = claude_argv(settings, extra)
+        argv = claude_argv(settings, extra, model, effort)
         if port:
             env = guest.bridge_env("claude", port)
     else:
-        argv = codex_argv(python, extra)
+        argv = codex_argv(python, extra, model, effort)
         extra = list(extra)
         if len(extra) >= 2 and extra[0] == "resume":
             session_id = extra[-1]      # codex has no flag to choose a new thread's id
@@ -264,6 +307,8 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, default=0, help="the IDE bridge's port, when it is up")
     parser.add_argument("--home", default=None, help="the home directory (tests, alternate homes)")
     parser.add_argument("--python", default=None, help="the interpreter codex's notify entry names")
+    parser.add_argument("--model", default=None, help="the model the pane is set to")
+    parser.add_argument("--effort", default=None, help="the reasoning effort the pane is set to")
     # Everything after `--` is the guest's own (`-r <id>`, `resume <id>`), split off before argparse
     # sees it: it would otherwise read `-r` as an option of its own.
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -274,7 +319,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(arguments)
     try:
         result = command_line(args.guest, args.runtime_dir, args.cwd or None, args.port, extra,
-                              home=args.home, python=args.python)
+                              home=args.home, python=args.python, model=args.model or None,
+                              effort=args.effort or None)
     except (LaunchError, ValueError, OSError) as error:
         print(json.dumps({"ok": False, "error": str(error)}))
         return 1

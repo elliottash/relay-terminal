@@ -22,6 +22,7 @@ issues/features/2026-09-19-claude-codex-guest-integration.md (GT7X, task t:x2).
 """
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
@@ -52,6 +53,21 @@ PERMISSIONS = ("bypass", "ask", "deny")
 #   notice          {text}                                           status
 #   done            {text, stop_reason: end|interrupted|error}        (the turn's answer)
 #   error           {text, code?}                                    error
+#
+# What the pane can *set* on a guest, beside the model (protocol 29.3, owner 2026-09-19 — "you
+# should be able to pick the model and reasoning effort for those"):
+#
+#   call                      what it does                                   what it returns
+#   start(..., effort=…)      starts the guest on that reasoning effort      HarnessStart
+#   set_effort(effort)        the effort the guest uses from the next turn   the effort, as the
+#                                                                           guest names it
+#   models()                  what this guest can be set to, for the picker  [{id, label, efforts,
+#                                                                             default_effort}]
+#
+# An effort is one short lowercase word (`validate_effort`), not one of Relay's own four levels:
+# Claude Code has five (low…max) and codex's catalogue names six (…ultra) and differs per model.
+# Which of them a guest has is the guest's to say — `models()` carries the list per model, and an
+# effort the guest will not take comes back as a HarnessError with the guest's own words in it.
 #
 # `tool` is the guest's own tool name mapped onto Relay's where the meaning is the same
 # (run_command, read_file, write_file, edit_file, list_directory, search, web, agent, other —
@@ -126,9 +142,11 @@ class Harness(Protocol):
     guest: str                       # "claude" | "codex"
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
-              fork: bool = False, permissions: str = "bypass") -> HarnessStart:
+              fork: bool = False, permissions: str = "bypass",
+              effort: str | None = None) -> HarnessStart:
         """Start the guest process in `cwd`. `resume` is a guest session id to continue (with
-        `fork`, as a new session branched from it); `permissions` is one of PERMISSIONS.
+        `fork`, as a new session branched from it); `permissions` is one of PERMISSIONS; `effort`
+        is a reasoning level the guest has (None leaves the guest's own default alone).
         Raises HarnessNotAvailable when the guest cannot be started here."""
 
     def send(self, prompt: str, *, attachments: list[dict] | None = None, emit: Emit,
@@ -143,6 +161,22 @@ class Harness(Protocol):
 
     def set_model(self, model: str) -> str:
         """Switch the guest's model for the next turn; returns the model as the guest names it."""
+
+    def set_effort(self, effort: str) -> str:
+        """Switch the guest's reasoning effort, in force from the guest's next turn. Returns the
+        effort the guest will use, as the guest names it. Raises HarnessError when this guest has
+        no such level. May be called while `send()` blocks: the running turn keeps the effort it
+        started with and the new one lands on the next."""
+
+    def models(self) -> list[dict]:
+        """What this guest can be set to, for the pane's model box:
+
+            [{"id": "sonnet", "label": "Sonnet", "efforts": ["low", ...],
+              "default_effort": "medium" | None, "current"?: True}]
+
+        `id` is what `set_model()` / `start(model=…)` take. Empty when the guest cannot say (it
+        is not running, or it has no catalogue to ask), which the pane reads as "type a name".
+        """
 
     def compact(self) -> None:
         """Ask the guest to compact its own context, when it can (a no-op otherwise)."""
@@ -159,6 +193,32 @@ class Harness(Protocol):
 
     @property
     def model(self) -> str: ...
+
+
+# One short lowercase word. Deliberately not `presets.EFFORTS`: that tuple is Relay's own four
+# levels for its own providers, and a guest's levels are the guest's (claude: low, medium, high,
+# xhigh, max; codex: those plus ultra, and a different subset per model).
+EFFORT_PATTERN = re.compile(r"[a-z]{1,16}")
+
+
+def validate_effort(value) -> str | None:
+    """A reasoning effort on its way to a guest, or None for "leave the guest's default alone".
+
+    None and "" are both None. Anything else must be one short lowercase word — the shape every
+    level either guest names has — and is handed on as it is: whether *this* guest has that level
+    is the guest's decision, made by the adapter (claude checks its five; codex lets its own
+    server refuse, so the person reads codex's own words).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("effort must be text.")
+    text = value.strip().lower()
+    if not text:
+        return None
+    if not EFFORT_PATTERN.fullmatch(text):
+        raise ValueError("effort must be one short lowercase word, such as low, high or max.")
+    return text
 
 
 def validate_permissions(value) -> str:

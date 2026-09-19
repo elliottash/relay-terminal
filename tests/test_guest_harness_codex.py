@@ -334,6 +334,48 @@ class PlainTurnTest(HarnessCase):
         self.assertEqual(proc.sent("turn/start")[0]["params"]["model"], "gpt-5.6-terra")
         self.assertEqual(harness.model, "gpt-5.6-terra")
 
+    def test_the_thread_is_started_on_the_effort_that_was_asked_for(self):
+        entries = load("ok-turn.jsonl")
+        harness, proc = self.harness(entries)
+        start = harness.start(cwd="/tmp/relay-harness-codex", effort="xhigh")
+        params = proc.sent("thread/start")[0]["params"]
+        # `ThreadStartParams` has no `effort` field; `config` is the overrides map and
+        # `model_reasoning_effort` is the key the TUI's `-c` sets (0.155.1 schema).
+        self.assertEqual(params["config"], {"model_reasoning_effort": "xhigh"})
+        self.assertNotIn("effort", params)
+        # The fixture's thread came up on "low", and codex's answer is what the adapter keeps.
+        self.assertEqual(harness.effort, "low")
+        self.assertTrue(start.session_id)
+
+    def test_no_config_is_sent_when_no_effort_is_asked_for(self):
+        harness, proc, _ = self.started("ok-turn.jsonl")
+        self.assertNotIn("config", proc.sent("thread/start")[0]["params"])
+
+    def test_set_effort_rides_on_the_next_turn_start(self):
+        harness, proc, _ = self.started("ok-turn.jsonl")
+        self.assertEqual(harness.set_effort("Ultra"), "ultra")
+        self.assertEqual(harness.effort, "ultra")
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        self.assertEqual(proc.sent("turn/start")[0]["params"]["effort"], "ultra")
+
+    def test_the_effort_is_only_sent_once_per_change(self):
+        entries = load("ok-turn.jsonl")
+        turn = entries[index_of(entries, "->", "turn/start"):]
+        harness, proc, _ = self.started(entries=entries + turn)
+        harness.set_effort("high")
+        harness.send("one", emit=self.emit, cancel=threading.Event())
+        harness.send("two", emit=self.emit, cancel=threading.Event())
+        sent = proc.sent("turn/start")
+        self.assertEqual(sent[0]["params"]["effort"], "high")
+        self.assertNotIn("effort", sent[1]["params"])      # codex keeps it for later turns
+
+    def test_a_shapeless_effort_is_refused_and_an_empty_one_is_an_error(self):
+        harness, proc, _ = self.started("ok-turn.jsonl")
+        with self.assertRaises(ValueError):
+            harness.set_effort("high, and also this")
+        with self.assertRaises(HarnessError):
+            harness.set_effort("")
+
     def test_attachments_go_as_a_data_url_image_item(self):
         harness, proc, _ = self.started("ok-turn.jsonl")
         harness.send("look", attachments=[{"kind": "image", "media_type": "image/png",
@@ -354,6 +396,56 @@ class PlainTurnTest(HarnessCase):
         harness.close()
         harness.close()
         self.assertEqual(proc.terminated, 1)
+
+
+class ModelsTest(HarnessCase):
+    """`models()` is `model/list`, in the contract's shape (29.3)."""
+
+    def _models(self):
+        entries = load("ok-turn.jsonl")
+        models = load("models.jsonl")
+        ask = models[index_of(models, "->", "model/list")]
+        answer = next(e for e in models
+                      if e["dir"] == "<-" and e["line"].get("id") == ask["line"]["id"]
+                      and "result" in e["line"])
+        at = index_of(entries, "->", "turn/start")
+        entries[at:at] = [ask, answer]
+        harness, proc, _ = self.started(entries=entries)
+        return harness, harness.models()
+
+    def test_each_row_is_a_slug_a_name_and_the_levels_that_model_has(self):
+        harness, rows = self._models()
+        by_id = {row["id"]: row for row in rows}
+        self.assertIn("gpt-6-astra", by_id)
+        self.assertEqual(by_id["gpt-6-astra"]["label"], "GPT-6-Astra")
+        self.assertEqual(by_id["gpt-6-astra"]["efforts"],
+                         ["low", "medium", "high", "xhigh", "max", "ultra"])
+        self.assertEqual(by_id["gpt-6-astra"]["default_effort"], "medium")
+        # gpt-5.5 has no `ultra`: the levels are per model, not a table of codex's.
+        self.assertEqual(by_id["gpt-5.5"]["efforts"], ["low", "medium", "high", "xhigh"])
+
+    def test_the_running_model_is_marked_current(self):
+        harness, rows = self._models()
+        self.assertEqual([row["id"] for row in rows if row.get("current")], ["gpt-5.6-sol"])
+        self.assertEqual(harness.model, "gpt-5.6-sol")
+
+    def test_models_is_empty_when_the_harness_is_not_up(self):
+        harness = gh.CodexHarness(codex_path=self.fake_codex)
+        self.assertEqual(harness.models(), [])
+
+    def test_the_snake_case_catalogue_reads_the_same(self):
+        """`codex debug models` spells the same facts differently; one reader serves both."""
+        rows = gh.catalog_rows([
+            {"slug": "gpt-6-astra", "display_name": "GPT-6-Astra", "visibility": "list",
+             "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "low", "description": "x"},
+                                            {"effort": "ultra", "description": "y"}]},
+            {"slug": "gpt-reserve", "display_name": "GPT-Reserve", "visibility": "hide",
+             "default_reasoning_level": "medium", "supported_reasoning_levels": []}],
+            current="gpt-6-astra")
+        self.assertEqual(rows, [{"id": "gpt-6-astra", "label": "GPT-6-Astra",
+                                 "efforts": ["low", "ultra"], "default_effort": "medium",
+                                 "current": True}])
 
 
 # ----- tools --------------------------------------------------------------------------------------

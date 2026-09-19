@@ -20,6 +20,7 @@ import os
 import queue
 import tempfile
 import threading
+import time
 import unittest
 
 from relay_core import guest_harness
@@ -493,16 +494,28 @@ class CompactTest(unittest.TestCase):
 # ----- the shapes the adapter has to survive ----------------------------------------------------
 
 
-def script(*messages, ins=()):
+def script(*messages, ins=(), request_id="h1"):
     """A hand-written transcript: the initialize handshake, then `messages`."""
-    out = [{"dir": "in", "json": {"type": "control_request", "request_id": "h1",
-                                  "request": {"subtype": "initialize"}}},
-           {"dir": "out", "json": {"type": "control_response",
-                                   "response": {"subtype": "success", "request_id": "h1",
-                                                "response": {}}}},
-           {"dir": "in", "json": {"type": "user"}}]
+    out = [*_handshake(request_id), {"dir": "in", "json": {"type": "user"}}]
     out.extend(messages)
     return out
+
+
+def _handshake(request_id="h1"):
+    """Just the initialize round trip: a process that is started and then left alone."""
+    return [{"dir": "in", "json": {"type": "control_request", "request_id": request_id,
+                                   "request": {"subtype": "initialize"}}},
+            {"dir": "out", "json": {"type": "control_response", "response": {
+                "subtype": "success", "request_id": request_id, "response": {}}}}]
+
+
+def _unsupported(subtype, request_id="c1"):
+    """A control request this CLI does not know, answered the way 2.1.278 answers one."""
+    return [{"dir": "in", "json": {"type": "control_request", "request_id": request_id,
+                                   "request": {"subtype": subtype}}},
+            {"dir": "out", "json": {"type": "control_response", "response": {
+                "subtype": "error", "request_id": request_id,
+                "error": f"Unsupported control request subtype: {subtype}"}}}]
 
 
 def init_message(session="s-1", model="claude-test-1"):
@@ -727,6 +740,19 @@ class StartTest(unittest.TestCase):
         argv = self._argv_for(permissions="deny")
         self.assertEqual(argv[argv.index("--permission-prompts") + 1], "none")
 
+    def test_the_effort_is_a_flag_when_one_is_asked_for(self):
+        argv = self._argv_for(effort="high")
+        self.assertEqual(argv[argv.index("--effort") + 1], "high")
+
+    def test_no_effort_flag_when_none_is_asked_for(self):
+        self.assertNotIn("--effort", self._argv_for())
+
+    def test_an_effort_claude_does_not_have_is_refused_before_the_process_starts(self):
+        harness = gh.ClaudeHarness(spawn=Spawner(), binary=_on_path())
+        with self.assertRaises(HarnessError) as caught:
+            harness.start(cwd=os.getcwd(), effort="ultra")
+        self.assertIn("low, medium, high, xhigh, max", str(caught.exception))
+
     def test_resume_and_fork(self):
         argv = self._argv_for(resume="abc-123", fork=True, model="sonnet")
         self.assertEqual(argv[argv.index("--resume") + 1], "abc-123")
@@ -782,28 +808,142 @@ class SetModelTest(unittest.TestCase):
         self.assertEqual(asked["request"], {"subtype": "set_model", "model": "sonnet"})
 
     def test_an_old_cli_without_set_model_is_restarted_on_the_session(self):
-        first = FakeClaude([
-            {"dir": "in", "json": {"type": "control_request", "request_id": "h1",
-                                   "request": {"subtype": "initialize"}}},
-            {"dir": "out", "json": {"type": "control_response", "response": {
-                "subtype": "success", "request_id": "h1", "response": {}}}},
-            {"dir": "in", "json": {"type": "control_request", "request_id": "m1",
-                                   "request": {"subtype": "set_model"}}},
-            {"dir": "out", "json": {"type": "control_response", "response": {
-                "subtype": "error", "request_id": "m1",
-                "error": "Unsupported control request subtype: set_model"}}}])
-        second = FakeClaude([
-            {"dir": "in", "json": {"type": "control_request", "request_id": "h2",
-                                   "request": {"subtype": "initialize"}}},
-            {"dir": "out", "json": {"type": "control_response", "response": {
-                "subtype": "success", "request_id": "h2", "response": {}}}}])
+        """After a turn there is a transcript to resume, and the restart resumes it."""
+        first = FakeClaude(script(init_message(), result_message()) + _unsupported("set_model"))
+        second = FakeClaude(_handshake("h2"))
         spawner, harness = self._harness(first, second)
-        start = harness.start(cwd=os.getcwd())
+        harness.start(cwd=os.getcwd())
+        harness.send("hello", emit=Collector(), cancel=threading.Event())
         self.assertEqual(harness.set_model("opus"), "opus")
         self.assertEqual(len(spawner.calls), 2)
         argv = spawner.calls[1][0]
         self.assertEqual(argv[argv.index("--model") + 1], "opus")
-        self.assertEqual(argv[argv.index("--resume") + 1], start.session_id)
+        # The id the CLI reported on `init`, which is the one its transcript is filed under.
+        self.assertEqual(argv[argv.index("--resume") + 1], harness.session_id)
+        self.assertNotIn("--session-id", argv)
+
+    def test_a_restart_before_the_first_turn_keeps_the_id_and_does_not_resume(self):
+        """`--resume <id>` on a session claude has never written exits 1 ("No conversation found
+        with session ID", measured against 2.1.278), and there is nothing to carry over, so the
+        replacement is a fresh process under the same id."""
+        first = FakeClaude(_handshake("h1") + _unsupported("set_model"))
+        second = FakeClaude(_handshake("h2"))
+        spawner, harness = self._harness(first, second)
+        start = harness.start(cwd=os.getcwd())
+        self.assertEqual(harness.set_model("opus"), "opus")
+        argv = spawner.calls[1][0]
+        self.assertNotIn("--resume", argv)
+        self.assertEqual(argv[argv.index("--session-id") + 1], start.session_id)
+
+
+class SetEffortTest(unittest.TestCase):
+    """The effort is a command-line flag and 2.1.278 has no control request for it (probed
+    2026-09-19), so changing it restarts the process on the same session."""
+
+    def _harness(self, *procs):
+        spawner = Spawner(*procs)
+        harness = gh.ClaudeHarness(spawn=spawner, binary=_on_path())
+        self.addCleanup(harness.close)
+        return spawner, harness
+
+    def test_set_effort_restarts_with_the_new_flag_and_resumes(self):
+        first = FakeClaude(script(init_message(), result_message()))
+        second = FakeClaude(_handshake("h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), effort="low")
+        harness.send("hello", emit=Collector(), cancel=threading.Event())
+        self.assertEqual(harness.set_effort("xhigh"), "xhigh")
+        self.assertEqual(harness.effort, "xhigh")
+        self.assertEqual(len(spawner.calls), 2)
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--effort") + 1], "xhigh")
+        self.assertEqual(argv[argv.index("--resume") + 1], harness.session_id)
+        # No control request was tried: the CLI has none, and asking would only log an error.
+        self.assertEqual([m["request"]["subtype"] for m in first.written
+                          if m.get("type") == "control_request"], ["initialize"])
+
+    def test_the_same_effort_again_changes_nothing(self):
+        proc = FakeClaude(_handshake("h1"))
+        spawner, harness = self._harness(proc)
+        harness.start(cwd=os.getcwd(), effort="high")
+        self.assertEqual(harness.set_effort("HIGH"), "high")
+        self.assertEqual(len(spawner.calls), 1)
+
+    def test_an_effort_claude_does_not_have_is_refused(self):
+        proc = FakeClaude(_handshake("h1"))
+        _, harness = self._harness(proc)
+        harness.start(cwd=os.getcwd())
+        with self.assertRaises(HarnessError) as caught:
+            harness.set_effort("ultra")
+        self.assertIn("xhigh", str(caught.exception))
+        self.assertEqual(harness.effort, "")
+
+    def test_a_shapeless_effort_is_refused_by_the_contract(self):
+        proc = FakeClaude(_handshake("h1"))
+        _, harness = self._harness(proc)
+        harness.start(cwd=os.getcwd())
+        with self.assertRaises(ValueError):
+            harness.set_effort("HIGH; rm -rf /")
+
+    def test_an_effort_asked_for_during_a_turn_lands_on_the_next_one(self):
+        """The running turn keeps the effort it started with — a restart would kill it — and the
+        replacement process is started at the top of the next `send()`."""
+        first = FakeClaude(script(init_message(), result_message()))
+        second = FakeClaude(script(init_message(), result_message(), request_id="h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), effort="low")
+
+        asked = threading.Event()
+
+        class Ask(Collector):
+            def __call__(self, event):
+                super().__call__(event)
+                if event.kind == "started" and not asked.is_set():
+                    asked.set()
+                    threading.Thread(target=harness.set_effort, args=("max",)).start()
+
+        events = Ask()
+        harness.send("first", emit=events, cancel=threading.Event())
+        self.assertEqual(len(spawner.calls), 1)          # the turn ran on --effort low
+        self.assertEqual(spawner.calls[0][0][spawner.calls[0][0].index("--effort") + 1], "low")
+        for _ in range(100):                             # the thread may not have run yet
+            if harness.effort == "max":
+                break
+            time.sleep(0.01)
+        harness.send("second", emit=Collector(), cancel=threading.Event())
+        self.assertEqual(len(spawner.calls), 2)
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--effort") + 1], "max")
+
+
+class ModelsTest(unittest.TestCase):
+
+    def test_the_aliases_and_their_levels(self):
+        harness = gh.ClaudeHarness(spawn=Spawner(), binary=_on_path())
+        rows = harness.models()
+        self.assertEqual([row["id"] for row in rows], list(gh.MODEL_ALIASES))
+        self.assertEqual([row["label"] for row in rows], ["Fable", "Opus", "Sonnet", "Haiku"])
+        for row in rows:
+            self.assertEqual(row["efforts"], ["low", "medium", "high", "xhigh", "max"])
+            self.assertIsNone(row["default_effort"])
+            self.assertNotIn("current", row)
+
+    def test_the_running_full_name_is_added_and_marked_current(self):
+        proc = FakeClaude(script(init_message(model="claude-haiku-4-5-20251001"),
+                                 result_message()))
+        harness, _, _, _, _ = run_turn(self, proc, "hello")
+        self.addCleanup(harness.close)
+        rows = harness.models()
+        self.assertEqual(rows[-1]["id"], "claude-haiku-4-5-20251001")
+        self.assertTrue(rows[-1]["current"])
+        self.assertEqual(rows[-1]["efforts"], list(gh.EFFORTS))
+
+    def test_an_alias_in_force_is_the_one_marked_current(self):
+        proc = FakeClaude(script(init_message(model="sonnet"), result_message()))
+        harness, _, _, _, _ = run_turn(self, proc, "hello")
+        self.addCleanup(harness.close)
+        current = [row for row in harness.models() if row.get("current")]
+        self.assertEqual([row["id"] for row in current], ["sonnet"])
 
 
 # ----- the pieces on their own ------------------------------------------------------------------
@@ -895,8 +1035,8 @@ class AttachmentTest(unittest.TestCase):
 class ContractTest(unittest.TestCase):
 
     def test_the_adapter_has_every_member_the_contract_names(self):
-        for name in ("start", "send", "interrupt", "set_model", "compact", "answer", "close",
-                     "session_id", "model", "guest"):
+        for name in ("start", "send", "interrupt", "set_model", "set_effort", "models",
+                     "compact", "answer", "close", "session_id", "model", "guest"):
             self.assertTrue(hasattr(gh.ClaudeHarness, name), name)
         self.assertEqual(gh.ClaudeHarness.guest, "claude")
         self.assertIn(gh.GUEST, guest_harness.HARNESS_GUESTS)

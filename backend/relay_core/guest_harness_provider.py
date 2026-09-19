@@ -25,14 +25,16 @@ from __future__ import annotations
 
 import base64
 import importlib
+import json
 import shutil
+import subprocess
 import threading
 import time
 import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
-                            TOOL_NAMES, map_tool_name, validate_permissions)
+                            TOOL_NAMES, map_tool_name, validate_effort, validate_permissions)
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ProviderConfig, ProviderError,
                        message_images)
 
@@ -116,9 +118,9 @@ def guest_options(raw) -> dict:
         raw = {}
     if not isinstance(raw, dict):
         raise ValueError("guest must be an object.")
-    unknown = set(raw) - {"model", "resume", "fork", "permissions"}
+    unknown = set(raw) - {"model", "resume", "fork", "permissions", "effort"}
     if unknown:
-        raise ValueError("guest may only carry model, resume, fork and permissions.")
+        raise ValueError("guest may only carry model, resume, fork, permissions and effort.")
     model = raw.get("model")
     if model is not None and (not isinstance(model, str) or len(model) > 200):
         raise ValueError("guest.model must be text.")
@@ -129,7 +131,10 @@ def guest_options(raw) -> dict:
     if type(fork) is not bool:
         raise ValueError("guest.fork must be true or false.")
     return {"model": (model or "").strip(), "resume": (resume or "").strip() or None, "fork": fork,
-            "permissions": validate_permissions(raw.get("permissions"))}
+            "permissions": validate_permissions(raw.get("permissions")),
+            # The guest's own levels, not Relay's four: `validate_effort` only checks the shape
+            # and the guest decides whether it has that one (29.3, owner 2026-09-19).
+            "effort": validate_effort(raw.get("effort"))}
 
 
 # ----- what this machine has -------------------------------------------------------------------
@@ -186,6 +191,109 @@ def _load_adapter(guest_id: str):
     return getattr(module, class_name, None)
 
 
+# ----- what a guest can be set to (the model box's rows, 29.3) -----------------------------------
+#
+# Owner, 2026-09-19: "the options menu doesnt have settings for claude and codex yet. you should be
+# able to pick the model and reasoning effort for those." A `presets` row therefore carries the same
+# two fields every other row does — `efforts` for the pane's `/effort` control and the effort
+# shortcuts, `effort_note` for the line under them — plus `models`, which only a guest has, because
+# a guest's models are not one of Relay's presets and cannot be matched to one.
+
+# Claude Code's, from `claude --help` (2.1.278); the adapter is the one source for both.
+_CLAUDE_MODELS = None            # filled on first use from guest_harness_claude, without importing
+                                 # the module at import time (the adapter may be half-written)
+
+# Codex's catalogue is a subprocess (`codex debug models`, ~0.4 MB of JSON), so it is read **once
+# per worker process, in a background thread**. The `presets` request is answered on the protocol
+# thread and may never wait for it: until the read lands, `models` is [] and `efforts` is every
+# level 0.155.1's models name between them.
+CODEX_CATALOG_TIMEOUT = 20.0
+_CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+_catalog: dict[str, list[dict]] = {}
+_catalog_started: set = set()
+_catalog_lock = threading.Lock()
+# Set once the codex scan has finished, whatever it found. Tests wait on it; nothing else does.
+catalog_ready = threading.Event()
+
+
+def _read_codex_catalog(binary: str) -> list[dict]:
+    """`codex debug models` as the contract's model rows. The seam tests replace."""
+    from .guest_harness_codex import catalog_rows
+    out = subprocess.run([binary, "debug", "models"], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, timeout=CODEX_CATALOG_TIMEOUT, check=False)
+    if out.returncode != 0:
+        raise RuntimeError((out.stderr or "").strip()[:200] or "codex debug models failed")
+    return catalog_rows(json.loads(out.stdout).get("models") or [])
+
+
+def start_catalog_scan(guest_id: str = "codex") -> None:
+    """Read this guest's catalogue behind the request, once per worker process. Never blocks."""
+    if guest_id != "codex":
+        return
+    with _catalog_lock:
+        if guest_id in _catalog_started:
+            return
+        _catalog_started.add(guest_id)
+    binary = (installations().get(guest_id) or {}).get("binary") or ""
+    if not binary:
+        with _catalog_lock:
+            _catalog[guest_id] = []
+        catalog_ready.set()
+        return
+
+    def scan():
+        rows: list[dict] = []
+        try:
+            rows = _read_codex_catalog(binary)
+        except Exception as exc:              # a missing, refusing or slow codex is simply no menu
+            _log.debug("codex catalogue could not be read: %s", exc)
+        with _catalog_lock:
+            _catalog[guest_id] = rows
+        catalog_ready.set()
+
+    threading.Thread(target=scan, name="relay-codex-models", daemon=True).start()
+
+
+def reset_catalog() -> None:
+    """Forget the catalogue and the fact that it was read (tests, and a `presets` refresh)."""
+    with _catalog_lock:
+        _catalog.clear()
+        _catalog_started.clear()
+    catalog_ready.clear()
+
+
+def guest_models(guest_id: str) -> list[dict]:
+    """What this guest can be set to, for the row's `models` — `[]` when it cannot be said here."""
+    if guest_id == "claude":
+        global _CLAUDE_MODELS
+        if _CLAUDE_MODELS is None:
+            adapter = _load_adapter("claude")
+            _CLAUDE_MODELS = adapter().models() if adapter is not None else []
+        return [dict(row) for row in _CLAUDE_MODELS]
+    start_catalog_scan(guest_id)
+    with _catalog_lock:
+        return [dict(row) for row in _catalog.get(guest_id) or ()]
+
+
+def guest_efforts(guest_id: str, models: list[dict] | None = None) -> list[str]:
+    """The levels the pane's effort control offers for this guest.
+
+    Claude's five are fixed. Codex's are the first model the catalogue lists, which is the one
+    codex defaults to (`codex debug models` is ordered by its own `priority`, and `model/list`
+    puts `isDefault` first); until the catalogue is read, or when there is none, the union of
+    everything 0.155.1's models name, so the control is never empty.
+    """
+    if guest_id == "claude":
+        rows = models if models is not None else guest_models("claude")
+        return list(rows[0]["efforts"]) if rows else []
+    rows = models if models is not None else guest_models(guest_id)
+    for row in rows:
+        if row.get("efforts"):
+            return list(row["efforts"])
+    return list(_CODEX_EFFORTS)
+
+
 def preset_rows() -> list[dict]:
     """One `presets` row per guest the registry knows (29.3). `harness` is what the GUI decides by:
     true means picking the row configures this pane's agent, false means the Tier B launch."""
@@ -193,6 +301,7 @@ def preset_rows() -> list[dict]:
     rows = []
     for guest_id in HARNESS_GUESTS:
         state = found.get(guest_id) or {"installed": False, "binary": "", "version": ""}
+        models = guest_models(guest_id) if state["installed"] else []
         rows.append({"id": PRESET_PREFIX + guest_id, "label": guest.spec(guest_id).name,
                      "guest": guest_id,
                      "harness": bool(state["installed"] and adapter_available(guest_id)),
@@ -200,7 +309,12 @@ def preset_rows() -> list[dict]:
                      "version": state["version"], "group": "guest",
                      "has_stored_key": False, "key_source": "guest",
                      "model": "", "base_url": base_url(guest_id),
-                     "local": False, "hosted": False, "efforts": []})
+                     "local": False, "hosted": False,
+                     # The guest's own levels and its own models (29.3). `effort_note` is the
+                     # line a provider uses to explain the levels it has *not* got; a guest's
+                     # list is its own and leaves nothing out, so there is nothing to say.
+                     "efforts": guest_efforts(guest_id, models) if state["installed"] else [],
+                     "effort_note": "", "models": models})
     return rows
 
 
@@ -236,7 +350,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     try:
         started = harness.start(cwd=workspace, model=options["model"] or None,
                                 resume=options["resume"], fork=options["fork"],
-                                permissions=options["permissions"])
+                                permissions=options["permissions"], effort=options["effort"])
     except HarnessError as exc:
         _close_quietly(harness)
         raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
@@ -252,10 +366,18 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     provider = HarnessProvider(config, harness, guest_id, stall_timeout=stall_timeout)
     provider.session_id = started.session_id or ""
     provider.permissions = options["permissions"]
+    provider.effort = _harness_effort(harness) or options["effort"] or ""
     logs.event(_log, "guest_harness_started", guest=guest_id, model=config.model,
                resumed=bool(options["resume"]), fork=options["fork"],
-               permissions=options["permissions"])
+               permissions=options["permissions"], effort=provider.effort)
     return provider
+
+
+def _harness_effort(harness) -> str:
+    """The level the guest says it is on, when it says (codex answers `thread/start` with it;
+    claude never reports one, so the pane's own request stands)."""
+    value = getattr(harness, "effort", "")
+    return value if isinstance(value, str) else ""
 
 
 def _close_quietly(harness) -> None:
@@ -290,6 +412,10 @@ class HarnessProvider:
         # The posture this pane started the guest with, so a resume starts the replacement the same
         # way rather than silently dropping back to the default.
         self.permissions = "bypass"
+        # The reasoning effort in force, as the guest names it. "" means the guest's own default
+        # (29.3): Relay's `agent.effort` is its four-level scale for its own providers and stays
+        # out of this, because a guest's levels are the guest's (xhigh, ultra).
+        self.effort = ""
         self._stall_timeout = float(stall_timeout)
         self._agent = None
         self._asker = _Asker()
@@ -915,6 +1041,15 @@ def switch_model(agent, guest_id: str | None, request: dict) -> HarnessProvider 
         except HarnessError as exc:
             raise ValueError(str(exc) or f"{guest.spec(guest_id).name} would not switch to {model}.") from None
         provider.config.model = named or model
+    # A `guest` block may carry both (the model box's row and its effort are one choice); the
+    # effort is applied after the model, because which levels a model has is the model's business.
+    effort = options["effort"]
+    if effort and effort != provider.effort:
+        try:
+            provider.effort = provider.harness.set_effort(effort) or effort
+        except HarnessError as exc:
+            raise ValueError(str(exc) or
+                             f"{guest.spec(guest_id).name} would not take {effort}.") from None
     return provider
 
 
@@ -932,11 +1067,43 @@ def agent_provider(agent) -> HarnessProvider | None:
 
 
 def configured_fields(agent) -> dict:
-    """`guest` and `guest_session` for the `configured` event (29.3); empty for a normal pane."""
+    """What a guest pane adds to `configured` and `model_changed` (29.3); empty for a normal pane.
+
+    `guest_effort` and not `effort`: the event's `effort` is the pane's own level on Relay's
+    four-level scale, and a guest's is the guest's own (`xhigh`, `ultra`), so the two travel
+    side by side rather than one pretending to be the other.
+    """
     provider = agent_provider(agent)
     if provider is None:
         return {}
-    return {"guest": provider.guest_id, "guest_session": provider.session_id}
+    return {"guest": provider.guest_id, "guest_session": provider.session_id,
+            "guest_effort": provider.effort}
+
+
+def set_effort(agent, effort) -> dict | None:
+    """The pane's `set_effort` when its agent is a guest (29.3), or None when it is not.
+
+    The guest's own knob, not a provider parameter: a guest turn is a process on a pipe and there
+    is no request body to put a `reasoning_effort` in, so nothing is written to the
+    `ProviderConfig`'s `extra`. Returns what `effort_changed` should carry.
+    """
+    provider = agent_provider(agent)
+    if provider is None:
+        return None
+    level = validate_effort(effort)
+    if level is None:
+        raise ValueError(f"{guest.spec(provider.guest_id).name} needs a reasoning effort to set.")
+    try:
+        applied = provider.harness.set_effort(level)
+    except HarnessError as exc:
+        raise ValueError(str(exc) or
+                         f"{guest.spec(provider.guest_id).name} would not take {level}.") from None
+    provider.effort = applied or level
+    logs.event(_log, "guest_harness_effort", guest=provider.guest_id, effort=provider.effort)
+    # `applied` keeps the event's shape the same as every other `effort_changed`; there are no
+    # provider parameters to name, because a guest turn is a process and not a request body.
+    return {"guest": provider.guest_id, "guest_effort": provider.effort,
+            "effort": provider.effort, "applied": {}}
 
 
 def session_guest(data) -> tuple[str, str]:
@@ -972,7 +1139,8 @@ def resume_session(agent, data, emit) -> None:
         replacement = make_harness(guest_id)
         started = replacement.start(cwd=str(agent.executor.workspace.root),
                                     model=provider.config.model or None, resume=session,
-                                    fork=False, permissions=provider.permissions)
+                                    fork=False, permissions=provider.permissions,
+                                    effort=provider.effort or None)
     except HarnessError as exc:
         emit({"event": "status",
               "text": f"{guest.spec(guest_id).name} could not resume that session: {exc}"})

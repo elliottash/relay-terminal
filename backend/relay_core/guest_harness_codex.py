@@ -10,8 +10,10 @@ The flow one turn takes, as recorded from codex-cli 0.155.1 (fixtures in
 
     -> initialize {clientInfo:{name:"relay",version}}        <- {userAgent, codexHome, ...}
     -> initialized (notification)
-    -> thread/start {cwd, approvalPolicy, sandbox}           <- {thread:{id,...}, model, ...}
-    -> turn/start {threadId, input:[{type:"text",text}]}     <- {turn:{id, status:"inProgress"}}
+    -> thread/start {cwd, approvalPolicy, sandbox}           <- {thread:{id,...}, model,
+                     [config:{model_reasoning_effort}]}          reasoningEffort, ...}
+    -> turn/start {threadId, input:[{type:"text",text}],     <- {turn:{id, status:"inProgress"}}
+                   [model], [effort]}
        <- turn/started, item/started, item/agentMessage/delta, item/completed,
           thread/tokenUsage/updated, turn/completed {turn:{status:"completed"}}
 
@@ -19,6 +21,22 @@ The protocol is machine-readable: `codex app-server generate-json-schema --out <
 `ClientRequest.json` (every request), `ServerRequest.json` (every request the server makes of us,
 i.e. the approvals) and `ServerNotification.json` (every notification). Anything not named below
 is ignored and logged at debug, so a newer codex cannot break a pane.
+
+**The reasoning effort** (owner, 2026-09-19: "you should be able to pick the model and reasoning
+effort for those"). Where the schema puts it, read off `generate-json-schema` for 0.155.1:
+
+* `TurnStartParams.effort` — "Override the reasoning effort for this turn and subsequent turns",
+  a `ReasoningEffort`, which is any non-empty string the *model* advertises. So `set_effort()`
+  only has to remember the level and put it on the next `turn/start`.
+* `ThreadStartParams` has **no** `effort` field, but it does have `config` (a free-form overrides
+  map), and `model_reasoning_effort` there is the same key the TUI's `-c` takes. A thread started
+  that way answers with `reasoningEffort: "<level>"`, so `start(effort=…)` uses it and the thread
+  is on the right level before its first turn. `ThreadResumeParams` has `config` too.
+* `ModelListResponse.data[]` is the catalogue `models()` reports: `id`, `displayName`,
+  `defaultReasoningEffort` and `supportedReasoningEfforts: [{reasoningEffort, description}]`.
+
+Nothing is refused here: an effort a model will not take is refused by codex, and its own words
+are what the pane shows (a `HarnessError` from `turn/start`).
 """
 from __future__ import annotations
 
@@ -34,7 +52,7 @@ import time
 from collections import deque
 
 from .guest_harness import (Emit, HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
-                            TurnResult, map_tool_name, validate_permissions)
+                            TurnResult, map_tool_name, validate_effort, validate_permissions)
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +71,15 @@ PERMISSION_MODES = {
     "ask": ("on-request", "workspace-write"),
     "deny": ("on-request", "read-only"),
 }
+
+# The config key `thread/start`'s free-form `config` map takes for the reasoning effort — the one
+# `codex -c model_reasoning_effort="high"` sets on the TUI.
+EFFORT_CONFIG_KEY = "model_reasoning_effort"
+
+# What `models()` falls back to when the catalogue cannot be had: every level 0.155.1's models
+# advertise between them. The per-model subsets come from `model/list` and differ (gpt-5.5 has no
+# `ultra`), which is why this is a fallback and not a table.
+EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 
 # `item/started` item types that are a tool call in Relay's sense. The `type` is what
 # `guest_harness.map_tool_name("codex", ...)` keys on.
@@ -138,7 +165,9 @@ class CodexHarness:
         self._usage: dict = {}
         self._session_id = ""
         self._model = ""
+        self._effort = ""
         self._pending_model: str | None = None
+        self._pending_effort: str | None = None
         self._announce_started = False
         self._permissions = "bypass"
         self._closed = False
@@ -148,11 +177,14 @@ class CodexHarness:
     # ----- the contract ------------------------------------------------------------------------
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
-              fork: bool = False, permissions: str = "bypass") -> HarnessStart:
+              fork: bool = False, permissions: str = "bypass",
+              effort: str | None = None) -> HarnessStart:
+        effort = validate_effort(effort)
         with self._lock:
             if self._proc is not None:
                 raise HarnessError("this codex harness has already been started.")
             self._permissions = validate_permissions(permissions)
+            self._effort = effort or ""
         exe = shutil.which(self._codex_path)
         if not exe:
             raise HarnessNotAvailable(
@@ -176,7 +208,8 @@ class CodexHarness:
             self._request("initialize", {"clientInfo": {"name": CLIENT_NAME,
                                                         "version": self._client_version}})
             self._notify("initialized", {})
-            result = self._start_thread(cwd=cwd, model=model, resume=resume, fork=fork)
+            result = self._start_thread(cwd=cwd, model=model, resume=resume, fork=fork,
+                                        effort=effort)
         except HarnessNotAvailable:
             self.close()
             raise
@@ -187,6 +220,9 @@ class CodexHarness:
         thread = result.get("thread") or {}
         self._session_id = str(thread.get("id") or thread.get("sessionId") or "")
         self._model = str(result.get("model") or thread.get("model") or model or "")
+        # The level the thread actually came up on, which is codex's answer and not our request.
+        self._effort = str(result.get("reasoningEffort") or thread.get("reasoningEffort")
+                           or effort or "")
         if not self._session_id:
             self.close()
             raise HarnessNotAvailable("Codex's app-server started no thread (no id came back).")
@@ -212,6 +248,10 @@ class CodexHarness:
                 if self._pending_model:
                     params["model"] = self._pending_model
                     self._pending_model = None
+                if self._pending_effort:
+                    # "Override the reasoning effort for this turn and subsequent turns."
+                    params["effort"] = self._pending_effort
+                    self._pending_effort = None
             response = self._request("turn/start", params)
             turn.turn_id = str(((response.get("turn") or {}).get("id")) or "")
             if turn.interrupt_requested or cancel.is_set():
@@ -239,6 +279,43 @@ class CodexHarness:
             self._model = resolved
             self._announce_started = True
         return resolved
+
+    def set_effort(self, effort: str) -> str:
+        """Remember the level; the next `turn/start` carries it as `effort`.
+
+        Nothing is checked against the model here: which levels a model has is what `model/list`
+        says and codex is the one that enforces it, so a level it will not take comes back as the
+        `turn/start` error, in codex's own words (29.1's `error` → the turn's error).
+        """
+        level = validate_effort(effort)
+        if level is None:
+            raise HarnessError("a reasoning effort is needed.")
+        with self._lock:
+            self._pending_effort = level
+            self._effort = level
+        return level
+
+    def models(self) -> list[dict]:
+        """`model/list` as the contract's rows (29.3): id = the slug `turn/start` takes, label =
+        the display name, efforts and the default from the model's own fields.
+
+        Best effort: an empty list when the process is not up or the server will not answer, and
+        the pane then simply offers no menu.
+        """
+        if self._proc is None or self._closed or self._dead:
+            return []
+        try:
+            listing = self._request("model/list", {}, timeout=min(self._request_timeout, 20.0))
+        except HarnessError as exc:
+            log.debug("codex harness: model/list failed (%s); no models to offer.", exc)
+            return []
+        return catalog_rows(listing.get("data") or [], current=self._model)
+
+    @property
+    def effort(self) -> str:
+        """The level the thread is on, as codex reported it (empty when it never said)."""
+        with self._lock:
+            return self._effort
 
     def compact(self) -> None:
         if self._closed or self._dead or not self._session_id:
@@ -293,11 +370,15 @@ class CodexHarness:
     # ----- starting the thread ------------------------------------------------------------------
 
     def _start_thread(self, *, cwd: str, model: str | None, resume: str | None,
-                      fork: bool) -> dict:
+                      fork: bool, effort: str | None = None) -> dict:
         policy, sandbox = PERMISSION_MODES[self._permissions]
         params: dict = {"cwd": cwd, "approvalPolicy": policy, "sandbox": sandbox}
         if model:
             params["model"] = model
+        if effort:
+            # `thread/start` has no `effort` field; `config` is the overrides map, and this is the
+            # key the TUI's `-c` sets. The response then reports `reasoningEffort: "<level>"`.
+            params["config"] = {EFFORT_CONFIG_KEY: effort}
         if resume:
             params["threadId"] = resume
             method = "thread/fork" if fork else "thread/resume"
@@ -840,6 +921,49 @@ class _Pending:
 
 
 # ----- pure helpers ------------------------------------------------------------------------------
+
+
+def catalog_rows(entries, current: str = "") -> list[dict]:
+    """`model/list`'s `data` (or `codex debug models`' `models`) as the contract's model rows.
+
+    Both catalogues carry the same facts under different spellings — the app-server answers
+    camelCase (`displayName`, `supportedReasoningEfforts[].reasoningEffort`,
+    `defaultReasoningEffort`) and `codex debug models` snake_case (`slug`, `display_name`,
+    `supported_reasoning_levels[].effort`, `default_reasoning_level`) — so one reader serves the
+    adapter and the worker's background scan (`guest_harness_provider`).
+    """
+    rows: list[dict] = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("hidden") is True or entry.get("visibility") == "hide":
+            continue
+        model_id = str(entry.get("id") or entry.get("slug") or entry.get("model") or "").strip()
+        if not model_id:
+            continue
+        efforts = []
+        for level in (entry.get("supportedReasoningEfforts")
+                      or entry.get("supported_reasoning_levels") or []):
+            name = level.get("reasoningEffort") or level.get("effort") if isinstance(level, dict) \
+                else level
+            try:
+                name = validate_effort(name)
+            except ValueError:
+                name = None
+            if name and name not in efforts:
+                efforts.append(name)
+        try:
+            default = validate_effort(entry.get("defaultReasoningEffort")
+                                      or entry.get("default_reasoning_level"))
+        except ValueError:
+            default = None
+        row = {"id": model_id,
+               "label": str(entry.get("displayName") or entry.get("display_name") or model_id),
+               "efforts": efforts, "default_effort": default}
+        if current and model_id == current:
+            row["current"] = True
+        rows.append(row)
+    return rows
 
 
 def _spawn_codex(argv: list[str], cwd: str):

@@ -196,6 +196,11 @@ def open_request_items(agent) -> list[dict]:
 
 
 class SessionCommands:
+    # Whether Relay indexes the guests' own sessions (Options › Privacy, `sessions/index_guests`,
+    # protocol 26.7, review B1). The pane sends it with every `conversations` request; None means
+    # "as the environment says" (`guest_sessions.guests_enabled()`, `RELAY_INDEX_GUESTS`): on.
+    index_guests: bool | None = None
+
     def __init__(self, turns, emit, *, on_model_changed=None, on_conversation_replaced=None, subagents=None):
         self.turns = turns
         self.emit = emit
@@ -307,6 +312,7 @@ class SessionCommands:
                     if guest_provider is not None:
                         changed["guest"] = guest_provider.guest_id
                         changed["guest_session"] = guest_provider.session_id
+                        changed["guest_effort"] = guest_provider.effort
                     self.emit(changed)
                 return outcome
         self.turns.now_or_later(lambda: decide(True), lambda: decide(False))
@@ -315,6 +321,14 @@ class SessionCommands:
 
     def _set_effort(self, request):
         agent = self._agent()
+        # Protocol 29.3: on a guest pane the effort is the guest's own knob (its command line or
+        # its `turn/start`), not a parameter of a request Relay makes, so the harness is told and
+        # nothing is written to the ProviderConfig. The guest's levels are its own (xhigh, ultra),
+        # which is why `presets.validate_effort`'s four are not consulted on that path.
+        guest_applied = guest_harness_provider.set_effort(agent, request.get("effort"))
+        if guest_applied is not None:
+            self.emit({"event": "effort_changed", "id": request.get("id"), **guest_applied})
+            return
         applied = agent.set_effort(validate_effort(request.get("effort")))
         self.emit({"event": "effort_changed", "id": request.get("id"), "effort": agent.effort, "applied": applied})
 
@@ -868,7 +882,9 @@ class SessionCommands:
 
         def work():
             try:
-                outcome = guest_sessions.reconcile(self.index())
+                # Off: nothing under ~/.claude or ~/.codex is read and the guest rows leave the
+                # index; the pins and the names are kept for when it goes back on (26.7).
+                outcome = guest_sessions.reconcile(self.index(), enabled=self.index_guests)
             except (OSError, ValueError, sqlite3.Error) as exc:
                 # A guest's files are not Relay's to depend on: an unreadable home is a log line,
                 # never an error on a listing the user already has in front of them.
@@ -908,6 +924,12 @@ class SessionCommands:
                 raise ValueError(f"{name} must be an integer.")
         if type(request.get("include_threads", False)) is not bool:
             raise ValueError("include_threads must be true or false.")
+        # Options › Privacy: whether the guests' sessions are indexed at all (26.7, review B1). It
+        # rides every listing, so a change takes effect at the next one with no second message.
+        if request.get("index_guests") is not None:
+            if type(request["index_guests"]) is not bool:
+                raise ValueError("index_guests must be true or false.")
+            self.index_guests = request["index_guests"]
         # The three-state filters (protocol 14.3): absent means "do not filter", not "false".
         for name in ("has_edits", "unfinished", "pinned", "has_summary"):
             value = request.get(name)

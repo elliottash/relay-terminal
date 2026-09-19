@@ -82,10 +82,16 @@ class PresetTests(unittest.TestCase):
 
     def test_guest_options_are_validated(self):
         self.assertEqual(ghp.guest_options(None),
-                         {"model": "", "resume": None, "fork": False, "permissions": "bypass"})
+                         {"model": "", "resume": None, "fork": False, "permissions": "bypass",
+                          "effort": None})
         self.assertEqual(ghp.guest_options({"resume": "abc", "fork": True, "permissions": "ask"}),
-                         {"model": "", "resume": "abc", "fork": True, "permissions": "ask"})
-        for bad in ({"nope": 1}, {"fork": "yes"}, {"permissions": "maybe"}, {"model": 3}, "x"):
+                         {"model": "", "resume": "abc", "fork": True, "permissions": "ask",
+                          "effort": None})
+        # The guest's own levels, so `xhigh` and `ultra` pass where Relay's own four would not.
+        for given, want in (("xhigh", "xhigh"), ("Ultra", "ultra"), ("", None), (None, None)):
+            self.assertEqual(ghp.guest_options({"effort": given})["effort"], want, given)
+        for bad in ({"nope": 1}, {"fork": "yes"}, {"permissions": "maybe"}, {"model": 3}, "x",
+                    {"effort": "high and also"}, {"effort": 3}):
             with self.assertRaises(ValueError):
                 ghp.guest_options(bad)
 
@@ -104,7 +110,14 @@ class PresetTests(unittest.TestCase):
         self.assertEqual((claude["group"], claude["key_source"], claude["model"]),
                          ("guest", "guest", ""))
         self.assertFalse(claude["has_stored_key"] or claude["local"] or claude["hosted"])
-        self.assertEqual(claude["efforts"], [])
+        # The guest's own levels and its own models, so Options can offer both (owner 2026-09-19).
+        self.assertEqual(claude["efforts"], ["low", "medium", "high", "xhigh", "max"])
+        self.assertEqual(claude["effort_note"], "")
+        self.assertEqual([row["id"] for row in claude["models"]],
+                         ["fable", "opus", "sonnet", "haiku"])
+        self.assertEqual(claude["models"][0]["efforts"], ["low", "medium", "high", "xhigh", "max"])
+        # A guest this machine does not have offers nothing: there is no catalogue to read.
+        self.assertEqual((rows["guest:codex"]["efforts"], rows["guest:codex"]["models"]), ([], []))
         # Installed but no adapter, and an adapter but not installed: both fall back to Tier B.
         self.assertFalse(rows["guest:codex"]["harness"])
         with mock.patch.object(ghp, "installations", return_value={
@@ -131,6 +144,24 @@ class PresetTests(unittest.TestCase):
 
 
 class StartTests(unittest.TestCase):
+    def test_start_provider_passes_the_effort_and_keeps_what_the_guest_says(self):
+        harness = FakeHarness([], session_id="s", model="m")
+        with mock.patch.object(ghp, "make_harness", return_value=harness):
+            provider = ghp.start_provider("guest:codex", {"guest": {"effort": "xhigh"}}, "/tmp/ws")
+        self.assertEqual(harness.starts[0]["effort"], "xhigh")
+        self.assertEqual(provider.effort, "xhigh")
+        # Codex answers `thread/start` with the level it actually came up on; that is what stands.
+        class Clamping(FakeHarness):
+            def start(self, **kwargs):
+                started = super().start(**kwargs)
+                self._effort = "medium"
+                return started
+
+        other = Clamping([], session_id="s", model="m")
+        with mock.patch.object(ghp, "make_harness", return_value=other):
+            provider = ghp.start_provider("guest:codex", {"guest": {"effort": "xhigh"}}, "/tmp/ws")
+        self.assertEqual(provider.effort, "medium")
+
     def test_start_provider_passes_the_guest_block(self):
         harness = FakeHarness([], session_id="sess-1", model="opus-fake")
         with mock.patch.object(ghp, "make_harness", return_value=harness):
@@ -138,7 +169,7 @@ class StartTests(unittest.TestCase):
                 "guest:claude", {"guest": {"model": "opus", "resume": "sess-1", "fork": True,
                                            "permissions": "ask"}}, "/tmp/ws")
         self.assertEqual(harness.starts, [{"cwd": "/tmp/ws", "model": "opus", "resume": "sess-1",
-                                           "fork": True, "permissions": "ask"}])
+                                           "fork": True, "permissions": "ask", "effort": None}])
         self.assertEqual(provider.guest_id, "claude")
         self.assertEqual(provider.session_id, "sess-1")
         self.assertEqual(provider.config.model, "opus")
@@ -402,7 +433,7 @@ class AgentWiringTests(unittest.TestCase):
                       session_dir=str(Path(temp.name) / "sessions"), track_requests=False)
         ghp.attach(agent, provider)
         self.assertEqual(ghp.configured_fields(agent),
-                         {"guest": "claude", "guest_session": "guest-sess-7"})
+                         {"guest": "claude", "guest_session": "guest-sess-7", "guest_effort": ""})
         fields = session_protocol.configured_fields(agent)
         self.assertEqual(fields["guest"], "claude")
         self.assertEqual(fields["guest_session"], "guest-sess-7")
@@ -438,6 +469,59 @@ class AgentWiringTests(unittest.TestCase):
         self.assertIsNone(ghp.switch_model(agent, "claude", {"guest": {"resume": "s1"}}))
         self.assertIsNone(ghp.switch_model(agent, "claude", {"guest": {"fork": True}}))
         self.assertIsNone(ghp.switch_model(agent, None, {}))
+
+    def test_set_model_with_a_guest_block_applies_the_model_and_the_effort(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        harness, provider = build([])
+        agent = Agent(guest_config(), temp.name, lambda e: None, provider=provider,
+                      track_requests=False)
+        ghp.attach(agent, provider)
+        same = ghp.switch_model(agent, "claude",
+                                {"guest": {"model": "opus", "effort": "xhigh"}})
+        self.assertIs(same, provider)
+        self.assertEqual(harness.calls[-2:], [("set_model", "opus"), ("set_effort", "xhigh")])
+        self.assertEqual(provider.effort, "xhigh")
+        # Asking for the effort it already has does not ask the guest again.
+        ghp.switch_model(agent, "claude", {"guest": {"effort": "xhigh"}})
+        self.assertEqual(harness.calls[-1], ("set_effort", "xhigh"))
+
+    def test_set_effort_tells_the_guest_and_leaves_the_provider_config_alone(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        harness, provider = build([])
+        agent = Agent(guest_config(), temp.name, lambda e: None, provider=provider,
+                      track_requests=False)
+        ghp.attach(agent, provider)
+        before = dict(agent.config.extra)
+        self.assertEqual(ghp.set_effort(agent, "Ultra"),
+                         {"guest": "claude", "guest_effort": "ultra", "effort": "ultra",
+                          "applied": {}})
+        self.assertIn(("set_effort", "ultra"), harness.calls)
+        self.assertEqual(provider.effort, "ultra")
+        self.assertEqual(agent.config.extra, before)     # no reasoning_effort is written anywhere
+        self.assertEqual(ghp.configured_fields(agent)["guest_effort"], "ultra")
+
+    def test_set_effort_on_a_pane_that_is_not_a_guest_says_so(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        agent = Agent(ProviderConfig("https://example.test/v1", "m", "k", {}, 1024), temp.name,
+                      lambda e: None, track_requests=False)
+        self.assertIsNone(ghp.set_effort(agent, "high"))
+
+    def test_a_guest_that_refuses_the_effort_is_the_words_the_pane_shows(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        harness, provider = build([], effort_error=HarnessError("gpt-5.5 has no ultra."))
+        agent = Agent(guest_config(), temp.name, lambda e: None, provider=provider,
+                      track_requests=False)
+        ghp.attach(agent, provider)
+        with self.assertRaises(ValueError) as caught:
+            ghp.set_effort(agent, "ultra")
+        self.assertIn("gpt-5.5 has no ultra.", str(caught.exception))
+        self.assertEqual(provider.effort, "")
+        with self.assertRaises(ValueError):
+            ghp.set_effort(agent, "")
 
     def test_resume_replaces_the_harness_with_one_on_the_recorded_session(self):
         temp = tempfile.TemporaryDirectory()
@@ -478,8 +562,86 @@ class AgentWiringTests(unittest.TestCase):
         self.assertTrue(any(e["event"] == "status" and "could not resume" in e["text"] for e in events))
 
 
+class CatalogueTests(unittest.TestCase):
+    """`codex debug models`, read once per worker process in the background (29.3)."""
+
+    def setUp(self):
+        ghp.reset_catalog()
+        ghp._detected = None
+        self.addCleanup(ghp.reset_catalog)
+        self.addCleanup(setattr, ghp, "_detected", None)
+
+    def _installed(self, binary="/usr/bin/codex"):
+        return mock.patch.object(ghp, "installations", return_value={
+            "claude": {"installed": True, "binary": "/usr/bin/claude", "version": ""},
+            "codex": {"installed": bool(binary), "binary": binary, "version": ""}})
+
+    def test_the_first_presets_answer_does_not_wait_for_codex(self):
+        release = threading.Event()
+        seen = []
+
+        def slow(binary):
+            seen.append(binary)
+            release.wait(5.0)
+            return [{"id": "gpt-6-astra", "label": "GPT-6-Astra",
+                     "efforts": ["low", "high", "ultra"], "default_effort": "medium"}]
+
+        with self._installed(), mock.patch.object(ghp, "_read_codex_catalog", slow):
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+            # Answered on the protocol thread while the scan is still blocked.
+            self.assertEqual(rows["guest:codex"]["models"], [])
+            self.assertEqual(rows["guest:codex"]["efforts"],
+                             ["low", "medium", "high", "xhigh", "max", "ultra"])
+            release.set()
+            self.assertTrue(ghp.catalog_ready.wait(5.0))
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+        self.assertEqual([m["id"] for m in rows["guest:codex"]["models"]], ["gpt-6-astra"])
+        self.assertEqual(rows["guest:codex"]["efforts"], ["low", "high", "ultra"])
+        self.assertEqual(seen, ["/usr/bin/codex"])       # read once per worker process
+
+    def test_a_codex_that_fails_or_is_missing_is_simply_no_menu(self):
+        with self._installed(), mock.patch.object(ghp, "_read_codex_catalog",
+                                                  side_effect=RuntimeError("not logged in")):
+            ghp.preset_rows()
+            self.assertTrue(ghp.catalog_ready.wait(5.0))
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+        self.assertEqual(rows["guest:codex"]["models"], [])
+        self.assertEqual(rows["guest:codex"]["efforts"],
+                         ["low", "medium", "high", "xhigh", "max", "ultra"])
+        ghp.reset_catalog()
+        ghp._detected = None
+        with self._installed(binary=""), mock.patch.object(
+                ghp, "_read_codex_catalog", side_effect=AssertionError("nothing to run")):
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+        self.assertEqual((rows["guest:codex"]["models"], rows["guest:codex"]["efforts"]), ([], []))
+
+    def test_the_real_reader_parses_what_codex_debug_models_prints(self):
+        printed = json.dumps({"models": [
+            {"slug": "gpt-6-astra", "display_name": "GPT-6-Astra", "visibility": "list",
+             "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "low", "description": "x"},
+                                            {"effort": "ultra", "description": "y"}]},
+            {"slug": "gpt-reserve", "display_name": "GPT-Reserve", "visibility": "hide",
+             "default_reasoning_level": "medium", "supported_reasoning_levels": []}]})
+        done = mock.Mock(returncode=0, stdout=printed, stderr="")
+        with mock.patch.object(ghp.subprocess, "run", return_value=done) as run:
+            rows = ghp._read_codex_catalog("/usr/bin/codex")
+        self.assertEqual(run.call_args[0][0], ["/usr/bin/codex", "debug", "models"])
+        self.assertEqual(run.call_args[1]["timeout"], ghp.CODEX_CATALOG_TIMEOUT)
+        self.assertEqual(rows, [{"id": "gpt-6-astra", "label": "GPT-6-Astra",
+                                 "efforts": ["low", "ultra"], "default_effort": "medium"}])
+        with mock.patch.object(ghp.subprocess, "run",
+                               return_value=mock.Mock(returncode=1, stdout="", stderr="no auth")):
+            with self.assertRaises(RuntimeError):
+                ghp._read_codex_catalog("/usr/bin/codex")
+
+
 class WorkerProtocolTests(unittest.TestCase):
     """The real worker loop, in process, with `make_harness` replaced. Nothing spawns."""
+
+    def setUp(self):
+        ghp.reset_catalog()
+        self.addCleanup(ghp.reset_catalog)
 
     def run_worker(self, messages, harness):
         script = "".join(json.dumps(m) + "\n" for m in messages).encode()
@@ -496,7 +658,8 @@ class WorkerProtocolTests(unittest.TestCase):
                  mock.patch.object(ghp, "installations", return_value={
                      "claude": {"installed": True, "binary": "/usr/bin/claude", "version": ""},
                      "codex": {"installed": True, "binary": "/usr/bin/codex", "version": ""}}), \
-                 mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True):
+                 mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True), \
+                 mock.patch.object(ghp, "_read_codex_catalog", return_value=[]):
                 import worker
                 worker.main()
         return [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
@@ -529,6 +692,45 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertTrue(changed, [e for e in events if e["event"] == "error"])
         self.assertEqual(changed[0]["model"], "m")
         self.assertTrue(harness.closed)
+
+    def test_the_pane_sets_the_guests_effort_and_the_event_carries_it(self):
+        """The owner's ask (2026-09-19): pick the model *and* the reasoning effort for a guest.
+
+        `set_effort` on a guest pane is the harness's own knob, so the level may be one Relay's
+        four-level scale has never heard of (`xhigh`), and it comes back on the ordinary
+        `effort_changed` beside `guest_effort`.
+        """
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.run_worker([
+            {"type": "configure", "preset": "guest:claude", "workspace": str(ROOT),
+             "guest": {"effort": "high"}},
+            {"type": "set_effort", "id": "e", "effort": "xhigh"},
+            {"type": "shutdown"}], harness)
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(configured[0]["guest_effort"], "high")
+        self.assertEqual(harness.starts[0]["effort"], "high")
+        changed = [e for e in events if e["event"] == "effort_changed"]
+        self.assertEqual(changed[-1]["effort"], "xhigh")
+        self.assertEqual(changed[-1]["guest_effort"], "xhigh")
+        self.assertIn(("set_effort", "xhigh"), harness.calls)
+        self.assertFalse([e for e in events if e["event"] == "error"])
+
+    def test_set_model_carries_the_guests_model_and_effort_together(self):
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.run_worker([
+            {"type": "configure", "preset": "guest:claude", "workspace": str(ROOT)},
+            {"type": "set_model", "id": "m", "preset": "guest:claude",
+             "guest": {"model": "opus", "effort": "max"}},
+            {"type": "shutdown"}], harness)
+        changed = [e for e in events if e["event"] == "model_changed" and e.get("id") == "m"]
+        self.assertTrue(changed, [e for e in events if e["event"] == "error"])
+        self.assertEqual(changed[0]["model"], "opus")
+        self.assertEqual(changed[0]["guest"], "claude")
+        self.assertEqual(changed[0]["guest_effort"], "max")
+        self.assertIn(("set_model", "opus"), harness.calls)
+        self.assertIn(("set_effort", "max"), harness.calls)
+        self.assertEqual(len(harness.starts), 1)         # the harness was kept, not restarted
 
     def test_a_second_configure_and_shutdown_both_close_the_harness(self):
         harness = FakeHarness([], session_id="w-sess")

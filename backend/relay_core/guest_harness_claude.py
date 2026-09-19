@@ -12,7 +12,7 @@ that pipe.
 
     claude -p --input-format stream-json --output-format stream-json --verbose
            --include-partial-messages
-           [--model M]
+           [--model M] [--effort low|medium|high|xhigh|max]
            [--session-id <uuid4> | --resume <id> [--fork-session]]
            [--permission-mode bypassPermissions --dangerously-skip-permissions]   # bypass
            [--permission-prompts host --permission-prompt-tool stdio]             # ask
@@ -36,6 +36,14 @@ acceptance, and a settings file that fails to validate is silently ignored in th
   `--permission-prompt-tool stdio`); we ask `initialize`, `interrupt` and `set_model`. An
   unknown subtype comes back as `{"subtype": "error", "error": "Unsupported control request
   subtype: …"}`, which is how `set_model` falls back to a restart on an older CLI.
+* **There is no control request for the effort.** `set_effort`, `setEffort` and
+  `set_reasoning_effort` were each tried against 2.1.278 on 2026-09-19 and each came back
+  "Unsupported control request subtype" (the probe is free: the CLI answers before any model
+  turn). The effort is a command-line flag and nothing else, so `set_effort()` is the same
+  restart `set_model()` falls back to — a new process on the same session, between turns.
+* A session claude has not written yet cannot be resumed: `--resume <a fresh uuid>` exits 1 with
+  "No conversation found with session ID" (measured the same day). So a restart before the first
+  turn starts a *fresh* process under the same `--session-id` instead, which loses nothing.
 * An interrupted turn ends with `subtype: "error_during_execution"`, `is_error: true`,
   `terminal_reason: "aborted_tools"` or `"aborted_streaming"` and **no `result` field** — so
   `is_error` alone does not mean the turn failed. The process survives it and takes the next
@@ -61,7 +69,7 @@ import time
 import uuid
 
 from .guest_harness import (HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
-                            TurnResult, map_tool_name, validate_permissions)
+                            TurnResult, map_tool_name, validate_effort, validate_permissions)
 
 GUEST = "claude"
 BINARY = "claude"                  # what `start()` looks for on PATH
@@ -70,6 +78,17 @@ BINARY = "claude"                  # what `start()` looks for on PATH
 # `--include-partial-messages` is what makes it stream deltas rather than whole messages.
 BASE_FLAGS = ("-p", "--input-format", "stream-json", "--output-format", "stream-json",
               "--verbose", "--include-partial-messages")
+
+# `--effort <level>`, as `claude --help` lists them (2.1.278). Checked here rather than passed
+# through, because an effort the CLI does not know makes the process exit at startup — and the
+# pane would see "the guest stopped" instead of "claude has no such level".
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+# The model aliases `--model` documents ("an alias for the latest model (e.g. 'fable', 'opus', or
+# 'sonnet') or a model's full name"). There is nothing on the stream-json protocol that lists the
+# models, and `claude --help` is the only catalogue there is, so `models()` is this list plus
+# whichever full name the running session reported (29.3).
+MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
 
 # One posture, one set of flags (guest_harness.PERMISSIONS).
 PERMISSION_FLAGS = {
@@ -213,6 +232,13 @@ class ClaudeHarness:
         self._permissions = "bypass"
         self._session_id = ""
         self._model = ""
+        self._effort = ""
+        self._effort_pending = False
+        # Whether the CLI has opened this session yet (its first `system`/`init` came). Until it
+        # has, there is no transcript on disk and `--resume` would be refused, so a relaunch
+        # starts fresh under the same id instead. Never cleared by `close()`: the session is on
+        # disk from then on, whatever this object does.
+        self._resumable = False
         self._tools: list[str] = []
 
         self._inbox: queue.Queue = queue.Queue()      # everything a turn reads
@@ -230,10 +256,12 @@ class ClaudeHarness:
     # ----- lifecycle ---------------------------------------------------------------------
 
     def _argv(self, *, model: str | None, session_id: str | None, resume: str | None,
-              fork: bool, permissions: str) -> list[str]:
+              fork: bool, permissions: str, effort: str | None = None) -> list[str]:
         argv = [self._binary, *BASE_FLAGS]
         if model:
             argv += ["--model", model]
+        if effort:
+            argv += ["--effort", effort]
         if resume:
             argv += ["--resume", resume]
             if fork:
@@ -247,8 +275,10 @@ class ClaudeHarness:
         return argv
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
-              fork: bool = False, permissions: str = "bypass") -> HarnessStart:
+              fork: bool = False, permissions: str = "bypass",
+              effort: str | None = None) -> HarnessStart:
         permissions = validate_permissions(permissions)
+        effort = self._level(validate_effort(effort)) if effort else None
         if self._proc is not None:
             raise HarnessError("this claude harness is already started.")
         if shutil.which(self._binary) is None:
@@ -260,12 +290,13 @@ class ClaudeHarness:
         self._cwd = cwd
         self._permissions = permissions
         self._model = model or ""
+        self._effort = effort or ""
         # A fork gets its id from the CLI (it makes a new one); everything else we name ourselves,
         # so the pane has a session id to file the transcript under before the first turn.
         new_id = "" if resume else str(uuid.uuid4())
         self._session_id = "" if (resume and fork) else (resume or new_id)
         argv = self._argv(model=model, session_id=new_id or None, resume=resume, fork=fork,
-                          permissions=permissions)
+                          permissions=permissions, effort=effort)
         self._launch(argv)
         self._handshake()
         return HarnessStart(session_id=self._session_id, model=self._model)
@@ -451,6 +482,9 @@ class ClaudeHarness:
     def send(self, prompt: str, *, attachments: list[dict] | None = None, emit,
              cancel: threading.Event) -> TurnResult:
         with self._turn_lock:
+            # An effort asked for while the last turn was running is applied here, before this
+            # one starts: it is a command-line flag, so applying it is a restart (`set_effort`).
+            self._apply_effort()
             if self._proc is None:
                 raise HarnessError("the guest is not running.")
             self._interrupted = False
@@ -523,6 +557,7 @@ class ClaudeHarness:
         subtype = message.get("subtype")
         if subtype == "init":
             with self._state_lock:
+                self._resumable = True      # the CLI has opened the session; --resume works now
                 self._session_id = str(message.get("session_id") or self._session_id)
                 self._model = str(message.get("model") or self._model)
                 tools = message.get("tools")
@@ -706,17 +741,102 @@ class ClaudeHarness:
         return model
 
     def _restart(self, model: str) -> None:
-        """The fallback for a CLI without `set_model`: the same session, resumed, on the new
-        model. The session id is what carries the conversation over."""
-        session_id = self._session_id
-        if not session_id:
+        """The fallback for a CLI without `set_model`: the same session, on the new model."""
+        if not self._session_id:
             raise HarnessError("the guest has no session to resume on a new model yet.")
+        self._relaunch(model=model, effort=self._effort or None)
+
+    def _relaunch(self, *, model: str | None, effort: str | None) -> None:
+        """Start the guest again with the flags it should have now, keeping its session.
+
+        A session the CLI has already opened is continued with `--resume <id>`; one it has not
+        written yet is started again under the same `--session-id`, because `--resume` on an id
+        with no transcript exits 1 ("No conversation found with session ID") and there is nothing
+        to carry over anyway. Either way the pane keeps the id it has been showing.
+        """
+        session_id = self._session_id or str(uuid.uuid4())
+        self._session_id = session_id
+        resume = session_id if self._resumable else None
         self.close()
         self._started_emitted = False
         self._inbox = queue.Queue()
-        self._launch(self._argv(model=model, session_id=None, resume=session_id, fork=False,
-                                permissions=self._permissions))
+        self._launch(self._argv(model=model, session_id=None if resume else session_id,
+                                resume=resume, fork=False, permissions=self._permissions,
+                                effort=effort))
         self._handshake()
+
+    # ----- the reasoning effort -------------------------------------------------------------
+
+    def _level(self, effort: str | None) -> str:
+        """`effort` as this CLI spells it, or a HarnessError naming what it does have."""
+        if not effort:
+            raise HarnessError("a reasoning effort is needed.")
+        if effort not in EFFORTS:
+            raise HarnessError(
+                f"Claude Code takes one of {', '.join(EFFORTS)} for its reasoning effort, "
+                f"not {effort!r}.")
+        return effort
+
+    def set_effort(self, effort: str) -> str:
+        """Switch the reasoning effort, in force from the next turn.
+
+        There is no control request for it (see the module docstring: three spellings were tried
+        against 2.1.278 and each was "Unsupported control request subtype"), so this is the same
+        restart `set_model` falls back to: a new process on the same session, with `--effort` on
+        its command line. A turn in flight keeps the effort it started with — restarting under it
+        would kill it — and the new process is started at the top of the next `send()`.
+        """
+        level = self._level(validate_effort(effort))
+        if self._proc is None:
+            raise HarnessError("the guest is not running.")
+        with self._state_lock:
+            if level == self._effort:
+                return level
+            self._effort = level
+            self._effort_pending = True
+        self._apply_effort()
+        return level
+
+    def _apply_effort(self) -> bool:
+        """Restart on the effort that is waiting, if no turn is running. True when it happened."""
+        if not self._turn_lock.acquire(blocking=False):
+            return False                     # a turn owns the process; the next `send()` does it
+        try:
+            with self._state_lock:
+                if not self._effort_pending or self._proc is None:
+                    return False
+                self._effort_pending = False
+                effort = self._effort
+            self._relaunch(model=self._model or None, effort=effort or None)
+            return True
+        finally:
+            self._turn_lock.release()
+
+    def models(self) -> list[dict]:
+        """The aliases `--model` documents, each with the five levels `--effort` takes (29.3).
+
+        Claude Code publishes no catalogue on this protocol — `claude --help` is the only list
+        there is — so this is static, plus the full model name the running session reported when
+        that is not one of the aliases, marked as the one in force.
+        """
+        with self._state_lock:
+            running = self._model
+        rows = [{"id": alias, "label": alias.capitalize(), "efforts": list(EFFORTS),
+                 "default_effort": None} for alias in MODEL_ALIASES]
+        known = {row["id"] for row in rows}
+        if running and running not in known:
+            rows.append({"id": running, "label": running, "efforts": list(EFFORTS),
+                         "default_effort": None})
+        for row in rows:
+            if running and row["id"] == running:
+                row["current"] = True
+        return rows
+
+    @property
+    def effort(self) -> str:
+        """The effort the guest is running on, or "" when it was never set (its own default)."""
+        with self._state_lock:
+            return self._effort
 
     def compact(self) -> None:
         """`/compact` as an ordinary user message — there is no control request for it, and the

@@ -35,13 +35,17 @@ class FakeHarness:
     * a callable `fn(prompt, attachments, emit, cancel, harness)` returning a `TurnResult`, for a
       turn that has to react to what it is given.
 
-    `answers` collects every `answer(request_id, decision)`; `calls` every method call in order.
+    `answers` collects every `answer(request_id, decision)`; `calls` every method call in order —
+    `start` with the effort it was given, and one entry per `set_effort` / `models` call, so a
+    test can hold the worker to what it asked the guest for (29.3).
     """
 
     guest = "fake"
 
     def __init__(self, script=None, *, guest: str = "claude", session_id: str = "fake-session",
-                 model: str = "fake-model", start_error: Exception | None = None):
+                 model: str = "fake-model", start_error: Exception | None = None,
+                 efforts=("low", "medium", "high", "xhigh", "max"),
+                 models=None, effort_error: Exception | None = None):
         self.guest = guest
         self.script = list(script or [])
         self.calls: list[tuple] = []
@@ -54,7 +58,13 @@ class FakeHarness:
         self.started = False
         self._session_id = session_id
         self._model = model
+        # The reasoning effort the pane asked for, as the contract's `effort` property reports it
+        # ("" until one is set), and what `models()` answers.
+        self._effort = ""
+        self._efforts = list(efforts)
+        self._models = list(models) if models is not None else None
         self._start_error = start_error
+        self._effort_error = effort_error
         self._turn = 0
         # Set while `send()` is blocked inside an `emit`, so a test can answer a card from another
         # thread and know the card is already up.
@@ -62,10 +72,10 @@ class FakeHarness:
 
     # ----- lifecycle -------------------------------------------------------------------
     def start(self, *, cwd: str, model=None, resume=None, fork: bool = False,
-              permissions: str = "bypass") -> HarnessStart:
-        self.calls.append(("start", cwd, model, resume, fork, permissions))
+              permissions: str = "bypass", effort=None) -> HarnessStart:
+        self.calls.append(("start", cwd, model, resume, fork, permissions, effort))
         self.starts.append({"cwd": cwd, "model": model, "resume": resume, "fork": fork,
-                            "permissions": permissions})
+                            "permissions": permissions, "effort": effort})
         if self._start_error is not None:
             raise self._start_error
         if self.started:
@@ -77,6 +87,8 @@ class FakeHarness:
             self._model = model
         if resume:
             self._session_id = resume
+        if effort:
+            self._effort = effort
         return HarnessStart(session_id=self._session_id, model=self._model)
 
     def close(self) -> None:
@@ -113,6 +125,20 @@ class FakeHarness:
         self._model = model
         return model
 
+    def set_effort(self, effort: str) -> str:
+        self.calls.append(("set_effort", effort))
+        if self._effort_error is not None:
+            raise self._effort_error
+        self._effort = effort
+        return effort
+
+    def models(self) -> list[dict]:
+        self.calls.append(("models",))
+        if self._models is not None:
+            return [dict(row) for row in self._models]
+        return [{"id": self._model, "label": self._model, "efforts": list(self._efforts),
+                 "default_effort": self._efforts[0] if self._efforts else None, "current": True}]
+
     def compact(self) -> None:
         self.calls.append(("compact",))
         self.compactions += 1
@@ -120,6 +146,10 @@ class FakeHarness:
     def answer(self, request_id: str, decision: dict) -> None:
         self.calls.append(("answer", request_id, dict(decision)))
         self.answers.append((request_id, dict(decision)))
+
+    @property
+    def effort(self) -> str:
+        return self._effort
 
     @property
     def session_id(self) -> str:

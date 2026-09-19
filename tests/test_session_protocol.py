@@ -520,6 +520,23 @@ class GuestSessionRows(unittest.TestCase):
         self.assertEqual(('Reading the drag', 1), (row['title'], row['pinned']))
         self.assertEqual(before, path.read_bytes())
 
+    def test_indexing_the_guests_is_a_setting_that_rides_the_listing(self):
+        """Options › Privacy (GT7X review, B1): the pane sends `index_guests` with every listing.
+        Off, the guests' rows leave Relay's index and their files are not even read; on again,
+        they come back. The transcript itself is never touched either way."""
+        cwd = str(self.root / 'repo')
+        session = 'dddddddd-0000-4000-8000-00000000000d'
+        path = self.write_claude(session, cwd=cwd)
+        self.assertIn(session, self.settled(lambda rows: session in rows))
+        self.ask(index_guests=False)
+        self.assertNotIn(session, self.settled(lambda rows: session not in rows))
+        self.assertIs(False, self.cmds.index_guests)
+        self.assertTrue(path.exists(), 'the transcript belongs to the guest')
+        self.ask(index_guests=True)
+        self.assertIn(session, self.settled(lambda rows: session in rows))
+        with self.assertRaises(ValueError):
+            self.cmds.handle('conversations', {'id': 'c', 'index_guests': 'no'})
+
     def test_delete_drops_the_row_and_leaves_the_guests_transcript(self):
         cwd = str(self.root / 'repo')
         session = 'eeeeeeee-0000-4000-8000-00000000000e'
