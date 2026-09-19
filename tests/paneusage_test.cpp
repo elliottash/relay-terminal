@@ -1,16 +1,95 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // A pane's CPU / memory share (issue #D03W): the arithmetic on Readings a test can make up —
-// percentages over an interval, rounding, when a meter is worth showing, tab-level sums and the
-// label suffixes — plus one /proc walk over this test's own process to prove the parsing.
+// percentages over an interval, rounding, when a meter is worth showing, tab-level sums, the
+// label suffixes and the per-process breakdown — plus the tree walk, driven over a /proc this
+// test builds out of directories and over the real one for this process.
 #include "PaneUsage.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QTemporaryDir>
 #include <QTest>
 
 #include <cmath>
 
+#include <unistd.h>
+
 using namespace relay::usage;
+
+namespace {
+
+// A /proc this test writes: one directory per process, with the stat and statm fields the walk
+// reads and a task/<tid>/children per thread. It is how a process spawned from a non-main thread
+// can be arranged on purpose, which is not something a test can ask the real kernel for.
+class FakeProc {
+public:
+    bool ok() const { return m_dir.isValid(); }
+    QString path() const { return m_dir.path(); }
+
+    // `threads` maps a thread id to the pids that thread is the parent of. The main thread (tid
+    // == pid) is always present, with whatever it was given.
+    void add(qint64 pid, const QString &comm, qint64 ppid, qint64 ticks, qint64 startTicks,
+             qint64 rssPages, const QMap<qint64, QList<qint64>> &threads = {})
+    {
+        QDir root(m_dir.path());
+        root.mkpath(QStringLiteral("%1/task").arg(pid));
+        // utime and stime are fields 14 and 15, cutime and cstime 16 and 17, starttime 22 —
+        // indices 11..14 and 19 once the fields are counted after the last ')'.
+        QStringList fields;
+        for (int i = 0; i < 20; ++i) fields << QStringLiteral("0");
+        fields[0] = QStringLiteral("S");
+        fields[1] = QString::number(ppid);
+        fields[11] = QString::number(ticks);   // all of it as utime; the parse sums four fields
+        fields[19] = QString::number(startTicks);
+        write(QStringLiteral("%1/stat").arg(pid),
+              QStringLiteral("%1 (%2) %3\n").arg(pid).arg(comm, fields.join(QLatin1Char(' '))));
+        write(QStringLiteral("%1/statm").arg(pid), QStringLiteral("9999 %1 0 0 0 0 0\n").arg(rssPages));
+        QMap<qint64, QList<qint64>> all = threads;
+        if (!all.contains(pid)) all.insert(pid, {});
+        for (auto it = all.constBegin(); it != all.constEnd(); ++it) {
+            root.mkpath(QStringLiteral("%1/task/%2").arg(pid).arg(it.key()));
+            QStringList kids;
+            for (qint64 child : it.value()) kids << QString::number(child);
+            write(QStringLiteral("%1/task/%2/children").arg(pid).arg(it.key()),
+                  kids.join(QLatin1Char(' ')) + QStringLiteral(" "));
+        }
+    }
+
+private:
+    void write(const QString &relative, const QString &text)
+    {
+        QFile file(m_dir.path() + QLatin1Char('/') + relative);
+        QVERIFY2(file.open(QIODevice::WriteOnly), qPrintable(file.fileName()));
+        file.write(text.toUtf8());
+    }
+    QTemporaryDir m_dir;
+};
+
+// Points relay::usage at a made-up /proc and puts the real one back, whatever the test does.
+class ProcRootFor {
+public:
+    explicit ProcRootFor(const QString &root) : m_previous(procRoot()) { setProcRoot(root); }
+    ~ProcRootFor() { setProcRoot(m_previous); }
+
+private:
+    QString m_previous;
+};
+
+// A process the meter can be fed without a /proc at all.
+ProcessInfo proc(qint64 pid, const QString &comm, qint64 ticks, qint64 startTicks, qint64 rssBytes)
+{
+    ProcessInfo info;
+    info.pid = pid;
+    info.comm = comm;
+    info.ticks = ticks;
+    info.startTicks = startTicks;
+    info.rssBytes = rssBytes;
+    info.state = 'R';
+    return info;
+}
+
+}  // namespace
 
 class PaneUsageTests : public QObject {
     Q_OBJECT
@@ -251,6 +330,215 @@ private Q_SLOTS:
         QVERIFY(own.rssBytes > 0);
         // Nothing to walk is not a reading.
         QVERIFY(!readTrees({}).ok);
+    }
+
+    void childrenOfEveryThreadAreFound() {
+        // The Python worker spawns a subprocess from a worker thread, so the kernel parents it to
+        // that thread and /proc/<pid>/task/<pid>/children — the main thread's list, which the walk
+        // used to be — never mentions it. Its CPU went unmeasured until the worker reaped it.
+        FakeProc fake;
+        QVERIFY(fake.ok());
+        // 100 is the worker: nothing under its main thread, one child under thread 137.
+        fake.add(100, QStringLiteral("python3"), 1, 40, 500, 10, {{100, {}}, {137, {200}}});
+        fake.add(200, QStringLiteral("rg"), 137, 70, 900, 20, {{200, {201}}});
+        fake.add(201, QStringLiteral("rg (worker)"), 200, 5, 910, 30);
+        ProcRootFor root(fake.path());
+        QList<qint64> pids;
+        for (const ProcessInfo &info : walkTrees({100})) pids << info.pid;
+        QCOMPARE(pids, QList<qint64>({100, 200, 201}));   // breadth-first, the root first
+        const Reading reading = readTrees({100});
+        QVERIFY(reading.ok);
+        QCOMPARE(reading.ticks, qint64(40 + 70 + 5));
+        QCOMPARE(reading.rssBytes, qint64(10 + 20 + 30) * ::sysconf(_SC_PAGESIZE));
+    }
+
+    void oneWalkServesBothReaders() {
+        // Both the meter and Pane::programWaitingForInput() go through walkTrees. The input poll
+        // runs at 250 ms and wants only the shape of the tree, so it asks for pids and pays for no
+        // stat or statm; it keeps its own, smaller cap.
+        FakeProc fake;
+        QVERIFY(fake.ok());
+        fake.add(7, QStringLiteral("bash"), 1, 11, 100, 5, {{7, {8, 9}}});
+        fake.add(8, QStringLiteral("make"), 7, 22, 200, 6, {{8, {10}}});
+        fake.add(9, QStringLiteral("tail"), 7, 33, 300, 7);
+        fake.add(10, QStringLiteral("cc1plus"), 8, 44, 400, 8);
+        ProcRootFor root(fake.path());
+        const QList<ProcessInfo> full = walkTrees({7});
+        QCOMPARE(int(full.size()), 4);
+        QCOMPARE(full.at(1).comm, QStringLiteral("make"));
+        QCOMPARE(full.at(1).ppid, qint64(7));
+        QCOMPARE(full.at(1).state, 'S');
+        QCOMPARE(full.at(1).startTicks, qint64(200));
+        const QList<ProcessInfo> cheap = walkTrees({7}, 64, Detail::PidsOnly);
+        QList<qint64> fullPids, cheapPids;
+        for (const ProcessInfo &info : full) fullPids << info.pid;
+        for (const ProcessInfo &info : cheap) cheapPids << info.pid;
+        QCOMPARE(cheapPids, fullPids);                 // the same tree, in the same order
+        QCOMPARE(cheap.at(1).ticks, qint64(0));        // ... and nothing was read for it
+        QCOMPARE(cheap.at(1).rssBytes, qint64(0));
+        QVERIFY(cheap.at(1).comm.isEmpty());
+        // The summed reading is the walk, so the two readers cannot disagree about the tree.
+        const Reading summed = summarize(full);
+        QCOMPARE(summed.ticks, readTrees({7}).ticks);
+        // The cap bounds the walk, whichever reader set it.
+        QCOMPARE(int(walkTrees({7}, 2).size()), 2);
+        QCOMPARE(int(walkTrees({7}, 0).size()), 0);
+        // A root that is not there is a walk of one unreadable process, not a failure.
+        const QList<ProcessInfo> gone = walkTrees({4242});
+        QCOMPARE(int(gone.size()), 1);
+        QCOMPARE(gone.at(0).ticks, qint64(0));
+    }
+
+    void perProcessDeltasKnowARecycledPid() {
+        // Each row's CPU is that process's own tick delta over the interval. A pid the kernel
+        // handed out again is a different process: without the starttime check its counters would
+        // be subtracted from its predecessor's and the row would read a whole lifetime in one
+        // poll, which is exactly the 100 % the summed meter is careful not to print.
+        const qint64 full = qint64(processorCount()) * clockTicksPerSecond();  // one second, every core
+        const qint64 total = totalMemoryBytes();
+        const qint64 small = total / 1000;   // 0.1 % of the machine: nothing a row would report
+        Meter meter;
+        QList<ProcessInfo> first{proc(7, QStringLiteral("bash"), 10, 100, small),
+                                 proc(8, QStringLiteral("yes"), 1000, 200, total / 50),
+                                 proc(9, QStringLiteral("make"), 5, 300, small)};
+        QVERIFY(!meter.compute(first, 1000).valid);   // the baseline: no deltas yet, no rows
+        QVERIFY(meter.compute(first, 1000).processes.isEmpty());
+        QList<ProcessInfo> second{proc(7, QStringLiteral("bash"), 10, 100, small),
+                                  proc(8, QStringLiteral("yes"), 1000 + full / 2, 200, total / 50),
+                                  // pid 9 was reused: a new starttime, and counters that do not
+                                  // continue the old process's.
+                                  proc(9, QStringLiteral("cc1plus"), full / 4, 999, small)};
+        const Sample sample = meter.compute(second, 2000);
+        QVERIFY(sample.valid);
+        QCOMPARE(int(sample.processes.size()), 1);
+        QCOMPARE(sample.processes.at(0).pid, qint64(8));
+        QVERIFY(std::fabs(sample.processes.at(0).cpuPercent - 50.0) < 0.5);
+        QVERIFY(std::fabs(sample.processes.at(0).ramPercent - 2.0) < 0.1);
+        // The recycled pid contributed no CPU it can be held to this interval, so it is not a
+        // row; bash sat still and holds nothing, and is not one either.
+        for (const ProcessUsage &row : sample.processes) QVERIFY(row.pid != 9);
+        // The next interval, on the other hand, measures the new process by its own baseline.
+        QList<ProcessInfo> third{proc(7, QStringLiteral("bash"), 10, 100, small),
+                                 proc(8, QStringLiteral("yes"), 1000 + full / 2, 200, total / 50),
+                                 proc(9, QStringLiteral("cc1plus"), full / 2, 999, small)};
+        const Sample after = meter.compute(third, 3000);
+        QCOMPARE(after.processes.at(0).pid, qint64(9));
+        QVERIFY(std::fabs(after.processes.at(0).cpuPercent - 25.0) < 0.5);
+        // `yes` stopped but still holds 2 % of the machine's memory, so it keeps a row with a
+        // zero CPU half rather than vanishing from the breakdown.
+        QCOMPARE(int(after.processes.size()), 2);
+        QCOMPARE(after.processes.at(1).pid, qint64(8));
+        QCOMPARE(formatPercent(after.processes.at(1).cpuPercent), QStringLiteral("0"));
+        // The rows are a breakdown of the sum, not a second opinion: a process's ticks are in
+        // exactly one row, so they add up to the tree's.
+        QVERIFY(std::fabs(after.cpuPercent - 25.0) < 0.5);
+        // A missed reading drops the per-pid history with the baseline, so the reading after it
+        // is a baseline again rather than a lifetime of ticks over one interval.
+        QVERIFY(!meter.compute(Reading{}, 4000).valid);
+        QVERIFY(!meter.compute(third, 5000).valid);
+        const Sample quiet = meter.compute(third, 6000);
+        QVERIFY(quiet.valid);
+        QCOMPARE(quiet.cpuPercent, 0.0);   // nothing moved since, and nothing was carried over
+        for (const ProcessUsage &row : quiet.processes)
+            QCOMPARE(formatPercent(row.cpuPercent), QStringLiteral("0"));
+    }
+
+    void theBreakdownNamesTheBusiestFew() {
+        const auto row = [](qint64 pid, const QString &name, double cpu, double mem) {
+            ProcessUsage out;
+            out.pid = pid; out.name = name; out.cpuPercent = cpu; out.ramPercent = mem;
+            out.ramBytes = qint64(mem / 100.0 * double(qint64(64) << 30));
+            return out;
+        };
+        QList<ProcessUsage> rows{row(1, QStringLiteral("shell"), 1.0, 0.2),
+                                 row(2, QStringLiteral("cc1plus"), 40.0, 2.0),
+                                 row(3, QStringLiteral("ld"), 5.0, 9.0),
+                                 row(4, QStringLiteral("agent worker"), 0.0, 4.0),
+                                 row(5, QStringLiteral("sleep"), 0.1, 0.1),
+                                 row(6, QStringLiteral("rg"), 12.0, 0.4),
+                                 row(7, QStringLiteral("jq"), 12.0, 3.0)};
+        const QList<ProcessUsage> top = topProcesses(rows);
+        QList<qint64> order;
+        for (const ProcessUsage &r : top) order << r.pid;
+        // CPU first; jq before rg on memory at the same CPU; the memory-only worker after them
+        // all; the idle sleep dropped, because "0% cpu · 0% mem" names nothing.
+        QCOMPARE(order, QList<qint64>({2, 7, 6, 3, 1}));
+        QCOMPARE(int(topProcesses(rows, 2).size()), 2);
+        QCOMPARE(int(topProcesses({}).size()), 0);
+        // Equal on both axes: the pid keeps the order steady, so the tooltip does not shuffle.
+        QList<ProcessUsage> tied{row(9, QStringLiteral("b"), 3.0, 1.0), row(4, QStringLiteral("a"), 3.0, 1.0)};
+        QCOMPARE(topProcesses(tied).at(0).pid, qint64(4));
+
+        QCOMPARE(processLine(row(2, QStringLiteral("cc1plus"), 40.4, 2.4)),
+                 QStringLiteral("cc1plus · 40% cpu · 2% mem"));
+        QVERIFY(!processLine(row(1, QStringLiteral("shell"), 1.0, 0.2)).contains(QChar(0x00c2)));
+        Sample sample;
+        sample.valid = true;
+        sample.processes = topProcesses(rows, 3);
+        QCOMPARE(int(processLines(sample).size()), 3);
+        QCOMPARE(processBreakdown(sample).split(QLatin1Char('\n')).first(),
+                 QStringLiteral("cc1plus · 40% cpu · 2% mem"));
+        // A sample with no baseline has nothing to break down.
+        Sample noBaseline;
+        noBaseline.processes = sample.processes;
+        QVERIFY(processBreakdown(noBaseline).isEmpty());
+        QVERIFY(processBreakdown(Sample{}).isEmpty());
+
+        // A tab's breakdown is its panes' put together and cut back again, so it names the
+        // busiest processes in the tab rather than the busiest in each pane.
+        Sample one; one.valid = true; one.cpuPercent = 40; one.processes = {row(2, QStringLiteral("cc1plus"), 40.0, 2.0)};
+        Sample two; two.valid = true; two.cpuPercent = 12; two.processes = {row(6, QStringLiteral("rg"), 12.0, 0.4),
+                                                                            row(3, QStringLiteral("ld"), 5.0, 9.0)};
+        const Sample tab = combined({one, two});
+        QCOMPARE(int(tab.processes.size()), 3);
+        QCOMPARE(tab.processes.at(0).pid, qint64(2));
+        QCOMPARE(tab.processes.at(2).pid, qint64(3));
+    }
+
+    void rootsAreNamedOnTheirRows() {
+        // The two roots are the pane's own: "shell" and "agent worker" say more than "bash" and
+        // "python3", and the rest of the tree is named after its comm.
+        const qint64 full = qint64(processorCount()) * clockTicksPerSecond();
+        Meter meter;
+        QList<ProcessInfo> before{proc(7, QStringLiteral("bash"), 0, 100, 0),
+                                  proc(8, QStringLiteral("python3"), 0, 200, 0),
+                                  proc(9, QStringLiteral("cc1plus"), 0, 300, 0)};
+        QList<ProcessInfo> after{proc(7, QStringLiteral("bash"), full / 10, 100, 0),
+                                 proc(8, QStringLiteral("python3"), full / 5, 200, 0),
+                                 proc(9, QStringLiteral("cc1plus"), full / 2, 300, 0)};
+        const QHash<qint64, QString> labels{{7, QStringLiteral("shell")}, {8, QStringLiteral("agent worker")}};
+        meter.compute(before, 1000, labels);
+        const Sample sample = meter.compute(after, 2000, labels);
+        QStringList names;
+        for (const ProcessUsage &r : sample.processes) names << r.name;
+        QCOMPARE(names, QStringList({QStringLiteral("cc1plus"), QStringLiteral("agent worker"),
+                                     QStringLiteral("shell")}));
+        // An unnamed process with no comm is still identifiable.
+        ProcessInfo bare = proc(11, QString(), full, 400, 0);
+        meter.reset();
+        meter.compute({bare}, 3000);
+        bare.ticks = full * 2;
+        QCOMPARE(meter.compute({bare}, 4000).processes.at(0).name, QStringLiteral("pid 11"));
+    }
+
+    void statLinesCarryTheWholeProcess() {
+        // parseStat reads what the walk needs beyond the ticks: the parent, the state, the comm
+        // (spaces, parentheses and all) and the starttime that tells two lives of one pid apart.
+        ProcessInfo info;
+        QVERIFY(parseStat("4242 (my (odd) prog) S 17 4242 4242 34816 4242 4194304 900 800 0 0 "
+                          "11 22 33 44 20 0 1 0 12345 1000 200 0 0 0 0 0 0 0 0\n", &info));
+        QCOMPARE(info.pid, qint64(4242));
+        QCOMPARE(info.comm, QStringLiteral("my (odd) prog"));
+        QCOMPARE(info.ppid, qint64(17));
+        QCOMPARE(info.state, 'S');
+        QCOMPARE(info.ticks, qint64(11 + 22 + 33 + 44));
+        QCOMPARE(info.startTicks, qint64(12345));
+        // A short line still gives the ticks; only the recycled-pid guard goes.
+        ProcessInfo shortLine;
+        QVERIFY(parseStat("7 (sh) R 1 7 7 0 7 0 0 0 0 0 11 22 0 0 20\n", &shortLine));
+        QCOMPARE(shortLine.ticks, qint64(33));
+        QCOMPARE(shortLine.startTicks, qint64(0));
+        QCOMPARE(shortLine.state, 'R');
     }
 };
 
