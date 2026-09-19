@@ -3077,7 +3077,10 @@ user does not know it is running (`subagents.RestrictedExecutor` sets `can_ask =
 
 The result is `{ok: true, answers: [{header, question, answer}], summary, note?}`. `answer` is the
 chosen labels joined with ", ", or the user's own words, or `"Unanswered"`. `note` appears when
-anything went unanswered and says to decide it and move on rather than ask again.
+anything went unanswered and says to decide it and move on rather than ask again. A typed answer is
+kept whole up to `MAX_ANSWER` (4000 characters — an open question may fairly be answered with a
+paragraph); past that it is cut and the cut is marked in the text the model reads, because an
+answer that stops mid-sentence with no marker reads as the user trailing off.
 
 ### 27.3 `question` (worker → GUI) and `question_answer` (GUI → worker)
 
@@ -3089,18 +3092,46 @@ question_answer {id, answers: [["This file only"], [], ["neither: delete it"]]}
 ```
 
 one list per question, in order: the labels chosen, the user's own text for an answer they typed
-(always the case for an open question), or an empty list for one they skipped. A dismissed card is
-every question skipped. An `id` nobody is waiting on is ignored — a click landing after Stop is the
-user being late, not an error.
+(always the case for an open question), or an empty list for one they skipped. There is no way to
+dismiss a card: every question is answered or skipped one at a time, and the whole set goes back
+together when the last one is. An `id` nobody is waiting on is ignored — a click landing after Stop
+is the user being late, not an error. An `id` the pane cannot draw a card for (no `id`, or no
+questions) is answered at once with empty `answers`, so a malformed event costs the turn its
+answers and not its life.
+
+A card is drawn by the **desktop pane only**. `question` and `question_closed` are in
+`FORWARDED_EVENTS` (docs/REMOTE-PROTOCOL.md section 6.4) but no web client draws them and they are
+not in `GUEST_EVENTS`, so a phone, a tablet or a share participant sees the question only as the
+text the desktop printed into the mirrored terminal, never as a card of its own. It can still be
+answered from there: a remote line typed while a card is up is given to the card rather than the
+shell (`Pane::submitRemote`), which is how an owner on their phone answers one.
 
 ### 27.4 What the user sees (GUI, card #4E13)
 
 A question is the "needs human" state, so the card is drawn in the theme's amber `warning` ink, the
 pane's status glyph and its tab go to `NeedsYou` while it is open, and the pane's notification says
-the agent needs you. The card is keyboard-first: with options a number chooses and `0` skips; an open question takes
-whatever you type; `/skip` passes on either; and Ctrl+Shift+Enter still runs a shell command,
-because a question from the agent must not take the terminal away. This is the visual language #4E13 asked for — amber is the colour of
-something waiting on a person.
+the agent needs you. This is the visual language #4E13 asked for — amber is the colour of something
+waiting on a person.
+
+There is no separate answering mode: the card is printed into the terminal and **the answer is
+typed into the pane's own prompt box**, which is where everything else is typed. Exactly what the
+code does with what is typed, in order:
+
+| Typed | |
+|---|---|
+| `/skip` | this question is skipped, whether or not it has options |
+| `0` | with options, skipped as well — the card lists it as "0  Skip this one" |
+| `2` | with options, picks option 2. A number the card has no option for is not an answer: the pane prints "There is no option 4" and prints the card again, still waiting |
+| `1,3` | with `multiple`, picks both; without it, the first number is taken and the rest ignored |
+| anything else | their own words, which is the answer — for an open question this is the only case |
+| nothing | Enter on an empty box does nothing; the card stays |
+
+**Enter** submits whatever is in the box. **Ctrl+Shift+Enter** still runs it as a shell command, so
+a question from the agent never takes the terminal away. **Esc stops the turn**, as it does at any
+other point in a turn — it is not "skip this question", and the card goes away with the turn
+(`question_closed`). Questions from one call are asked one at a time; answering the last one sends
+them all back together. There are no number keys to press without the box, no `t` for "type your
+own" and no key that dismisses the card: those would each be a mode, and the box is already there.
 
 ### 27.5 Deviations from the harnesses this follows
 

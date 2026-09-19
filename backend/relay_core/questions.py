@@ -34,8 +34,8 @@ Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.
 """
 from __future__ import annotations
 
-import itertools
 import threading
+import uuid
 from typing import Callable
 
 from .provider import Cancelled
@@ -47,12 +47,18 @@ MAX_HEADER = 30            # the chip over the card, e.g. "Scope"
 MAX_QUESTION = 300
 MAX_LABEL = 60
 MAX_DESCRIPTION = 200
+MAX_ANSWER = 4000          # a typed answer may be a paragraph; only a runaway paste is cut
+ANSWER_CUT = " […truncated]"   # never cut silently: the model must see that words are missing
 MAX_ASKS_PER_TURN = 6      # stops a loop from interviewing the user
 CUSTOM_LABEL = "Type your own answer"
 UNANSWERED = "Unanswered"
 SKIP_WORD = "/skip"        # what the pane types to leave a question unanswered
 
-_CALL_IDS = itertools.count(1)
+def _call_id() -> str:
+    """A card's id. Random rather than counted: a counter restarts at `q-1` in every worker
+    process, so a pane that outlived a worker could answer a new card with an old card's id and be
+    believed. Nothing reads the number, so there is nothing to lose by it being unguessable."""
+    return f"q-{uuid.uuid4().hex}"
 
 SPEC = {
     "type": "function",
@@ -160,9 +166,13 @@ def validate(args) -> list[dict]:
             entry = {"label": label,
                      "description": _text(option.get("description"), f"Question {index}: option description",
                                           MAX_DESCRIPTION)}
-            if option.get("recommended"):
-                if type(option["recommended"]) is not bool:
-                    raise ValueError(f"Question {index}: recommended must be true or false.")
+            # The type check comes first, as `multiple`'s does: `recommended: 0` or `""` is a
+            # model getting the schema wrong, and letting it through as "not recommended" hides
+            # that from the one reader who can fix it.
+            flag = option.get("recommended", False)
+            if type(flag) is not bool:
+                raise ValueError(f"Question {index}: recommended must be true or false.")
+            if flag:
                 if recommended:
                     raise ValueError(f"Question {index} recommends two options; recommend at most one.")
                 recommended = True
@@ -185,13 +195,53 @@ def preview(questions: list[dict]) -> str:
     return "ASK THE USER\n\n" + "\n".join(lines)
 
 
+def clip_answer(text: str) -> str:
+    """One answer, capped. A typed answer is prose — "what should the error message say?" can
+    fairly be answered with a paragraph — so the cap is `MAX_ANSWER`, not a few labels' worth. A
+    cut says so in the text the model reads: an answer that stops mid-sentence without a marker
+    reads as the user changing their mind, and the model acts on half a sentence."""
+    if len(text) <= MAX_ANSWER:
+        return text
+    return text[:MAX_ANSWER - len(ANSWER_CUT)] + ANSWER_CUT
+
+
 def answer_text(answers) -> str:
     """One question's answer as the model reads it: the chosen labels, the user's own words, or
     `Unanswered`. Anything the pane sends is the user's text, so it is clipped, never trusted."""
     if not isinstance(answers, list) or not answers:
         return UNANSWERED
-    chosen = [" ".join(str(a).split())[:MAX_LABEL * 4] for a in answers if str(a).strip()]
+    chosen = [clip_answer(" ".join(str(a).split())) for a in answers if str(a).strip()]
     return ", ".join(chosen) if chosen else UNANSWERED
+
+
+def wake_on_set(event: threading.Event, callback: Callable[[], None]) -> bool:
+    """Run `callback` whenever `event` is set, and say whether that could be arranged.
+
+    A card has no deadline, so the wait under it is the one wait in the worker that can last hours.
+    `threading.Event` has no way to register a waiter and the cancel event is the agent's own
+    (`Agent.cancel_event`), so the alternative is a timer: the first version of this file woke
+    twenty times a second for as long as a question was on screen, to ask an event that had not
+    changed. This wraps `set` on that one instance — the real `set` runs first, so every other
+    waiter sees exactly what it saw before — and falls back to `False` for anything that is not a
+    plain Python event, which the caller answers by polling as before.
+    """
+    try:
+        hooks = getattr(event, "_relay_wake_hooks", None)
+        if hooks is None:
+            hooks = []
+            plain = event.set
+
+            def set_and_wake() -> None:
+                plain()
+                for hook in list(hooks):
+                    hook()
+
+            event._relay_wake_hooks = hooks
+            event.set = set_and_wake
+        hooks.append(callback)
+        return True
+    except (AttributeError, TypeError):   # pragma: no cover - not a plain threading.Event
+        return False
 
 
 class Questions:
@@ -203,6 +253,10 @@ class Questions:
         self._lock = threading.Lock()
         self._pending: dict[str, list] = {}
         self.asks = 0
+        # Stop is what ends a wait the user never ends, so it has to wake the wait rather than be
+        # noticed by it. Hooked here and not at the first question, so that anything which takes
+        # its own reference to `cancel.set` afterwards takes the hooked one.
+        self._hooked = wake_on_set(cancel, lambda: self.fail_pending("cancelled"))
 
     # ----- turn boundaries -------------------------------------------------------------------
     def begin_turn(self) -> None:
@@ -230,18 +284,25 @@ class Questions:
                     "error": (f"You have asked the user {MAX_ASKS_PER_TURN} times this turn, which is the "
                               "limit. Decide with what you know, say in your reply which way you went and "
                               "why, and let them correct you.")}
-        call_id = f"q-{next(_CALL_IDS)}"
+        call_id = _call_id()
         done = threading.Event()
         with self._lock:
             self._pending[call_id] = [done, None]
             self.asks += 1
         self.emit({"event": "question", "id": call_id, "turn_id": turn_id, "questions": questions})
+        # Stop between the check at the top of this method and the card being registered above
+        # would otherwise be a Stop that woke nothing: the hook ran when there was no card yet.
+        if self.cancel.is_set():
+            self.fail_pending("cancelled")
         # No deadline: the user may be away, and a timeout would report "failed" for "still thinking".
-        while not done.wait(0.05):
-            if self.cancel.is_set():
-                self._take(call_id)
-                self.emit({"event": "question_closed", "id": call_id, "reason": "cancelled"})
-                raise Cancelled("Stopped.")
+        # The wait is woken — by the answer, by Stop, or by the turn ending — and not timed, because
+        # a question may sit on screen for hours.
+        if self._hooked:
+            done.wait()
+        else:                                            # pragma: no cover - fallback, see wake_on_set
+            while not done.wait(0.25):
+                if self.cancel.is_set():
+                    self.fail_pending("cancelled")
         reply = self._take(call_id) or {}
         if reply.get("code") == "cancelled":
             # Stop, or the turn ending under the card: the pane takes it down either way, so it is

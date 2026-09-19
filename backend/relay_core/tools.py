@@ -590,8 +590,9 @@ class ToolExecutor:
             return self.program.execute(args)
         if name == "run_in_terminal":
             return self.terminal.execute(args)
-        if name == "ask_user":
-            return self.questions.execute(args)
+        # `ask_user` is not here: `Agent._execute` runs it itself, because the card has to carry
+        # the turn it belongs to (`turn_id`) and nothing else in a Prepared does. A copy here
+        # could only ever be reached by a caller that had bypassed the agent, and would drop it.
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None or args["action"] not in catalog.actions:

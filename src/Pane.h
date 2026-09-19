@@ -183,6 +183,48 @@ public:
     }
 };
 
+// What a line typed into the prompt box means for the question card on screen (#MQ9C,
+// protocol 27.4). Free and pure, so the whole decision sits in one place with nothing of the pane
+// around it: Pane::answerQuestion reads the options off the card and then only acts on this.
+namespace relay::ask {
+
+struct Reading {
+    enum Kind {
+        Words,          // their own answer, in their own words (always so for an open question)
+        Chosen,         // options, picked by number
+        Skip,           // "0" or /skip: this one is left unanswered
+        NoSuchOption,   // a number the card has no option for: nothing is sent, the card stays up
+    };
+    Kind kind = Words;
+    QStringList labels;   // Chosen: the labels picked, in the order typed. Words: the line itself.
+    QString missing;      // NoSuchOption: the number they typed, as they typed it.
+};
+
+// `labels` is the question's options in order, and is empty for an open question.
+inline Reading read(const QString &text, const QStringList &labels, bool multiple) {
+    const QString trimmed = text.trimmed();
+    if (trimmed.compare(QStringLiteral("/skip"), Qt::CaseInsensitive) == 0) return {Reading::Skip, {}, {}};
+    if (labels.isEmpty()) return {Reading::Words, {trimmed}, {}};
+    static const QRegularExpression numbers(QStringLiteral("^\\s*\\d+(?:\\s*[,\\s]\\s*\\d+)*\\s*$"));
+    if (!numbers.match(trimmed).hasMatch()) return {Reading::Words, {trimmed}, {}};
+    Reading reading{Reading::Chosen, {}, {}};
+    const auto parts = trimmed.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        bool ok = false;
+        const qlonglong index = part.toLongLong(&ok);   // only digits got here; !ok means too long
+        if (ok && index == 0) return {Reading::Skip, {}, {}};       // skip wins: "0" is never a label
+        // A number with no option behind it is a misread list, not an answer. It used to be passed
+        // on as the prose answer "4", which reads to the model as a considered reply.
+        if (!ok || index > labels.size()) return {Reading::NoSuchOption, {}, part};
+        const QString &label = labels.at(int(index) - 1);
+        if (!reading.labels.contains(label)) reading.labels.append(label);
+        if (!multiple) break;                                       // one answer asked for, one taken
+    }
+    return reading;
+}
+
+}  // namespace relay::ask
+
 // One terminal pane: a shell behind relay::TerminalBackend (Relay's own engine, engine/), its
 // Bash bridge, a composer, and its own agent worker and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
@@ -1520,7 +1562,21 @@ public:
         m_ask = Ask{};
         m_ask.id = event.value(QStringLiteral("id")).toString();
         m_ask.questions = event.value(QStringLiteral("questions")).toArray();
-        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) return;
+        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) {
+            // A card that cannot be drawn would otherwise leave the worker's turn blocked on an
+            // answer nobody can type. Say so where the card would have been, and answer nothing:
+            // the tool reports every question unanswered and the turn carries on.
+            const QString id = m_ask.id;
+            m_ask = Ask{};
+            ensureLineStart();
+            printInline(QStringLiteral("The agent asked a question this pane could not read; "
+                                       "it was left unanswered.\n"), Ink::Error);
+            closeInline();
+            if (!id.isEmpty()) send({{"type", "question_answer"}, {"id", id}, {"answers", QJsonArray()}});
+            refreshBackgroundWait();
+            changed();
+            return;
+        }
         for (int i = 0; i < m_ask.questions.size(); ++i) m_ask.answers.append(QStringList());
         m_ask.current = 0;
         printQuestion();
@@ -1602,28 +1658,17 @@ private:
                 QStringLiteral("answer the question")};
     }
 
-    // The text in the prompt box, read as an answer. `/skip` always skips. With options, numbers
-    // pick them and "0" skips; anything else is the user's own words, which is the whole point of
-    // not making this a button row. An open question has no numbers to read: it is all own words.
-    QStringList readAnswer(const QString &text) const {
-        if (text.trimmed().compare(QStringLiteral("/skip"), Qt::CaseInsensitive) == 0) return {};
+    // The text in the prompt box, read as an answer to the question on screen. `/skip` always
+    // skips. With options, numbers pick them and "0" skips; anything else is the user's own words,
+    // which is the whole point of not making this a button row. An open question has no numbers to
+    // read: it is all own words. The decision itself is `relay::ask::read`, above the class.
+    relay::ask::Reading readAnswer(const QString &text) const {
         const QJsonObject question = questionAt(m_ask.current);
+        QStringList labels;
         const QJsonArray options = questionOptions(question);
-        if (options.isEmpty()) return {text.trimmed()};
-        const bool multiple = question.value(QStringLiteral("multiple")).toBool();
-        static const QRegularExpression numbers(QStringLiteral("^\\s*\\d+(?:\\s*[,\\s]\\s*\\d+)*\\s*$"));
-        if (!numbers.match(text).hasMatch()) return {text.trimmed()};
-        QStringList chosen;
-        const auto parts = text.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
-        for (const QString &part : parts) {
-            const int index = part.toInt();
-            if (index == 0) return {};                       // skip wins: "0" is never a label
-            if (index < 1 || index > options.size()) return {text.trimmed()};   // out of range: their words
-            const QString label = options.at(index - 1).toObject().value(QStringLiteral("label")).toString();
-            if (!chosen.contains(label)) chosen.append(label);
-            if (!multiple) break;                            // one answer asked for, one taken
-        }
-        return chosen;
+        for (const QJsonValue &option : options)
+            labels.append(option.toObject().value(QStringLiteral("label")).toString());
+        return relay::ask::read(text, labels, question.value(QStringLiteral("multiple")).toBool());
     }
 
     // Enter in the prompt box while a card is up. Returns false when there is no card, so the
@@ -1633,7 +1678,20 @@ private:
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
         const QJsonObject question = questionAt(m_ask.current);
-        const QStringList answer = readAnswer(trimmed);
+        const relay::ask::Reading reading = readAnswer(trimmed);
+        if (reading.kind == relay::ask::Reading::NoSuchOption) {
+            // A number the card has no option for: name it and print the card again, rather than
+            // send the model "4" as the answer they gave. Nothing is recorded; the wait goes on.
+            ensureLineStart();
+            printInline(QStringLiteral("There is no option %1 · answer with 1–%2, 0 to skip, or your own words\n")
+                            .arg(reading.missing).arg(questionOptions(question).size()), Ink::Ask);
+            closeInline();
+            printQuestion();
+            focusInput();
+            changed();
+            return true;
+        }
+        const QStringList answer = reading.kind == relay::ask::Reading::Skip ? QStringList() : reading.labels;
         m_ask.answers[m_ask.current] = answer;
         // The slow path for this card is typing an option out in full when its number would do
         // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in

@@ -774,6 +774,14 @@ them on the screen, because Relay prints them into the terminal; stored transcri
 output (`turn_transcript_get`, `tool_output_get`) are refused, since they hold every file the
 agent read.
 
+`question` and `question_closed` (the `ask_user` card, sessions protocol 27) are forwarded, but as
+of today no web client draws them and they are not in `GUEST_EVENTS`: an owner's phone and a share
+participant both see a question only as the card the desktop printed into the mirrored terminal.
+The owner can still answer from a paired device, because a remote line typed while a card is up is
+given to the card rather than the shell (`Pane::submitRemote`). There is no `question_answer` a
+guest may send; a guest's `compose` that the owner approves does reach the same path, which is the
+part of this still to be decided.
+
 **Outbound is an allow-list too.** `GUEST_SERVER_TYPES` in `remote/wire.py` names every
 desktop→client **type** a participant may receive, and `Host.guest_view` drops anything else
 before it is encoded. Denied-by-default in the same way `GUEST_TYPES` is, and for a sharper

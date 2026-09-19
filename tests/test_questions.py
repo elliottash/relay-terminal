@@ -4,10 +4,13 @@
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.
 Card: issues/features/2026-09-19-the-planner-asks-the-user-questions.md (#MQ9C).
 """
+import re
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from relay_core import questions as module
 from relay_core.agent import Agent
@@ -16,6 +19,8 @@ from relay_core.provider import Cancelled, ProviderConfig
 from relay_core.questions import MAX_ASKS_PER_TURN, Questions
 from relay_core.subagents import RestrictedExecutor
 from relay_core.tools import ToolExecutor
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 OPEN = {"questions": [{
@@ -106,6 +111,16 @@ class ValidationTests(QuestionsTestCase):
         with self.assertRaisesRegex(ValueError, "recommend at most one"):
             self.questions.prepare({"questions": [{**ASK["questions"][0], "options": options}]})
 
+    def test_recommended_must_be_a_boolean_and_not_merely_truthy(self):
+        # The type check used to sit *inside* `if option.get("recommended")`, so `0` and `""` —
+        # a model getting the schema wrong — were read as "not recommended" and never reported.
+        for value in (0, "", "yes", 1, None):
+            options = [{**ASK["questions"][0]["options"][0], "recommended": value},
+                       ASK["questions"][0]["options"][1]]
+            with self.subTest(recommended=value), \
+                    self.assertRaisesRegex(ValueError, "recommended must be true or false"):
+                self.questions.prepare({"questions": [{**ASK["questions"][0], "options": options}]})
+
     def test_the_same_answer_is_not_offered_twice(self):
         options = [ASK["questions"][0]["options"][0], {"label": "this file only", "description": "x"}]
         with self.assertRaisesRegex(ValueError, "twice"):
@@ -152,6 +167,33 @@ class RoundTripTests(QuestionsTestCase):
         self.assertEqual(result["answers"][0]["answer"], module.UNANSWERED)
         self.assertIn("Do not ask again", result["note"])
 
+    def test_a_long_typed_answer_is_kept_whole_up_to_a_paragraph(self):
+        # An open question ("what should the error message say?") can fairly be answered at length.
+        typed = "word " * 700                                     # 3500 characters
+        self.wire(lambda event: {"answers": [[typed]]})
+        answer = self.ask(OPEN)["answers"][0]["answer"]
+        self.assertEqual(answer, typed.strip())
+        self.assertNotIn(module.ANSWER_CUT, answer)
+
+    def test_an_answer_that_is_cut_says_so_where_the_model_can_see_it(self):
+        self.wire(lambda event: {"answers": [["x" * (module.MAX_ANSWER + 500)]]})
+        answer = self.ask(OPEN)["answers"][0]["answer"]
+        self.assertEqual(len(answer), module.MAX_ANSWER)
+        # A cut that says nothing reads as the user stopping mid-sentence, and the model acts on
+        # half of one.
+        self.assertTrue(answer.endswith(module.ANSWER_CUT))
+
+    def test_a_card_id_is_never_reused_by_the_next_worker(self):
+        # `q-1` again in every process: a pane that outlived a worker could answer a new card with
+        # an old card's id and be believed.
+        ids = {module._call_id() for _ in range(100)}
+        self.assertEqual(len(ids), 100)
+        self.assertNotIn("q-1", ids)
+        pane = self.wire()
+        self.ask()
+        self.assertTrue(pane.seen[0]["id"].startswith("q-"))
+        self.assertGreater(len(pane.seen[0]["id"]), len("q-") + 16)
+
     def test_the_cap_ends_the_interview(self):
         self.wire()
         for _ in range(MAX_ASKS_PER_TURN):
@@ -177,6 +219,51 @@ class RoundTripTests(QuestionsTestCase):
             self.ask()
         self.assertEqual([e["event"] for e in self.events if e["event"].startswith("question")],
                          ["question", "question_closed"])
+
+    def test_stop_wakes_the_wait_rather_than_being_polled_for(self):
+        """A card has no deadline, so the wait under it can last hours; it must not be a timer.
+
+        The wait used to come round twenty times a second to ask an event that had not changed.
+        Here every wait the waiting thread does is untimed, and Stop still ends it at once.
+        """
+        self.wire(lambda event: None)
+        waiter = threading.current_thread()
+        timeouts, real_wait = [], threading.Event.wait
+
+        def record(event, timeout=None):
+            if threading.current_thread() is waiter:
+                timeouts.append(timeout)
+            return real_wait(event, timeout)
+
+        def stop_soon():
+            time.sleep(0.05)
+            self.cancel.set()
+
+        threading.Thread(target=stop_soon, daemon=True).start()
+        started = time.monotonic()
+        with mock.patch.object(threading.Event, "wait", record):
+            with self.assertRaises(Cancelled):
+                self.ask()
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(timeouts, [None])
+        self.assertEqual([e["event"] for e in self.events if e["event"].startswith("question")],
+                         ["question", "question_closed"])
+        self.assertEqual(self.questions._pending, {})
+
+    def test_stop_in_the_gap_before_the_card_is_registered_still_ends_the_wait(self):
+        # Stop landing after `execute`'s own check and before the card is in `_pending` is the one
+        # moment the hook has nothing to fail, and an untimed wait would then never be woken. The
+        # second look, after the card has gone up, is what covers it.
+        self.wire(lambda event: None)
+        real = module._call_id
+
+        def stop_first():
+            self.cancel.set()
+            return real()
+
+        with mock.patch.object(module, "_call_id", stop_first):
+            with self.assertRaises(Cancelled):
+                self.ask()
 
     def test_a_turn_that_ends_takes_its_card_with_it(self):
         self.wire(lambda event: None)
@@ -223,6 +310,46 @@ class ToolListTests(unittest.TestCase):
                 self.assertIn("ask_user", [t["function"]["name"] for t in agent.tools()], mode)
                 self.assertEqual(agent._prepare("ask_user", ASK).name, "ask_user", mode)
                 self.assertEqual(agent._prepare("ask_user", OPEN).name, "ask_user", mode)
+
+
+class PaneCardTests(unittest.TestCase):
+    """The card itself is C++ (`src/Pane.h`), and nothing can include that header but the one
+    translation unit it belongs to, so the two decisions this card's review turned on are checked
+    where they are written. `tests/test_presets.py` reads the same file the same way.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.source = (ROOT / "src" / "Pane.h").read_text(encoding="utf-8")
+
+    def block(self, start: str, end: str) -> str:
+        self.assertIn(start, self.source)
+        rest = self.source.split(start, 1)[1]
+        self.assertIn(end, rest)
+        return rest.split(end, 1)[0]
+
+    def test_a_number_the_card_has_no_option_for_is_not_sent_as_the_answer(self):
+        # "4" with three options used to be forwarded to the model as the prose answer "4".
+        reading = self.block("inline Reading read(", "}  // namespace relay::ask")
+        self.assertIn("if (!ok || index > labels.size()) return {Reading::NoSuchOption, {}, part};",
+                      reading)
+        self.assertIn("if (ok && index == 0) return {Reading::Skip, {}, {}};", reading)
+        answer = self.block("bool answerQuestion(const QString &text) {", "void sendAnswers()")
+        branch = answer.split("Reading::NoSuchOption) {", 1)[1].split("return true;", 1)[0]
+        self.assertIn("There is no option", branch)      # named, in the card's own ink
+        self.assertIn("printQuestion();", branch)        # the card goes up again
+        self.assertNotIn("m_ask.answers", branch)        # nothing is recorded
+        self.assertNotIn("sendAnswers", branch)          # and nothing is sent: the wait goes on
+
+    def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
+        # An empty id or no questions used to `return` and leave the worker blocked for good.
+        show = self.block("void showQuestion(const QJsonObject &event) {",
+                          "// The worker took the card away")
+        malformed = show.split("if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) {", 1)[1]
+        malformed = malformed.split("return;", 1)[0]
+        self.assertIn("Ink::Error", malformed)                       # the pane says so
+        self.assertIn('{"type", "question_answer"}', malformed)      # and the turn carries on
+        self.assertIn("QJsonArray()", malformed)                     # with nothing answered
 
 
 if __name__ == "__main__":
