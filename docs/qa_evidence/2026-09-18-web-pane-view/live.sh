@@ -90,7 +90,10 @@ url=$(cat "$RELAY_REMOTE_PAIR_FILE" 2>/dev/null)
 [[ -z $url ]] && { echo "no pairing url; the sidecar did not start"; tail -20 "$out/live-relay.log"; exit 1; }
 echo "pairing url: ${url:0:48}..."
 
-( cd "$root" && python3 "$out/live_browser.py" "$url" "$out" >"$out/live-pair.log" 2>&1 ) &
+# BROWSER_SCRIPT swaps the phone half: the keyboard drive (docs/qa_evidence/2026-09-18-ipad-keyboard)
+# reuses this whole desktop half and only changes what the "phone" does once it is paired.
+( cd "$root" && python3 "${BROWSER_SCRIPT:-$out/live_browser.py}" "$url" "${BROWSER_OUT:-$out}" \
+    >"$out/live-pair.log" 2>&1 ) &
 pair_pid=$!
 for i in $(seq 1 60); do grep -q "phone shows code" "$out/live-pair.log" 2>/dev/null && break; sleep 1; done
 sleep 3
