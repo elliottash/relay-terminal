@@ -7806,6 +7806,11 @@ private:
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
+            // A `route` that was in flight will never be answered. Left behind, m_pendingSubmit
+            // is a one-submission guard that no reply can ever release, so every later terminal
+            // submit in this pane is dropped in silence — the worst version of the bug the local
+            // dispatch above exists to prevent.
+            m_pendingSubmit.clear(); m_previewId.clear(); m_heldDecision = QJsonObject();
             // Nobody is left to answer to (#MQ9C): take the card down rather than leave the pane
             // asking on behalf of a worker that is gone.
             closeQuestion(QStringLiteral("the agent worker stopped"));
@@ -8127,13 +8132,12 @@ private:
         // An explicit agent submit never needed the worker's router (#N8VK): the verdict cannot
         // change where a forced-agent prompt goes, and the round trip made it refusable ("Local
         // router is not ready" while the worker was still starting) and losable ("Input changed
-        // during routing") for a prompt whose destination was never in question. The refusal and
-        // the one-submission guard below stay for shell and auto; the local dispatch further down
-        // takes an explicit agent submit from there.
-        if (!m_workerReady && mode != QStringLiteral("agent")) {
-            if (submit) status(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
-            return;
-        }
+        // during routing") for a prompt whose destination was never in question. An explicit
+        // *terminal* submit never needed it either, and that half was missed: with the worker gone
+        // the whole prompt box went with it, `!echo …` included, although the shell was never the
+        // worker's to lend. Both are dispatched locally below; only `auto`, which has a real
+        // question for the router, is refused — and it says what is wrong and how to send anyway.
+        const bool routerDown = !m_workerReady;
         if (submit && mode != QStringLiteral("agent")
             && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);
@@ -8161,6 +8165,31 @@ private:
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);   // one submission only
             setRouteText(QStringLiteral("AGENT · explicit"));
             submitAgent(typed, true);
+            return;
+        }
+        // The explicit terminal submit with no worker to ask. The router's only contribution to a
+        // forced-shell line is the syntax check that offers a broken command to the agent; with no
+        // agent to offer it to, the shell makes that judgement itself, exactly as it does for
+        // anything typed natively. dispatch() then takes it down the ordinary terminal path —
+        // login, queue, hand-off and all — so nothing else about the line changes.
+        if (submit && routerDown
+            && relay::input::withoutRouter(mode) == relay::input::WithoutRouter::Shell) {
+            const QString typed = m_editor->toPlainText();
+            if (typed.trimmed().isEmpty()) return;
+            m_handoffChain = 0;   // the user typed something: a chain of hand-overs starts over
+            if (!m_prefixMode.isEmpty()) clearPrefixMode(true);   // one submission only
+            setRouteText(QStringLiteral("TERMINAL · explicit"));
+            m_submitMode = mode; m_submittedDraft = typed;
+            dispatch(QJsonObject{{"route", QStringLiteral("shell")}, {"text", typed}, {"valid", true}}, mode);
+            return;
+        }
+        // Everything left is `auto` (relay::input::WithoutRouter::Refuse — Shell and Agent were
+        // taken above), and only the router can answer it. Say what is wrong, name the banner's
+        // own action and the key that sends this very line to the terminal anyway.
+        if (routerDown) {
+            if (submit)
+                status(relay::input::noRouterText(Keymap::instance().shortcutText(QStringLiteral("pane.restartShell")),
+                                                  QStringLiteral("Ctrl+Shift+Enter")));
             return;
         }
         if (submit) {

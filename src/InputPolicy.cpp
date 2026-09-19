@@ -69,6 +69,23 @@ LineTarget targetFor(const State &state, const QString &mode) {
     return LineTarget::Shell;
 }
 
+WithoutRouter withoutRouter(const QString &mode) {
+    if (mode == QStringLiteral("shell")) return WithoutRouter::Shell;
+    if (mode == QStringLiteral("agent")) return WithoutRouter::Agent;
+    return WithoutRouter::Refuse;
+}
+
+QString noRouterText(const QString &restartKeys, const QString &terminalKeys) {
+    const QString restart = restartKeys.isEmpty()
+                                ? QStringLiteral("Use the banner's Restart agent")
+                                : QStringLiteral("Restart agent (%1)").arg(restartKeys);
+    const QString terminal = terminalKeys.isEmpty()
+                                 ? QStringLiteral("switch the chip to TERMINAL")
+                                 : QStringLiteral("press %1").arg(terminalKeys);
+    return QStringLiteral("The agent worker is not running, so Auto cannot tell a command from a prompt. "
+                          "%1, or %2 to run this line in the terminal.").arg(restart, terminal);
+}
+
 bool offerTakeControl(const State &state, bool remoteSession) {
     return !state.native && state.programRunning && (state.altScreen || remoteSession);
 }

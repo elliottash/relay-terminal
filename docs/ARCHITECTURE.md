@@ -1778,6 +1778,20 @@ turn sends a prompt to the back. `submitAgent`, `startFix`, `finishHandoff` and 
 all go through it. The router is asked only for `auto`: an explicit agent submit (Ctrl+Enter,
 the `*` prefix, AGENT mode) is dispatched locally, with no `route` round trip to wait on.
 
+**And the shell does not wait on the agent worker at all** (2026-09-19, the #N8VK follow-on). The
+router lives in the worker; the terminal does not. `relay::input::withoutRouter(mode)`
+(`src/InputPolicy.{h,cpp}`) is the rule for a submit while the worker is down — the pane's banner
+reading "The agent worker exited": a line already addressed to the terminal (the `!` prefix,
+TERMINAL mode, Ctrl+Shift+Enter) is dispatched locally and runs, a line addressed to the agent
+takes the agent's own path, and only `auto` is refused, because only `auto` has a question the
+router alone can answer. That refusal now says what is wrong and names both ways on —
+`relay::input::noRouterText`, which quotes the banner's own Restart agent and the key that sends
+this very line to the terminal — instead of the old "Local router is not ready; use the native
+terminal or restart Relay", which took the whole prompt box away from someone whose shell was
+working perfectly well. `Pane`'s worker-exit handler also drops a `route` left in flight
+(`m_pendingSubmit`, `m_previewId`, `m_heldDecision`): no reply can ever release that
+one-submission guard, and left behind it silently swallowed every later terminal submit.
+
 **One list, in delivery order** (2026-09-18, #C4M8). Under "▸ running", `m_queueList` holds every
 row the pane will deliver: first the steers still waiting for the running turn's next tool call
 (`m_steering`, drawn "↪ next tool call ✦" in the agent colour), then the queued prompts and

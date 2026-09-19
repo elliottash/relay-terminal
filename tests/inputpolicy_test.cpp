@@ -322,6 +322,31 @@ private Q_SLOTS:
         // the line can only reach the agent, so the card takes it.
         QVERIFY(takes(true, false, false));
     }
+    // The agent worker is gone and its banner is up. The shell was never the worker's to lend
+    // (reported 2026-09-19 against #N8VK: `!echo …`, the `! terminal` chip lit, Enter sent
+    // nothing and no command reached the shell).
+    void aLineTheUserAddressedDoesNotNeedTheWorker() {
+        // `!`, Terminal mode and Ctrl+Shift+Enter all resolve to "shell": the terminal runs it.
+        QCOMPARE(withoutRouter(QStringLiteral("shell")), WithoutRouter::Shell);
+        // `*`, Agent mode and Ctrl+Enter: the agent's own path, which says what it needs itself.
+        QCOMPARE(withoutRouter(QStringLiteral("agent")), WithoutRouter::Agent);
+        // Only auto has a question nothing here can answer.
+        QCOMPARE(withoutRouter(QStringLiteral("auto")), WithoutRouter::Refuse);
+        // An unknown mode is auto, not a free pass to the shell.
+        QCOMPARE(withoutRouter(QString()), WithoutRouter::Refuse);
+        QCOMPARE(withoutRouter(QStringLiteral("Shell")), WithoutRouter::Refuse);
+    }
+    void theAutoRefusalNamesTheWayOut() {
+        const QString said = noRouterText(QStringLiteral("Ctrl+Shift+R"), QStringLiteral("Ctrl+Shift+Enter"));
+        QVERIFY(said.contains(QStringLiteral("agent worker is not running")));
+        QVERIFY(said.contains(QStringLiteral("Restart agent (Ctrl+Shift+R)")));   // the banner's own action
+        QVERIFY(said.contains(QStringLiteral("press Ctrl+Shift+Enter")));         // and the line's way out
+        QVERIFY(!said.contains(QStringLiteral("restart Relay")));   // nothing here needs Relay restarted
+        // A key nobody has bound is named rather than typed; the sentence still offers both.
+        const QString unbound = noRouterText(QString(), QString());
+        QVERIFY(unbound.contains(QStringLiteral("banner's Restart agent")));
+        QVERIFY(unbound.contains(QStringLiteral("switch the chip to TERMINAL")));
+    }
     void handoffReportIsLabelledData() {
         using namespace relay::input;
         const QString report = handoffReport(QStringLiteral("ssh -t filly true"), 255,

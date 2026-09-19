@@ -60,6 +60,22 @@ bool lineRequested(const State &state);
 // ("auto", "shell" or "agent"); an agent submission is never diverted to a program.
 LineTarget targetFor(const State &state, const QString &mode);
 
+// ----- a submitted line while the agent worker is not up ---------------------------------------
+// The router lives in the worker; the shell does not. When the worker is gone — the pane's banner
+// reads "The agent worker exited" — a line the user has already addressed needs no verdict, and
+// refusing it took the terminal away from someone whose terminal was working perfectly well
+// (reported 2026-09-19 against #N8VK: `!echo …`, the `! terminal` chip lit, Enter sent nothing).
+// Only `auto` genuinely has a question for the router.
+enum class WithoutRouter {
+    Shell,    // `!`, Terminal mode, Ctrl+Shift+Enter: run it now — the shell reports its own errors
+    Agent,    // `*`, Agent mode, Ctrl+Enter: the agent's own path, which says what it needs itself
+    Refuse,   // `auto`: nothing here can tell a command from a prompt, so say so and offer the restart
+};
+WithoutRouter withoutRouter(const QString &mode);
+// What `auto` is told: why the line did not go, the banner's own action, and the key that sends
+// it to the terminal anyway. Either key text may be empty, and is then named rather than typed.
+QString noRouterText(const QString &restartKeys, const QString &terminalKeys);
+
 // May the agent type into the foreground program? `delegated` is the user's consent for this
 // turn (the delegate action, the banner button, or "let the agent answer this"); it is never
 // inferred. Checked again in the Pane immediately before every write, so a take-over that
