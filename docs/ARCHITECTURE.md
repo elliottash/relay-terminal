@@ -1858,14 +1858,15 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   the terminal starts) and the `~/.claude/ide/<port>.lock` file a claude started anywhere
   reads to find the same server. It serves the twelve IDE tools; `getDiagnostics` answers
   `[]` — Relay has no LSP source, documented rather than faked. `openDiff` is the blocking
-  one: the unified diff travels the one channel as a `bridge` event, the pane shows Relay's
-  diff view ("claude proposes changes to …"), and the call returns only when the user decides
-  — `FILE_SAVED`, after the *sidecar* writes the file, so the GUI never writes a user file —
-  or `DIFF_REJECTED`, which is also what an unmatched, timed-out or abandoned request gets,
-  because a guest left hanging is worse than a guest told no. Every path an openDiff names
-  must `realpath`-resolve inside the one pane's workspace, checked again at the moment of the
-  write. `guest.diffSave` accepts the open proposal from the keyboard and carries the
-  feature's shortcut hint ("Next time: %1 saves claude's change").
+  one: the unified diff travels the one channel as a `bridge` event, the pane opens Relay's
+  diff view beside itself, and **Accept / Reject in that view's own header** (`DiffView::
+  setDecision`) is the answer — the call returns only then: `FILE_SAVED`, after the *sidecar*
+  writes the file, so the GUI never writes a user file, or `DIFF_REJECTED`, which is also what
+  an unmatched, timed-out or abandoned request gets, because a guest left hanging is worse than
+  a guest told no. The pane's banner ("claude proposes changes to …") is a pointer at that pane
+  and nothing more: any other banner may replace it, and dismissing it decides nothing. Every
+  path an openDiff names must `realpath`-resolve inside the one pane's workspace, checked again
+  at the moment of the write.
 - **Sessions** (§26.7, `guest_sessions.py`): Claude's `~/.claude/projects/<cwd-slug>/`
   transcripts and Codex's `~/.codex/sessions/` rollouts are two more Conversations sources
   (`claude`, `codex`) beside Relay's own sessions and subagent threads. A record is

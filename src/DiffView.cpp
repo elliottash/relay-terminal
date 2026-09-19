@@ -8,7 +8,9 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QHBoxLayout>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QTextBlock>
@@ -250,6 +252,9 @@ DiffTextEdit::DiffTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
     setObjectName(QStringLiteral("diffText"));
     setReadOnly(true);
     setFocusPolicy(Qt::StrongFocus);
+    // Tab leaves the diff rather than being eaten by a read-only editor, so the decision buttons
+    // in the header above are reachable from the keyboard (26.5).
+    setTabChangesFocus(true);
     setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     // Diffs are code: wrapping would break the columns the eye follows down a hunk.
     setLineWrapMode(QPlainTextEdit::NoWrap);
@@ -330,7 +335,24 @@ DiffView::DiffView(QWidget *parent) : QWidget(parent) {
     m_header->setObjectName(QStringLiteral("turnHeader"));   // the heading style the panes share
     m_header->setTextFormat(Qt::PlainText);
     m_header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    layout->addWidget(m_header);
+    // The header is a row, because a decision on the diff lives in it (26.5). Both buttons are
+    // hidden until `setDecision` puts one there, so an ordinary tool-call diff looks as it did.
+    auto *heading = new QHBoxLayout;
+    heading->setContentsMargins(0, 0, 0, 0);
+    heading->setSpacing(6);
+    heading->addWidget(m_header, 1);
+    m_reject = new QPushButton;
+    m_accept = new QPushButton;
+    for (QPushButton *button : {m_reject, m_accept}) {
+        button->setObjectName(QStringLiteral("diffDecision"));
+        button->setFocusPolicy(Qt::StrongFocus);
+        button->setAutoDefault(false);
+        button->hide();
+        heading->addWidget(button);
+    }
+    connect(m_accept, &QPushButton::clicked, this, [this] { settle(true); });
+    connect(m_reject, &QPushButton::clicked, this, [this] { settle(false); });
+    layout->addLayout(heading);
     m_text = new DiffTextEdit;
     m_text->setLines(&m_diff.lines);
     m_text->installEventFilter(this);
@@ -340,7 +362,45 @@ DiffView::DiffView(QWidget *parent) : QWidget(parent) {
     connect(theme::notifier(), &theme::Notifier::themeChanged, this, [this] { render(); });
 }
 
+DiffView::~DiffView() {
+    // The view is going away with the change on it: nobody can answer a proposal that is not on
+    // screen, and the guest is waiting on one. Reject (26.5).
+    settle(false);
+}
+
+void DiffView::setDecision(const QString &acceptLabel, const QString &rejectLabel,
+                           std::function<void(bool accepted)> answer) {
+    settle(false);                 // one decision at a time; the one before it is off the screen
+    m_answer = std::move(answer);
+    if (!m_answer) {
+        m_accept->hide();
+        m_reject->hide();
+        return;
+    }
+    m_accept->setText(acceptLabel.isEmpty() ? QStringLiteral("Accept") : acceptLabel);
+    m_reject->setText(rejectLabel.isEmpty() ? QStringLiteral("Reject") : rejectLabel);
+    m_accept->show();
+    m_reject->show();
+}
+
+void DiffView::clearDecision() {
+    m_answer = nullptr;
+    m_accept->hide();
+    m_reject->hide();
+}
+
+void DiffView::settle(bool accepted) {
+    if (!m_answer) return;
+    auto answer = std::move(m_answer);
+    m_answer = nullptr;
+    m_accept->hide();
+    m_reject->hide();
+    answer(accepted);
+}
+
 void DiffView::setDiff(const QString &title, const QString &unifiedDiff) {
+    // A new diff in this view replaces whatever was being decided; see `setDecision`.
+    settle(false);
     m_label = title.trimmed();
     m_diff = parseUnifiedDiff(unifiedDiff);
     render();

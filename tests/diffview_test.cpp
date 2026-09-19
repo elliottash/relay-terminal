@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "DiffView.h"
 
+#include <QPushButton>
 #include <QStringList>
 #include <QTest>
 
@@ -204,6 +205,96 @@ private slots:
         QCOMPARE(view.lineCount(), 0);
         QCOMPARE(view.title(), QStringLiteral("x.py  +0 −0"));
         QCOMPARE(view.plainText(), QStringLiteral("(No text changes)"));
+    }
+
+    // ----- the decision on a guest's diff (issue GT7X, protocol 26.5) --------------------------
+    //
+    // `claude`'s openDiff blocks until the user answers, and the answer is Accept / Reject in this
+    // view's header — not the owning pane's one shared banner, which any other notice replaced,
+    // taking the only way to accept the change with it.
+
+    void anOrdinaryDiffHasNoDecisionOnIt() {
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        QVERIFY(!view.hasDecision());
+        QVERIFY(!view.acceptButton()->isVisibleTo(&view));
+        QVERIFY(!view.rejectButton()->isVisibleTo(&view));
+    }
+
+    void acceptAndRejectAnswerOnceEach() {
+        for (const bool press : {true, false}) {
+            DiffView view;
+            view.setDiff(QStringLiteral("x.py"), writePreview());
+            QVector<bool> answers;
+            view.setDecision(QStringLiteral("Accept"), QStringLiteral("Reject"),
+                             [&answers](bool accepted) { answers.append(accepted); });
+            QVERIFY(view.hasDecision());
+            QVERIFY(view.acceptButton()->isVisibleTo(&view));
+            (press ? view.acceptButton() : view.rejectButton())->click();
+            QCOMPARE(answers, QVector<bool>{press});
+            // Answered: the buttons are gone and a second press cannot answer a returned call.
+            QVERIFY(!view.hasDecision());
+            view.acceptButton()->click();
+            view.rejectButton()->click();
+            QCOMPARE(answers, QVector<bool>{press});
+        }
+    }
+
+    void theButtonsAreReachableWithoutTheMouse() {
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        view.setDecision(QString(), QString(), [](bool) {});
+        QCOMPARE(view.acceptButton()->focusPolicy(), Qt::StrongFocus);
+        QCOMPARE(view.rejectButton()->focusPolicy(), Qt::StrongFocus);
+        QCOMPARE(view.acceptButton()->text(), QStringLiteral("Accept"));
+        QCOMPARE(view.rejectButton()->text(), QStringLiteral("Reject"));
+    }
+
+    void aNewDiffRejectsTheDecisionItReplaces() {
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        QVector<bool> answers;
+        view.setDecision(QString(), QString(), [&answers](bool accepted) { answers.append(accepted); });
+        // The next tool-call diff, or claude's own replacement proposal: what was on screen is not
+        // any more, so it is refused rather than left for a guest to wait on.
+        view.setDiff(QStringLiteral("doc.md"), twoHunks());
+        QCOMPARE(answers, QVector<bool>{false});
+        QVERIFY(!view.hasDecision());
+    }
+
+    void aSecondDecisionRejectsTheFirst() {
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        QVector<bool> answers;
+        view.setDecision(QString(), QString(), [&answers](bool) { answers.append(false); });
+        view.setDecision(QString(), QString(), [](bool) {});
+        QCOMPARE(int(answers.size()), 1);
+        QVERIFY(view.hasDecision());
+    }
+
+    void closingTheViewRejects() {
+        QVector<bool> answers;
+        {
+            DiffView view;
+            view.setDiff(QStringLiteral("x.py"), writePreview());
+            view.setDecision(QString(), QString(), [&answers](bool accepted) { answers.append(accepted); });
+        }
+        QCOMPARE(answers, QVector<bool>{false});
+    }
+
+    void clearDecisionAnswersNothing() {
+        // What the pane calls once it has answered by another route — its own close, a timeout,
+        // claude's close_tab: the buttons go, and nobody is told a second time.
+        DiffView view;
+        view.setDiff(QStringLiteral("x.py"), writePreview());
+        QVector<bool> answers;
+        view.setDecision(QString(), QString(), [&answers](bool accepted) { answers.append(accepted); });
+        view.clearDecision();
+        QVERIFY(answers.isEmpty());
+        QVERIFY(!view.hasDecision());
+        QVERIFY(!view.acceptButton()->isVisibleTo(&view));
+        view.setDiff(QStringLiteral("doc.md"), twoHunks());
+        QVERIFY(answers.isEmpty());
     }
 };
 

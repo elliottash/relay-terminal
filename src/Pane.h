@@ -1269,6 +1269,16 @@ private:
         if (!m_guestDiff.pending) return;
         const GuestDiff diff = m_guestDiff;
         m_guestDiff = GuestDiff();
+        // The answer is going out by this route, so the diff view's own Accept / Reject has
+        // nothing left to ask: drop it *without* answering, or the buttons would still be there
+        // offering a decision on a call that has already returned.
+        if (diff.view) diff.view->clearDecision();
+        // And the banner that pointed at it is now pointing at nothing. Only if it is still this
+        // diff's own text: anything else up there belongs to whatever replaced it, and taking
+        // another notice down is not this answer's business.
+        if (!diff.banner.isEmpty() && m_banner && m_banner->isVisible() && m_bannerText
+            && m_bannerText->text() == diff.banner)
+            hideBanner();
         relay::guestbridge::Bridge::instance().answerDiff(diff.replyPath, outcome);
         const QString name = QFileInfo(diff.file).fileName();
         const bool saved = outcome == relay::guestbridge::fileSaved();
@@ -1280,9 +1290,14 @@ private:
                         : QStringLiteral("Kept the file as it was · claude's changes to %1 were not applied").arg(name));
     }
 
-    // `openDiff` from the bridge: Relay's diff view beside this pane, and the banner that decides.
-    // The decision is the banner's action (save) or its dismissal (reject), because claude's call
-    // blocks until one of them — an unanswered diff is a claude left waiting forever.
+    // `openDiff` from the bridge: Relay's diff view beside this pane, with Accept and Reject in
+    // that view's own header. claude's call blocks until one of them, so the decision has to stay
+    // reachable for as long as the proposal is on screen — which is why it is *not* in the pane's
+    // banner any more. The banner is one shared strip: an out-of-memory notice, a shell error or an
+    // ssh offer replaced it, and with it the only way to accept the change; the other way round, a
+    // diff banner made Ctrl+Shift+R (which runs the visible banner's action) write a file instead
+    // of restarting a stopped shell. The banner is now a pointer at the diff pane and nothing more,
+    // free to be replaced without settling anything.
     void showGuestDiff(const QJsonObject &data) {
         const QString reply = data.value(QStringLiteral("reply")).toString();
         const QString file = data.value(QStringLiteral("file")).toString();
@@ -1294,32 +1309,45 @@ private:
             return;
         }
         // A second openDiff while one waits: claude replaced its proposal, and the first call
-        // cannot be answered any more. Rejecting it is the only honest answer.
+        // cannot be answered any more. Rejecting it is the only honest answer. Done before the
+        // view is asked to show the new diff, so that the view's own "a new diff rejects the old
+        // decision" rule finds nothing left to reject.
         settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("replaced"));
-        m_guestDiff.replyPath = reply;
-        m_guestDiff.file = file;
-        m_guestDiff.pending = true;
         const QString name = QFileInfo(file).fileName();
-        if (diff.isEmpty() || !onOpenDiff) {
+        relay::DiffView *view = diff.isEmpty() || !onOpenDiff
+                                    ? nullptr
+                                    : onOpenDiff(tabName.isEmpty() ? name : tabName, diff);
+        if (!view) {
             // Nowhere to show the change is nowhere to decide it: refuse rather than leave claude
-            // waiting on a question this pane cannot put to anyone.
+            // waiting on a question this pane cannot put to anyone. The reply goes out directly,
+            // because there is no pending diff to settle.
             relay::log::error(QStringLiteral("guest_bridge_diff_unshowable pane=%1").arg(paneLogId()));
-            settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("no diff view"));
+            relay::guestbridge::Bridge::instance().answerDiff(reply, relay::guestbridge::diffRejected());
+            relay::log::info(QStringLiteral("guest_bridge_diff pane=%1 saved=0 reason=no diff view")
+                                 .arg(paneLogId()));
             return;
         }
-        onOpenDiff(tabName.isEmpty() ? name : tabName, diff);
+        m_guestDiff.replyPath = reply;
+        m_guestDiff.file = file;
+        m_guestDiff.view = view;
+        m_guestDiff.pending = true;
+        // The view outlives neither answer: it calls this once, and `settleGuestDiff` takes the
+        // callback back out of it on every other path (the pane closing, a timeout, `close_tab`).
+        // The guard is for the window closing, where the view may be destroyed after the pane.
+        view->setDecision(QStringLiteral("Accept"), QStringLiteral("Reject"),
+                          [this, guard = QPointer<Pane>(this)](bool accepted) {
+                              if (!guard) return;
+                              settleGuestDiff(accepted ? relay::guestbridge::fileSaved()
+                                                       : relay::guestbridge::diffRejected(),
+                                              accepted ? QStringLiteral("accepted")
+                                                       : QStringLiteral("rejected"));
+                          });
         const QString where = m_workspace.isEmpty() ? name : QStringLiteral("%1 · %2").arg(name, m_workspace);
-        showBanner(QStringLiteral("claude proposes changes to %1").arg(where), QStringLiteral("Save"),
-                   [this] {
-                       settleGuestDiff(relay::guestbridge::fileSaved(), QStringLiteral("saved"));
-                       hideBanner();
-                   });
-        // The banner's action is Ctrl+Shift+R's too (restartStopped runs the visible banner's
-        // action); teaching that once is cheaper than a claude left waiting on a decision nobody
-        // knows is one keystroke away.
-        if (const QString key = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell")); !key.isEmpty())
-            hint(QStringLiteral("guest.diffSave"),
-                QStringLiteral("Next time: %1 saves claude's change").arg(key));
+        // A pointer, not a decision: no action button, so Ctrl+Shift+R still means "restart what
+        // stopped here" and any other banner may take this one's place.
+        m_guestDiff.banner = QStringLiteral("claude proposes changes to %1 · Accept or Reject in the diff pane")
+                                 .arg(where);
+        showBanner(m_guestDiff.banner, QString(), {});
     }
 
     // ----- the guest event channel (issue GT7X, protocol 26.3) ---------------------------------
@@ -4247,7 +4275,10 @@ private:
 public:
     // A write or an edit whose diff is more than 12 changed lines (§ 23.6): the window opens a diff
     // pane beside this one. Also wired into the turn pane's rows (requestTurn).
-    std::function<void(const QString &title, const QString &unifiedDiff)> onOpenDiff;
+    // Show one unified diff in a pane beside this one, and hand back the view it went into, so a
+    // caller with a decision on that diff can put it in the view's own header (26.5). nullptr when
+    // the host showed nothing.
+    std::function<relay::DiffView *(const QString &title, const QString &unifiedDiff)> onOpenDiff;
 
     // A relay://open-call link arriving from outside the window (the desktop's relay: handler).
     void openCallLink(const QString &uri) { openCallTarget(uri); }
@@ -8503,13 +8534,13 @@ private:
         m_banner->show();
     }
 
+    // Hiding the banner decides nothing. It used to reject a pending guest diff, because the
+    // decision *was* the banner; now the decision is in the diff view's header (26.5) and the
+    // banner only points at it, so dismissing the pointer — or letting any other notice replace
+    // it — leaves claude's proposal exactly where the user can still answer it.
     void hideBanner() {
         if (m_banner) m_banner->hide();
         m_bannerCallback = nullptr;
-        // The guest-diff banner's dismissal is its decision (26.5): once the banner is gone there
-        // is nothing left to answer claude with, so × — or anything else that clears the banner —
-        // rejects the change rather than leaving the tool call waiting forever.
-        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("dismissed"));
     }
 
 public:
@@ -12911,7 +12942,15 @@ private:
     bool m_guestBarMouse = false;       // the question on screen was reached with the mouse
     // A bridge diff this pane still owes claude an answer to (GT7X, 26.5): where the sidecar is
     // waiting for the decision, and the file the decision is about.
-    struct GuestDiff { bool pending = false; QString replyPath, file; };
+    // The diff view is held weakly: it is a widget in another pane of this tab and may be closed
+    // before the answer is given — which is itself a rejection, delivered by the view's own
+    // destructor through the callback it holds.
+    struct GuestDiff {
+        bool pending = false;
+        QString replyPath, file;
+        QPointer<relay::DiffView> view;
+        QString banner;   // the pointer this diff put up, so settling can take down its own and no other
+    };
     GuestDiff m_guestDiff;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};

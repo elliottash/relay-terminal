@@ -7,9 +7,14 @@ MCP from there, with the `x-claude-code-ide-authorization` header and masked cli
 `initialize`, `tools/list`, and `tools/call openDiff`, the blocking one. What the pictures are
 evidence of is the whole round trip: the call arrives as a `bridge` event through the guest
 channel (§26.3, written by `shell/guest-event.py`), the pane opens Relay's diff view beside
-itself and shows the banner whose Save button — or whose × — is the decision, and only that
-click returns the tool call: `FILE_SAVED` after the sidecar has written the file, or
-`DIFF_REJECTED` with the file untouched.
+itself, and the decision returns the tool call: `FILE_SAVED` after the sidecar has written the
+file, or `DIFF_REJECTED` with the file untouched.
+
+**Where the decision is** changed on 2026-09-19 (owner's decision, §26.5): it is `Accept` and
+`Reject` in the **diff view's own header**, not the pane's banner. The pictures below were taken
+before that and still show the banner's `Save` button; what is under them is unchanged, and the
+paragraph at the end of this file says what a re-shoot would show instead and why it has not been
+taken here.
 
 ## Running it
 
@@ -32,14 +37,14 @@ sorted-first name instead waits forever on the one without a shell.
 
 Each picture is verified, not just taken: the harness OCRs the screenshot and logs what the
 window says, and the hard assertions are what a guest depends on — what the tool call returned,
-and what is on disk afterwards. The clicks are found from tesseract's word boxes, but never by
-what the words say: the same button pixels have read `Save` and `See`, so the geometry is what
-is trusted. The banner row is the one holding `proposes changes`; the pane's right edge is the
-first tall thin column right of that text (the diff pane opening beside makes one); the Save
-button is the row's rightmost full-sized word — any point of its label is the button, and the
-label is wider than its `Save` word — and the × is the tiny glyph past the label's end, or 32 px
-past it when OCR drops the glyph. Tab-row noise OCRs as tall words that would claim to be the
-button; the row filter's height bound keeps them out.
+and what is on disk afterwards. The clicks are found from tesseract's word boxes. Since the
+decision moved into the diff view (§26.5) that is much simpler than it was: the two
+buttons' labels are one unambiguous word each (`Accept`, `Reject`) and nothing else on the screen
+says either, so the word *is* the button and `decision_geometry()` takes the rightmost match. The
+banner's old single button could not be found that way — its label carried the shortcut, and the
+same pixels OCR'd as `Save` one run and `See` the next — so the code that found it by geometry
+(the rightmost full-sized word of the `proposes changes` row, left of the diff pane's edge, with a
+height bound to keep the tab row out) is gone with it.
 
 ## What each picture is evidence of
 
@@ -91,6 +96,37 @@ The pictures above still stand; the code under them changed in five places, all 
   continuation and an unknown opcode (1002), as `remote/ws.py` does;
 * a non-ASCII auth header is a 401 rather than a TypeError and a dropped socket.
 
+## The decision moved into the diff view (owner, 2026-09-19)
+
+A pane has **one** banner and it belongs to nobody in particular: an out-of-memory notice, a shell
+error or an ssh offer replaces whatever is in it. While the guest diff's Save *was* that banner,
+any of those took the only way to accept the change away, and claude then waited out the 30-minute
+timeout on a question the user could no longer answer. The other direction was as bad: Ctrl+Shift+R
+runs the visible banner's action, so a diff banner made that key write a file instead of restarting
+a stopped shell.
+
+So `Accept` (FILE_SAVED) and `Reject` (DIFF_REJECTED) are now two focusable buttons in the diff
+view's own header (`DiffView::setDecision`, `tests/diffview_test.cpp`), and the banner is a pointer
+at that pane with no action of its own — free to be replaced, and `hideBanner()` settles nothing.
+What settles a diff besides the buttons: a new diff replacing the one on screen, the view closing,
+and every path that already did (the pane closing, the connection dropping, `close_tab`,
+`closeAllDiffTabs`, the timeout, shutdown). The `guest.diffSave` shortcut hint went with the
+banner's action.
+
+**The pictures here were not re-shot, and this is why.** `claude-bridge-drive.py` is updated for the
+new buttons, but it cannot get past its own setup on `main` today: it types
+`!bash -c 'exec -a claude sleep 900'` into the composer and presses Return, and the line stays in
+the composer — the `! terminal` chip lit, nothing sent, so no `claude` ever reaches the pane's
+foreground and the run stops before the first `openDiff`. That is **not** this change: the same run
+fails identically with the decision reverted to the banner (checked, same build tree, 2026-09-19),
+with "The agent worker exited" up in the banner both times. Enter's routing was being changed on
+`main` the same day (`issues/changes/2026-09-19-ctrl-enter-should-send-now-not-join-the-queue.md`).
+Once a Relay on `main` sends a composer line again, the harness re-takes all four pictures
+unchanged except for the decision: picture 01 shows `Accept` and `Reject` in the diff pane's header
+beside `claude's haiku +1 −1`, the banner beside it reads
+`claude proposes changes to haiku.txt · Accept or Reject in the diff pane` and carries no button,
+and picture 03 is answered with `Reject` rather than the banner's ×.
+
 ## The four owner decisions of 2026-09-19 (third pass)
 
 The pictures above still stand. Four things under them changed, and each is unit-tested in
@@ -114,6 +150,9 @@ The pictures above still stand. Four things under them changed, and each is unit
   per-connection `max_frame` (the remote sessions keep its 2 MiB default, the bridge asks for 4 MiB)
   and its `WebSocketError` a close code; the auth-header check stays on the bridge side of the
   handshake.
+* **The decision is in the diff view**, as above, with its own tests in
+  `tests/diffview_test.cpp` (7 new slots: answered once and once only, a replacing diff and a
+  closing view both rejecting, `clearDecision` answering nothing, the buttons focusable).
 * **A lock is stale when its port refuses, not when its pid is gone.** After a crash the pid is
   recycled and the old test called a dead editor live, so claude kept dialling a dead port forever.
   The sweep connects to the port on loopback; a port that answers keeps its lock however wrong the

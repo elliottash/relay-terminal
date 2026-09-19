@@ -65,7 +65,7 @@ Backend tests by module:
 | `tests/test_forge_sync.py` | 106 | Two-way sync between Switchboard cards and GitHub issues (`#GDQN`) |
 | `tests/test_gateway.py` | 27 | The Relay Free gateway, end to end in one process: a fake model provider on loopback, the real gateway on a real port, and a client that registers, streams and gets refused the way the desktop will |
 | `tests/test_guest.py` | 22 | Guest agent panes (protocol 26): detecting Claude Code and Codex, the `guest` block, the env injected at launch and the shim's own contract |
-| `tests/test_guest_bridge.py` | 93 | The Claude IDE bridge (protocol 26.5): the lock file, the JSON-RPC/tool layer, and the blocking openDiff — the last two frame by frame over a real WebSocket, with a hand-rolled client standing in for claude (no claude process is ever started) |
+| `tests/test_guest_bridge.py` | 117 | The Claude IDE bridge (protocol 26.5): the lock file, the JSON-RPC/tool layer, and the blocking openDiff — the last two frame by frame over a real WebSocket, with a hand-rolled client standing in for claude (no claude process is ever started) |
 | `tests/test_guest_codex.py` | 97 | Codex as a guest: the marked settings writes and the rollout tail (protocol 26.6) |
 | `tests/test_guest_hook.py` | 38 | The Claude guest shim (GT7X, protocol 26.3/26.4) |
 | `tests/test_guest_install.py` | 25 | The marked settings installer (GT7X, protocol 26.4) |
@@ -139,7 +139,7 @@ Backend tests by module:
 | `tests/test_web_meet_code.py` | 12 | Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG) |
 | `tests/test_web_theme.py` | 7 | app/pane-theme.css is generated from the desktop theme, and must not drift from it |
 | `tests/test_web_viewport.py` | 5 | The web client fits the part of the screen that is visible, on-screen keyboard or not |
-| **Total** | **2779** | 91 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
+| **Total** | **2808** | 91 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
 
 Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file stem without
 `_test`):
@@ -157,7 +157,7 @@ Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file st
 | `tests/completion_test.cpp` | 8 | `src/Completion.h`: completing a path at the cursor — directories, the shared prefix of several matches, hidden files needing a dot, escaped spaces, a subdirectory, and what is left alone |
 | `tests/conversations_test.cpp` | 32 | Pure helpers of the session manager and the find bar (src/Conversations.h), the session manager pane itself, and the ⓘ view's rendering (src/SessionInfo.h) |
 | `tests/copyonselect_test.cpp` | 13 | Copy on highlight, the shared filter every read-only pane surface installs (src/CopyOnSelect.h) |
-| `tests/diffview_test.cpp` | 12 | `src/DiffView.h`: reading the diff out of a tool preview and numbering both sides of every hunk, including a new file and a hunk that promised more lines than it has |
+| `tests/diffview_test.cpp` | 19 | `src/DiffView.h`: reading the diff out of a tool preview and numbering both sides of every hunk, including a new file and a hunk that promised more lines than it has, plus the Accept / Reject decision a guest's openDiff hangs in the header (26.5) — answered once, rejected by a replacing diff or a closing view, dropped without an answer by `clearDecision` |
 | `tests/editor_test.cpp` | 19 | native selection and undo, submission shortcuts and multiline, Shift+click, mouse drag, paste never submits, IME preedit does not submit, history keeps the draft, Up inside multiline text moves the cursor |
 | `tests/fileindex_test.cpp` | 6 | `src/FileIndex.h`: the file index behind completion and the palette — tracked and untracked but not ignored, when a fresh index is rebuilt, a new directory superseding one in flight, the plain-directory walk, and a refresh returning before git does |
 | `tests/filepanes_test.cpp` | 31 | explorer navigates in and up, filter, hidden files, Enter opens a file, typing starts the filter, filter then Down+Enter opens the match, preview picks a viewer by type, large text truncated with a notice, missing path returns false |
@@ -200,7 +200,7 @@ Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file st
 | `tests/voice_test.cpp` | 10 | The rules behind voice transcription (issue NY7Z): which capture tool runs and how, which key event is the hold key, where a transcript lands in the composer's text, and the WAV repair that makes a clip from an interrupted recorder readable. No microphone and no provider are involved |
 | `tests/windowstate_test.cpp` | 25 | Saved window layout ("reopen where I left off"): the parts that do not need a window — reading and writing state/windows.json, validating pane trees, clamping geometry onto a screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store a restored pane refills itself from |
 | `tests/wordwrap_test.cpp` | 9 | Relay's own text in the terminal breaks between words, never inside one |
-| **Total** | **881** | 54 suites; data-driven slots run more cases than this |
+| **Total** | **888** | 54 suites; data-driven slots run more cases than this |
 
 Engine suites (`relay-engine-tests`, one binary, `RELAY_ENGINE_TEST=<name>` runs one):
 

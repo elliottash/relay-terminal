@@ -3570,16 +3570,31 @@ refused *before* the announced bytes are read. Every `KEEPALIVE_SECONDS` (30) th
 each live connection, so an idle claude — and anything keeping state between the two — knows the
 bridge is alive.
 
-**The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface and
-the lock file, and it is the only side that can answer claude — including `getDiagnostics`
+**The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface
+and the lock file, and it is the only side that can answer claude — including `getDiagnostics`
 (empty, documented). The GUI decides what only a person can decide. `openDiff` crosses the seam
-as one `bridge` event over the guest channel (26.3): the pane opens Relay's diff view and shows
-the banner whose action (Save) — also Ctrl+Shift+R, the visible banner's action — or whose
-dismissal (×) is the answer; on `FILE_SAVED` the *sidecar* writes the file, so the GUI never
-writes a user's file from a bridge event. `openFile` opens the preview pane; everything else
-the twelve tools ask for was answered sidecar-side already. The `bridge` event arrives through
-the shared channel plumbing (26.3): `pollGuestEvent` → `handleGuestEvent`, whose `bridge`
-branch calls the pane's `guestBridgeEvent`.
+as one `bridge` event over the guest channel (26.3): the pane opens Relay's diff view beside
+itself, and **the decision lives in that view's own header** — `Accept` (`FILE_SAVED`) and
+`Reject` (`DIFF_REJECTED`) as two buttons (`DiffView::setDecision`), focusable, so the answer is
+reachable without the mouse. On `FILE_SAVED` the *sidecar* writes the file, so the GUI never
+writes a user's file from a bridge event.
+
+The decision is *not* in the pane's banner, and this is the rule: **a pane has one banner and it
+belongs to nobody in particular.** An out-of-memory notice, a shell error or an ssh offer replaces
+whatever is there, and while the decision was the banner's action that took the only way to accept
+the change away — a claude then waited out the 30-minute timeout on a question the user could no
+longer answer. The other direction was as bad: `pane.restartShell` (Ctrl+Shift+R) runs the visible
+banner's action, so a diff banner made that key write a file instead of restarting a stopped shell.
+The banner is now a **pointer** at the diff pane, with no action of its own; it may be replaced or
+dismissed freely and `hideBanner()` settles nothing. What settles a diff is the view: a button, a
+new diff replacing the one on screen, or the view being closed (all three are the view's own
+`setDecision` contract), on top of every settle path that was already there — the pane closing, the
+connection dropping, `close_tab`, `closeAllDiffTabs`, the timeout and shutdown. A `bridge` event
+that names no diff to show is answered `DIFF_REJECTED` straight away rather than waited on.
+
+`openFile` opens the preview pane; everything else the twelve tools ask for was answered
+sidecar-side already. The `bridge` event arrives through the shared channel plumbing (26.3):
+`pollGuestEvent` → `handleGuestEvent`, whose `bridge` branch calls the pane's `guestBridgeEvent`.
 
 **The channel's writer, in-process.** `shell/guest-event.py` (26.3) is the only writer, for the
 bridge as for the shim, and the sidecar **imports** it — `importlib` by path, honouring

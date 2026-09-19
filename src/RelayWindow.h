@@ -3280,13 +3280,16 @@ public:
     // changed lines opens (#TK9C, protocol § 23.6). A splitter pane, never an overlay — and one
     // per tab: the next big diff replaces what the last one showed, so a long turn does not leave
     // a row of panes behind.
-    void openDiffPane(Pane *owner, const QString &title, const QString &unifiedDiff) {
+    // Returns the view it showed the diff in, for a caller that has something to put in its
+    // header — a guest's `openDiff` hangs its Accept / Reject there (26.5) — or nullptr when there
+    // was nothing to show and no pane was opened.
+    relay::DiffView *openDiffPane(Pane *owner, const QString &title, const QString &unifiedDiff) {
         QWidget *page = pageOf(owner);
-        if (!page || unifiedDiff.isEmpty()) return;
+        if (!page || unifiedDiff.isEmpty()) return nullptr;
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->diff()) {
                 tool->diff()->setDiff(title, unifiedDiff);
-                setActiveLeaf(tool); focusLeaf(tool); updateTitles(); return;
+                setActiveLeaf(tool); focusLeaf(tool); updateTitles(); return tool->diff();
             }
         auto *view = new relay::DiffView;
         view->setDiff(title, unifiedDiff);
@@ -3298,6 +3301,7 @@ public:
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
+        return view;
     }
     // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
     // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
@@ -4310,8 +4314,9 @@ private:
             if (auto *w = windowOf(guard)) w->localModels().handleEvent(event);
         };
         // A tool-call line whose diff is too big to read inline (#TK9C).
-        pane->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) {
-            if (auto *w = windowOf(guard)) w->openDiffPane(guard, title, unifiedDiff);
+        pane->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) -> relay::DiffView * {
+            if (auto *w = windowOf(guard)) return w->openDiffPane(guard, title, unifiedDiff);
+            return nullptr;
         };
         // Session manager and ⓘ (cards #R6J0, #Y63Z).
         pane->onOpenSessions = [guard](const QString &query) { if (auto *w = windowOf(guard)) w->openSessionsFor(guard, query); };

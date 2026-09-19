@@ -30,7 +30,10 @@
 #include <QVector>
 #include <QWidget>
 
+#include <functional>
+
 class QLabel;
+class QPushButton;
 
 namespace relay {
 
@@ -88,10 +91,35 @@ class DiffTextEdit;
 class DiffView final : public QWidget {
 public:
     explicit DiffView(QWidget *parent = nullptr);
+    ~DiffView() override;
 
     // `title` names the file in the heading (the pane host usually passes the path it opened);
     // empty falls back to the file name in the diff. `unifiedDiff` may be a whole tool preview.
+    // A diff that replaces one with a decision on it rejects that decision first: a proposal the
+    // user can no longer see is not one they agreed to.
     void setDiff(const QString &title, const QString &unifiedDiff);
+
+    // ----- a decision on the diff (issue GT7X, protocol 26.5) ---------------------------------
+    //
+    // `claude`'s `openDiff` blocks until the user answers, and the answer belongs here, in the
+    // header of the thing showing the change. It used to be the owning pane's banner — which is
+    // one shared strip: an OOM notice, a shell error or an ssh offer replaced it and the diff
+    // could not be accepted at all any more, while in the other direction a diff banner made
+    // Ctrl+Shift+R save a file instead of restarting a stopped shell.
+    //
+    // `answer(true)` is Accept, `answer(false)` is Reject, and it is called exactly **once**:
+    // by one of the two buttons, or by anything that takes the change off the screen — a new
+    // `setDiff`, or this view being destroyed — which counts as Reject. `clearDecision()` drops
+    // it *without* answering, for an owner that has already answered by another route (its pane
+    // closed, the guest hung up, the request timed out).
+    void setDecision(const QString &acceptLabel, const QString &rejectLabel,
+                     std::function<void(bool accepted)> answer);
+    void clearDecision();
+    bool hasDecision() const { return bool(m_answer); }
+    // The two buttons, so that a caller — and a test — can press one. Both are focusable and the
+    // text area passes Tab on, so the decision is reachable without the mouse.
+    QPushButton *acceptButton() const { return m_accept; }
+    QPushButton *rejectButton() const { return m_reject; }
     // "x.py  +3 −1".
     QString title() const;
     // The pane host calls this when the pane takes focus; the text area is what reads keys.
@@ -112,10 +140,16 @@ protected:
 private:
     void render();
     bool jumpToHunk(int direction);
+    // Answer once and forget: the callback is moved out before it is called, so anything it does
+    // back to this view (a `clearDecision`, a fresh `setDiff`) cannot re-enter it.
+    void settle(bool accepted);
     ParsedDiff m_diff;
     QString m_label;
     QLabel *m_header = nullptr;
     DiffTextEdit *m_text = nullptr;
+    QPushButton *m_accept = nullptr;
+    QPushButton *m_reject = nullptr;
+    std::function<void(bool accepted)> m_answer;
 };
 
 }  // namespace relay

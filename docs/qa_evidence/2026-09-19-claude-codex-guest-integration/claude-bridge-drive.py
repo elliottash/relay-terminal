@@ -10,9 +10,11 @@ sidecar writes in `~/.claude/ide/<port>.lock` — and speaks the WebSocket varia
 `initialize`, `tools/list`, and `tools/call openDiff`, the blocking one.
 
 The whole round trip is what the pictures are evidence of: openDiff arrives as a `bridge` event
-through the guest channel (26.3), the pane opens Relay's diff view beside itself and shows the
-banner whose Save button — or whose × — is the decision, and only that click returns the tool call:
-FILE_SAVED after the *sidecar* has written the file, or DIFF_REJECTED with the file untouched.
+through the guest channel (26.3), the pane opens Relay's diff view beside itself, and **Accept or
+Reject in that view's own header** is the decision — only that click returns the tool call:
+FILE_SAVED after the *sidecar* has written the file, or DIFF_REJECTED with the file untouched. The
+pane's banner beside it is a pointer at the diff pane and nothing more (26.5): it has no action of
+its own, because a pane has one banner and any other notice may replace it.
 
 Each picture is checked, not just taken: the harness OCRs the screenshot and logs what the window
 actually says, so the run's output is the evidence's own verification. The hard assertions are the
@@ -332,61 +334,31 @@ def click(x: int, y: int) -> None:
     xdo("click", "1")
 
 
-def banner_geometry(words):
-    """Where to click Save and the banner's x, from OCR'd boxes — not from what the words say,
-    which is not dependable (the same pixels have read Save and See). The banner row is the one
-    holding `proposes changes`; its pane's right edge is the first tall thin column right of
-    that text (the diff pane opening beside makes it); the Save button is the row's rightmost
-    full-sized word — any point of its label is the button — and the x is the tiny glyph past
-    the label's end, or 32 px past it when OCR drops the glyph."""
-    anchor = next((w for w in words
-                   if "proposes" in w[4].lower() or "changes" in w[4].lower()), None)
-    if anchor is None:
+def decision_geometry(words, label: str):
+    """Where the diff pane's Accept or Reject button is.
+
+    This got *simpler* when the decision moved out of the banner (26.5). The old code could not
+    trust what the words said — the banner's one button carried its shortcut in the same label and
+    the same pixels OCR'd as `Save` one run and `See` the next — so it found the button by geometry:
+    the rightmost full-sized word of the row holding `proposes changes`, left of the diff pane's
+    edge. The diff pane's header has two buttons whose whole label is one unambiguous word each,
+    and nothing else on the screen says either, so the word *is* the button. The rightmost match
+    wins, because the header reads `<file>  +n −m    Reject  Accept`."""
+    hits = [w for w in words if w[4].strip().strip(".,:;|") == label]
+    if not hits:
         return None
-    tall = [w[0] for w in words if 0 < w[2] <= 8 and w[3] >= 300 and w[0] > anchor[0] + anchor[2]]
-    if not tall:
-        return None
-    edge = min(tall)
-    # h <= 20 keeps the tab row above out: it OCRs as tall words (a '|' one run) that would
-    # otherwise claim to be the button and push both clicks right of where they belong.
-    row = sorted((w for w in words if w[4] and w[3] <= 20
-                  and w[1] < anchor[1] + anchor[3] and w[1] + w[3] > anchor[1]
-                  and w[0] + w[2] <= edge - 8), key=lambda w: w[0])
-    label_words = [w for w in row if w[2] > 12 or w[3] > 12]
-    if not label_words:
-        return None
-    button = max(label_words, key=lambda w: w[0] + w[2])
-    save_click = (button[0] + button[2] // 2, button[1] + button[3] // 2)
-    label_end = button[0] + button[2]
-    crosses = [w for w in row if w[2] <= 12 and w[3] <= 12 and w[0] >= label_end + 20]
-    if crosses:
-        cross = crosses[-1]
-        x_click = ((cross[0] * 2 + cross[2]) // 2, cross[1] + cross[3] // 2)
-    else:
-        x_click = (label_end + 32, save_click[1])
-    return save_click, x_click
+    box = max(hits, key=lambda w: w[0] + w[2])
+    return (box[0] + box[2] // 2, box[1] + box[3] // 2)
 
 
-def click_save(window: str, picture: Path) -> None:
-    def save_at(words):
-        geometry = banner_geometry(words)
-        return geometry[0] if geometry else None
+def click_decision(window: str, picture: Path, label: str) -> None:
+    def at(words):
+        return decision_geometry(words, label)
 
-    at = save_at(shoot_words(window, picture, save_at))
+    point = at(shoot_words(window, picture, at))
     xdo("windowactivate", "--sync", window)
-    click(*at)
-    log(f"clicked the banner's Save button at {at}")
-
-
-def click_dismiss(window: str, picture: Path) -> None:
-    def x_at(words):
-        geometry = banner_geometry(words)
-        return geometry[1] if geometry else None
-
-    at = x_at(shoot_words(window, picture, x_at))
-    xdo("windowactivate", "--sync", window)
-    click(*at)
-    log(f"clicked the banner's x at {at}")
+    click(*point)
+    log(f"clicked the diff pane's {label} button at {point}")
 
 
 # ----- the run ------------------------------------------------------------------------------
@@ -463,8 +435,8 @@ def main() -> int:
             time.sleep(1.0)
             picture = output / "claude-bridge-01-opendiff-banner.png"
             report("01-opendiff-banner", screenshot(picture),
-                   ["claude proposes changes", "haiku.txt", "Save"], forbid=[])
-            click_save(window, picture)
+                   ["claude proposes changes", "haiku.txt", "Accept", "Reject"], forbid=[])
+            click_decision(window, picture, "Accept")
 
         reply = client.wait_reply(10, actions=[(3.5, shoot_first)], timeout=60)
         outcome = reply["result"]["content"][0]["text"]
@@ -481,7 +453,7 @@ def main() -> int:
         report("02-saved", screenshot(output / "claude-bridge-02-saved.png"),
                ["Saved claude"], forbid=["proposes changes"])
 
-        # 2. openDiff, rejected: the same flow, the banner's x instead of Save.
+        # 2. openDiff, rejected: the same flow, the diff pane's Reject instead of Accept.
         refused = "the page stays blank\n"
         client.send({"jsonrpc": "2.0", "id": 20, "method": "tools/call",
                      "params": {"name": "openDiff", "arguments": {
@@ -492,8 +464,8 @@ def main() -> int:
             time.sleep(1.0)
             picture = output / "claude-bridge-03-second-diff.png"
             report("03-second-diff", screenshot(picture),
-                   ["claude proposes changes", "Save"])
-            click_dismiss(window, picture)
+                   ["claude proposes changes", "Accept", "Reject"])
+            click_decision(window, picture, "Reject")
 
         reply = client.wait_reply(20, actions=[(3.5, shoot_second)], timeout=60)
         outcome = reply["result"]["content"][0]["text"]
