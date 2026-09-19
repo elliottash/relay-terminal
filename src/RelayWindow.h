@@ -397,10 +397,7 @@ public:
                 const bool byMouse = QApplication::mouseButtons() != Qt::NoButton;
                 const bool changed = m_activeLeaf && m_activeLeaf.data() != leaf && pageOf(m_activeLeaf) == pageOf(leaf);
                 setActiveLeaf(leaf);
-                if (byMouse && changed)
-                    hint(QStringLiteral("pane.focus.mouse"), QStringLiteral("Next time: %1 / %2 / %3 / %4 moves between panes").arg(
-                        Keymap::instance().shortcutText(QStringLiteral("pane.focusLeft")), Keymap::instance().shortcutText(QStringLiteral("pane.focusRight")),
-                        Keymap::instance().shortcutText(QStringLiteral("pane.focusUp")), Keymap::instance().shortcutText(QStringLiteral("pane.focusDown"))));
+                if (byMouse && changed) hintPaneFocusByMouse();
             }
         });
         qApp->installEventFilter(this);
@@ -834,6 +831,7 @@ protected:
             if (!pressed || !relay::panes::chordKeyKeepsWindow(pressed->key(), Keymap::instance().match(pressed)))
                 endBeneathDock();
         }
+        activateOnPress(object, event);
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
@@ -4708,6 +4706,44 @@ private:
 
     void setActive(Pane *pane) { setActiveLeaf(pane); }
 
+    // The mouse is the slow way between panes; the Alt+arrows are the fast one.
+    void hintPaneFocusByMouse() {
+        hint(QStringLiteral("pane.focus.mouse"), QStringLiteral("Next time: %1 / %2 / %3 / %4 moves between panes").arg(
+            Keymap::instance().shortcutText(QStringLiteral("pane.focusLeft")), Keymap::instance().shortcutText(QStringLiteral("pane.focusRight")),
+            Keymap::instance().shortcutText(QStringLiteral("pane.focusUp")), Keymap::instance().shortcutText(QStringLiteral("pane.focusDown"))));
+    }
+
+    // A press anywhere in a pane makes that pane the active one (issue #H3TQ).
+    //
+    // Focus alone used to decide it, so only the surfaces that take the keyboard moved the active
+    // frame: the prompt box, a list, a text field. Everything else a pane is mostly made of — the
+    // terminal body (`Qt::NoFocus` under the prompt-box-only rules), the header and its title, the
+    // chips, the pane's own margin — left the old pane active, and the next keystroke went to a
+    // pane the user had clicked away from.
+    //
+    // Returns whether the active pane changed; the press itself is never consumed, so every click
+    // still does what it did.
+    bool activateOnPress(QObject *object, QEvent *event) {
+        if (event->type() != QEvent::MouseButtonPress) return false;
+        auto *widget = qobject_cast<QWidget *>(object);
+        if (!widget || widget->window() != this) return false;
+        QWidget *leaf = leafOf(widget);
+        if (!leaf || leaf == m_activeLeaf) return false;
+        setActiveLeaf(leaf);
+        hintPaneFocusByMouse();
+        // The press has not moved the keyboard yet — a widget that takes click focus does that
+        // when the event reaches it, after this filter. So ask on the next turn instead of
+        // guessing from focus policies: if nothing in the new pane ended up with the keyboard,
+        // give it to its prompt box, which is what the frame now says is listening. A press that
+        // opened a popup (the model box, a menu) is left alone: focusing behind it would shut it.
+        QPointer<QWidget> guard(leaf);
+        QTimer::singleShot(0, this, [this, guard] {
+            if (!guard || m_activeLeaf != guard.data() || QApplication::activePopupWidget()) return;
+            if (leafOf(QApplication::focusWidget()) != guard.data()) focusLeaf(guard);
+        });
+        return true;
+    }
+
     // Any pane can be the focused leaf; agent and terminal actions use the last terminal pane.
     void setActiveLeaf(QWidget *leaf) {
         if (!leaf) return;
@@ -4732,7 +4768,8 @@ private:
         updateTitles();
     }
 
-    // The pane frame and its composer both follow "relayActive", so both have to be repolished.
+    // The pane frame, its composer and its header text all follow "relayActive", so each of them
+    // has to be given the property and repolished.
     static void repolishLeaf(QWidget *leaf) {
         const bool active = leaf->property("relayActive").toBool();
         QList<QWidget *> widgets{leaf};
@@ -4741,6 +4778,15 @@ private:
                 frame->setProperty("relayActive", active);
                 widgets.append(frame);
             }
+        // The pane's name is at full strength on the active pane and muted on every other one
+        // (issue #H3TQ): the second half of telling them apart, and grey like the frame, because
+        // the accent means "shell" in Relay's visual language and a pane must not compete with
+        // the composer (data/theme/themes/relay-dark.toml, `border_strong`). The path beside it
+        // stays legible in both states — it is the pane's address, not a focus mark.
+        for (auto *label : leaf->findChildren<QLabel *>(QStringLiteral("paneTitle"))) {
+            label->setProperty("relayActive", active);
+            widgets.append(label);
+        }
         for (QWidget *w : widgets) { w->style()->unpolish(w); w->style()->polish(w); w->update(); }
     }
 

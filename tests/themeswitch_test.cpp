@@ -18,7 +18,19 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <cmath>
+
 using namespace relay::theme;
+
+namespace {
+// WCAG 2.1 relative luminance and contrast, the same arithmetic as tests/theme_test.cpp.
+double channel(int v) { const double s = v / 255.0; return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4); }
+double luminance(const QColor &c) { return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue()); }
+double contrast(const QColor &a, const QColor &b) {
+    const double la = luminance(a), lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+}  // namespace
 
 class ThemeSwitchTest : public QObject {
     Q_OBJECT
@@ -240,6 +252,48 @@ private Q_SLOTS:
                                            + Surface.name() + QStringLiteral("; }")));
         QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
         QVERIFY(BoardMaterial);
+    }
+
+    // Which pane is the active one has to be readable at a glance (owner, 2026-09-19: "its too hard
+    // to tell what is the active pane"). Two cues carry it in every theme: the pane's own outline
+    // goes from `border` to `text_muted`, and the pane's name from `text_muted` to `text`. Both are
+    // grey on purpose — the accent means "shell" in Relay's visual language, so a pane frame must
+    // not compete with the composer (data/theme/themes/relay-dark.toml, `border_strong`).
+    //
+    // The rules are checked against the live tokens, and then the tokens themselves: a theme whose
+    // `text_muted` sat near its own background would put the cue back where the complaint found it,
+    // and the sheet would still be spelled correctly. 3:1 is WCAG's floor for a non-text mark.
+    void theActivePaneIsVisiblyTheActiveOne() {
+        for (const char *id : {"relay-dark", "relay-light", "dark-copper", "gruvbox-dark", "ibm-beige"}) {
+            QVERIFY2(setActiveTheme(QString::fromLatin1(id), false), id);
+            const QString css = qApp->styleSheet();
+            QVERIFY2(css.contains(QStringLiteral("QWidget#pane { background: %1; border: 1px solid %2;")
+                                      .arg(Background.name(), Border.name())), id);
+            QVERIFY2(css.contains(QStringLiteral("QWidget#pane[relayActive=\"true\"] { border: 1px solid %1; }")
+                                      .arg(TextMuted.name())), id);
+            QVERIFY2(css.contains(QStringLiteral("QLabel#paneTitle { color: %1; font-weight: 600; }")
+                                      .arg(TextMuted.name())), id);
+            QVERIFY2(css.contains(QStringLiteral("QLabel#paneTitle[relayActive=\"true\"] { color: %1; }")
+                                      .arg(Text.name())), id);
+            // The path beside the name is the pane's address, not a focus mark: it stays legible in
+            // both states rather than dimming with the rest of the header.
+            QVERIFY2(css.contains(QStringLiteral("QLabel#paneCwd { color: %1; font-size: 9pt; }").arg(TextMuted.name())), id);
+            QVERIFY2(!css.contains(QStringLiteral("QLabel#paneCwd[relayActive")), id);
+
+            const QString why = QStringLiteral("%1: active outline %2 on %3 is %4:1, and the resting one is %5")
+                                    .arg(QString::fromLatin1(id), TextMuted.name(), Background.name())
+                                    .arg(contrast(TextMuted, Background), 0, 'f', 2).arg(Border.name());
+            QVERIFY2(TextMuted != Border, qPrintable(why));
+            QVERIFY2(contrast(TextMuted, Background) >= 3.0, qPrintable(why));
+            // The live outline has to be the louder of the two, whichever way the theme runs.
+            QVERIFY2(contrast(TextMuted, Background) > contrast(Border, Background), qPrintable(why));
+            QVERIFY2(contrast(Text, Background) > contrast(TextMuted, Background), qPrintable(why));
+        }
+        // A bevelled theme redraws the frame as two-tone and keeps the cue: its own 2px override.
+        QVERIFY(setActiveTheme(QStringLiteral("ibm-beige"), false));
+        QVERIFY(active().flag(QStringLiteral("bevel")));
+        QVERIFY(qApp->styleSheet().contains(
+            QStringLiteral("QWidget#pane[relayActive=\"true\"] { border: 2px solid %1; }").arg(TextMuted.name())));
     }
 
 private:
