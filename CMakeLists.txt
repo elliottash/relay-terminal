@@ -52,7 +52,7 @@ target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
-    src/BoardWorker.cpp src/BoardWorker.h)
+    src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h)
 target_include_directories(relay-board PUBLIC src)
 # relay-toollabel: the cleanup run's progress line is the call's concise line (protocol section 23).
 target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel ${RELAY_QT}::Widgets)
@@ -583,6 +583,14 @@ if(BUILD_TESTING)
     target_link_libraries(relay-board-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME board COMMAND relay-board-tests)
     set_tests_properties(board PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Which project's Switchboard a pane is looking at. The rule itself is pure (QTemporaryDir);
+    # RelayWindow::boardWorkspace() needs a whole window, so the test reads that one function as
+    # text, exactly as tests/settingspane_test.cpp reads settingsSections().
+    add_executable(relay-boardworkspace-tests tests/boardworkspace_test.cpp)
+    target_link_libraries(relay-boardworkspace-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    target_compile_definitions(relay-boardworkspace-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME boardworkspace COMMAND relay-boardworkspace-tests)
+    set_tests_properties(boardworkspace PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # Copy on highlight is header-only (src/CopyOnSelect.h); relay-diffview gives the test one
     # real pane surface that installs it.
     add_executable(relay-copyonselect-tests tests/copyonselect_test.cpp)

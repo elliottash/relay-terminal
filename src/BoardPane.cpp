@@ -2269,6 +2269,19 @@ void BoardView::handleEvent(const QJsonObject &event)
     const QString type = event.value(QStringLiteral("event")).toString();
     const QString requestId = event.value(QStringLiteral("id")).toString();
     const bool mine = !requestId.isEmpty() && requestId.startsWith(m_requestPrefix);
+    // Defence in depth for the per-project Switchboard: every board event carries the `issues`
+    // directory it came from. The window already routes each worker's events to the views of its
+    // own board root, but a view that has learned its root will not take another project's cards
+    // even if that routing is ever wrong — a wrong reset here silently repoints the view, and the
+    // next drag or quick add writes into the other repository. Events with no `root` (an older
+    // worker) are handled exactly as before.
+    const QString root = event.value(QStringLiteral("root")).toString();
+    if (!root.isEmpty()) {
+        if (!m_root.isEmpty() && root != m_root)
+            return;
+        if (m_root.isEmpty() && type == QStringLiteral("board"))
+            m_root = root;
+    }
     if (type == QStringLiteral("board")) {
         m_open = true;
         m_model.setConfig(event.value(QStringLiteral("config")).toObject());

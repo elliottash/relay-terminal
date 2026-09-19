@@ -1,0 +1,49 @@
+The Switchboard is per project, not per Relay (owner report, 2026-09-18)
+========================================================================
+
+Implementer evidence, run live under Xvfb :97 with an isolated profile
+(XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_RUNTIME_DIR, TMPDIR all under a scratch
+directory) and RELAY_KEYRING=off. Build: build/relay, libvterm engine core.
+
+Fixture: two git checkouts with a board each, and one directory with none.
+
+    <scratch>/projA/issues/board.yaml   + issues/features/AAAA.md  "Card in project A"
+    <scratch>/projB/issues/board.yaml   + issues/features/BBBB.md  "Card in project B"
+    <scratch>/noboard/
+
+Relay was started from projA, so the *launch* directory is projA: under the old
+rule (`m_manager->workspace()`, then `QDir::currentPath()`) every pane in every
+window found projA's board.
+
+1. implementer-live-01-project-a-board.png
+   Terminal pane in projA, Ctrl+Shift+S: projA's Switchboard, card #AAAA.
+
+2. implementer-live-02-tab-board-is-another-project.png
+   `cd <scratch>/projB` in that same pane, Ctrl+Shift+S again. The tab already
+   holds projA's Switchboard, so it is focused rather than replaced — and the
+   status bar says whose board is on screen:
+       "This tab's Switchboard is <…>/projA; <…>/projB belongs to <…>/projB."
+   One project per tab: no second board is opened in the tab.
+
+3. implementer-live-03-second-tab-project-b-board.png
+   Ctrl+T for a new tab, `cd <scratch>/projB`, Ctrl+Shift+S: projB's
+   Switchboard, card #BBBB. Two Switchboard workers are now running in the one
+   window (checked by RELAY_PANE_ID=switchboard in /proc/<pid>/environ):
+
+       switchboard worker pid 3898414
+       switchboard worker pid 3904878
+
+4. implementer-live-04-first-board-still-project-a.png
+   Back on the first tab: still #AAAA. Before the fix the second board's
+   `board` event was broadcast to every BoardView in the window and this view
+   had silently become projB's, so a drag or a quick add here wrote into projB.
+
+5. Closing the second tab's Switchboard (Ctrl+Shift+S on it) left exactly one
+   switchboard worker; closing the window left none. The single per-window
+   worker used to be killed by the QProcess destructor instead of being asked
+   to shut down.
+
+Headless: ctest (50/50 passed), including the new `boardworkspace` test
+(the rule itself on a QTemporaryDir, plus RelayWindow::boardWorkspace() read as
+text to pin that the launch-directory fallbacks stay gone) and the new
+`board` case that a view ignores a reset carrying another project's `root`.

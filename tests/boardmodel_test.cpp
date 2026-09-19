@@ -158,6 +158,7 @@ private slots:
     void executeHandsTheCardToAPaneAndMovesItToInProgress();
     void theExecuteTaskCarriesTheBoardsConventions();
     void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
+    void aViewIgnoresEventsFromAnotherProjectsBoard();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -1477,6 +1478,46 @@ void BoardModelTests::aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew()
     QVERIFY(md.indexOf(QStringLiteral("**after**")) < md.indexOf(QStringLiteral("New")));
     QCOMPARE(relay::board::threadMarkdown(QStringLiteral("- a list"), QStringLiteral("comment")),
              QStringLiteral("- a list"));
+}
+
+// The Switchboard is per project. Every board event carries the `issues` directory it came from,
+// and a view that has learned its own root from the `board` event refuses everything from another
+// one: a reset it accepted would silently repoint the view at the other project's cards, and the
+// next drag or quick add would be written into that repository (owner report, 2026-09-18).
+void BoardModelTests::aViewIgnoresEventsFromAnotherProjectsBoard()
+{
+    relay::BoardView view(QStringLiteral("/tmp/mine"));
+    QJsonObject mine = opened({row("K7Q2", "inbox", "features")});
+    mine.insert(QStringLiteral("root"), QStringLiteral("/tmp/mine/issues"));
+    view.handleEvent(mine);
+    QCOMPARE(view.model().total(), 1);
+
+    // Another project's worker resetting the board: not this view's.
+    QJsonObject theirs = opened({row("ZZ11", "inbox", "features"), row("ZZ22", "ready", "features")});
+    theirs.insert(QStringLiteral("root"), QStringLiteral("/tmp/theirs/issues"));
+    view.handleEvent(theirs);
+    QCOMPARE(view.model().total(), 1);
+    QVERIFY(view.model().card(QStringLiteral("K7Q2")));
+    QVERIFY(!view.model().card(QStringLiteral("ZZ11")));
+
+    // Nor a change from it.
+    view.handleEvent(QJsonObject{{"event", "board_changed"},
+                                 {"root", "/tmp/theirs/issues"},
+                                 {"upserts", rows({row("ZZ22", "ready", "features")})},
+                                 {"removed", QJsonArray{QStringLiteral("K7Q2")}}});
+    QCOMPARE(view.model().total(), 1);
+    QVERIFY(view.model().card(QStringLiteral("K7Q2")));
+
+    // Its own root still gets through, and so does an event from a worker that sends no root.
+    view.handleEvent(QJsonObject{{"event", "board_changed"},
+                                 {"root", "/tmp/mine/issues"},
+                                 {"upserts", rows({row("M3XJ", "ready", "features")})},
+                                 {"removed", QJsonArray{}}});
+    QCOMPARE(view.model().total(), 2);
+    view.handleEvent(QJsonObject{{"event", "board_changed"},
+                                 {"upserts", rows({row("DN01", "inbox", "features")})},
+                                 {"removed", QJsonArray{}}});
+    QCOMPARE(view.model().total(), 3);
 }
 
 QTEST_MAIN(BoardModelTests)

@@ -18,6 +18,7 @@
 #include "FilePanes.h"
 #include "BoardPane.h"
 #include "BoardWorker.h"
+#include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Hints.h"
 #include "Notifications.h"
 #include "ScreenPrompt.h"
@@ -53,6 +54,7 @@
 #include <QPair>
 #include <QUuid>
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <QAbstractItemView>
 #include <QAbstractScrollArea>
@@ -359,7 +361,10 @@ public:
         qApp->installEventFilter(this);
     }
 
-    ~RelayWindow() override { qApp->removeEventFilter(this); }
+    // stopBoardWorkers() again (closeEvent has usually run already, and it is idempotent): a
+    // window destroyed without being closed must still not leave Switchboard workers behind, and
+    // its board panes are about to be destroyed with it.
+    ~RelayWindow() override { qApp->removeEventFilter(this); stopBoardWorkers(); }
 
     // Build a tab from a layout node. Returns false if no pane could be created.
     bool addTab(const QJsonObject &node, int index = -1) {
@@ -835,6 +840,7 @@ protected:
             }
         }
         rememberWindow();
+        stopBoardWorkers();   // ask every Switchboard worker to exit; the destructor only kills
         // Saved window layout: snapshot the whole set before this window leaves it, so quitting
         // (every window closes at once) saves them all while closing one of several drops it.
         m_manager->noteWindowClosing();
@@ -3031,21 +3037,41 @@ public:
     // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
     void toggleBoardPane() {
-        const QString workspace = boardWorkspace();
-        if (workspace.isEmpty()) {
-            statusBar()->showMessage(QStringLiteral("This workspace has no Switchboard yet "
-                                                    "(issues/board.yaml is missing)."), 9000);
-            return;
-        }
         QWidget *page = m_tabs->currentWidget();
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board()) {
             if (m_active) { setActiveLeaf(m_active); focusLeaf(m_active); }
             return;
         }
+        const QString workspace = boardWorkspace();
+        const QString from = boardSearchRoot();
+        // A tab holds one project's board (owner's rule: one project per tab), so an existing one
+        // is what this key shows — but never silently as if it were the active pane's. When the
+        // two disagree, say whose board is on screen: dropping a card on it writes into that
+        // project's `issues/`, not the one the pane is standing in.
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
-                setActiveLeaf(tool); focusLeaf(tool); return;
+                setActiveLeaf(tool); focusLeaf(tool);
+                const QString shown = tool->board()->workspace();
+                if (!from.isEmpty() && shown != workspace) {
+                    statusBar()->showMessage(
+                        workspace.isEmpty()
+                            ? QStringLiteral("This tab's Switchboard is %1; %2 has no Switchboard of its own.")
+                                  .arg(shown, from)
+                            : QStringLiteral("This tab's Switchboard is %1; %2 belongs to %3.")
+                                  .arg(shown, from, workspace),
+                        9000);
+                }
+                return;
             }
+        if (workspace.isEmpty()) {
+            statusBar()->showMessage(
+                from.isEmpty()
+                    ? QStringLiteral("No pane to look from, so there is no Switchboard to open.")
+                    : QStringLiteral("No Switchboard for %1: no issues/board.yaml there or in any "
+                                     "directory above it.").arg(from),
+                9000);
+            return;
+        }
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         auto *tool = createBoardPane(workspace);
         if (!tool) return;
@@ -3081,7 +3107,12 @@ public:
     // on a large tree. It stops as soon as a card detail is open, so a card the *user* opened in
     // the meantime is never yanked out from under them.
     void waitForBoardCard(ToolPane *tool, const QString &id, int attempt) {
-        if (attempt >= 24) return;
+        // Out of retries: the card is not on this board (a `#ID` from another project's output,
+        // or a card that has been removed). Say so rather than leave the click looking ignored.
+        if (attempt >= 24) {
+            statusBar()->showMessage(QStringLiteral("No card #%1 on this board.").arg(id), 9000);
+            return;
+        }
         QPointer<ToolPane> guard(tool);
         QTimer::singleShot(250, this, [this, guard, id, attempt] {
             ToolPane *pane = guard.data();
@@ -3092,39 +3123,91 @@ public:
         });
     }
 
-    // The nearest ancestor of the anchor pane's directory that has a Switchboard.
-    QString boardWorkspace() const {
-        QStringList candidates;
-        if (m_active) candidates << m_active->workspace() << m_active->cwd();
-        candidates << m_manager->workspace() << QDir::currentPath();
-        for (const QString &candidate : candidates) {
-            if (candidate.isEmpty()) continue;
-            for (QDir dir(candidate); ; ) {
-                if (QFileInfo::exists(dir.absoluteFilePath(QStringLiteral("issues/board.yaml"))))
-                    return dir.absolutePath();
-                if (!dir.cdUp()) break;
-            }
-        }
-        return QString();
+    // The directory the Switchboard is looked for from: the pane that asked, and nothing else.
+    // The Switchboard is per project, so the answer may only come from the active pane — the
+    // terminal's own directory first, because `workspace()` is frozen when the pane is made and a
+    // pane that has `cd`-ed into another checkout is standing in that project now.
+    QString boardSearchRoot() const {
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board())
+            return tool->board()->workspace();
+        if (!m_active) return QString();
+        return m_active->cwd().isEmpty() ? m_active->workspace() : m_active->cwd();
     }
 
-    relay::BoardWorker *boardWorker() {
-        if (!m_boardWorker) {
-            m_boardWorker = new relay::BoardWorker(
-                QStandardPaths::findExecutable(QStringLiteral("python3")), dataRoot(), this);
-            QPointer<RelayWindow> guard(this);
-            m_boardWorker->onEvent = [guard](const QJsonObject &event) {
-                if (!guard) return;
-                for (int i = 0; i < guard->m_tabs->count(); ++i)
-                    for (QWidget *leaf : leavesIn(guard->m_tabs->widget(i)))
-                        if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
-                            tool->board()->handleEvent(event);
-            };
-            m_boardWorker->onStatus = [guard](const QString &text) {
-                if (guard) guard->statusBar()->showMessage(text, 9000);
-            };
+    // The nearest ancestor of the active pane's directory that has a Switchboard (BoardWorkspace.h).
+    // There is deliberately no window-wide or process-wide fallback: `m_manager->workspace()` and
+    // QDir::currentPath() are both the directory Relay was launched in, so with them every pane in
+    // every window "found" the launch project's board and wrote cards into the wrong repository
+    // (owner report, 2026-09-18). A Switchboard pane answers with the board it is already showing.
+    QString boardWorkspace() const {
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board())
+            return tool->board()->workspace();
+        if (!m_active) return QString();
+        return relay::boardRootFor({m_active->cwd(), m_active->workspace()});
+    }
+
+    // One worker per board root per window: a window showing two projects' boards runs two, each
+    // configured for its own tree, and each event reaches only the views of that tree. A single
+    // shared worker was re-pointed at whichever board was opened last and broadcast its cards to
+    // every Switchboard in the window, so the first project's view silently became the second's.
+    relay::BoardWorker *boardWorker(const QString &workspace) {
+        if (workspace.isEmpty()) return nullptr;
+        if (relay::BoardWorker *existing = m_boardWorkers.value(workspace).data()) return existing;
+        auto *worker = new relay::BoardWorker(
+            QStandardPaths::findExecutable(QStringLiteral("python3")), dataRoot(), this);
+        m_boardWorkers.insert(workspace, worker);
+        QPointer<RelayWindow> guard(this);
+        worker->onEvent = [guard, workspace](const QJsonObject &event) {
+            if (!guard) return;
+            for (int i = 0; i < guard->m_tabs->count(); ++i)
+                for (QWidget *leaf : leavesIn(guard->m_tabs->widget(i)))
+                    if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                        tool && tool->board() && tool->board()->workspace() == workspace)
+                        tool->board()->handleEvent(event);
+        };
+        worker->onStatus = [guard](const QString &text) {
+            if (guard) guard->statusBar()->showMessage(text, 9000);
+        };
+        return worker;
+    }
+
+    // The last Switchboard of a board root has gone: its worker has nobody left to talk to, so it
+    // is shut down rather than left running for the life of the window.
+    void releaseBoardWorker(const QString &workspace, QObject *closing = nullptr) {
+        for (int i = 0; i < m_tabs->count(); ++i)
+            for (QWidget *leaf : leavesIn(m_tabs->widget(i))) {
+                if (static_cast<QObject *>(leaf) == closing) continue;
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                    tool && tool->board() && tool->board()->workspace() == workspace)
+                    return;
+            }
+        if (relay::BoardWorker *worker = m_boardWorkers.take(workspace).data()) {
+            worker->onEvent = nullptr;
+            worker->onStatus = nullptr;
+            worker->stop();
+            worker->deleteLater();
         }
-        return m_boardWorker;
+    }
+
+    // Every Switchboard worker, told to shut down the way one is when its last view closes. The
+    // single per-window worker was never stopped at all: it was a child of the window, so its
+    // QProcess was killed by the destructor instead of being asked to exit (closeEvent).
+    //
+    // The per-pane hooks go first: a board pane destroyed with the window would otherwise call
+    // releaseBoardWorker() from QWidget's destructor, by which time this window's own members are
+    // gone. After this the window has no Switchboard state left to release.
+    void stopBoardWorkers() {
+        for (const QMetaObject::Connection &hook : std::as_const(m_boardWorkerHooks)) disconnect(hook);
+        m_boardWorkerHooks.clear();
+        const QList<QPointer<relay::BoardWorker>> workers = m_boardWorkers.values();
+        m_boardWorkers.clear();
+        for (const QPointer<relay::BoardWorker> &worker : workers)
+            if (worker) {
+                worker->onEvent = nullptr;
+                worker->onStatus = nullptr;
+                worker->stop();
+                worker->deleteLater();
+            }
     }
 
     // The Switchboard worker runs an ordinary agent on the `switchboard` role (protocol 13), so
@@ -3162,7 +3245,8 @@ public:
         if (!roles.isEmpty()) configure.insert(QStringLiteral("roles"), roles);
         const QJsonObject tiers = Pane::tiersObject();
         if (!tiers.isEmpty()) configure.insert(QStringLiteral("tiers"), tiers);
-        boardWorker()->start(configure);
+        // Only this board root's worker: another project's board in the same window keeps its own.
+        if (relay::BoardWorker *worker = boardWorker(workspace)) worker->start(configure);
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
@@ -3174,7 +3258,16 @@ public:
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
         QPointer<ToolPane> guard(tool);
-        view->onSend = [this](const QJsonObject &message) { boardWorker()->send(message); };
+        // This view's own board root, so a second project's Switchboard in the same window writes
+        // through its own worker and into its own `issues/`.
+        view->onSend = [this, workspace](const QJsonObject &message) {
+            if (relay::BoardWorker *worker = boardWorker(workspace)) worker->send(message);
+        };
+        // The last Switchboard of this root to close takes its worker with it. The connection is
+        // kept so stopBoardWorkers() can drop it before the window tears its own panes down.
+        m_boardWorkerHooks << connect(tool, &QObject::destroyed, this, [this, workspace](QObject *gone) {
+            releaseBoardWorker(workspace, gone);
+        });
         view->onStatus = [guard](const QString &text) {
             if (auto *w = windowOf(guard); w && !text.isEmpty()) w->statusBar()->showMessage(text, 9000);
         };
@@ -3209,7 +3302,7 @@ public:
             w->hint(QStringLiteral("board.") + id, relay::ShortcutHints::nextTime(keys));
         };
         startBoardWorker(workspace);
-        boardWorker()->open();
+        if (relay::BoardWorker *worker = boardWorker(workspace)) worker->open();
         return tool;
     }
 
@@ -3411,7 +3504,12 @@ private:
             if (QFileInfo::exists(workspace + QStringLiteral("/issues/board.yaml")))
                 return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
                                        board.value(QStringLiteral("hidden")).toArray());
-            return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
+            // The project lost its board (or moved): a terminal in the directory this pane was
+            // saved in, which is the project the person was working in. It used to open in the
+            // launch directory, quietly moving the pane to another checkout.
+            const QString fallback = relay::windowstate::resolveDirectory(
+                workspace, m_manager->workspace(), QDir::homePath());
+            return createPane({{"cwd", fallback}, {"workspace", fallback}});
         }
         if (node.contains(QStringLiteral("subagents"))) {   // card #WD83: the tabs' text, then its owner
             const QJsonObject saved = node.value(QStringLiteral("subagents")).toObject();
@@ -4772,8 +4870,13 @@ private:
     }
 
     WindowManager *m_manager;
-    // Switchboard: one worker per window, started on the first Ctrl+Shift+S (protocol 17).
-    QPointer<relay::BoardWorker> m_boardWorker;
+    // Switchboard: one worker per board root in this window, keyed by that root and started with
+    // the first Switchboard opened on it (protocol 17). The Switchboard is per project, so a
+    // window holding two projects' boards runs a worker for each; one shared worker was
+    // re-configured by whichever board opened last and fed its cards to both views.
+    QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
+    // One per Switchboard pane: "this pane has gone, release its worker if it was the last".
+    QList<QMetaObject::Connection> m_boardWorkerHooks;
     QTabWidget *m_tabs = nullptr;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;

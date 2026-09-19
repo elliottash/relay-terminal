@@ -116,8 +116,13 @@ tab pickers, labels, assignee, links (plans, commits, evidence, related). Body: 
 thinking collapses to "Thought 9 s"; tools collapse to one `turn_summary` line ("⚙ 3 tools · 12 s") expanding via
 `turn_transcript_get` (`TurnTranscript`). Reply box: `RichEditor` with composer keys and `/plan`, `/move`, `/assign`.
 
-**Which agent answers:** a dedicated **board worker** per window (an ordinary `worker.py` with its own queue), so card
-chats never pollute a pane's conversation. It is stateless between turns: each turn is seeded from the body plus the
+**Which agent answers:** a dedicated **board worker** per board root per window (an ordinary `worker.py` with its own
+queue), so card chats never pollute a pane's conversation. The Switchboard is per project: a window showing two
+projects' boards runs a worker for each, keyed by the board root, and each worker's events reach only the Switchboard
+views of that root. The worker is started with the first Switchboard opened on a root and stopped when the last one in
+the window closes. Which project a pane's board is comes from that pane alone — the terminal's own directory, then the
+pane's workspace (`relay::boardRootFor`, `src/BoardWorkspace.h`); there is deliberately no window-wide or process-wide
+fallback, because both are the directory Relay was launched in. It is stateless between turns: each turn is seeded from the body plus the
 thread (older entries summarized past a cap), so the *file* is the memory and a collaborator's Relay continues the same
 thread. Its model chip defaults to the anchor pane's preset.
 
@@ -604,7 +609,7 @@ Board UI), so autonomy is QA'd before the drag-and-drop pane lands.
 
 ### 12.5 Card agent (owner decision, 2026-09-17)
 
-- **Thread replies** come from a dedicated **Switchboard agent** (a worker per window, as in 4.3), whose model is a
+- **Thread replies** come from a dedicated **Switchboard agent** (a worker per board root per window, as in 4.3), whose model is a
   role in Agent options defaulting to the main agent (implemented: `docs/AGENT-SESSIONS-PROTOCOL.md` section 13, role `switchboard`).
 - **Pane hand-off (option C):** a card can be pulled into a terminal pane's own conversation (`#K7Q2`, "work on
   #K7Q2"), so the pane agent has the card body, open tasks and thread tail in context and posts progress back.

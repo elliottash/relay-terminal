@@ -180,6 +180,10 @@ private:
     int rowHeight() const;
 
     QString m_workspace;
+    // The `issues` directory the worker that owns this view is reading, learned from the `board`
+    // event's `root` and then used to refuse events from another project's worker (see
+    // handleEvent). Empty while no event has carried one — older workers send none.
+    QString m_root;
     board::Model m_model;
     QString m_selected, m_askCard;
     QString m_askText;                  // the question in flight, to put back if it is refused
