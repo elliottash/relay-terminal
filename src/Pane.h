@@ -6392,7 +6392,11 @@ private:
     }
 
     // ----- slash commands in the composer --------------------------------------------------------
-    struct SlashCommand { QString name, args, description; };
+    // `hidden` is a name Relay still answers to but never teaches: it is left out of the `/` popup
+    // and never completed from a prefix, so the palette cannot show the word it replaced. Typing it
+    // in full still runs it, and it still counts as a known command (so it is not reported unknown
+    // and an alias cannot take its name). Card #SHE3: `/todos` is the first of these.
+    struct SlashCommand { QString name, args, description; bool hidden = false; };
     static const QList<SlashCommand> &slashCommands() {
         static const QList<SlashCommand> commands{
             {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
@@ -6428,7 +6432,8 @@ private:
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
             {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: what the agent is working on")},
             {QStringLiteral("requests"), QString(), QStringLiteral("Task list (same as /tasks)")},
-            {QStringLiteral("todos"), QString(), QStringLiteral("Task list (same as /tasks)")},
+            // A silent alias: still typed by hand and by an older habit, never taught (#SHE3).
+            {QStringLiteral("todos"), QString(), QStringLiteral("Task list (same as /tasks)"), true},
             {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
@@ -6459,9 +6464,12 @@ private:
         QList<Ranked> ranked;
         // The built-ins, then the aliases (issue G8DK), so `/name` is discoverable and a built-in
         // is never hidden behind an alias of the same name.
-        QList<SlashCommand> commands = slashCommands();
+        QList<SlashCommand> commands;
         QStringList builtins;
-        for (const auto &command : std::as_const(commands)) builtins << command.name;
+        for (const auto &command : slashCommands()) {
+            builtins << command.name;                 // a hidden name still shadows an alias
+            if (!command.hidden) commands.append(command);
+        }
         for (const auto &alias : std::as_const(m_aliasList)) {
             if (alias.shadowed || builtins.contains(alias.name)) continue;
             commands.append({alias.name, alias.params.isEmpty() ? QString() : QStringLiteral("[args]"),
@@ -6545,7 +6553,9 @@ private:
         for (const auto &command : slashCommands()) {
             if (command.name == QStringLiteral("shell") || command.name == QStringLiteral("agent")) continue;
             if (command.name == name) return &command;
-            if (!hasArgs && !prefix && command.name.startsWith(name)) prefix = &command;
+            // A hidden alias is never completed from a prefix: it would put the retired word back
+            // in front of the user, which is the whole point of hiding it (#SHE3).
+            if (!hasArgs && !prefix && !command.hidden && command.name.startsWith(name)) prefix = &command;
         }
         return prefix;
     }
