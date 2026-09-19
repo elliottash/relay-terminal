@@ -99,10 +99,10 @@ one invariant that matters, and it reuses a store, a masked field and a refusal 
 
 - 2026-09-19, agent: filed as its own card rather than folded into #R5TC. The owner's line was
   "in general", and #R5TC's own decision — that a turn *started by another pane* gets no
-  `program_control` grant — is unaffected by it: that withholding is about one pane escalating into
-  another pane's login shell, not about a person's own agent answering a prompt in front of them.
-  Once this card lands, a cross-pane turn still will not answer password prompts, and the person at
-  that pane takes over. If the owner wants that too, it is one predicate and a line on #R5TC.
+  `program_control` grant — was dropped later the same day, when the owner narrowed #R5TC to
+  messages between panes rather than commands: no turn is caused in another pane any more, so there
+  is no pane-origin turn to withhold anything from. Either way this card is unaffected — it is
+  about a person's own agent answering a prompt in front of them.
 - 2026-09-19, agent: the recommendation deliberately does not give the model the value. The
   existing rule guards against a password reaching a model's context, where it would be sent to a
   provider, kept in a conversation and written to a session file; nothing in the owner's request
