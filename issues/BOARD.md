@@ -2,15 +2,16 @@
      edit the card files and regenerate. -->
 # Board
 
-220 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+224 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (132)
+## Features (133)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
 | `#VZ69` | [improving the switchboard functionality](features/2026-09-19-improving-the-switchboard-functionality.md) | inbox |  |  | [8](threads/VZ69.md) |
 | `#9K5H` | [show the thinking trace in the swtichboard as well](features/2026-09-19-show-the-thinking-trace-in-the-swtichboard-as-we.md) | inbox |  |  | [3](threads/9K5H.md) |
+| `#R5TC` | [Let Relay terminals talk to each other, and to the claude and codex agents in them](features/2026-09-19-relay-terminals-talk-to-each-other-and-to-claude.md) | inbox | agent | 0/2 |  |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#916B` | [A project picker, a personal inbox and a chip on the tab that says which project it is attached to](features/2026-09-19-project-picker-inbox-and-tab-chip.md) | ready |  | 0/7 |  |
@@ -141,17 +142,18 @@
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 
-## Bugs (86)
+## Bugs (89)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
-| `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/needs_qa_llm/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | needs-qa-llm | agent |  | [7](threads/EC58.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | ready | agent | 0/5 |  |
+| `#HQ2B` | [The "Relaying …" line belongs on the left, in the normal weight](changes/2026-09-19-the-relaying-line-goes-left-and-loses-the-bold.md) | ready | agent | 0/5 |  |
+| `#N8VK` | [Ctrl+Enter should send now, not join the back of the queue](changes/2026-09-19-ctrl-enter-should-send-now-not-join-the-queue.md) | ready | agent | 0/5 |  |
 | `#ZYRB` | [Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead](changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md) | in-progress |  |  | [3](threads/ZYRB.md) |
 | `#Y4RX` | [Pane isolation leaks: tmux and Chrome self-scope into app.slice, outside any pane cap](changes/2026-09-19-pane-isolation-leaks-tmux-and-chrome-self-scope.md) | in-progress |  |  | [4](threads/Y4RX.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  |  |
@@ -222,9 +224,11 @@
 | `#T8CN` | [Thinking presentation: collapse in place, markdown, breathing room](changes/needs_qa_llm/2026-09-19-thinking-collapses-in-place.md) | needs-qa-llm | agent | 7/7 |  |
 | `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/needs_qa_llm/2026-09-18-preview-link-has-no-way-back.md) | needs-qa-llm | agent |  |  |
 | `#3W58` | [Markdown files are not rendered as Markdown](changes/needs_qa_llm/2026-09-18-markdown-files-do-not-render.md) | needs-qa-llm | agent |  |  |
+| `#7FD3` | ["open in pane" inside a fold always said the call's detail was gone — even one second after the call](changes/needs_qa_llm/2026-09-19-open-in-pane-inside-a-fold-said-the-detail-was-g.md) | needs-qa-llm | agent | 0/2 |  |
 | `#M109` | [The provider dialog: a local server needs no consent box, and the warning says what is wrong](changes/needs_qa_llm/2026-09-18-provider-dialog-local-server-and-specific-warning.md) | needs-qa-llm | agent |  |  |
 | `#E99H` | [File tools refuse absolute paths and parent traversal; the owner does not want that constraint](changes/needs_qa_llm/2026-09-18-file-tools-refuse-absolute-paths-and-parent-trav.md) | needs-qa-llm |  |  | [6](threads/E99H.md) |
 | `#3ES1` | [Changing the model is refused while the agent is working](changes/needs_qa_llm/2026-09-18-changing-the-model-is-refused-while-the-agent-is.md) | needs-qa-llm | agent |  | [1](threads/3ES1.md) |
+| `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/needs_qa_llm/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | needs-qa-llm | agent |  | [7](threads/EC58.md) |
 | `#W954` | ["command not found" under a request whose first word ends in a comma](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request-whose-first-wo.md) | needs-qa-llm | agent |  | [1](threads/W954.md) |
 | `#N3WC` | ["command not found" under a sentence that names a file](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-sentence-naming-a-fi.md) | needs-qa-llm | agent |  |  |
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
