@@ -18,6 +18,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [ENGINE-PERF.md](ENGINE-PERF.md) | Terminal engine and emulator-core benchmarks (2026-09-17 measurements) |
 | [AGENT-SESSIONS-PROTOCOL.md](AGENT-SESSIONS-PROTOCOL.md) | GUI ↔ worker message contract: sessions, planning, subagents, suggestions |
 | [RELAY-FREE.md](RELAY-FREE.md) | Relay Free: the included hosted allowance for a fresh install — identity, token, gateway contract, quotas, privacy posture, operating notes and what exists so far (`#HG7K`) |
+| [RELAY-FREE-HANDOFF.md](RELAY-FREE-HANDOFF.md) | Handoff for the three open Relay Free items: the allowance chip in the phone and Relay-to-Relay views, tuning the Lite output cap from measured replies, and moving Lite to Gemini direct (`#HG7K`) |
 | [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md) | RRP/1: the wire contract for phone access and multiplayer — Noise handshake, pairing, messages, sequencing, the rendezvous API, and what is built so far |
 
 ## Research (inputs to decisions; may describe earlier behavior)

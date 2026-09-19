@@ -9,7 +9,7 @@ workstream: providers
 rank: zzzzzn
 created: '2026-09-18'
 source: owner, in a Claude Code session, 2026-09-18, with a written spec ("Relay Free Hosted Inference")
-links: {plans: ['docs/RELAY-FREE.md'], commits: ['6e83ee9'], evidence: ['docs/qa_evidence/2026-09-18-relay-free/'], related: ['24XJ', 'W5N2'], github: null}
+links: {plans: ['docs/RELAY-FREE.md', 'docs/RELAY-FREE-HANDOFF.md'], commits: ['6e83ee9'], evidence: ['docs/qa_evidence/2026-09-18-relay-free/'], related: ['24XJ', 'W5N2'], github: null}
 ---
 # Relay Free: the agent works on a fresh install, with no API key
 
@@ -253,3 +253,4 @@ are kept; the decisions in it are unchanged):
 
 - 2026-09-18, implementer (Claude): landed as `6e83ee9`: gateway, backend, desktop, docs and site in one commit, built and tested on the exact tree (the tmux test in `test_ssh_shell` is flaky under load and passed on rerun). Left open: deploying the gateway (DNS, cloudflared ingress, env file with the OpenRouter key, real prices), the phone view's copy of the quota chip, and the Lite cap tuning.
 - 2026-09-18, implementer (Claude), on the owner's instruction with the owner's keys: deployed. `/opt/relay` on elliott-main-1 from the committed tree, user `relay-gateway`, `/etc/relay-gateway/{gateway.json,env}` (the OpenRouter key, mode 0600), unit enabled; the tunnel's remote ingress gained `api.relay-terminal.ai -> localhost:8790` as its first rule (25 rules, catch-all still last) and the zone a proxied CNAME to the tunnel. `/v1/health` answers publicly; a real `relay-lite` call from the desktop's client returned in 1.5 s with `hosted_quota` 44 of 250,000. Prices in `gateway.example.json` are OpenRouter's list prices of the day. The other hostnames on the shared tunnel still return 200.
+- 2026-09-19, implementer (Claude): the three items under "What is left" (the allowance chip in the remote views, tuning the Lite cap from measured replies, Lite on Gemini direct) are written up step by step for the next implementer in `docs/RELAY-FREE-HANDOFF.md`.
