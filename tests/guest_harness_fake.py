@@ -8,6 +8,18 @@ every test of the worker side drives this instead. It is deliberately dumb: a tu
     from guest_harness_fake import FakeHarness, ev
     harness = FakeHarness([{"events": [ev("delta", text="hi")], "result": ("hi", "end", {})}])
 
+Every kind in `guest_harness.EVENT_KINDS` can be scripted, including the ones GT7X task t:a3
+added — a call that prints while it runs, and a usage report that says how full the guest's own
+window is::
+
+    ev("tool_started", call_id="c1", tool="run_command", input={"command": "make"}),
+    ev("tool_output", call_id="c1", text="cc a.c\n"),      # as often as the guest says something
+    ev("tool_result", call_id="c1", tool="run_command", output="cc a.c\n", ok=True),
+    ev("usage", input_tokens=9, output_tokens=2, context_tokens=13394, context_window=258400)
+
+and an approval answered with a scope arrives in `answers` exactly as the provider sent it:
+`("req-1", {"behavior": "allow", "scope": "session"})`.
+
 Other test modules import it; keep the surface the contract's and nothing more.
 """
 from __future__ import annotations
@@ -35,9 +47,11 @@ class FakeHarness:
     * a callable `fn(prompt, attachments, emit, cancel, harness)` returning a `TurnResult`, for a
       turn that has to react to what it is given.
 
-    `answers` collects every `answer(request_id, decision)`; `calls` every method call in order —
-    `start` with the effort it was given, and one entry per `set_effort` / `models` call, so a
-    test can hold the worker to what it asked the guest for (29.3).
+    `answers` collects every `answer(request_id, decision)` — including the optional `scope` the
+    provider puts on an approval (`once` / `session` / `stop`), which a real adapter turns into
+    its guest's own word for it; `calls` every method call in order — `start` with the effort it
+    was given, and one entry per `set_effort` / `models` call, so a test can hold the worker to
+    what it asked the guest for (29.3).
     """
 
     guest = "fake"

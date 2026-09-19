@@ -34,7 +34,8 @@ import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
-                            TOOL_NAMES, map_tool_name, validate_effort, validate_permissions)
+                            TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
+                            validate_permissions)
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ProviderConfig, ProviderError,
                        message_images)
 
@@ -59,6 +60,13 @@ _PREVIEW_TITLES = {"run_command": "RUN COMMAND", "read_file": "READ FILE", "writ
                    "web": "WEB", "agent": "SUBAGENT"}
 
 MAX_OUTPUT_CHARS = 200_000     # one tool result kept in the turn record; the fold shows this much
+
+# What a running call may stream to the pane before the stream is cut, per call. The same budget
+# `tools.MAX_OUTPUT` gives Relay's own live command output (`ToolRunner._await`), so a guest's
+# build scrolls the pane exactly as far as Relay's own does and no further; the whole output is
+# still in the `tool_result` when the call ends. Not imported from `tools`, which would drag the
+# tool runner into every worker that only wants a preset row.
+MAX_STREAMED_OUTPUT = 32_768
 
 
 # ----- the preset ------------------------------------------------------------------------------
@@ -416,6 +424,11 @@ class HarnessProvider:
         # (29.3): Relay's `agent.effort` is its four-level scale for its own providers and stays
         # out of this, because a guest's levels are the guest's (xhigh, ultra).
         self.effort = ""
+        # The guest's own context after its last `usage`, in `Agent.context_event()`'s words
+        # ({used_tokens, window, percent}); empty until the guest reports one. `attach()` puts it
+        # on every `context` event as `guest_context`, so the pane's chip can say how full the
+        # *guest's* window is — which is the only window a guest turn actually runs against.
+        self.guest_context: dict = {}
         self._stall_timeout = float(stall_timeout)
         self._agent = None
         self._asker = _Asker()
@@ -534,6 +547,7 @@ class _Turn:
         self.cancel = cancel
         self.turn_id = record.get("turn_id") if isinstance(record, dict) else None
         self.calls: dict[str, dict] = {}
+        self.streamed: dict[str, int] = {}
         self.usage_seen = False
         self.error_text = ""
         self._thinking_started = None
@@ -606,6 +620,7 @@ class _Turn:
         if not usage:
             return
         self.usage_seen = True
+        self.provider.guest_context = guest_context(usage) or self.provider.guest_context
         self.emit({"event": "usage", "usage": usage})
 
     def finish(self, usage: dict) -> None:
@@ -615,6 +630,7 @@ class _Turn:
             return
         mapped = relay_usage(usage)
         if mapped:
+            self.provider.guest_context = guest_context(mapped) or self.provider.guest_context
             self.emit({"event": "usage", "usage": mapped})
 
     # ----- tool calls -----------------------------------------------------------------------
@@ -633,6 +649,38 @@ class _Turn:
             event["turn_id"] = self.turn_id
         self.emit(event)
 
+    def _on_tool_output(self, data: dict) -> None:
+        """Output a call has printed so far → Relay's live `tool_output` (protocol 11.1).
+
+        Exactly the event `ToolRunner._await` emits for Relay's own long-running commands — the
+        live one, `{text}`, not the `stored: true` reply to `tool_output_get` — so the pane's
+        running call line counts a guest's build the way it counts Relay's, with no change to the
+        pane. `call_id` and `turn_id` ride along for the surfaces that key on them (the internals
+        pane, a subagent wrapper); the terminal pane reads `text` alone and ignores the rest.
+
+        Capped per call at MAX_STREAMED_OUTPUT characters, counted the way `ToolRunner._await`
+        counts it: past the budget the stream stops and the call's full output still arrives with
+        its `tool_result`. Split again at MAX_TOOL_OUTPUT_CHUNK on the way out, so one event is a
+        few KiB whatever the harness handed over — the adapters already chunk, and this is the
+        last gate before the worker's queue and every subscribed surface's socket.
+        """
+        text = data.get("text")
+        if not isinstance(text, str) or not text:
+            return
+        call_id = str(data.get("call_id") or "")
+        streamed = self.streamed.get(call_id, 0)
+        if streamed >= MAX_STREAMED_OUTPUT:
+            return
+        piece = text[:MAX_STREAMED_OUTPUT - streamed]
+        self.streamed[call_id] = streamed + len(piece)
+        for chunk in chunk_tool_output(piece):
+            event = {"event": "tool_output", "text": chunk}
+            if call_id:
+                event["call_id"] = call_id
+            if self.turn_id is not None:
+                event["turn_id"] = self.turn_id
+            self.emit(event)
+
     def _on_tool_result(self, data: dict) -> None:
         call_id = str(data.get("call_id") or "")
         call = self.calls.pop(call_id, None)
@@ -641,6 +689,7 @@ class _Turn:
             call = {"name": name, "guest_tool": guest_tool, "args": {}, "preview": "",
                     "started": None}
             call_id = call_id or "guest-" + uuid.uuid4().hex[:12]
+        self.streamed.pop(call_id, None)
         ok = data.get("ok") is not False
         diff = data.get("diff") if isinstance(data.get("diff"), str) and data["diff"].strip() else ""
         result = tool_result(data.get("output"), ok, diff)
@@ -673,15 +722,14 @@ class _Turn:
 
     # ----- questions and approvals -----------------------------------------------------------
     def _on_approval(self, data: dict) -> None:
-        """An approval the guest raised under `permissions: "ask"`: a protocol 27 card with two
-        options, and the answer goes back through `harness.answer` (29.3)."""
+        """An approval the guest raised under `permissions: "ask"`: a protocol 27 card with the
+        APPROVAL_CHOICES options, and the answer goes back through `harness.answer` (29.3)."""
         request_id = str(data.get("id") or "")
         card = approval_card(str(data.get("kind") or "other"), data.get("detail"))
         answers = self.provider._asker.ask(card, self.turn_id, self.emit, self.cancel)
-        allowed = bool(answers and answers[0]
-                       and str(answers[0][0]).strip().casefold() == "allow")
-        decision = {"behavior": "allow" if allowed else "deny"}
-        if not allowed:
+        picked = str(answers[0][0]).strip() if answers and answers[0] else ""
+        decision = approval_decision(picked)
+        if decision["behavior"] != "allow":
             decision["message"] = ("The user did not allow this." if answers is not None
                                    else "The turn was stopped.")
         self._answer(request_id, decision)
@@ -699,8 +747,33 @@ class _Turn:
             _log.debug("guest harness answer failed: %s", exc)
 
 
+# What the pane offers on an approval card, and the `harness.answer()` decision each option is
+# (GT7X task t:a3). Four rather than two because both guests can say more than allow/deny:
+# `scope: "session"` is codex's `acceptForSession` and claude's session-scoped permission rule,
+# and `scope: "stop"` is codex's `cancel` and claude's `deny` with `interrupt: true`. The pane
+# needs no change to draw them — a protocol 27 card renders the options it is handed — and an
+# answer this table does not know is a plain deny, which is what an unanswered approval is too.
+APPROVAL_CHOICES = (
+    ("Allow", "Let it go ahead, this once.", {"behavior": "allow", "scope": "once"}),
+    ("Allow for session", "And anything like it, until this guest session ends.",
+     {"behavior": "allow", "scope": "session"}),
+    ("Deny", "Refuse this one and let it carry on.", {"behavior": "deny", "scope": "once"}),
+    ("Deny and stop", "Refuse it and end the turn here.", {"behavior": "deny", "scope": "stop"}),
+)
+
+
+def approval_decision(label) -> dict:
+    """The decision one APPROVAL_CHOICES label means. Anything else — a stopped card, a pane that
+    sent a word this build does not know — is a deny for this one action."""
+    picked = " ".join(str(label or "").split()).casefold()
+    for name, _description, decision in APPROVAL_CHOICES:
+        if picked == name.casefold():
+            return dict(decision)          # a copy: the caller adds a `message` to it
+    return {"behavior": "deny", "scope": "once"}
+
+
 def approval_card(kind: str, detail) -> list[dict]:
-    """One approval as a protocol 27 card: what the guest wants to do, Allow or Deny.
+    """One approval as a protocol 27 card: what the guest wants to do, and APPROVAL_CHOICES.
 
     Through `questions.validate` like any other card, so the pane is handed exactly the shape it
     already draws (whitespace collapsed, every field capped) and a guest that sends something odd
@@ -709,8 +782,8 @@ def approval_card(kind: str, detail) -> list[dict]:
     header = {"command": "Run command", "patch": "Apply edit", "tool": "Use tool"}.get(kind, "Approve")
     text = " ".join(str(detail or "").replace("\x00", " ").split()) or "Let the guest do this?"
     card = [{"header": header, "question": text[:questions_mod.MAX_QUESTION],
-             "options": [{"label": "Allow", "description": "Let it go ahead."},
-                         {"label": "Deny", "description": "Refuse this one and let it carry on."}],
+             "options": [{"label": name, "description": description}
+                         for name, description, _decision in APPROVAL_CHOICES],
              "multiple": False}]
     try:
         return questions_mod.validate({"questions": card})
@@ -900,12 +973,41 @@ def relay_usage(data) -> dict:
     cost = data.get("cost_usd")
     if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
         usage["cost"] = float(cost)
+    # The guest's own context, not Relay's: what the guest put in its own window, out of its own
+    # model's window, and the share that is. Carried for the pane; `sessions.add_usage` only reads
+    # the four keys above, so none of this reaches the session totals.
+    for source, target in (("context_tokens", "guest_context_tokens"),
+                           ("context_window", "guest_context_window")):
+        value = data.get(source)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            usage[target] = value
     pct = data.get("context_pct")
+    if not isinstance(pct, (int, float)) or isinstance(pct, bool):
+        # A harness that reports the two numbers and not the share still gets a share: the pane's
+        # chip should not have to do arithmetic that is the same for every guest.
+        tokens, window = usage.get("guest_context_tokens"), usage.get("guest_context_window")
+        pct = min(100.0, 100.0 * tokens / window) if tokens and window else None
     if isinstance(pct, (int, float)) and not isinstance(pct, bool):
-        # The guest's own window, not Relay's. Carried for the pane; `sessions.add_usage` only
-        # reads the four keys above, so it never reaches the session totals.
         usage["guest_context_pct"] = round(float(pct), 1)
     return usage
+
+
+def guest_context(usage: dict) -> dict:
+    """The guest's own context out of a mapped `usage`, in the words `Agent.context_event()` uses
+    for Relay's (`used_tokens`, `window`, `percent`), or {} when the guest said nothing.
+
+    Same names because it is the same measurement of a different window: the pane draws one chip
+    from `context` and this is what lets it read "43% · 13k of 258k" instead of "43%".
+    """
+    if not isinstance(usage, dict):
+        return {}
+    out = {}
+    for source, target in (("guest_context_tokens", "used_tokens"),
+                           ("guest_context_window", "window"),
+                           ("guest_context_pct", "percent")):
+        if source in usage:
+            out[target] = usage[source]
+    return out
 
 
 def label_arguments(source) -> dict:
@@ -984,6 +1086,10 @@ def attach(agent, provider: HarnessProvider) -> None:
       `Agent.session_data()` is a fixed dict this module may not edit — so it is wrapped, once, on
       this one instance. Unknown keys are ignored by `_apply_session`, so a session written this way
       loads anywhere.
+    * the `context` event measures Relay's transcript against Relay's window, which for a guest
+      pane is a record and not what the turn runs against. The guest's own figure rides beside it
+      as `guest_context` (same wrapping, same instance, same reason: `Agent.context_event()` is
+      not this module's to edit), so the chip can say how full the *guest's* window is.
     """
     provider.bind(agent)
     agent._guest_session_data = provider
@@ -991,6 +1097,7 @@ def attach(agent, provider: HarnessProvider) -> None:
         return                          # wrapped once per Agent; the line above re-points it
     agent._guest_session_data_wrapped = True
     original = agent.session_data
+    original_context = agent.context_event
 
     def session_data():
         data = original()
@@ -1000,7 +1107,16 @@ def attach(agent, provider: HarnessProvider) -> None:
             data["guest_session"] = held.session_id
         return data
 
+    def context_event():
+        event = original_context()
+        held = getattr(agent, "_guest_session_data", None)
+        if held is not None and held.guest_context:
+            event["guest"] = held.guest_id
+            event["guest_context"] = dict(held.guest_context)
+        return event
+
     agent.session_data = session_data
+    agent.context_event = context_event
 
 
 def detach(agent) -> HarnessProvider | None:

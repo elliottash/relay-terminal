@@ -45,10 +45,12 @@ PERMISSIONS = ("bypass", "ask", "deny")
 #   delta           {text}                                           delta
 #   thinking        {text}                                           thinking_delta
 #   tool_started    {call_id, tool, input, label?}                   tool_started
+#   tool_output     {call_id, text}                                  tool_output (live, {text})
 #   tool_result     {call_id, tool, output, ok, diff?, ms?}          tool_result
 #   approval        {id, kind: command|patch|tool|other, detail}     question (Allow / Deny)
 #   question        {id, questions: [{header, question, options?}]}  question (protocol 27)
 #   usage           {input_tokens, output_tokens, context_pct?,       context
+#                    context_tokens?, context_window?,
 #                    cost_usd?, model?}
 #   notice          {text}                                           status
 #   done            {text, stop_reason: end|interrupted|error}        (the turn's answer)
@@ -76,8 +78,36 @@ PERMISSIONS = ("bypass", "ask", "deny")
 # when the harness reports one; Relay prints it under the call line exactly as it does for its own
 # edits (protocol 23).
 
-EVENT_KINDS = ("started", "delta", "thinking", "tool_started", "tool_result", "approval",
-               "question", "usage", "notice", "done", "error")
+EVENT_KINDS = ("started", "delta", "thinking", "tool_started", "tool_output", "tool_result",
+               "approval", "question", "usage", "notice", "done", "error")
+
+# `tool_output` is what a call prints *while it runs* — a five-minute build or test run would
+# otherwise show a frozen call line until its `tool_result` lands (GT7X task t:a3). It is
+# append-only: each event carries the text that arrived since the last one for that `call_id`,
+# never the whole buffer again, and the `tool_result` still carries the complete output. A harness
+# that cannot stream simply never emits it, which is what the pane already copes with.
+#
+# One event is at most MAX_TOOL_OUTPUT_CHUNK characters; a longer delta is split across several,
+# in order. This is the adapter's share of the cap — the provider holds the per-call budget
+# (guest_harness_provider.MAX_STREAMED_OUTPUT), the same one Relay's own live command stream has.
+MAX_TOOL_OUTPUT_CHUNK = 4096
+
+# `usage.context_tokens` / `usage.context_window` are the two numbers behind `context_pct`, so a
+# chip can say "13k of 258k" and not only "5%". Both optional ints, both the *guest's* own
+# measurement of its own context — not Relay's transcript against Relay's window (29.3).
+
+# What `answer()` may say about how far an approval reaches (`decision["scope"]`):
+#
+#   once      this one action only. The default, and what `answer()` did before this key existed.
+#   session   and every action like it for the rest of the guest's session (codex:
+#             `acceptForSession`; claude: an `updatedPermissions` addRules entry with
+#             `destination: "session"`).
+#   stop      refuse *and* end the turn (codex: `cancel`; claude: `deny` with `interrupt: true`).
+#             Only meaningful with `behavior: "deny"`; on an allow it reads as `once`.
+#
+# An adapter that cannot express a scope falls back to `once` rather than refusing the answer: an
+# approval must always be answerable, or the guest waits forever.
+APPROVAL_SCOPES = ("once", "session", "stop")
 
 TOOL_NAMES = ("run_command", "read_file", "write_file", "edit_file", "list_directory", "search",
               "web", "agent", "other")
@@ -182,8 +212,11 @@ class Harness(Protocol):
         """Ask the guest to compact its own context, when it can (a no-op otherwise)."""
 
     def answer(self, request_id: str, decision: dict) -> None:
-        """Answer an `approval` (`{"behavior": "allow"|"deny", "message"?}`) or a `question`
-        (`{"answers": [[...], ...]}`, protocol 27.3) the harness raised during `send()`."""
+        """Answer an `approval` (`{"behavior": "allow"|"deny", "scope"?, "message"?}`) or a
+        `question` (`{"answers": [[...], ...]}`, protocol 27.3) the harness raised during `send()`.
+
+        `scope` is one of APPROVAL_SCOPES and defaults to `once`; a guest that cannot express the
+        one it is given falls back to `once` rather than leaving the approval unanswered."""
 
     def close(self) -> None:
         """End the guest process. Idempotent."""
@@ -219,6 +252,33 @@ def validate_effort(value) -> str | None:
     if not EFFORT_PATTERN.fullmatch(text):
         raise ValueError("effort must be one short lowercase word, such as low, high or max.")
     return text
+
+
+def approval_scope(decision) -> str:
+    """The scope of an approval answer, normalised (APPROVAL_SCOPES). Anything unrecognised — a
+    missing key, another word, a `stop` on an allow — is `once`, which is what `answer()` has
+    always done and is the only safe reading of a decision nobody can make sense of."""
+    if not isinstance(decision, dict):
+        return "once"
+    scope = str(decision.get("scope") or "").strip().lower()
+    if scope not in APPROVAL_SCOPES:
+        return "once"
+    if scope == "stop" and str(decision.get("behavior") or "").lower() == "allow":
+        return "once"
+    return scope
+
+
+def chunk_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHUNK):
+    """`text` as the `tool_output` events it becomes: in order, each at most `limit` characters.
+
+    A guest can hand over a whole megabyte in one delta (codex's `outputDelta` is whatever the
+    child wrote since the last read), and one event that size would sit in the worker's queue and
+    in every surface's socket buffer at once. Splitting is not truncating: nothing is dropped here,
+    and the per-call budget is the provider's to hold."""
+    if not text:
+        return
+    for start in range(0, len(text), max(1, limit)):
+        yield text[start:start + max(1, limit)]
 
 
 def validate_permissions(value) -> str:

@@ -37,6 +37,18 @@ effort for those"). Where the schema puts it, read off `generate-json-schema` fo
 
 Nothing is refused here: an effort a model will not take is refused by codex, and its own words
 are what the pane shows (a `HarnessError` from `turn/start`).
+
+**Streaming tool output** (GT7X task t:a3). `item/commandExecution/outputDelta` is
+`{threadId, turnId, itemId, delta}` with the delta as plain text, and each one becomes a
+`tool_output` event under the item's id, so a five-minute build ticks in the pane instead of
+sitting on a frozen call line. The delta is buffered as well, because that buffer is still the
+fallback for an `item/completed` with no `aggregatedOutput`. `item/fileChange/outputDelta` has the
+same shape and 0.155.1's schema marks it deprecated ("the server no longer emits this
+notification"); it is handled the same way for the servers that still do.
+
+**Approval scopes.** `answer()`'s `decision["scope"]` reaches the words codex has and
+allow/deny does not: `acceptForSession` (v2) / `approved_for_session` (v1) for `session`,
+`cancel` (v2) / `abort` (v1) for a deny that also ends the turn. See `_answer_record`.
 """
 from __future__ import annotations
 
@@ -52,7 +64,8 @@ import time
 from collections import deque
 
 from .guest_harness import (Emit, HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
-                            TurnResult, map_tool_name, validate_effort, validate_permissions)
+                            TurnResult, approval_scope, chunk_tool_output, map_tool_name,
+                            validate_effort, validate_permissions)
 
 log = logging.getLogger(__name__)
 
@@ -476,10 +489,27 @@ class CodexHarness:
         self._on_item_reasoning_textDelta(turn, params)
 
     def _on_item_commandExecution_outputDelta(self, turn, params):
-        state = turn.items.setdefault(str(params.get("itemId") or ""), {})
-        state.setdefault("output", []).append(str(params.get("delta") or ""))
+        """What the command has printed so far, as it prints it.
+
+        `CommandExecutionOutputDeltaNotification` is `{threadId, turnId, itemId, delta}` and the
+        delta is plain text, not base64 (`command/exec`'s own notification is the base64 one, and
+        is a different channel this adapter does not use). It is still buffered as well, because
+        `item/completed` only carries `aggregatedOutput` when codex kept it, and the buffer is
+        what fills a `tool_result` when it does not.
+        """
+        item_id = str(params.get("itemId") or "")
+        delta = str(params.get("delta") or "")
+        if not delta:
+            return
+        state = turn.items.setdefault(item_id, {})
+        state.setdefault("output", []).append(delta)
+        for chunk in chunk_tool_output(delta):
+            self._emit(turn, "tool_output", {"call_id": item_id, "text": chunk})
 
     def _on_item_fileChange_outputDelta(self, turn, params):
+        # `FileChangeOutputDeltaNotification` has the same shape and codex 0.155.1's schema says
+        # the server no longer emits it ("Deprecated legacy notification for `apply_patch` textual
+        # output"). Kept, and streamed the same way, for the older servers that still send it.
         self._on_item_commandExecution_outputDelta(turn, params)
 
     def _on_item_fileChange_patchUpdated(self, turn, params):
@@ -622,6 +652,13 @@ class CodexHarness:
             data["model"] = self._model
         window = state.get("modelContextWindow")
         last = (state.get("last") or {}).get("totalTokens")
+        # The guest's own context, as codex measures it: `last` is the tokens the most recent
+        # request carried and `modelContextWindow` the model's window, so the pane can say
+        # "13k of 258k" and not only a percentage (GT7X task t:a3).
+        if window:
+            data["context_window"] = int(window)
+        if last:
+            data["context_tokens"] = int(last)
         if window and last:
             data["context_pct"] = round(100.0 * int(last) / int(window), 1)
         return data
@@ -638,6 +675,20 @@ class CodexHarness:
                                           "detail": record["detail"]})
 
     def _answer_record(self, record: dict, decision: dict) -> None:
+        """Send one approval answer back, in the words the method that asked expects.
+
+        `decision["scope"]` (guest_harness.APPROVAL_SCOPES) is what codex has richer words for
+        than allow/deny, read off `generate-json-schema` for 0.155.1:
+
+        * `once` — `accept` / `decline`, what this adapter always sent.
+        * `session` — `acceptForSession`: "future prompts in the same session-scoped approval
+          cache should run without prompting". On `item/permissions/requestApproval` the same
+          idea is the response's own `scope: "session"` in place of the default `"turn"`.
+        * `stop` (deny only) — `cancel`: "the turn will also be immediately interrupted". The two
+          methods that have no such word (a permissions request, an MCP elicitation's `cancel`
+          only closes the dialog) get the refusal they would have got plus an `interrupt()`, so
+          "refuse and stop" means the same thing whatever asked.
+        """
         method = record["method"]
         rid = record["raw_id"]
         if method in _QUESTION_METHODS:
@@ -648,19 +699,33 @@ class CodexHarness:
             self._respond(rid, {"answers": payload})
             return
         allow = str(decision.get("behavior") or "").lower() == "allow"
+        scope = approval_scope(decision)
+        stop = not allow and scope == "stop"
+        ours = False                      # does *this* adapter have to end the turn, or codex?
         if method == "mcpServer/elicitation/request":
-            self._respond(rid, {"action": "accept" if allow else "decline"})
+            # `McpServerElicitationAction`: accept | decline | cancel. `cancel` is "the user
+            # dismissed it", not "end the turn", so a stop is a cancel *and* an interrupt.
+            self._respond(rid, {"action": "accept" if allow else "cancel" if stop else "decline"})
+            ours = stop
         elif method == "item/permissions/requestApproval":
             if allow:
+                # `PermissionGrantScope`: turn | session. The default is `turn`.
                 self._respond(rid, {"permissions": record.get("permissions") or {},
-                                    "scope": "turn"})
+                                    "scope": "session" if scope == "session" else "turn"})
             else:
                 self._respond_error(rid, -32000,
                                     decision.get("message") or "the user refused the request.")
+                ours = stop               # a refusal here has no "and stop" of its own
         elif method in ("execCommandApproval", "applyPatchApproval"):
-            self._respond(rid, {"decision": "approved" if allow else "denied"})
+            # The v1 `ReviewDecision` spelling, for the older servers that still ask this way:
+            # `abort` is "the agent should not do anything until the user's next command".
+            self._respond(rid, {"decision": "approved_for_session" if allow and scope == "session"
+                                else "approved" if allow else "abort" if stop else "denied"})
         else:
-            self._respond(rid, {"decision": "accept" if allow else "decline"})
+            self._respond(rid, {"decision": "acceptForSession" if allow and scope == "session"
+                                else "accept" if allow else "cancel" if stop else "decline"})
+        if ours:
+            self.interrupt()
 
     def _on_server_request(self, message: dict) -> None:
         method = str(message.get("method") or "")

@@ -23,8 +23,8 @@ from collections import deque
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "backend"))
 
-from relay_core.guest_harness import (HarnessError, HarnessEvent, HarnessNotAvailable,
-                                      map_tool_name)
+from relay_core.guest_harness import (MAX_TOOL_OUTPUT_CHUNK, HarnessError, HarnessEvent,
+                                      HarnessNotAvailable, map_tool_name)
 from relay_core import guest_harness_codex as gh
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
@@ -318,6 +318,16 @@ class PlainTurnTest(HarnessCase):
         self.assertNotIn("cost_usd", usage)
         self.assertEqual(result.usage, usage)
 
+    def test_usage_carries_the_window_and_what_is_in_it(self):
+        """GT7X t:a3: a chip that can say "13k of 258k", not only the share of it."""
+        harness, _, _ = self.started("ok-turn.jsonl")
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        usage = self.only("usage")[0]
+        # `thread/tokenUsage/updated`'s `modelContextWindow` and its `last.totalTokens`.
+        self.assertEqual(usage["context_window"], 258400)
+        self.assertEqual(usage["context_tokens"], 13317)
+        self.assertEqual(usage["context_pct"], round(100.0 * 13317 / 258400, 1))
+
     def test_started_is_announced_once_and_again_after_a_model_switch(self):
         entries = load("ok-turn.jsonl")
         models = load("models.jsonl")
@@ -490,6 +500,69 @@ class ToolTurnTest(HarnessCase):
         self.assertEqual(order, ["started", "delta", "tool_started", "tool_result", "delta",
                                  "usage"])
 
+    def test_output_deltas_stream_as_tool_output_while_the_command_runs(self):
+        """GT7X t:a3. `CommandExecutionOutputDeltaNotification` is `{threadId, turnId, itemId,
+        delta}` with a plain-text delta (0.155.1's `generate-json-schema`); the recorded turn's
+        command is an `echo` short enough that codex sent none, so these are written from that
+        schema rather than recorded."""
+        entries = load("shell-turn.jsonl")
+        item = "exec-fd850614-3420-4b80-ab94-b5111876744e"
+        at = index_of(entries, "<-", "item/started", occurrence=2)      # the commandExecution
+        entries[at + 1:at + 1] = [
+            server("item/commandExecution/outputDelta",
+                   {"threadId": "t", "turnId": "u", "itemId": item, "delta": "relay-"}),
+            server("item/commandExecution/outputDelta",
+                   {"threadId": "t", "turnId": "u", "itemId": item, "delta": "harness-ok\n"}),
+        ]
+        harness, _, _ = self.started(entries=entries)
+        harness.send("Run `echo relay-harness-ok` and report its output.", emit=self.emit,
+                     cancel=threading.Event())
+        streamed = self.only("tool_output")
+        self.assertEqual([d["text"] for d in streamed], ["relay-", "harness-ok\n"])
+        self.assertEqual({d["call_id"] for d in streamed}, {item})
+        kinds = self.kinds()
+        self.assertLess(kinds.index("tool_started"), kinds.index("tool_output"))
+        self.assertLess(kinds.index("tool_output"), kinds.index("tool_result"))
+        # Still buffered: the buffer is the fallback when `item/completed` has no aggregatedOutput.
+        self.assertEqual(self.only("tool_result")[0]["output"], "relay-harness-ok\n")
+
+    def test_one_huge_delta_is_split_into_events_the_channel_can_carry(self):
+        chunk = MAX_TOOL_OUTPUT_CHUNK
+        entries = load("shell-turn.jsonl")
+        item = "exec-fd850614-3420-4b80-ab94-b5111876744e"
+        at = index_of(entries, "<-", "item/started", occurrence=2)
+        entries[at + 1:at + 1] = [server("item/commandExecution/outputDelta",
+                                         {"threadId": "t", "turnId": "u", "itemId": item,
+                                          "delta": "x" * (chunk * 2 + 7)})]
+        harness, _, _ = self.started(entries=entries)
+        harness.send("go", emit=self.emit, cancel=threading.Event())
+        texts = [d["text"] for d in self.only("tool_output")]
+        self.assertEqual([len(t) for t in texts], [chunk, chunk, 7])
+        self.assertEqual("".join(texts), "x" * (chunk * 2 + 7))       # split, never truncated
+
+    def test_an_empty_delta_says_nothing(self):
+        entries = load("shell-turn.jsonl")
+        at = index_of(entries, "<-", "item/started", occurrence=2)
+        entries[at + 1:at + 1] = [server("item/commandExecution/outputDelta",
+                                         {"threadId": "t", "turnId": "u", "itemId": "exec-1",
+                                          "delta": ""})]
+        harness, _, _ = self.started(entries=entries)
+        harness.send("go", emit=self.emit, cancel=threading.Event())
+        self.assertNotIn("tool_output", self.kinds())
+
+    def test_the_deprecated_file_change_delta_still_streams(self):
+        """0.155.1's schema: "the server no longer emits this notification". Older ones do."""
+        entries = load("approval-turn.jsonl")
+        at = index_of(entries, "<-", "item/started", occurrence=2)
+        item = (entries[at]["line"]["params"]["item"] or {}).get("id")
+        entries[at + 1:at + 1] = [server("item/fileChange/outputDelta",
+                                         {"threadId": "t", "turnId": "u", "itemId": item,
+                                          "delta": "patching ok.txt\n"})]
+        harness, _, _ = self.started(entries=entries, permissions="bypass")
+        harness.send("Create a file named ok.txt containing the word ok.", emit=self.emit,
+                     cancel=threading.Event())
+        self.assertEqual([d["text"] for d in self.only("tool_output")], ["patching ok.txt\n"])
+
     def test_a_file_change_becomes_edit_file_with_a_unified_diff(self):
         harness, _, _ = self.started("approval-turn.jsonl")
         harness.send("Create a file named ok.txt containing the word ok.", emit=self.emit,
@@ -592,6 +665,98 @@ class ApprovalTest(HarnessCase):
         self.assertEqual(answered[0]["detail"], "apply its file changes")
         self.assertEqual(proc.responses()[0]["result"], {"decision": "accept"})
         self.assertIn("tool_result", self.kinds())
+
+    def _answer_with(self, decision, *, method=None):
+        """One `ask` approval on the recorded turn, answered with `decision`. Returns the
+        adapter's JSON-RPC response to it."""
+        entries = load("approval-turn.jsonl")
+        if method is not None:
+            at = index_of(entries, "<-", "item/fileChange/requestApproval")
+            line = dict(entries[at]["line"])
+            line["method"] = method
+            entries[at] = {"dir": "<-", "line": line}
+        harness, proc, _ = self.started(entries=entries, permissions="ask")
+
+        def emit(event):
+            self.events.append(event)
+            if event.kind == "approval":
+                harness.answer(event.data["id"], decision)
+
+        harness.send("Create a file named ok.txt containing the word ok.", emit=emit,
+                     cancel=threading.Event())
+        return proc.responses()[0], harness, proc
+
+    def test_an_allow_for_the_session_is_codexs_acceptForSession(self):
+        """GT7X t:a3. `FileChangeApprovalDecision`: accept | acceptForSession | decline | cancel."""
+        response, _, _ = self._answer_with({"behavior": "allow", "scope": "session"})
+        self.assertEqual(response["result"], {"decision": "acceptForSession"})
+
+    def test_a_deny_that_stops_the_turn_is_codexs_cancel(self):
+        response, harness, _ = self._answer_with({"behavior": "deny", "scope": "stop"})
+        self.assertEqual(response["result"], {"decision": "cancel"})
+
+    def test_the_default_scope_is_still_this_one_action(self):
+        for decision in ({"behavior": "allow"}, {"behavior": "allow", "scope": "once"},
+                         {"behavior": "allow", "scope": "stop"},      # meaningless on an allow
+                         {"behavior": "allow", "scope": "forever"}):  # not a scope this build has
+            response, _, _ = self._answer_with(decision)
+            self.assertEqual(response["result"], {"decision": "accept"}, decision)
+        response, _, _ = self._answer_with({"behavior": "deny", "scope": "once"})
+        self.assertEqual(response["result"], {"decision": "decline"})
+
+    def test_the_v1_spelling_takes_the_same_scopes(self):
+        """The older `ReviewDecision` words, for a server that still asks the v1 way."""
+        response, _, _ = self._answer_with({"behavior": "allow", "scope": "session"},
+                                           method="applyPatchApproval")
+        self.assertEqual(response["result"], {"decision": "approved_for_session"})
+        response, _, _ = self._answer_with({"behavior": "deny", "scope": "stop"},
+                                           method="applyPatchApproval")
+        self.assertEqual(response["result"], {"decision": "abort"})
+        response, _, _ = self._answer_with({"behavior": "allow"}, method="applyPatchApproval")
+        self.assertEqual(response["result"], {"decision": "approved"})
+
+    def test_a_permissions_request_grants_for_the_session_or_the_turn(self):
+        """`PermissionsRequestApprovalResponse.scope` is its own `PermissionGrantScope`."""
+        params = {"threadId": "t", "turnId": "u", "reason": "read outside the workspace",
+                  "permissions": {"fileSystem": {"read": ["/etc"]}}}
+        for scope, expected in (("session", "session"), ("once", "turn"), (None, "turn")):
+            decision = {"behavior": "allow"} if scope is None else {"behavior": "allow",
+                                                                    "scope": scope}
+            entries = load("approval-turn.jsonl")
+            at = index_of(entries, "<-", "item/fileChange/requestApproval")
+            entries[at] = {"dir": "<-", "line": {
+                "id": 0, "method": "item/permissions/requestApproval", "params": params}}
+            harness, proc, _ = self.started(entries=entries, permissions="ask")
+
+            def emit(event, harness=harness, decision=decision):
+                self.events.append(event)
+                if event.kind == "approval":
+                    harness.answer(event.data["id"], decision)
+
+            harness.send("go", emit=emit, cancel=threading.Event())
+            self.assertEqual(proc.responses()[0]["result"],
+                             {"permissions": params["permissions"], "scope": expected}, scope)
+
+    def test_a_refused_permissions_request_that_stops_also_interrupts(self):
+        """The one method with no "and stop" of its own: the adapter ends the turn itself."""
+        params = {"threadId": "t", "turnId": "u", "reason": "widen the sandbox",
+                  "permissions": {}}
+        entries = load("approval-turn.jsonl")
+        at = index_of(entries, "<-", "item/fileChange/requestApproval")
+        entries[at] = {"dir": "<-", "line": {
+            "id": 0, "method": "item/permissions/requestApproval", "params": params}}
+        harness, proc, _ = self.started(entries=entries, permissions="ask")
+
+        def emit(event):
+            self.events.append(event)
+            if event.kind == "approval":
+                harness.answer(event.data["id"], {"behavior": "deny", "scope": "stop",
+                                                  "message": "no"})
+
+        result = harness.send("go", emit=emit, cancel=threading.Event())
+        self.assertEqual(proc.responses()[0]["error"]["message"], "no")
+        self.assertTrue(proc.sent("turn/interrupt"))
+        self.assertEqual(result.stop_reason, "interrupted")
 
     def test_answering_an_unknown_request_is_an_error(self):
         harness, _, _ = self.started("ok-turn.jsonl")

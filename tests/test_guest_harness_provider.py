@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from relay_core import guest_harness_provider as ghp   # noqa: E402
 from relay_core import session_protocol                # noqa: E402
 from relay_core.agent import Agent                     # noqa: E402
-from relay_core.guest_harness import HarnessError, HarnessNotAvailable  # noqa: E402
+from relay_core.guest_harness import (MAX_TOOL_OUTPUT_CHUNK, HarnessError,  # noqa: E402
+                                      HarnessNotAvailable)
 from relay_core.provider import Cancelled, ProviderConfig, ProviderError, content_parts  # noqa: E402
 from guest_harness_fake import FakeHarness, ev         # noqa: E402
 
@@ -309,6 +310,94 @@ class TurnTests(unittest.TestCase):
         self.assertEqual(len(usage), 1)
         self.assertEqual(usage[0]["usage"]["total_tokens"], 10)
 
+    def test_tool_output_streams_as_relays_own_live_command_output(self):
+        """GT7X t:a3: a running call ticks instead of freezing until its result."""
+        script = [{"events": [ev("tool_started", call_id="c1", tool="run_command",
+                                 input={"command": "make -j8", "_guest_tool": "Bash"}),
+                              ev("tool_output", call_id="c1", text="cc a.c\n"),
+                              ev("tool_output", call_id="c1", text="cc b.c\n"),
+                              ev("tool_result", call_id="c1", tool="run_command",
+                                 output="cc a.c\ncc b.c\n", ok=True)],
+                   "result": ("built", "end", {})}]
+        events, _, _ = run_turn(self, script)
+        live = [e for e in events if e["event"] == "tool_output"]
+        # Exactly `tools.ToolRunner._await`'s event, plus the ids for the surfaces that key on
+        # them: the terminal pane reads `text` and nothing else (protocol 11.1).
+        self.assertEqual([e["text"] for e in live], ["cc a.c\n", "cc b.c\n"])
+        self.assertEqual([e["call_id"] for e in live], ["c1", "c1"])
+        self.assertTrue(all(e["turn_id"] for e in live))
+        self.assertTrue(all("stored" not in e for e in live))
+        # It comes between the call's start and its result, which is the whole point.
+        kinds = [e["event"] for e in events]
+        self.assertLess(kinds.index("tool_started"), kinds.index("tool_output"))
+        self.assertLess(kinds.index("tool_output"), kinds.index("tool_result"))
+
+    def test_the_live_stream_is_capped_per_call(self):
+        cap = ghp.MAX_STREAMED_OUTPUT
+        script = [{"events": [ev("tool_started", call_id="c1", tool="run_command",
+                                 input={"command": "yes", "_guest_tool": "Bash"}),
+                              ev("tool_output", call_id="c1", text="x" * (cap - 3)),
+                              ev("tool_output", call_id="c1", text="y" * 100),
+                              ev("tool_output", call_id="c1", text="z" * 100),
+                              ev("tool_result", call_id="c1", tool="run_command",
+                                 output="everything", ok=True),
+                              ev("tool_started", call_id="c2", tool="run_command",
+                                 input={"command": "echo", "_guest_tool": "Bash"}),
+                              ev("tool_output", call_id="c2", text="fresh budget"),
+                              ev("tool_result", call_id="c2", tool="run_command", output="fresh",
+                                 ok=True)],
+                   "result": ("done", "end", {})}]
+        events, _, _ = run_turn(self, script)
+        live = [e for e in events if e["event"] == "tool_output"]
+        first = [e for e in live if e["call_id"] == "c1"]
+        self.assertEqual(sum(len(e["text"]) for e in first), cap)
+        self.assertEqual(first[-1]["text"], "y" * 3)          # cut at the budget, not dropped
+        # And no event is bigger than a few KiB, whatever the harness handed over in one go.
+        self.assertLessEqual(max(len(e["text"]) for e in live), MAX_TOOL_OUTPUT_CHUNK)
+        # The next call starts from nothing, and the full output is still in the result.
+        self.assertEqual([e["text"] for e in live if e["call_id"] == "c2"], ["fresh budget"])
+        self.assertEqual([e for e in events if e["event"] == "tool_result"][0]["result"]["output"],
+                         "everything")
+
+    def test_the_guests_own_context_rides_the_usage_and_context_events(self):
+        script = [{"events": [ev("usage", input_tokens=120, output_tokens=30, context_pct=5.2,
+                                 context_tokens=13394, context_window=258400)],
+                   "result": ("ok", "end", {})}]
+        events, agent, provider = run_turn(self, script)
+        usage = [e for e in events if e["event"] == "usage"][0]["usage"]
+        self.assertEqual(usage["guest_context_tokens"], 13394)
+        self.assertEqual(usage["guest_context_window"], 258400)
+        self.assertEqual(usage["guest_context_pct"], 5.2)
+        # ... and on the `context` event the pane's chip already reads, in the words
+        # `Agent.context_event()` uses for Relay's own window.
+        context = [e for e in events if e["event"] == "context"][-1]
+        self.assertEqual(context["guest"], "claude")
+        self.assertEqual(context["guest_context"],
+                         {"used_tokens": 13394, "window": 258400, "percent": 5.2})
+        # Relay's own numbers are untouched: this is the guest's window, not Relay's transcript.
+        self.assertIn("used_tokens", context)
+        self.assertNotEqual(context["used_tokens"], 13394)
+        self.assertEqual(provider.guest_context["window"], 258400)
+
+    def test_a_share_is_worked_out_when_the_guest_reports_only_the_two_numbers(self):
+        mapped = ghp.relay_usage({"input_tokens": 1, "output_tokens": 1,
+                                  "context_tokens": 5000, "context_window": 20000})
+        self.assertEqual(mapped["guest_context_pct"], 25.0)
+        # Nothing is invented when the guest says nothing.
+        plain = ghp.relay_usage({"input_tokens": 1, "output_tokens": 1})
+        self.assertNotIn("guest_context_pct", plain)
+        self.assertNotIn("guest_context_window", plain)
+        self.assertEqual(ghp.guest_context(plain), {})
+
+    def test_a_pane_that_is_not_on_a_guest_has_no_guest_context(self):
+        script = [{"events": [ev("usage", input_tokens=1, output_tokens=1)],
+                   "result": ("ok", "end", {})}]
+        events, agent, provider = run_turn(self, script)
+        context = [e for e in events if e["event"] == "context"][-1]
+        self.assertNotIn("guest_context", context)
+        ghp.detach(agent)
+        self.assertNotIn("guest_context", agent.context_event())
+
     def test_a_harness_error_ends_the_turn_with_one_error_event(self):
         script = [{"events": [ev("delta", text="starting"),
                               ev("error", text="Claude Code lost its process.")],
@@ -379,7 +468,7 @@ class QuestionTests(unittest.TestCase):
         agent.ask("go")
         return events, harness
 
-    def test_an_approval_becomes_an_allow_deny_card(self):
+    def test_an_approval_becomes_a_four_way_card(self):
         script = [{"events": [ev("approval", id="req-1", kind="command",
                                  detail="Run `rm -rf build`?")],
                    "result": ("done", "end", {})}]
@@ -390,18 +479,42 @@ class QuestionTests(unittest.TestCase):
         question = card["questions"][0]
         self.assertEqual(question["header"], "Run command")
         self.assertIn("rm -rf build", question["question"])
-        self.assertEqual([o["label"] for o in question["options"]], ["Allow", "Deny"])
-        self.assertEqual(harness.answers, [("req-1", {"behavior": "allow"})])
+        self.assertEqual([o["label"] for o in question["options"]],
+                         ["Allow", "Allow for session", "Deny", "Deny and stop"])
+        self.assertEqual(harness.answers, [("req-1", {"behavior": "allow", "scope": "once"})])
 
     def test_deny_and_a_skipped_card_both_deny(self):
         script = [{"events": [ev("approval", id="req-2", kind="patch", detail="Write a file?")],
                    "result": ("done", "end", {})}]
         _, harness = self._drive(script, {"answers": [["Deny"]]})
-        self.assertEqual(harness.answers[0][1]["behavior"], "deny")
+        self.assertEqual(harness.answers[0][1],
+                         {"behavior": "deny", "scope": "once",
+                          "message": "The user did not allow this."})
         script = [{"events": [ev("approval", id="req-3", kind="other", detail="Something?")],
                    "result": ("done", "end", {})}]
         _, harness = self._drive(script, {"answers": [[]]})
         self.assertEqual(harness.answers[0][1]["behavior"], "deny")
+        self.assertEqual(harness.answers[0][1]["scope"], "once")
+
+    def test_the_two_wider_answers_carry_their_scope(self):
+        """The GUI offers four options; each one is one `answer()` decision (GT7X t:a3)."""
+        script = [{"events": [ev("approval", id="req-s", kind="command", detail="npm test?")],
+                   "result": ("done", "end", {})}]
+        _, harness = self._drive(script, {"answers": [["Allow for session"]]})
+        self.assertEqual(harness.answers, [("req-s", {"behavior": "allow", "scope": "session"})])
+        script = [{"events": [ev("approval", id="req-x", kind="command", detail="rm -rf /?")],
+                   "result": ("done", "end", {})}]
+        _, harness = self._drive(script, {"answers": [["Deny and stop"]]})
+        self.assertEqual(harness.answers[0][1]["behavior"], "deny")
+        self.assertEqual(harness.answers[0][1]["scope"], "stop")
+
+    def test_an_option_this_build_does_not_know_is_a_plain_deny(self):
+        self.assertEqual(ghp.approval_decision("Allow"), {"behavior": "allow", "scope": "once"})
+        self.assertEqual(ghp.approval_decision("allow  for   SESSION"),
+                         {"behavior": "allow", "scope": "session"})
+        self.assertEqual(ghp.approval_decision("Allow once and for all"),
+                         {"behavior": "deny", "scope": "once"})
+        self.assertEqual(ghp.approval_decision(None), {"behavior": "deny", "scope": "once"})
 
     def test_a_question_keeps_the_per_question_answer_lists(self):
         script = [{"events": [ev("question", id="req-4", questions=[

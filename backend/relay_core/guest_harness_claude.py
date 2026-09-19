@@ -50,7 +50,27 @@ acceptance, and a settings file that fails to validate is silently ignored in th
   turn on the same session.
 * There is no context-window percentage on this stream (the statusline's
   `context_window.used_percentage` is not sent). `result.modelUsage[<model>].contextWindow`
-  carries the window, so `context_pct` is derived from the last request's prompt size.
+  carries the window, so `context_pct` is derived from the last request's prompt size, and the
+  window and the prompt travel beside it as `context_window` / `context_tokens` (GT7X t:a3).
+* **A running tool prints nothing on this stream.** The contract has `tool_output` for the output
+  a call produces while it runs (a five-minute build), and this adapter never emits it, because
+  2.1.278 does not send that text to a stream-json host. What was checked, on 2026-09-19, against
+  the installed binary and for free:
+  - `--include-partial-messages`' `stream_event` frames are the Anthropic API's own SSE events for
+    the *model's* message — `text_delta`, `thinking_delta`, `input_json_delta`. `input_json_delta`
+    streams the tool's **input** being written (the command being typed), never its output.
+  - The CLI does have a live Bash stream internally: a `progress` message whose data is
+    `{type: "bash_progress", output, fullOutput, elapsedTimeSeconds, totalLines, totalBytes}`.
+    The stream-json serialiser turns it into the wire message `tool_progress {tool_use_id,
+    tool_name, parent_tool_use_id, elapsed_time_seconds, task_id?, heartbeat?}` — and **drops
+    `output` and `fullOutput`**. So what a host can have is how long the call has been running,
+    not a byte of what it printed. `tool_heartbeat` does the same for every other tool.
+  - `--include-hook-events` adds the hook lifecycle (PreToolUse / PostToolUse); a hook fires
+    before or after a tool, never during one, so there is nothing incremental there either.
+  `tool_progress` is therefore the only per-tool liveness claude offers, and elapsed seconds are
+  not output: turning them into `tool_output` text would be inventing output the guest never
+  produced. It is ignored here (`_dispatch`), and what the pane should do with an elapsed-seconds
+  tick is a GUI decision, not this module's.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 29. Card:
 issues/features/2026-09-19-claude-codex-guest-integration.md (GT7X, task t:x2).
@@ -69,7 +89,8 @@ import time
 import uuid
 
 from .guest_harness import (HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
-                            TurnResult, map_tool_name, validate_effort, validate_permissions)
+                            TurnResult, approval_scope, map_tool_name, validate_effort,
+                            validate_permissions)
 
 GUEST = "claude"
 BINARY = "claude"                  # what `start()` looks for on PATH
@@ -548,7 +569,11 @@ class ClaudeHarness:
             self._on_user(message, emit)
         elif kind == "control_request":
             self._on_control_request(message, emit)
-        elif kind in ("rate_limit_event", "prompt_suggestion", "result"):
+        elif kind in ("rate_limit_event", "prompt_suggestion", "result", "tool_progress"):
+            # `tool_progress` is a running call's elapsed seconds (and `heartbeat` for the tools
+            # that have no stream of their own). It carries no output — the CLI drops
+            # `bash_progress.output` on its way to stream-json — so there is nothing here to make
+            # a `tool_output` event out of; see the module docstring.
             pass
         else:
             log.debug("claude harness: ignoring a %r message", kind)
@@ -875,7 +900,23 @@ class ClaudeHarness:
         """Answer one `approval` or `question` the guest raised. Both go back as the
         `control_response` to its `can_use_tool` request: an allowed tool runs with the input it
         asked for, a denied one gets the message as its tool result — which is also how a
-        question's answers reach the conversation."""
+        question's answers reach the conversation.
+
+        `decision["scope"]` (guest_harness.APPROVAL_SCOPES) is expressible here, which is not what
+        the contract assumes of every guest — both of claude's richer answers are fields on this
+        same response, verified against 2.1.278's own validator on 2026-09-19:
+
+        * `session` — an allow may carry `updatedPermissions`, a list of
+          `{type: "addRules", behavior: "allow"|"deny"|"ask", rules: [{toolName, ruleContent?}],
+          destination: "userSettings"|"projectSettings"|"localSettings"|"session"|"cliArg"}`.
+          `destination: "session"` is exactly "for the rest of this session and no longer", and
+          `_session_rule` makes the rule as narrow as the thing that was asked about (this
+          command, this file), never a blanket "Bash is allowed now".
+        * `stop` — a deny may carry `interrupt: true`, which the CLI logs as "SDK permission
+          prompt deny+interrupt" and acts on by aborting the turn.
+
+        Anything else is `once`, which is what this method did before the key existed.
+        """
         request_id = str(request_id or "")
         decision = decision if isinstance(decision, dict) else {}
         with self._state_lock:
@@ -883,14 +924,22 @@ class ClaudeHarness:
         if pending is None:
             log.debug("claude harness: an answer for %r that nothing is waiting on", request_id)
             return
+        scope = approval_scope(decision)
         if "answers" in decision:
             body = {"behavior": "deny", "message": _answers_text(decision.get("answers"))}
         elif str(decision.get("behavior")) == "allow":
             body = {"behavior": "allow",
                     "updatedInput": decision.get("updatedInput") or pending["input"]}
+            if scope == "session":
+                rule = _session_rule(str(pending.get("tool") or ""), pending.get("input"))
+                if rule is not None:
+                    body["updatedPermissions"] = [rule]
         else:
             body = {"behavior": "deny",
                     "message": str(decision.get("message") or "The user said no.")}
+            if scope == "stop":
+                body["interrupt"] = True
+                self._interrupted = True
         try:
             self._write({"type": "control_response", "response": {
                 "subtype": "success", "request_id": request_id, "response": body}})
@@ -939,6 +988,32 @@ def _result_text(content) -> str:
     if content is None:
         return ""
     return json.dumps(content, ensure_ascii=False)
+
+
+def _session_rule(tool: str, tool_input) -> dict | None:
+    """The `updatedPermissions` entry for "allow this, for the rest of the session".
+
+    As narrow as what was asked about: the rule names the tool, and `ruleContent` the one command
+    or the one path the approval was raised for, so allowing one `npm test` does not allow every
+    Bash for the session. With nothing specific to name, the rule is the tool alone — which is all
+    claude can be told, and is what "allow for session" means for a tool that takes no target.
+    """
+    tool = (tool or "").strip()
+    if not tool:
+        return None
+    source = tool_input if isinstance(tool_input, dict) else {}
+    content = None
+    if tool in _COMMAND_TOOLS:
+        content = source.get("command")
+    else:
+        for key in ("file_path", "notebook_path", "path", "url", "pattern"):
+            if isinstance(source.get(key), str) and source[key].strip():
+                content = source[key]
+                break
+    rule: dict = {"toolName": tool}
+    if isinstance(content, str) and content.strip():
+        rule["ruleContent"] = content.strip()
+    return {"type": "addRules", "behavior": "allow", "rules": [rule], "destination": "session"}
 
 
 def _approval_kind(tool: str) -> str:
@@ -998,9 +1073,13 @@ def _usage_event(message: dict) -> dict:
     if model:
         data["model"] = model
     if window > 0:
+        # The guest's own context, as claude reports it: the window the model has and what the
+        # last request put in it, so the pane can say "13k of 258k" and not only a percentage.
+        data["context_window"] = window
         prompt = (data.get("input_tokens", 0) + data.get("cache_read_input_tokens", 0)
                   + data.get("cache_creation_input_tokens", 0))
         if prompt > 0:
+            data["context_tokens"] = prompt
             data["context_pct"] = round(min(100.0, 100.0 * prompt / window), 1)
     return data
 

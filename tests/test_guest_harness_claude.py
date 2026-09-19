@@ -395,6 +395,70 @@ class ApprovalTest(unittest.TestCase):
         self.assertIn("+ok", result["diff"])
         self.assertIn("harness-ok.txt", result["diff"])
 
+    def _answer_with(self, decision):
+        """The recorded approval turn, answered with `decision`. Returns the body of the one
+        `control_response` the adapter wrote."""
+        proc = FakeClaude(load("approval-write"))
+        _, harness = harness_on(proc)
+        self.addCleanup(harness.close)
+        harness.start(cwd=os.getcwd(), permissions="ask")
+        events = Collector()
+
+        def emit(event):
+            events(event)
+            if event.kind == "approval":
+                harness.answer(event.data["id"], decision)
+
+        harness.send("write it", emit=emit, cancel=threading.Event())
+        replies = [m for m in proc.written if m.get("type") == "control_response"]
+        self.assertEqual(len(replies), 1)
+        return replies[0]["response"]["response"]
+
+    def test_an_allow_for_the_session_carries_a_session_permission_rule(self):
+        """GT7X t:a3. Claude can express both wider scopes, on this same response: an allow may
+        carry `updatedPermissions`, and `destination: "session"` is exactly "until this session
+        ends" (2.1.278's validator takes userSettings | projectSettings | localSettings |
+        session | cliArg)."""
+        body = self._answer_with({"behavior": "allow", "scope": "session"})
+        self.assertEqual(body["behavior"], "allow")
+        rule = body["updatedPermissions"][0]
+        self.assertEqual(len(body["updatedPermissions"]), 1)
+        self.assertEqual(rule["type"], "addRules")
+        self.assertEqual(rule["behavior"], "allow")
+        self.assertEqual(rule["destination"], "session")
+        # As narrow as the thing that was asked about: this tool, this file.
+        self.assertEqual(rule["rules"], [{"toolName": "Write",
+                                          "ruleContent": body["updatedInput"]["file_path"]}])
+
+    def test_a_plain_allow_grants_nothing_beyond_this_call(self):
+        for decision in ({"behavior": "allow"}, {"behavior": "allow", "scope": "once"},
+                         {"behavior": "allow", "scope": "stop"},       # meaningless on an allow
+                         {"behavior": "allow", "scope": "whenever"}):  # not a scope
+            body = self._answer_with(decision)
+            self.assertEqual(body["behavior"], "allow", decision)
+            self.assertNotIn("updatedPermissions", body)
+
+    def test_a_deny_that_stops_the_turn_asks_the_cli_to_interrupt(self):
+        """`{"behavior": "deny", "interrupt": true}` is what the CLI logs as "SDK permission
+        prompt deny+interrupt" and acts on by aborting the turn."""
+        body = self._answer_with({"behavior": "deny", "scope": "stop", "message": "no"})
+        self.assertEqual(body["behavior"], "deny")
+        self.assertEqual(body["message"], "no")
+        self.assertTrue(body["interrupt"])
+        body = self._answer_with({"behavior": "deny", "message": "no"})
+        self.assertNotIn("interrupt", body)
+
+    def test_a_session_rule_is_as_narrow_as_what_was_asked_about(self):
+        command = gh._session_rule("Bash", {"command": "npm test"})
+        self.assertEqual(command["rules"], [{"toolName": "Bash", "ruleContent": "npm test"}])
+        self.assertEqual(command["destination"], "session")
+        edit = gh._session_rule("Edit", {"file_path": "/w/note.txt", "old_string": "a"})
+        self.assertEqual(edit["rules"], [{"toolName": "Edit", "ruleContent": "/w/note.txt"}])
+        # Nothing specific to name: the tool alone, which is all claude can be told.
+        bare = gh._session_rule("TodoWrite", {"todos": []})
+        self.assertEqual(bare["rules"], [{"toolName": "TodoWrite"}])
+        self.assertIsNone(gh._session_rule("", {}))
+
     def test_the_ask_command_line(self):
         proc = FakeClaude(load("approval-write"))
         spawner, harness = harness_on(proc)
@@ -558,6 +622,41 @@ class RobustnessTest(unittest.TestCase):
         self.addCleanup(harness.close)
         self.assertEqual(result.stop_reason, "end")
         self.assertEqual(events.kinds, ["started", "usage", "done"])
+
+    def test_a_running_tool_streams_nothing_and_tool_progress_is_not_faked(self):
+        """GT7X t:a3. The contract has `tool_output` for what a call prints while it runs, and
+        this adapter never emits it: 2.1.278 sends a host no such text.
+
+        The one per-tool frame there is, `tool_progress`, carries `elapsed_time_seconds` and no
+        output at all — the CLI's internal `bash_progress` has `output`/`fullOutput`, and its
+        stream-json serialiser drops both. Elapsed seconds are not output, so they are ignored
+        here rather than dressed up as some. See the module docstring for what else was checked
+        (`--include-partial-messages`, `--include-hook-events`).
+        """
+        proc = FakeClaude(script(
+            init_message(),
+            {"dir": "out", "json": {"type": "assistant", "message": {
+                "model": "claude-test-1", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Bash",
+                     "input": {"command": "make -j8"}}]}}},
+            {"dir": "out", "json": {"type": "tool_progress", "tool_use_id": "t1",
+                                    "tool_name": "Bash", "parent_tool_use_id": None,
+                                    "elapsed_time_seconds": 5, "session_id": "s-1",
+                                    "uuid": "u-1"}},
+            {"dir": "out", "json": {"type": "tool_progress", "tool_use_id": "t1",
+                                    "tool_name": "Bash", "parent_tool_use_id": None,
+                                    "elapsed_time_seconds": 10, "heartbeat": True,
+                                    "session_id": "s-1", "uuid": "u-2"}},
+            {"dir": "out", "json": {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "built\n"}]}}},
+            result_message(result="built")))
+        harness, events, result, _, _ = run_turn(self, proc, "build it")
+        self.addCleanup(harness.close)
+        self.assertEqual(result.stop_reason, "end")
+        self.assertNotIn("tool_output", events.kinds)
+        self.assertEqual(events.kinds,
+                         ["started", "tool_started", "tool_result", "usage", "done"])
+        self.assertEqual(events.of("tool_result")[0].data["output"], "built\n")
 
     def test_the_process_dying_mid_turn_is_an_error_with_its_stderr(self):
         proc = FakeClaude(script(init_message()), stderr="claude: out of memory\n",
@@ -1011,7 +1110,26 @@ class UsageTest(unittest.TestCase):
     def test_no_window_means_no_percentage(self):
         data = gh._usage_event({"usage": {"input_tokens": 10, "output_tokens": 5}})
         self.assertNotIn("context_pct", data)
+        self.assertNotIn("context_window", data)
+        self.assertNotIn("context_tokens", data)
         self.assertEqual(data["input_tokens"], 10)
+
+    def test_the_window_and_what_is_in_it_travel_beside_the_share(self):
+        """GT7X t:a3: a chip that can say "13k of 258k", not only the share of it."""
+        data = gh._usage_event({"usage": {"input_tokens": 10, "output_tokens": 5,
+                                          "cache_read_input_tokens": 90,
+                                          "cache_creation_input_tokens": 100},
+                                "modelUsage": {"claude-x": {"contextWindow": 1000}}})
+        self.assertEqual(data["context_window"], 1000)
+        self.assertEqual(data["context_tokens"], 200)      # 10 + 90 + 100, the last request
+        self.assertEqual(data["context_pct"], 20.0)
+
+    def test_a_window_with_nothing_in_it_yet_is_still_reported(self):
+        data = gh._usage_event({"usage": {"output_tokens": 5},
+                                "modelUsage": {"claude-x": {"contextWindow": 1000}}})
+        self.assertEqual(data["context_window"], 1000)
+        self.assertNotIn("context_tokens", data)
+        self.assertNotIn("context_pct", data)
 
 
 class AttachmentTest(unittest.TestCase):
