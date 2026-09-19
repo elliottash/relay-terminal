@@ -10,7 +10,8 @@
 //   view.destroy();
 //
 // The layout is the Qt pane's, top to bottom: terminal, thinking bubble, queue strip, prompt box
-// with its strip (folder, turn clock, "% left", model). The view writes none of the pane's words:
+// with its strip (folder, turn clock, "% left", model), in the colours of the desktop's own theme
+// (the message's `theme`, drawn by app/pane-theme.css). The view writes none of the pane's words:
 // every label, hint and title comes from the message, and every action a row offers is one the
 // desktop listed for that row. What the view adds is the device: an action sheet and a send menu
 // for touch, the desktop's keys and its "Next time" hints for a keyboard.
@@ -145,6 +146,25 @@ export function mountPane(container, options = {}) {
   // ---- the device -------------------------------------------------------------------------
   const root = el('div', 'relay-pane');
   if (options.theme) root.dataset.theme = options.theme;
+  // The theme (protocol § 16): the desktop sends the id it is drawing itself in and the pane here
+  // takes it, so the terminal on the phone is the colour the terminal on the desktop is.
+  //
+  // Which ids exist is not listed here. app/pane-theme.css generates a block per shipped theme and
+  // each one declares its own id in --rt-theme-id, so the view tries the id and reads back what the
+  // stylesheet gave it: an id it has no colours for — a theme of the person's own — leaves the view
+  // on the theme it is already showing rather than dropping it to the default. A sixth desktop
+  // theme therefore reaches the phone by regenerating that file, and nothing here changes.
+  function applyTheme(id) {
+    const wanted = str(id);
+    const previous = root.dataset.theme;
+    if (wanted === (previous || '')) return true;
+    if (wanted) root.dataset.theme = wanted; else delete root.dataset.theme;
+    if (!wanted) return true;
+    const applied = getComputedStyle(root).getPropertyValue('--rt-theme-id').trim().replace(/^["']|["']$/g, '');
+    if (!applied || applied === wanted) return true;   // no stylesheet to ask: take the id as given
+    if (previous) root.dataset.theme = previous; else delete root.dataset.theme;
+    return false;
+  }
   const input = () => options.input
     || (matchMedia('(hover: none) and (pointer: coarse)').matches ? 'touch' : 'mouse');
   function placeDevice() {
@@ -785,6 +805,9 @@ export function mountPane(container, options = {}) {
   }
 
   function draw() {
+    // Before the rest: the pane is drawn in the colours the desktop is using. A state without the
+    // field — an older desktop — leaves the theme alone.
+    if (state.theme !== undefined) applyTheme(state.theme);
     renderThinking();
     renderQueue();
     renderStrip();
@@ -1008,8 +1031,10 @@ export function mountPane(container, options = {}) {
       return true;
     },
 
+    // A host that knows better than the desktop does (the demo page's picker). Returns false for
+    // an id this view has no colours for, having left the theme as it was.
     setTheme(id) {
-      if (id) root.dataset.theme = id; else delete root.dataset.theme;
+      return applyTheme(id);
     },
 
     get editingRow() { return editRow; },

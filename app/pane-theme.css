@@ -4,6 +4,7 @@
    run the script. tests/test_web_theme.py fails while this file is stale. */
 .relay-pane, .relay-pane[data-theme="dark-copper"] {
   /* Dark Copper (dark) */
+  --rt-theme-id: dark-copper;
   color-scheme: dark;
   --rt-on-warning: #251a07;
   --rt-on-caution: #251407;
@@ -89,6 +90,7 @@
 }
 .relay-pane[data-theme="gruvbox-dark"] {
   /* Gruvbox Dark (dark) */
+  --rt-theme-id: gruvbox-dark;
   color-scheme: dark;
   --rt-on-warning: #271c05;
   --rt-on-caution: #271805;
@@ -174,6 +176,7 @@
 }
 .relay-pane[data-theme="ibm-beige"] {
   /* IBM Beige (light) */
+  --rt-theme-id: ibm-beige;
   color-scheme: light;
   --rt-on-warning: #fcf6e8;
   --rt-on-caution: #fcf1e8;
@@ -259,6 +262,7 @@
 }
 .relay-pane[data-theme="relay-dark"] {
   /* Relay Dark (dark) */
+  --rt-theme-id: relay-dark;
   color-scheme: dark;
   --rt-on-warning: #251a07;
   --rt-on-caution: #251407;
@@ -344,6 +348,7 @@
 }
 .relay-pane[data-theme="relay-light"] {
   /* Relay Light (light) */
+  --rt-theme-id: relay-light;
   color-scheme: light;
   --rt-on-warning: #fcf5e8;
   --rt-on-caution: #fcf1e8;

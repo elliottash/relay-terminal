@@ -171,6 +171,11 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
                     {QStringLiteral("context"), context},
                     {QStringLiteral("sessions"), sessions}};
     if (!allowance.isEmpty()) out.insert(QStringLiteral("allowance"), allowance);
+    // The theme the desktop is drawing itself in (owner, 2026-09-19: the phone's terminal follows
+    // the desktop's theme). An id, never a file name or a path — the web view has a generated
+    // block per shipped theme and keeps the one it is on for an id it does not know — and absent
+    // rather than empty when there is none to name.
+    if (!in.theme.trimmed().isEmpty()) out.insert(QStringLiteral("theme"), in.theme.trimmed());
     return out;
 }
 

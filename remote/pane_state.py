@@ -10,8 +10,8 @@ Three rules live in this module, so that no caller has to remember them:
 * **An allow-list, not a pass-through.** :func:`clean` rebuilds the message from the fields section
   16 names, with every string capped and every enumeration checked; anything else the GUI sent —
   a preset id, a base URL, a key, a session file path — is simply not copied. Ids must have the
-  shapes the desktop mints (a queue row id, ``m<n>``, ``s<n>``), so an id can never *be* a preset
-  id or a path either.
+  shapes the desktop mints (a queue row id, ``m<n>``, ``s<n>``, a theme id), so an id can never
+  *be* a preset id or a path either.
 * **Per capability, read live.** :func:`for_capability` is applied per device on every message: a
   ``view`` device gets no row actions, no model choices and no ``can_new``, and the composer's
   ``modes`` list only what that device's ``compose`` may use.
@@ -49,6 +49,10 @@ MOVES = ("to_queue", "steer", "up", "down")   # queue_move's `to`
 # per-publisher tokens. None of these shapes can hold a preset id ("openrouter-kimi"), a path or a
 # session file name, which is the point: the phone sends back only what it was shown.
 PANE_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+# The desktop theme's id ("relay-dark"), which the phone's pane follows (owner, 2026-09-19). The
+# same kind of shape check as the ids above, and for the same reason: it is written into the view's
+# `data-theme`, so it may be an id and nothing else — not a path, not a file name, not a URL.
+THEME_ID = re.compile(r"^[a-z0-9-]{1,40}$")
 ROW_ID = re.compile(r"^(?:steer:[A-Za-z0-9_-]{1,40}|entry:[0-9]{1,19})$")
 CHOICE_ID = re.compile(r"^m[1-9][0-9]{0,8}$")
 SESSION_ID = re.compile(r"^s[1-9][0-9]{0,8}$")
@@ -207,6 +211,13 @@ def clean(message) -> dict | None:
     }
     if allowance_out is not None:
         cleaned["allowance"] = allowance_out
+    # The desktop's theme, so the terminal on the phone is the colour the terminal on the desktop
+    # is. Every level sees it: it is how the pane looks, there is nothing to press and nothing in
+    # an id to leak. Absent — not empty — when the desktop sent none or sent something that is not
+    # an id, and the view then keeps the theme it is already showing.
+    theme = message.get("theme")
+    if isinstance(theme, str) and THEME_ID.match(theme):
+        cleaned["theme"] = theme
     return cleaned
 
 
@@ -363,6 +374,7 @@ EXAMPLE = {
     "composer": {"mode": "auto", "placeholder": "Shell commands or agent prompts…",
                  "modes": ["auto", "shell", "agent"]},
     "context": {"label": "96% left", "percent_left": 96},
+    "theme": "relay-dark",
     "allowance": {"label": "Free · 73% left", "percent_left": 73, "warn": False,
                   "detail": "182,400 of 250,000 tokens today · resets at 02:00"},
     "sessions": {"rows": [{"id": "s1", "title": "Thinking copy test", "when": "14:02",

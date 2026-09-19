@@ -40,6 +40,7 @@ Inputs busyPane() {
     in.allowanceLabel = QStringLiteral("Free · 73% left");
     in.allowanceLeft = 73;
     in.allowanceDetail = QStringLiteral("182,400 of 250,000 tokens today · resets at 02:00");
+    in.theme = QStringLiteral("relay-dark");
     in.sessions = {{QStringLiteral("0f3a-session"), QStringLiteral("Thinking copy test"), QStringLiteral("14:02"), true, true}};
     in.canNew = false;
     return in;
@@ -62,6 +63,7 @@ private slots:
         QCOMPARE(state.value("v").toInt(), 1);
         QCOMPARE(state.value("pane").toString(), QStringLiteral("tok-1"));
         QCOMPARE(state.value("seq").toInt(), 42);
+        QCOMPARE(state.value("theme").toString(), QStringLiteral("relay-dark"));
         for (const char *key : {"turn", "thinking", "queue", "model", "composer", "context", "sessions"})
             QVERIFY2(state.value(key).isObject(), key);
         const QJsonObject turn = state.value("turn").toObject();
@@ -117,6 +119,18 @@ private slots:
         QVERIFY(!build(1, in, choices, sessions).contains(QStringLiteral("allowance")));
         in.allowanceLabel = QStringLiteral("Free · 73% left");   // and with one, it is there
         QVERIFY(build(1, in, choices, sessions).contains(QStringLiteral("allowance")));
+    }
+    void the_theme_is_published_by_id_or_not_at_all() {
+        // The phone's pane follows the desktop's theme (owner, 2026-09-19): the id goes in the
+        // message, and a pane with no theme to name publishes no field rather than an empty one.
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        Inputs in;
+        in.pane = QStringLiteral("tok");
+        QVERIFY(!build(1, in, choices, sessions).contains(QStringLiteral("theme")));
+        in.theme = QStringLiteral("   ");
+        QVERIFY(!build(1, in, choices, sessions).contains(QStringLiteral("theme")));
+        in.theme = QStringLiteral("relay-light");
+        QCOMPARE(build(1, in, choices, sessions).value("theme").toString(), QStringLiteral("relay-light"));
     }
     void the_allowance_warns_at_ten_percent_and_below() {
         Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));

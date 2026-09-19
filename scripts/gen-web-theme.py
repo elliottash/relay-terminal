@@ -702,7 +702,12 @@ def generate(root: Path) -> str:
     for theme_id in THEMES:
         spec, env = load_theme(root, theme_id, defaults, adopt_ui, adopt_syntax)
         tokens = theme_tokens(spec, env, locals_, table, mono)
+        # The id the block is for, so app/pane.js can tell a theme it has colours for from one it
+        # has not: it writes the id the desktop sent into data-theme and reads this back. A theme
+        # of the person's own reads as some other id, and the view keeps the theme it is showing
+        # instead of dropping to the default.
         lines = [f"  /* {spec['name']} ({spec['variant']}) */",
+                 f"  --rt-theme-id: {theme_id};",
                  f"  color-scheme: {'light' if spec['variant'] == 'light' else 'dark'};"]
         for token, value in tokens.items():
             if token == "@mono":

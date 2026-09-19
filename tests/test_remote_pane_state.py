@@ -60,6 +60,25 @@ class CleanTests(unittest.TestCase):
             message["allowance"] = bad
             self.assertNotIn("allowance", pane_state.clean(message), bad)
 
+    def test_the_theme_is_an_id_or_it_is_absent(self):
+        """The desktop's theme reaches the phone so the two panes are the same colour (owner,
+        2026-09-19). It goes into the view's `data-theme`, so it is shape-checked like every other
+        id here: anything that is not one is simply not copied, and the view keeps its theme."""
+        self.assertEqual(pane_state.clean(state())["theme"], "relay-dark")
+        for good in ("dark-copper", "relay-light", "gruvbox-dark", "ibm-beige", "a", "0", "x" * 40):
+            self.assertEqual(pane_state.clean(state(theme=good))["theme"], good, good)
+        for bad in ("", "Relay-Dark", "relay dark", "relay_dark", "../../etc/passwd",
+                    "/home/elliott/.local/share/relay/themes/mine.toml", "mine.toml",
+                    "https://example/theme.css", "x" * 41, "relay-dark;", 7, True, None, ["relay-dark"]):
+            message = state()
+            message["theme"] = bad
+            self.assertNotIn("theme", pane_state.clean(message), bad)
+        # A desktop that names none says nothing, rather than an empty string the view would have
+        # to read as "go back to the default".
+        message = state()
+        del message["theme"]
+        self.assertNotIn("theme", pane_state.clean(message))
+
     def test_unknown_fields_are_dropped_at_every_level(self):
         message = state()
         message["api_key"] = "sk-live-0123456789abcdefghij"
@@ -181,6 +200,13 @@ class CapabilityTests(unittest.TestCase):
     def test_no_capability_is_nothing(self):
         for capability in (None, "", "owner", "editor", "viewer"):
             self.assertIsNone(pane_state.for_capability(self.cleaned, capability), capability)
+
+    def test_every_level_sees_the_theme(self):
+        """How the pane looks is not a permission: there is nothing to press in a theme id and
+        nothing in it to leak, so a viewer's pane is the same colour as the owner's."""
+        for capability in (wire.VIEW, wire.AGENT, wire.FULL):
+            self.assertEqual(pane_state.for_capability(self.cleaned, capability)["theme"],
+                             "relay-dark", capability)
 
     def test_filtering_never_touches_the_stored_state(self):
         pane_state.for_capability(self.cleaned, wire.VIEW)

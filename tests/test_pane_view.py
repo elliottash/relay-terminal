@@ -138,6 +138,60 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_the_view_takes_the_desktops_theme(self):
+        """The phone's terminal is the colour the desktop's is (owner, 2026-09-19): the state's
+        `theme` reaches the pane's data-theme, and the generated block for it is what paints. An id
+        the view has no colours for leaves it on the theme it is showing."""
+        state = fixture("busy_queue")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                # The demo mounts on Dark Copper, the desktop's default; the state moves it.
+                await self.open(browser, "busy_queue", query="&theme=dark-copper")
+                self.assertEqual(await browser.evaluate("document.querySelector('.relay-pane').dataset.theme"),
+                                 "dark-copper")
+                dark = await browser.evaluate(
+                    "getComputedStyle(document.querySelector('.relay-pane')).getPropertyValue('--rt-bg').trim()")
+
+                seq = state["seq"]
+
+                async def push(theme):
+                    nonlocal seq
+                    seq += 1
+                    message = {**state, "seq": seq, "theme": theme}
+                    self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(message)})"))
+                    return await browser.evaluate(
+                        "(() => { const p = document.querySelector('.relay-pane');"
+                        " return {theme: p.dataset.theme || '',"
+                        " bg: getComputedStyle(p).getPropertyValue('--rt-bg').trim()}; })()")
+
+                light = await push("relay-light")
+                self.assertEqual(light["theme"], "relay-light")
+                self.assertNotEqual(light["bg"], dark)
+                # Every shipped theme the desktop can be on is one the view can follow.
+                for theme in ("gruvbox-dark", "ibm-beige", "relay-dark", "dark-copper"):
+                    applied = await push(theme)
+                    self.assertEqual(applied["theme"], theme, theme)
+                # A theme of the person's own: the pane keeps the colours it has rather than
+                # dropping to the default (which is what an unknown data-theme would paint).
+                kept = await push("mine-own-theme")
+                self.assertEqual(kept["theme"], "dark-copper")
+                self.assertEqual(kept["bg"], dark)
+                # A state with no theme at all — an older desktop — changes nothing either.
+                seq += 1
+                message = {**state, "seq": seq}
+                message.pop("theme", None)
+                self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(message)})"))
+                self.assertEqual(await browser.evaluate("document.querySelector('.relay-pane').dataset.theme"),
+                                 "dark-copper")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_the_cross_sends_queue_remove_naming_the_desktops_row(self):
         state = fixture("busy_queue")
         steer = next(row for row in state["queue"]["rows"] if row["kind"] == "steer")
