@@ -13,32 +13,41 @@ independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Install
 
+### Packages (beta)
+
+Every release publishes `.deb`s for Ubuntu 24.04 (Qt 5), Ubuntu 26.04 and Debian 13 (Qt 6), amd64
+and arm64, with `SHA256SUMS`, on [GitHub Releases](https://github.com/elliottash/relay-terminal/releases/latest):
+
+```bash
+sudo apt install ./relay_*_ubuntu24.04_amd64.deb    # or ubuntu26.04 / debian13, amd64 / arm64
+relay --workspace ~/project
+```
+
+A fresh install runs on Relay Free with no key (see "Privacy and your keys"). The AUR packages
+`relay-terminal` and `relay-terminal-git` are prepared but not yet published; see
+[docs/RELEASING.md](docs/RELEASING.md).
+
 ### From source
 
 Ubuntu 24.04:
 
 ```bash
-sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
+sudo apt install build-essential cmake ninja-build python3 python3-cryptography libsecret-tools \
   qtbase5-dev libkf5syntaxhighlighting-dev qtpdf5-dev
 ./scripts/build.sh                 # configures, builds, runs all tests
 ./build/relay --workspace ~/project
 ```
 
-Relay builds against Qt 5; KDE Frameworks is no longer required (KonsolePart was retired on
-2026-09-18). Qt 6 is selected only when Qt 5 is absent and is not yet finished — force one with
-`./scripts/build.sh -DRELAY_QT_MAJOR=5` (or `6`). KSyntaxHighlighting and Qt PDF are optional.
+Relay builds against Qt 5 or Qt 6 (`qt6-base-dev`, `libkf6syntaxhighlighting-dev` on Ubuntu 26.04
+and Debian 13); KDE Frameworks is no longer required (KonsolePart was retired on 2026-09-18).
+Force one with `./scripts/build.sh -DRELAY_QT_MAJOR=5` (or `6`). KSyntaxHighlighting and Qt PDF
+are optional.
 `cmake --install build` installs to `~/.local` by default.
 
 Options: `--workspace PATH` sets the first terminal directory and the agent workspace (and, like
 `--fresh`, starts one new window instead of reopening the saved layout). `--fresh` ignores the
 saved window layout once. `--clean-shell` skips `~/.bashrc` for that session, for prompt plugins
 that conflict.
-
-### Packages (coming)
-
-Beta `.deb`s for Ubuntu 24.04, Debian 13 and Ubuntu 26.04 (amd64, arm64) and the AUR packages
-`relay-terminal` and `relay-terminal-git` are prepared but not published.
-See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Quick start
 

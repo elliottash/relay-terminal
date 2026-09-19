@@ -33,9 +33,10 @@ if [[ ${RELAY_SKIP_DEPS:-0} != 1 ]]; then
   export DEBIAN_FRONTEND=noninteractive
   $sudo apt-get update -q
   # bash and git are for the tests (PTY tests need Bash; the router tests expect common
-  # commands such as git on PATH); dpkg-dev and file are what CPack's dpkg-shlibdeps needs.
+  # commands such as git on PATH); dpkg-dev and file are what CPack's dpkg-shlibdeps needs;
+  # python3-cryptography is a runtime dependency (remote access, Relay Free) whose tests run here.
   $sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build \
-    python3 dpkg-dev file bash git ca-certificates "${deps[@]}"
+    python3 python3-cryptography dpkg-dev file bash git ca-certificates "${deps[@]}"
 fi
 
 build=$(mktemp -d)

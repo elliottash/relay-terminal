@@ -54,11 +54,11 @@
             the agent, and Relay shows you which before you press Enter. It works the moment it opens on an
             included allowance, and runs on your own API keys when you want them. No account, no telemetry.</p>
           <div class="cta">
-            <a class="button primary" href="#install">Build from source</a>
+            <a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/latest">Download the beta</a>
             <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
           </div>
-          <p class="cta-note">Packaged builds (<code>.deb</code>, AUR) exist but are not published yet, so
-            today it is a source build. The agent runs commands as your user without asking each time —
+          <p class="cta-note">A <code>.deb</code> for Ubuntu 24.04, Ubuntu 26.04 and Debian 13, or a source build.
+            The agent runs commands as your user without asking each time —
             <a href="#privacy">read this first</a>.</p>
         </div>
 
@@ -246,17 +246,25 @@
     <section id="install" aria-labelledby="install-title">
       <div class="wrap">
         <h2 id="install-title">Install</h2>
-        <p class="note" role="note"><strong>No packaged build yet.</strong> The beta <code>.deb</code>s and AUR
-          packages are prepared but not published, so there is nothing to download from
-          <a href="https://github.com/elliottash/relay-terminal/releases">Releases</a> today. Build from source
-          with the recipes below; this section will point at the beta build as soon as it is out.</p>
+        <p class="note" role="note"><strong>Beta.</strong> Packages are built and tested by CI for every release and
+          published on <a href="https://github.com/elliottash/relay-terminal/releases/latest">GitHub Releases</a>,
+          with <code>SHA256SUMS</code> beside them. Linux only for now; the AUR packages are prepared but
+          not yet published.</p>
 
         <div class="grid install">
           <article>
-            <h3>Ubuntu 24.04 LTS</h3>
+            <h3>Packaged: Ubuntu 24.04, 26.04, Debian 13</h3>
+            <p>Pick the <code>.deb</code> for your distribution and architecture (amd64 or arm64), then:</p>
+            <pre><code>sudo apt install ./relay_*_ubuntu24.04_amd64.deb
+relay --workspace ~/project</code></pre>
+            <p>Open it, ask the agent something, and it answers: the included <a href="free.html">Relay Free</a>
+              allowance needs no key.</p>
+          </article>
+          <article>
+            <h3>From source on Ubuntu 24.04</h3>
             <p>Qt and Python. The two optional viewers can be left out.</p>
             <pre><code>sudo apt install build-essential cmake ninja-build python3 \
-  libsecret-tools qtbase5-dev
+  python3-cryptography libsecret-tools qtbase5-dev
 # optional: file-preview highlighting and PDF preview
 sudo apt install libkf5syntaxhighlighting-dev qtpdf5-dev</code></pre>
           </article>
@@ -271,7 +279,8 @@ cmake --install build      # optional, installs to ~/.local</code></pre>
           </article>
           <article>
             <h3>What it needs</h3>
-            <p>CMake 3.22+, a C++17 compiler, Qt 5, Python 3.10+ and Bash. KDE Frameworks is not required:
+            <p>CMake 3.22+, a C++17 compiler, Qt 5 or Qt 6, Python 3.10+ with <code>cryptography</code>, and Bash.
+              KDE Frameworks is not required:
               Relay's terminal is its own. Syntax highlighting and PDF preview are optional.</p>
           </article>
           <article>
@@ -283,7 +292,8 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
           </article>
           <article>
             <h3>Keys</h3>
-            <p>Add a provider key in Options › Models › API keys… (Ctrl+,). Keys go to the desktop keyring
+            <p>None needed to start: a fresh install runs on <a href="free.html">Relay Free</a>. For your own
+              provider, add a key in Options › Models › API keys… (Ctrl+,). Keys go to the desktop keyring
               through <code>secret-tool</code> — install <code>libsecret-tools</code> on Debian/Ubuntu or
               <code>libsecret</code> on Arch — or come from an environment variable such as
               <code>RELAY_OPENROUTER_API_KEY</code>.</p>

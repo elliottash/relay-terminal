@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build \
-            python3 bash qtbase5-dev libkf5syntaxhighlighting-dev qtpdf5-dev \
+            python3 python3-cryptography bash qtbase5-dev libkf5syntaxhighlighting-dev qtpdf5-dev \
             appstream desktop-file-utils
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRELAY_QT_MAJOR=5 -DBUILD_TESTING=ON
