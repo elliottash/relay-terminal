@@ -22,7 +22,7 @@ from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all 
 
 **Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
 `ctest --test-dir build` **29/29**, both clean. Neither is current: `python3 -m unittest discover
--s tests` **collects 3,052 cases in 99 modules** as of 2026-09-19 (how many pass is what the command
+-s tests` **collects 3,350 cases in 103 modules** as of 2026-09-19 (how many pass is what the command
 reports, and it has not been re-run here). `ctest` registers **56** tests, not 29
 (`grep -c add_test CMakeLists.txt engine/CMakeLists.txt`) — `guestbridge`, `projectinit`,
 `striplayout`, `pulsepaint`, `panestatus`, `boardworkspace`, `diffview` and `sharing` among
@@ -58,7 +58,7 @@ Backend tests by module:
 | `tests/test_board_protocol.py` | 111 | Switchboard worker protocol (docs/AGENT-SESSIONS-PROTOCOL.md section 17) and the `board_*` tools' wiring into the agent |
 | `tests/test_board_tools.py` | 125 | Switchboard agent tools: the six `board_*` tools, their refusals and their guardrails |
 | `tests/test_configure_provider.py` | 15 | How `configure` / `set_model` turn a request into a provider, and what a refused key reads like |
-| `tests/test_conv_index.py` | 89 | Conversation index and the conversation-list protocol commands (protocol section 14) |
+| `tests/test_conv_index.py` | 90 | Conversation index and the conversation-list protocol commands (protocol section 14) |
 | `tests/test_cpace.py` | 15 | CPACE-X25519-SHA512 (remote/cpace.py and app/cpace.js), card #97EG |
 | `tests/test_failover.py` | 28 | Failover (card #G9VE): a turn whose provider keeps failing continues on another one |
 | `tests/test_forge_github.py` | 40 | The GitHub provider: REST shape, pagination, conditional requests, rate limits, credentials |
@@ -67,12 +67,12 @@ Backend tests by module:
 | `tests/test_guest.py` | 22 | Guest agent panes (protocol 26): detecting Claude Code and Codex, the `guest` block, the env injected at launch and the shim's own contract |
 | `tests/test_guest_bridge.py` | 117 | The Claude IDE bridge (protocol 26.5): the lock file, the JSON-RPC/tool layer, and the blocking openDiff — the last two frame by frame over a real WebSocket, with a hand-rolled client standing in for claude (no claude process is ever started) |
 | `tests/test_guest_codex.py` | 92 | Codex as a guest: the rollout tail, the `notify` hook and the retired settings writer kept as the launch's legacy cleanup (protocol 26.6, 26.9) |
-| `tests/test_guest_harness_claude.py` | 49 | Tier A: the `claude -p` stream-json harness adapter, replayed from recorded transcripts (protocol 29.2) |
-| `tests/test_guest_harness_codex.py` | 35 | Tier A: the `codex app-server` harness adapter, replayed from recorded transcripts (protocol 29.2) |
-| `tests/test_guest_harness_provider.py` | 31 | Tier A: the worker's `HarnessProvider`, guest presets, configure/set_model/resume and the event translation, against a scripted fake harness (protocol 29.3) |
+| `tests/test_guest_harness_claude.py` | 68 | Tier A: the `claude -p` stream-json harness adapter, replayed from recorded transcripts (protocol 29.2) |
+| `tests/test_guest_harness_codex.py` | 55 | Tier A: the `codex app-server` harness adapter, replayed from recorded transcripts (protocol 29.2) |
+| `tests/test_guest_harness_provider.py` | 48 | Tier A: the worker's `HarnessProvider`, guest presets, configure/set_model/resume and the event translation, against a scripted fake harness (protocol 29.3) |
 | `tests/test_guest_hook.py` | 38 | The Claude guest shim (GT7X, protocol 26.3/26.4) |
 | `tests/test_guest_install.py` | 21 | The hook and statusline entries (`relay_entries`) and the retired installer's remove path, kept as the launch's legacy cleanup (GT7X, protocol 26.4, 26.9) |
-| `tests/test_guest_launch.py` | 20 | Launch-time configuration for a guest picked in the model picker: the per-launch settings file, the claude/codex command lines, the bypass flags and the legacy cleanup (protocol 26.9) |
+| `tests/test_guest_launch.py` | 31 | Launch-time configuration for a guest picked in the model picker: the per-launch settings file, the claude/codex command lines, the bypass flags and the legacy cleanup (protocol 26.9) |
 | `tests/test_guest_sessions.py` | 104 | Guest sessions: the `claude` and `codex` conversation sources (protocol 26.7) |
 | `tests/test_guest_slash.py` | 5 | A guest's slash catalog: what the shim writes, what the composer popup is offered, and what a guest's own `/command` does |
 | `tests/test_hosted.py` | 22 | Relay Free's client half (protocol 13.9): identity, token cache, the hosted transport, the worker |
@@ -127,7 +127,7 @@ Backend tests by module:
 | `tests/test_router.py` | 43 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, that parsing and validity checks never execute input, and a 99-input table of commands that are also English words (sentence vs. command) with false-positive sweeps |
 | `tests/test_routing_thinking_skills.py` | 29 | Protocol section 11: routing assist, thinking events, turn records, skill refine/import. Fake providers and local git repositories only (no network) |
 | `tests/test_security.py` | 33 | The Security section's policy (card #3KB7): the command denylist, extra readable folders and extra secret patterns, as the worker enforces them |
-| `tests/test_session_protocol.py` | 25 | Presets/effort table, provider usage, instruction files, and the worker protocol handlers for sessions (docs/AGENT-SESSIONS-PROTOCOL.md). Fake providers and local servers only |
+| `tests/test_session_protocol.py` | 30 | Presets/effort table, provider usage, instruction files, and the worker protocol handlers for sessions (docs/AGENT-SESSIONS-PROTOCOL.md). Fake providers and local servers only |
 | `tests/test_session_threads.py` | 13 | Session and subagent-thread index, and the session info view's data (cards #Y63Z, #R6J0) |
 | `tests/test_sessions.py` | 35 | Agent sessions: model/effort switching, context and compaction, checkpoints, rewind, fork, sessions and recaps, plan mode, attachments. Fake providers only; no network |
 | `tests/test_shell.py` | 8 | Real Bash in a PTY: acknowledged command loading and exit status, cwd/env persistence, multiline Unicode, heredoc, native `read` and interrupt, alias reporting, existing prompt arrays, existing DEBUG trap falls back to native |
@@ -147,7 +147,7 @@ Backend tests by module:
 | `tests/test_web_meet_code.py` | 12 | Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG) |
 | `tests/test_web_theme.py` | 7 | app/pane-theme.css is generated from the desktop theme, and must not drift from it |
 | `tests/test_web_viewport.py` | 5 | The web client fits the part of the screen that is visible, on-screen keyboard or not |
-| **Total** | **2960** | 96 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
+| **Total** | **3350** | 103 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
 
 Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file stem without
 `_test`):
