@@ -269,9 +269,6 @@ QStringList badges(const QJsonObject &item, bool openNow, const QString &closedT
     if (item.value(QStringLiteral("pinned")).toInt() > 0) tags << QStringLiteral("pinned");
     if (openNow) tags << QStringLiteral("open");
     else if (!closedText.isEmpty()) tags << closedText;
-    // What the conversation's pane is costing the machine right now (issue #D03W): live state
-    // like "open", so it sits beside it, and it is simply absent when the pane is idle.
-    if (!usageTag.isEmpty()) tags << usageTag;
     if (item.value(QStringLiteral("unfinished")).toBool()) tags << QStringLiteral("unfinished");
     const int files = item.value(QStringLiteral("files_count")).toInt();
     if (files > 0)
@@ -281,6 +278,12 @@ QStringList badges(const QJsonObject &item, bool openNow, const QString &closedT
     const QString branch = item.value(QStringLiteral("branch")).toString();
     if (!branch.isEmpty() && branch != QLatin1String("main") && branch != QLatin1String("master"))
         tags << branch;
+    // What the conversation's pane is costing the machine right now (issue #D03W) goes last, and
+    // is simply absent when the pane is idle. It is the only tag that changes while the row sits
+    // there, and the delegate stops drawing tags at the row's edge: anywhere earlier and its
+    // changing width would push "unfinished" and "edits · N files" off a narrow pane, and make
+    // the badges that are still on the row jump about as it moved between 9% and 10%.
+    if (!usageTag.isEmpty()) tags << usageTag;
     return tags;
 }
 

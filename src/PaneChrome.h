@@ -699,7 +699,7 @@ private:
         QWidget *header = pane->headerWidget();
         if (!row || !header) return;
         m_glyph = new PaneStateGlyph(this);
-        m_usageChip = new PaneUsageChip;
+        m_usageChip = new PaneUsageChip(pane);
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
         m_phoneChip->setText(QStringLiteral("phone"));
@@ -806,32 +806,52 @@ private:
     // idle terminal looks exactly as it did before.
     class PaneUsageChip final : public QWidget {
     public:
-        explicit PaneUsageChip() {
+        // `owner` is the pane whose header this chip sits in. It is passed in because the chip's
+        // parent is that header widget, not the pane, so parentWidget() cannot find it — and
+        // without it the title never learns that the chip appeared and never re-elides.
+        explicit PaneUsageChip(Pane *owner) : m_owner(owner) {
             setObjectName(QStringLiteral("paneUsageChip"));
             setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             setAccessibleName(QStringLiteral("Pane CPU and memory"));
+            // Nothing is known until the first sample lands, and a chip that is merely empty
+            // still holds its ~58 px of header open. Start hidden, like the other chips.
+            hide();
         }
         void setSample(const relay::usage::Sample &sample) {
             m_sample = sample;
-            const bool show = sample.valid && relay::usage::worthShowing(sample) && enabled();
-            if (show == isVisible() && m_text == text()) { update(); return; }
-            m_text = text();
+            const bool show = relay::usage::worthShowing(sample) && relay::usage::metersEnabled();
+            const QString next = show ? text() : QString();
+            // isVisible() is recursive: every pane in a tab that is not the current one reports
+            // false, so comparing against it would let this whole body run for every busy pane in
+            // every background tab, 2.5 times a second. What this chip was last told is its own.
+            if (show == m_shown && next == m_text) {
+                // The ink warns at 60 % and 85 %, which a value can cross without the rounded
+                // text moving ("60%" is 59.6 as well as 60.4), so a bucket change still repaints.
+                if (m_inkBucket != inkBucket()) { m_inkBucket = inkBucket(); update(); }
+                return;
+            }
+            m_shown = show;
+            m_text = next;
+            m_inkBucket = inkBucket();
             setToolTip(QStringLiteral("This pane's share of this machine\n%1\n\n"
                                       "Counts the shell, the program it is running and this pane's agent "
                                       "worker, with their children. A remote pane measures the local ssh "
-                                      "client, not the far machine.")
-                           .arg(relay::usage::describe(sample)));
+                                      "client, not the far machine.\n%2")
+                           .arg(relay::usage::describe(sample), relay::usage::memoryNote()));
             setVisible(show);
             updateGeometry();
             update();
             // Appearing or leaving changes what the title has to elide around.
-            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+            if (m_owner) m_owner->updateHeader();
         }
         QSize sizeHint() const override {
-            if (!isVisible() && m_text.isEmpty()) return {0, 0};
+            if (m_text.isEmpty()) return {0, 0};
             const QFontMetrics metrics(font());
-            return {7 + kGlyph + 4 + metrics.horizontalAdvance(section(0)) + 10 + kGlyph + 4
-                        + metrics.horizontalAdvance(section(1)) + 7, 18};
+            int width = 7;
+            if (!section(0).isEmpty()) width += kGlyph + 4 + metrics.horizontalAdvance(section(0));
+            if (!section(1).isEmpty())
+                width += (section(0).isEmpty() ? 0 : 10) + kGlyph + 4 + metrics.horizontalAdvance(section(1));
+            return {width + 7, 18};
         }
     protected:
         void paintEvent(QPaintEvent *) override {
@@ -843,13 +863,17 @@ private:
             const QFontMetrics metrics(font());
             int x = 7;
             for (int i = 0; i < 2; ++i) {
+                // A half with nothing to say is left out entirely rather than drawn as "0%":
+                // an idle pane's agent worker used to hold the chip open reading "0% / 1%".
+                const QString label = section(i);
+                if (label.isEmpty()) continue;
+                if (x > 7) x += 10;
                 const double value = i == 0 ? m_sample.cpuPercent : m_sample.ramPercent;
                 const QColor ink = value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
                 p.setPen(QPen(ink, 1.2));
                 if (i == 0) paintDie(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
                 else paintModule(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
                 x += kGlyph + 4;
-                const QString label = section(i);
                 p.setPen(ink);
                 p.drawText(QRectF(x, 0, metrics.horizontalAdvance(label) + 2, height()),
                            Qt::AlignLeft | Qt::AlignVCenter, label);
@@ -881,19 +905,30 @@ private:
                 p.drawLine(QPointF(x, body.bottom()), QPointF(x, r.bottom() - 0.5));
             }
         }
-        static bool enabled() {
-            return QSettings().value(QStringLiteral("appearance/pane_usage"), true).toBool();
-        }
+        // Either half may be absent, so the text carries the separator either way: "12%/3%",
+        // "12%/" for CPU alone, "/3%" for memory alone.
         QString section(int i) const {
             return i == 0 ? m_text.section(QLatin1Char('/'), 0, 0) : m_text.section(QLatin1Char('/'), 1, 1);
         }
         QString text() const {
-            if (!m_sample.valid || !relay::usage::worthShowing(m_sample)) return {};
-            return relay::usage::formatPercent(m_sample.cpuPercent) + QLatin1Char('%') + QLatin1Char('/')
-                 + relay::usage::formatPercent(m_sample.ramPercent) + QLatin1Char('%');
+            QString out;
+            if (relay::usage::showsCpu(m_sample))
+                out = relay::usage::formatPercent(m_sample.cpuPercent) + QLatin1Char('%');
+            out += QLatin1Char('/');
+            if (relay::usage::showsMemory(m_sample))
+                out += relay::usage::formatPercent(m_sample.ramPercent) + QLatin1Char('%');
+            return out == QLatin1String("/") ? QString() : out;
         }
+        // Which colour band each half is in, as one comparable value.
+        int inkBucket() const {
+            const auto band = [](double v) { return v >= 85 ? 2 : v >= 60 ? 1 : 0; };
+            return band(m_sample.cpuPercent) * 3 + band(m_sample.ramPercent);
+        }
+        Pane *m_owner = nullptr;
         relay::usage::Sample m_sample;
-        QString m_text;   // "12%/3%"; empty when the chip is hidden
+        QString m_text;      // "12%/3%"; empty when the chip is hidden
+        bool m_shown = false; // what this chip was last told, not the recursive isVisible()
+        int m_inkBucket = 0;
     };
 
     // The remote band behind a terminal's title row: the error hue, hatched, with a firm line under

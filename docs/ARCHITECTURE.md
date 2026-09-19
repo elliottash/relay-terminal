@@ -297,13 +297,28 @@ same interval. The rules and the arithmetic are `src/PaneUsage.{h,cpp}` (`relay-
 `relay::usage`, tests `tests/paneusage_test.cpp`): `/proc/<pid>/stat` and `/proc/<pid>/statm` are
 summed over a walk of `/proc/<pid>/task/<pid>/children` (capped at 256 processes), CPU ticks over
 the interval become a percentage *of the machine* (100 = every core), resident pages a percentage
-of physical memory. It shows three ways: a chip in the pane's header row right of the state's word
+of physical memory. Each process contributes `cutime`/`cstime` as well as `utime`/`stime`, so the
+children it has already reaped still count — without that, a build whose compilers each live for
+less than one poll interval reads as an idle pane. A poll that reads nothing drops the baseline
+rather than zeroing it, so the reading after a blind tick is a fresh baseline and not a spurious
+100 %. Memory is a sum of resident sets, which counts pages two processes share more than once;
+the tooltips say so.
+
+It shows three ways: a chip in the pane's header row right of the state's word
 (`PaneChrome::PaneUsageChip`, a die and a memory-module glyph, muted ink that only warns at
-60 %/85 %), a `· 12% / 3%` suffix on the tab label (tooltip spells out which is which, summed over
-the tab's panes), and a `cpu 12% · mem 3%` tag on the conversation's row in the Sessions pane
-(`SessionManager::setLiveUsage`, fed by the poll like `setOpenSessions`). A pane using nothing
-shows nothing anywhere: an idle terminal looks exactly as it did before, and the meters are local —
-a remote pane measures the ssh client, not the far machine. `appearance/pane_usage` turns them off.
+60 %/85 %), a `· 12% / 3%` suffix on the tab label (tooltip spells out which is which, summed
+over the tab's panes), and a `cpu 12% · mem 3%` tag on the conversation's row in the Sessions
+pane (`SessionManager::setLiveUsage`, fed by the poll like `setOpenSessions`; it is the row's last
+badge, since it is the only one whose width moves while the row sits there). A half with nothing
+to say is left out rather than drawn as "0%", and a lone number is named (`· 20% cpu`). CPU
+speaks from half a percent; memory has to clear 256 MiB *and* half a percent, so an agent worker
+idling on 60 MB leaves the chip off a small machine as well as a large one. A pane using nothing
+shows nothing anywhere: an idle terminal looks exactly as it did before, and the meters are local
+— a remote pane measures the ssh client, not the far machine. What a tab label shows is held
+still until the reading moves three points or a second has passed
+(`relay::usage::labelShouldFollow`), and only the tab whose text moved is relabelled.
+`appearance/pane_usage` turns off all four — chip, tab suffix, tab tooltip line and Sessions tag
+— through `relay::usage::metersEnabled()`, which is the one place the key is read.
 
 **Remote sessions** are a safety signal and ignore the colour setting. `Pane::remoteCommandLine()`
 is the foreground process group's command line while it is `ssh`, `mosh`, `mosh-client`, `telnet`

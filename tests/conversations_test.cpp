@@ -441,11 +441,20 @@ private slots:
         QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("main")}}, false, QString()), QStringList());
         QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("master")}}, false, QString()), QStringList());
         QCOMPARE(badges({}, false, QString()), QStringList());
-        // Live usage (issue #D03W) sits with "open", which it belongs to; an empty tag is absent.
+        // Live usage (issue #D03W) comes last, after every badge whose text is fixed: the
+        // delegate stops drawing at the row's edge, so a varying tag in the middle would push
+        // "unfinished" and "edits · 3 files" off a narrow Sessions pane and move them about as
+        // the number changed. An empty tag is absent.
         QCOMPARE(badges(item, true, QString(), QStringLiteral("cpu 12% · mem 3%")),
                  QStringList({QStringLiteral("pinned"), QStringLiteral("open"),
-                              QStringLiteral("cpu 12% · mem 3%"), QStringLiteral("unfinished"),
-                              QStringLiteral("edits · 3 files"), QStringLiteral("feature/x")}));
+                              QStringLiteral("unfinished"), QStringLiteral("edits · 3 files"),
+                              QStringLiteral("feature/x"), QStringLiteral("cpu 12% · mem 3%")}));
+        QCOMPARE(badges(item, true, QString(), QStringLiteral("cpu 12% · mem 3%")).last(),
+                 QStringLiteral("cpu 12% · mem 3%"));
+        // The badges before it are exactly the ones it would have displaced.
+        QStringList withoutTag = badges(item, true, QString(), QStringLiteral("cpu 12% · mem 3%"));
+        withoutTag.removeLast();
+        QCOMPARE(withoutTag, badges(item, true, QString(), QString()));
         QCOMPARE(badges(item, true, QString(), QString()).contains(QStringLiteral("cpu 12% · mem 3%")), false);
     }
 

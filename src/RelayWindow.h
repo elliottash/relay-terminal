@@ -1605,7 +1605,8 @@ private:
             relay::SettingRow usage = toggleRow(QStringLiteral("appearance/pane_usage"),
                                                QStringLiteral("Pane CPU and memory"),
                                                QStringLiteral("A small CPU % and memory % beside each pane's title, "
-                                                              "and in the tab label, while the pane is using the machine"),
+                                                              "in the tab label and tooltip, and on the conversation's row "
+                                                              "in Sessions, while the pane is using the machine"),
                                                true, [this](bool) { refreshPaneStatus(); });
             usage.aliases = QStringLiteral("cpu memory ram usage load percent meter resource");
             appearance.rows << usage;
@@ -4039,29 +4040,10 @@ private:
         scheduleTabShareSync();
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
-            const auto leaves = leavesIn(page);
-            QWidget *leaf = m_lastActive.value(page);
-            if (!leaf && !leaves.isEmpty()) leaf = leaves.first();
             const QStringList titles = paneTitlesIn(page);
             refreshTabJudgement(page, titles);
-            QString title = tabLabelFor(page, titles);
-            if (leaves.size() > 1) title += QStringLiteral("  ·  %1").arg(leaves.size());
-            title += tabUsageSuffix(page);
-            const QFontMetrics metrics(m_tabs->tabBar()->font());
-            m_tabs->setTabText(i, metrics.elidedText(title, Qt::ElideRight, 260));
-            // The suffix is two bare numbers; the tooltip says which is which (issue #D03W).
-            const QString usageLine = [page, this] {
-                QList<relay::usage::Sample> samples;
-                for (QWidget *leaf : leavesIn(page))
-                    if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
-                const relay::usage::Sample combined = relay::usage::combined(samples);
-                return combined.valid ? QStringLiteral("CPU / memory of this tab's panes: ")
-                                          + relay::usage::describe(combined) : QString();
-            }();
-            m_tabs->setTabToolTip(i, (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
-                                     + (leaf ? leafCwd(leaf) : QString())
-                                     + (usageLine.isEmpty() ? QString() : QStringLiteral("\n\n") + usageLine)
-                                     + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab"));
+            m_tabs->setTabText(i, tabLabelText(page, titles));
+            m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
         }
         syncChrome();
         // Which tool panes this tab holds decides which title-bar buttons are lit, and this runs
@@ -4786,7 +4768,9 @@ private:
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
         QSet<QWidget *> pages;
-        bool relabel = false;
+        // One read of `appearance/pane_usage` for the whole poll: the chip, the tab label, the
+        // tab tooltip and the Sessions row all answer to it (issue #D03W).
+        const bool meters = relay::usage::metersEnabled();
         QHash<QString, QString> liveUsage;   // session id → tag, for the Sessions pane (#D03W)
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
@@ -4807,7 +4791,7 @@ private:
                 // The pane's resource meter (issue #D03W) is sampled here so every pane is
                 // measured over the same interval this poll keeps.
                 pane->refreshUsage();
-                if (chrome) chrome->setUsage(pane->usageSample());
+                chrome->setUsage(pane->usageSample());
                 const ps::Facts facts = pane->statusFacts();
                 const bool watched = focused && i == m_tabs->currentIndex() && leaf == m_activeLeaf;
                 if (!watched) chrome->watchedSince = 0;
@@ -4825,18 +4809,29 @@ private:
                 states << state;
                 usage << pane->usageSample();
                 const QString sessionId = pane->sessionId();
-                if (!sessionId.isEmpty()) {
+                if (meters && !sessionId.isEmpty()) {
                     const QString tag = relay::usage::liveTag(pane->usageSample());
                     if (!tag.isEmpty()) liveUsage.insert(sessionId, tag);
                 }
                 remote = remote || !remoteLine.isEmpty();
             }
-            // The tab label carries the tab's combined usage (issue #D03W); updateTitles()
-            // reads the panes' samples live, so this only asks for a relabel when the text moves.
-            const QString usageText = relay::usage::tabSuffix(relay::usage::combined(usage));
-            if (m_tabUsageKey.value(page) != usageText) {
+            // The tab label carries the tab's combined usage (issue #D03W). Two things keep
+            // this cheap: the displayed percent is held still unless it moved by a few points
+            // or a second has passed (relay::usage::labelShouldFollow — at 2.5 Hz a wobbling
+            // number is a distraction, and the label's width wobbles with it), and only the one
+            // tab whose text moved is relabelled. It used to call updateTitles(), which re-elides
+            // every tab, rewrites every tooltip and runs syncChrome and the share sync.
+            const relay::usage::Sample summed = relay::usage::combined(usage);
+            const QString usageText = meters ? relay::usage::tabSuffix(summed) : QString();
+            if (m_tabUsageKey.value(page) != usageText
+                && relay::usage::labelShouldFollow(m_tabUsageShown.value(page), summed,
+                                                   m_tabUsageAt.value(page), now)) {
                 m_tabUsageKey.insert(page, usageText);
-                relabel = true;
+                m_tabUsageShown.insert(page, summed);
+                m_tabUsageAt.insert(page, now);
+                const QStringList titles = paneTitlesIn(page);
+                m_tabs->setTabText(i, tabLabelText(page, titles));
+                m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
             }
             const ps::State top = ps::mostUrgent(states);
             const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6").arg(terminal).arg(int(top)).arg(remote)
@@ -4849,6 +4844,10 @@ private:
             it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
         for (auto it = m_tabUsageKey.begin(); it != m_tabUsageKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabUsageKey.erase(it);
+        for (auto it = m_tabUsageShown.begin(); it != m_tabUsageShown.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageShown.erase(it);
+        for (auto it = m_tabUsageAt.begin(); it != m_tabUsageAt.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageAt.erase(it);
         // The session manager shows the same reading as a tag on each open conversation's row
         // (issue #D03W). It never looks at a window itself; like setOpenSessions, this feeds it.
         if (!liveUsage.isEmpty() || m_fedLiveUsage)
@@ -4859,16 +4858,54 @@ private:
                         if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()))
                             manager->setLiveUsage(liveUsage);
         m_fedLiveUsage = !liveUsage.isEmpty();
-        if (relabel) updateTitles();
     }
 
-    // The tab's own share of the machine: every terminal pane in it summed (issue #D03W). Same
-    // shape as tabUsageSuffix() so the poll's key and the label can never disagree.
-    QString tabUsageSuffix(QWidget *page) const {
+    // The tab's own share of the machine: every terminal pane in it summed (issue #D03W).
+    relay::usage::Sample tabUsageSample(QWidget *page) const {
         QList<relay::usage::Sample> samples;
         for (QWidget *leaf : leavesIn(page))
             if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
-        return relay::usage::tabSuffix(relay::usage::combined(samples));
+        return relay::usage::combined(samples);
+    }
+
+    // The suffix the tab label carries, or nothing while the meters are switched off — the same
+    // setting the chip obeys, read in the one place the poll reads it.
+    QString tabUsageSuffix(QWidget *page) const {
+        if (!relay::usage::metersEnabled()) return {};
+        return relay::usage::tabSuffix(tabUsageSample(page));
+    }
+
+    // A tab's tooltip: the pane titles, where the tab's last active pane is, and the usage line
+    // that says which of the label's two bare numbers is which (issue #D03W) and what the memory
+    // figure is a sum of. Off with the same setting as the suffix.
+    QString tabTooltipText(QWidget *page, const QStringList &titles) const {
+        const auto leaves = leavesIn(page);
+        QWidget *leaf = m_lastActive.value(page);
+        if (!leaf && !leaves.isEmpty()) leaf = leaves.first();
+        QString usageLine;
+        if (relay::usage::metersEnabled()) {
+            const relay::usage::Sample summed = tabUsageSample(page);
+            if (summed.valid)
+                usageLine = QStringLiteral("CPU / memory of this tab's panes: ")
+                            + relay::usage::describe(summed) + QStringLiteral("\n")
+                            + relay::usage::memoryNote();
+        }
+        return (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
+               + (leaf ? leafCwd(leaf) : QString())
+               + (usageLine.isEmpty() ? QString() : QStringLiteral("\n\n") + usageLine)
+               + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab");
+    }
+
+    // A tab's label, elided as the bar shows it: the pane titles, how many panes, and the usage
+    // suffix. updateTitles() builds every tab's from here, and the status poll rebuilds the one
+    // tab whose usage moved without touching the others.
+    QString tabLabelText(QWidget *page, const QStringList &titles) const {
+        QString title = tabLabelFor(page, titles);
+        if (const int panes = int(leavesIn(page).size()); panes > 1)
+            title += QStringLiteral("  ·  %1").arg(panes);
+        title += tabUsageSuffix(page);
+        const QFontMetrics metrics(m_tabs->tabBar()->font());
+        return metrics.elidedText(title, Qt::ElideRight, 260);
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -5403,7 +5440,9 @@ private:
     QTimer m_statusTimer;
     QHash<QWidget *, QString> m_tabIconKey;
     QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
-    bool m_fedLiveUsage = false;               // ... and whether any session tag was pushed last poll
+    QHash<QWidget *, relay::usage::Sample> m_tabUsageShown;  // ... the reading behind that text
+    QHash<QWidget *, qint64> m_tabUsageAt;     // ... and when it last moved, for the hysteresis
+    bool m_fedLiveUsage = false;               // whether any session tag was pushed last poll
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;
     QPointer<QToolButton> m_newTabButton;

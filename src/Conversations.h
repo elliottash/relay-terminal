@@ -69,9 +69,11 @@ QString removeOperator(const QString &query, const QJsonObject &op);
 // "closed 5 min ago" for a recently-closed stamp (milliseconds since the epoch); empty when the
 // stamp is not set. Mirrors relay::closed::age, which this library cannot link against.
 QString closedAgo(qint64 closedAtMs, qint64 nowMs);
-// The short text tags in a row's title cell: pinned, open, closed …, cpu / mem when its pane is
-// busy, unfinished, edits · N files, and the branch when it is not the trunk. `openNow` is
-// "a pane already has this conversation"; `usageTag` is that pane's live reading (issue #D03W).
+// The short text tags in a row's title cell: pinned, open, closed …, unfinished, edits · N files,
+// the branch when it is not the trunk, and last of all cpu / mem when the pane is busy. `openNow`
+// is "a pane already has this conversation"; `usageTag` is that pane's live reading (issue
+// #D03W), and it comes last because it is the one tag whose width changes while the row is on
+// screen — earlier, it would push the fixed badges off a narrow pane and jog the rest sideways.
 QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText,
                    const QString &usageTag = QString());
 // A path elided in the middle ("src/…/Conversations.cpp"); other text is elided at the end.
