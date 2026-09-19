@@ -1,0 +1,65 @@
+$ grep -rnoiE "[^A-Za-z_]todo[^A-Za-z_]?" src/ backend/ --include=*.h --include=*.cpp --include=*.py   # what a person could read
+
+# Every "todo" left in src/ and backend/ is an identifier, a wire name, a comment or a docstring.
+# The user-visible strings all say "task" now. The survey below lists every string literal that
+# still contains "todo", with what it is:
+
+backend/relay_core/agent.py:2003:" Add it to your todos if it is a new ask."
+backend/relay_core/agent.py:2005:"changes it.{todo} Say briefly how you handled it in your final answer.]\n"
+backend/relay_core/agent.py:2153:"UPDATE TODOS\n\n"
+backend/relay_core/agent.py:2402:": self.todos.next_id, "
+backend/relay_core/agent.py:470:"Current ledger and todos, e.g. after a reset, load, resume or rewind."
+backend/relay_core/agent.py:477:"The todo a new subagent may take (a copy), or ValueError with a model-readable reason."
+backend/relay_core/agent.py:488:"Your task is todo {todo['
+backend/relay_core/agent.py:488:'s task list: {todo['
+backend/relay_core/agent.py:490:"Note on it so far: {todo['
+backend/relay_core/agent.py:495:"\nThe user handed this todo to you from Relay'
+backend/relay_core/agent.py:497:".join(todo["
+backend/relay_core/agent.py:497:"].split())[:60] or todo["
+backend/relay_core/agent.py:502:"A subagent linked to a todo started ("
+backend/relay_core/context.py:292:"## Todos"
+backend/relay_core/context.py:294:") for t in todos] + ["
+backend/relay_core/context.py:46:"Understood. These requests, todos and state are authoritative; I will not redo handled requests."
+backend/relay_core/conv_index.py:1484:": str(todo.get("
+backend/relay_core/conv_index.py:846:" todos, indexed_version)"
+backend/relay_core/guest_harness.py:185:"TodoWrite"
+backend/relay_core/project_probe.py:62:"TODO.md"
+backend/relay_core/requests.py:149:"Derive request statuses from the todos linked to them."
+backend/relay_core/requests.py:285:"] for t in todos if item["
+backend/relay_core/requests.py:330:'s todos ---\n"
+backend/relay_core/session_protocol.py:543:"], todos=claim["
+backend/relay_core/session_protocol.py:583:"], todos=inputs["
+backend/relay_core/session_protocol.py:623:"], todos=claim["
+backend/relay_core/subagents.py:401:"Optional: the todo (T<n>) this subagent works on. "
+backend/relay_core/subagents.py:402:"Relay keeps that todo'
+backend/relay_core/subagents.py:531:'s todo list that a linked subagent started or ended. Never fails the subagent."
+backend/relay_core/subagents.py:680:"{CONTEXT_OPEN}\nBackground agent {sub.id} ({sub.type}) finished.{_todo_line(sub)}\n{_labelled(sub)}"
+backend/relay_core/subagents.py:688:"user briefly what it found.{_todo_line(sub)}\n{_labelled(sub)}\n{CONTEXT_CLOSE}"
+backend/relay_core/titles.py:255:"Open todos"
+backend/relay_core/titles.py:273:"``{messages, files, todos}`` for one saved session file (sessions.SessionStore.load)."
+backend/relay_core/titles.py:277:") in OPEN_TODO and t.get("
+backend/relay_core/todos.py:140:"The todo a subagent may take, or ValueError with a model-readable reason."
+backend/relay_core/todos.py:164:"A subagent starts (or resumes) work on a todo: link it and mark it in_progress."
+backend/relay_core/todos.py:174:'s run ended: its todo takes the outcome. False when no todo follows it (any more)."
+backend/relay_core/todos.py:194:"Rewind to an earlier list. Subagents still running keep the todos they are linked to."
+backend/relay_core/todos.py:39:"Replace your todo list for this conversation (send the complete list every time). Use it when a "
+backend/relay_core/todos.py:40:"message contains more than one ask or a message arrives while you work. Link each todo to the "
+backend/relay_core/todos.py:41:"request ids (R<n>) it serves. Mark every todo you are working on in_progress: several may be in "
+backend/relay_core/todos.py:42:"progress at once, yours and those you hand to subagents. A todo a subagent is working on (it shows a "
+backend/relay_core/todos.py:47:"Existing todo id (T<n>) to keep; omit for a new todo."
+backend/relay_core/todos.py:50:"]. Omit to link a new todo to the current turn'
+backend/relay_core/todos.py:58:"): Relay then keeps that todo'
+backend/relay_core/todos.py:58:'s request_ids instead of adding a todo; add a todo only for work that is genuinely new. Mark the todos you are working on in_progress (several may be in progress at once), mark each completed as soon as it is actually done, and keep going until every todo of the current turn'
+src/Conversations.cpp:1228:")).toDouble() < b.value(QStringLiteral("
+src/Conversations.cpp:369:")).toDouble() > b.value(QStringLiteral("
+src/Pane.h:5936:")).toDouble())).toString(QStringLiteral("
+src/RelayWindow.h:2600:"board issues cards todo trello kanban scratchpad tickets tracker"
+src/RelayWindow.h:2790:"todos todo requests ledger asks open items checklist unaddressed progress"
+src/RelayWindow.h:2793:"unaddressed missed requests check todos"
+src/RelayWindow.h:2814:"board issues cards todo trello kanban scratchpad tracker"
+src/RequestsPanel.h:4:'s todos for the current task list, with a folded "
+src/SessionInfo.cpp:142:")).toDouble(), 0, '
+src/SessionInfo.cpp:68:")).toDouble(), 0, '
+src/SubagentsPanel.cpp:165:"); row.todoId = str(event, "
+src/SubagentsPanel.cpp:250:"); row.todoId = str(item, "
+src/SubagentsPanel.h:22:'s todo this subagent works on ("

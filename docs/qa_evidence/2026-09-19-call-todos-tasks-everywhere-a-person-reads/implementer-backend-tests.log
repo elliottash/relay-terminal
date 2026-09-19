@@ -1,0 +1,6 @@
+$ PYTHONPATH=backend:tests python3 -m unittest tests.test_tool_labels tests.test_todo_subagents tests.test_requests tests.test_agent tests.test_keybindings
+...............................................................................................................................................................
+----------------------------------------------------------------------
+Ran 159 tests in 8.262s
+
+OK
