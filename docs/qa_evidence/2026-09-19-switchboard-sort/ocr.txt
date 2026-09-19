@@ -1,0 +1,7 @@
+01 board open; button label: Sort: Manual,
+02 manual order:      Bravo Charlie Alpha 
+03 menu has:          Sort: Manual.|Manual (drag order)|Newest first|Oldest first|Recently updated|
+04 newest order:      Charlie Bravo Alpha 
+04 button label:      Sort: Newest first,
+06 updated order:     Alpha Bravo Charlie 
+07 notice says:       The list is sorted by recently updated, so reordering is off. Sort by Manual to
