@@ -257,45 +257,5 @@ class InvalidSettings(unittest.TestCase):
                 self.assertEqual(value, read(path))
 
 
-class CommandLine(unittest.TestCase):
-    def run_cli(self, *args):
-        run = subprocess.run([sys.executable, "-m", "relay_core.guest_install", *args],
-                             text=True, capture_output=True, env={**os.environ, "PYTHONPATH": BACKEND})
-        return run.returncode, json.loads(run.stdout), run.stderr
-
-    def test_project_on_status_off(self):
-        with tempfile.TemporaryDirectory() as root:
-            code, out, err = self.run_cli("--project", root, "--on")
-            self.assertEqual((0, True, ""), (code, out["ok"], err))
-            code, out, err = self.run_cli("--project", root, "--status")
-            self.assertEqual((0, True, ""), (code, out["installed"], err))
-            code, out, err = self.run_cli("--project", root, "--off")
-            self.assertEqual((0, True, ""), (code, out["changed"], err))
-
-    def test_global_needs_the_explicit_second_opt_in(self):
-        with tempfile.TemporaryDirectory() as home:
-            code, out, err = self.run_cli("--global", "--on", "--home", home)
-            self.assertEqual((2, False, ""), (code, out["ok"], err))
-            self.assertFalse((Path(home) / ".claude" / "settings.json").exists())
-
-    def test_global_with_the_opt_in(self):
-        with tempfile.TemporaryDirectory() as home:
-            code, out, err = self.run_cli("--global", "--on", "--global-opt-in", "--home", home)
-            self.assertEqual((0, True, ""), (code, out["ok"], err))
-            self.assertIn("hooks", read(Path(home) / ".claude" / "settings.json"))
-            self.assertFalse((Path(home) / ".claude" / "settings.local.json").exists())
-
-    def test_global_status_needs_no_opt_in(self):
-        """Reading is not writing: Options › Guests draws the global row from the file, and a
-        read it could not make would leave the row asserting a stored choice instead."""
-        with tempfile.TemporaryDirectory() as home:
-            code, out, err = self.run_cli("--global", "--status", "--home", home)
-            self.assertEqual((0, True, False, ""), (code, out["ok"], out["installed"], err))
-            self.run_cli("--global", "--on", "--global-opt-in", "--home", home)
-            code, out, err = self.run_cli("--global", "--status", "--home", home)
-            self.assertEqual((0, True, ""), (code, out["installed"], err))
-            self.assertTrue(out["path"].endswith("/.claude/settings.json"))
-
-
 if __name__ == "__main__":
     unittest.main()

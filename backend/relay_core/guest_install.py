@@ -1,27 +1,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The marked settings installer for guest agents (GT7X, protocol 26.3).
+"""Relay's Claude Code settings entries, and the retired installer that once wrote them (GT7X).
 
-Guest integration is **per project and off by default**. Options › Guests is the front end (the
-"Claude Code in this project" row, and the global file behind its own second toggle); it calls
-this module's own command line, which is also how a script or a test does it:
+**Retired as a setup path, 2026-09-19** (owner: "no per-project setup"). Until then, Options ›
+Guests wrote these entries into a project's `.claude/settings.local.json` — and, behind a second
+opt-in, into `~/.claude/settings.json` — through this module's command line. That command line
+is gone, and so are the Options rows. A claude picked in the model picker now gets the same
+entries from a per-launch settings file handed over with `claude --settings <file>`
+(`relay_core.guest_launch`, protocol 26.9), which is read by that one claude only and touches
+nothing in the project.
 
-    python -m relay_core.guest_install --project <dir> --on|--off|--status [--global --global-opt-in]
+What stays here, and why:
 
-Turning it on writes Relay's hook and statusline commands into that project's
-`.claude/settings.local.json` *additively*. **Local, never `settings.json`**: that file is the
-shared, source-controlled one, and a commit of it would hand every teammate a hook command whose
-`$RELAY_BACKEND_DIR` is empty on their machine. `settings.local.json` is the per-developer file
-Claude Code keeps out of git, which is what a Relay pane's wiring is. Every entry already in the
-file is preserved, and Relay's own entries carry a marker — the `--relay-guest` token on the
-command — so turning it off removes exactly those and nothing else. The user's global
-`~/.claude/settings.json` is touched only by an explicit second opt-in.
+* `relay_entries()` is the one place the hook and statusline entries are spelled. The launch
+  file is built from it, so the shim's contract (26.4 — the guard, the absolute path, the
+  `--relay-guest` marker, the timeouts) has one source.
+* `remove()` / `is_installed()` / `status()` are the migration: a settings file still holding
+  the stopgap's marked entries would run every hook twice beside the launch file, so every launch
+  removes exactly the marked entries first (`guest_launch.clean_legacy`).
+* `install()` is kept as the tested inverse of `remove()` — the round-trip tests are what hold
+  `remove()` to "exactly the marked entries, nothing else" — and has no caller in Relay.
 
 The file is re-serialised, not patched: the JSON is read, changed and written back with the
 indentation it already used (tabs or n spaces, detected from the file) and its original mode. So
 "everything else is preserved" means every *entry*, with its value and its order — not the file's
 bytes. Comments, which JSON does not have and Claude Code does not read, would not survive.
 
-What is installed, and why (protocol 26.4):
+What the entries are, and why (protocol 26.4):
 
 * `hooks.PermissionRequest` — the hook Claude Code fires only when it is actually about to ask
   the user for permission. The shim forwards it and holds it open while the pane asks; nothing is
@@ -46,12 +50,10 @@ permission question a little above the shim's own wait, the rest a few seconds.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import os
 from pathlib import Path
 import re
-import sys
 import tempfile
 
 MARKER = "--relay-guest"          # the token that marks a Relay-installed entry, in the command
@@ -75,6 +77,17 @@ def hook_command(event: str) -> str:
     """The command one hook entry runs. Not a `.format` template: the command itself holds
     `${RELAY_PYTHON:-python3}`, and braces in a format string are not braces."""
     return GUARD + "; " + RUN + " " + event + " " + MARKER
+
+
+def relay_entries() -> dict:
+    """Relay's entries as one settings object: one matcher group per hook event, each carrying its
+    explicit timeout, plus the statusline command. This is what a launch-time settings file holds
+    (`guest_launch`) and what `install()` merges; a fresh dict every call, so a caller may drop
+    `statusLine` without touching the next caller's."""
+    return {"hooks": {event: [{"hooks": [{"type": "command", "command": hook_command(event),
+                                          "timeout": HOOK_TIMEOUTS.get(event, HOOK_TIMEOUT_DEFAULT)}]}]
+                      for event in HOOK_EVENTS},
+            "statusLine": {"type": "command", "command": STATUSLINE_COMMAND}}
 
 
 class SettingsError(Exception):
@@ -207,6 +220,7 @@ def install(path: Path) -> dict:
         hooks = {}
         settings["hooks"] = hooks
     added = []
+    ours = relay_entries()
     for event in HOOK_EVENTS:
         groups = hooks.get(event)
         if groups is None:
@@ -216,12 +230,11 @@ def install(path: Path) -> dict:
             raise SettingsError(f"{path}: \"hooks.{event}\" is not a list; Relay left it alone.")
         # Drop a marked group from an earlier install, then append the current command.
         hooks[event] = [group for group in groups if not _group_is_ours(group)]
-        hooks[event].append({"hooks": [{"type": "command", "command": hook_command(event),
-                                        "timeout": HOOK_TIMEOUTS.get(event, HOOK_TIMEOUT_DEFAULT)}]})
+        hooks[event].extend(ours["hooks"][event])
         added.append(f"hooks.{event}")
     statusline = settings.get("statusLine")
     if statusline is None or marked(statusline):
-        settings["statusLine"] = {"type": "command", "command": STATUSLINE_COMMAND}
+        settings["statusLine"] = ours["statusLine"]
         statusline_result = "installed"
         added.append("statusLine")
     else:
@@ -293,48 +306,3 @@ def status(path: Path) -> dict:
     events = sorted({event for event, _index in _marked_hooks(settings)})
     return {"path": str(path), "installed": bool(events) or marked(settings.get("statusLine")),
             "events": events, "statusline": marked(settings.get("statusLine")), "ok": True}
-
-
-# ----- the command line ---------------------------------------------------------------------
-
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Install or remove Relay's guest hooks (GT7X).")
-    target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--project",
-                        help="the project directory whose .claude/settings.local.json to touch")
-    target.add_argument("--global", dest="global_", action="store_true",
-                        help="the user's ~/.claude/settings.json; needs --global-opt-in")
-    action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--on", action="store_true", help="install the marked entries")
-    action.add_argument("--off", action="store_true", help="remove exactly the marked entries")
-    action.add_argument("--status", action="store_true", help="report what is installed")
-    parser.add_argument("--global-opt-in", action="store_true",
-                        help="the explicit second opt-in the global settings file requires")
-    parser.add_argument("--home", help="the home directory to use for --global (tests, alternate homes)")
-    args = parser.parse_args(argv)
-
-    # The opt-in gates *writing* into the user's own global settings, not reading it: a row that
-    # cannot ask the file what is in it has to draw from a stored choice, and then it says "on"
-    # for entries somebody removed by hand.
-    if args.global_ and not args.global_opt_in and not args.status:
-        print(json.dumps({"ok": False, "error": "The global settings file needs the explicit "
-                                                 "--global-opt-in; the project file does not."}))
-        return 2
-    path = global_settings_path(args.home) if args.global_ else project_settings_path(args.project)
-    try:
-        if args.on:
-            result = install(path)
-        elif args.off:
-            result = remove(path)
-        else:
-            result = status(path)
-    except SettingsError as error:
-        print(json.dumps({"ok": False, "path": str(path), "error": str(error)}))
-        return 1
-    print(json.dumps(result))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

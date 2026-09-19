@@ -8,17 +8,21 @@ sources only, never from scraping the screen:
   finishes and hands it a JSON payload *as one extra argv argument* (not on stdin, and with
   all three standard streams closed). Relay's entry points that payload at this module's own
   `notify` subcommand, which turns it into a `hook` event on the shared guest channel
-  (protocol 26.3). The entry lives in the user's global `~/.codex/config.toml`, so it fires in
-  every terminal — which is exactly why the channel's hard invariant matters: with no
-  `RELAY_GUEST_EVENT` in the environment this is a no-op that writes nowhere.
+  (protocol 26.3). Since 2026-09-19 the entry is a `-c notify=[…]` override on the command line
+  of a codex picked in the model picker (`guest_launch`, 26.9), so it exists for that one codex
+  only; the channel's hard invariant still holds — with no `RELAY_GUEST_EVENT` in the
+  environment this is a no-op that writes nowhere.
 * **The rollout transcript** — `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, one JSON object
   per line, appended while a turn runs. Tailing the active pane's newest rollout is how the
   pane gets `state` (busy, turn) and statusline-equivalent data (model, token counts) without
   an app-server daemon (protocol 26.6; the daemon stays Tier A).
 
-Both writes to `config.toml` are **additive and marked**: existing entries are preserved
-verbatim, Relay's carry the `relay-guest` marker, and turning Guests off removes exactly the
-marked entries. TOML is not JSON — it has comments, nested tables, multi-line arrays and
+The `config.toml` writer below is the **retired** stopgap (Options › Guests, gone 2026-09-19).
+It stays as a library for one reason: a config still holding its marked entries is cleaned at
+every launch (`disable()`, called by `guest_launch.clean_legacy`), and `enable()` is the tested
+inverse that holds `disable()` to "byte for byte". Its writes are additive and marked: existing
+entries are preserved verbatim, Relay's carry the `relay-guest` marker, and disabling removes
+exactly the marked entries. TOML is not JSON — it has comments, nested tables, multi-line arrays and
 multi-line strings — so this module carries a small TOML *document* model that keeps every
 untouched byte untouched. Values are never re-serialized by us: `tomllib` reads them back to
 check the result, and the file is written with the same temp-file-and-rename the rest of Relay
@@ -1173,59 +1177,14 @@ def tail_main(argv: Sequence[str], env: dict | None = None,
     return 0
 
 
-def settings_main(argv: Sequence[str]) -> int:
-    """The settings entry point, which the Options › Guests row calls (GT7X):
-
-        guest_codex.py --enable | --disable | --settings-state [--home DIR] [--python PATH] [--script PATH]
-
-    One JSON object on stdout: the state `enable()` / `disable()` / `settings_state()` returned,
-    plus `ok`. A conflict is its own exit code (3) with the taken keys in `conflict`, because the
-    GUI must show that one verbatim and leave its toggle alone; any other failure is exit 1 with
-    the error in `error`. Reads and writes go through the library functions above and nothing
-    else, so the command line can never mean something the tests do not hold the library to.
-    """
-    options = {"home": None, "python": None, "script": None}
-    action = None
-    index = 0
-    while index < len(argv):
-        argument = argv[index]
-        if argument in ("--enable", "--disable", "--settings-state"):
-            action = argument[2:]
-        elif argument in ("--home", "--python", "--script") and index + 1 < len(argv):
-            index += 1
-            options[argument[2:]] = argv[index]
-        else:
-            print(json.dumps({"ok": False, "error": f"unknown option {argument!r}."}))
-            return 2
-        index += 1
-    if action is None:
-        print(json.dumps({"ok": False, "error": "choose --enable, --disable or --settings-state."}))
-        return 2
-    try:
-        if action == "enable":
-            result = enable(home=options["home"], python=options["python"], script=options["script"])
-        elif action == "disable":
-            result = disable(home=options["home"])
-        else:
-            result = settings_state(home=options["home"], script=options["script"])
-    except SettingsConflict as error:
-        print(json.dumps({"ok": False, "conflict": list(error.keys), "error": str(error)}))
-        return 3
-    except CodexError as error:
-        print(json.dumps({"ok": False, "error": str(error)}))
-        return 1
-    print(json.dumps({**result, "ok": True}))
-    return 0
-
-
 def main(argv: Sequence[str] | None = None, env: dict | None = None,
          runner: Callable[..., object] | None = None) -> int:
-    """The script entry point: `guest_codex.py notify <payload>` / `... tail [options]`, and the
-    settings flags the Options › Guests row uses (`--enable` / `--disable` / `--settings-state`)."""
+    """The script entry point: `guest_codex.py notify <payload>` / `... tail [options]`. The
+    `--enable` / `--disable` / `--settings-state` flags the retired Options › Guests row used are
+    gone with it (2026-09-19): a codex picked in the model picker gets its `notify` entry as a
+    `-c` override on its own command line (`guest_launch`, 26.9)."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     command, rest = (arguments[0], arguments[1:]) if arguments else ("", [])
-    if command in ("--enable", "--disable", "--settings-state"):
-        return settings_main(arguments)
     if command == NOTIFY_EVENT:
         return notify_main(rest, env=env, runner=runner)
     if command == "tail":

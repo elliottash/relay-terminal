@@ -27,10 +27,13 @@
 //     path is checked to be inside this run's replies directory before anything is written to it.
 //
 // The environment that makes claude look for us — `CLAUDE_CODE_SSE_PORT` and
-// `ENABLE_IDE_INTEGRATION`, i.e. `guest.bridge_env("claude", port)` — is injected by the pane at
-// the `startTerminal` qputenv block (26.2), because it has to be in the shell's environment before
-// a claude could start in it. The bridge is off unless Options › Guests turns it on
-// (`guests/claude_bridge`), which is the hooks phase's sibling key (`guests/project_install`).
+// `ENABLE_IDE_INTEGRATION`, i.e. `guest.bridge_env("claude", port)` — is prefixed to the one
+// command line the pane types when Claude Code is picked in the model picker (26.9), never
+// exported into the shell: no other program in that shell, and no shell started later, ever sees
+// a port that may since have gone away. The bridge is always on (owner, 2026-09-19): there is no
+// setting. The sidecar starts with the first guest launch (`portFor`) and stops a minute after
+// the last claude pane's claude has left (`guestArrived` / `guestLeft`), so a run that never
+// picks a guest never starts it and an exit-and-relaunch never pays a restart.
 //
 // The state directory is a `QTemporaryDir` named `relay-XXXXXX` and marked with
 // relay::runtimedirs' owner file, so a GUI that dies without saying goodbye leaves a directory the
@@ -48,11 +51,12 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QSaveFile>
-#include <QSettings>
+#include <QSet>
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include "Logging.h"
 #include "RuntimeDirs.h"
@@ -62,12 +66,6 @@
 #endif
 
 namespace relay::guestbridge {
-
-// One bridge per GUI run, and off by default (26.3's settings rules: the guest integration is
-// opt-in, and this is the bridge's own switch).
-inline bool enabled() {
-    return QSettings().value(QStringLiteral("guests/claude_bridge"), false).toBool();
-}
 
 // The two answers a waiting openDiff can get (26.5). Upstream's own strings — claude compares them
 // — and the vocabulary lives here so the pane and the sidecar cannot drift apart.
@@ -123,11 +121,12 @@ public:
     // tree or an install. Set by the pane before it asks for a port.
     void setDataRoot(const QString &data) { m_data = data; }
 
-    // The loopback port a pane's shell should be told about, or 0 for "inject nothing". The first
-    // call starts the sidecar and waits for its ready line; every later call is a field read.
+    // The loopback port a claude's command line should carry, or 0 for "inject nothing". The
+    // first call starts the sidecar and waits for its ready line; every later call is a field read
+    // — unless the sidecar was stopped as idle (`guestLeft`), in which case it starts again.
     int portFor(const QString &python) {
-        if (!enabled()) return 0;
         s_started = true;   // asked for: from here on a closing pane has something to say goodbye to
+        m_idle.stop();      // a launch is under way: not idle
         if (running()) return m_port;
         if (m_failed) return 0;
         start(python);
@@ -135,6 +134,21 @@ public:
     }
 
     bool running() const { return m_process.state() == QProcess::Running && m_port > 0; }
+
+    // The sidecar's lifetime follows the claude panes (26.9): a pane says when a claude is in its
+    // foreground and when it has gone, and the sidecar is stopped `kIdleSeconds` after the last
+    // one left — long enough that exiting claude and picking it again does not pay a restart, and
+    // short enough that a run whose guests are done does not keep a listener and a lock file.
+    static constexpr int kIdleSeconds = 60;
+    void guestArrived(const QString &token) {
+        if (token.isEmpty()) return;
+        m_guestPanes.insert(token);
+        m_idle.stop();
+    }
+    void guestLeft(const QString &token) {
+        m_guestPanes.remove(token);
+        if (m_guestPanes.isEmpty() && m_process.state() != QProcess::NotRunning) m_idle.start(kIdleSeconds * 1000);
+    }
 
     // One pane, as the sidecar's router sees it. Written whenever the token, runtime dir,
     // workspace, cwd, guest or shell pid it names changes; the sidecar reads the directory, so a
@@ -197,6 +211,8 @@ public:
 
 private:
     Bridge() {
+        m_idle.setSingleShot(true);
+        QObject::connect(&m_idle, &QTimer::timeout, &m_idle, [this] { stopIdle(); });
         QObject::connect(&m_process, &QProcess::readyReadStandardOutput, &m_process, [this] {
             m_stdout += m_process.readAllStandardOutput();
             for (int newline = m_stdout.indexOf('\n'); newline >= 0; newline = m_stdout.indexOf('\n')) {
@@ -226,14 +242,21 @@ private:
         });
     }
 
-    ~Bridge() {
+    ~Bridge() { stopIdle(); }
+
+    // SIGTERM is the sidecar's own quit path: it removes its lock file and exits (26.5). The
+    // registrations stay on disk in the state directory, so a sidecar started again later routes
+    // the same panes without being told about them a second time.
+    void stopIdle() {
         if (m_process.state() == QProcess::NotRunning) return;
-        // SIGTERM is the sidecar's own quit path: it removes its lock file and exits (26.5).
+        relay::log::info(QStringLiteral("guest_bridge_stop reason=%1")
+                             .arg(m_guestPanes.isEmpty() ? QStringLiteral("idle") : QStringLiteral("exit")));
         m_process.terminate();
         if (!m_process.waitForFinished(2000)) {
             m_process.kill();
             m_process.waitForFinished(1000);
         }
+        m_port = 0;
     }
 
     void start(const QString &python) {
@@ -325,6 +348,8 @@ private:
     QByteArray m_stdout;
     QString m_data, m_stateDir, m_repliesDir;
     QHash<QString, QByteArray> m_written;   // pane token -> the registration file's own bytes
+    QSet<QString> m_guestPanes;             // panes with a claude in the foreground right now
+    QTimer m_idle;                          // runs from the last claude leaving to the stop
     int m_port = 0;
     bool m_failed = false;
     static inline bool s_started = false;

@@ -1789,8 +1789,12 @@ a Relay worker, not a BYOK preset. Relay's posture is the same as Warp's guest t
 ("Relay does not try to turn Claude Code into a second worker backend; it observes, and it touches
 a guest only through the guest's own sanctioned surfaces", issue `GT7X`): no reverse-engineered
 internals, no keystroke automation, and any contact beyond observation is a step Relay offers and
-the user confirms — Relay never reaches into a project on its own. The reference spec is
-`docs/AGENT-SESSIONS-PROTOCOL.md` section 26, whose contracts (§26.3–26.8) are binding; every
+the user confirms — Relay never reaches into a project on its own. That still holds under the
+launch-time configuration of §26.9 (owner, 2026-09-19: no per-project setup): starting a guest
+writes one file, in the pane's own runtime directory, and the only files a launch *changes* are the
+ones the retired installers wrote into, from which it removes exactly Relay's own marked entries
+and nothing else. The reference spec is
+`docs/AGENT-SESSIONS-PROTOCOL.md` section 26, whose contracts (§26.3–26.9) are binding; every
 deviation from this section is written down there. Guests are **local-only**: none of the pane's
 `guest_model` / `guest_context_pct` / `guest_busy` state or the five guest event kinds crosses the
 wire to a remote host (`GUEST_CHANNEL_EVENTS` in `remote/wire.py`, one regression test). The module
@@ -1802,8 +1806,8 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   *knows* it is running claude or codex (`Pane::guest()`) without scraping the screen.
   `detect_installations()` answers what is installed from the tool itself (binary, version,
   config dir), and an unreadable install is "installed, details unknown", never a guess.
-  Install state is never inferred from files by the GUI either: it is the installers' own
-  `--status` (below), re-read each time the Guests page is shown.
+  The model picker's own test is narrower and just as concrete: a guest is offered when its
+  binary is on `PATH` (`QStandardPaths::findExecutable` over the same `guestSpecs()` table).
 - **One event channel** (§26.3): everything a guest phase learns reaches its pane as one
   envelope — `{"token", "sequence", "event", "guest", "data"}`, the event one of `hook`,
   `statusline`, `state`, `bridge`, `slash` — written by the single `shell/guest-event.py`
@@ -1814,37 +1818,47 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   a statusline tick landing on top of a permission question replaced the question, and the
   shim then waited out its whole timeout for an answer nobody had been shown. The
   pane accepts only its own pane token and a fresh sequence, and a missing `RELAY_GUEST_EVENT`
-  makes the helper a no-op that writes nowhere, so the entries Relay leaves in a tool's
-  settings are inert in an ordinary terminal. All five kinds are withheld from the wire, and
+  makes the helper a no-op that writes nowhere, so a hook entry read by a claude with no Relay
+  around it is inert — which is why the launch file is harmless wherever it is read, and why the
+  stopgap's leftovers were harmless until a launch removed them. All five kinds are withheld from the wire, and
   any future one is refused by the same regression test until an explicit owner decision adds
   it to `GUEST_CHANNEL_EVENTS`. A helper Relay starts *itself* (the slash scan, the codex tail
-  of §26.6) is handed this pane's spool, token and runtime dir explicitly, in
+  of §26.6, the launch helper of §26.9) is handed this pane's spool, token and runtime dir explicitly, in
   `Pane::guestHelperEnvironment()`: `startTerminal` publishes them with `qputenv`, which writes
   the GUI's own environment, so anything that inherits it names whichever pane started its shell
   last — pane A's events landed on pane B's spool under pane B's token, and pane B took them.
-- **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`):
-  marked, additive entries in the project's `.claude/settings.local.json` (never the shared,
-  source-controlled `settings.json`) — hooks `PermissionRequest`, `UserPromptSubmit`, `Stop`
-  and `Notification` calling `"${RELAY_PYTHON:-python3}"
-  "$RELAY_BACKEND_DIR/relay_core/guest_hook.py" <event> --relay-guest` behind a
-  `$RELAY_GUEST_EVENT` guard (§26.4; the `-m relay_core.guest_hook` form expanded to an empty
-  command and exited 127), plus a `statusLine` shim that feeds the pane's guest chip while claude still
-  renders its own line. Every Relay command carries the `--relay-guest` marker, and turning
-  Guests off removes exactly the marked entries and nothing else. A statusline the user wrote
-  themselves is kept, not overwritten (the chip then simply has nothing to show), and a
-  `PermissionRequest` is answered as a Relay question on the pane — never auto-approved, and
-  `PreToolUse` is deliberately **not** installed, because it fires before every tool call
-  including the ones the user's own rules already allow. The global
-  `~/.claude/settings.json` gets the same entries only behind a second, explicit opt-in, and
-  only ever in addition to the project install.
-- **Codex: `notify` and the rollout tail** (§26.6, `guest_codex.py`): Codex has no IDE bridge
-  and no project scope, so its two marked entries — `notify` (run at the end of a turn with
-  the JSON payload as one argv item) and `[tui] notification_condition = "always"` (Codex
-  otherwise stays quiet in the focused terminal) — live in the user's `~/.codex/config.toml`
-  and fire in every terminal, which is exactly why the channel's no-op invariant matters. A
-  small TOML *document* model keeps every untouched byte untouched — enabling then disabling
-  returns the file byte for byte — and a key the user already owns is a hard
-  `SettingsConflict`, never overwritten. What the pane knows about a codex turn comes from
+- **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`): the
+  hooks `PermissionRequest`, `UserPromptSubmit`, `Stop` and `Notification` calling
+  `"${RELAY_PYTHON:-python3}" "$RELAY_BACKEND_DIR/relay_core/guest_hook.py" <event>
+  --relay-guest` behind a `$RELAY_GUEST_EVENT` guard (§26.4; the `-m relay_core.guest_hook` form
+  expanded to an empty command and exited 127), plus a `statusLine` shim that feeds the pane's
+  guest chip while claude still renders its own line. Since 2026-09-19 they are not *installed*
+  anywhere: `guest_install.relay_entries()` is the one place they are spelled, and the launch of
+  §26.9 writes that object into the pane's own runtime directory and hands it to one claude with
+  `--settings`. A statusline the user wrote themselves is still kept — the launch file leaves
+  `statusLine` out when any file that claude reads carries a line that is not Relay's, and the
+  chip then simply has nothing to show. `PreToolUse` is deliberately **not** requested, because
+  it fires before every tool call including the ones the user's own rules already allow. A
+  `PermissionRequest` is answered as a Relay question on the pane, never auto-approved — but a
+  guest Relay launched runs with `--dangerously-skip-permissions` and so never fires one; the
+  question bar is for a claude the user started themselves. What is left of the installer is the
+  migration: every launch removes exactly the `--relay-guest` marked entries the retired Options
+  page wrote into `.claude/settings.local.json`, `~/.claude/settings.json` and
+  `~/.codex/config.toml`, because those entries beside the launch file would run every hook twice.
+- **Codex: `notify` and the rollout tail** (§26.6, `guest_codex.py`): Codex has no IDE bridge, so
+  what a picked codex gets is the rollout tail, the finished-turn `notify`, the sessions sources
+  and the same bypass rule (`--dangerously-bypass-approvals-and-sandbox`); what it does not get is
+  diffs in Relay or `openFile`, documented rather than faked. Its two settings —
+  `notify` (run at the end of a turn with the JSON payload as one argv item) and
+  `[tui] notification_condition = "always"` (Codex otherwise stays quiet in the focused terminal)
+  — are `-c key=value` overrides on that one codex's command line since 2026-09-19, so nothing
+  lives in `~/.codex/config.toml` and nothing fires in anyone else's terminal. The TOML
+  *document* writer stays as the migration's half (the retired entries are removed at every
+  launch, byte for byte on everything it does not own) and as the tested inverse that holds it
+  to that. Codex 0.155.1 does have a stable `hooks` feature with Claude Code's schema; Relay adds
+  none, because busy and the finished turn are already covered and a `PermissionRequest` cannot
+  fire under the bypass flag — they are the route if a Codex permission bar is ever wanted
+  (§26.6). What the pane knows about a codex turn comes from
   `notify` — forwarded as a `hook` named `notify`, which the pane turns into the finished-turn
   notification — and from `guest_codex.py tail`, one short-lived helper the pane starts when a
   codex turns up in its foreground and ends when it leaves: it follows the newest rollout under
@@ -1854,9 +1868,15 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
 - **The Claude IDE bridge** (§26.5, `guest_bridge.py`, one sidecar per GUI run): Relay plays
   the *editor* side of Claude Code's IDE integration — JSON-RPC 2.0 over a loopback-only
   WebSocket, discovered upstream's own way: `CLAUDE_CODE_SSE_PORT` and
-  `ENABLE_IDE_INTEGRATION` in the pane's shell environment (`guest.bridge_env`, injected when
-  the terminal starts) and the `~/.claude/ide/<port>.lock` file a claude started anywhere
-  reads to find the same server. It serves the twelve IDE tools; `getDiagnostics` answers
+  `ENABLE_IDE_INTEGRATION` (`guest.bridge_env`), and the `~/.claude/ide/<port>.lock` file a
+  claude started anywhere reads to find the same server. Those two variables are **not** in the
+  shell any more: they are assignments on the launched guest's own command line (§26.2), so no
+  other program in that shell, and no shell started later, is handed a port that may have gone
+  away. There is no setting either — the bridge is always on, started lazily by the first guest
+  launch and stopped 60 s after the last guest pane's guest has left, the grace period being what
+  keeps an `/exit`-and-relaunch from paying for a sidecar start. A pane registers at shell start
+  while the bridge is running and again when its guest arrives, so a claude's first request
+  routes. It serves the twelve IDE tools; `getDiagnostics` answers
   `[]` — Relay has no LSP source, documented rather than faked. `openDiff` is the blocking
   one: the unified diff travels the one channel as a `bridge` event, the pane opens Relay's
   diff view beside itself, and **Accept / Reject in that view's own header** (`DiffView::
@@ -1874,8 +1894,11 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   `resume_command` is always the tool's own (`claude -r <id>`, `codex resume <id>`, and their
   fork variants) — resuming is the tool's affair, run in a pane like any other command, in the
   session's own `resume_cwd` because both guests resolve an id against the directory they start
-  in. Enter runs it in the focused pane (behind a `cd`), Shift+Enter in a new pane created in
-  that directory, Ctrl+Enter the row's `fork_command`. The index is a cache as everywhere else:
+  in. Enter runs it in the focused pane, Shift+Enter in a new pane created in that directory
+  (`RelayWindow::openGuestPane`), Ctrl+Enter the row's fork. All three go through
+  `Pane::launchGuest(guest, extra, cwd)` (§26.9) with the row's argv tail as `extra`, so a
+  resumed guest is configured exactly like a picked one — same launch settings file, same bypass
+  flag, same bridge variables on the command line. The index is a cache as everywhere else:
   `_conversations()` annotates the guest rows with those fields and sets
   `guest_sessions.reconcile()` going on a background thread, whose second `conversations` event
   replaces the list only when the rescan actually changed something. Rename / pin / delete stay
@@ -1887,20 +1910,23 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   and legacy-command locations it documents; codex: the stable TUI set), refreshed by live
   `slash` events, and shows those commands in the `/` menu marked as the guest's own. Picking
   one sends it to the pane as plain text — queued while the guest is busy ("Queued · sent to
-  <guest> when it is ready") — and the router treats a guest pane's composer as terminal
-  input throughout, the translator passing only what a TUI can take.
-- **Options** (Settings › Guests, `src/RelayWindow.h`): four rows — the project install, the
-  global file behind its own second opt-in, the Claude IDE bridge (`guests/claude_bridge`, which
-  nothing else can turn on) and the Codex `notify` entry. The first, second and fourth are a thin
-  front end over two installer command lines — `relay_core.guest_install` (project scope, and
-  global behind its own opt-in) and `relay_core.guest_codex` — each run with `-S -u -m` and the
-  shipped backend *appended* to PYTHONPATH, so the user's own environment keeps precedence.
-  The rows never guess at the files: showing the page re-reads `--status` for **both** Claude
-  files and `--settings-state` for Codex's, every apply draws its state from the installer's own
-  JSON answer and then re-reads the file, and the notice names the file that was written —
-  including the cases where what the user wrote themselves was kept because it is theirs.
-  Reading a file needs no opt-in; only writing the global one does. No row declares a reset: off
-  is what Relay ships, and off is idempotent.
+  <guest> when it is ready"). The composer itself is unchanged in a guest pane (§26.8): the
+  prompt box, the mode chip and auto-detection behave as they do anywhere, and only delivery
+  differs — a line decided to be a command is typed into the guest as `!<command>`, which both
+  TUIs run in their own shell mode, and a line decided to be a prompt is typed as the prompt.
+- **The picker** (§26.9, `Pane::chooseGuest` → `Pane::launchGuest`, `guest_launch.py`): there is
+  no Guests page and no setup step. "Claude Code" and "Codex" are rows in the pane's model box, a
+  group after the presets, shown when the binary is on `PATH`, with `guest:<id>` as their item
+  data and `/model claude` / `/model codex` as the same choice from the prompt box — no tier, no
+  API key, no worker, so a guest works in a pane with no provider configured at all. Picking one
+  stops a running worker turn, leaves a running guest first, asks the bridge for its port, then
+  runs `python -m relay_core.guest_launch <guest> --runtime-dir … --cwd … --port …` with
+  `Pane::guestHelperEnvironment()` and types the `command` it prints into the shell like any
+  other terminal command — visibly, because it is exactly what the user could type themselves.
+  Leaving a guest for a preset or a role types the guest's own `/exit` and applies the model when
+  the shell is back at its prompt; a guest that is *working* is not interrupted, the switch is
+  refused with a status line instead ("<Guest> is working — stop its turn first (Esc in the
+  terminal), then switch"). Whether Esc should be sent instead is an open question for the owner.
 
 The pane's guest state rides the ordinary `program_state` (`guest_model`, `guest_context_pct`,
 `guest_busy`) so the title bar, tab labels and remote clients that are allowed to see process

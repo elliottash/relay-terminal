@@ -37,7 +37,15 @@ special translator from the relay prompt into the claude code input and back."
 - [ ] Live tail of the active pane's guest transcript (`guest_sessions.LiveTail` has no caller; a
       running session's row refreshes on the next reconcile instead) <!-- t:lt -->
 - [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:bt -->
-- [x] ~~Tier A headless harness adapters (codex app-server first, then claude stream-json)~~ — deferred by owner, kept as later optional phase <!-- t:x2 -->
+- [ ] Tier A headless harness adapters (codex app-server first, then claude stream-json). Deferred on 2026-09-19, **un-deferred the same day** (owner: "i think i want to undefer and start woking on it"): a phase of its own after the picker route lands; the first slice is `codex app-server` beside the TUI (`codex --remote`) for Codex diffs in Relay's diff pane <!-- t:x2 -->
+- [x] Picker route: "Claude Code" / "Codex" rows in the pane's model box (`guest:<id>`, no tier, no key), `/model claude|codex`, launched by the pane in its own shell (§26.9) <!-- t:pk -->
+- [x] Launch-time configuration instead of installed files: `guest_launch.py` writes `<runtime>/guest/claude-settings.json` for `claude --settings`, `-c` overrides for codex, bypass flags on both, bridge variables on the command line only; flags verified against Claude Code 2.1.278 / Codex 0.155.1 <!-- t:c1 -->
+- [x] Retire the setup surface: Options › Guests rows and the `guest_install` / `guest_codex --enable` command lines gone; libraries kept for the legacy cleanup every launch runs <!-- t:rs -->
+- [x] Bridge always on: no setting; sidecar starts with the first claude launch, stops 60 s after the last claude leaves <!-- t:ba -->
+- [x] Composer delivery in a guest pane: terminal verdict → `!<command>` into the guest, agent verdict → the prompt; Relay's UI unchanged (§26.8) <!-- t:cd -->
+- [x] Sessions resume/fork go through `launchGuest` (same settings, flags and bridge as a pick), in the session's cwd, this pane or a new one <!-- t:s2 -->
+- [x] Codex parity written down honestly (§26.6): status, busy, notify, sessions, bypass yes; diffs in Relay no; Codex 0.155.1 hooks (Claude's schema, trust-gated) documented, not wired <!-- t:cp -->
+- [ ] Owner decision: a guest turn running when the pane switches back to a normal model — today refused with a status line; interrupt instead? <!-- t:q9 -->
 
 ## Decisions
 - 2026-09-19, owner: translator-in-pane first ("i dont need a headless protocol… a special translator from the relay
@@ -48,6 +56,21 @@ special translator from the relay prompt into the claude code input and back."
   transcript/rollout tailing, app-server daemon).
 - 2026-09-19, agent: Relay implements the same protocols VS Code uses — the claude IDE bridge (lock file + WebSocket
   MCP) now, and claude stream-json + codex app-server as a client in the deferred Tier A phase.
+- 2026-09-19, owner (second round): **no per-project setup** — the Options › Guests install rows were a stopgap, not the
+  product; full integration through the IDE bridge; claude / codex selectable from the pane's model selector like any
+  model, running in the pane's own shell and cwd; a guest diff is decided in the diff view.
+- 2026-09-19, owner: "the pane content itself also looks the same as regular relay — a terminal system. relay terminal
+  commands are piped to the agent as '! …' to maintain a seamless / identical experience"; "the claude / codex agent
+  needs to understand an auto-detected terminal command or agent prompt." Relay's UI does not change in a guest pane;
+  only delivery does (§26.8).
+- 2026-09-19, owner: "the claude / codex agent needs to be --yolo / --dangerously-skip-permissions to allow moving
+  around the file system, like relay / warp does." Both launches carry the bypass flag; the permission bar stays for a
+  hand-started claude whose own settings ask.
+- 2026-09-19, owner: Tier A (t:x2) un-deferred — "i think i want to undefer and start woking on it"; what it unlocks is
+  written in the t:x2 task and in §26.6's parity paragraph (Codex diffs in Relay need it).
+- 2026-09-19, agent: switching the picker back while a guest is *working* is refused with a status line rather than
+  interrupting it (owner's open question, t:q9); an idle guest is asked to `/exit` and the pick is applied when the
+  shell is back.
 
 ## Functionality mapping
 | Capability | Claude Code | Codex | Relay equivalent | Integration path |
@@ -95,12 +118,16 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
 - `shell/guest-event.py` — the one channel writer (§26.3): every guest phase reaches its pane through the
   `{"token", "sequence", "event", "guest", "data"}` envelope, one file per event in the pane's
   `guest-events/` spool (`mkstemp` + `os.replace`), no-op without `RELAY_GUEST_EVENT`.
-- `backend/relay_core/guest_hook.py` + `guest_install.py` — the claude hook/statusline shim and its marked,
-  additive installer for `.claude/settings.local.json` (`--relay-guest` marker; off removes exactly the marked entries;
-  a user's own statusline is kept). PreToolUse is a Relay question on the pane, never auto-approved.
-- `backend/relay_core/guest_codex.py` — the marked `notify` + `[tui] notification_condition` entries in
-  `~/.codex/config.toml` (byte-for-byte TOML document model; user-owned keys are a hard `SettingsConflict`) and
-  the rollout tail under `~/.codex/sessions/YYYY/MM/DD/`.
+- `backend/relay_core/guest_launch.py` — **the picker route (§26.9)**: per launch, the claude settings file under the
+  pane's runtime dir (`relay_entries()` verbatim, the user's own statusline kept), the claude / codex command lines
+  with the bypass flags and the bridge variables, and the legacy cleanup of the stopgap's marked entries. Verified
+  flags: Claude Code 2.1.278 `--settings`, `--dangerously-skip-permissions`, `-r`, `--fork-session`; Codex 0.155.1
+  `-c key=value` (plain, `resume`, `fork`), `--dangerously-bypass-approvals-and-sandbox`.
+- `backend/relay_core/guest_hook.py` + `guest_install.py` — the claude hook/statusline shim, and the entries it is
+  reached by (`relay_entries()`, the `--relay-guest` marker). The installer's command line is **retired**; `remove()`
+  stays as the launch's legacy cleanup and `install()` only as its tested inverse.
+- `backend/relay_core/guest_codex.py` — the `notify` hook (now a `-c` override on the launch, no file), the rollout tail
+  under `~/.codex/sessions/YYYY/MM/DD/`, and the retired TOML settings writer kept for the legacy cleanup.
 - `backend/relay_core/guest_bridge.py` + `src/GuestBridge.h` — the Claude IDE bridge sidecar (loopback WebSocket
   MCP, `~/.claude/ide/<port>.lock`, the 12 IDE tools) and its GUI half. `openDiff` blocks on the user's decision
   in Relay's diff view: `FILE_SAVED` (the sidecar writes, never the GUI) or `DIFF_REJECTED`; every path must
@@ -114,9 +141,10 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
 - `backend/relay_core/guest_slash.py` — the static slash catalogs (claude built-ins + skills + legacy commands;
   codex TUI set), published live as `slash` events.
 - `src/Pane.h` — `pollGuestEvent` dispatch, guest state in `program_state` (`guest_model`, `guest_context_pct`,
-  `guest_busy`), the `/` popup's badged guest rows, the openDiff banner, composer → guest input routing.
-- `src/RelayWindow.h` — Settings › Guests, the two installers' front end (status re-read on show; JSON answers;
-  no reset rows; PYTHONPATH appended, never prepended).
+  `guest_busy`), the `/` popup's badged guest rows, the openDiff banner, composer → guest delivery (§26.8), and the
+  picker route: the guest rows in the model box, `chooseGuest` / `launchGuest` / `leaveGuest`, `/model claude|codex`.
+- `src/RelayWindow.h` — `openGuestPane(source, guest, extra, cwd)`: a session resumed in a new pane launches there.
+  Settings › Guests is gone.
 - `remote/wire.py` — `GUEST_CHANNEL_EVENTS`: all five guest event kinds are local-only, written down
   beside the worker lists rather than inside them, one regression test.
 - Tests: `tests/test_guest{,_hook,_install,_codex,_bridge,_sessions,_slash}.py`, `tests/guestbridge_test.cpp`,
@@ -130,29 +158,37 @@ covers Tier B); the bridge is one sidecar per GUI run rather than per pane; modu
 
 `docs/qa_evidence/2026-09-19-claude-codex-guest-integration/` — per track: claude-hooks (5 Xvfb shots incl.
 the PreToolUse question bar), claude-bridge (4 Xvfb shots of the openDiff banner / save / reject), options
-(5 Xvfb shots of the Guests rows incl. the global guard and a codex SettingsConflict), composer
+(5 Xvfb shots of the Guests rows — **historical**: the section was retired on 2026-09-19), composer
 (`composer-evidence.md`), sessions backend (`sessions-index-evidence.md` + real-data measurements: 77 claude
-sessions indexed in 1.19 s, warm reconcile 1 ms). Implementer shots are prefixed `implementer-` and are not QA
-verdicts. Each track's drive script and run log sits beside its shots.
+sessions indexed in 1.19 s, warm reconcile 1 ms), and the picker route (`picker-README.md`: 6 Xvfb shots from
+`picker-drive.py` with a stand-in `claude`, and `launch-flags-README.md`: the real CLIs' flags exercised).
+Implementer shots are prefixed `implementer-` and are not QA verdicts. Each track's drive script and run log sits
+beside its shots.
 
 ## QA checklist
 
 - [ ] `./scripts/test.sh` and `ctest --test-dir build` pass on the final tree, including the guest suites named
       above and the wire withholding regression.
-- [ ] With Claude Code in a pane and "Claude Code in this project" on, the pane shows the guest chip (model,
-      context %) from the statusline shim while claude still renders its own statusline.
+- [ ] "Claude Code" and "Codex" are rows of the pane's model box when the CLIs are on PATH; picking one (or
+      `/model claude`) types a visible `claude --settings <runtime>/guest/claude-settings.json
+      --dangerously-skip-permissions` line (with `CLAUDE_CODE_SSE_PORT` / `ENABLE_IDE_INTEGRATION` prefixed) into
+      the pane's own shell; the settings file holds the four hook entries and a `statusLine` only when the user has
+      none of their own; nothing under the project's `.claude/` or `~/.codex/` is written.
+- [ ] With the guest running, the box shows its row; a terminal-mode line (or a typed `!`) reaches the guest as
+      `!<command>`, an agent-mode line as the prompt; picking a preset while the guest is idle types `/exit` and
+      then switches; while it is busy the switch is refused with a status line.
+- [ ] With Claude Code in a pane, the pane shows the guest chip (model, context %) from the statusline shim while
+      claude still renders its own statusline.
 - [ ] A PreToolUse hook surfaces as a Relay question bar on the pane; it is never auto-approved; answering it
       lets the claude turn proceed with the user's decision.
 - [ ] A claude edit arrives as openDiff: Relay's diff view with the "claude proposes changes to …" banner;
       Save writes the file (claude sees FILE_SAVED), Reject answers DIFF_REJECTED; `guest.diffSave` saves from
       the keyboard; a diff naming a path outside the pane's workspace is rejected.
-- [ ] Options › Guests: the project toggle writes only `--relay-guest`-marked entries to
-      `.claude/settings.local.json` (and never the shared `.claude/settings.json`)
-      and off removes exactly those; the global toggle is refused unless the project one is on; a user's own
-      statusline in the file is kept and reported as kept.
-- [ ] The Codex toggle writes the marked `notify` + `[tui] notification_condition` entries to
-      `~/.codex/config.toml`; on→off returns the file byte for byte; a user-owned `notify` produces the
-      SettingsConflict notice and no write. A finished codex turn reaches Relay's notification centre.
+- [ ] A project or home still carrying the retired installer's `--relay-guest` entries has exactly those removed at
+      the first launch (the pane says which files), and the user's own entries in those files are untouched.
+- [ ] Picking Codex types `codex -c notify=[…] -c tui.notification_condition="always"
+      --dangerously-bypass-approvals-and-sandbox`; a finished codex turn reaches Relay's notification centre with no
+      entry in `~/.codex/config.toml`.
 - [ ] In a guest pane the `/` popup lists the guest's commands badged as the guest's; choosing one types it into
       the guest (queued as "Queued · sent to <guest> when it is ready" while the guest is busy).
 - [ ] The sessions pane lists claude and codex sessions beside Relay's own with titles and dates; Enter resumes

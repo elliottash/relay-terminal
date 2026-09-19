@@ -385,6 +385,8 @@ public:
         // still owes claude an answer to. Rejecting is the only honest answer once nobody can
         // show the change (26.5).
         settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("pane closed"));
+        if (m_guest == QStringLiteral("claude") && relay::guestbridge::Bridge::started())
+            relay::guestbridge::Bridge::instance().guestLeft(m_token);   // the sidecar may stop (26.9)
         unregisterFromBridge();
         stopGuestTail();   // the codex rollout tail dies with the pane it was reporting to (26.6)
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
@@ -729,6 +731,8 @@ public:
         // the roles modal.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
             || id.startsWith(QStringLiteral("vision:")) || id.startsWith(QStringLiteral("planning:"))) return;
+        // "guest:" is Claude Code or Codex (26.9): not a preset either, and its own path.
+        if (id.startsWith(QStringLiteral("guest:"))) { chooseGuest(id.mid(6)); return; }
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
@@ -1169,12 +1173,20 @@ private:
     // for anything else. The worker hears about a change in the next program_state (26.1).
     void setGuest(const QString &guest) {
         if (guest == m_guest) return;
+        const QString before = m_guest;
         m_guest = guest;
+        if (!m_guest.isEmpty()) m_guestWanted.clear();   // picked and now detected (26.9)
         // A guest that left (or changed) takes its live facts and its open question with it;
         // the next statusline or state event repopulates them (26.3).
         clearGuestState();
         m_guestSlashCommands.clear();
         if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
+        // The sidecar's lifetime follows the claude panes (26.9): it hears about every claude that
+        // arrives, whether picked or typed, and stops a minute after the last one has gone.
+        if (relay::guestbridge::Bridge::started()) {
+            if (m_guest == QStringLiteral("claude")) relay::guestbridge::Bridge::instance().guestArrived(m_token);
+            else if (before == QStringLiteral("claude")) relay::guestbridge::Bridge::instance().guestLeft(m_token);
+        }
         // Codex reports a turn only in its rollout transcript (26.6): no statusline, and a
         // `notify` that fires when the turn is already over. Its `state`/`statusline` events come
         // from a tail that follows this pane's newest rollout for as long as the codex runs.
@@ -1189,6 +1201,13 @@ private:
         // router in between would have had its first request refused as unmatched. Only a closing
         // pane unregisters.
         registerWithBridge();
+        // A model picked while the guest was running waited for this moment (leaveGuest, 26.9):
+        // the guest was asked to exit, the shell is back, and the switch can be made now.
+        if (m_guest.isEmpty() && m_guestLeaveThen) {
+            const std::function<void()> then = std::move(m_guestLeaveThen);
+            m_guestLeaveThen = nullptr;
+            then();
+        }
     }
 
     // ----- the codex rollout tail (GT7X, 26.6) -------------------------------------------------
@@ -1244,8 +1263,9 @@ private:
     // are dropped by the bridge itself, so this is cheap enough to ask for on every change.
     void registerWithBridge() {
         // Asked before the singleton, not after: `Bridge::instance()` builds a state directory and
-        // a QProcess, and a run whose user never turned the bridge on should have neither.
-        if (!relay::guestbridge::enabled()) return;
+        // a QProcess, and a run in which no pane has launched a claude yet should have neither.
+        // The bridge is always on (26.9); it is *started* by the first claude launch.
+        if (!relay::guestbridge::Bridge::started()) return;
         auto &bridge = relay::guestbridge::Bridge::instance();
         bridge.setDataRoot(m_data);
         // The shell pid is how the sidecar tells two claudes in one project apart: it walks the
@@ -2093,9 +2113,10 @@ public:
     std::function<void(const QJsonObject &state, const QString &title)> onForkState;
     // Conversation list, Shift+Enter: open an existing saved conversation in a new pane.
     std::function<void(const QJsonObject &state, const QString &title)> onOpenSessionInNewPane;
-    // A guest session (protocol 26.7) resumed in a new pane: the tool's own shell line and the
-    // directory it must run in (empty keeps this pane's).
-    std::function<void(const QString &command, const QString &cwd)> onOpenGuestPane;
+    // A guest session (protocol 26.7) resumed in a new pane: the guest, the tool's own arguments
+    // (`-r <id>`, `resume <id>`…) and the directory it must run in (empty keeps this pane's). The
+    // new pane launches it through its own `launchGuest` (26.9), so it is configured like a picked one.
+    std::function<void(const QString &guest, const QStringList &extra, const QString &cwd)> onOpenGuestPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
 
     // Relay's four levels, in order. This is the vocabulary a *stored* value may hold — a pane, a
@@ -3007,35 +3028,7 @@ private:
         m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            const QString data = m_modelBox->itemData(index).toString();
-            // Owner report, 2026-09-18: "selecting model options in the model dropdown didnt do
-            // anything. the main use case for that is going to be swapping between the main and
-            // flash models." Two entries in this list are not models: the gear (the model options
-            // modal, which lost its branch here when the strip was rebuilt) and the Main/Flash rows
-            // (the pane's agent role). Both are handled before selectModel, which only knows presets.
-            if (data == QStringLiteral("gear:modelOptions")) {
-                refreshPickers();   // put the box back on the pane's model: the gear is not a choice
-                openRolesDialog();
-                hint(QStringLiteral("model.options.mouse"),
-                     QStringLiteral("Tip: Options › Models opens the same modals"));
-                return;
-            }
-            if (data.startsWith(QStringLiteral("role:"))) {
-                const QString role = data.mid(5);
-                chooseAgentRole(role); focusInput();
-                // The Local agent has no shortcut on purpose (it takes no key), so its hint names
-                // the fast path it does have: /local in the prompt box. WARP.md, "Shortcut hints".
-                if (role == QStringLiteral("local"))
-                    hint(QStringLiteral("model.role.local.mouse"),
-                         QStringLiteral("Tip: /local runs this pane on the local model, /main goes back"));
-                else
-                    hint(QStringLiteral("model.role.mouse"),
-                         relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
-                                                        QStringLiteral("the Main and Flash agents")));
-                return;
-            }
-            selectModel(data); focusInput();
-            hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
+            modelBoxPicked(m_modelBox->itemData(index).toString());
         });
         routeRow->addWidget(m_modelBox);
         // Voice transcription: the chip toggles recording, the hold key is push-to-talk.
@@ -6009,28 +6002,29 @@ public:
     // pane whose working directory is the session's own, because both guests resolve a session id
     // against the directory they are started in and report an unknown session from anywhere else.
     void openGuestSession(const QJsonObject &item, bool newPane, bool fork) {
-        const QString command = relay::conversations::guestCommand(item, fork);
-        if (command.isEmpty()) {
+        const QString source = item.value(QStringLiteral("source")).toString();
+        const QJsonArray argv = item.value(fork ? QStringLiteral("fork_command") : QStringLiteral("resume_command")).toArray();
+        QStringList words;
+        for (const auto &value : argv) words << value.toString();
+        if (words.size() < 2 || guestIdFor(words.first()) != source) {
             status(QStringLiteral("That session did not come with a resume command."));
             return;
         }
+        // The tool's own arguments without its name: `launchGuest` adds the launch-time settings,
+        // the bypass flag and the bridge (26.9), so a resumed guest is configured like a picked one.
+        const QStringList extra = words.mid(1);
         const QString cwd = relay::conversations::guestCwd(item);
         if (newPane) {
-            if (onOpenGuestPane) { onOpenGuestPane(command, cwd); return; }
+            if (onOpenGuestPane) { onOpenGuestPane(source, extra, cwd); return; }
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
         }
-        // In this pane: the shell must be at a prompt, and it has to be moved into the session's
-        // own directory first — `cd` and the resume are one command line so the guest never starts
-        // in the wrong place if the cd fails.
-        // The shell may have been cd'd anywhere since the pane opened, so the directory is set
-        // every time rather than compared against the one the pane started in.
-        QString line = command;
-        if (!cwd.isEmpty())
-            line = QStringLiteral("cd ") + relay::conversations::shellWord(cwd) + QStringLiteral(" && ") + command;
-        if (!runCommand(line)) return;     // runInTerminal has already said why
-        status(QStringLiteral("Resuming the %1 session in this pane.")
-                   .arg(relay::conversations::guestLabel(item.value(QStringLiteral("source")).toString())));
+        // In this pane, in the session's own directory (both guests resolve an id against the
+        // directory they start in, 26.7). A guest already here is asked to leave first.
+        leaveGuest([this, source, extra, cwd] {
+            launchGuest(source, extra, cwd);
+            status(QStringLiteral("Resuming the %1 session in this pane.").arg(guestDisplayName(source)));
+        });
     }
 
     // Ctrl+F: find in this pane. The terminal scrollback is searched by the engine; the saved
@@ -6511,18 +6505,33 @@ private:
     void runSlashCommand(const QString &name, const QString &args) {
         if (name == QStringLiteral("new") || name == QStringLiteral("clear")) newChat();
         else if (name == QStringLiteral("model")) {
+            // Claude Code and Codex are models here too (26.9): `/model codex`, `/model claude`.
+            const QStringList guests = installedGuests();
             if (!args.isEmpty()) {
+                for (const QString &id : guests) {
+                    if (id.compare(args, Qt::CaseInsensitive) == 0 || guestDisplayName(id).compare(args, Qt::CaseInsensitive) == 0) {
+                        if (!m_guest.isEmpty() && m_guest != id) leaveGuest([this, id] { chooseGuest(id); });
+                        else chooseGuest(id);
+                        return;
+                    }
+                }
                 for (const auto &model : std::as_const(m_stored)) {
-                    if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) { selectModel(model.first); return; }
+                    if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) {
+                        leaveGuest([this, id = model.first] { selectModel(id); });
+                        return;
+                    }
                 }
                 status(QStringLiteral("No stored model matches “%1”.").arg(args));
                 return;
             }
             QList<relay::agentui::PickerRow> rows;
-            for (const auto &model : std::as_const(m_stored)) rows << relay::agentui::PickerRow{{model.second, model.first == m_currentPreset ? QStringLiteral("current") : QString()}, model.first, model.first};
+            for (const auto &model : std::as_const(m_stored)) rows << relay::agentui::PickerRow{{model.second, model.first == m_currentPreset && m_guest.isEmpty() ? QStringLiteral("current") : QString()}, model.first, model.first};
+            for (const QString &id : guests) rows << relay::agentui::PickerRow{{guestDisplayName(id), id == m_guest ? QStringLiteral("current") : QString()}, QStringLiteral("guest:") + id, id};
             const auto result = relay::agentui::pick(this, QStringLiteral("Model"), QStringLiteral("Switch this pane's model. The conversation is kept."),
                                                      {QStringLiteral("Model"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
-            if (result.row >= 0) selectModel(m_stored.at(result.row).first);
+            if (result.row < 0) return;
+            if (result.row >= m_stored.size()) modelBoxPicked(QStringLiteral("guest:") + guests.at(result.row - m_stored.size()));
+            else leaveGuest([this, id = m_stored.at(result.row).first] { selectModel(id); });
         } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")
                    || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
@@ -7580,30 +7589,15 @@ private:
         }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
-        // The Claude IDE bridge (GT7X, 26.2): the first claude pane starts the sidecar and every
-        // shell after it carries the port, so a `claude` started in this pane finds Relay instead
-        // of no editor at all. Codex has no IDE bridge, so it gets nothing; when the bridge is off
-        // or failed to start, `bridge_env` is empty and both keys are removed.
-        {
-            int port = 0;
-            if (relay::guestbridge::enabled()) {
-                auto &bridge = relay::guestbridge::Bridge::instance();
-                bridge.setDataRoot(m_data);
-                port = bridge.portFor(m_python);
-            }
-            // qputenv writes the *GUI process's* environment, which every later shell inherits, so
-            // the keys have to be cleared rather than merely not set: a sidecar that died, or a
-            // bridge the user switched off, used to leave the last port behind for every pane
-            // started afterwards, and a claude in one of them hung dialling a closed socket.
-            const QJsonObject env = relay::guestbridge::bridgeEnv(QStringLiteral("claude"), port);
-            for (const QString &key : relay::guestbridge::bridgeEnvKeys()) {
-                const QString value = env.value(key).toString();
-                if (value.isEmpty()) qunsetenv(key.toUtf8().constData());
-                else qputenv(key.toUtf8().constData(), value.toUtf8());
-            }
-        }
-        // Registered now, not at the first prompt: the port is already in this shell's
-        // environment, so a claude started at that prompt must find a routable pane (26.5).
+        // The Claude IDE bridge (GT7X, 26.9): the shell carries *no* bridge variables. They go on
+        // the one command line the pane types when Claude Code is picked (`launchGuest`), so no
+        // other program in this shell, and no shell started later, ever sees a port that may since
+        // have gone away — the qputenv injection this replaced had to clear the keys on every
+        // start for exactly that reason. The keys are still cleared here, once, because they may
+        // be in Relay's own inherited environment (a Relay started from an IDE's terminal).
+        for (const QString &key : relay::guestbridge::bridgeEnvKeys()) qunsetenv(key.toUtf8().constData());
+        // Registered now, not at the first prompt, when a sidecar is running: a claude typed at
+        // that prompt after a launch elsewhere must still find a routable pane (26.5).
         registerWithBridge();
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
@@ -7781,26 +7775,35 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
-            // `!` remains a terminal line even when the foreground program is a guest. The
-            // key handler has already converted a typed leading bang into shell mode; this arm
-            // covers a pasted spelling, which must not be silently handed to Claude or Codex.
-            if (!m_guest.isEmpty() && m_editor->toPlainText().startsWith(QLatin1Char('!'))) {
-                const QString command = m_editor->toPlainText().mid(1);
-                if (command.trimmed().isEmpty()) {
-                    status(QStringLiteral("Type a terminal command after !."));
+            // A guest pane (26.8): the prompt box, the mode chip and the auto router work exactly
+            // as in any other pane; only the delivery differs. A line that is a terminal command —
+            // terminal mode, Ctrl+Shift+Enter, a typed `!`, or (below) the router's `shell`
+            // verdict — is typed into the guest as `!<command>`, which both TUIs run as a local
+            // shell line; a prompt is typed as the prompt (owner, 2026-09-19: "relay terminal
+            // commands are piped to the agent as '! …' to maintain a seamless / identical
+            // experience"). Relay's built-ins, aliases and skills above always win; any other
+            // `/command` is the guest's own, never rejected by Relay.
+            if (!m_guest.isEmpty()) {
+                QString line = m_editor->toPlainText();
+                const QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
+                const bool bang = line.startsWith(QLatin1Char('!'));
+                if (bang) line = line.mid(1);
+                if (bang || m_prefixMode == QStringLiteral("shell") || mode == QStringLiteral("shell")) {
+                    if (line.trimmed().isEmpty()) {
+                        status(QStringLiteral("Type a terminal command after !."));
+                        return;
+                    }
+                    submitGuest(QLatin1Char('!') + line.trimmed(), true);
+                    if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
                     return;
                 }
-                m_editor->remember(m_editor->toPlainText());
-                m_editor->clear();
-                submitTerminal(command, false);
-                return;
-            }
-            // Relay's built-ins and aliases above always win. A guest's unknown command is its
-            // own business, though: never let Relay reject a new guest command it has not scanned.
-            if (!m_guest.isEmpty() && m_prefixMode != QStringLiteral("shell")) {
-                submitGuest(m_editor->toPlainText(), true);
-                if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
-                return;
+                if (mode == QStringLiteral("agent") || m_prefixMode == QStringLiteral("agent") || !m_workerReady
+                    || line.trimmed().startsWith(QLatin1Char('/'))) {
+                    submitGuest(line, true);
+                    if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+                    return;
+                }
+                // Auto: the local router decides below, and dispatch() delivers its verdict.
             }
             // A `/command` that is not one of the above never reaches the router: Relay says so
             // itself rather than letting Bash answer with "command not found".
@@ -8375,6 +8378,13 @@ private:
         // which replaces the fix loop for this one submission.
         const bool handoff = m_handoffPrefill;
         m_handoffPrefill = false; m_handoffPrefix = false; m_handoffOffered = false;
+        // A guest pane (26.8): the auto router's verdict says how the line is typed into the guest
+        // — a command as `!<command>`, a prompt as itself. Nothing reaches the pane's own shell.
+        if (!m_guest.isEmpty() && (route == QStringLiteral("shell") || route == QStringLiteral("agent"))) {
+            submitGuest(route == QStringLiteral("shell") ? QLatin1Char('!') + text.trimmed() : text, true);
+            if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+            return;
+        }
         if (route == QStringLiteral("shell") && loginTakesLines()) {
             // A command for the remote shell: typed into the login, never queued for the local one.
             typeIntoLogin(text);
@@ -9133,6 +9143,57 @@ private:
         m_busyLine->clearBusy();
     }
 
+    // One row of the model box, chosen. Split out of the box's `activated` handler so a choice
+    // made while a guest is running can be made again once the guest has left (26.9).
+    void modelBoxPicked(const QString &data) {
+        // Owner report, 2026-09-18: "selecting model options in the model dropdown didnt do
+        // anything. the main use case for that is going to be swapping between the main and
+        // flash models." Two entries in this list are not models: the gear (the model options
+        // modal, which lost its branch here when the strip was rebuilt) and the Main/Flash rows
+        // (the pane's agent role). Both are handled before selectModel, which only knows presets.
+        if (data == QStringLiteral("gear:modelOptions")) {
+            refreshPickers();   // put the box back on the pane's model: the gear is not a choice
+            openRolesDialog();
+            hint(QStringLiteral("model.options.mouse"),
+                 QStringLiteral("Tip: Options › Models opens the same modals"));
+            return;
+        }
+        if (data.startsWith(QStringLiteral("role:"))) {
+            const QString role = data.mid(5);
+            chooseAgentRole(role); focusInput();
+            // The Local agent has no shortcut on purpose (it takes no key), so its hint names
+            // the fast path it does have: /local in the prompt box. WARP.md, "Shortcut hints".
+            if (role == QStringLiteral("local"))
+                hint(QStringLiteral("model.role.local.mouse"),
+                     QStringLiteral("Tip: /local runs this pane on the local model, /main goes back"));
+            else
+                hint(QStringLiteral("model.role.mouse"),
+                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
+                                                    QStringLiteral("the Main and Flash agents")));
+            return;
+        }
+        // Claude Code or Codex (26.9): the guest is this pane's agent from here on.
+        if (data.startsWith(QStringLiteral("guest:"))) {
+            const QString id = data.mid(6);
+            if (!m_guest.isEmpty() && m_guest != id) leaveGuest([this, id] { chooseGuest(id); });
+            else chooseGuest(id);
+            focusInput();
+            hint(QStringLiteral("model.guest.mouse"),
+                 QStringLiteral("Tip: /model %1 does this from the prompt box").arg(id));
+            return;
+        }
+        // A preset picked while a guest runs: the guest is asked to leave first, and the pick
+        // is made again when it has (leaveGuest refuses while the guest is working).
+        if (!m_guest.isEmpty()) {
+            leaveGuest([this, data] { selectModel(data); });
+            refreshPickers();   // the box shows the guest until it has actually left
+            focusInput();
+            return;
+        }
+        selectModel(data); focusInput();
+        hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
+    }
+
     void refreshPickers() {
         m_paneState.changed();   // pane_state (relay-terminal-71): model and mode; changed() runs this
         if (!m_modelBox) return;
@@ -9175,6 +9236,21 @@ private:
                                 QStringLiteral("role:") + role);
             if (selects) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
         }
+        // Guest agents (26.9): Claude Code and Codex, when installed, as rows like any model — no
+        // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
+        // is the box's current item while that guest is in the pane's foreground (picked or typed
+        // by hand) or was just picked and not yet detected.
+        QStringList guests = installedGuests();
+        const QString liveGuest = m_guest.isEmpty() ? m_guestWanted : m_guest;
+        if (!liveGuest.isEmpty() && !guests.contains(liveGuest)) guests << liveGuest;   // run by a path
+        if (!guests.isEmpty()) {
+            m_modelBox->insertSeparator(m_modelBox->count());
+            for (const QString &id : std::as_const(guests)) {
+                const QString model = id == m_guest && !m_guestModel.isEmpty() ? QStringLiteral(" · ") + m_guestModel : QString();
+                m_modelBox->addItem(guestDisplayName(id) + model, QStringLiteral("guest:") + id);
+                if (id == liveGuest) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
+            }
+        }
         // Last entry: the model options modal (default provider, Main/Flash/Lite, per-job overrides).
         // It stays reachable with no stored key, which is exactly when it is needed most.
         m_modelBox->insertSeparator(m_modelBox->count());
@@ -9197,9 +9273,152 @@ private:
         }
         m_modelBox->setToolTip(modelTooltip(!m_visionModel.isEmpty()
             ? QStringLiteral("This turn carries an image, so it runs on %1 and then goes back.").arg(m_visionModel)
-            : m_planModel.isEmpty()
-            ? QString()
-            : QStringLiteral("Plan mode: this turn runs on %1 (the planning role) and then goes back.").arg(m_planModel)));
+            : !m_planModel.isEmpty()
+            ? QStringLiteral("Plan mode: this turn runs on %1 (the planning role) and then goes back.").arg(m_planModel)
+            : !liveGuest.isEmpty()
+            ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestDisplayName(liveGuest))
+            : QString()));
+    }
+
+    // ----- Claude Code and Codex from the model picker (GT7X, 26.9) ---------------------------
+    //
+    // The owner's direction (2026-09-19): no per-project setup, and the guest selectable like any
+    // model. Picking a row runs the guest in this pane's own shell and directory, configured on its
+    // command line — a per-launch settings file for claude, `-c` overrides for codex, the bypass
+    // flag both, and the IDE bridge's port for claude — by `relay_core.guest_launch`, which also
+    // removes the retired installers' marked entries from the files that claude would read (they
+    // would run every hook twice beside the launch file). The typed line is visible in the
+    // terminal, deliberately: it is exactly what the user could type themselves.
+
+    // Which guests this machine has on PATH, by the same binary names the detector uses. Cached
+    // for a few seconds: refreshPickers runs on every state change.
+    static QStringList installedGuests() {
+        static QStringList found;
+        static QElapsedTimer clock;
+        if (clock.isValid() && clock.elapsed() < 10000) return found;
+        found.clear();
+        for (const GuestSpec &spec : guestSpecs())
+            for (const QString &binary : spec.binaries)
+                if (!QStandardPaths::findExecutable(binary).isEmpty()) { found << QString::fromLatin1(spec.id); break; }
+        clock.start();
+        return found;
+    }
+
+    // The picker's row: this guest, here, now.
+    void chooseGuest(const QString &guest) {
+        if (guestDisplayName(guest) == QStringLiteral("The guest agent")) return;   // not an id the table knows
+        if (m_guest == guest) { status(QStringLiteral("Already on %1.").arg(guestDisplayName(guest))); refreshPickers(); return; }
+        if (!m_guest.isEmpty()) { leaveGuest([this, guest] { chooseGuest(guest); }); return; }
+        launchGuest(guest, {}, QString());
+    }
+
+    // Start `guest` in this pane's shell with `extra` after the launch-time flags (a sessions
+    // row's `-r <id>` / `resume <id>`), in `cwd` when that is not this pane's directory. A worker
+    // turn still running is stopped: the guest is the pane's agent from here on. Public: a new
+    // pane created for a session (RelayWindow::openGuestPane) calls it before its shell is up,
+    // and the command waits in the queue for the prompt like any other.
+public:
+    void launchGuest(const QString &guest, const QStringList &extra, const QString &cwd) {
+        if (guestDisplayName(guest) == QStringLiteral("The guest agent")) {
+            status(QStringLiteral("Unknown guest agent: %1").arg(guest));
+            return;
+        }
+        if (m_guestLaunch) { status(QStringLiteral("A guest is already starting in this pane.")); return; }
+        if (m_agentBusy) stopAgent();
+        int port = 0;
+        if (guest == QStringLiteral("claude")) {
+            // The first claude launch of the run starts the sidecar (26.5); the port then goes on
+            // this one command line. A bridge that failed to start costs nothing: no port, no diffs.
+            auto &bridge = relay::guestbridge::Bridge::instance();
+            bridge.setDataRoot(m_data);
+            port = bridge.portFor(m_python);
+            registerWithBridge();
+        }
+        const QString directory = cwd.isEmpty() ? m_cwd : cwd;
+        auto *launch = new QProcess(this);
+        launch->setWorkingDirectory(QFileInfo(directory).isDir() ? directory : m_cwd);
+        launch->setProcessEnvironment(guestHelperEnvironment());
+        launch->setProgram(m_python);
+        QStringList arguments{QStringLiteral("-m"), QStringLiteral("relay_core.guest_launch"), guest,
+                              QStringLiteral("--runtime-dir"), m_runtime.path(), QStringLiteral("--cwd"), directory,
+                              QStringLiteral("--port"), QString::number(port), QStringLiteral("--python"), m_python};
+        if (!extra.isEmpty()) arguments << QStringLiteral("--") << extra;
+        launch->setArguments(arguments);
+        m_guestLaunch = launch;
+        m_guestWanted = guest;   // the picker shows the row from now until the detector agrees
+        refreshPickers();
+        connect(launch, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, launch, guest, cwd](int code, QProcess::ExitStatus exit) {
+                    launch->deleteLater();
+                    if (m_guestLaunch == launch) m_guestLaunch = nullptr;
+                    const QJsonObject result = QJsonDocument::fromJson(launch->readAllStandardOutput()).object();
+                    if (exit != QProcess::NormalExit || code != 0 || !result.value(QStringLiteral("ok")).toBool()) {
+                        const QString why = result.value(QStringLiteral("error")).toString(
+                            QString::fromUtf8(launch->readAllStandardError()).trimmed().section(QLatin1Char('\n'), -1));
+                        relay::log::error(QStringLiteral("guest_launch_failed pane=%1 guest=%2 code=%3 error=%4")
+                                              .arg(paneLogId(), guest).arg(code).arg(why));
+                        status(QStringLiteral("Could not start %1: %2").arg(guestDisplayName(guest), why.isEmpty() ? QStringLiteral("the launch helper failed") : why));
+                        m_guestWanted.clear();
+                        refreshPickers();
+                        return;
+                    }
+                    QString line = result.value(QStringLiteral("command")).toString();
+                    // `cd` and the launch are one command line, so the guest never starts in the
+                    // wrong place if the cd fails (26.7).
+                    if (!cwd.isEmpty() && QDir::cleanPath(cwd) != QDir::cleanPath(m_cwd))
+                        line = QStringLiteral("cd ") + relay::conversations::shellWord(cwd) + QStringLiteral(" && ") + line;
+                    const QJsonArray legacy = result.value(QStringLiteral("legacy")).toArray();
+                    if (!legacy.isEmpty()) {
+                        QStringList files;
+                        for (const auto &value : legacy) files << value.toString();
+                        notify(guestDisplayName(guest), QStringLiteral("Removed Relay's old guest entries from %1 (Relay no longer needs them installed).").arg(files.join(QStringLiteral(", "))));
+                    }
+                    // Now if the shell is at its prompt, else queued like anything typed while the
+                    // terminal is busy; a new pane's shell is not up yet and the queue waits for it.
+                    submitTerminal(line, false);
+                    status(QStringLiteral("Starting %1…").arg(guestDisplayName(guest)));
+                    // The detector takes over once the guest is in the foreground; if it never
+                    // arrives (the command failed in the shell), the picker stops claiming it.
+                    QTimer::singleShot(30000, this, [this, guest] {
+                        if (m_guestWanted == guest && m_guest != guest) { m_guestWanted.clear(); refreshPickers(); }
+                    });
+                });
+        connect(launch, &QProcess::errorOccurred, this, [this, launch, guest](QProcess::ProcessError) {
+            launch->deleteLater();
+            if (m_guestLaunch == launch) m_guestLaunch = nullptr;
+            relay::log::error(QStringLiteral("guest_launch_error pane=%1 guest=%2 error=%3").arg(paneLogId(), guest, launch->errorString()));
+            status(QStringLiteral("Could not start %1: %2").arg(guestDisplayName(guest), launch->errorString()));
+            m_guestWanted.clear();
+            refreshPickers();
+        });
+        launch->start();
+    }
+private:
+
+    // Leave the guest, then do `then`. No guest: `then` runs now. A guest at its input: Relay
+    // types the guest's own `/exit` and `then` waits for the program poll to see the shell back
+    // (setGuest). A guest that is working is never interrupted unasked: the switch is refused with
+    // a line saying what to do, and `then` is dropped (owner's open question, 26.9: whether an
+    // interrupt should be sent instead).
+    void leaveGuest(std::function<void()> then) {
+        if (m_guest.isEmpty()) { if (then) then(); return; }
+        if (m_guestBusy) {
+            status(QStringLiteral("%1 is working · stop its turn first (Esc in the terminal), then switch.")
+                       .arg(guestDisplayName(m_guest)));
+            refreshPickers();
+            return;
+        }
+        m_guestLeaveThen = std::move(then);
+        const QString guest = m_guest;
+        typeIntoGuest(guest, QStringLiteral("/exit"));
+        status(QStringLiteral("Leaving %1…").arg(guestDisplayName(guest)));
+        QTimer::singleShot(15000, this, [this, guest] {
+            if (m_guest == guest && m_guestLeaveThen) {
+                m_guestLeaveThen = nullptr;
+                status(QStringLiteral("%1 did not exit · type /exit into it, then pick the model again.").arg(guestDisplayName(guest)));
+                refreshPickers();
+            }
+        });
     }
 
     // "glm-5.3", not "Z.AI · GLM-5.3 · Coding Plan": the model id from the worker's preset list,
@@ -10077,7 +10296,15 @@ private:
             return false;
         }
         m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
-        m_backend->sendText(text, true);
+        QString body = text;
+        // `!` enters the TUI's shell mode only as a keystroke on an empty line (26.8): pasted, it
+        // is one more character of a prompt. So the bang goes first, on its own, and the command
+        // after it is pasted as usual.
+        if (body.startsWith(QLatin1Char('!'))) {
+            m_backend->sendInput(QByteArrayLiteral("!"));
+            body = body.mid(1);
+        }
+        m_backend->sendText(body, true);
         if (text.trimmed().startsWith(QLatin1Char('/')))
             m_backend->sendInput(QByteArrayLiteral("\x1b"));  // dismiss its slash popup before Enter
         m_backend->sendInput(QByteArrayLiteral("\r"));
@@ -13247,6 +13474,9 @@ private:
     bool m_delegated = false;          // the user handed the foreground program to the agent
     QString m_delegatedProgram;
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
+    QString m_guestWanted;             // picked in the model box, not yet in the foreground (26.9)
+    QProcess *m_guestLaunch = nullptr; // relay_core.guest_launch preparing the command line, while it runs
+    std::function<void()> m_guestLeaveThen;   // what a model pick does once the guest has exited
     QFrame *m_guestBar = nullptr;      // the guest's permission question, floating over the terminal
     QLabel *m_guestBarLabel = nullptr;
     QPushButton *m_guestAllow = nullptr;   // focused while a question is up; Y/Enter presses it
