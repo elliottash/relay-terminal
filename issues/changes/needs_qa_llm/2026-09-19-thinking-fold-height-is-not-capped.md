@@ -12,7 +12,7 @@ rank: zzzzzzz
 created: '2026-09-19'
 acceptance: a streaming thinking fold never shows more than 6 rows of reasoning (the tail being written), a finished one opened by hand never more than 18 followed by "… N more lines · open in pane", on any length of reasoning; a test feeds a several-thousand-line block and asserts both caps
 source: 'issues/bug_intake.txt, 2026-09-19: "the thinking bubble height isnt capped, its filling up multiple terminal pages."'
-links: {plans: [], commits: [ebebb08], evidence: [docs/qa_evidence/2026-09-19-thinking-fold-cap/], related: [T8CN, QT8C], github: null}
+links: {plans: [], commits: [ebebb08, 41d4355], evidence: [docs/qa_evidence/2026-09-19-thinking-fold-cap/], related: [T8CN, QT8C], github: null}
 ---
 # The thinking fold's height is not capped
 
@@ -44,9 +44,9 @@ a clipped view of 120 px while streaming, 360 px when done — and they never ma
 - **The two caps.** `Pane::thinkingFoldLines()` asks for `calllines::kThinkingStreamRows` (6, with
   `tail`) while the block streams and `kThinkingDoneRows` (18, from the top) for a settled fold, and
   passes `foldWrapCells()` — the grid width less `relay::kFoldIndent`, which is where the fold layer
-  wraps. `calllines::FoldOptions` gained `wrapCells` and `tail`; `foldForMarkdown()` wraps before it
-  counts, so the cap is in the rows the view paints and the cut is named on a muted row
-  (`… N earlier lines` above a stream, `… N more lines · open in pane` below a settled fold).
+  wraps — and `tail` to `foldForMarkdown()`, which wraps before it counts. The cap is then in the
+  rows the view paints, and the cut is named on a muted row (`… N earlier lines` above a stream,
+  `… N more lines · open in pane` below a settled fold).
 - **The wrap is the engine's own**, not a second implementation: `relay::wrapFoldLines()` and
   `relay::foldClusterWidth()` now live beside `FoldLine` in `engine/TerminalBackend.h`, `FoldLayer`
   keeps the one width table (`clusterWidth` forwards to it) and `kFoldIndent` is the indent both
