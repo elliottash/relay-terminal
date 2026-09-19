@@ -1,11 +1,11 @@
 ---
 id: 5AWD
 type: work
-status: in-progress
+status: needs-qa-llm
 assignee: agent
 rank: zzzzzzzi
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-helpful-line-breaks/README.md], related: [], github: null}
+links: {plans: [], commits: [2a6fa27], evidence: [docs/qa_evidence/2026-09-19-helpful-line-breaks/README.md], related: [], github: null}
 ---
 # helpful line breaks in the terminal
 

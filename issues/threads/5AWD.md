@@ -39,3 +39,9 @@ Execute · handed to a new terminal pane beside the Switchboard, whose agent wor
 
 <!-- relay:entry 20260919T184114Z-mf author=agent kind=progress model=claude-fable-5-1 -->
 Read the code. The transcript prints every block single-spaced: the ✦ line, the `▸ model` header, prose deltas, ▸ tool rows. Taking "done" as: one blank line between blocks of different kinds — prose vs tool rows, and before every ✦ line the user typed (including across turns, over the shell prompt) — none inside a run of tool rows, and the `▸ model` header sits directly on what follows it. Rule in src/TranscriptGaps.h (headless test), hooks in Pane.h's printInline/drawCallRow/turnHeader. Building now; live shots under Xvfb next.
+
+<!-- relay:entry 20260919T185737Z-c4 author=agent kind=evidence model=claude-fable-5-1 commit=2a6fa27 -->
+Landed 2a6fa27 (#5AWD): src/TranscriptGaps.h + tests/transcriptgaps_test.cpp (the rule), Pane::beginBlock hooks, ARCHITECTURE note, evidence under docs/qa_evidence/2026-09-19-helpful-line-breaks/ (three Xvfb shots against a loopback stub with prose + tool calls, README with the byte trace). One fix found live: the gap for a tool row must print before LineCursor::start()/result() are asked, or the running row is never rewritten in place. Two beginBlock lines sit inside the internals session's (#QT8C) uncommitted tool_started/tool_result branches and will ride along with their commit; on main they landed inside the same branches at the same points. Moving to needs-qa-llm with a QA checklist on the card.
+
+<!-- relay:entry 20260919T185737Z-fz author=agent kind=event model=claude-fable-5-1 -->
+- ✦ agent moved this card · In progress → Needs QA (llm) · evidence docs/qa_evidence/2026-09-19-helpful-line-breaks/README.md
