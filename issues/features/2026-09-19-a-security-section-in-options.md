@@ -121,7 +121,7 @@ but shipping one set first is the smaller step and matches how Relay's other set
 - [x] The `security` section itself, between `agent` and `privacy` (`src/RelayWindow.h:1930`), with <!-- t:a3 -->
       the posture sentence at its head
 - [ ] `security/unattended_full_tools` (default on) and the predicate it drives, with #R5TC <!-- t:b5 -->
-- [ ] Move, do not copy: `agent/terminal_handoff`, `isolation/*`, `agent/max_auto_turns`, <!-- t:c7 -->
+- [x] Move, do not copy: `agent/terminal_handoff`, `isolation/*`, `agent/max_auto_turns`, <!-- t:c7 -->
       `agent/max_steps`, `agent/max_tool_calls`, `agent/audit_requests`. Check every reader of each
       key still finds it, and that the Agent and Terminal sections do not end up with a hole
 - [x] The command denylist: a setting, the match (before execution, on the resolved command), the <!-- t:d9 -->
@@ -172,10 +172,10 @@ so that one splits on whitespace.
       are the missing rung. Off by default, verified live in both states. Reads stay impossible and
       have no switch. Note `run_command` output never reaches the emulator, so the agent copies by
       running the escape in the pane's own terminal.
-- [ ] Moving `agent/terminal_handoff`, `isolation/*`, the turn bounds and `agent/audit_requests` <!-- t:p9 -->
-      onto this page. Mechanical, but it touches every reader of each key and `src/RelayWindow.h`
-      had three sessions editing it today; worth doing in one quiet pass rather than beside a
-      feature.
+- [x] Moving `agent/terminal_handoff`, `isolation/*`, the turn bounds and `agent/audit_requests` <!-- t:p9 -->
+      onto this page, done as that quiet pass (2026-09-19): keys unchanged — every reader, the
+      notifications and `requestOptions()` are key-based — with the chain limit named on the handoff
+      row. The compaction threshold and the two model-call timeouts stay on the Agent page.
 
 
 ## Decisions

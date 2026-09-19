@@ -1411,7 +1411,8 @@ private:
     // its keyboard path. Values live in QSettings under exactly the keys they used before, because
     // several of them are read straight from QSettings elsewhere.
     //
-    // Sections: General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard.
+    // Sections: General, Appearance, Models, Local models, Claude Code and Codex, Terminal,
+    // Agent, Security, Voice, Privacy, Keyboard.
     //
     // What belongs here (owner, 2026-09-18): what persists — a default, true in every pane after
     // a restart. A verb ("Reload themes", "Reset shortcut hints", "Open the log folder") is an
@@ -2132,100 +2133,6 @@ private:
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
-        // Per-pane isolation (src/Isolation.h): the caps scale with the machine (agent RAM/16
-        // clamped to 2–8G, shell RAM/2 clamped to 4–16G), and these rows write the same
-        // [isolation] keys relay.conf takes, so a manual edit and this page agree.
-        terminal.rows << headingRow(QStringLiteral("Memory limits"));
-        terminal.rows << toggleRow(QStringLiteral("isolation/enabled"),
-                                   QStringLiteral("Per-pane memory limits"),
-                                   QStringLiteral("Each pane's shell and agent run in their own systemd scope, so a runaway "
-                                                   "command stops inside its pane; applies to new panes"), true);
-        {
-            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max")).toString();
-            relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
-                                              QStringLiteral("Agent memory limit"),
-                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
-                                              {QStringLiteral("auto"), QStringLiteral("2G"), QStringLiteral("4G"), QStringLiteral("8G"),
-                                               QStringLiteral("16G"), QStringLiteral("infinity")},
-                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::agentDefault()),
-                                               QStringLiteral("2 GiB"), QStringLiteral("4 GiB"), QStringLiteral("8 GiB"),
-                                               QStringLiteral("16 GiB"), QStringLiteral("No limit")},
-                                              current, QStringLiteral("auto"), [](const QString &value) {
-                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
-                else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
-                // Card #Y4RX: the escapee cap below is this same limit, so rewrite its drop-ins.
-                if (QSettings().value(QStringLiteral("isolation/cap_escapees"), false).toBool()) {
-                    escapees::install(escapees::userConfigRoot(),
-                                      {isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
-                                       isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault())});
-                    escapees::reload();
-                }
-            });
-            row.aliases = QStringLiteral("oom memory isolation worker limit kill");
-            terminal.rows << row;
-        }
-        {
-            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max")).toString();
-            relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
-                                              QStringLiteral("Shell memory limit"),
-                                              QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
-                                              {QStringLiteral("auto"), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
-                                               QStringLiteral("32G"), QStringLiteral("infinity")},
-                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::shellDefault()),
-                                               QStringLiteral("4 GiB"), QStringLiteral("8 GiB"), QStringLiteral("16 GiB"),
-                                               QStringLiteral("32 GiB"), QStringLiteral("No limit")},
-                                              current, QStringLiteral("auto"), [](const QString &value) {
-                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/shell_memory_max"));
-                else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
-            });
-            row.aliases = QStringLiteral("oom memory isolation shell limit kill");
-            terminal.rows << row;
-        }
-        // The hole per-pane limits cannot close, and the owner's opt-in mitigation (card #Y4RX).
-        // A child may ask the user's systemd for a transient scope of its own over D-Bus; the scope
-        // it gets is a sibling of the pane's, not a child, so nothing Relay does from inside the
-        // pane's scope contains it. tmux and Chrome both do exactly that.
-        {
-            relay::SettingRow info;
-            info.kind = relay::SettingRow::Info;
-            info.id = QStringLiteral("info:escapee_scopes");
-            info.label = QStringLiteral("Two programs get out from under these limits. tmux moves its server into "
-                                        "tmux-spawn-<uuid>.scope and Chrome puts each app instance in "
-                                        "app-com.google.Chrome-<pid>.scope, both directly under app.slice: a program "
-                                        "may ask systemd for a scope of its own, and Relay cannot contain that from "
-                                        "the pane's. Their memory counts against no pane's limit, and an out-of-memory "
-                                        "kill in app.slice can land on any program there, not only the pane that "
-                                        "started it.");
-            terminal.rows << info;
-        }
-        {
-            const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
-            const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
-            relay::SettingRow row = toggleRow(QStringLiteral("isolation/cap_escapees"),
-                                              QStringLiteral("Cap programs that leave their pane (tmux, Chrome)"),
-                                              QStringLiteral("Off by default. Writes systemd user drop-ins that cap those two at "
-                                                             "%1 of memory and %2 of swap — machine-wide for them, not per pane: "
-                                                             "every tmux server and Chrome app scope on this machine, whether "
-                                                             "Relay started it or not").arg(cap, swap),
-                                              false, [this](bool on) {
-                // Read now, not when the row was built: the limit above may have changed since.
-                const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
-                const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
-                const QString root = escapees::userConfigRoot();
-                QStringList skipped;
-                const QStringList touched = on ? escapees::install(root, {cap, swap}, &skipped)
-                                               : escapees::removeAll(root, &skipped);
-                const bool reloaded = (touched.isEmpty() && skipped.isEmpty()) || escapees::reload();
-                QString said = on ? QStringLiteral("Capped tmux and Chrome at %1 (%2 drop-in(s) written)").arg(cap).arg(touched.size())
-                                  : QStringLiteral("Removed Relay's tmux and Chrome caps (%1 file(s))").arg(touched.size());
-                if (!skipped.isEmpty())
-                    said += QStringLiteral("; left alone, not written by Relay: ") + skipped.join(QStringLiteral(", "));
-                if (!reloaded) said += QStringLiteral("; `systemctl --user daemon-reload` failed, so it takes effect at your next login");
-                statusBar()->showMessage(said + QStringLiteral("."), 8000);
-            });
-            row.aliases = QStringLiteral("tmux chrome browser scope app.slice oom escape dropin systemd cap");
-            terminal.rows << row;
-        }
         // SSH sessions (#S5SH, docs/SSH-AND-MOSH.md): the wrapper is set up when a pane's shell
         // starts, so the mode applies to new panes; the host lists are read at each login.
         terminal.rows << headingRow(QStringLiteral("SSH"));
@@ -2260,8 +2167,8 @@ private:
         relay::SettingsSection agent;
         agent.id = QStringLiteral("agent");
         agent.title = QStringLiteral("Agent");
-        agent.blurb = QStringLiteral("Instructions, skills and the limits of one turn. Most of these apply to the "
-                                     "next conversation; the turn limits apply at once.");
+        agent.blurb = QStringLiteral("Instructions, skills and the Switchboard. Most of these apply to the "
+                                     "next conversation; the timeout rows apply at once.");
         agent.rows << headingRow(QStringLiteral("Instructions and skills"));
         {
             // Where a new pane's prompt box starts; Ctrl+I cycles auto → terminal → agent in the pane.
@@ -2273,22 +2180,6 @@ private:
                                     {QStringLiteral("Auto"), QStringLiteral("Terminal"), QStringLiteral("Agent")},
                                     current, QStringLiteral("auto"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("input/default"), value);
-            });
-        }
-        {
-            // run_in_terminal (protocol 22): how far a command the agent hands over may go. The
-            // value is read when a turn starts, so it applies to the next prompt.
-            const QString current = QSettings().value(QStringLiteral("agent/terminal_handoff"),
-                                                      QStringLiteral("agent")).toString();
-            agent.rows << choiceRow(QStringLiteral("option:terminal_handoff"),
-                                    QStringLiteral("Commands the agent hands to your terminal"),
-                                    QStringLiteral("For ssh, sudo and logins, which the agent's own shell cannot run"),
-                                    {QStringLiteral("agent"), QStringLiteral("prefill"), QStringLiteral("off")},
-                                    {QStringLiteral("The agent runs it or puts it in the prompt box"),
-                                     QStringLiteral("Always in the prompt box, for you to run"),
-                                     QStringLiteral("Off")},
-                                    current, QStringLiteral("agent"), [](const QString &value) {
-                QSettings().setValue(QStringLiteral("agent/terminal_handoff"), value);
             });
         }
         agent.rows << buttonRow(QStringLiteral("agent.instructions"), QStringLiteral("Instructions"),
@@ -2428,13 +2319,6 @@ private:
             else if (ok && number >= 0.5 && number <= 0.98)
                 QSettings().setValue(QStringLiteral("agent/compact_threshold"), number);
         });
-        agent.rows << numberRow(QStringLiteral("agent/max_auto_turns"),
-                                QStringLiteral("Automatic turns from background agents"),
-                                QStringLiteral("In a row without your input (0 = unlimited)"), 50, 0, 10000);
-        agent.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
-                                QStringLiteral("Model calls, then the turn stops with Continue"), 256, 1, 500);
-        agent.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
-                                QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
         // Idle deadline for a model call (protocol 15). Applies to the running agent at once.
         {
             relay::SettingRow stall = numberRow(QStringLiteral("agent/stall_timeout_s"), QStringLiteral("Stop a silent model after"),
@@ -2458,8 +2342,6 @@ private:
             alsoBoardWorkers(firstToken);
             agent.rows << firstToken;
         }
-        agent.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
-                                QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         sections << agent;
 
         // ----- Security (card #3KB7) -------------------------------------------------------
@@ -2485,6 +2367,26 @@ private:
                 "permissions under a systemd memory limit — a denylist below is a guardrail against an obvious "
                 "mistake, not a sandbox: a shell line can always be spelled another way.");
             security.rows << info;
+        }
+        // Moved here from Agent (card #3KB7): how far the agent's own hands reach is a bound,
+        // and it belongs with the others. The chain limit (kMaxHandoffChain, src/InputPolicy.h)
+        // is the backstop this row cannot turn off.
+        {
+            // run_in_terminal (protocol 22): how far a command the agent hands over may go. The
+            // value is read when a turn starts, so it applies to the next prompt.
+            const QString current = QSettings().value(QStringLiteral("agent/terminal_handoff"),
+                                                      QStringLiteral("agent")).toString();
+            security.rows << choiceRow(QStringLiteral("option:terminal_handoff"),
+                                       QStringLiteral("Commands the agent hands to your terminal"),
+                                       QStringLiteral("For ssh, sudo and logins, which the agent's own shell cannot run. "
+                                                      "Three hand-offs in a row with nothing typed in between is the cap"),
+                                       {QStringLiteral("agent"), QStringLiteral("prefill"), QStringLiteral("off")},
+                                       {QStringLiteral("The agent runs it or puts it in the prompt box"),
+                                        QStringLiteral("Always in the prompt box, for you to run"),
+                                        QStringLiteral("Off")},
+                                       current, QStringLiteral("agent"), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("agent/terminal_handoff"), value);
+            });
         }
         security.rows << listRow(QStringLiteral("security/command_denylist"),
                                  QStringLiteral("Commands the agent never runs"),
@@ -2517,6 +2419,114 @@ private:
                                                   "runs — copy for you, and lets anything else that reaches the "
                                                   "screen replace what you are about to paste. Reading your "
                                                   "clipboard is never allowed and has no switch."), false);
+        // Per-pane isolation (src/Isolation.h), moved here from Terminal (card #3KB7): the caps
+        // scale with the machine (agent RAM/16 clamped to 2–8G, shell RAM/2 clamped to 4–16G),
+        // and these rows write the same [isolation] keys relay.conf takes, so a manual edit and
+        // this page agree.
+        security.rows << headingRow(QStringLiteral("Memory limits"));
+        security.rows << toggleRow(QStringLiteral("isolation/enabled"),
+                                   QStringLiteral("Per-pane memory limits"),
+                                   QStringLiteral("Each pane's shell and agent run in their own systemd scope, so a runaway "
+                                                   "command stops inside its pane; applies to new panes"), true);
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
+                                              QStringLiteral("Agent memory limit"),
+                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("2G"), QStringLiteral("4G"), QStringLiteral("8G"),
+                                               QStringLiteral("16G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::agentDefault()),
+                                               QStringLiteral("2 GiB"), QStringLiteral("4 GiB"), QStringLiteral("8 GiB"),
+                                               QStringLiteral("16 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
+                // Card #Y4RX: the escapee cap below is this same limit, so rewrite its drop-ins.
+                if (QSettings().value(QStringLiteral("isolation/cap_escapees"), false).toBool()) {
+                    escapees::install(escapees::userConfigRoot(),
+                                      {isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
+                                       isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault())});
+                    escapees::reload();
+                }
+            });
+            row.aliases = QStringLiteral("oom memory isolation worker limit kill");
+            security.rows << row;
+        }
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
+                                              QStringLiteral("Shell memory limit"),
+                                              QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
+                                               QStringLiteral("32G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::shellDefault()),
+                                               QStringLiteral("4 GiB"), QStringLiteral("8 GiB"), QStringLiteral("16 GiB"),
+                                               QStringLiteral("32 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/shell_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
+            });
+            row.aliases = QStringLiteral("oom memory isolation shell limit kill");
+            security.rows << row;
+        }
+        // The hole per-pane limits cannot close, and the owner's opt-in mitigation (card #Y4RX).
+        // A child may ask the user's systemd for a transient scope of its own over D-Bus; the scope
+        // it gets is a sibling of the pane's, not a child, so nothing Relay does from inside the
+        // pane's scope contains it. tmux and Chrome both do exactly that.
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:escapee_scopes");
+            info.label = QStringLiteral("Two programs get out from under these limits. tmux moves its server into "
+                                        "tmux-spawn-<uuid>.scope and Chrome puts each app instance in "
+                                        "app-com.google.Chrome-<pid>.scope, both directly under app.slice: a program "
+                                        "may ask systemd for a scope of its own, and Relay cannot contain that from "
+                                        "the pane's. Their memory counts against no pane's limit, and an out-of-memory "
+                                        "kill in app.slice can land on any program there, not only the pane that "
+                                        "started it.");
+            security.rows << info;
+        }
+        {
+            const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
+            const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+            relay::SettingRow row = toggleRow(QStringLiteral("isolation/cap_escapees"),
+                                              QStringLiteral("Cap programs that leave their pane (tmux, Chrome)"),
+                                              QStringLiteral("Off by default. Writes systemd user drop-ins that cap those two at "
+                                                             "%1 of memory and %2 of swap — machine-wide for them, not per pane: "
+                                                             "every tmux server and Chrome app scope on this machine, whether "
+                                                             "Relay started it or not").arg(cap, swap),
+                                              false, [this](bool on) {
+                // Read now, not when the row was built: the limit above may have changed since.
+                const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
+                const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+                const QString root = escapees::userConfigRoot();
+                QStringList skipped;
+                const QStringList touched = on ? escapees::install(root, {cap, swap}, &skipped)
+                                               : escapees::removeAll(root, &skipped);
+                const bool reloaded = (touched.isEmpty() && skipped.isEmpty()) || escapees::reload();
+                QString said = on ? QStringLiteral("Capped tmux and Chrome at %1 (%2 drop-in(s) written)").arg(cap).arg(touched.size())
+                                  : QStringLiteral("Removed Relay's tmux and Chrome caps (%1 file(s))").arg(touched.size());
+                if (!skipped.isEmpty())
+                    said += QStringLiteral("; left alone, not written by Relay: ") + skipped.join(QStringLiteral(", "));
+                if (!reloaded) said += QStringLiteral("; `systemctl --user daemon-reload` failed, so it takes effect at your next login");
+                statusBar()->showMessage(said + QStringLiteral("."), 8000);
+            });
+            row.aliases = QStringLiteral("tmux chrome browser scope app.slice oom escape dropin systemd cap");
+            security.rows << row;
+        }
+        // Turn bounds, moved here from Agent (card #3KB7): they are the real cost and runaway
+        // control. The compaction threshold and the two timeouts stay on the Agent page, where
+        // they describe the model call rather than what it may reach.
+        security.rows << headingRow(QStringLiteral("Turn bounds"));
+        security.rows << numberRow(QStringLiteral("agent/max_auto_turns"),
+                                   QStringLiteral("Automatic turns from background agents"),
+                                   QStringLiteral("In a row without your input (0 = unlimited)"), 50, 0, 10000);
+        security.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
+                                   QStringLiteral("Model calls, then the turn stops with Continue"), 256, 1, 500);
+        security.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
+                                   QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
+        security.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
+                                   QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval card's "Always
         // allow" unticks the matching row by writing the same list. The labels are the card's
         // headers (approvals.LABELS), so the row a card names is the row that unticks.
