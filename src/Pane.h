@@ -2720,7 +2720,9 @@ public:
         if (key == QStringLiteral("agent/thinking_display")) return;
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
-            || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")
+            || key == QStringLiteral("agent/stall_timeout_s")
+            || key == QStringLiteral("agent/first_token_timeout_s")
+            || key == QStringLiteral("agent/audit_requests")
             || key == QStringLiteral("agent/failover") || key == QStringLiteral("agent/failover_hosted")
             || key.startsWith(QStringLiteral("security/"))) {
             if (m_configured) {
@@ -3698,8 +3700,11 @@ private:
         QSettings settings;
         return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 256).toInt(), 1, 500)},
                 {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
-                // Idle deadline for a streamed model call (protocol 15).
+                // Idle deadline for a streamed model call (protocol 15), and the longer budget
+                // the first chunk alone may take (0: the same deadline, as it was before 15.1's
+                // second row — prefill on a large prompt is not a stalled stream).
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
+                {"first_token_timeout_s", std::clamp(settings.value(QStringLiteral("agent/first_token_timeout_s"), 0).toInt(), 0, 1800)},
                 {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()},
                 // Whether a turn whose provider keeps failing continues on another one (#G9VE),
                 // and whether Relay Free may be one of those providers (owner, 2026-09-19: opt-in,
