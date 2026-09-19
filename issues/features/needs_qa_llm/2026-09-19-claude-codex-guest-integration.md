@@ -71,6 +71,33 @@ special translator from the relay prompt into the claude code input and back."
 - 2026-09-19, owner: "a busy guest model change should be the same as our relay-native models. just shift over
   immediately." The refusal the agent had shipped is gone: the pick applies at once, the guest's turn in flight
   finishes, then it is asked to `/exit` (§26.9 "Leaving a guest").
+
+## Functionality mapping
+| Capability | Claude Code | Codex | Relay equivalent | Integration path |
+|---|---|---|---|---|
+| Prompt input | TUI prompt / stream-json user msg | TUI prompt / `turn/start` | Composer | Tier B: `type_into_program`; Tier A: protocol |
+| Slash commands | built-ins + skills + `.claude/commands` | TUI commands | Relay `/` commands + aliases + skills | Union registry, guest badge, passthrough |
+| `/resume` | TUI picker; `claude -r <id>` / `-c` | `/resume` picker; `codex resume` | Sessions pane | conv_index sources + respawn command |
+| `/model` | `/model`, `--model`, `set_model` | `/model`, `thread/settings/update`, `model/list` | Model picker | Tier B: type command; Tier A: protocol |
+| Context % | statusline JSON; `result.usage` | `turn/completed` usage; `token_count` | Context chip | Statusline shim / app-server events |
+| Compact | `/compact` | `thread/compact/start` | `/compact` | Passthrough (B) / protocol (A) |
+| Permissions | permission modes; PermissionRequest hook; `can_use_tool` | approval policies; `requestApproval`; `pre_tool_use` hook | Relay agent keeps no-approval model; guests get approval UI | openDiff bridge (edits), hook decisions, cards (A) |
+| Edit review | `openDiff` (IDE bridge, blocking FILE_SAVED/DIFF_REJECTED) | `applyPatchApproval` | Relay diff view | Bridge (B) / adapter (A) |
+| Sessions store | `~/.claude/projects/**/*.jsonl` | rollouts + `state_5.sqlite` threads | conv_index + sessions pane | Indexers, live tail for active pane |
+| Fork | `--fork-session` | `thread/fork` | `/fork` | Respawn with flag (B) / protocol (A) |
+| Rewind/checkpoints | `/rewind` (TUI-only) | `thread/rollback` | `/rewind`, `/rewind-code` | B: pass to TUI; A: rollback (codex), documented limitation (claude) |
+| `!` shell | `!` bash mode | `thread/shellCommand` | Relay shell routing | Explicit user choice, never silent |
+| `@` files | `@` mentions | `@` mentions | Relay `@` picker | Composer translates to guest syntax |
+| `#` memory | `#` shortcut | — | Instructions system | Passthrough for claude guests |
+| Notifications | hooks (Stop/Notification/PermissionRequest) | hooks + `[tui] notification_condition` | Notification centre | Hook bundles → pane events |
+| Statusline | `statusLine.command` JSON (model, cwd, context %) | — | Prompt items / chips | Shim forwards JSON to pane |
+| Subagents | Task tool | `spawn_agent` | Relay subagent pane | Event bridge (polish phase) |
+| Todos | TodoWrite | — | Relay todos | Event bridge (polish phase) |
+| MCP | MCP servers, `/mcp` | MCP servers | (SSRQ: planned import) | Unchanged; import per SSRQ |
+| Diagnostics | `getDiagnostics` (IDE bridge) | — | None (no LSP source) | Empty stub, documented |
+| File open | `openFile` (IDE bridge) | fs RPCs (app-server clients) | File panes | Bridge (B) / adapter (A) |
+
+## Notes
 - Full research + design: Warp plan `72204e45-c3d4-419f-b94e-f5f5b045a480` (Tier B primary, Tier A optional).
 - Research anchors: `warpdotdev/claude-code-warp` + `warpdotdev/codex-warp` (OSC 777 hooks; one-directional);
   `coder/claudecode.nvim` PROTOCOL.md (IDE bridge spec); `openai/codex` app-server README + OpenAI's "Unlocking the
