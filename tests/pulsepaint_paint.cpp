@@ -47,6 +47,24 @@ QImage badgeAt(int live, qreal dpr, bool remote) {
     return img;
 }
 
+QImage badgeOffsetAt(int live, qreal dpr, int offset) {
+    const relay::panestatus::Tokens t = relay::chrome::tokens();
+    const QColor ground = t.background;
+    QFont font = QApplication::font();
+    font.setWeight(QFont::DemiBold);
+    const QSize box(7 + 12 + 4 + QFontMetrics(font).horizontalAdvance(QStringLiteral("8")) + 7, 18);
+    QImage img(QSize(box.width() + offset, box.height()) * dpr, QImage::Format_ARGB32_Premultiplied);
+    img.setDevicePixelRatio(dpr);
+    img.fill(ground);
+    QPainter p(&img);
+    relay::chrome::paintSubagentBadge(p, QRectF(QPointF(offset, 0), QSizeF(box)),
+                                      relay::panestatus::subagentBadgeText(live),
+                                      relay::panestatus::subagentBadgeStyle(ground, t),
+                                      relay::chrome::paneRadius() > 0 ? 5 : 0, font);
+    p.end();
+    return img;
+}
+
 QColor headerGround() { return relay::chrome::tokens().background; }
 
 QColor sshBandFill() { return relay::panestatus::remoteStyle(relay::chrome::tokens()).fill; }

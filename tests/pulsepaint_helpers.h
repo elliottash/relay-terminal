@@ -17,6 +17,10 @@ QImage headAt(relay::panestatus::State state, int phase, qreal dpr);
 // the count `live`. A count of zero paints nothing, and the box is still a one-digit badge's size,
 // so a test can assert that "nothing" instead of comparing two empty pictures.
 QImage badgeAt(int live, qreal dpr, bool remote);
+// The same badge painted into a wider surface with its box `offset` logical pixels along, which is
+// what any caller that is not the widget itself does. Everything inside the badge is measured from
+// the box, so this is the badge of badgeAt() shifted and nothing else.
+QImage badgeOffsetAt(int live, qreal dpr, int offset);
 // The two grounds the badge can land on, read from the live theme: the pane header's own background
 // and the ssh band's fill. They live here because the tokens are behind PaneChrome.h.
 QColor headerGround();

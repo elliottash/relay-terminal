@@ -264,9 +264,12 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         if (m_text.isEmpty()) return;
+        // Every field, in Tokens' own order: leaving the last one out default-constructed an
+        // invalid QColor, which any rule that reached for `tool` would have painted with.
         const relay::panestatus::Tokens t{relay::theme::Background, relay::theme::Text, relay::theme::TextMuted,
                                           relay::theme::Shell, relay::theme::Agent, relay::theme::Success,
-                                          relay::theme::Warning, relay::theme::Error, relay::theme::Action};
+                                          relay::theme::Warning, relay::theme::Error, relay::theme::Action,
+                                          relay::theme::Tool};
         QFont bold = font(); bold.setWeight(QFont::DemiBold);
         QPainter p(this);
         p.setFont(bold);
@@ -525,10 +528,20 @@ public:
     // pane is measured on the same interval. An idle pane is a valid sample of nothing.
     relay::usage::Sample usageSample() const { return m_usageSample; }
     void refreshUsage() {
+        // With the meters switched off nothing reads the sample, so nothing walks /proc for it:
+        // the setting turns the measuring off as well as the three labels, and the baseline goes
+        // with it so switching back on reads a fresh interval rather than averaging the gap.
+        if (!relay::usage::metersEnabled()) { clearUsage(); return; }
         QList<qint64> roots;
         if (const int shell = shellPid(); shell > 0) roots << shell;
         if (m_worker.state() == QProcess::Running) roots << qint64(m_worker.processId());
         m_usageSample = m_usageMeter.update(roots);
+    }
+    // Forget the reading and its baseline (the meters were switched off, or the pane's processes
+    // changed wholesale).
+    void clearUsage() {
+        m_usageMeter.reset();
+        m_usageSample = {};
     }
     // The foreground program's command line while it is ssh, mosh or telnet; empty otherwise.
     // Read live from the terminal's foreground process group, so it is true exactly while the

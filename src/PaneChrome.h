@@ -22,6 +22,7 @@
 #include "Theme.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDynamicPropertyChangeEvent>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -294,10 +295,15 @@ inline void paintSubagentBadge(QPainter &p, const QRectF &box, const QString &te
     p.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
     p.setPen(Qt::NoPen);
     p.setBrush(style.ink);
-    p.drawPath(fourPointStar(QPointF(7 + 6, box.center().y()), 5.0, 1.7));
+    // Everything inside is measured from the box, not from the painter's origin: the widget hands
+    // in its own rect() (origin 0, 0) but a test — or any caller that draws the badge into a
+    // larger surface — hands in a box further along, and absolute offsets put the star and the
+    // number outside the chip they belong to.
+    p.drawPath(fourPointStar(QPointF(box.left() + 7 + 6, box.center().y()), 5.0, 1.7));
     p.setFont(font);
     p.setPen(style.ink);
-    p.drawText(QRectF(7 + 12 + 4, box.top(), box.width() - (7 + 12 + 4) - 6, box.height()),
+    const qreal textLeft = box.left() + 7 + 12 + 4;
+    p.drawText(QRectF(textLeft, box.top(), box.right() - 6 - textLeft, box.height()),
                Qt::AlignLeft | Qt::AlignVCenter, text);
     p.restore();
 }
@@ -782,7 +788,7 @@ private:
         if (!row || !header) return;
         m_glyph = new PaneStateGlyph(this);
         m_word = new PaneStateWord(this);
-        m_subagentBadge = new PaneSubagentBadge(this);
+        m_subagentBadge = new PaneSubagentBadge(this, pane);
         m_usageChip = new PaneUsageChip(pane);
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
@@ -838,14 +844,22 @@ private:
             if (live) {
                 if (!m_pulse) {
                     m_pulse = new QTimer(this);
-                    m_pulse->setInterval(600);   // the waiting dots' clock: four steps, two levels
-                    connect(m_pulse, &QTimer::timeout, this, [this] { ++m_phase; update(); });
+                    m_pulse->setSingleShot(true);
+                    connect(m_pulse, &QTimer::timeout, this, [this] { update(); armPulse(); });
                 }
-                if (QApplication::cursorFlashTime() > 0) m_pulse->start();
+                if (QApplication::cursorFlashTime() > 0) armPulse();
             } else if (m_pulse) {
                 m_pulse->stop();
             }
             update();
+        }
+        // The phase is read off the wall clock, not counted per pane, and the timer is re-armed to
+        // the next step boundary rather than left free-running. Two panes that went live seconds
+        // apart used to blink seconds apart — three busy panes in a row each flashing on their own
+        // beat is noise, not a signal — and now every live mark in every window is on the same step.
+        static constexpr int kStepMs = 600;   // the waiting dots' clock: four steps, two levels
+        static int phaseNow() {
+            return int((QDateTime::currentMSecsSinceEpoch() / kStepMs) % 4);
         }
     protected:
         void paintEvent(QPaintEvent *) override {
@@ -856,12 +870,14 @@ private:
             const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
             const bool blinking = m_pulse && m_pulse->isActive();
             relay::chrome::paintStateGlyph(p, QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), s, relay::panestatus::stateInk(s, t), ground,
-                                           blinking ? relay::panestatus::pulseScale(m_phase) : 1.0);
+                                           blinking ? relay::panestatus::pulseScale(phaseNow()) : 1.0);
         }
     private:
+        void armPulse() {
+            m_pulse->start(int(kStepMs - QDateTime::currentMSecsSinceEpoch() % kStepMs));
+        }
         PaneChrome *m_chrome;
         QTimer *m_pulse = nullptr;
-        int m_phase = 0;
     };
 
     // The live state's word beside the glyph — "Command running", "Relaying…", "Subagents
@@ -877,30 +893,43 @@ private:
         }
         void setState(relay::panestatus::State state) {
             setToolTip(relay::panestatus::stateLabel(state));
-            const QString text = relay::panestatus::isLive(state) ? relay::panestatus::stateLabel(state) : QString();
+            const bool live = relay::panestatus::isLive(state);
+            const QString text = live ? relay::panestatus::stateLabel(state) : QString();
             if (text == m_text) return;
             m_text = text;
+            m_short = live ? relay::panestatus::stateLabelShort(state) : QString();
             updateGeometry(); update();
             setVisible(!m_text.isEmpty());   // Pane::updateHeader re-elides the title around it
         }
         QSize sizeHint() const override {
-            QFont bold = font(); bold.setWeight(QFont::DemiBold);
-            return {QFontMetrics(bold).horizontalAdvance(m_text) + 2, 18};
+            return {advance(m_text) + 2, 18};
         }
     protected:
         void paintEvent(QPaintEvent *) override {
             if (m_text.isEmpty()) return;
+            // The row can end up narrower than the word asked for — three panes to a window, with
+            // the usage chip and the subagent badge beside it. Then the short form, and when even
+            // that does not fit, nothing: a word cut off mid-letter says less than the glyph
+            // already does, and the tooltip still spells the state out.
+            const QString text = advance(m_text) <= width() ? m_text
+                                 : advance(m_short) <= width() ? m_short : QString();
+            if (text.isEmpty()) return;
             const relay::panestatus::Tokens t = relay::chrome::tokens();
             const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
             QPainter p(this);
             QFont bold = font(); bold.setWeight(QFont::DemiBold);
             p.setFont(bold);
             p.setPen(relay::panestatus::stateText(m_chrome->state(), ground, t));
-            p.drawText(rect(), Qt::AlignLeft | Qt::AlignVCenter, m_text);
+            p.drawText(rect(), Qt::AlignLeft | Qt::AlignVCenter, text);
         }
     private:
+        int advance(const QString &text) const {
+            if (text.isEmpty()) return 0;
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            return QFontMetrics(bold).horizontalAdvance(text);
+        }
         PaneChrome *m_chrome;
-        QString m_text;
+        QString m_text, m_short;
     };
 
     // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
@@ -1084,7 +1113,11 @@ private:
     // the tooltip is where the key that opens the subagents pane is taught.
     class PaneSubagentBadge final : public QWidget {
     public:
-        explicit PaneSubagentBadge(PaneChrome *chrome) : m_chrome(chrome) {
+        // `owner` is the pane whose header this badge sits in, passed in for the reason
+        // PaneUsageChip gives: the layout reparents the badge to the header widget, so
+        // parentWidget() is that header and never the Pane, and a dynamic_cast of it found
+        // nothing — the title was never told to re-elide when the badge appeared or widened.
+        PaneSubagentBadge(PaneChrome *chrome, Pane *owner) : m_chrome(chrome), m_owner(owner) {
             setObjectName(QStringLiteral("paneSubagentBadge"));
             setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             setAccessibleName(QStringLiteral("Subagents running"));
@@ -1102,7 +1135,7 @@ private:
             updateGeometry();
             update();
             // Appearing, leaving or widening changes what the title has to elide around.
-            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+            if (m_owner) m_owner->updateHeader();
         }
         QSize sizeHint() const override {
             if (m_text.isEmpty()) return {0, 0};
@@ -1122,6 +1155,7 @@ private:
         }
     private:
         PaneChrome *m_chrome;
+        Pane *m_owner = nullptr;
         QString m_text;
         QString m_keys;
     };

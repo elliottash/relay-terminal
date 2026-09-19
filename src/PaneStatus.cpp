@@ -46,6 +46,16 @@ QString stateLabel(State state) {
     return {};
 }
 
+QString stateLabelShort(State state) {
+    switch (state) {
+    case State::Running: return QStringLiteral("Running");
+    case State::Subagents: return QStringLiteral("Subagents");
+    case State::Recommends: return QStringLiteral("Suggested command");
+    default: break;
+    }
+    return stateLabel(state);   // the rest are already one or two words
+}
+
 bool isLive(State state) {
     return state == State::Running || state == State::Working || state == State::Subagents;
 }

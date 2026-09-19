@@ -305,7 +305,10 @@ happening"). Running, Working and Subagents are work happening *now*, and their 
 dots' 600 ms clock (card #4E13: full size and a dimmed step alternating — `pulseScale`, a scale,
 never an opacity, so the ink keeps its contrast), the state's word sits beside it ("Command
 running", "Relaying…", "Subagents working" — `stateLabel`) in the work's own colour lifted to 4.5:1
-on the header's ground (`stateText`), and a tab with anything live carries a blinking corner dot
+on the header's ground (`stateText`) — shortened to one word (`stateLabelShort`: "Running",
+"Subagents") when the row has run out of room for the full one, and left out rather than cut in
+half when even that does not fit, since the glyph and the tooltip still say it — and a tab with
+anything live carries a blinking corner dot
 in that colour (`liveMarker`: the agent's violet whenever agent work — a turn or subagents — is
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
@@ -315,6 +318,9 @@ a gerund of the live tool call, or what the pane waits for — and "Relaying <pr
 terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
 flash time of 0, the same one that stills the caret and the waiting dots — draws every live mark at
 rest, and the news states (done, failed, needs you) never move: they pull the eye by being news.
+Every live mark reads its step off the wall clock (`kStepMs`, 600 ms) rather than counting one per
+pane, and each pane's timer is re-armed to the next boundary, so panes that went live seconds apart
+blink together instead of each on its own beat.
 
 **The subagent badge** (card #YMSR, owner 2026-09-19: "in the pane header, add a badge with a
 number for number of subagents, if applicable") is how many agents that pane's agent has
@@ -364,7 +370,9 @@ shows nothing anywhere: an idle terminal looks exactly as it did before, and the
 still until the reading moves three points or a second has passed
 (`relay::usage::labelShouldFollow`), and only the tab whose text moved is relabelled.
 `appearance/pane_usage` turns off all four — chip, tab suffix, tab tooltip line and Sessions tag
-— through `relay::usage::metersEnabled()`, which is the one place the key is read.
+— through `relay::usage::metersEnabled()`, which is the one place the key is read; with it off
+`Pane::refreshUsage()` drops the pane's baseline and walks no `/proc` at all, so the setting stops
+the measuring and not only the labels.
 
 **Remote sessions** are a safety signal and ignore the colour setting. `Pane::remoteCommandLine()`
 is the foreground process group's command line while it is `ssh`, `mosh`, `mosh-client`, `telnet`
@@ -571,13 +579,15 @@ Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Switchboard with the Edit button, a click on the title or a
 double-click in the text (→ `e`), a card's Discuss, Plan and Execute buttons (→ Enter, `p`, `x`),
-and rotating idle tips 4 s after a finished agent turn with an
-from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
+the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share chip on a pane that is already shared (→ the palette, then "Sharing", because
 `pane.sharing` deliberately has no key of its own), answering an `ask_user` card by typing an
 option out in full (→ its number, `question.number`; an answer in the user's own words is the
-card working and is never corrected),
+card working and is never corrected), dropping a pane on another's bottom edge (→ the move
+toward that pane then Move-down, `pane.dockBeneath`; the chord's own arming line is
+`pane.dockBeneath.chord`), the first reasoning delta of a turn (→ a click or `agent.thinkingPanel`
+folds it away, `thinking.fold`),
 and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.

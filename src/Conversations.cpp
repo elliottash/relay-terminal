@@ -269,9 +269,6 @@ QStringList badges(const QJsonObject &item, bool openNow, const QString &closedT
     if (item.value(QStringLiteral("pinned")).toInt() > 0) tags << QStringLiteral("pinned");
     if (openNow) tags << QStringLiteral("open");
     else if (!closedText.isEmpty()) tags << closedText;
-    // What the conversation's pane is costing the machine right now (issue #D03W): live state
-    // like "open", so it sits beside it, and it is simply absent when the pane is idle.
-    if (!usageTag.isEmpty()) tags << usageTag;
     if (item.value(QStringLiteral("unfinished")).toBool()) tags << QStringLiteral("unfinished");
     const int files = item.value(QStringLiteral("files_count")).toInt();
     if (files > 0)

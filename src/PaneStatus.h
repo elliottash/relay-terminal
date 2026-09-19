@@ -50,6 +50,12 @@ State mostUrgent(const QList<State> &states);
 QString stateName(State state);
 // What the glyph's tooltip says ("Agent needs you").
 QString stateLabel(State state);
+// The same word for a header row that has run out of room: "Command running" → "Running",
+// "Subagents working" → "Subagents". A live pane's word sits between the glyph and the title
+// with the ssh, phone, subagent and usage chips beside it, and at three panes to a window the
+// row cannot hold every one of them: the word is the piece that gives way, and a word that
+// shortens reads, where "Command" cut out of "Command running" only looks broken.
+QString stateLabelShort(State state);
 
 // ----- live states (cards #V8KT, #4E13) ----------------------------------------------------------
 // Work happening in the pane right now: a command runs, an agent turn runs, or subagents run.

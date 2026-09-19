@@ -82,6 +82,20 @@ private Q_SLOTS:
         QCOMPARE(stateLabel(State::Working), QStringLiteral("Relaying…"));
     }
 
+    // The short form the header falls back to when the row runs out of room (three panes to a
+    // window, with the usage chip and the subagent badge beside the word). It has to be a word,
+    // not a truncation, and never longer than the full label — the whole point is that it fits.
+    void theStateWordHasAShorterFormForACrowdedHeader() {
+        QCOMPARE(stateLabelShort(State::Running), QStringLiteral("Running"));
+        QCOMPARE(stateLabelShort(State::Subagents), QStringLiteral("Subagents"));
+        QCOMPARE(stateLabelShort(State::Working), stateLabel(State::Working));   // already short
+        for (State state : {State::Idle, State::Running, State::Subagents, State::Working,
+                            State::Recommends, State::Done, State::Failed, State::NeedsYou}) {
+            QVERIFY(!stateLabelShort(state).isEmpty());
+            QVERIFY(stateLabelShort(state).size() <= stateLabel(state).size());
+        }
+    }
+
     // Card #V8KT: "its not clear enough if a pane agent or program is running". The live states
     // are the ones whose marks move; the news states pull the eye by being news and stay still.
     // Owner, 2026-09-19: "the icons / anims should use blue for terminal work happening and violet

@@ -99,6 +99,28 @@ private slots:
         }
     }
 
+    // The badge is drawn inside the box it is given, wherever that box is. The widget always hands
+    // in its own rect() at the origin, so absolute offsets for the star and the number looked right
+    // there and put both outside the chip for every other caller — the header row is not the only
+    // surface this is painted on.
+    void theSubagentBadgeIsDrawnInsideTheBoxItIsGiven() {
+        for (qreal dpr : {1.0, 2.0}) {
+            const QImage atOrigin = badgeAt(3, dpr, false);
+            const int offset = 24;
+            const QImage moved = badgeOffsetAt(3, dpr, offset);
+            const QByteArray where = QStringLiteral("dpr=%1").arg(dpr).toUtf8();
+            // Nothing is painted before the box.
+            QVERIFY2(movedPixels(moved, flatLike(moved, headerGround()), 8, 0, int(offset * dpr)) == 0,
+                     where.constData());
+            // And what is painted from the box on is the badge, pixel for pixel.
+            int same = 0;
+            for (int y = 0; y < atOrigin.height(); ++y)
+                for (int x = 0; x < atOrigin.width(); ++x)
+                    if (atOrigin.pixel(x, y) == moved.pixel(x + int(offset * dpr), y)) ++same;
+            QCOMPARE(same, atOrigin.width() * atOrigin.height());
+        }
+    }
+
     // A news icon (here: a failed turn) carrying the live corner dot still moves with every
     // step — the dot is the one thing that says a sibling pane is busy.
     void everyStepOfTheCornerDotMoves() {
