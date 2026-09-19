@@ -14,9 +14,10 @@ list, not the current one" needs. The first list covers every glyph: completed, 
 pending, deferred, blocked, cancelled.
 
 Re-shoot with `docs/qa_evidence/2026-09-19-clicking-updated-todos-does-not-unfold/drive.sh
-[build-dir]`; it needs Xvfb, xdotool, ImageMagick and tesseract. Clicks are placed by OCR-scanning
-the window one terminal row at a time for the row's own text, so nothing is hard-coded to a pixel.
-`implementer-notes.txt` has the OCR of every shot and the y each click landed on.
+[build-dir] [scene]`; it needs Xvfb, xdotool, ImageMagick and tesseract. `scene` is `all` (01–05,
+into `implementer-notes.txt`) or `tasklist` (06, into `implementer-tasklist-notes.txt`). Clicks are
+placed by OCR-scanning the window one terminal row at a time for the row's own text, so nothing is
+hard-coded to a pixel; the notes record the OCR of every shot and the y each click landed on.
 
 | Shot | What it shows |
 | --- | --- |
@@ -25,11 +26,36 @@ the window one terminal row at a time for the row's own text, so nothing is hard
 | `implementer-03-folded.png` | **A second click on the same row**: folded away again, `▸ updated tasks · 2 open`. |
 | `implementer-04-two-rows.png` | A second ask leaves a second row; the first turn's fold is still open above it with its own list. |
 | `implementer-05-earlier.png` | The clearest one: the **first** turn's fold open on the six-task list it left behind, the **second** turn's row folded below it, and the strip and task panel showing the *current* four-task list (T7–T10). An old row says what it said. |
+| `implementer-06-open.png` | The `tasklist` scene, before its second click: the fold open, `open the task list` its last row. |
+| `implementer-06-hint.png` | The instant after clicking that row: the Tasks panel is up **and** the shortcut hint is on screen — `Next time: Ctrl+Shift+K · task list`, the `tasks.fold` hint WARP.md's standing rule asks for. |
+| `implementer-06-tasklist.png` | The same, settled: `Tasks · 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished)` with T1–T6 under the same glyphs the fold drew, the selected task's note below, and the fold still open behind it. |
 
-`logs/` holds the app's and the worker's logs from the run and `implementer-notes.txt` the OCR of
-every shot. A sixth scene — clicking `open the task list` itself — is in `drive.sh` but did not fit
-the run's 900 s budget: the OCR row scan is slow, and the first five scenes are the card's claims.
-Shots 02 and 05 show that row rendered and linked, and `calllines_test.cpp` pins where it points.
+`logs/` holds the app's and the worker's logs from the last run in this folder (the
+`tasklist` scene); every run rewrites them.
+
+**The sixth scene and its hint.** 06 was unshot when this card first landed — it is last in a run
+whose OCR scan costs about a second a row, and it fell off the end of the budget — so it is now a
+scene of its own, reached from one ask in about a minute. Shooting it found two things worth
+writing down, neither of them in Relay:
+
+- The click was landing at x=40, which is inside a *tool-call row* but inside the **indent** of a
+  row that lives in a fold (`relay::kFoldIndent`), so it missed the link entirely and produced a
+  shot of a fold that looked as though it would not open. `click_row` now takes the x to click.
+- A one-line crop of that row — indented, underlined, in the link ink — OCRs with its word spacing
+  wandering ("openthe tasklist"), so the needle and the text are now compared lowercased with their
+  spaces removed.
+
+The hint needed one more thing. Hints share a 20-second global gap and each has a show limit of
+three (`src/Hints.cpp`), and **every** left click in the terminal offers `terminal.click` ("The
+prompt box is the input · Ctrl+H types into the terminal") from the pane's event filter, which runs
+before the view's own handler — so on a fresh profile that generic hint takes the gap and
+`tasks.fold` is suppressed. That is the hint system working as designed, not a fault in this route.
+The scene therefore starts from the profile of somebody who has already been shown the prompt-box
+hint its three times (`EXTRA_CONF` seeds `[hints] count\terminal.click=3`), and then the toast this
+card is about is the one with something to say. `implementer-tasklist-relay.conf` is the settings
+file the run left behind, and the tail of `implementer-tasklist-notes.txt` quotes its `[hints]`
+section: `count\tasks.fold=1` — and `ShortcutHints::recordShown()` writes that count *only* when the
+toast actually reached the screen.
 
 ## What the shots cannot show, and what covers it
 

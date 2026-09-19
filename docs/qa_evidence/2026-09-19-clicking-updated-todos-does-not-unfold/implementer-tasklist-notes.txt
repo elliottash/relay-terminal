@@ -1,0 +1,88 @@
+row 'updated tasks' #1 at y=250: » updated tasks - 2 open
+--- 06-open
+vy updated tasks - 2 open
+vy read the card and the code it names
+© make the row a fold and draw the list
+oO run ctest and the backend suite
+« ask the owner about the icons
+x wait on the other session's header
+x the old plan
+open the task list
+The list is up: one in progress, three still open.
++ checking open items (1/2)
+The list is up: one in progress, three still open.
++ checking open items (2/2)
+The list is up: one in progress, three still open.
++ 1 tool call - 1s (Ctrl+click)
++ Tasks 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) - T5 “wait on the other session's hea...” failed, T4 “ask the owner about the icons”
+deferred +3 more - /tasks
+Shell commands or agent prompts... ? for help auto
+row 'open the task list' #1 at y=250: _ | open the task List
+--- 06-hint
+v updated tasks - 2 open Tasks - 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) x
+7 Geet) Ge Gare) Git) die Geule i nens* 11 select - Enter open its subagent / fold Earlier - S run as subagent - Esc close
+© make the row a fold and draw the list
+S Gin Get end) the baskend anine ¥ T1 read the card and the code it names
+. © T2 make the row a fold and draw the list
+« ask the owner about the icons .
+nt ann afin ion's head © T3 run ctest and the backend suite
+were en the oener sesszon’s neecer « T4 ask the owner about the icons — not needed yet
+x the old plan x TS wait on the other session's header — their file
+open _the task List | To theoldplan— superseded
+The list is up: one in progress, three still open.
++ checking open items (1/2)
+The list is up: one in progress, three still open.
++ checking open items (2/2)
+The list is up: one in progress, three still open.
++ 1 tool call - 1s (Ctrl+click)
++ Tasks 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished T6 - cancelled
+deferred +3 more - /tasks DOSS SSeS
+the old plan
+Next time: Ctrl+Shift+K - task list
+Shell commands or agent prompts... ? for help auto
+~/project { (11/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) _| 94% left stub « local ~- @ €
+--- 06-tasklist
+v updated tasks - 2 open Tasks - 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) x
+7 Geet) Ge Gare) Git) die Geule i nens* 11 select - Enter open its subagent / fold Earlier - S run as subagent - Esc close
+© make the row a fold and draw the list
+S Gin Get end) the baskend anine ¥ T1 read the card and the code it names
+. © T2 make the row a fold and draw the list
+« ask the owner about the icons .
+nt ann afin ion's head © T3 run ctest and the backend suite
+were en the oener sesszon’s neecer « T4 ask the owner about the icons — not needed yet
+x the old plan x TS wait on the other session's header — their file
+open _the task List | To theoldplan— superseded
+The list is up: one in progress, three still open.
++ checking open items (1/2)
+The list is up: one in progress, three still open.
++ checking open items (2/2)
+The list is up: one in progress, three still open.
++ 1 tool call - 1s (Ctrl+click)
++ Tasks 1/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished T6 - cancelled
+deferred +3 more - /tasks DOSS SSeS
+the old plan
+Next time: Ctrl+Shift+K - task list
+Shell commands or agent prompts... ? for help auto
+~/project { (11/6 (1 failed, 1 deferred, 1 cancelled, 2 unfinished) _| 94% left stub « local ~- @ €
+--- hints recorded (hints/count/<id> is written only when the toast was drawn)
+[hints]
+count\call.fold=1
+count\tasks.fold=1
+count\terminal.click=3
+count\turn.link=3
+last\call.fold=1789846735
+last\tasks.fold=1789846764
+last_any=1789846764
+
+[instructions]
+onboarded=true
+
+[provider]
+base=http://127.0.0.1:8845/v1
+extra={}
+model=stub
+preset=local:stub
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true

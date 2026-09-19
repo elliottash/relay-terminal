@@ -4,26 +4,30 @@
 # No provider account: the profile points a local model endpoint at stub-provider.py on
 # 127.0.0.1, which answers every ask with an `update_todos` call and then a one-line answer.
 #
-#   docs/qa_evidence/2026-09-19-clicking-updated-todos-does-not-unfold/drive.sh [build-dir]
+#   docs/qa_evidence/2026-09-19-clicking-updated-todos-does-not-unfold/drive.sh [build-dir] [scene]
 #
-# Shots (implementer-NN-<name>.png, each with a 150 % body crop and OCR in implementer-notes.txt):
+# `scene` is `all` (the default: 01-05, into implementer-notes.txt) or `tasklist` (06 alone, into
+# implementer-tasklist-notes.txt). The OCR row scan costs about a second a row, so the five-scene
+# run takes most of a quarter of an hour and 06, being last, fell off the end of its budget;
+# `tasklist` reaches the same click in about a minute, from one ask.
+#
+# Shots (implementer-NN-<name>.png, each with a 150 % body crop and the OCR in the scene's notes):
 #   01-row        the turn ended: "▸ updated tasks · N open", folded
 #   02-unfolded   one click on that row: the tasks with their glyphs, "open the task list"
 #   03-folded     a second click on the same row: folded away again
 #   04-two-rows   a second ask leaves a second row, with a different list
 #   05-earlier    the first turn's fold, still its own list, beside the current one
-#   06-tasklist   the last row of the fold clicked: the task list panel. This one is the least
-#                 reliable of the six — it needs the OCR scan to find "open the task list" in
-#                 whatever the terminal has scrolled to — and the run's 900 s budget can expire
-#                 first; 02 and 05 already show the row rendered and linked, and
-#                 calllines_test.cpp pins where it points.
+#   06-hint       the instant after that click: the tasks.fold shortcut hint (a 1600 ms toast)
+#   06-tasklist   the last row of that fold clicked: the Tasks panel, on this turn's tasks
 #
 # Needs Xvfb, xdotool, ImageMagick, tesseract.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 out=$PWD
+notes=          # the scene's OCR log; the five-scene run uses implementer-notes.txt
 root=$(cd ../../.. && pwd)
 build=${1:-$root/build}
+scene=${2:-all}
 width=1440 height=900
 port=${RELAY_QA_PORT:-8816}
 
@@ -75,6 +79,7 @@ name=relay-dark
 pane_colours=type
 [provider]
 preset=local:stub
+${EXTRA_CONF:-}
 CONF
     printf '{"version": 1, "endpoints": [{"id": "local:stub", "label": "Stub", "base_url": "http://127.0.0.1:%s/v1", "model": "stub", "server": "openai-compatible", "context_window": 131072}]}\n' \
         "$port" >"$XDG_CONFIG_HOME/relay/local-models.json"
@@ -102,41 +107,95 @@ stop() {
     relay_pid=
 }
 
-shot() {
-    xdotool mousemove $((width + 20)) $((height + 20)); sleep 0.8
+shot() {   # shot <name> [fast] — "fast" skips the mouse park, for a toast (1600 ms)
+    [[ ${2:-} == fast ]] || { xdotool mousemove $((width + 20)) $((height + 20)); sleep 0.8; }
     import -window "$win" "$out/implementer-$1.png"
     convert "$out/implementer-$1.png" -crop ${width}x620+0+90 +repage -scale 150% "$out/implementer-$1-body.png"
-    { echo "--- $1"; tesseract "$out/implementer-$1-body.png" - --psm 6 2>/dev/null; } >>"$out/implementer-notes.txt"
+    { echo "--- $1"; tesseract "$out/implementer-$1-body.png" - --psm 6 2>/dev/null; } >>"${notes:-$out/implementer-notes.txt}"
 }
 
 # Click the terminal row whose text OCRs as the first line starting with the fold arrow. The row
 # geometry is fixed (the pane's font), so the y of the Nth printed row is what is scanned for: the
 # shot is cropped one row at a time and the first crop that reads "updated tasks" is the row.
-click_row() {   # click_row <needle> [occurrence]
-    local needle=$1 want=${2:-1} seen=0 y text
+click_row() {   # click_row <needle> [occurrence] [x]
+    # The needle and the OCR are both lowercased with their spaces removed before they are compared:
+    # a one-line crop of a row that is indented inside a fold, underlined and in the link ink comes
+    # back with its word spacing wandering ("openthe tasklist"), and that cost this scene a run.
+    #
+    # `x` is where on the row to click. A tool-call row starts at column 0, so 40 px is inside it;
+    # a row *inside* a fold is indented by relay::kFoldIndent, and a click in that indent is not on
+    # the link at all — which cost this scene another run, with a shot that looked like a fold that
+    # simply would not open.
+    local needle=$1 want=${2:-1} clickx=${3:-40} seen=0 y text flat
+    local wanted; wanted=$(printf '%s' "$needle" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
     import -window "$win" "$sandbox/scan.png"
     for (( y = 96; y < height - 200; y += 6 )); do
-        convert "$sandbox/scan.png" -crop 900x24+8+$y +repage -scale 250% "$sandbox/row.png" 2>/dev/null
+        convert "$sandbox/scan.png" -crop 900x24+8+$y +repage -scale 300% "$sandbox/row.png" 2>/dev/null
         text=$(tesseract "$sandbox/row.png" - --psm 7 2>/dev/null | tr -d '\n')
-        if [[ $text == *"$needle"* ]]; then
+        flat=$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        if [[ $flat == *"$wanted"* ]]; then
             (( ++seen ))
             if (( seen == want )); then
                 row_y=$((y + 10))
-                echo "row '$needle' #$want at y=$row_y: $text" >>"$out/implementer-notes.txt"
-                xdotool mousemove 40 "$row_y" click 1
-                sleep 1.2
+                echo "row '$needle' #$want at y=$row_y: $text" >>"${notes:-$out/implementer-notes.txt}"
+                xdotool mousemove "$clickx" "$row_y" click 1
+                sleep "${CLICK_SETTLE:-1.2}"
                 return 0
             fi
             (( y += 18 ))
         fi
     done
-    echo "row '$needle' #$want NOT FOUND" >>"$out/implementer-notes.txt"
+    echo "row '$needle' #$want NOT FOUND" >>"${notes:-$out/implementer-notes.txt}"
     return 1
 }
 
 # Opening a fold pushes the rows below it down, so the terminal scrolls and the anchor leaves the
 # top of the viewport: wheel back up before looking for it again.
 scroll_up() { xdotool mousemove 400 300 click --repeat ${1:-4} --delay 120 4; sleep 0.8; }
+
+row_y=0
+if [[ $scene == tasklist ]]; then
+    # One ask, unfold it, then click the fold's last row. The OCR row scan costs about a second a
+    # row, so reaching this click at the end of the five-scene run used to fall off the end of the
+    # run's budget; here it takes about a minute. The Tasks panel it opens covers the bottom third
+    # of the window, which is the other reason this is a scene of its own.
+    notes=$out/implementer-tasklist-notes.txt
+    : >"$notes"
+    # Hints share one global gap of 20 s and each has a show limit of 3 (src/Hints.cpp). Every left
+    # click in the terminal offers `terminal.click` ("The prompt box is the input …") from the
+    # pane's event filter, which runs before the view's own handler, so on a fresh profile that
+    # generic hint takes the gap and the one this click is about never gets it. Start from the
+    # profile of somebody who has already been told about the prompt box its three times, which is
+    # the state in which `tasks.fold` is the hint with something to say.
+    EXTRA_CONF='[hints]
+count\terminal.click=3
+count\turn.link=3'
+    start
+    ask 'plan the work'
+    sleep 9
+    click_row 'updated tasks' || { echo "no task row"; stop; exit 1; }
+    # The fold's rows come back from the worker (tool_output_get), so the link row is not on screen
+    # the instant the click lands; and 06-open records what the scan was looking at.
+    sleep 2.5
+    shot 06-open
+    # A short settle, so 06-hint catches the shortcut hint before its 1600 ms is up; the panel's
+    # own shot follows once everything has settled.
+    CLICK_SETTLE=0.25 click_row 'open the task list' 1 120 || { echo "no link row"; stop; exit 1; }
+    shot 06-hint fast
+    sleep 1.6
+    shot 06-tasklist
+    stop
+    # The hint's toast is drawn in the bottom-right corner of the pane, which is exactly where the
+    # Tasks panel it just opened now sits, so no screenshot can show both. What it leaves behind is
+    # in the sandbox's settings: ShortcutHints::recordShown() writes hints/count/<id> only when the
+    # toast actually reached the screen (src/Hints.cpp).
+    cp "$sandbox/home/.config/RelayTerminal/relay.conf" "$out/implementer-tasklist-relay.conf" 2>/dev/null
+    { echo "--- hints recorded (hints/count/<id> is written only when the toast was drawn)"
+      grep -A 20 '^\[hints\]' "$out/implementer-tasklist-relay.conf" 2>/dev/null || echo "(no [hints] section)"
+    } >>"$notes"
+    printf 'done: %s\n' "$out"
+    exit 0
+fi
 
 rm -f "$out/implementer-notes.txt"
 row_y=0
@@ -150,6 +209,6 @@ click_row 'updated tasks'; shot 03-folded          # a second click on the same 
 ask 'now do it'
 sleep 9;  shot 04-two-rows                         # a second turn, a second row
 click_row 'updated tasks' 1; shot 05-earlier       # each row unfolds to its own call'"'"'s list
-click_row 'open the task list'; shot 06-tasklist   # the fold'"'"'s last row opens the task list
+click_row 'open the task list' 1 120; shot 06-tasklist   # the fold'"'"'s last row opens the task list
 stop
 printf 'done: %s\n' "$out"

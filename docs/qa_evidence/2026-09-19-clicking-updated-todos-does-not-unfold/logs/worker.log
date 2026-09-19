@@ -1,7 +1,5 @@
-2026-09-19T17:47:21.523Z INFO relay.worker pane=df74212e worker_start version=0.1.0 pid=2242043 level=info
-2026-09-19T17:47:21.604Z INFO relay.worker pane=df74212e configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=86d5e321c78241658fba569ada78eb8c
-2026-09-19T17:47:29.598Z INFO relay.agent pane=df74212e turn_start session=86d5e321c78241658fba569ada78eb8c turn=29f92156dada476885a71ffefc4d863e model=stub host=127.0.0.1 mode=build effort=high prompt_chars=13 messages=1 stall_s=60 max_steps=256
-2026-09-19T17:47:29.739Z INFO relay.agent pane=df74212e tool session=86d5e321c78241658fba569ada78eb8c turn=29f92156dada476885a71ffefc4d863e call=call_6 tool=update_todos ok=True ms=0
-2026-09-19T17:47:29.885Z INFO relay.agent pane=df74212e turn_end session=86d5e321c78241658fba569ada78eb8c turn=29f92156dada476885a71ffefc4d863e outcome=done ms=286 thinking_ms=0 tools=1 retries=0 open_items=3
-2026-09-19T17:50:48.579Z INFO relay.agent pane=df74212e turn_start session=86d5e321c78241658fba569ada78eb8c turn=30ac2c6d77ad4302814b93d89f2c39c9 model=stub host=127.0.0.1 mode=build effort=high prompt_chars=9 messages=9 stall_s=60 max_steps=256
-2026-09-19T17:50:48.594Z ERROR relay.agent pane=df74212e turn_end session=86d5e321c78241658fba569ada78eb8c turn=30ac2c6d77ad4302814b93d89f2c39c9 outcome=error ms=14 thinking_ms=0 tools=0 retries=0 open_items=1 error="No model server is answering on 127.0.0.1:8816. Start it, for example `llama-server -m <model.gguf> --jinja --port 8816`, or the systemd user unit that serves it (docs/LOCAL-MODELS.md)."
+2026-09-19T19:38:45.825Z INFO relay.worker pane=5d332d36 worker_start version=0.1.0 pid=4051264 level=info
+2026-09-19T19:38:45.855Z INFO relay.worker pane=5d332d36 configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=fe803031ff3a4d03b1e9799ae19ae4a0
+2026-09-19T19:38:54.406Z INFO relay.agent pane=5d332d36 turn_start session=fe803031ff3a4d03b1e9799ae19ae4a0 turn=0bbc1b54fa5a44a2b51925e74ee3e099 model=stub host=127.0.0.1 mode=build effort=high prompt_chars=8 messages=1 stall_s=60 max_steps=256
+2026-09-19T19:38:54.448Z INFO relay.agent pane=5d332d36 tool session=fe803031ff3a4d03b1e9799ae19ae4a0 turn=0bbc1b54fa5a44a2b51925e74ee3e099 call=call_6 tool=update_todos ok=True ms=0
+2026-09-19T19:38:54.504Z INFO relay.agent pane=5d332d36 turn_end session=fe803031ff3a4d03b1e9799ae19ae4a0 turn=0bbc1b54fa5a44a2b51925e74ee3e099 outcome=done ms=97 thinking_ms=0 tools=1 retries=0 open_items=3
