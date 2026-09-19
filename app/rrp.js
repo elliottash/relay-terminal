@@ -370,8 +370,7 @@ export class Rrp extends EventTarget {
       return;
     }
     if (typeof message.seq === 'number' && message.t) {
-      const stream = message.t === 'agent' ? `agent:${message.pane}` : message.t;
-      this.streams.set(stream, message.seq);
+      this.streams.set(Rrp.streamOf(message), message.seq);
     }
     this.emit('message', message);
     this.emit(message.t, message);
@@ -423,6 +422,16 @@ export class Rrp extends EventTarget {
       this.addEventListener(kind, onMessage, { once: true });
       this.addEventListener('error', onError, { once: true });
     });
+  }
+
+  // The hub's own stream names (remote/host.py): `panes`, `agent:<pane>` and `screen:<pane>`.
+  // A resume that names a stream the hub does not keep is silently ignored, which is how the
+  // screen stream went unresumed for a while: it was recorded here under the message types
+  // `screen_snapshot` / `screen_diff` instead of the one name the hub files both under.
+  static streamOf(message) {
+    if (message.t === 'agent') return `agent:${message.pane}`;
+    if (message.t === 'screen_snapshot' || message.t === 'screen_diff') return `screen:${message.pane}`;
+    return message.t;
   }
 
   resume() {

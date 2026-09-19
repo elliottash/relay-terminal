@@ -816,6 +816,37 @@ class GuestPromptTests(unittest.TestCase):
         run(main(), timeout=120)
 
 
+class IdentityStorageTests(unittest.TestCase):
+    """The keyring holds the profile's identity and nothing else.
+
+    A test, or the CLI's ``--state``, names its own directory; the identity it makes must live
+    there. Before this rule, running any remote test module directly wrote a fresh key into the
+    owner's real keyring entry, and every phone he had paired stopped matching the pinned key.
+    """
+
+    def test_an_identity_with_a_directory_never_touches_the_keyring(self):
+        import remote.identity as identity_mod
+        calls = []
+
+        def forbidden():
+            calls.append("secret-tool")
+            return "/nonexistent/secret-tool"
+
+        original = identity_mod.Identity._secret_tool
+        identity_mod.Identity._secret_tool = staticmethod(forbidden)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                made = identity_mod.Identity.create(Path(directory))
+                self.assertTrue((Path(directory) / "identity.key").is_file())
+                self.assertEqual(stat.S_IMODE((Path(directory) / "identity.key").stat().st_mode),
+                                 0o600)
+                loaded = identity_mod.Identity.load(Path(directory))
+                self.assertEqual(loaded.public, made.public)
+        finally:
+            identity_mod.Identity._secret_tool = original
+        self.assertEqual(calls, [], "an explicit directory must never reach the keyring")
+
+
 class AuditTests(unittest.TestCase):
     def test_the_log_is_0600_from_the_moment_it_exists(self):
         """Section 10.6: 0600 inside a 0700 directory, "as `logs.py` requires of every Relay log".

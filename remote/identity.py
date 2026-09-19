@@ -111,8 +111,15 @@ class Identity:
 
     @classmethod
     def load(cls, directory: Path | None = None) -> "Identity | None":
-        """The existing identity, or None. Never generates one — see ``create``."""
-        private = cls._from_keyring()
+        """The existing identity, or None. Never generates one — see ``create``.
+
+        The keyring holds the **profile's** identity and nothing else. An explicit ``directory``
+        (the CLI's ``--state``, and every test's temporary directory) is a separate state with a
+        separate identity, kept in its 0600 file. Before this rule a test that created an
+        identity in a temp dir wrote it into the real keyring, over the owner's own key: every
+        phone he had paired stopped matching the pinned key and had to be paired again.
+        """
+        private = cls._from_keyring() if directory is None else None
         if private and len(private) == 32:
             return cls(private)
         path = (directory or cls.default_dir()) / cls.filename
@@ -128,7 +135,7 @@ class Identity:
     def create(cls, directory: Path | None = None) -> "Identity":
         """Make a new identity. Only ever called when the user turns remote access on."""
         private, _ = noise.generate_keypair()
-        if not cls._to_keyring(private):
+        if directory is not None or not cls._to_keyring(private):
             path = (directory or cls.default_dir()) / cls.filename
             path.write_text(pairing.b64(private))
             path.chmod(0o600)

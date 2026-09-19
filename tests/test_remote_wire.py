@@ -214,6 +214,25 @@ class PairingTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class BrowserStreamNameTests(unittest.TestCase):
+    """app/rrp.js files each message under the stream name the hub keeps it in (section 7)."""
+
+    def test_the_client_resumes_under_the_hubs_own_stream_names(self):
+        messages = [{"t": "screen_snapshot", "pane": "p1", "seq": 3},
+                    {"t": "screen_diff", "pane": "p1", "seq": 4},
+                    {"t": "agent", "pane": "p2", "seq": 9},
+                    {"t": "panes", "seq": 1}]
+        done = subprocess.run(
+            [shutil.which("node"), str(Path(__file__).resolve().parent / "stream_name_peer.mjs"),
+             json.dumps(messages)], capture_output=True, text=True,
+            cwd=str(Path(__file__).resolve().parent.parent))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # A snapshot and a diff are one stream, the one the hub calls screen:<pane>; before this
+        # they were recorded under their message types, which the hub never replays.
+        self.assertEqual(json.loads(done.stdout), ["screen:p1", "screen:p1", "agent:p2", "panes"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class BrowserPairLinkTests(unittest.TestCase):
     """app/rrp.js parsing the links a phone actually receives."""
 
