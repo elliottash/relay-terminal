@@ -388,6 +388,11 @@ public:
         m_editor->onImageMime = [this](const QMimeData *data, bool dropped) {
             return attachImages(data, dropped);
         };
+        // The phone's pane follows the desktop's theme (owner, 2026-09-19), so a theme change is
+        // one of the things that changes what a paired device must be told. Costs nothing while
+        // nobody is listening: changed() gathers nothing until onPaneState is wired up.
+        connect(relay::theme::notifier(), &relay::theme::Notifier::themeChanged, this,
+                [this] { m_paneState.changed(); });
         qApp->installEventFilter(this);
         QTimer::singleShot(5000, this, [this] {
             if (!m_seenShell && m_backend) {
@@ -10026,6 +10031,13 @@ public:
                                                      relay::conversations::whenText(item.value(QStringLiteral("updated")).toDouble(), now),
                                                      current, current && m_agentBusy};
         }
+        // The theme the desktop is drawing itself in, by id: the web view has a generated block per
+        // shipped theme (app/pane-theme.css) and follows this one (protocol section 16). The
+        // application's active theme is the right answer even now that a tab owns a theme, because
+        // the tokens, the palette and the stylesheet are the application's — the tab in front
+        // decides, and that is the theme this pane is being painted in at this instant. A tab change
+        // sets it again, which is a themeChanged() and so a republish.
+        in.theme = relay::theme::activeThemeId();
         in.canNew = m_workerReady && !m_agentBusy;
         in.canOpen = m_workerReady && !m_agentBusy;   // as the session manager's own rows behave
         return in;
