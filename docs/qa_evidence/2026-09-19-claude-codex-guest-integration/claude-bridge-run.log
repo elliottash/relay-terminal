@@ -1,0 +1,30 @@
+[drive] isolated session at /tmp/relay-qa-bridge-7ato6poo
+[drive] relay pid 2922068
+[drive] window 2097162
+[drive] pane runtime /tmp/relay-qa-bridge-7ato6poo/tmp/relay-sWeMij, token 2e7038be…
+[drive] a process called `claude` is in the foreground (pid 2922411)
+[drive] bridge lock 33165.lock: pid 2922122, folders ['/tmp/relay-qa-bridge-7ato6poo/workspace']
+[drive] connected to the bridge on 127.0.0.1:33165
+[drive] initialize: {'name': 'relay', 'version': '0.1.0'}
+[drive] tools/list: 12 tools
+[drive] wrote claude-bridge-01-opendiff-banner.png
+[drive] 01-opendiff-banner: found 'claude proposes changes'
+[drive] 01-opendiff-banner: found 'haiku.txt'
+[drive] 01-opendiff-banner: MISSING 'Save'
+[drive] wrote claude-bridge-01-opendiff-banner.png
+[drive] clicked the banner's Save button at (552, 101)
+[drive] openDiff #1 returned 'FILE_SAVED'
+[drive] the file on disk reads 'the ink dries fast\n'
+[drive] wrote claude-bridge-02-saved.png
+[drive] 02-saved: found 'Saved claude'
+[drive] wrote claude-bridge-03-second-diff.png
+[drive] 03-second-diff: found 'claude proposes changes'
+[drive] 03-second-diff: MISSING 'Save'
+[drive] wrote claude-bridge-03-second-diff.png
+[drive] clicked the banner's x at (630, 101)
+[drive] openDiff #2 returned 'DIFF_REJECTED'
+[drive] the file on disk still reads 'the ink dries fast\n'
+[drive] wrote claude-bridge-04-rejected.png
+[drive] 04-rejected: found 'Kept the file'
+[drive] PASS: openDiff accepted and rejected, end to end
+[drive] relay stopped

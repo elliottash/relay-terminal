@@ -82,6 +82,17 @@ inline QJsonObject bridgeEnv(const QString &guest, int port) {
                        {QStringLiteral("ENABLE_IDE_INTEGRATION"), QStringLiteral("true")}};
 }
 
+// May this reply path be written? The one rule `answerDiff` enforces: inside the replies
+// directory it names, and that is all. The reply file does not exist yet — it is what the call
+// writes — so its own path is absolute-and-cleaned, not canonical (`canonicalFilePath()` is empty
+// for a file that is not there, which once made every answer a refusal); the clean also resolves
+// a `..`, so a name cannot climb back out of the directory.
+inline bool replyAllowed(const QString &repliesDir, const QString &replyPath) {
+    const QString inside = QFileInfo(repliesDir).canonicalFilePath();
+    const QString reply = QDir::cleanPath(QFileInfo(replyPath).absoluteFilePath());
+    return !inside.isEmpty() && !reply.isEmpty() && reply.startsWith(inside + QLatin1Char('/'));
+}
+
 class Bridge {
 public:
     static Bridge &instance() {
@@ -149,13 +160,11 @@ public:
     // event can never name a file for Relay to overwrite.
     bool answerDiff(const QString &replyPath, const QString &outcome) {
         if (replyPath.isEmpty()) return false;
-        const QString inside = QFileInfo(m_repliesDir).canonicalFilePath();
-        const QString reply = QFileInfo(replyPath).canonicalFilePath();
-        if (inside.isEmpty() || reply.isEmpty() || !reply.startsWith(inside + QLatin1Char('/'))) {
+        if (!replyAllowed(m_repliesDir, replyPath)) {
             relay::log::error(QStringLiteral("guest_bridge_reply_refused path=%1").arg(replyPath));
             return false;
         }
-        return writeBytes(reply, QJsonDocument(QJsonObject{{QStringLiteral("outcome"), outcome}})
+        return writeBytes(replyPath, QJsonDocument(QJsonObject{{QStringLiteral("outcome"), outcome}})
                                     .toJson(QJsonDocument::Compact));
     }
 
