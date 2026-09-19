@@ -739,6 +739,23 @@ class RoleTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_an_editor_cannot_steer_a_turn(self):
+        """A guest's prompt waits for the owner to admit it, so it can never be aimed at the turn
+        that is running now (owner, 2026-09-19: steering is the owner's devices' own)."""
+        async def main():
+            async with Harness() as harness:
+                _, url = await harness.invite(role=wire.EDITOR)
+                client, _ = await harness.guest(url)
+                await client.expect("panes")
+                await client.send({"t": "compose", "pane": "pane-1", "text": "check the readme",
+                                   "when": "steer"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("prompt_pending", timeout=5)
+                self.assertEqual(caught.exception.code, "not_permitted")
+                self.assertEqual(harness.host.prompts.pending, {})   # nothing was parked either
+                await client.close()
+        run(main())
+
     def test_a_parked_prompt_lapses(self):
         queue = guests_mod.PromptQueue(now=lambda: clock[0])
         clock = [1000.0]

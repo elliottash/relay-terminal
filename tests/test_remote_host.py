@@ -199,6 +199,64 @@ class CapabilityTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_an_agent_device_may_steer_the_running_turn(self):
+        """`when: "steer"` is the third door of the composer, and the owner's rule for a paired
+        device is "model switch and steer at AGENT" (2026-09-19). It reaches the desktop as it was
+        sent — the hub decides who may steer, never what a steer means."""
+        async def main():
+            async with Harness(capability=wire.AGENT) as harness:
+                client, paired, _, _ = await harness.pair()
+                await client.close()
+                client = client_mod.Client(harness.base)
+                await client.connect(paired)
+                await client.expect("panes")
+                seen = []
+
+                async def record(pane, text, *, to_agent, when, origin, origin_name=""):
+                    seen.append({"pane": pane, "text": text, "to_agent": to_agent, "when": when,
+                                 "origin": origin})
+
+                harness.source.compose = record
+                await client.send({"t": "compose", "pane": "pane-1", "text": "check the readme",
+                                   "when": "steer"})
+                for _ in range(200):
+                    if seen:
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(seen, [{"pane": "pane-1", "text": "check the readme",
+                                         "to_agent": True, "when": "steer",
+                                         "origin": f"remote:{paired.device_id}"}])
+                # And a `when` that is neither of the three is still refused, by name.
+                await client.send({"t": "compose", "pane": "pane-1", "text": "x", "when": "later"})
+                error = await client.expect("error")
+                self.assertEqual(error["code"], "unknown_type")
+                self.assertEqual(len(seen), 1)
+                await client.close()
+        run(main())
+
+    def test_a_view_device_cannot_steer(self):
+        """Steering is typing here, so the level that may not type may not steer either."""
+        async def main():
+            async with Harness(capability=wire.VIEW) as harness:
+                client, paired, _, _ = await harness.pair()
+                await client.close()
+                client = client_mod.Client(harness.base)
+                await client.connect(paired)
+                await client.expect("panes")
+                seen = []
+
+                async def record(*args, **kwargs):
+                    seen.append(kwargs)
+
+                harness.source.compose = record
+                await client.send({"t": "compose", "pane": "pane-1", "text": "check the readme",
+                                   "when": "steer"})
+                error = await client.expect("error")
+                self.assertEqual(error["code"], "not_permitted")
+                self.assertEqual(seen, [])
+                await client.close()
+        run(main())
+
     def test_revoking_ends_a_live_session(self):
         async def main():
             async with Harness() as harness:

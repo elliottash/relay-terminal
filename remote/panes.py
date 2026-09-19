@@ -256,7 +256,9 @@ class DemoPaneSource(PaneSource):
         item = self._pane(pane)
         if item is None:
             raise wire.WireError("no_such_pane", "no such pane.")
-        if when == "queue" and pane in self._running:
+        # A steer is delivered inside the turn it names, so like a queued prompt it must not cancel
+        # it: the demo counts it on the queue rather than starting a turn of its own.
+        if when in ("queue", "steer") and pane in self._running:
             item["queue"] += 1
             self._emit(pane, {"event": "queued", "text": text, "origin": origin,
                               **({"author": origin_name} if origin_name else {})})

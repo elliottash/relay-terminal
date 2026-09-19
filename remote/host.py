@@ -1958,9 +1958,14 @@ class Host:
             raise wire.WireError("unknown_type", "compose needs text.")
         if len(text) > 32_000:
             raise wire.WireError("unknown_type", "that prompt is too long.")
+        # The three doors of the desktop's own composer: now, after this turn, or into the running
+        # turn at its next tool call. `steer` is the owner's rule for a paired device — "model
+        # switch and steer at AGENT" (owner, 2026-09-19) — and both clients already fall back to it
+        # when the row they meant to edit has gone (app/pane.js `enter()`, src/RemotePane.cpp), so
+        # refusing it here meant a phone's steer came back as an error it could do nothing about.
         when = message.get("when", "now")
-        if when not in ("now", "queue"):
-            raise wire.WireError("unknown_type", 'when must be "now" or "queue".')
+        if when not in ("now", "queue", "steer"):
+            raise wire.WireError("unknown_type", 'when must be "now", "queue" or "steer".')
         participant = channel.participant
         if participant is not None:
             # A guest's prompt is never passed on. `agent: false` — the composer's shell route —
@@ -1968,11 +1973,21 @@ class Host:
             if message.get("agent") is False:
                 raise wire.WireError("not_permitted",
                                      "a guest's prompt always goes to the agent, never the shell.")
+            # Nor is it ever a steer: a parked prompt reaches the pane only when the owner admits
+            # it, and by then the turn it named has moved on or ended. Steering is the owner's.
+            if when == "steer":
+                raise wire.WireError("not_permitted",
+                                     "a guest's prompt waits for the owner, so it cannot steer a turn.")
             await self.ask_owner_about_prompt(channel, participant, pane, text, when=when)
             return
         # A remote prompt goes to the agent unless the device is trusted with the shell. The
         # composer's own routing would otherwise run `git push --force` for an `agent` device.
         capability = channel.capability()
+        # Read live, like every other capability check here, so a downgrade lands on this message:
+        # steering is typing here, which is `agent` and above. (`compose` itself already needs
+        # `agent`, so this is the second lock on the same door rather than the only one.)
+        if when == "steer" and not wire.allows(capability or "", wire.AGENT):
+            raise wire.WireError("not_permitted", "only a device that may type here can steer a turn.")
         to_agent = True
         if message.get("agent") is False:
             if capability != wire.FULL:
