@@ -2582,7 +2582,8 @@ public:
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
             || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")
-            || key == QStringLiteral("agent/failover") || key.startsWith(QStringLiteral("security/"))) {
+            || key == QStringLiteral("agent/failover") || key == QStringLiteral("agent/failover_hosted")
+            || key.startsWith(QStringLiteral("security/"))) {
             if (m_configured) {
                 QJsonObject request{{"type", "set_agent_options"}};
                 const QJsonObject options = requestOptions();
@@ -3561,8 +3562,11 @@ private:
                 // Idle deadline for a streamed model call (protocol 15).
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
                 {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()},
-                // Whether a turn whose provider keeps failing continues on another one (#G9VE).
+                // Whether a turn whose provider keeps failing continues on another one (#G9VE),
+                // and whether Relay Free may be one of those providers (owner, 2026-09-19: opt-in,
+                // because a pane on the user's own key never chose Relay's hosted service).
                 {"failover", settings.value(QStringLiteral("agent/failover"), true).toBool()},
+                {"failover_hosted", settings.value(QStringLiteral("agent/failover_hosted"), false).toBool()},
                 // Options › Security (card #3KB7). Always sent, including empty, so clearing a list
                 // in Options reaches the worker as "no rules" rather than as "unchanged".
                 {"command_denylist", QJsonArray::fromStringList(settings.value(QStringLiteral("security/command_denylist")).toStringList())},

@@ -1457,6 +1457,7 @@ private:
         row.detail = detail;
         row.placeholder = placeholder;
         row.text = QSettings().value(key).toString();
+        row.changed = !row.text.isEmpty();     // these ship empty; the placeholder says what empty means
         row.onText = [this, key, write](const QString &value) {
             if (write) write(value);
             else if (value.isEmpty()) QSettings().remove(key);
@@ -1484,6 +1485,7 @@ private:
         row.aliases = QStringLiteral("ssh hosts");
         row.placeholder = QStringLiteral("filly, backup.example.org");
         row.text = QSettings().value(key).toStringList().join(QStringLiteral(", "));
+        row.changed = !row.text.isEmpty();     // ships empty: no host is on either list
         row.onText = [key](const QString &value) {
             QStringList hosts;
             for (const QString &word : value.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts))
@@ -1820,6 +1822,16 @@ private:
                                                                  "The pane keeps the model you chose"), true);
             failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
             models.rows << failover;
+            // Relay Free is the one failover target that is not already the user's own: another
+            // company's terms and a shared allowance, so it is opt-in even when failover is on
+            // (owner, 2026-09-19). A pane already running on Relay Free is unaffected.
+            relay::SettingRow hosted = toggleRow(QStringLiteral("agent/failover_hosted"),
+                                                 QStringLiteral("Allow Relay Free as a fallback when my own provider keeps failing"),
+                                                 QStringLiteral("Off: only your own providers with a stored key are tried. "
+                                                                "On: Relay's hosted service is the last resort, and the turn's "
+                                                                "conversation goes through it"), false);
+            hosted.aliases = QStringLiteral("failover relay free hosted fallback last resort");
+            models.rows << hosted;
         }
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
