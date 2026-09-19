@@ -130,7 +130,8 @@ class Preset:
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "max_output": self.max_output,
-                "efforts": distinct_efforts(self.effort_style), "group": self.group,
+                "efforts": effort_levels(self.effort_style),
+                "effort_note": effort_note(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
                 "local": self.local, "server": self.server, "hosted": self.hosted}
@@ -355,21 +356,51 @@ def resolve_preset(preset_id, base_url: str = "", model: str = "") -> Preset | N
     return match_preset(base_url or "", model or "") or _local(preset_id, base_url or "", model or "")
 
 
-def distinct_efforts(style: str) -> list[str]:
-    """Relay levels that map to different provider values (Kimi/GLM have no medium).
+def effort_levels(style: str) -> list[str]:
+    """The levels a picker offers for this style: one per request this provider can actually make.
 
-    Empty for the "none" style: the provider's OpenAI-compatible endpoint has no effort knob, so
-    every level would send the same request and the GUI offers no choice.
+    Empty for the "none" style, whose OpenAI-compatible endpoint has no effort knob at all.
+
+    Levels that send the same request are one entry, and the entry is the level the provider itself
+    names — ``EFFORT_MAP`` values are Relay level names, so the group keeps the level whose own name
+    is the value sent, and only falls back to the first of the group when none is (OpenRouter's max,
+    sent as "xhigh"). That name matters: Kimi and GLM send the same request for medium and high, and
+    keeping the *first* of the group offered "medium" and dropped "high" — the level Relay defaults
+    to and the one every other picker shows, so the roles modal could not display the pane's own
+    effort and fell back to "Model default" (owner report, 2026-09-18). Relay Free's cap is the same
+    rule read the other way: everything above medium is sent as medium, so the picker stops there.
     """
     if style == "none":
         return []
-    seen, out = set(), []
-    for level in EFFORTS:
-        value = EFFORT_MAP[style][level]
-        if value not in seen:
-            seen.add(value)
-            out.append(level)
+    out = []
+    for value, levels in _effort_groups(style).items():
+        out.append(next((level for level in levels if level == value), levels[0]))
     return out
+
+
+def _effort_groups(style: str) -> dict[str, list[str]]:
+    """provider value -> the Relay levels that send it, in EFFORTS order."""
+    groups: dict[str, list[str]] = {}
+    for level in EFFORTS:
+        groups.setdefault(EFFORT_MAP[style][level], []).append(level)
+    return groups
+
+
+def effort_note(style: str) -> str:
+    """One line naming the levels this provider does not have, or "" when it has all four.
+
+    The picker shows what the endpoint can do; this says what happens to the levels it left out, so
+    a pane set to one of them from another provider is not a mystery.
+    """
+    if style == "none":
+        return ""
+    phrases = []
+    for value, levels in _effort_groups(style).items():
+        kept = next((level for level in levels if level == value), levels[0])
+        dropped = [level for level in levels if level != kept]
+        if dropped:
+            phrases.append(f"{' and '.join(dropped)} {'are' if len(dropped) > 1 else 'is'} sent as {kept}")
+    return "; ".join(phrases) + "." if phrases else ""
 
 
 def effort_style(preset: Preset | None, extra: dict | None = None, base_url: str = "") -> str:
@@ -421,14 +452,11 @@ def infer_effort(style: str, extra: dict | None) -> str | None:
     value = (extra.get("reasoning") or {}).get("effort") if style == "openrouter" else extra.get("reasoning_effort")
     if not isinstance(value, str):
         return None
-    # Levels that send the same value are one group; report the level named after the value it
-    # sends ("high" for Kimi's high, which medium also sends; "medium" for Relay Free's medium,
-    # which high and max also send), and only then the first level that sends it.
+    # Only a level the picker offers: two levels can send this value, and the answer is the one the
+    # pane can be put back on (effort_levels).
+    offered = effort_levels(style)
     for level in ("low", "high", "max", "medium"):
-        if level == value and EFFORT_MAP[style][level] == value:
-            return level
-    for level in ("low", "high", "max", "medium"):
-        if EFFORT_MAP[style][level] == value:
+        if level in offered and EFFORT_MAP[style][level] == value:
             return level
     return "max" if value in ("max", "xhigh") else None
 

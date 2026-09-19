@@ -159,7 +159,8 @@ class PresetTableTests(unittest.TestCase):
         # Anthropic's compat layer ignores reasoning_effort and MiniMax has no such field.
         for preset_id in ("anthropic", "minimax"):
             self.assertEqual(P.PRESETS[preset_id].effort_style, "none", preset_id)
-        self.assertEqual(P.distinct_efforts("none"), [])
+        self.assertEqual(P.effort_levels("none"), [])
+        self.assertEqual(P.effort_note("none"), "")
         for level in P.EFFORTS:
             extra, applied = P.apply_effort({"temperature": 0.2}, "none", level)
             self.assertEqual(applied, {})

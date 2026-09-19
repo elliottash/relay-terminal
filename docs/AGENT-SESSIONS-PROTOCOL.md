@@ -61,6 +61,18 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
 
 Verify against provider docs before shipping; keep the table in `backend/relay_core/presets.py`.
 
+**What a picker offers** (v2.10, 2026-09-18). Every preset in the `presets` event carries `efforts` —
+`presets.effort_levels`, one entry per request that endpoint can actually make — and `effort_note`, one
+line naming the levels it does not have ("medium is sent as high."). Two levels that send the same
+request are one entry, and the entry keeps the name the provider itself sends: Kimi and GLM offer
+`["low", "high", "max"]`, Gemini `["low", "medium", "high"]`, Relay Free `["low", "medium"]` (13.9),
+and a provider with no effort knob at all (Anthropic, MiniMax) offers `[]`. Keeping the *first* of a
+group instead offered "medium" on Kimi and GLM and dropped "high" — Relay's own default, and the level
+every other picker shows — so the roles modal could not display the pane's effort at all (owner report,
+2026-09-18: "in the models options page, there was low, medium, high, max reasoning. but in the model
+roles, there were only 3 options"). A *stored* level is still any of the four: a pane, a tier or a role
+keeps what it was set to across a provider switch, and the GUI shows it as the level it is sent as.
+
 ## 4. Context and compaction
 
 - After every model response the worker emits `context {used_tokens, window, percent, threshold, estimated: bool}` (provider `usage` when present, else an estimate).

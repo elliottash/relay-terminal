@@ -67,6 +67,12 @@ public:
     std::function<void(const QString &presetId)> onProviderChosen;   // switches the pane's model
     std::function<void()> onRolesChanged;                            // persist + set_agent_options
     std::function<void()> openKeys;
+    // The Main row. The pane's own model is not a tier the worker resolves — roles.py rejects
+    // `tiers.main`, because it *is* the pane — so what that row offers goes back to the pane
+    // instead: a model id becomes a set_model, a level becomes the pane's reasoning effort.
+    // Empty model: the provider's own default model for this tier.
+    std::function<void(const QString &model)> onMainModelChosen;
+    std::function<void(const QString &level)> onMainEffortChosen;
 
     void setPresets(const QJsonArray &presets, const QJsonObject &tierCatalog, const QJsonArray &actions);
     void setResolved(const QJsonObject &tiers, const QJsonObject &roles);

@@ -33,8 +33,22 @@ class PresetTests(unittest.TestCase):
                           {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'}))
         self.assertEqual(presets.apply_effort({'reasoning': {'max_tokens': 5, 'exclude': True}}, 'openrouter', 'medium')[0],
                          {'reasoning': {'exclude': True, 'effort': 'medium'}})
-        self.assertEqual(presets.distinct_efforts('kimi'), ['low', 'medium', 'max'])
-        self.assertEqual(presets.distinct_efforts('openrouter'), ['low', 'medium', 'high', 'max'])
+        # A level two others collapse onto keeps the name the provider itself sends, so "high" —
+        # Relay's own default, and what every other picker shows — is never the one dropped
+        # (owner report, 2026-09-18: the roles modal offered three levels and not that one).
+        self.assertEqual(presets.effort_levels('kimi'), ['low', 'high', 'max'])
+        self.assertEqual(presets.effort_levels('glm'), ['low', 'high', 'max'])
+        self.assertEqual(presets.effort_levels('openrouter'), ['low', 'medium', 'high', 'max'])
+        self.assertEqual(presets.effort_levels('gemini'), ['low', 'medium', 'high'])
+        for style in presets.EFFORT_MAP:
+            offered = presets.effort_levels(style)
+            self.assertEqual(offered, [level for level in presets.EFFORTS if level in offered], style)
+            if style != 'none':
+                self.assertIn('high' if style not in ('gemini', 'relay') else offered[-1], offered, style)
+        self.assertEqual(presets.effort_note('kimi'), 'medium is sent as high.')
+        self.assertEqual(presets.effort_note('gemini'), 'max is sent as high.')
+        self.assertEqual(presets.effort_note('relay'), 'high and max are sent as medium.')
+        self.assertEqual(presets.effort_note('openrouter'), '')
         self.assertEqual(presets.infer_effort('glm', presets.GLM_EXTRA), 'high')
         self.assertIsNone(presets.apply_effort({'a': 1}, 'kimi', None)[1] or None)
 

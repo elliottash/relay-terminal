@@ -1507,10 +1507,18 @@ private:
                                  QStringLiteral("Default provider, the Main / Flash / Lite models, and what each job uses"),
                                  QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
         {
+            // The levels the current provider offers, so this row and the Model roles modal beside
+            // it always name the same ones (owner report, 2026-09-18: four here, three there). A
+            // provider with no effort knob at all leaves Relay's four, because the default outlives
+            // it: it is what the next pane on the next provider starts at.
             const QString effort = settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
+            const QStringList levels = m_active ? m_active->offeredEfforts() : Pane::efforts();
+            const QStringList offered = levels.isEmpty() ? Pane::efforts() : levels;
+            const QString note = m_active ? m_active->effortNote() : QString();
             models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
-                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane"),
-                                     Pane::efforts(), Pane::efforts(), effort, [this](const QString &value) {
+                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane")
+                                         + (note.isEmpty() ? QString() : QStringLiteral(" · ") + note),
+                                     offered, offered, Pane::nearestEffort(offered, effort), [this](const QString &value) {
                 QSettings().setValue(QStringLiteral("agent/effort"), value);
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
             });
@@ -1877,13 +1885,25 @@ private:
         }
         if (pane) {
             const QString effort = pane->effort();
-            items << submenu(QStringLiteral("menu:effort"), agent, QStringLiteral("Reasoning effort"), effort, [this, effort] {
+            // The levels this pane's provider has, not Relay's four: on GLM medium is the same
+            // request as high, and Relay Free stops at medium (presets.py effort_levels).
+            const QStringList levels = pane->offeredEfforts();
+            const QString effortNote = pane->effortNote();
+            // The note goes in the submenu's own detail line. It is a sentence about the provider,
+            // not something to run, and a row here is a thing you can choose.
+            items << submenu(QStringLiteral("menu:effort"), agent, QStringLiteral("Reasoning effort"),
+                             levels.isEmpty()
+                                 ? QStringLiteral("this model has no reasoning setting")
+                                 : Pane::nearestEffort(levels, effort)
+                                       + (effortNote.isEmpty() ? QString()
+                                                               : QStringLiteral(" · ") + effortNote),
+                             [this, effort, levels] {
                 QList<PaletteItem> children;
-                for (const QString &level : Pane::efforts()) {
+                for (const QString &level : levels) {
                     PaletteItem item;
                     item.key = QStringLiteral("effort:") + level; item.section = QStringLiteral("Reasoning effort"); item.label = level;
                     item.detail = QStringLiteral("This pane; keeps the conversation");
-                    item.checked = effort == level; item.stayOpen = true;
+                    item.checked = Pane::nearestEffort(levels, effort) == level; item.stayOpen = true;
                     item.run = [this, level] { if (m_active) m_active->setEffort(level); };
                     children << item;
                 }
