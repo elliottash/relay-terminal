@@ -2,16 +2,17 @@
      edit the card files and regenerate. -->
 # Board
 
-238 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+240 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (141)
+## Features (142)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
 | `#VZ69` | [improving the switchboard functionality](features/2026-09-19-improving-the-switchboard-functionality.md) | inbox |  |  | [8](threads/VZ69.md) |
 | `#9K5H` | [show the thinking trace in the swtichboard as well](features/2026-09-19-show-the-thinking-trace-in-the-swtichboard-as-we.md) | inbox |  |  | [3](threads/9K5H.md) |
-| `#5PY9` | [new convo had incorrect context remaining](features/2026-09-19-new-convo-had-incorrect-context-remaining.md) | inbox |  |  | [1](threads/5PY9.md) |
+| `#5PY9` | [new convo had incorrect context remaining](features/2026-09-19-new-convo-had-incorrect-context-remaining.md) | inbox |  |  | [5](threads/5PY9.md) |
+| `#Y2JW` | [new /models command.](features/2026-09-19-new-models-command.md) | inbox |  |  | [3](threads/Y2JW.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 3/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#916B` | [A project picker, a personal inbox and a chip on the tab that says which project it is attached to](features/2026-09-19-project-picker-inbox-and-tab-chip.md) | ready |  | 0/7 |  |
@@ -150,20 +151,18 @@
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 
-## Bugs (95)
+## Bugs (96)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
-| `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
 | `#DJX7` | [land.py's name gate cannot land a card move in one commit (rename collapse)](changes/2026-09-19-land-py-s-name-gate-cannot-land-a-card-move-in-o.md) | inbox |  |  | [1](threads/DJX7.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
+| `#BVL1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | ready | agent |  |  |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | ready | agent | 0/5 |  |
-| `#BDXG` | [Clicking the "updated todos" row does not unfold it](changes/2026-09-19-clicking-updated-todos-does-not-unfold.md) | ready | agent |  |  |
 | `#BTYE` | [land.py's name gate refuses a moved file: git reports a rename as one path](changes/2026-09-19-land-py-s-name-gate-refuses-a-moved-file-git-rep.md) | ready |  |  | [2](threads/BTYE.md) |
-| `#99T0` | [The backend suite flakes under load, and one flake can hang ctest for 600 s](changes/2026-09-19-the-backend-suite-flakes-under-load.md) | in-progress | agent | 0/3 | [2](threads/99T0.md) |
 | `#ZYRB` | [Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead](changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md) | in-progress |  |  | [3](threads/ZYRB.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  | [1](threads/JN7X.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
@@ -211,6 +210,7 @@
 | `#RM1N` | [Model roles: the Main row has its own controls, and a job can name its own provider](changes/needs_qa_llm/2026-09-18-roles-modal-main-row-and-per-job-providers.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
+| `#99T0` | [The backend suite flakes under load, and one flake can hang ctest for 600 s](changes/needs_qa_llm/2026-09-19-the-backend-suite-flakes-under-load.md) | needs-qa-llm | agent | 3/3 | [2](threads/99T0.md) |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | agent |  |  |
 | `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | agent |  |  |
 | `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | agent |  |  |
@@ -228,6 +228,7 @@
 | `#G5MK` | [A step cut off at the output limit threw the whole turn away](changes/needs_qa_llm/2026-09-18-a-step-cut-off-at-the-output-limit.md) | needs-qa-llm | agent |  |  |
 | `#Z79Y` | [The output token limit is 128K where 128K is allowed, and each model's own number everywhere else](changes/needs_qa_llm/2026-09-18-output-token-limit-is-per-model.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
+| `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/needs_qa_llm/2026-09-18-pane-buttons-brighter-outline.md) | needs-qa-llm | agent | 5/5 |  |
 | `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/needs_qa_llm/2026-09-18-markdown-view-labels-say-md.md) | needs-qa-llm | agent |  |  |
 | `#V8KT` | [A running agent or program is not clear enough in a pane](changes/needs_qa_llm/2026-09-19-pane-live-state-not-clear.md) | needs-qa-llm | agent |  | [5](threads/V8KT.md) |
 | `#T8CN` | [Thinking presentation: collapse in place, markdown, breathing room](changes/needs_qa_llm/2026-09-19-thinking-collapses-in-place.md) | needs-qa-llm | agent | 7/7 |  |
@@ -244,7 +245,8 @@
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
 | `#HQ2B` | [The "Relaying …" line belongs on the left, in the normal weight](changes/needs_qa_llm/2026-09-19-the-relaying-line-goes-left-and-loses-the-bold.md) | needs-qa-llm | agent | 5/5 | [7](threads/HQ2B.md) |
 | `#6GX9` | [A conversation that is still in its first turn is never saved, so the sessions list and full-text search cannot see it](changes/needs_qa_llm/2026-09-19-a-conversation-that-is-still-in-its-first-turn-i.md) | needs-qa-llm |  |  | [5](threads/6GX9.md) |
-| `#N8VK` | [Ctrl+Enter should send now, not join the back of the queue](changes/needs_qa_llm/2026-09-19-ctrl-enter-should-send-now-not-join-the-queue.md) | needs-qa-llm | agent | 5/5 | [10](threads/N8VK.md) |
+| `#N8VK` | [Ctrl+Enter should send now, not join the back of the queue](changes/needs_qa_llm/2026-09-19-ctrl-enter-should-send-now-not-join-the-queue.md) | needs-qa-llm | agent | 5/5 | [12](threads/N8VK.md) |
+| `#BDXG` | [Clicking the "updated todos" row does not unfold it](changes/needs_qa_llm/2026-09-19-clicking-updated-todos-does-not-unfold.md) | needs-qa-llm | agent |  |  |
 | `#SHE3` | [Call todos "tasks" everywhere a person reads](changes/needs_qa_llm/2026-09-19-call-todos-tasks-everywhere-a-person-reads.md) | needs-qa-llm | agent |  | [1](threads/SHE3.md) |
 | `#K48R` | [The thinking fold's height is not capped](changes/needs_qa_llm/2026-09-19-thinking-fold-height-is-not-capped.md) | needs-qa-llm | agent |  |  |
 | `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
