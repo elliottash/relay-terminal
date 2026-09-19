@@ -137,7 +137,7 @@ Backend tests by module:
 | `tests/test_subagents.py` | 21 | Subagents: the restricted executor, what a subagent may and may not do, its transcript, handoffs and the events a pane sees |
 | `tests/test_summaries.py` | 22 | Agent-written session summaries (protocol section 18.4) |
 | `tests/test_terminal_handoff.py` | 30 | `run_in_terminal`: the tool, the pane's ceiling on it, its cap and every refusal |
-| `tests/test_titles.py` | 14 | Model-written pane titles and tab labels (issue JRWQ, protocol section 18) |
+| `tests/test_titles.py` | 10 | Model-written pane titles (issue JRWQ, protocol section 18); tab labels are the GUI's own since 2026-09-19 (protocol 18.3) |
 | `tests/test_todo_subagents.py` | 10 | Todos mapped to subagents (card #QHR1): a todo handed to a subagent follows it, both ways |
 | `tests/test_tool_labels.py` | 57 | Tool-call labels (#TK9C, protocol § 23): the verb and title of every tool, a short command shown whole and a long one shrunk to its program (keeping the subcommand for a multi-command CLI), a pipeline or `&&` chain named by its first real command with the rest counted, the stats (lines, entries, exit code, duration, `+n −m`), `kind`, the `open` target, which calls merge and which never do (a failure, a command, an edit), and the `detail` sections `tool_output_get` replies with |
 | `tests/test_tools.py` | 24 | Preparation never executes, output and exit capture, secret env removal, timeouts (including after stdout closes), output cap, read and diff, stale-write refusal, new-file race, path escape and secret guard, absolute and `..` paths confined but allowed inside the workspace, symlink swap, FIFO, cancel before and during a command, unknown tools, create and list, and `edit_file`: a unique replacement, an ambiguous one refused with its count and then done with `replace_all`, each refusal that names the fix, the stale-edit race, the path and secret guards, cancel before an edit, and the added/removed counts a write now reports |
@@ -147,7 +147,7 @@ Backend tests by module:
 | `tests/test_web_meet_code.py` | 12 | Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG) |
 | `tests/test_web_theme.py` | 7 | app/pane-theme.css is generated from the desktop theme, and must not drift from it |
 | `tests/test_web_viewport.py` | 5 | The web client fits the part of the screen that is visible, on-screen keyboard or not |
-| **Total** | **3350** | 103 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
+| **Total** | **3346** | 103 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
 
 Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file stem without
 `_test`):
@@ -182,7 +182,7 @@ Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file st
 | `tests/panelayout_test.cpp` | 25 | Pane movement: which pane Alt+arrow focuses and Ctrl+Alt+arrow moves past, what the splitter order is afterwards, and which edge a dragged pane is dropped on. The swap tests run against a real QSplitter |
 | `tests/panestate_test.cpp` | 22 | relay::panestate: the v1 `pane_state` message a phone draws (docs/REMOTE-PROTOCOL.md section 16), the actions each queue row offers, the desktop-minted ids, and the coalescing publisher |
 | `tests/panestatus_test.cpp` | 23 | Pane types, pane states and remote sessions (cards #SPBN and #XM0T): the urgency order a tab uses, how a pane's facts become one state, the ssh/mosh/telnet destination, and that every tint keeps its glyph and its label legible in every shipped theme |
-| `tests/panetitles_test.cpp` | 6 | Pane titles and tab labels (issue JRWQ): tidying a model-written title, the offline "same work" judgement and how a tab label is joined and shortened. The worker side is tested in tests/test_titles.py; the rules here are what the GUI applies before, or without, any model |
+| `tests/panetitles_test.cpp` | 7 | Pane titles and tab labels (issue JRWQ): tidying a model-written title, a tab's place label (the repo name of its project, else the folder of its directory), and the offline "same work" judgement and join that still label a tab with no terminal pane. The worker side is tested in tests/test_titles.py; the rules here are what the GUI applies without any model |
 | `tests/paneusage_test.cpp` | 13 | A pane's CPU / memory share (issue #D03W): the arithmetic on Readings a test can make up — percentages over an interval, rounding, when a meter is worth showing, tab-level sums and the label suffixes — plus one /proc walk over this test's own process to prove the parsing |
 | `tests/projectinit_test.cpp` | 19 | "Initialize a project and create a Switchboard here?" (src/ProjectInit.h, protocol 19.12/19.13). The owner's rule of 2026-09-18 is that `<project>/switchboard/` appears only after one yes, and that only five acts may ask |
 | `tests/projects_test.cpp` | 28 | The project model behind the per-project Switchboard (src/Projects.h): the candidate project of a terminal directory, the project key that has to match the backend's workspace digest, which board a project's cards go to (and whether the user has to be asked first) |

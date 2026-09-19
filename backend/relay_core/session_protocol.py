@@ -49,8 +49,8 @@ GUEST_TAIL_RETRY_EVERY = 1.0
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
-         # pane title and tab label (protocol section 18)
-         "set_session_title", "tab_label",
+         # pane title (protocol section 18)
+         "set_session_title",
          # session summaries, on demand and in a batch (protocol section 18.4)
          "conversation_summarize", "conversations_summarize_estimate",
          "conversations_summarize_all", "conversations_summarize_cancel",
@@ -468,7 +468,7 @@ class SessionCommands:
                          lambda text: {"event": "recap", "id": request_id, "skipped": "failed", "error": text,
                                        "reason": reason, "turns_covered": turns, "open_items": open_items})
 
-    # ----- pane title and tab label (protocol section 18) -----------------------------------
+    # ----- pane title (protocol section 18) ---------------------------------------------------
     def _set_session_title(self, request):
         """Name this pane by hand. An empty title hands the name back to the model, which writes a
         fresh one straight away rather than at the next cadence point."""
@@ -519,26 +519,6 @@ class SessionCommands:
                 text = ""
             return agent.release_title(text, claim)
         self._background("session_title", None, work, lambda _text: agent.release_title("", claim) or agent.title_event())
-
-    def _tab_label(self, request):
-        """One label for a tab from the titles its panes already have: no extra title call, just a
-        cheap "same work or not" judgement on the chores role. Never an error: a failed call falls
-        back to the plain-text comparison, which is what the GUI shows in the meantime."""
-        items = request.get("titles")
-        if not isinstance(items, list) or len(items) > 32 or not all(isinstance(t, str) for t in items):
-            raise ValueError("titles must be a list of at most 32 strings.")
-        items = [t[:400] for t in items]
-        request_id = request.get("id")
-        agent = self.turns.agent
-        provider = agent.side_provider(cheap=True, role="chores", max_tokens=titles.MAX_TOKENS) if agent else None
-        offline = {"event": "tab_label", "id": request_id, **titles.label(None, items)}
-
-        def work():
-            try:
-                return {"event": "tab_label", "id": request_id, **titles.label(provider, items)}
-            except Exception:
-                return offline
-        self._background("tab_label", request_id, work, lambda text: offline)
 
     # ----- session summaries (protocol section 18.4) -----------------------------------------
     def _summary_state(self) -> dict:

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PaneTitles.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
 
@@ -8,7 +10,8 @@ namespace relay {
 namespace titles {
 namespace {
 
-// Words that say nothing about which work a pane is on. Mirrors STOPWORDS in relay_core/titles.py.
+// Words that say nothing about which work a pane is on. The rule is the GUI's own since the
+// worker stopped judging tab labels (2026-09-19).
 const QSet<QString> &stopwords() {
     static const QSet<QString> words = [] {
         QSet<QString> set;
@@ -103,6 +106,17 @@ QString join(const QStringList &titles, bool related, const QString &phrase, int
         return clip(text.isEmpty() ? items.first() : text, limit);
     }
     return clip(items.join(QStringLiteral("; ")), limit);
+}
+
+QString placeTitle(const QString &cwd, const QString &project) {
+    if (!project.isEmpty()) {
+        const QString repo = QFileInfo(project).fileName();
+        return repo.isEmpty() ? project : repo;
+    }
+    if (cwd.isEmpty()) return QString();
+    if (cwd == QDir::homePath()) return QStringLiteral("~");
+    const QString folder = QFileInfo(cwd).fileName();
+    return folder.isEmpty() ? cwd : folder;
 }
 
 }  // namespace titles

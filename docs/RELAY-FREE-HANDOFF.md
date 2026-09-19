@@ -75,7 +75,7 @@ test files cover it.
 ## 2. Tune the `relay-lite` output cap down from 512
 
 **Why it is 512.** The owner's spec asked for 8 to 32 output tokens on Lite. It started at 512
-because Relay's Lite chores are more than routing: pane titles and tab labels
+because Relay's Lite chores are more than routing: pane titles
 (`backend/relay_core/titles.py`, `MAX_TOKENS = 1024`), 320-character session summaries
 (`SUMMARY_MAX_TOKENS = 1024`), the request audit (`backend/relay_core/requests.py`,
 `AUDIT_MAX_TOKENS = 1024`) and route assist (`backend/relay_core/route_assist.py`,
@@ -109,7 +109,7 @@ number in `gateway/gateway.example.json` and the sentence about 512 in `gateway/
 judgment more than speed, and the spec says not to put all summaries on Lite. In
 `backend/relay_core/roles.py`, `ROLE_TIERS` maps the `chores` role to `lite`; summaries reach it
 through `session_protocol._chores_provider`. Splitting summaries onto the existing `summaries` role
-(Flash) would leave Lite with titles, labels, audit and routing, and only then is a cap near 64
+(Flash) would leave Lite with titles, audit and routing, and only then is a cap near 64
 realistic. This changes behaviour for every provider, not only Relay Free, so ask before doing it.
 
 **Done when** the cap is set from measured data, the example config and both documents say the new

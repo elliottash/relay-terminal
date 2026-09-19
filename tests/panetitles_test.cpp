@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Pane titles and tab labels (issue JRWQ): tidying a model-written title, the offline "same work"
-// judgement and how a tab label is joined and shortened. The worker side is tested in
-// tests/test_titles.py; the rules here are what the GUI applies before, or without, any model.
+// Pane titles and tab labels (issue JRWQ): tidying a model-written title, a tab's place label
+// (the repo name of its project, else the folder of its directory), and the offline "same work"
+// judgement and join that still label a tab with no terminal pane. The worker side is tested in
+// tests/test_titles.py; the rules here are what the GUI applies without any model.
 #include "PaneTitles.h"
 
+#include <QDir>
 #include <QTest>
 
 using namespace relay::titles;
@@ -67,6 +69,19 @@ private Q_SLOTS:
                                     QStringLiteral("Release notes for the 0.1 preview")}, false, QString(), 30);
         QVERIFY(label.size() <= 30);
         QVERIFY(label.endsWith(QChar(0x2026)));
+    }
+
+    void namesAPlace() {
+        // A project answers its repo name, whatever directory the pane is in.
+        QCOMPARE(placeTitle(QStringLiteral("/home/elliott/repos/relay-terminal/src"),
+                            QStringLiteral("/home/elliott/repos/relay-terminal")),
+                 QStringLiteral("relay-terminal"));
+        // No project: the folder of the pane's own directory.
+        QCOMPARE(placeTitle(QStringLiteral("/home/elliott/repos/relay-terminal/src"), QString()),
+                 QStringLiteral("src"));
+        QCOMPARE(placeTitle(QStringLiteral("/tmp/build/docs"), QString()), QStringLiteral("docs"));
+        QCOMPARE(placeTitle(QDir::homePath(), QString()), QStringLiteral("~"));
+        QVERIFY(placeTitle(QString(), QString()).isEmpty());
     }
 };
 

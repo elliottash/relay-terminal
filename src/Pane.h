@@ -6312,17 +6312,10 @@ private:
             if (onForkState) QTimer::singleShot(0, this, [this, state, title] { if (onForkState) onForkState(state, title); });
             return true;
         }
-        // ----- pane title and tab label (protocol section 18) --------------------------------
+        // ----- pane title (protocol section 18) ------------------------------------------------
         if (type == QStringLiteral("session_title")) {
             setTitleFromWorker(event.value(QStringLiteral("title")).toString(),
                                event.value(QStringLiteral("source")).toString() == QStringLiteral("user"));
-            return true;
-        }
-        if (type == QStringLiteral("tab_label")) {
-            if (onTabLabel)
-                onTabLabel(event.value(QStringLiteral("id")).toString(),
-                           event.value(QStringLiteral("label")).toString(),
-                           event.value(QStringLiteral("related")).toBool(true));
             return true;
         }
         if (type == QStringLiteral("state_loaded")) {
@@ -14397,15 +14390,6 @@ public:
         if (onTitleChanged) onTitleChanged();
     }
 
-    // Tab labels (issue JRWQ): the window asks one pane's worker whether its tab's panes are on the
-    // same work. No extra title call - the titles are already there.
-    void requestTabLabel(const QString &requestId, const QStringList &titles) {
-        if (!m_workerReady) return;
-        QJsonArray items;
-        for (const QString &title : titles) items.append(title);
-        send({{"type", "tab_label"}, {"id", requestId}, {"titles", items}});
-    }
-    std::function<void(const QString &id, const QString &label, bool related)> onTabLabel;
     // /rename-tab: the tab belongs to the window, so the pane hands the request over.
     std::function<void(const QString &text, bool edit)> onRenameTab;
 

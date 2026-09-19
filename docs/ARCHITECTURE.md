@@ -275,11 +275,14 @@ to today's first-prompt title when no model is configured or the call fails.
   argument opens the same in-place editor (Enter commits, Esc cancels). A hand-set name is fixed:
   the model never overwrites it, and the small `auto` badge beside the title disappears. Clearing
   the field hands the pane back to the model, which writes a fresh title straight away.
-- **Tab labels** are derived from the pane titles, so they cost no extra title call: one phrase when
-  the panes are on the same work, the titles joined with `"; "` when they are not ("Fixing pane
-  drag; Release notes"), elided to the tab. Which of the two is a cheap `tab_label` judgement on the
-  same `chores` role, asked only when a pane title actually changed and answered offline
-  (`relay::titles::relatedText`) until it comes back or when no model is configured.
+- **Tab labels** are the opposite of a pane title: they name where the tab is, not what it is
+  doing (owner, 2026-09-19: "change the tab title to be the repo name of the associated project,
+  otherwise the folder of the active pane"). The repo name of the project attached to the tab
+  (#JN7X), else of the project that contains its active pane's directory, else that directory's
+  folder (`RelayWindow::placeTabTitle` over `relay::titles::placeTitle`; `~` at home). Only a tab
+  with no terminal pane at all keeps the old joined-titles label, answered offline
+  (`relay::titles::relatedText` / `join`) — no model is asked about a tab label any more (protocol
+  18.3), and the pane titles stay in the headers and the tab's tooltip.
 - `/rename-tab <name>`, or a double click on the tab, names the tab by hand; it too is fixed until
   the field is cleared, and it follows the tab into a new window.
 
@@ -2716,7 +2719,7 @@ of the platform and of the engine itself.
 | `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/RuntimeDirs.*` | the private `$TMPDIR/relay-XXXXXX` directories: the pid+starttime owner mark, and the startup sweep of the ones a crash left behind (section 2) |
-| `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
+| `src/PaneTitles.*` | pane titles and a tab's place label: tidying a title, the repo-name-or-folder rule (`placeTitle`), and the offline join that still labels a tab with no terminal pane |
 | `src/PaneStatus.*` | pane types (`paneType`, the band's tints by type or group), pane states and their urgency order, the host of an ssh/mosh/telnet session |
 | `src/SshConfig.*` | SSH: the concrete hosts of `~/.ssh/config` and its Includes, the recent hosts, and the ssh/mosh command line that Split on the same host re-runs |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
@@ -2727,7 +2730,7 @@ of the platform and of the engine itself.
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

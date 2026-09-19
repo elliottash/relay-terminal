@@ -1689,7 +1689,7 @@ by a drop or `@path` is attached where it is and never copied. `agent.screenshot
 Per the standing shortcut-hints rule, dropping a file hints the paste shortcut, and reaching the
 screenshot action from the palette hints Ctrl+Shift+G.
 
-## 18. Pane title and tab label (v1.8, 2026-09-17)
+## 18. Pane title and session summary (v1.8, 2026-09-17)
 
 Backend: `backend/relay_core/titles.py` with the state on `Agent` and the handlers in
 `session_protocol.py`; GUI: `src/PaneTitles.{h,cpp}` and `src/Pane.h`; tests:
@@ -1744,18 +1744,22 @@ opens). The text is collapsed and capped at 200 characters. **An empty title han
 to the model** ("Use automatic name"): the pane goes back to `source: "model"` and a fresh title
 is written straight away rather than at the next cadence point.
 
-### 18.3 `tab_label`
+### 18.3 Tab labels (GUI side, no protocol since 2026-09-19)
 
-`tab_label {titles: [string, …] (≤32), id?}` → `tab_label {label, related, source: "model"|"text", id?}`
+A tab's label was the worker's to judge in v1.8: the `tab_label` message sent a tab's pane titles
+to the `chores` role and got back one phrase when the panes were on the same work, the titles
+joined with `"; "` when they were not. The owner moved the whole question into the GUI
+(2026-09-19: "change the tab title to be the repo name of the associated project, otherwise the
+folder of the active pane"), and the message is gone from both ends; a worker that never hears of
+it names nothing, because nothing asks.
 
-A tab's label is derived from the titles its panes already have, so it costs **no extra title
-call**. The only judgement is whether the panes are on the same work: one phrase when they are
-(`"Fixing pane drag"`), the titles joined with `"; "` when they are not
-(`"Fixing pane drag; Release notes"`), shortened to fit the tab. That judgement is another cheap
-`chores` call; `source` says whether the model or the offline comparison made it. The offline rule
-(`titles.related_text`, mirrored in `src/PaneTitles.cpp`) is that every title shares a content word
-with the first, and it is what the GUI uses until the worker answers and whenever no model is
-configured. A failed call is not an error: the offline answer is sent instead.
+A tab is named where it is, which the GUI knows without a model: a hand rename first
+(`/rename-tab`), then the repo name of the project attached to the tab (#JN7X), else of the
+project that contains its active pane's directory, else that directory's own folder
+(`RelayWindow::placeTabTitle` over `relay::titles::placeTitle` in `src/PaneTitles.cpp`; `~` at
+the home directory). Only a tab with no terminal pane at all is still labelled from its panes'
+titles, offline (`relay::titles::relatedText` / `join`) — the pane titles stay in the pane headers
+and the tab's tooltip, where they always were.
 
 ### 18.4 Session summary (v1.8, 2026-09-18)
 

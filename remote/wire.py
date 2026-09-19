@@ -249,10 +249,11 @@ FORWARDED_EVENTS = frozenset({
     # Same call for a plan-mode turn's model (protocol 13.11, #Z0VG): the pane prints a ◆ line
     # when a plan turn runs on the planning role's model, so a phone watching the pane sees it too.
     "plan_route", "plan_route_ended",
-    # Pane titles and tab labels: what a phone needs to label the panes it is showing. The
-    # session summary (protocol 18.4) is the same thing at greater length - this pane's own
-    # description, written from this pane's own conversation, which the phone is already watching.
-    "session_title", "tab_label", "session_summary",
+    # Pane titles and session summaries: what a phone needs to label the panes it is showing. The
+    # summary (protocol 18.4) is the title at greater length - this pane's own description, written
+    # from this pane's own conversation, which the phone is already watching. Tab labels are the
+    # GUI's own (protocol 18.3) and never cross this wire.
+    "session_title", "session_summary",
     # Switchboard (protocol 19): cards, their threads and what the agent did to them. A phone
     # watching a pane should see the board move for the same reason the desktop does; the card
     # bodies are the user's own notes, already in git, not desktop-local configuration.

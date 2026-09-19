@@ -4925,11 +4925,9 @@ private:
             other->toast(QStringLiteral("This session was already open here"));
             return true;
         };
-        // Pane titles (issue JRWQ): a fresh title relabels the tab; /rename-tab is the window's job.
+        // Pane titles (issue JRWQ): a fresh title refreshes the tab's tooltip (and the label of a
+        // tab with no terminal pane); /rename-tab is the window's job.
         pane->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
-        pane->onTabLabel = [guard](const QString &id, const QString &label, bool related) {
-            if (auto *w = windowOf(guard)) w->applyTabJudgement(id, label, related);
-        };
         pane->onRenameTab = [guard](const QString &text, bool edit) {
             auto *w = windowOf(guard);
             if (w) w->renameTab(text, edit, w->pageOf(guard));
@@ -5248,11 +5246,13 @@ private:
         return name.isEmpty() ? path : name;
     }
 
-    // ----- tab labels (issue JRWQ) -------------------------------------------------------------
-    // A tab is labelled from the titles its panes already carry, so it costs no extra model call:
-    // one phrase when the panes are on the same work, the titles joined with "; " when they are
-    // not. Which of the two is a cheap chores-role judgement in the worker (`tab_label`); until it
-    // answers, and whenever no model is configured, the plain-text comparison decides.
+    // ----- tab labels -----------------------------------------------------------------------
+    // A tab is labelled after where it is (owner, 2026-09-19: "the repo name of the associated
+    // project, otherwise the folder of the active pane"), not after what its panes are doing: a
+    // hand-set name first, then the tab's attached project (#JN7X), then the repo of its active
+    // pane's directory, then that directory's own folder. The agent-written pane titles stay in
+    // the pane headers and in the tab's tooltip; the joined-titles label below survives only for a
+    // tab with no terminal pane at all, answered offline — nothing asks a model about a tab.
     QStringList paneTitlesIn(QWidget *page) const {
         QStringList titles;
         for (QWidget *leaf : leavesIn(page)) {
@@ -5267,47 +5267,29 @@ private:
     QString tabLabelFor(QWidget *page, const QStringList &titles) const {
         const QString manual = m_tabNames.value(page);
         if (!manual.isEmpty()) return manual;
+        const QString place = placeTabTitle(page);
+        if (!place.isEmpty()) return place;
         if (titles.isEmpty()) return QStringLiteral("Relay");
-        const bool related = m_tabRelated.contains(page) ? m_tabRelated.value(page)
-                                                         : relay::titles::relatedText(titles);
-        return relay::titles::join(titles, related, m_tabPhrase.value(page));
+        return relay::titles::join(titles, relay::titles::relatedText(titles));
     }
 
-    // Ask the tab's own worker whether its panes are on one job, but only when the titles changed.
-    void refreshTabJudgement(QWidget *page, const QStringList &titles) {
-        const QString key = titles.join(QChar(0x1f));
-        if (m_tabKey.value(page) == key) return;
-        m_tabKey.insert(page, key);
-        m_tabRelated.remove(page);
-        m_tabPhrase.remove(page);
-        if (titles.size() < 2 || !m_tabNames.value(page).isEmpty()) return;
-        QWidget *leaf = m_lastActive.value(page);
-        Pane *pane = dynamic_cast<Pane *>(leaf);
+    // Where a tab is: the repo name of the project it is attached to (#JN7X), else of the project
+    // that contains its active pane's directory, else that directory's own folder. The active pane
+    // is the tab's last active leaf when that is a terminal, else its first terminal.
+    QString placeTabTitle(QWidget *page) const {
+        const QString attached = tabProject(page);
+        if (!attached.isEmpty()) return relay::projects::nameFor(attached);
+        Pane *pane = dynamic_cast<Pane *>(m_lastActive.value(page).data());
         if (!pane)
-            for (QWidget *candidate : leavesIn(page))
-                if ((pane = dynamic_cast<Pane *>(candidate))) break;
-        if (!pane) return;
-        const QString id = QStringLiteral("tab-%1").arg(++m_tabLabelSerial);
-        m_tabLabelRequests.insert(id, {QPointer<QWidget>(page), key});
-        pane->requestTabLabel(id, titles);
-    }
-
-    void applyTabJudgement(const QString &id, const QString &phrase, bool related) {
-        const auto request = m_tabLabelRequests.take(id);
-        QWidget *page = request.first.data();
-        // A pane title moved on while the worker was thinking: that answer is stale.
-        if (!page || m_tabKey.value(page) != request.second) return;
-        m_tabRelated.insert(page, related);
-        m_tabPhrase.insert(page, related ? phrase : QString());
-        updateTitles();
+            for (QWidget *leaf : leavesIn(page))
+                if ((pane = dynamic_cast<Pane *>(leaf))) break;
+        if (!pane) return QString();
+        return relay::titles::placeTitle(pane->cwd(), relay::projects::candidateFor(pane->cwd()));
     }
 
     void forgetTab(QWidget *page) {
         m_tabNames.remove(page);
         m_tabProject.remove(page);   // the tab is going: its project goes with it (#JN7X)
-        m_tabKey.remove(page);
-        m_tabRelated.remove(page);
-        m_tabPhrase.remove(page);
     }
 
     // ---- "Share whole tab" (owner, 2026-09-18) ----------------------------------------------------
@@ -5361,7 +5343,6 @@ private:
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             const QStringList titles = paneTitlesIn(page);
-            refreshTabJudgement(page, titles);
             m_tabs->setTabText(i, tabLabelText(page, titles));
             m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
             syncTabProjectChip(i, page);
@@ -5379,7 +5360,7 @@ private:
     }
 
     // /rename-tab, or a double click on the tab: an editor over the tab itself. An empty name puts
-    // the tab back under the pane titles.
+    // the tab back under its place title.
     void renameTab(const QString &text, bool edit, QWidget *page = nullptr) {
         if (!page) page = m_tabs->currentWidget();
         if (!page) return;
@@ -5388,7 +5369,6 @@ private:
         if (!edit) {
             if (text.isEmpty()) m_tabNames.remove(page);
             else m_tabNames.insert(page, relay::titles::clean(text, relay::titles::kMaxUserTitle, 0));
-            m_tabKey.remove(page);   // re-ask the worker when the tab goes back to automatic
             updateTitles();
             return;
         }
@@ -5418,16 +5398,13 @@ private:
         m_tabEditPage = nullptr;
     }
 
-    // Tab labels (issue JRWQ): names set by hand, and the worker's last "same work?" judgement per
-    // tab page, keyed by the pane titles it was made for.
-    QMap<QWidget *, QString> m_tabNames, m_tabKey, m_tabPhrase;
+    // Tab labels: names set by hand. The automatic label is a place (placeTabTitle), decided in
+    // the GUI alone, so there is no per-tab judgement left to keep.
+    QMap<QWidget *, QString> m_tabNames;
     // Which project each tab is attached to (#JN7X). Written only by attachTab()/detachTab() and
     // cleared by forgetTab(); a tab that is not in it is attached to nothing, which is the
     // ordinary state.
     QMap<QWidget *, QString> m_tabProject;
-    QMap<QWidget *, bool> m_tabRelated;
-    QMap<QString, QPair<QPointer<QWidget>, QString>> m_tabLabelRequests;
-    int m_tabLabelSerial = 0;
     QLineEdit *m_tabEdit = nullptr;
     QPointer<QWidget> m_tabEditPage;
 

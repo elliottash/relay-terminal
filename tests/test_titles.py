@@ -1,8 +1,9 @@
-"""Model-written pane titles and tab labels (issue JRWQ, protocol section 18).
+"""Model-written pane titles (issue JRWQ, protocol section 18).
 
 Covers the refresh cadence, that a title the user typed is never overwritten, that a title comes
 back with a resumed session, and the fallback when no model answers. Fake providers only; no
-network. The GUI-side rules are tested in tests/panetitles_test.cpp.
+network. Tab labels are the GUI's own since 2026-09-19 (protocol 18.3); the GUI-side rules are
+tested in tests/panetitles_test.cpp.
 """
 import json
 import sys
@@ -52,30 +53,11 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(titles.fallback_title('  make   the tabs\nnicer '), 'make the tabs nicer')
         self.assertEqual(len(titles.fallback_title('word ' * 100)), 80)
 
-    def test_tab_labels_join_unrelated_panes_with_a_semicolon(self):
-        panes = ['Fixing pane drag', 'Release notes']
-        self.assertFalse(titles.related_text(panes))
-        self.assertEqual(titles.join(panes, False), 'Fixing pane drag; Release notes')
-        self.assertTrue(titles.related_text(['Fixing pane drag', 'Pane drag drop zones']))
-        self.assertEqual(titles.join(panes, True, 'Pane drag work'), 'Pane drag work')
-        self.assertEqual(titles.distinct(['a', '', ' A ', 'b']), ['a', 'b'])
-        # One pane, or none, needs no judgement at all.
-        self.assertEqual(titles.label(None, ['Release notes'])['label'], 'Release notes')
-        self.assertEqual(titles.label(None, [])['label'], '')
-
-    def test_tab_label_without_a_model_uses_the_text_comparison(self):
-        result = titles.label(None, ['Fixing pane drag', 'Release notes'])
-        self.assertEqual((result['related'], result['source']), (False, 'text'))
-        self.assertEqual(result['label'], 'Fixing pane drag; Release notes')
-
 
 class SideCallProvider(ScriptedProvider):
     """Answers no-tools calls with `side_reply`, and records only the title calls."""
     def title_calls(self):
         return [m for m in self.side_requests if m and m[0].get('content') == titles.TITLE_SYSTEM]
-
-    def label_calls(self):
-        return [m for m in self.side_requests if m and m[0].get('content') == titles.LABEL_SYSTEM]
 
 
 class BrokenSideProvider(SideCallProvider):
@@ -228,29 +210,6 @@ class SessionTitleTests(unittest.TestCase):
         self.run_turn('again')
         self.settle()
         self.assertEqual(len(provider.title_calls()), 1)
-
-    def test_tab_label_asks_the_chores_role_whether_the_panes_are_on_one_job(self):
-        provider = SideCallProvider(side_reply='{"related": true, "label": "Pane titles and tabs"}')
-        self.make_agent(provider)
-        self.cmds.handle('tab_label', {'id': 't1', 'titles': ['Fixing pane drag', 'Release notes']})
-        event = self.rec.wait(lambda e: e['event'] == 'tab_label' and e.get('id') == 't1')
-        self.assertEqual((event['label'], event['related'], event['source']),
-                         ('Pane titles and tabs', True, 'model'))
-        self.assertEqual(len(provider.label_calls()), 1)
-        # Unrelated panes keep their own titles, joined with a semicolon.
-        provider.side_reply = '{"related": false}'
-        self.cmds.handle('tab_label', {'id': 't2', 'titles': ['Fixing pane drag', 'Release notes']})
-        event = self.rec.wait(lambda e: e['event'] == 'tab_label' and e.get('id') == 't2')
-        self.assertEqual(event['label'], 'Fixing pane drag; Release notes')
-        with self.assertRaises(ValueError):
-            self.cmds.handle('tab_label', {'titles': 'not a list'})
-
-    def test_a_failed_tab_label_call_falls_back_to_the_text_comparison(self):
-        self.make_agent(BrokenSideProvider())
-        self.cmds.handle('tab_label', {'id': 't3', 'titles': ['Fixing pane drag', 'Pane drag zones']})
-        event = self.rec.wait(lambda e: e['event'] == 'tab_label' and e.get('id') == 't3')
-        self.assertEqual((event['related'], event['source'], event['label']),
-                         (True, 'text', 'Fixing pane drag'))
 
     def test_a_new_conversation_drops_the_title(self):
         provider = SideCallProvider(side_reply='{"title": "Fixing pane drag"}')
