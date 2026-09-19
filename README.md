@@ -236,8 +236,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
   because a key is missing. Every pane starts on the Main agent unless Options › Agent › "New panes
   use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.
-  **`/flash`**, Alt+F, the **Flash agent** row in the model box, or Actions › Flash agent for this
-  pane moves a pane to the Flash model, and **`/main`** or the **Main agent** row moves it back,
+  **`/flash`**, Alt+F, the **(flash)** row in the model box, or Actions › Flash agent for this
+  pane moves a pane to the Flash model, and **`/main`** or the **(main)** row moves it back,
   both without losing the conversation. **`/glm`** and **`/kimi`** switch
   the pane to that provider's Coding Plan (its pay-as-you-go preset when no Coding Plan key is stored).
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
@@ -308,8 +308,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   prompt marks and the working directory keep working, and the agent keeps its local powers — it
   runs commands on the host, and its file tools take a `host`, so it reads and edits remote
   files and shows the diff before writing (`docs/SSH-AND-MOSH.md`).
-- **Share a pane with a phone — and with other people.** The share chip beside the microphone
-  pairs a phone: a link and QR, a five-digit code both ends derive, and a deliberate choice
+- **Share a pane with a phone — and with other people.** The share button in the pane's
+  top-right corner pairs a phone: a link and QR, a five-digit code both ends derive, and a deliberate choice
   between viewing and typing. The phone sees the pane's screen, gets one prompt box routed
   exactly like Relay's own (a command runs, anything else goes to the agent), pages through the
   scrollback, and can send a voice clip that is transcribed on the desktop, so the API key never

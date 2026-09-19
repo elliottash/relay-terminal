@@ -13,8 +13,11 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   against the other sessions and stamps the objects it made back to the build's start, so a
   header edited while a compile was running is recompiled instead of silently missed
   (`CLAUDE.md`, "Build through `scripts/relay-build`").
-- **Tests:** `./scripts/test.sh` (backend + Bash/PTY) and `ctest --test-dir build` must pass.
-  Verify GUI changes live under Xvfb with an isolated `XDG_CONFIG_HOME`.
+- **Tests:** do not run the full test suites unless the owner asks. Run targeted tests for the
+  code you changed instead — a single `ctest --test-dir build -R <name>` case, or one
+  `pytest`/`scripts/test.sh` subset. (`./scripts/test.sh` and a full `ctest --test-dir build`
+  run are for when the owner asks, or a release-scale change.) Verify GUI changes live under
+  Xvfb with an isolated `XDG_CONFIG_HOME`.
 - **Commits:** land through `python3 scripts/land.py begin <me> <paths>` before editing and
   `python3 scripts/land.py commit <me> -m …` afterwards; several sessions share this checkout
   and a plain `git commit` from the shared index reverts them (`CLAUDE.md`).

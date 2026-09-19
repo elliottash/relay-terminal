@@ -160,7 +160,9 @@ Sources:
 right, and Left, Up or Down within two seconds re-docks it to that side, so **`pane.splitDown` has no
 default key in any preset** and `pane.splitLeft` / `pane.splitUp` have none either. All four keep an
 action, so they can still be bound here or run from the palette. The rows above record what each
-program binds; the JSON is what Relay ships.
+program binds; the JSON is what Relay ships. Ctrl may still be held from the split key when the
+arrow comes (Shift too: Ctrl+Shift+E leaves both down), as long as that chord is not a shortcut in
+the preset — konsole's Ctrl+Shift+Down keeps focusing the pane below (card #JXWT).
 
 **Since card #Q7Y9:** moving and placing share the same trick. A `pane.moveLeft` or
 `pane.moveRight` followed by `pane.moveDown` **within two seconds** docks the pane beneath the

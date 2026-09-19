@@ -18,7 +18,10 @@ about what is already done.
 
 What this means in practice:
 
-- Commit your own work as soon as it builds and `ctest` passes. Do not sit on it.
+- Commit your own work as soon as it builds and its targeted tests pass. Do not sit on it.
+  Do not run the full test suites (`ctest --test-dir build`, `./scripts/test.sh`) unless the
+  owner asks: run the tests that cover your change (`ctest --test-dir build -R <name>`, one
+  pytest file) and leave the suites to the owner.
 - Before starting, `git log --oneline -15` and `git status` — someone may have just done it, or be
   half way through the file you are about to change.
 - Never commit, stash or revert a file you did not write. If another session's unfinished work

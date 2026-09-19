@@ -1,0 +1,16 @@
+binary: /tmp/jn7x-source.dtMCiQ/build/relay
+binary sha256: 6455ae147fe6df378c096b8d938189f2fd8c4e87682bc7eb6939d592509e10ad  /tmp/jn7x-source.dtMCiQ/build/relay
+fixture root: /tmp/tmp.ayu1TEGmfs
+
+CHECK 1: no-board directory in a fresh tab
+
+Open project A board in first tab and project B board in second tab
+workers after both boards: 2127421 (count=1)
+
+CHECK 2: drag A card from inbox to discussing
+projA:
+ M issues/features/AAAA.md
+?? issues/threads/
+projB:
+
+CHECK 3: quick-add one card per board

@@ -1,0 +1,10 @@
+Internal ctest changing into directory: /tmp/jn7x-source.dtMCiQ/build
+Test project /tmp/jn7x-source.dtMCiQ/build
+    Start 42: board
+1/2 Test #42: board ............................   Passed    0.18 sec
+    Start 43: boardworkspace
+2/2 Test #43: boardworkspace ...................   Passed    0.04 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.23 sec

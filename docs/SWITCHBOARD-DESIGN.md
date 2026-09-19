@@ -246,6 +246,17 @@ wrapping. The glyph set: `○` inbox/draft, `◇` discussing, `◆` ready/approv
 `◐` a Waiting lane, `◉` a QA lane, `◌` deferred/retired, `✓` done, `✗` dropped, coloured by
 family (accent for running, warning for waiting, the agent violet for QA).
 
+**Sorting.** A `Sort` menu beside the filter box (owner, 2026-09-19: "add sorting options,
+especially by time") picks the order of the cards *inside* every section: **Manual** — the
+board's own rank, the order drag and drop and Alt+Shift+↑↓ write, with Done and Verified newest
+first as they always were — **Newest first**, **Oldest first** (by `created`) and **Recently
+updated** (by the row's `updated`, the card file's or its thread file's mtime, whichever is
+later; an older worker sends none and that sort falls back to `created`). A time sort takes over
+every section alike and takes the manual reorder off — a drop inside the card's own section and
+Alt+Shift+↑↓ answer with a notice saying why, while drops *between* sections still move, because
+they write a status and not a place. The choice is saved with the window's layout
+(`{"board": {"workspace", "collapsed", "hidden", "sort"}}`) and each pane keeps its own.
+
 **Keyboard.** Up/Down walk the card rows of the whole list, stepping over the headers; PageUp/Down
 and Home/End likewise; Enter opens; Left folds the selection's section and stands on the nearest
 card still on screen; Right unfolds the folded section nearest the selection (so Left and Right
@@ -259,7 +270,10 @@ has the pane to itself.
 **Filtering.** The filter box filters rows live across every section: a section with no match is
 left out, the counts follow, and nothing is folded while a filter is active — a search that hid
 its own matches would be a search that does nothing. The tokens are `label:`, `status:`,
-`folder:`, `@assignee`, `waiting:`, `#ID` and words.
+`folder:`, `@assignee`, `waiting:`, `#ID` and words. A word is full-text search (2026-09-19): it
+matches the row's own fields and the card's whole text — body and thread, which the worker sends
+on each row as `text`, capped at 64 KiB (protocol 19.2) — so a phrase remembered from the
+request, a decision or a comment finds its card.
 
 ### 4.7 The tools are the top of the list page, not the pane's header (owner, 2026-09-18)
 
@@ -536,7 +550,7 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   keeps only what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
   **Verify (v)**. The empty-thread line teaches the same three keys instead of naming buttons.
 - **Stopping a turn is a strip, not a mode-swapped button.** While a turn runs, a line over the
-  reply box reads `✦ Agent is planning…` or `✦ Agent is discussing…` with `✕ Stop planning` /
+  reply box reads `✦ Switchboarding · planning…` or `✦ Switchboarding · discussing…` with `✕ Stop planning` /
   `✕ Stop discussing` at its right (`boardBusyStrip`, `boardBusyLabel`, `boardStop`); the buttons
   that would start another turn are disabled and keep their own labels. This replaces 4.9's rule
   that the running mode's button becomes **Stop** — which only worked while that mode *had* a

@@ -12,6 +12,7 @@
 #               kind, none between the three rows, the ▸ model line directly on top of the prose
 #   02-second   a second ✦ line: set off from the previous turn's last prose line by a blank row
 #   03-tools    a turn whose first step is a tool call: ▸ model directly on top of the row
+#   04-recap    /recap after a turn: the Recap · line is set off from the ✦ N tool calls link
 #
 # Needs Xvfb, xdotool, ImageMagick, tesseract.
 set -uo pipefail
@@ -92,6 +93,7 @@ rm -f "$out/implementer-notes.txt"
 ask 'walk through the files'; sleep 30; shot 01-walk
 ask 'second prompt, no tools'; sleep 8; shot 02-second
 ask 'tools first please'; sleep 14; shot 03-tools
+ask '/recap'; sleep 12; shot 04-recap
 cp "$sandbox/relay.log" "$out/relay.log" 2>/dev/null
 mkdir -p "$out/logs" && cp -r "$sandbox/home/.local/share/relay/logs/." "$out/logs/" 2>/dev/null
 printf 'done: %s\n' "$out"

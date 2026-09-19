@@ -738,7 +738,7 @@ GUI's `pane` line carries it as `tab` for every pane shared under it, and an inv
   every live invite and participant of that tab. The hub records `scope_grown` (10.6) per
   participant and per invite *before* the store changes, and changes it before the `panes` list
   announcing the pane is filtered, so a guest is never sent a list without a pane they now hold.
-  The desktop is never silent about it: the new pane's share chip is lit from its first frame and
+  The desktop is never silent about it: the new pane's share button is lit from its first frame and
   a toast says the tab's guests can see it;
 * a pane that **leaves** the tab — closed, or moved to a tab that is not shared whole — leaves
   their scope at once (`scope_shrunk`), with any control token, pending control request and
@@ -1201,7 +1201,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. What is **not** fixed is the per-device connect token of §8, which needs a change to §5 |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
-| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |
+| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share button in the pane's chrome row, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |
 | How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
 
@@ -1257,7 +1257,7 @@ to this pane" — role, expiry, uses, the link and its QR — and everything tha
 pane rather than a dialog: per shared pane the participants with their key fingerprints and who is
 driving, the live invites with uses and expiry and a Revoke, and the knocks, control requests and
 guest prompts, each with the countdown of its own kind and Refuse first and holding the focus. The
-pane opens from the share chip, from the palette (`pane.sharing`) and by itself when somebody
+pane opens from the share button, from the palette (`pane.sharing`) and by itself when somebody
 knocks, and opening it never takes the keyboard, because the next keystroke would land on Admit.
 The owner's keystroke in a pane a guest is driving sends `control_take` from the same place the
 agent's hand-over already ends.
@@ -1360,7 +1360,7 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
                    "state":"waiting|withdrawing|queued|editing|paused",
                    "actions":["remove","edit","to_queue","send_now","steer","up","down"]}],
           "hint":"↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
- "model":{"label":"fake · local","choices":[{"id":"m1","label":"Kimi K2 · Main","current":false}]},
+ "model":{"label":"kimi-k3 (main)","choices":[{"id":"m1","label":"kimi-k3 (main)","current":true}]},
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
  "theme":"relay-dark",

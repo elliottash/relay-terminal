@@ -1970,10 +1970,14 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 no table of its own.
 
 A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
-thread_entries, tasks_done, tasks_total, created, milestone, topic, implemented_by, text}` — enough to
-draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only the first
-eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends them all.
-`component` is not in the row: the card detail reads it from `front`.)
+thread_entries, tasks_done, tasks_total, created, updated, milestone, topic, implemented_by, text}`
+— enough to draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only
+the first eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends
+them all. `component` is not in the row: the card detail reads it from `front`.)
+
+`updated` (2026-09-19) is when the card last changed on disk — its file's mtime, or its thread
+file's if that is later — as an ISO UTC timestamp. The pane's **Recently updated** sort keys on
+it (a GUI talking to an older worker gets none and falls back to `created`).
 
 `text` (2026-09-19) is the card's whole searchable text — its body, then each thread entry's
 author, kind and words — capped at `board_protocol.MAX_ROW_TEXT` (64 KiB), so the pane's filter
@@ -2065,7 +2069,11 @@ its local state is gone, continues the same thread.
 
 Turn events (`delta`, `thinking`, `tool_started`, `tool_result`, `turn_summary`, `status`, `done`,
 `error`, `cancelled`) carry `card_id` while a `board_ask` turn runs, so the pane routes them to the
-right card detail view. On `done` the assembled answer is appended to the thread as an `agent`
+right card detail view. The `thinking_delta` stream is drawn in the card's thread itself (#9K5H):
+the block streams under a `✦ thinking…` header — the terminal fold's own words — and is sealed in
+place above any thread entry that lands under it (an answer, or a `question` the agent asks
+mid-turn), so the thread reads in arrival order; it is a live view only and is never written to the
+card file. On `done` the assembled answer is appended to the thread as an `agent`
 comment carrying the model and `session/turn`; on `error` or `cancelled` nothing is written.
 
 ### 19.5 `board_activity`: what the agent did, in the pane that caused it
@@ -3181,7 +3189,7 @@ title line, the last line of the block, the diff — is now a field.
 | `ok` | bool | on `tool_result` only. Same verdict the turn record keeps: no `error`, no `ok: false`, not timed out, exit code 0 or none |
 | `error` | string | only when the call **did not happen**: first line of the error, at most 120 characters. A command that ran and exited 1 is `ok: false` with **no** `error` — `stats` already says `exit 1`, and `title` stays "ran pytest" |
 | `path` | string | workspace-relative path, for the file kinds (`read_file`, `list_directory`, `write_file`, `edit_file`), so the surface can open the file. Skill files have no workspace path and send none |
-| `inline_diff` | bool | present for a successful write or edit: `true` when the diff is at most **12** changed lines (added + removed) and the surface prints it under the line with no click; `false` when it is bigger |
+| `inline_diff` | bool | present for a successful write or edit: `true` when the diff is at most **12** changed lines (added + removed) — small enough that a surface may show it in place; Relay folds it under the row, collapsed until the row is clicked (#WXT6); `false` when it is bigger |
 | `open` | object | what a click does, §23.6. Always present on `tool_result` |
 | `merge` | object | present only when consecutive calls may be merged into one line, §23.7 |
 
@@ -3269,7 +3277,7 @@ not the capped first line.
 |---|---|
 | `{"type": "fold"}` | the default everywhere: the detail folds open in place, in the terminal |
 | `{"type": "file", "path": "x.py"}` | a `read_file`, and a `write_file` that created the file |
-| `{"type": "diff"}` | a write or an edit whose diff is more than 12 changed lines (the small ones are printed inline instead) |
+| `{"type": "diff"}` | a write or an edit whose diff is more than 12 changed lines (the small ones fold in place instead) |
 | `{"type": "subagent", "id": "a1"}` | `agent`, `agent_message`, `agent_wait` with an id |
 | `{"type": "card", "id": "K7Q2"}` | a `board_*` call about one card (the id carries no `#`) |
 | `{"type": "plan"}` | `write_plan` |
@@ -4418,7 +4426,7 @@ want to answer wants to move past the question, not end the work they are being 
 **Stop, while a card is up, is the `agent.stop` action** — Actions › Stop agent, or the shortcut the
 user bound to it, since Relay ships `agent.stop` unbound and Esc was the only key that reached it.
 The card's last footer line says which of the two applies, read live from the Keymap, and so does
-the "Relaying – waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
+the "Relaying · waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
 can no longer promise. There is deliberately no second Esc that stops: on the last question a second
 Esc is an ordinary Esc in an idle pane. Stop still takes the card away with the turn
 (`question_closed`).

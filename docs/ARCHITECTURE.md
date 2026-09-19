@@ -1,6 +1,6 @@
 # Relay architecture
 
-Current as of 2026-09-19 (commit `ab8f37e`). Every
+Current as of 2026-09-19 (commit `3269611`). Every
 statement points at code; paths are relative to the repository root. Planned work is in
 [ROADMAP.md](ROADMAP.md), test status in [VALIDATION.md](VALIDATION.md).
 
@@ -211,7 +211,11 @@ Layout rules:
 - **Keyboard moves** (`pane.moveLeft/Right/Up/Down`, default Ctrl+Alt+arrows, unbound in the
   Warp preset where those keys focus panes): the neighbor is found like focus movement; adjacent
   siblings in a splitter of that orientation swap, otherwise the pane docks on the neighbor's
-  near side, so repeating keeps moving it. A left/right move opens the twin of #78BN's placement
+  near side, so repeating keeps moving it. With no pane that way the move does not refuse: the
+  pane is carried past the page's edge into a column (left/right) or a row (up/down) of its own
+  (`movePastPageEdge`) — appended to the root splitter when it already runs that way, otherwise
+  with the root wrapped — taking one equal share of the page's top-level regions; the notice
+  stays only for the tab's sole pane and a pane already filling that edge alone. A left/right move opens the twin of #78BN's placement
   window (#Q7Y9): for two seconds the Move-down *action* — Ctrl+Alt+Down by default, whatever the
   user bound — docks the pane beneath the neighbor it moved toward instead of moving it down
   (`armBeneathDock` / `dockBeneathNeighbor`; the window closes without consuming anything on any
@@ -222,7 +226,10 @@ Layout rules:
   own arming line is a registry hint (`pane.dockBeneath.chord`), so it stops after a few showings.
 - **Layout rules** live in `src/PaneLayout.{h,cpp}` (library `relay-panes`, tests
   `tests/panelayout_test.cpp`): `neighborIndex()` (which pane is on that side, used by focus and
-  by moves), `swapInSplitter()`, `dropEdge()`, and the chord's two decisions `moveToward()` (which
+  by moves), `swapInSplitter()`, `dropEdge()`, the past-the-edge pair `fillsTheEdge()` (that pane
+  already spans the page across the move, so there is nothing to change) and
+  `sizesAfterEdgeDock()` (the newcomer takes one equal share of the root splitter), and the
+  chord's two decisions `moveToward()` (which
   move takes a pane toward its neighbour) and `chordKeyKeepsWindow()`. `swapInSplitter()` is one
   `QSplitter::insertWidget` call in either direction, because that call **moves** a child the
   splitter already owns and numbers the index as if it had been taken out first — "finishing" a
@@ -232,8 +239,8 @@ Layout rules:
   drops). `dropTarget()` picks the nearest edge of the leaf under the cursor or a `QTabBar`; a
   translucent `dropZone` frame shows the half that will be taken. Esc cancels. Dropping on the
   half two neighbours already share means "stay here", so nothing moves.
-- **Tabs:** a "+" button placed after the last tab, a ⧉ left-side tab button shown on hover and a
-  context menu run `tab.new` / `tab.moveToNewWindow`; the tab page moves to
+- **Tabs:** a "+" button placed after the last tab and a context menu run
+  `tab.new` / `tab.moveToNewWindow`; the tab page moves to
   `WindowManager::newEmptyWindow()`.
 - Typing `exit` closes the pane. A shell stopped for memory keeps the pane open (section 13).
 
@@ -352,8 +359,8 @@ in that colour (`liveMarker`: the agent's violet whenever agent work — a turn 
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
 and takes the one across. The sentence sits above the prompt box (`Pane::PaneBusyLine`, card
-#4E13): "Relaying – <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
-action a gerund of the live tool call, or what the pane waits for — and "Relaying – <program>…" in the
+#4E13): "Relaying · <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
+action a gerund of the live tool call, or what the pane waits for — and "Relaying · <program>…" in the
 terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
 flash time of 0, the same one that stills the caret and the waiting dots — draws every live mark at
 rest, and the news states (done, failed, needs you) never move: they pull the eye by being news.
@@ -460,8 +467,8 @@ a red corner mark, or the ⇄ itself when nothing more urgent is going on. The p
 `remoteSession` = the host, for anything else that wants to know.
 
 **Shared with a phone** (Relay's remote share, section 19) is a different state and gets a
-different mark: a `phone` chip in the title row in the shell blue, beside the share chip under the
-prompt box that already said so.
+different mark: a `phone` chip in the title row in the shell blue; the share button in the pane's
+chrome row already said so.
 
 ### Notification centre
 
@@ -620,11 +627,11 @@ waiting behind other toasts costs none of its showings. Idle tips work the same 
 (`nextIdleTip()` picks, the pane records on display, and only into a pane with no toast up).
 Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
 own time if shorter), identical consecutive toasts collapse. The agent turn clock is state, not a
-toast: while a turn runs, the line above the prompt box says "Relaying – <action>… · 48 s · Esc
+toast: while a turn runs, the line above the prompt box says "Relaying · <action>… · 48 s · Esc
 stops" in the agent's violet, left-aligned with the prompt text and in the normal weight
-(`Pane::PaneBusyLine`, cards #4E13, #HQ2B; the spaced en dash after the verb is #RR0G) — the
+(`Pane::PaneBusyLine`, cards #4E13, #HQ2B; the spaced dot after the verb is #RR0G, 2026-09-19 cdot) — the
 action a gerund of the live tool call ("thinking", "reading src/Pane.h") — and a program that owns
-the terminal gets the same line in the terminal's blue, "Relaying – <program>…". **Waiting on
+the terminal gets the same line in the terminal's blue, "Relaying · <program>…". **Waiting on
 background work** (cards #V7QD and #KP4M): when the pane's main ("orchestrator") agent is blocked
 on the subagents or the jobs it started, the prompt box's own placeholder says so — "waiting for
 2 subagents, 1 job . . .", the dots growing every 600 ms — and the busy line says "Relaying –
@@ -643,7 +650,7 @@ signal `RichEditor::setCaretColor` takes the caret's blink from) draws the dots 
 no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
-tab close and ⧉ buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), clicking into another pane, mouse model/effort/mode pickers, clicking
+tab close buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the palette's Update action (→ `/update`, `update.palette`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
@@ -658,7 +665,7 @@ starting a card edit in the Switchboard with the Edit button, a click on the tit
 double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane),
 the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
-(→ n and p step through the hunks), the share chip on a pane that is already shared (→ the palette, then "Sharing", because
+(→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
 `pane.sharing` deliberately has no key of its own), answering an `ask_user` card by typing an
 option out in full (→ its number, `question.number`; an answer in the user's own words is the
 card working and is never corrected), dropping a pane on another's bottom edge (→ the move
@@ -1059,7 +1066,8 @@ backend's `label`, protocol section 23; the fold layer is docs/ENGINE.md, "Folds
 - **Consecutive reads and listings merge**: the row keeps the cursor until a call arrives that
   cannot join it, and becomes `read 6 files · 4,100 lines`. Its anchor is `<first call>+<n>` and
   its fold lists the members, each linking to the file it read.
-- A **diff of at most 12 changed lines** prints under the row with no click at all; a larger one
+- A **diff of any size folds under the row**, collapsed until it is clicked (#WXT6): a small one
+  (at most 12 changed lines) is answered from the diff the pane already stored, and a larger one
   opens the diff pane (`ToolPane::Kind::Diff` over `relay::DiffView`, a splitter pane, one per
   tab). What else a click opens is the label's `open.type` (section 23.6): a file in a preview
   pane, a subagent tab, a card. Those lines anchor **`relay://open-call/…`** instead, which the
@@ -1067,16 +1075,29 @@ backend's `label`, protocol section 23; the fold layer is docs/ENGINE.md, "Folds
   link from outside) routes.
 - The fold's content comes from `tool_output_get` under a `fold-` request id, so it never also
   opens a pane, and is built from the reply's `detail` sections: a command with a `$` lead, output
-  with its escapes stripped, a diff in the add/remove inks on a tint, capped at 5,000 rows with a
-  final "open in pane" row. A turn the worker no longer keeps gets a one-row fold that says so.
+  with its escapes stripped, a diff as black-or-white ink on the green/red fills, capped at 5,000
+  rows with a final "open in pane" row. A turn the worker no longer keeps gets a one-row fold that
+  says so.
+- An **`update_todos` row folds to the task list that call left behind** (card #BDXG): `open.type`
+  is `todos`, and `Pane::callAnchor` anchors it as a fold like `Click::Fold`, because the `tasks`
+  section *is* the surface it would have opened. `relay::calllines::appendTasks` draws one row per
+  task, `taskGlyph(status)` then the text, in the tasks panel's inks — completed and cancelled
+  muted, one in progress in the accent, blocked in the error ink. `taskGlyph` is the one glyph
+  table in the program: `RequestLedgerModel::statusGlyph` calls it, so the fold and the panel it
+  opens cannot drift. The list is the call's stored detail, so a row from an earlier turn still
+  says what it said, and a pane restored from scrollback reaches it through the #EC58
+  fetch-by-anchor path. The fold's last row is `open the task list` over `relay://tasks/<pane>`
+  (`FoldOptions::openInPaneText`), which `openOutputTarget` routes to `openRequests()` with the
+  `tasks.fold` hint. A backend with no fold layer keeps the open-call anchor and gets the same
+  section as the call's detail in a preview pane.
 - **While a program owns the terminal** nothing can be rewritten, so only the finished line is
   printed, as plain text with no anchor.
 - Everything the pane decides first — the URI, the row and its cut, the rewrite-or-new-row state
   machine, the fold's rows — is in `src/CallLines.{h,cpp}` and tested headless
   (`tests/calllines_test.cpp`); `src/Pane.h` only writes the bytes.
 - Hints: `call.fold` ("Click a ▸ line to unfold it here · Ctrl+Shift+Return unfolds the nearest")
-  after a turn that printed tool lines, and `diff.hunks` ("n and p step through the hunks") when a
-  diff pane opens.
+  after a turn that printed tool lines, `diff.hunks` ("n and p step through the hunks") when a
+  diff pane opens, and `tasks.fold` (→ `agent.requests`) when the task fold's last row is clicked.
 
 **While a program owns the terminal** (vim, a build, a REPL), printing would corrupt its
 screen. Output is buffered, and also shown live in the **transcript panel** above the composer
@@ -1115,7 +1136,7 @@ the stored reply `tool_output {stored: true, …}` share a name; the GUI branche
 
 **The Activity pane** (card #QT8C; named "Activity" by #4X53, which left every identifier — the
 action `agent.internalsPane`, the pane type `internals`, the classes, the layout node — spelled
-"internals"; Alt+Shift+R, the palette's "Activity", the relay-mark button on the "Relaying – …"
+"internals"; Alt+Shift+R, the palette's "Activity", the relay-mark button on the "Relaying · …"
 line, or the reasoning fold's "open in pane"). One `ToolPane(Kind::Internals)` per
 terminal pane, inserted beside it like the turn and diff panes, hosting `relay::AgentInternalsView`
 (`src/AgentInternalsView.*`): a scrolling log of the pane's reasoning and tool calls, live and in
@@ -1144,7 +1165,7 @@ starts a fresh inline anchor for what follows. Closing the owner takes the pane 
 reprinted (the `destroyed` connection's context is the owner). The pane is saved in the layout as
 `{"internals": {cwd, owner}}` and restored beside the pane whose scrollback id it names, empty
 until the next event. **The button that opens it** (#4X53, owner: "add a circled purple relay
-icon next to relaying") is painted by `PaneBusyLine` itself at the left of the "Relaying – …"
+icon next to relaying") is painted by `PaneBusyLine` itself at the left of the "Relaying · …"
 line, before the word: `relay::chrome::paintCircledRelayMark` (`src/RelayMark.h` — the same
 drawing the header's live state glyph and the tab icons use, moved out of `PaneChrome.h` so
 `Pane.h` can reach it), in the ink `panestatus::stateText` gives the line, so it is violet for
@@ -1416,8 +1437,7 @@ in every pane of every window. Only an explicit project action attaches: opening
 the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
 the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
 worker **without ending its conversation**. An attached tab wears a **chip** with its project's name
-at the left of its label (`RelayWindow::syncTabProjectChip`, in the tab's left box beside the ⧉
-button); one click detaches, and "Detach this tab from <project>" stays in the palette as the
+at the left of its label (`RelayWindow::syncTabProjectChip`, in the tab's left box); one click detaches, and "Detach this tab from <project>" stays in the palette as the
 keyboard path — either closes nothing. An unattached tab shows nothing at all. In a tab with no
 project whose pane stands in no candidate (`~/Downloads`), Ctrl+Shift+S, `/card` and the palette's
 "Attach this tab to a project…" open the **project picker** instead (`src/ProjectPicker.{h,cpp}`,
@@ -1620,12 +1640,17 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands.
-- The pane's model box (`Pane::refreshPickers`) is one list of three groups: the stored presets, then
-  a **Main agent** / **Flash agent** row per pane role (`role:<id>`, the live one ticked or selected;
-  `Pane::chooseAgentRole`), then the ⚙ gear (`gear:modelOptions`). Only the first group is a model to
-  switch to — `selectModel` refuses the other two ids, so the box's `activated` handler must act on
-  them before calling it, and rebuild the chip afterwards because Qt has already moved the box to the
-  clicked row.
+- The pane's model box (`Pane::refreshPickers`) is one flat list, roles first (owner, 2026-09-19:
+  no separate Main / Flash / Local section — `model (main)`, `model (flash)`, and `model (local)`
+  when this machine serves one, `role:<id>`; `Pane::chooseAgentRole`), then the other stored
+  presets, then the guest rows (26.9) and the ⚙ gear (`gear:modelOptions`) behind separators.
+  There are no ticks: the collapsed box sits on the live row, which says it, and it hugs that
+  row's text — `CurrentTextComboBox` sizes the closed box to the current item and lets the open
+  list grow to its widest row instead of `AdjustToContents`' widest-row box. Only a preset row is
+  a model to switch to — `selectModel` refuses the `role:` / `guest:` / `gear:` ids, so the box's
+  `activated` handler must act on them before calling it, and rebuild the chip afterwards because
+  Qt has already moved the box to the clicked row. The pane_state menu publishes the same rows in
+  the same order (`Pane::remoteState`).
 - Difficulty-based routing between the Main and Flash agent is deliberately not implemented yet.
 
 ### Provider transport
@@ -2506,10 +2531,8 @@ on) turns that off, and then a command changes one tab only. Either way the firs
 the other tabs to what they were showing, so they do not follow. "Start each new tab on the next theme" (off by default)
 walks the theme list instead of inheriting the default. A tab's own theme is saved with the layout
 in the tab wrapper — `{"node", "theme"[, "project"]}`, only when it differs from the default
-(`windowstate::tabTheme()`) — and each tab wears it as a swatch on the tab bar: the theme's terminal
-ground over its accent, outlined in its own strong border, painted over the bar by
-`paintTabSwatches()` from `theme::specFor(id)` without activating anything. With "Each tab keeps its
-own theme" off, every choice is the application's and is stored, as before. What a tab has already
+(`windowstate::tabTheme()`). With "Each tab keeps its own theme" off, every choice is the
+application's and is stored, as before. What a tab has already
 printed in 24-bit colour keeps the colours of the theme it was printed under, which per-tab themes
 make rarer: a tab's scrollback now mostly lives under one theme.
 
@@ -2745,7 +2768,9 @@ of the platform and of the engine itself.
 
 ## 19. Sharing a pane with a phone
 
-The share chip sits beside the microphone in the composer strip, and the palette action is
+The share button sits in the pane's chrome row at the top right (owner, 2026-09-19: it no longer
+fit beside the model picker and the microphone in the composer strip; `PaneChrome::buildShare`
+owns it and repaints it through `Pane::onShareChipChanged`), and the palette action is
 "Share this pane with a phone" (`pane.share`). Both call `Pane::toggleShare`.
 
 The protocol, the cryptography and the phone's web client live in a Python sidecar,
@@ -2811,7 +2836,7 @@ kind `Sharing` whose `paneType` is `sharing`:
   whole and wrapped, because approving it is approving exactly that text. There is no "approve
   always" in v1, by the protocol's own argument (section 10.5).
 
-The pane opens from the share chip once a pane is shared, from the palette (`pane.sharing`), and by
+The pane opens from the share button once a pane is shared, from the palette (`pane.sharing`), and by
 itself when somebody knocks. **Opening it never takes the keyboard**: `RelayWindow::openSharingPane`
 puts the focused widget back, now and again after the layout has run, because the next keystroke
 would otherwise land on Admit. The bell carries the same news through `Pane::notifyFromWindow`,
