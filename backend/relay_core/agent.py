@@ -838,7 +838,12 @@ class Agent:
         max_tokens below the configurable minimum (256) is applied after validation, for tiny
         classification calls such as route_assist. ``role`` picks a model role (protocol 13); when
         no roles are configured, or the role follows the main agent, the main model is used."""
-        if self._injected_provider:
+        # A guest harness (protocol 29.3) serves the pane's turns and nothing else: a title, a
+        # summary or a route-assist call would each spend a guest turn. It says so with
+        # `serves_side_calls = False`, and a role of its own (summaries, chores…) serves the job
+        # instead; with no such role the harness provider answers the side call with nothing.
+        declines = self._injected_provider and not getattr(self.provider, "serves_side_calls", True)
+        if self._injected_provider and not declines:
             return self.provider
         make = lambda cfg: _provider_for(cfg, self.stall_timeout_s)   # noqa: E731 - side calls share the deadline
         resolved = self.roles.resolve(role) if role is not None and self.roles is not None else None
@@ -848,6 +853,8 @@ class Agent:
             config = resolved.config
             extra = copy.deepcopy(config.extra)
             limit = min(config.max_tokens, 4096) if cheap else config.max_tokens
+        elif declines:
+            return self.provider
         elif not cheap:
             return make(self.config)
         else:
@@ -1089,8 +1096,17 @@ class Agent:
         self.epoch += 1
 
     def _maybe_compact(self) -> None:
-        if self.context.over(self.messages, self.tools()):
-            self.compact("auto")
+        if not self.context.over(self.messages, self.tools()):
+            return
+        # On a guest harness (protocol 29.3) the guest keeps its own context; Relay's transcript is a
+        # record of it. With no summaries role of its own, an automatic compaction would ask the
+        # harness for a summary it never writes and fail the turn on an empty one — so it is not
+        # attempted, and the transcript simply grows.
+        if self._injected_provider and not getattr(self.provider, "serves_side_calls", True):
+            resolved = self.roles.resolve("summaries") if self.roles is not None else None
+            if resolved is None or resolved.is_main:
+                return
+        self.compact("auto")
 
     # ----- turns ---------------------------------------------------------------
     def stop(self):

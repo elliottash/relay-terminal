@@ -22,7 +22,7 @@ from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all 
 
 **Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
 `ctest --test-dir build` **29/29**, both clean. Neither is current: `python3 -m unittest discover
--s tests` **collects 2,845 cases in 93 modules** as of 2026-09-19 (how many pass is what the command
+-s tests` **collects 2,960 cases in 96 modules** as of 2026-09-19 (how many pass is what the command
 reports, and it has not been re-run here). `ctest` registers **56** tests, not 29
 (`grep -c add_test CMakeLists.txt engine/CMakeLists.txt`) — `guestbridge`, `projectinit`,
 `striplayout`, `pulsepaint`, `panestatus`, `boardworkspace`, `diffview` and `sharing` among
@@ -67,6 +67,9 @@ Backend tests by module:
 | `tests/test_guest.py` | 22 | Guest agent panes (protocol 26): detecting Claude Code and Codex, the `guest` block, the env injected at launch and the shim's own contract |
 | `tests/test_guest_bridge.py` | 117 | The Claude IDE bridge (protocol 26.5): the lock file, the JSON-RPC/tool layer, and the blocking openDiff — the last two frame by frame over a real WebSocket, with a hand-rolled client standing in for claude (no claude process is ever started) |
 | `tests/test_guest_codex.py` | 92 | Codex as a guest: the rollout tail, the `notify` hook and the retired settings writer kept as the launch's legacy cleanup (protocol 26.6, 26.9) |
+| `tests/test_guest_harness_claude.py` | 49 | Tier A: the `claude -p` stream-json harness adapter, replayed from recorded transcripts (protocol 29.2) |
+| `tests/test_guest_harness_codex.py` | 35 | Tier A: the `codex app-server` harness adapter, replayed from recorded transcripts (protocol 29.2) |
+| `tests/test_guest_harness_provider.py` | 31 | Tier A: the worker's `HarnessProvider`, guest presets, configure/set_model/resume and the event translation, against a scripted fake harness (protocol 29.3) |
 | `tests/test_guest_hook.py` | 38 | The Claude guest shim (GT7X, protocol 26.3/26.4) |
 | `tests/test_guest_install.py` | 21 | The hook and statusline entries (`relay_entries`) and the retired installer's remove path, kept as the launch's legacy cleanup (GT7X, protocol 26.4, 26.9) |
 | `tests/test_guest_launch.py` | 20 | Launch-time configuration for a guest picked in the model picker: the per-launch settings file, the claude/codex command lines, the bypass flags and the legacy cleanup (protocol 26.9) |
@@ -141,7 +144,7 @@ Backend tests by module:
 | `tests/test_web_meet_code.py` | 12 | Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG) |
 | `tests/test_web_theme.py` | 7 | app/pane-theme.css is generated from the desktop theme, and must not drift from it |
 | `tests/test_web_viewport.py` | 5 | The web client fits the part of the screen that is visible, on-screen keyboard or not |
-| **Total** | **2845** | 93 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
+| **Total** | **2960** | 96 modules, counted by `unittest`'s own collector; `./scripts/test.sh` is the live pass/fail |
 
 Qt tests (one binary per file, `tests/*_test.cpp`; the ctest name is the file stem without
 `_test`):

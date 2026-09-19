@@ -730,6 +730,15 @@ public:
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(source, pane, Qt::Horizontal, false);
         setActive(pane);
+        // Tier A (protocol 29.4): when the worker can run this guest's harness, the new pane
+        // resumes the session on its own agent instead — Relay's conversation, the guest's
+        // session, no TUI. The source pane is asked because the new one has no presets yet; its
+        // own worker answers the same way, and `resumeGuestPreset` waits for that answer.
+        if (source->guestHarnessUsable(guest)) {
+            const Pane::GuestResume resume = Pane::guestResumeFrom(extra);
+            pane->resumeGuestPreset(guest, resume.sessionId, resume.fork, directory, extra);
+            return;
+        }
         // The pane names itself from its foreground program once the guest starts (the guest
         // registry does the detecting), so nothing is imposed on it here.
         pane->launchGuest(guest, extra, directory);   // the pane's own launch path (26.9)

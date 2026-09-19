@@ -16,8 +16,9 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
-from . import (alias_import, aliases, attachments, conv_index, guest_sessions, instructions,
-               keystore, localmodels, logs, planning, suggestions, titles)
+from . import (alias_import, aliases, attachments, conv_index, guest_harness_provider,
+               guest_sessions, instructions, keystore, localmodels, logs, planning, suggestions,
+               titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -78,10 +79,15 @@ def provider_config(request: dict) -> ProviderConfig:
     posted to a foreign endpoint - which is an HTTP 401 and nothing more legible. The Switchboard did
     exactly that until 2026-09-18.
     """
+    named = request.get("preset")
+    if guest_harness_provider.is_guest_preset(named):
+        # A guest agent is a preset too (protocol 29.3): its "endpoint" is a process this worker
+        # starts, so there is no key, no URL to validate and no model until the guest says which
+        # one it is running.
+        return guest_harness_provider.config_for_preset(named, request)
     api_key = request.get("api_key", "")
     if not isinstance(api_key, str):
         raise ValueError("API key must be text.")
-    named = request.get("preset")
     preset = PRESETS.get(named) if isinstance(named, str) else None
     if preset is None and localmodels.is_local_id(named):
         # A model server on this machine (protocol 28): the registry supplies URL and model.
@@ -154,6 +160,9 @@ def configured_fields(agent) -> dict:
               "session_id": agent.session_id, "plans_dir": str(agent.plans_dir),
               "session_dir": str(agent.store.directory) if agent.store else None,
               **agent.options()}
+    # Protocol 29.3: a pane whose agent is a guest harness says which guest, and which session of
+    # the guest's own, so the GUI can label the pane and the sessions row can be resumed.
+    fields.update(guest_harness_provider.configured_fields(agent))
     if agent.instructions:
         fields["instructions_max_bytes"] = agent.instructions.cap
         fields["instructions_bytes"] = len(agent.instructions.section.encode("utf-8"))
@@ -247,11 +256,33 @@ class SessionCommands:
         window = request.get("context_window")
         window = validate_window(window) if window is not None else None
         preset_id = request.get("preset") if isinstance(request.get("preset"), str) else None
+        # Protocol 29.3: switching to a `guest:` preset starts the guest's harness *here*, for the
+        # same reason the key is looked up here — a guest that cannot start refuses the switch at
+        # the request and the pane keeps the model it has, rather than failing at the next step.
+        # Staying on the same guest and only naming another of its models keeps the harness (and
+        # with it the guest's own context); every other move to a guest starts a fresh one.
+        guest_id = guest_harness_provider.preset_guest_id(preset_id)
+        guest_provider = guest_harness_provider.switch_model(agent, guest_id, request)
+        restart_guest = guest_id is not None and guest_provider is None
+        if restart_guest:
+            guest_provider = guest_harness_provider.start_provider(
+                preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s)
+        if guest_provider is not None:
+            config = guest_provider.config
         preset = resolve_preset(preset_id, config.base_url, config.model)
         agent.on_model_applied = self.on_model_changed
 
         def apply_now():
-            agent.set_model(config, preset_id, window)
+            # Leaving a guest ends its process and hands provider-building back to the Agent; a
+            # guest replacing a guest is a restart, which is what 29.3 says a guest-to-guest
+            # switch is (the Relay conversation is kept, the guest's context is not).
+            if restart_guest or guest_id is None:
+                guest_harness_provider.detach(agent)
+            if guest_provider is not None:
+                agent.set_model(config, preset_id, window, provider=guest_provider)
+                guest_harness_provider.attach(agent, guest_provider)
+            else:
+                agent.set_model(config, preset_id, window)
             self.on_model_changed(agent)
 
         def decide(idle: bool) -> dict:
@@ -262,14 +293,21 @@ class SessionCommands:
                                               start_exclusive=lambda task: self.turns.start_exclusive_locked(
                                                   "set_model", task))
                 if outcome["applies"] == "refused":
+                    if restart_guest and guest_provider is not None:
+                        guest_provider.close()   # started for a switch that is not happening
                     self.emit({"event": "model_switch_refused", "id": request.get("id"), "at": "request",
                                "model": config.model, "current_model": agent.config.model,
                                "preset": agent.preset.id if agent.preset else None,
                                "context_window": agent.context.window, "effort": agent.effort,
                                "reason": outcome["reason"]})
                 else:
-                    self.emit({"event": "model_changed", "id": request.get("id"), "model": config.model,
-                               "preset": preset.id if preset else None, "effort": agent.effort, **outcome})
+                    changed = {"event": "model_changed", "id": request.get("id"), "model": config.model,
+                               "preset": preset.id if preset else preset_id if guest_provider else None,
+                               "effort": agent.effort, **outcome}
+                    if guest_provider is not None:
+                        changed["guest"] = guest_provider.guest_id
+                        changed["guest_session"] = guest_provider.session_id
+                    self.emit(changed)
                 return outcome
         self.turns.now_or_later(lambda: decide(True), lambda: decide(False))
         # Every outcome moves the context bar: the window now in force, or the one about to be.
@@ -291,6 +329,11 @@ class SessionCommands:
             raise ValueError("focus must be text of at most 2000 characters.")
 
         def task(agent):
+            # Protocol 29.3: on a guest pane, Compact means both context windows — the guest
+            # compacts its own, and Relay compacts the transcript it keeps.
+            provider = guest_harness_provider.agent_provider(agent)
+            if provider is not None:
+                provider.compact()
             agent.compact("manual", focus or None)
             agent.autosave()
         self.turns.run_exclusive("compact", task)
@@ -338,6 +381,13 @@ class SessionCommands:
         # Protocol v1 names the session "id"; "session_id" is also accepted.
         event = agent.resume(request.get("session_id", request.get("id")))
         self.emit(event)
+        # Protocol 29.3: the session file says which guest ran it and under which of the guest's own
+        # sessions; a pane already on that guest points its harness back at the same one.
+        if agent.store is not None:
+            try:
+                guest_harness_provider.resume_session(agent, agent.store.load(agent.session_id), self.emit)
+            except (OSError, ValueError):
+                pass
         agent.announce_requests()
         self.emit({"event": "mode_changed", "mode": agent.mode})
         self.emit(agent.context_event())

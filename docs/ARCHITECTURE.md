@@ -1785,7 +1785,9 @@ run three times or more — a suggestion only, logged in `worker.log`.
 ## 11a. Guest agents: Claude Code and Codex in a pane
 
 A **guest** is a CLI agent process (Claude Code, Codex) running in an ordinary terminal pane — not
-a Relay worker, not a BYOK preset. Relay's posture is the same as Warp's guest terminal agent
+a Relay worker, not a BYOK preset — *or*, since Tier A (protocol section 29, owner 2026-09-19), the
+same CLI driven headless as the pane's agent through its own harness, which is the one case where
+Relay does more than observe: it runs the guest's sanctioned headless mode and nothing else. Relay's posture is the same as Warp's guest terminal agent
 ("Relay does not try to turn Claude Code into a second worker backend; it observes, and it touches
 a guest only through the guest's own sanctioned surfaces", issue `GT7X`): no reverse-engineered
 internals, no keystroke automation, and any contact beyond observation is a step Relay offers and
@@ -1927,6 +1929,19 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   the shell is back at its prompt; a guest that is *working* is not interrupted, the switch is
   refused with a status line instead ("<Guest> is working — stop its turn first (Esc in the
   terminal), then switch"). Whether Esc should be sent instead is an open question for the owner.
+
+- **Tier A: the guest as the pane's agent** (§29, `guest_harness.py` + `guest_harness_claude.py`
+  + `guest_harness_codex.py` + `guest_harness_provider.py`): the owner un-deferred the headless
+  harnesses on 2026-09-19. A guest is a worker preset (`guest:<id>`, no key, no tier); configuring
+  it gives the ordinary `Agent` a `HarnessProvider` whose `complete()` runs one turn of
+  `claude -p --input-format stream-json --output-format stream-json` or of `codex app-server`
+  and forwards the guest's events in Relay's own vocabulary (`delta`, `tool_started`,
+  `tool_result` with a diff, `context`, `question`), so the transcript, the call lines, the chips
+  and the question card are Relay's, the pane's shell stays the user's terminal, and nothing is
+  typed into a TUI. The model box lists the worker's row when the harness is usable and falls
+  back to the Tier B launch otherwise; a hand-typed `claude` is still served the Tier B way.
+  Adapters are held to recorded transcripts replayed through a fake process; no test starts a
+  real guest.
 
 The pane's guest state rides the ordinary `program_state` (`guest_model`, `guest_context_pct`,
 `guest_busy`) so the title bar, tab labels and remote clients that are allowed to see process

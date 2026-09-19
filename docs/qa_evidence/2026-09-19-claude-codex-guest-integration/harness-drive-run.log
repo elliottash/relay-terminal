@@ -1,0 +1,11 @@
+[drive] isolated session at /tmp/claude-1000/relay-qa-harn-ainve35a (HOME stays /home/elliott)
+[drive] wrote implementer-harness-01-before.png
+[drive] wrote implementer-harness-02-picked.png
+[drive] 02-picked: found ['Claude Code']; missing nothing
+[drive] wrote implementer-harness-03-answered.png
+[drive] 03-answered: found ['Reply with the single word']; missing nothing
+[drive] answer seen on screen: True
+[drive] wrote implementer-harness-04-shell.png
+[drive] 04-shell: found ['relay-shell-still-mine']; missing nothing
+[drive] RESULT: all checks passed
+[drive] relay output saved to harness-run.log

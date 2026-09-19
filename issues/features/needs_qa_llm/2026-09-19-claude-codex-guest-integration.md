@@ -37,7 +37,8 @@ special translator from the relay prompt into the claude code input and back."
 - [ ] Live tail of the active pane's guest transcript (`guest_sessions.LiveTail` has no caller; a
       running session's row refreshes on the next reconcile instead) <!-- t:lt -->
 - [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:bt -->
-- [ ] Tier A headless harness adapters (codex app-server first, then claude stream-json). Deferred on 2026-09-19, **un-deferred the same day** (owner: "i think i want to undefer and start woking on it"): a phase of its own after the picker route lands; the first slice is `codex app-server` beside the TUI (`codex --remote`) for Codex diffs in Relay's diff pane <!-- t:x2 -->
+- [x] Tier A headless harness adapters: the contract (`guest_harness.py`), `codex app-server` and `claude -p` stream-json adapters with recorded fixtures, the worker's `HarnessProvider` and `guest:` presets, the picker routed to the preset when usable (protocol §29). Un-deferred by the owner on 2026-09-19 ("i wanted Tier A now … go ahead and unlock that now") <!-- t:x2 -->
+- [ ] Tier A follow-ups: streaming tool output (`tool_output` kind), a context-window size in `usage`, "always allow" / "deny and stop" answers for Codex approvals, Codex's `--remote` co-attach of its TUI to Relay's app-server (attaches; not built on) <!-- t:a3 -->
 - [x] Picker route: "Claude Code" / "Codex" rows in the pane's model box (`guest:<id>`, no tier, no key), `/model claude|codex`, launched by the pane in its own shell (§26.9) <!-- t:pk -->
 - [x] Launch-time configuration instead of installed files: `guest_launch.py` writes `<runtime>/guest/claude-settings.json` for `claude --settings`, `-c` overrides for codex, bypass flags on both, bridge variables on the command line only; flags verified against Claude Code 2.1.278 / Codex 0.155.1 <!-- t:c1 -->
 - [x] Retire the setup surface: Options › Guests rows and the `guest_install` / `guest_codex --enable` command lines gone; libraries kept for the legacy cleanup every launch runs <!-- t:rs -->
@@ -162,6 +163,9 @@ the PreToolUse question bar), claude-bridge (4 Xvfb shots of the openDiff banner
 (`composer-evidence.md`), sessions backend (`sessions-index-evidence.md` + real-data measurements: 77 claude
 sessions indexed in 1.19 s, warm reconcile 1 ms), and the picker route (`picker-README.md`: 6 Xvfb shots from
 `picker-drive.py` with a stand-in `claude`, and `launch-flags-README.md`: the real CLIs' flags exercised).
+Tier A (§29): `harness-claude-README.md` and `harness-codex-README.md` (the adapters against the real CLIs,
+recorded into `tests/fixtures/guest_harness_*`), and `harness-drive-README.md` (4 Xvfb shots from `harness-drive.py`:
+Claude Code picked from the box, one real turn answered in Relay's own transcript, the shell still the pane's).
 Implementer shots are prefixed `implementer-` and are not QA verdicts. Each track's drive script and run log sits
 beside its shots.
 
@@ -196,3 +200,10 @@ beside its shots.
       leave the files under `~/.claude` and `~/.codex` untouched; a running session's transcript updates live.
 - [ ] With a pane shared to a remote host, no guest event kind and no `guest_*` program-state field crosses the
       wire.
+- [ ] Tier A (§29): with `claude` on PATH the model box lists the worker's "Claude Code" row (no Tier B duplicate);
+      picking it (or `/model claude`) configures the worker on `guest:claude` with no TUI in the terminal; a prompt
+      runs one headless turn and Relay's transcript prints the answer and each tool call as a call line with its
+      diff; a terminal-mode line runs in the pane's own shell; picking a normal preset closes the harness and keeps
+      the conversation; a guest that cannot start leaves the pane on its previous model.
+- [ ] Tier A: the same for Codex (`codex app-server`), and a Codex file change arriving as a call line with the patch
+      as its diff; no approval is raised under the bypass posture.

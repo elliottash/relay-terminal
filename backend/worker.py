@@ -13,7 +13,7 @@ from pathlib import Path
 from relay_core import (__version__, board_protocol, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
-from relay_core import agents_defs
+from relay_core import agents_defs, guest_harness_provider
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS
@@ -140,6 +140,11 @@ def main():
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
                 config = session_protocol.provider_config(request)
+                # Tier A (protocol 29.3): a `guest:` preset makes the guest's own headless harness
+                # this pane's agent. `is_guest` here, the process started further down — after
+                # everything that can refuse this request, so a bad `roles` table or an unreadable
+                # skills directory never leaves a guest process behind with no pane to own it.
+                is_guest = guest_harness_provider.is_guest_preset(request.get("preset"))
                 catalog = KeybindingCatalog.from_request(request.get("keybindings"))
                 skill_index = skills.from_request(request.get("skills"), workspace)
                 # --- model roles (protocol 13) ---
@@ -152,14 +157,36 @@ def main():
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),
                                                     tiers=tier_table)
                 pane_role = resolver.resolve(agent_role)
-                if not pane_role.is_main:
+                # The guest starts here: every field of the request has been accepted, and a guest
+                # that cannot start is one `error` with the pane left on the model it had (29.3).
+                # `config` is filled in rather than replaced, so the resolver holds the same object
+                # and its summary names the model the guest reports.
+                guest_provider = (guest_harness_provider.start_provider(
+                    request.get("preset"), request, workspace, config=config) if is_guest else None)
+                if guest_provider is not None:
+                    # A guest pane's agent *is* the guest: no role may put another model's config
+                    # under the harness (the provider would stay the guest's and the pane would
+                    # report a model it is not running).
+                    agent_role = "main"
+                elif not pane_role.is_main:
                     config, options["preset_id"] = pane_role.config, pane_role.preset_id
                 else:
                     agent_role = "main"   # the role follows the main agent, or fell back to it
                 state["agent_role"] = agent_role
                 # --- end model roles ---
-                agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index,
-                              roles=resolver, **options)
+                # A configure replaces the pane's agent, so a guest harness the old one held has
+                # nobody left to close it (protocol 29.3). Idle by now: configure refuses mid-turn.
+                if turns.agent is not None:
+                    guest_harness_provider.detach(turns.agent)
+                try:
+                    agent = Agent(config, workspace, turns.agent_emit, provider=guest_provider,
+                                  keybindings=catalog, skills=skill_index, roles=resolver, **options)
+                except Exception:
+                    if guest_provider is not None:
+                        guest_provider.close()   # never leave a guest with no pane to own it
+                    raise
+                if guest_provider is not None:
+                    guest_harness_provider.attach(agent, guest_provider)
                 # --- subagents ---
                 agents_request = request.get("agents") or {}
                 if not isinstance(agents_request, dict):
@@ -233,7 +260,10 @@ def main():
                       # Model servers on this machine (protocol 28): no key to store, so
                       # has_stored_key stays false and `local` is what makes the row usable.
                       + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
-                         for e in localmodels.catalog().values()]})
+                         for e in localmodels.catalog().values()]
+                      # Guest agents on this machine (protocol 29.3): no key either, and `harness`
+                      # is what makes the row this pane's agent rather than a Tier B launch.
+                      + guest_harness_provider.preset_rows()})
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
             elif kind == "hosted_quota":
@@ -432,7 +462,10 @@ def main():
                 agent = turns.agent
                 if agent is None:
                     raise ValueError("Configure a provider and workspace first.")
-                agent.executor.questions.resolve(request)
+                # A guest's approval or question card is the same round trip (protocol 29.3), so
+                # the harness provider gets first refusal on the id before the agent's own tool.
+                if not guest_harness_provider.answer_question(agent.provider, request):
+                    agent.executor.questions.resolve(request)
             elif kind == "terminal_command_result":
                 # The pane's answer to a `terminal_command` (protocol 22).
                 agent = turns.agent
@@ -462,6 +495,9 @@ def main():
                   "agent_busy": turns.busy,
                   "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError, keystore.KeystoreError)) else f"Protocol error ({type(exc).__name__})."})
     logs.event(log, "worker_stop", pid=os.getpid())
+    # The guest is a process of this worker's (protocol 29.3): it goes when the worker goes.
+    if turns.agent is not None:
+        guest_harness_provider.detach(turns.agent)
     subagents.shutdown()
     observe.shutdown()
     turns.shutdown(timeout=1)

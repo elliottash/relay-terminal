@@ -746,8 +746,17 @@ public:
         // the roles modal.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
             || id.startsWith(QStringLiteral("vision:")) || id.startsWith(QStringLiteral("planning:"))) return;
-        // "guest:" is Claude Code or Codex (26.9): not a preset either, and its own path.
-        if (id.startsWith(QStringLiteral("guest:"))) { chooseGuest(id.mid(6)); return; }
+        // "guest:" is Claude Code or Codex. Two shapes (protocol 29.4): the worker's harness
+        // preset, which is an ordinary preset switch carrying a `guest` object, and — when the
+        // worker cannot run that guest headless — the Tier B launch of its TUI in this pane's
+        // shell (26.9), which is not a preset at all.
+        if (const QString guest = guestOfPreset(id); !guest.isEmpty()) {
+            if (!guestHarnessUsable(guest)) { chooseGuest(guest); return; }
+            // A TUI guest already here owns the prompt box: it is asked to leave first, and the
+            // pick is made again when it has (leaveGuest refuses while the guest is working).
+            if (!m_guest.isEmpty()) { leaveGuest([this, id] { selectModel(id); }); return; }
+            // …and on through the ordinary preset path below.
+        }
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
@@ -760,12 +769,17 @@ public:
         // Switch the provider, keeping the conversation. Allowed while a turn runs (issue 3ES1): the
         // worker lets the request in flight finish on the old model and sends the next one to this
         // model; `model_changed` says which, and `model_applied` marks the moment in the transcript.
-        send({{"type", "set_model"}, {"preset", id}, {"use_stored_key", true},
+        QJsonObject request{{"type", "set_model"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
-              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 0).toInt()}});
+              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 0).toInt()}};
+        // A guest preset (29.3): what the harness is started with — the permission mode, and a
+        // model, `resume` or `fork` when the pick carried one.
+        if (const QJsonObject guest = takeGuestRequest(id); !guest.isEmpty()) request.insert(QStringLiteral("guest"), guest);
+        send(request);
         rememberPreset(id);
+        rememberPresetBeforeGuest(id);
         m_currentPreset = id; changed();
     }
     // The Main row of the roles modal: run this pane on another model id from the same provider
@@ -775,6 +789,22 @@ public:
     // Empty: back to the provider's default model.
     void setMainModel(const QString &model) {
         const QJsonObject preset = presetById(m_currentPreset);
+        // On a guest preset (29.4) the model belongs to the guest: the harness is asked to switch
+        // (`set_model` with `guest.model`, which restarts it) and nothing is written to Relay's
+        // own provider settings — "sonnet" is not a default for the next pane's provider.
+        if (const QString guest = guestOfPreset(m_currentPreset); !guest.isEmpty()) {
+            const QString want = model.trimmed();
+            if (want.isEmpty() || want == m_model) return;
+            if (!m_configured) { status(QStringLiteral("%1 is not running yet.").arg(guestDisplayName(guest))); return; }
+            m_guestRequest = QJsonObject{{"model", want}};
+            QJsonObject request{{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
+                                {"base_url", preset.value(QStringLiteral("base_url")).toString()},
+                                {"model", QString()}};
+            request.insert(QStringLiteral("guest"), takeGuestRequest(m_currentPreset));
+            send(request);
+            changed();
+            return;
+        }
         const QString id = model.trimmed().isEmpty() ? preset.value(QStringLiteral("model")).toString()
                                                      : model.trimmed();
         if (id.isEmpty()) return;
@@ -5197,7 +5227,7 @@ public:
             m_keysDialog->send = [this](QJsonObject request) { send(request); };
             m_keysDialog->onKeysChanged = [this] { send({{"type", "presets"}}); };
         }
-        m_keysDialog->setPresets(m_presets);
+        m_keysDialog->setPresets(providerPresets());
         m_keysDialog->show(); m_keysDialog->raise(); m_keysDialog->activateWindow();
         if (m_workerReady) send({{"type", "presets"}});
     }
@@ -5227,7 +5257,7 @@ public:
                          QStringLiteral("raise / lower effort")));
             };
         }
-        m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
+        m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
         m_rolesDialog->setProvider(m_currentPreset);
         m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
         m_rolesDialog->show(); m_rolesDialog->raise(); m_rolesDialog->activateWindow();
@@ -5423,6 +5453,8 @@ private:
             if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
             // A role switch keeps the pane's main preset: only a set_model changes it.
             if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); discloseHosted(); }
+            // Onto or off a guest preset (29.4): which tool answers now, or none.
+            if (role.isEmpty()) noteGuestPreset(event);
             // Mid-turn (issue 3ES1) the chip moves now; the model still answering keeps its window as
             // m_ctxWindow until `model_applied`, and the bar shows the new one from the `context`
             // event's `next`, which follows this event.
@@ -6036,6 +6068,14 @@ public:
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
         }
+        // Tier A (29.4): when the worker can run this guest headless, the row is resumed *on the
+        // pane's own agent* — `configure` with `guest.resume`, in the session's directory — so the
+        // conversation, the call lines and the chips are Relay's from the first turn.
+        if (guestHarnessUsable(source)) {
+            const GuestResume resume = guestResumeFrom(extra);
+            resumeGuestPreset(source, resume.sessionId, resume.fork, cwd, extra);
+            return;
+        }
         // In this pane, in the session's own directory (both guests resolve an id against the
         // directory they start in, 26.7). A guest already here is asked to leave first.
         leaveGuest([this, source, extra, cwd] {
@@ -6523,12 +6563,19 @@ private:
         if (name == QStringLiteral("new") || name == QStringLiteral("clear")) newChat();
         else if (name == QStringLiteral("model")) {
             // Claude Code and Codex are models here too (26.9): `/model codex`, `/model claude`.
-            const QStringList guests = installedGuests();
+            // The rows offered are the presets — which now include the guests the worker can run
+            // as this pane's agent (29.4) — plus the guests only the Tier B launch answers for.
+            const QStringList guests = tierBGuests();
             if (!args.isEmpty()) {
-                for (const QString &id : guests) {
-                    if (id.compare(args, Qt::CaseInsensitive) == 0 || guestDisplayName(id).compare(args, Qt::CaseInsensitive) == 0) {
-                        if (!m_guest.isEmpty() && m_guest != id) leaveGuest([this, id] { chooseGuest(id); });
-                        else chooseGuest(id);
+                // `/model claude opus`: a model named with the guest, which only its harness can
+                // honour. Every installed guest is matched here, Tier A or Tier B, so the name
+                // always reaches pickGuest rather than a preset whose label happens to contain it.
+                const QString firstWord = args.section(QLatin1Char(' '), 0, 0);
+                const QString restOfArgs = args.section(QLatin1Char(' '), 1).trimmed();
+                for (const QString &id : installedGuests()) {
+                    const bool byName = guestDisplayName(id).compare(args, Qt::CaseInsensitive) == 0;
+                    if (byName || firstWord.compare(id, Qt::CaseInsensitive) == 0) {
+                        pickGuest(id, byName ? QString() : restOfArgs);
                         return;
                     }
                 }
@@ -7078,6 +7125,7 @@ private:
         inherit->setData(QStringLiteral("inherit"));
         menu.addSeparator();
         for (const auto &model : std::as_const(m_stored)) {
+            if (!guestOfPreset(model.first).isEmpty()) continue;   // a guest runs no subagent (29.3)
             QAction *action = menu.addAction(conciseModel(model.first, model.second));
             action->setData(model.first);
             action->setCheckable(true);
@@ -7999,6 +8047,7 @@ private:
             if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
+            noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on
             discloseHosted();   // Relay Free: where the prompts go, said once per installation
             runBoardTask();   // a card handed over by the Switchboard's Execute, if any (#XS6Q)
             // No "Agent ready · <model>" here: the composer's own chips carry the model and the
@@ -8020,16 +8069,28 @@ private:
                 // 13.8) needs none either, while the worker reports it `available`.
                 const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
                 if (hosted && !preset.value(QStringLiteral("available")).toBool()) hostedUnavailable = true;
+                // A guest (protocol 29.3) needs no key either: `harness` is the worker saying it
+                // can run this guest's headless harness here, which is what makes the row usable.
+                // A guest row without it is not a row of this box at all — the picker offers that
+                // guest the Tier B way (26.9) instead.
                 if (preset.value(QStringLiteral("has_stored_key")).toBool()
                     || preset.value(QStringLiteral("local")).toBool()
+                    || preset.value(QStringLiteral("harness")).toBool()
                     || (hosted && preset.value(QStringLiteral("available")).toBool()))
                     m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
                 // The allowance the worker last saw, so the chip has a figure before the first call.
                 if (hosted && preset.value(QStringLiteral("quota")).isObject()) setHostedQuota(preset.value(QStringLiteral("quota")).toObject());
             }
-            if (m_keysDialog) m_keysDialog->setPresets(m_presets);
-            if (m_rolesDialog) m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
+            if (m_keysDialog) m_keysDialog->setPresets(providerPresets());
+            if (m_rolesDialog) m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
             changed();
+            // A pane opened for a guest sessions row (29.4) could not know until now whether the
+            // guest can be its agent. It does now: the preset, or the Tier B launch.
+            if (!m_pendingGuestResume.guest.isEmpty()) {
+                const PendingGuestResume pending = m_pendingGuestResume;
+                m_pendingGuestResume = PendingGuestResume();
+                startGuestPreset(pending.guest, pending.extra, pending.cwd);
+            }
             if (m_stored.isEmpty()) {
                 status(hostedUnavailable
                            ? QStringLiteral("No stored provider keys, and Relay Free needs python3-cryptography. "
@@ -8059,11 +8120,20 @@ private:
                         });
                         return found == m_stored.cend() ? QString() : found->first;
                     };
-                    choice = firstWhere([](const QJsonObject &preset) {
-                        return !preset.value(QStringLiteral("local")).toBool() && !preset.value(QStringLiteral("hosted")).toBool();
+                    // A guest row is never picked for a pane that asked for nothing (29.4):
+                    // starting Claude Code because it happens to be installed is not a default.
+                    // It is reached only as the restored or saved choice above, or by hand.
+                    auto guestRow = [](const QJsonObject &preset) { return preset.value(QStringLiteral("harness")).toBool(); };
+                    choice = firstWhere([&](const QJsonObject &preset) {
+                        return !preset.value(QStringLiteral("local")).toBool() && !preset.value(QStringLiteral("hosted")).toBool()
+                               && !guestRow(preset);
                     });
                     if (choice.isEmpty()) choice = firstWhere([](const QJsonObject &preset) { return preset.value(QStringLiteral("hosted")).toBool(); });
-                    if (choice.isEmpty()) choice = m_stored.first().first;
+                    if (choice.isEmpty()) choice = firstWhere([&](const QJsonObject &preset) { return !guestRow(preset); });
+                }
+                if (choice.isEmpty()) {   // guests only: the pane has no provider of its own yet
+                    status(QStringLiteral("No stored provider keys. Open Options › Models › API keys… to add one or import from Warp."));
+                    return;
                 }
                 configurePreset(choice, false);
             }
@@ -8372,6 +8442,16 @@ private:
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
             if (!m_agentBusy) stopTurnClock();
+            // A guest that could not start (29.3): the pane stays on the model it had, rather than
+            // on a row whose harness never came up. `m_presetBeforeGuest` is set on the way in and
+            // cleared the moment the guest reports itself configured.
+            if (onGuestPreset() && !m_presetBeforeGuest.isEmpty()) {
+                m_currentPreset = m_presetBeforeGuest;
+                m_presetBeforeGuest.clear();
+                m_guestSession.clear();
+                m_guestRequest = QJsonObject();
+                changed();
+            }
             m_configuring = false;
             status(text);
             if (wasBusy && !m_agentBusy) {
@@ -9189,11 +9269,12 @@ private:
                                                     QStringLiteral("the Main and Flash agents")));
             return;
         }
-        // Claude Code or Codex (26.9): the guest is this pane's agent from here on.
+        // Claude Code or Codex: the guest is this pane's agent from here on — through its harness
+        // when the worker offers one (29.4), as a TUI in this pane's shell when it does not (26.9).
+        // Both rows carry the same `guest:<id>` data, and pickGuest decides which.
         if (data.startsWith(QStringLiteral("guest:"))) {
             const QString id = data.mid(6);
-            if (!m_guest.isEmpty() && m_guest != id) leaveGuest([this, id] { chooseGuest(id); });
-            else chooseGuest(id);
+            pickGuest(id);
             focusInput();
             hint(QStringLiteral("model.guest.mouse"),
                  QStringLiteral("Tip: /model %1 does this from the prompt box").arg(id));
@@ -9257,7 +9338,11 @@ private:
         // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
         // is the box's current item while that guest is in the pane's foreground (picked or typed
         // by hand) or was just picked and not yet detected.
-        QStringList guests = installedGuests();
+        // Tier A (29.4) takes a guest out of this group: when the worker offers it as a usable
+        // harness preset, that preset *is* the row — it sits with the models above, and a second
+        // row here would be the same tool offered twice. Only the guest actually running as a TUI
+        // in this pane keeps its row either way (tierBGuests).
+        QStringList guests = tierBGuests();
         const QString liveGuest = m_guest.isEmpty() ? m_guestWanted : m_guest;
         if (!liveGuest.isEmpty() && !guests.contains(liveGuest)) guests << liveGuest;   // run by a path
         if (!guests.isEmpty()) {
@@ -9294,6 +9379,12 @@ private:
             ? QStringLiteral("Plan mode: this turn runs on %1 (the planning role) and then goes back.").arg(m_planModel)
             : !liveGuest.isEmpty()
             ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestDisplayName(liveGuest))
+            : onGuestPreset()
+            // Tier A (29.4): the guest answers through its harness, so the conversation, the chips
+            // and the call lines are Relay's and the terminal below is still the user's own shell.
+            ? QStringLiteral("%1 is this pane's agent, through its own harness%2. The terminal stays yours.")
+                  .arg(guestDisplayName(guestOfPreset(m_currentPreset)),
+                       m_guestSession.isEmpty() ? QString() : QStringLiteral(" (session %1)").arg(m_guestSession.left(8)))
             : QString()));
     }
 
@@ -9319,6 +9410,158 @@ private:
                 if (!QStandardPaths::findExecutable(binary).isEmpty()) { found << QString::fromLatin1(spec.id); break; }
         clock.start();
         return found;
+    }
+
+    // ----- Tier A: the guest as this pane's own agent (protocol 29.4) -------------------------
+    //
+    // The worker reports one preset per guest it knows (29.3), `guest:<id>`, and `harness: true`
+    // when it can actually run that guest's headless harness here. Such a row is a model row like
+    // any other: picking it is a `configure`/`set_model` carrying a `guest` object, the worker puts
+    // the ordinary Agent on a HarnessProvider, and the transcript, the call lines, the context chip
+    // and the question cards are Relay's own. Nothing is typed into a TUI and the pane's shell
+    // stays the user's. A row the worker cannot run (`harness: false`, or a worker that reports no
+    // guest rows at all) keeps the Tier B launch of 26.9, which is also what a `claude` typed by
+    // hand gets. `guestHarnessUsable` is the one place that decides between the two.
+public:
+    // "guest:claude" → "claude"; anything else → empty.
+    static QString guestOfPreset(const QString &presetId) {
+        return presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6) : QString();
+    }
+    // Can this guest be the pane's agent through its harness, here and now? Only the worker knows:
+    // it owns the adapter and looks for the binary. No preset (no worker yet, an older worker, a
+    // guest it does not know) is a no, which leaves Tier B in charge exactly as before.
+    bool guestHarnessUsable(const QString &guest) const {
+        if (guest.isEmpty()) return false;
+        const QJsonObject preset = presetById(QStringLiteral("guest:") + guest);
+        return !preset.isEmpty() && preset.value(QStringLiteral("harness")).toBool();
+    }
+private:
+    bool onGuestPreset() const { return !guestOfPreset(m_currentPreset).isEmpty(); }
+
+    // The guest rows the *picker* still has to draw itself: a guest on PATH that the worker does
+    // not already offer as a usable preset. The one running in the pane keeps its row whatever the
+    // worker says — a TUI in the foreground is not a preset, and the box must show where the
+    // prompt box is going.
+    QStringList tierBGuests() const {
+        const QString live = m_guest.isEmpty() ? m_guestWanted : m_guest;
+        QStringList rows;
+        for (const QString &id : installedGuests())
+            if (id == live || !guestHarnessUsable(id)) rows << id;
+        return rows;
+    }
+
+    // "The user picked this guest": the model box, `/model claude`, the palette. One door, so the
+    // Tier A/Tier B decision is made once. `model` is a model named with the pick (`/model claude
+    // opus`), which only the harness can honour.
+    void pickGuest(const QString &guest, const QString &model = QString()) {
+        if (!guestHarnessUsable(guest)) {
+            if (!model.isEmpty())
+                status(QStringLiteral("%1 picks its own model when it runs in the terminal; ignoring “%2”.")
+                           .arg(guestDisplayName(guest), model));
+            if (!m_guest.isEmpty() && m_guest != guest) leaveGuest([this, guest] { chooseGuest(guest); });
+            else chooseGuest(guest);
+            return;
+        }
+        const QString id = QStringLiteral("guest:") + guest;
+        if (id == m_currentPreset && m_configured && m_guest.isEmpty()) {
+            if (model.isEmpty()) { status(QStringLiteral("Already on %1.").arg(guestDisplayName(guest))); refreshPickers(); }
+            else setMainModel(model);   // same guest, another model: the harness restarts on it
+            return;
+        }
+        m_guestRequest = QJsonObject();
+        if (!model.isEmpty()) m_guestRequest.insert(QStringLiteral("model"), model);
+        selectModel(id);
+    }
+
+    // The `guest` object of the request about to be sent, and the end of the one that was staged
+    // for it. Empty for every other preset — and staging is dropped there, so a pick that landed
+    // somewhere else cannot leak into the next guest request. The owner's rule (29.1) is the
+    // default: no per-action approvals, exactly as for Relay's own agent.
+    QJsonObject takeGuestRequest(const QString &presetId) {
+        QJsonObject staged = m_guestRequest;
+        m_guestRequest = QJsonObject();
+        if (guestOfPreset(presetId).isEmpty()) return QJsonObject();
+        if (!staged.contains(QStringLiteral("permissions")))
+            staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
+        return staged;
+    }
+
+    // A guest that cannot start is an `error` on the configure and the pane keeps the model it had
+    // (29.3). That model is remembered here, on the way onto the guest.
+    void rememberPresetBeforeGuest(const QString &id) {
+        if (guestOfPreset(id).isEmpty()) m_presetBeforeGuest.clear();
+        else if (!onGuestPreset()) m_presetBeforeGuest = m_currentPreset;
+    }
+
+    // `configured` / `model_changed` for a pane that is now on a guest: one line saying which tool
+    // answers and which of its sessions this is. `guest` and `guest_session` are the worker's
+    // (29.3); a worker that reports neither still gets the line from the preset the pane picked.
+    void noteGuestPreset(const QJsonObject &event) {
+        m_presetBeforeGuest.clear();
+        const QString guest = event.value(QStringLiteral("guest")).toString(guestOfPreset(m_currentPreset));
+        if (guest.isEmpty()) { m_guestSession.clear(); return; }
+        m_guestSession = event.value(QStringLiteral("guest_session")).toString();
+        status(m_guestSession.isEmpty()
+                   ? QStringLiteral("%1 is this pane's agent.").arg(guestDisplayName(guest))
+                   : QStringLiteral("%1 is this pane's agent (session %2).")
+                         .arg(guestDisplayName(guest), m_guestSession.left(8)));
+    }
+
+public:
+    // A guest's own resume argv (26.7) read back: the sessions row carries what the *tool* would be
+    // launched with, and Tier A needs the two values inside it. claude continues with `-r <id>` and
+    // forks with `--fork-session`; codex uses the subcommands `resume <id>` and `fork <id>`.
+    struct GuestResume { QString sessionId; bool fork = false; };
+    static GuestResume guestResumeFrom(const QStringList &extra) {
+        GuestResume out;
+        for (int i = 0; i < extra.size(); ++i) {
+            const QString word = extra.at(i);
+            const QString next = i + 1 < extra.size() ? extra.at(i + 1) : QString();
+            if (word == QStringLiteral("--fork-session")) out.fork = true;
+            else if (word == QStringLiteral("fork")) { out.fork = true; if (!next.startsWith(QLatin1Char('-'))) out.sessionId = next; }
+            else if (word == QStringLiteral("resume") || word == QStringLiteral("-r") || word == QStringLiteral("--resume")) {
+                if (!next.isEmpty() && !next.startsWith(QLatin1Char('-'))) out.sessionId = next;
+            } else if (word.startsWith(QStringLiteral("--resume="))) {
+                out.sessionId = word.mid(QStringLiteral("--resume=").size());
+            }
+        }
+        return out;
+    }
+
+    // Resume a guest session on this pane's agent (29.4): a `configure` on the guest preset with
+    // `guest.resume`, in the session's own directory — both guests resolve an id against the
+    // directory they start in, and the harness starts in the workspace of the configure. Public:
+    // RelayWindow::openGuestPane calls it on the pane it has just created for the row, which may
+    // not have the worker's presets yet; the choice then waits for them, as a restored pane's does.
+    // `extra` is the row's own argv, kept only as the Tier B fallback for that case.
+    void resumeGuestPreset(const QString &guest, const QString &sessionId, bool fork,
+                           const QString &cwd = QString(), const QStringList &extra = QStringList()) {
+        if (!cwd.isEmpty() && QFileInfo(cwd).isDir()) {
+            m_workspace = cwd;
+            // The pane's shell follows the agent into the session's directory, as the Tier B
+            // resume does with its `cd &&` — one directory per pane, whatever is answering.
+            if (QDir::cleanPath(cwd) != QDir::cleanPath(m_cwd))
+                submitTerminal(QStringLiteral("cd ") + relay::conversations::shellWord(cwd), false);
+        }
+        m_guestRequest = QJsonObject();
+        if (!sessionId.isEmpty()) m_guestRequest.insert(QStringLiteral("resume"), sessionId);
+        if (fork) m_guestRequest.insert(QStringLiteral("fork"), true);
+        if (m_presets.isEmpty()) { m_pendingGuestResume = {guest, extra, cwd}; return; }
+        startGuestPreset(guest, extra, cwd);
+    }
+private:
+    // The staged resume, once the worker's presets are in (or straight away when they already are).
+    void startGuestPreset(const QString &guest, const QStringList &extra, const QString &cwd) {
+        if (!guestHarnessUsable(guest)) {   // the worker cannot run it after all: Tier B, as before
+            m_guestRequest = QJsonObject();
+            launchGuest(guest, extra, cwd);
+            return;
+        }
+        leaveGuest([this, guest] {
+            if (m_agentBusy) stopAgent();   // a configure ends the conversation; the turn goes first
+            configurePreset(QStringLiteral("guest:") + guest, false);
+            status(QStringLiteral("Resuming the %1 session on this pane's agent.").arg(guestDisplayName(guest)));
+        });
     }
 
     // The picker's row: this guest, here, now.
@@ -9448,6 +9691,9 @@ private:
             // (card #24XJ): no key stands behind it and it answers from this machine.
             const QString mark = preset.value(QStringLiteral("local")).toBool()
                                      ? QStringLiteral(" · local") : QString();
+            // A guest (29.4) reads as the tool — "Claude Code", not the model id it happens to be
+            // running: the model is the guest's own and shows on the chip once it reports one.
+            if (preset.value(QStringLiteral("group")).toString() == QStringLiteral("guest")) return label;
             // Relay Free's model ids are the gateway's roles (relay-main…), which name nothing a
             // person recognises: the row reads as the service.
             if (preset.value(QStringLiteral("hosted")).toBool()) return label;
@@ -10194,6 +10440,17 @@ private:
         return {};
     }
 
+    // The presets that are *providers*: everything the worker reported except the guests (29.3).
+    // A guest holds no key, answers to no tier and cannot run a subagent, so it has no place in
+    // the keys dialog, the roles tables or a subagent's model menu — only in the model box, where
+    // it is the pane's own agent.
+    QJsonArray providerPresets() const {
+        QJsonArray rows;
+        for (const auto &item : m_presets)
+            if (item.toObject().value(QStringLiteral("group")).toString() != QStringLiteral("guest")) rows.append(item);
+        return rows;
+    }
+
     // Configure a built-in preset using its key from the keyring. The key never enters this process.
     void configurePreset(const QString &id, bool announce) {
         const auto preset = presetById(id);
@@ -10205,13 +10462,18 @@ private:
         settings.setValue("provider/base", preset.value(QStringLiteral("base_url")).toString());
         settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
+        rememberPresetBeforeGuest(id);
         m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
         if (announce) status(QStringLiteral("Switching model. This starts a new conversation."));
-        send(withSessionFields(QJsonObject{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
+        QJsonObject request{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
-              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}}));
+              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}};
+        // A guest preset (29.3): the harness is started with this — `permissions`, and `model`,
+        // `resume` or `fork` when the pick carried them. The harness runs in `workspace`.
+        if (const QJsonObject guest = takeGuestRequest(id); !guest.isEmpty()) request.insert(QStringLiteral("guest"), guest);
+        send(withSessionFields(request));
         updatePaths();
     }
 
@@ -13538,6 +13800,12 @@ private:
     QPushButton *m_guestAllow = nullptr;   // focused while a question is up; Y/Enter presses it
     QPushButton *m_guestDeny = nullptr;
     QLabel *m_guestChip = nullptr;     // the guest's model/context chip in the prompt-box strip
+    // Tier A (29.4): the guest as this pane's agent, through the worker's harness preset.
+    QJsonObject m_guestRequest;        // the `guest` object staged for the next configure/set_model
+    QString m_presetBeforeGuest;       // the model to go back to if the guest cannot start (29.3)
+    QString m_guestSession;            // the guest's own session id, as `configured` reported it
+    struct PendingGuestResume { QString guest; QStringList extra; QString cwd; };
+    PendingGuestResume m_pendingGuestResume;   // a sessions row waiting for the worker's presets
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it
     QFrame *m_programBar = nullptr;    // the floating banner over the terminal

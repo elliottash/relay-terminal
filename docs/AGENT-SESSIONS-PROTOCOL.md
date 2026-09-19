@@ -4132,3 +4132,175 @@ stopped — Relay never starts or stops one.
   `group: "local"`, `has_stored_key: false`, `key_source: "local"` and `efforts: []` (an
   OpenAI-compatible server has no effort knob Relay can rely on). Built-in rows carry
   `local: false`.
+
+## 29. Tier A: the guest as the pane's agent, through its headless harness (v3.6, 2026-09-19)
+
+Owner, 2026-09-19, un-deferring task t:x2 of GT7X: "i wanted Tier A now … go ahead and unlock that
+now." Section 26 runs Claude Code or Codex as a **TUI in the pane** and works around it: it types
+into the TUI, reads hooks, a statusline and rollout files, and gets diffs through the IDE bridge.
+This section runs the guest's own **headless harness** — `claude -p --input-format stream-json
+--output-format stream-json` and `codex app-server` — and makes the guest the pane's agent the way
+a provider is: the prompt goes through the ordinary `ask`, the guest's tool calls print as Relay's
+own call lines (section 23), its usage feeds the context chip, its questions are Relay's question
+cards (section 27), and the pane's shell stays the user's terminal. Nothing is typed into a TUI and
+nothing is scraped. Section 26 stays as built: a `claude` or `codex` the user types at the prompt
+is still detected and served the Tier B way, and the picker row falls back to the Tier B launch
+(26.9) when the harness is not available for that guest.
+
+Backend: `backend/relay_core/guest_harness.py` (the contract), `guest_harness_claude.py`,
+`guest_harness_codex.py` (the adapters), `guest_harness_provider.py` (the worker side). Tests
+`tests/test_guest_harness*.py` replay recorded transcripts through a fake process; **no test starts
+a real guest** — a real turn spends the owner's subscription.
+
+### 29.1 The contract (`guest_harness.py`)
+
+One `Harness` per pane: `start(cwd, model?, resume?, fork?, permissions)` → `{session_id, model}`;
+`send(prompt, attachments, emit, cancel)` blocks for one turn and returns `TurnResult{text,
+stop_reason: end|interrupted|error, usage}`; `interrupt()`, `set_model(model)`, `compact()`,
+`answer(request_id, decision)` and `close()` may be called from any thread while `send()` blocks.
+`permissions` is `bypass` (the default and the owner's rule: no per-action approvals, as for Relay's
+own agent), `ask` (every approval the guest raises becomes a question card) or `deny`.
+
+What a harness reports while a turn runs is one flat vocabulary, and the provider maps each kind
+onto exactly one Relay event, so an adapter never learns Relay's names and Relay never learns the
+guest's:
+
+| harness event | data | Relay event |
+|---|---|---|
+| `started` | `{session_id, model}` | (`configured` / `model_changed`) |
+| `delta` | `{text}` | `delta` |
+| `thinking` | `{text}` | `thinking_delta` |
+| `tool_started` | `{call_id, tool, input, label?}` | `tool_started` |
+| `tool_result` | `{call_id, tool, output, ok, diff?, ms?}` | `tool_result` (with `diff`, section 23) |
+| `approval` | `{id, kind: command\|patch\|tool\|other, detail}` | `question` (Allow / Deny) |
+| `question` | `{id, questions: [...]}` | `question` (section 27) |
+| `usage` | `{input_tokens, output_tokens, context_pct?, cost_usd?, model?}` | `context` |
+| `notice` | `{text}` | `status` |
+| `done` | `{text, stop_reason}` | (the turn's answer) |
+| `error` | `{text, code?}` | `error` |
+
+`tool` is the guest's tool in Relay's vocabulary (`guest_harness.TOOL_NAMES`: `run_command`,
+`read_file`, `write_file`, `edit_file`, `list_directory`, `search`, `web`, `agent`, `other`), mapped
+by `map_tool_name`, with the guest's own name kept in `input["_guest_tool"]`. `diff` is a unified
+diff of the edit the guest made, when the harness can produce one; Relay prints it under the call
+line exactly as for its own edits.
+
+### 29.2 The adapters
+
+**Claude** (`guest_harness_claude.ClaudeHarness`): one long-lived `claude -p --input-format
+stream-json --output-format stream-json --verbose --include-partial-messages` in the pane's
+directory, `--session-id <uuid4>` for a new session or `--resume <id>` (`--fork-session` to fork),
+`--permission-mode bypassPermissions --dangerously-skip-permissions` for `bypass`, the CLI's
+permission prompts routed to the host for `ask` (answered with `control_response`), `--model` when
+the pane asks for one. Each turn is one `user` message on stdin and everything up to that turn's
+`result` on stdout; `system`/`init` gives the session id and model; `stream_event` deltas are text
+and thinking; `assistant` `tool_use` blocks are `tool_started`, `user` `tool_result` blocks are
+`tool_result`; `result` carries the usage. The process stays alive between turns. The adapter strips
+`CLAUDE_CODE_*` / `CLAUDECODE` variables from the child's environment: Relay may itself be running
+inside a Claude Code session, whose child marker turns transcript saving off.
+
+**Codex** (`guest_harness_codex.CodexHarness`): one `codex app-server` over stdio (JSON-RPC 2.0,
+newline-delimited): `initialize` (client "relay"), `thread/start` in the pane's directory — approval
+policy `never` and sandbox `danger-full-access` for `bypass`, `on-request` for `ask` — or
+`thread/resume` / `thread/fork`; `turn/start` per prompt; `turn/interrupt`; `thread/compact/start`;
+`model/list` and the thread's settings for `set_model`. Notifications map as the table says: agent
+message deltas → `delta`, reasoning deltas → `thinking`, `item/started` of a command execution or
+file change → `tool_started`, `item/completed` → `tool_result` (with the patch as `diff`),
+`turn/completed` → `usage`; the server's `item/*/requestApproval` and `item/tool/requestUserInput`
+requests are `approval` and `question` events answered through `answer()`. The thread id is the
+session id. The protocol is machine-readable from the installed binary (`codex app-server
+generate-json-schema`); the adapter's README under the evidence directory records the version and
+the exact flow.
+
+Both adapters raise `HarnessNotAvailable` when the binary is not on PATH, `HarnessError` when the
+process dies or answers nonsense (with the last stderr lines), skip non-JSON lines and unknown
+message kinds, and record the flags they use against the versions they were verified with.
+
+### 29.3 The worker side (`guest_harness_provider.py`)
+
+**A guest is a preset.** The worker's `presets` answer (13.7) carries one row per guest the
+registry knows, `{id: "guest:<id>", label: "<display name>", guest: "<id>", harness: <bool>,
+installed: <bool>, binary, version, group: "guest", has_stored_key: false, key_source: "guest",
+model: "", base_url: "harness://<id>", local: false, hosted: false, efforts: []}`. `harness` is
+true when the adapter exists and the binary is installed; a row with `harness: false` is what the
+GUI falls back to Tier B for (29.4).
+
+**Configuring one.** `configure {preset: "guest:claude", guest: {model?, resume?, fork?,
+permissions?}}` (and `set_model {preset: "guest:…", guest: {…}}` from any other preset) builds a
+`HarnessProvider` in place of the chat provider: it satisfies the `ChatProvider` surface the Agent
+uses — `complete(messages, tools, emit, cancel)`, `config`, `cancel()` — so the ordinary `Agent`,
+its transcript, its request ledger, titles, summaries and the sessions index are unchanged. On
+`complete` the provider takes the last user message (its text and its images), runs one harness
+turn, forwards each harness event as the Relay event in the table, and returns the guest's final
+text as the assistant message with the usage the guest reported. The Agent's own tools are not
+offered to the guest (it has its own); Relay's `run_command`/file tools never run in a guest turn.
+`configured` gains `guest: "<id>"` and `guest_session: "<the guest's session id>"`; `model` is the
+model the guest reports. `cancel` → `interrupt()`. `compact` → `harness.compact()` and Relay's own
+compaction of the transcript. `set_model` to another `guest:` preset restarts the harness (the
+Relay conversation is kept; the guest's context is not, and `model_changed` says so); `set_model`
+back to a normal preset ends the harness and the conversation continues on the provider with the
+transcript Relay kept. `session_data` records `guest` and `guest_session`, so a Relay `resume` of a
+harness session starts the harness with `resume` and the same id; a guest session row (26.7) is
+resumed with `configure {preset: "guest:<id>", guest: {resume: "<id>"}}`.
+
+**What the transcript holds.** Relay's messages: the user's prompt, the guest's final text, and
+one record per tool call with the label and the diff, exactly as for Relay's own turns; the guest's
+inner reasoning and its own system prompt are not copied. The guest's own transcript stays the
+guest's (`~/.claude/projects`, `~/.codex/sessions`) and is what the sessions index reads.
+
+**Failures.** A guest that cannot start is `error` on the `configure` (the GUI keeps the pane on
+its previous model); a guest that dies mid-turn ends the turn with `error` and the next `ask`
+restarts the harness with `resume` when it has a session id. Nothing is retried on its own.
+
+**As built (2026-09-19), where the code differs from the paragraphs above:**
+
+- A guest `ProviderConfig` (`harness://<id>`, no model, no key) is not `validate()`d — the scheme
+  and the key rule are for HTTP providers; `guest_options()` validates the `guest` block instead.
+- A harness's `error` event is not forwarded as its own Relay `error`: both adapters emit it and
+  then end the turn, so the text is held and becomes the turn's single `error`, as for every
+  other provider.
+- The provider emits one `usage` event and the Agent computes `context` from it as for any
+  provider; the guest's own `context_pct` travels as `usage.guest_context_pct` and does not drive
+  the context bar, which measures Relay's transcript against Relay's window.
+- **Side calls never reach the guest.** `HarnessProvider.serves_side_calls = False`;
+  `Agent.side_provider` then uses a role of its own (summaries, chores, route_assist…) when one is
+  configured and otherwise gets an empty answer, so a guest pane has no model-written title or
+  summary unless a role serves it; `Agent._maybe_compact` skips automatic compaction on a guest
+  pane with no summaries role — the guest keeps its own context, Relay's transcript is a record.
+- `session_data` carries `guest` and `guest_session` (wrapped onto the Agent by `attach()`);
+  `resume` restarts the harness on that session, `load_state` does not.
+- A change of model within the same guest keeps the harness (`set_model` on it, the guest's
+  context kept); a `resume` or `fork` in the `guest` block always restarts it, and `set_model`
+  to another preset closes it. `model_changed` carries `guest` / `guest_session` like `configured`.
+- The presets row's `version` is always empty: `<binary> --version` takes seconds and `presets`
+  is answered on the protocol thread; installation is `shutil.which`, cached per process.
+- A guest may only name its session on the first turn: `codex app-server` returns the thread id
+  from `thread/start`, but `claude -p` prints nothing before the first user message, so
+  `ClaudeHarness.start()` returns the id it chose (`--session-id`), reports the model from the
+  first `system`/`init`, and a forked claude session has no id until then. Claude's `context_pct`
+  is derived from the `result`'s `modelUsage` window, since the statusline's percentage is not on
+  the stream; an interrupted claude turn is `is_error: true` with a `terminal_reason`, which the
+  adapter reads as `interrupted`, not as a failure.
+- A guest pane's `agent_role` is forced to `main`; a guest's approvals and questions go through
+  their own round trip (`question` / `question_answer` with the raw per-question answer lists),
+  not the Agent's `ask_user` machinery, and an unanswered or stopped approval is a deny.
+
+### 29.4 The GUI side
+
+The model box's guest rows (26.9) are the worker's `guest:` presets when the worker reports them:
+picking one is `configurePreset("guest:<id>")` like any preset — the conversation, the chips and
+the call lines are Relay's — and the Tier B `launchGuest` is the fallback for a row whose preset
+says `harness: false`, and the path for a `claude`/`codex` the user types by hand. While the pane
+is on a guest preset: the model chip shows the guest's model; the context chip reads `context`; a
+`question` draws the section 27 card (Allow/Deny for an approval); a `tool_result` with a `diff`
+prints it inline or opens the diff pane past the inline limit, as for Relay's own edits; the prompt
+box's terminal/agent routing is the ordinary one and a terminal line runs in the pane's own shell,
+because there is no TUI to pipe it into. A guest sessions row resumes through the preset with
+`guest.resume`; Shift+Enter opens the new pane on that preset.
+
+### 29.5 Tests and evidence
+
+Recorded transcripts (redacted) under `tests/fixtures/guest_harness_{claude,codex}/`, replayed
+through a fake process; a `FakeHarness` for the provider and worker tests; the evidence directory's
+`harness-claude-README.md` and `harness-codex-README.md` say what was run against the real CLIs,
+how many turns it cost, and what did not work.

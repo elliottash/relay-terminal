@@ -90,7 +90,7 @@ def make_isolation() -> dict:
     stand_in.chmod(0o755)
     (root / "config" / "RelayTerminal").mkdir(parents=True, exist_ok=True)
     (root / "config" / "RelayTerminal" / "relay.conf").write_text(
-        "[instructions]\nonboarded=true\n", encoding="utf-8")
+        "[instructions]\nonboarded=true\n[isolation]\nenabled=false\n", encoding="utf-8")
     environment = dict(os.environ)
     # The stand-in must be the only `claude` and `codex` the pane's shell can find: the real ones
     # would cost a session. Only directories without either go on PATH, plus the stand-in's.
