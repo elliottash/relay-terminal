@@ -128,6 +128,7 @@ private slots:
     void upsertAndRemoveKeepTheBoardInStep();
     void statusTitlesAreHumanReadable();
     void everyStatusHasAMark();
+    void everySectionSaysWhatItIsFor();
     void theRowListIsHeadersThenCards();
     void badgesSayWhatTheCardCarries();
     void aRowDropsItsLeastImportantBadgesFirst();
@@ -400,6 +401,9 @@ void BoardModelTests::upsertAndRemoveKeepTheBoardInStep()
 void BoardModelTests::statusTitlesAreHumanReadable()
 {
     QCOMPARE(relay::board::statusTitle(QStringLiteral("in-progress")), QStringLiteral("In progress"));
+    // Not "Ready": on its own it was read as "ready to ship" (owner, 2026-09-19). The id is
+    // still `ready`, so nothing on disk moved.
+    QCOMPARE(relay::board::statusTitle(QStringLiteral("ready")), QStringLiteral("Ready to start"));
     QCOMPARE(relay::board::statusTitle(QStringLiteral("needs-qa-llm")), QStringLiteral("Needs QA (LLM)"));
     QCOMPARE(relay::board::statusTitle(QStringLiteral("brand-new")), QStringLiteral("Brand new"));
     QCOMPARE(relay::board::tabTitle(QStringLiteral("planning")), QStringLiteral("Plans"));
@@ -421,6 +425,32 @@ void BoardModelTests::everyStatusHasAMark()
     QCOMPARE(statusGlyph(QStringLiteral("invented")), QStringLiteral("·"));
     QCOMPARE(statusGlyph(QStringLiteral("done")), QStringLiteral("✓"));
     QCOMPARE(statusGlyph(QStringLiteral("dropped")), QStringLiteral("✗"));
+}
+
+void BoardModelTests::everySectionSaysWhatItIsFor()
+{
+    using relay::board::sectionMeaning;
+    // The question this answers, asked of the board itself (owner, 2026-09-19: "what does ready
+    // mean? done or inbox?"): every section the pane can draw explains itself, so no header is
+    // a word you have to guess at. A section with no meaning would be a silent hole in the
+    // tooltip, which is exactly the state that prompted the question.
+    Model model;
+    model.setConfig(config());
+    model.reset(rows({row("K7Q2", "needs-review", "features"), row("M3XJ", "deferred", "bugs"),
+                      row("P9AB", "draft", "planning"), row("R4CD", "active", "memory")}));
+    const QStringList drawn = sectionIds(model);
+    QVERIFY(drawn.contains(QStringLiteral("ready")));
+    QVERIFY(drawn.contains(QStringLiteral("verified")));
+    for (const QString &id : drawn)
+        QVERIFY2(!sectionMeaning(id).isEmpty(), qPrintable(id));
+    // The meaning is a clause, not a sentence: it goes on one tooltip line under the header.
+    QCOMPARE(sectionMeaning(QStringLiteral("ready")),
+             QStringLiteral("agreed and not started — anyone may pick it up"));
+    QVERIFY(!sectionMeaning(QStringLiteral("inbox")).isEmpty());
+    for (const QString &id : drawn)
+        QVERIFY2(!sectionMeaning(id).endsWith(QLatin1Char('.')), qPrintable(id));
+    // A column a board invented gets no invented explanation.
+    QVERIFY(sectionMeaning(QStringLiteral("triage-later")).isEmpty());
 }
 
 void BoardModelTests::theRowListIsHeadersThenCards()

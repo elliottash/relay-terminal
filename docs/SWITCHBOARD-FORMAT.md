@@ -111,7 +111,12 @@ Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `pr
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
-- `ready` is what the old tracker called `open`; `dropped` cards live in `done/` beside `done` ones.
+- `ready` is what the old tracker called `open`: **agreed and not started**. The pane labels the
+  section **Ready to start**, because "Ready" on its own was read as "ready to ship" (owner,
+  2026-09-19); the status id is unchanged, so no card file or folder moved. Every section's
+  one-clause meaning lives in `board::sectionMeaning()` (`src/BoardModel.cpp`) and is what the
+  header tooltips and the hide checkboxes show.
+- `dropped` cards live in `done/` beside `done` ones.
 - `implemented_by` and `verified_by` are **signatures, not free text**, and Relay writes them: the
   worker stamps `provider/model` from its own preset and model when a card enters `in-progress` or a
   QA lane, and again when it leaves a QA lane to `done` (card `#T71W`, protocol section 19.15). The

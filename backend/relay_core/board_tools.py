@@ -2185,7 +2185,10 @@ def _rewrite_entry(what: str, old: str, new: str) -> str:
 
 
 def _column_label(status: str) -> str:
-    return {"inbox": "Inbox", "discussing": "Discussing", "ready": "Ready",
+    #: `ready` reads as "ready to ship" on its own (owner, 2026-09-19), so the label the pane
+    #: shows is "Ready to start" and a thread line says the same words as the section header.
+    #: The status id is unchanged, here and on disk.
+    return {"inbox": "Inbox", "discussing": "Discussing", "ready": "Ready to start",
             "in-progress": "In progress", "needs-qa-llm": "Needs QA (LLM)",
             "needs-qa-human": "Needs QA (human)", "needs-review": "Needs review",
             "needs-labels": "Needs labels", "needs-ab": "Needs A/B", "deferred": "Deferred",

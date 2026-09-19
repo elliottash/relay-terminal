@@ -83,7 +83,9 @@ QString statusTitle(const QString &status)
     static const QMap<QString, QString> names{
         {QStringLiteral("inbox"), QStringLiteral("Inbox")},
         {QStringLiteral("discussing"), QStringLiteral("Discussing")},
-        {QStringLiteral("ready"), QStringLiteral("Ready")},
+        // "Ready" alone was read as "ready to ship" (owner, 2026-09-19: "what does ready mean?
+        // done or inbox?"). The status id stays `ready`, so no card file and no folder moves.
+        {QStringLiteral("ready"), QStringLiteral("Ready to start")},
         {QStringLiteral("in-progress"), QStringLiteral("In progress")},
         {QStringLiteral("needs-review"), QStringLiteral("Needs review")},
         {QStringLiteral("needs-labels"), QStringLiteral("Needs labels")},
@@ -108,6 +110,37 @@ QString statusTitle(const QString &status)
     if (!text.isEmpty())
         text[0] = text.at(0).toUpper();
     return text;
+}
+
+// What a section means, in one clause, from the column table in docs/SWITCHBOARD-DESIGN.md
+// section 3. The pane shows it wherever a section is named without its cards — the header's
+// tooltip and the hide checkboxes — because a header read all day is the one place a person
+// asks "what is this lane for?" and the list itself cannot answer.
+QString sectionMeaning(const QString &id)
+{
+    static const QMap<QString, QString> meanings{
+        {QStringLiteral("inbox"), QStringLiteral("raw capture, not triaged yet")},
+        {QStringLiteral("discussing"),
+         QStringLiteral("an open question — waiting_on says who owes the answer")},
+        {QStringLiteral("ready"), QStringLiteral("agreed and not started — anyone may pick it up")},
+        {QStringLiteral("in-progress"), QStringLiteral("someone or some agent has it now")},
+        {QStringLiteral("waiting"),
+         QStringLiteral("built, and a check is owed: review, labels or an A/B")},
+        {QStringLiteral("needs-review"), QStringLiteral("built, waiting to be read by a person")},
+        {QStringLiteral("needs-labels"), QStringLiteral("built, waiting for its labelling run")},
+        {QStringLiteral("needs-ab"), QStringLiteral("built, waiting for an A/B")},
+        {QStringLiteral("needs-qa"), QStringLiteral("built, waiting to be verified")},
+        {QStringLiteral("needs-qa-llm"), QStringLiteral("built, waiting for a model to verify it")},
+        {QStringLiteral("needs-qa-human"), QStringLiteral("built, waiting for you to verify it")},
+        {QStringLiteral("deferred"), QStringLiteral("agreed, but not now")},
+        {QStringLiteral("verified"), QStringLiteral("closed and signed by whoever verified it")},
+        {QStringLiteral("done"), QStringLiteral("closed, with a Resolution — dropped cards too")},
+        {QStringLiteral("draft"), QStringLiteral("a plan still being written")},
+        {QStringLiteral("approved"), QStringLiteral("a plan you approved, not started")},
+        {QStringLiteral("executing"), QStringLiteral("a plan being worked through")},
+        {QStringLiteral("active"), QStringLiteral("in use — loaded when it applies")},
+        {QStringLiteral("retired"), QStringLiteral("kept for the record, never loaded")}};
+    return meanings.value(id);
 }
 
 QString tabTitle(const QString &id)

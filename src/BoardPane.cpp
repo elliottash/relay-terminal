@@ -70,6 +70,16 @@ constexpr int kAddWidth = 22;        // the `+` at the right of a section header
 // Below this width the open card takes the whole pane instead of squeezing the list.
 constexpr int kStackedWidth = 900;
 
+// A section's tooltip, with what the section is for on a line of its own underneath. Every
+// surface that names a section without showing its cards goes through here, so the answer to
+// "what is Ready to start?" is in one place (board::sectionMeaning) and reads the same in all
+// of them. A section id with no definition — a column a board invented — keeps its tip as is.
+QString withMeaning(const QString &tip, const QString &sectionId)
+{
+    const QString why = board::sectionMeaning(sectionId);
+    return why.isEmpty() ? tip : tip + QLatin1Char('\n') + why;
+}
+
 QColor mix(const QColor &a, const QColor &b, qreal t)
 {
     return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * t,
@@ -2861,14 +2871,16 @@ void BoardView::updateCounts()
         const QString id = m_checkIds.at(i);
         const int header = board::rowOfSection(m_rows, id);
         const QString title = sectionTitle(id);
+        QString tip;
         if (m_hidden.contains(id))
-            box->setToolTip(QStringLiteral("%1 — hidden; tick to put the section back").arg(title));
+            tip = QStringLiteral("%1 — hidden; tick to put the section back").arg(title);
         else if (header >= 0)
-            box->setToolTip(QStringLiteral("%1 · %2 card%3 — untick to hide the section")
-                                .arg(title).arg(m_rows.at(header).count)
-                                .arg(m_rows.at(header).count == 1 ? QString() : QStringLiteral("s")));
+            tip = QStringLiteral("%1 · %2 card%3 — untick to hide the section")
+                      .arg(title).arg(m_rows.at(header).count)
+                      .arg(m_rows.at(header).count == 1 ? QString() : QStringLiteral("s"));
         else
-            box->setToolTip(QStringLiteral("%1 — nothing matches the filter").arg(title));
+            tip = QStringLiteral("%1 — nothing matches the filter").arg(title);
+        box->setToolTip(withMeaning(tip, id));
     }
 }
 
@@ -2962,11 +2974,12 @@ void BoardView::refill()
             // A header is not a card: it is never selected, never dragged, and Up/Down steps
             // straight over it (board::stepRow).
             item->setFlags(Qt::ItemIsEnabled);
-            item->setToolTip(row.collapsed
-                                 ? QStringLiteral("%1 · %2 cards — click to show them")
-                                       .arg(row.title).arg(row.count)
-                                 : QStringLiteral("%1 · %2 cards — click to fold")
-                                       .arg(row.title).arg(row.count));
+            item->setToolTip(withMeaning(row.collapsed
+                                             ? QStringLiteral("%1 · %2 cards — click to show them")
+                                                   .arg(row.title).arg(row.count)
+                                             : QStringLiteral("%1 · %2 cards — click to fold")
+                                                   .arg(row.title).arg(row.count),
+                                         row.columnId));
             continue;
         }
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);

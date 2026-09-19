@@ -59,6 +59,12 @@ struct Tab {
 
 // "in-progress" -> "In progress"; used for section headers, chips and thread lines.
 QString statusTitle(const QString &status);
+
+// One clause saying what a section is for ("ready" -> "agreed and not started…"), shown wherever
+// a section is named without its cards. Empty for an id with no definition, so a board that
+// configures a column of its own gets no invented explanation.
+QString sectionMeaning(const QString &id);
+
 QString tabTitle(const QString &id);
 
 // The `## ` section holding what the card is about, in the words of whoever asked for it. It
