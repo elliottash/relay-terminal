@@ -164,6 +164,7 @@ PY
     stop
 }
 
-rm -f "$out/implementer-notes.txt"
+# Only a full run starts the notes again: re-shooting one scene must not drop the others'.
+[[ -z ${*:-} ]] && rm -f "$out/implementer-notes.txt"
 for scene in $scenes; do $scene; done
 printf 'done: %s\n' "$out"

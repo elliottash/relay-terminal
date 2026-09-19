@@ -136,7 +136,7 @@ Done.
 Thinking
 Short check. The ponies are fine. Nothing else to do.
 > [Relay context: added by Relay, not typed by the user]
-The user's terminal pane is in °/tmp/relay-fold-cap.uJE162/home/project’. When
+The user's terminal pane is in */tmp/relay-fold-cap.tM8m2k/home/project’. When
 that is inside the workspace, treat it as the current directory unless they say
 otherwise: it is the default working directory of run_command, and relative
 paths they mention are relative to it. When it is outside the workspace,
@@ -149,3 +149,5 @@ Relay stops you after a few in a row without them.
 [End of Relay context]
 please think quick about ponies
 Done.
+
+| The prompt box is the input - Ctri+H types into the terminal
