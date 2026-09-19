@@ -4744,10 +4744,12 @@ public:
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
-                              const QJsonArray &hidden = {}) {
+                              const QJsonArray &hidden = {}, const QString &sort = QString()) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
+        // The sort the pane was saved with; empty (or unknown) leaves it Manual.
+        if (!sort.isEmpty()) view->setSortOrder(sort);
         auto *tool = new ToolPane(view, workspace);
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
@@ -5126,7 +5128,8 @@ private:
             // `switchboard/`.
             if (!relay::projects::boardDirOf(workspace).isEmpty()) {
                 ToolPane *tool = createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
-                                                 board.value(QStringLiteral("hidden")).toArray());
+                                                 board.value(QStringLiteral("hidden")).toArray(),
+                                                 board.value(QStringLiteral("sort")).toString());
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.
