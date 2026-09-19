@@ -182,7 +182,9 @@ count\turn.link=3'
     # own shot follows once everything has settled.
     CLICK_SETTLE=0.25 click_row 'open the task list' 1 120 || { echo "no link row"; stop; exit 1; }
     shot 06-hint fast
-    sleep 1.6
+    # Long enough for the toast to go: 06-tasklist is the panel on its own, and a settled shot that
+    # is byte-for-byte the hint shot says nothing the hint shot did not.
+    sleep 5
     shot 06-tasklist
     stop
     # The hint's toast is drawn in the bottom-right corner of the pane, which is exactly where the
