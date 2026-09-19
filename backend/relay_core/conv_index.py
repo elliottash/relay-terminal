@@ -70,6 +70,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -727,10 +728,27 @@ def header_entries(title: str, summary: str) -> list[dict]:
 # ----- the index -----------------------------------------------------------------------------
 
 class ConversationIndex:
-    """A connection to index.db. Safe to use from several threads and several worker processes."""
+    """A connection to index.db, shared by the threads of one worker and by several workers.
+
+    **One connection, one lock.** The connection is opened `check_same_thread=False` because the
+    worker's own threads share it: the protocol thread answers a listing while `_guest_refresh`
+    reconciles the guests' transcripts on a background thread (protocol 26.7), and both go through
+    this object. sqlite3 will not serialise them for us at that setting, and two statements
+    interleaved on one connection surface as `InterfaceError: bad parameter or other API misuse`
+    from whichever call lost — once in 48 runs of the backend suite under load, in `search()`
+    beneath a `conversations` event (found by the load run behind card #99T0). Every use of the
+    connection therefore goes through `_run`, which holds `_lock`, and so do the open, the reset
+    and the close. It is an `RLock` because a `work(db)` callback may call back in — a corrupt
+    database reconnects and re-seeds from inside `_run` — and re-entering must not deadlock. The
+    guest meta store is a file two *processes* may write, so its read and its rewrite take the
+    same lock: that keeps this worker's own threads from clobbering each other, and the file is
+    replaced atomically for the other processes.
+    """
 
     def __init__(self, path: str | Path | None = None, *, rebuild_on_reset: bool = False):
         self.path = Path(path) if path else default_index_path()
+        # Before `_open()`: everything below serialises on it.
+        self._lock = threading.RLock()
         self._db: sqlite3.Connection | None = None
         self.recovered = False       # a corrupt or outdated database was discarded
         self._open()
@@ -852,6 +870,10 @@ class ConversationIndex:
         self._connect()
 
     def close(self) -> None:
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
         if self._db is not None:
             try:
                 self._db.close()
@@ -859,14 +881,17 @@ class ConversationIndex:
                 self._db = None
 
     def _run(self, work):
-        """Run `work(db)`, recreating the database once if SQLite reports corruption."""
-        try:
-            return work(self._db)
-        except sqlite3.DatabaseError as exc:
-            if "malformed" not in str(exc) and "not a database" not in str(exc) and "corrupt" not in str(exc):
-                raise
-            self._reset()
-            return work(self._db)
+        """Run `work(db)` under the connection's lock, recreating the database once if SQLite
+        reports corruption. The lock is what makes one connection safe for the worker's threads
+        (see the class docstring); it is re-entrant, so a `work` that reaches back in is fine."""
+        with self._lock:
+            try:
+                return work(self._db)
+            except sqlite3.DatabaseError as exc:
+                if "malformed" not in str(exc) and "not a database" not in str(exc) and "corrupt" not in str(exc):
+                    raise
+                self._reset()
+                return work(self._db)
 
     # ----- the guest meta store (v4) ----------------------------------------------------
     #
@@ -887,6 +912,10 @@ class ConversationIndex:
         Another worker process writes the same file, so the cache is keyed by its (mtime_ns, size)
         rather than trusted for the life of the connection.
         """
+        with self._lock:
+            return self._guest_store_locked()
+
+    def _guest_store_locked(self) -> dict:
         cache = getattr(self, "_store_cache", None)
         try:
             stat = self.store_path.stat()
@@ -919,7 +948,13 @@ class ConversationIndex:
         """
         if source not in GUEST_SOURCES or not session_id:
             return
-        data = self._guest_store()
+        # Read, change and rewrite under the lock: two of this worker's threads merging into the
+        # same file would otherwise each write what they read, and the later write would win.
+        with self._lock:
+            self._write_guest_meta_locked(source, session_id, **fields)
+
+    def _write_guest_meta_locked(self, source: str, session_id: str, **fields) -> None:
+        data = self._guest_store_locked()
         data = {name: {key: dict(value) for key, value in rows.items()} for name, rows in data.items()}
         entry = dict(data.get(source, {}).get(session_id) or {})
         if "custom_title" in fields:

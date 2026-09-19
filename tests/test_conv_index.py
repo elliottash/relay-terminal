@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -812,6 +813,73 @@ class MigrationTests(unittest.TestCase):
                            updated=3000.0))
         index.reconcile(self.root / "sessions")
         self.assertEqual(index.search("", scope="all")["items"][0]["summary"], "written by the session")
+
+
+class ThreadedAccess(unittest.TestCase):
+    """One index, several threads (protocol 26.7).
+
+    The connection is opened `check_same_thread=False` because the worker shares it: the protocol
+    thread answers a `conversations` listing while `_guest_refresh` reconciles the guests'
+    transcripts on a background thread. sqlite3 does not serialise that for us, and two statements
+    interleaved on one connection come back as `InterfaceError: bad parameter or other API misuse`
+    — once in 48 runs of the backend suite under load, inside `search()` (card #99T0). Without
+    `ConversationIndex._lock` this test fails within a second or two.
+    """
+
+    CLAUDE = "cc000000-0000-4000-8000-00000000000c"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.index = ConversationIndex(Path(self.temp.name) / "index.db")
+        self.addCleanup(lambda: self.index.close())
+
+    def guest(self, n: int) -> dict:
+        return {"source": "claude", "id": "%s%04d" % (self.CLAUDE[:-4], n), "title": "pane drag %d" % n,
+                "workspace": "/tmp/alpha", "raw_cwd": "/tmp/alpha", "created": 1000.0, "mtime": 1000.0 + n,
+                "message_count": 2,
+                "entries": [{"turn": 1, "seq": 1, "kind": "prompt", "time": 1000.0, "text": "fix the pane drag"},
+                            {"turn": 1, "seq": 2, "kind": "reply", "time": 1000.0, "text": "fixed it in Pane.h"}]}
+
+    def test_searching_while_the_guests_are_reconciled_is_not_an_api_misuse(self):
+        failures, done = [], threading.Event()
+
+        def writer():
+            try:
+                for n in range(120):
+                    if done.is_set():
+                        return
+                    self.index.update_guest(self.guest(n))
+                    self.index.rename(self.guest(n)["id"], "renamed %d" % n)
+                    self.index.set_pinned(self.guest(n)["id"], n % 2 == 0)
+            except Exception as error:                      # the race, whichever call loses it
+                failures.append("writer: %r" % (error,))
+            finally:
+                done.set()
+
+        def reader():
+            try:
+                while not done.is_set():
+                    self.index.search("pane", scope="all", sources=list(conv_index.GUEST_SOURCES))
+                    self.index.guest_meta("claude")
+                    self.index.forgotten()
+            except Exception as error:
+                failures.append("reader: %r" % (error,))
+                done.set()
+
+        threads = [threading.Thread(target=writer, name="writer")]
+        threads += [threading.Thread(target=reader, name="reader%d" % i) for i in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+            self.assertFalse(thread.is_alive(), "%s did not finish" % thread.name)
+        self.assertEqual([], failures)
+        # And the writes all landed: a lock that serialised nothing would also lose rows.
+        rows = {item["session_id"] for item in
+                self.index.search("", scope="all", sources=list(conv_index.GUEST_SOURCES),
+                                  limit=200)["items"]}
+        self.assertEqual({self.guest(n)["id"] for n in range(120)}, rows)
 
 
 class GuestRowTests(unittest.TestCase):
