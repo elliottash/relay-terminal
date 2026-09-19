@@ -13,7 +13,7 @@ resolver records a one-line warning, which the worker emits in ``model_roles``.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
                       provider_tier_model, tier_default, tier_fallbacks, validate_effort,
@@ -44,13 +44,16 @@ def _preset(preset_id):
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
 # "local" (2026-09-18) is the pane role /local switches to, the way "flash" is the one /flash
 # switches to: a role a pane runs, not a job some side call does.
-ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "summaries",
-         "suggestions", "chores", "audit", "vision", "route_assist")
+# "planning" (2026-09-19) serves plan-mode turns: by default the main model pushed to max
+# reasoning, so a plan is investigated harder without switching the pane's own model.
+ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "planning",
+         "summaries", "suggestions", "chores", "audit", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
           "switchboard": "Switchboard agent", "flash": "Flash agent", "local": "Local agent",
-          "summaries": "Summaries", "suggestions": "Suggestions", "chores": "Chores",
-          "audit": "Request audit", "vision": "Vision", "route_assist": "Route assist"}
+          "planning": "Plan mode", "summaries": "Summaries", "suggestions": "Suggestions",
+          "chores": "Chores", "audit": "Request audit", "vision": "Vision",
+          "route_assist": "Route assist"}
 
 # The pane-agent role was called "fast" until 2026-09-18. It is renamed to "flash" so the one word
 # names the tier, the role and the /flash command, and so nothing in Relay says "fast" — in Codex and
@@ -68,6 +71,7 @@ def canonical_role(role):
 # after the job rather than the protocol id (owner, 2026-09-17). The GUI mirrors this table.
 ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
+    ("planning", "Plan mode", "investigating and writing plans; max reasoning by default"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
     ("flash", "New panes (Flash agent)", "panes that open on the Flash agent"),
@@ -92,8 +96,9 @@ ROLE_TIERS: dict[str, str | None] = {
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
     "chores": "lite", "audit": "lite", "local": "local",
-    # Vision and route assist are not tiered: they have their own fixed defaults below.
-    "vision": None, "route_assist": None,
+    # Vision and route assist are not tiered: they have their own fixed defaults below. Plan mode
+    # is not tiered either: its default is the pane's own model at max reasoning (_default below).
+    "vision": None, "route_assist": None, "planning": None,
 }
 # Vision turns on presets without image support: GLM-5.3 Flash for GLM, unset elsewhere.
 VISION_DEFAULTS: dict[str, tuple[str, str, dict]] = {
@@ -446,6 +451,17 @@ class RoleResolver:
         tier = ROLE_TIERS.get(role)
         if tier is not None:
             return self._main(role, tier="main") if tier == "main" else self._tier(role, tier, "default")
+        if role == "planning":
+            # Owner, 2026-09-19: plan-mode turns run on the main model pushed to max reasoning.
+            # When the knob cannot move — the provider has no effort parameter, or the pane's
+            # effort is already max — there is nothing to swap, so the role is the main agent.
+            style = effort_style(_preset(self.main_preset_id), self.main_config.extra,
+                                 self.main_config.base_url)
+            raised, _ = apply_effort(self.main_config.extra, style, "max")
+            if raised != self.main_config.extra:
+                return Resolved(role, replace(self.main_config, extra=raised),
+                                self.main_preset_id, "max", "default", tier="main")
+            return self._main(role)
         if role == "vision":
             candidates = [VISION_DEFAULTS.get(self.main_preset_id or "")]
         elif role == "route_assist":
@@ -465,6 +481,39 @@ class RoleResolver:
         # Built-in defaults are implicit: a missing key quietly means "use the main agent".
         return self._main(role)
 
+    # ----- failover (card #G9VE) ----------------------------------------------------------
+    def failover_candidates(self, tier: str, exclude) -> list[Resolved]:
+        """Providers a failing turn may move to, best first (owner, 2026-09-19): the tier's own
+        model on every other preset with a stored key, then Relay Free.
+
+        ``exclude`` is the preset ids already tried this turn, the failing provider first: each
+        provider is asked once, after its own transport retries. A preset without a stored key
+        never appears, because a turn must not start spending a key the user did not choose, and
+        neither does a local endpoint: it is not a keyed preset, and its answers are the
+        deterministic kind a failover would only repeat.
+        """
+        tier = validate_tier(tier)
+        out: list[Resolved] = []
+        for preset_id, preset in PRESETS.items():
+            if preset_id in exclude or preset.hosted:
+                continue
+            if not self.has_key(preset_id):
+                continue
+            model, extra = ((preset.model, dict(preset.extra)) if tier == "main"
+                            else provider_tier_model(preset_id, tier))
+            resolved = self._build("main", preset_id, preset.base_url, model, extra, None,
+                                   "failover", tier)
+            if resolved.source != "fallback":
+                out.append(resolved)
+        if PRESETS[hosted.PRESET_ID].id not in exclude and hosted.available():
+            preset = PRESETS[hosted.PRESET_ID]
+            model, extra = provider_tier_model(preset.id, tier)
+            resolved = self._build("main", preset.id, preset.base_url, model, extra, None,
+                                   "failover", tier)
+            if resolved.source != "fallback":
+                out.append(resolved)
+        return out
+
     # ----- api --------------------------------------------------------------------------
     def resolve(self, role: str) -> Resolved:
         role = validate_role(role)   # also translates the pre-2026-09-18 name "fast"
@@ -479,6 +528,16 @@ class RoleResolver:
         if resolved.warning and resolved.warning not in self.warnings:
             self.warnings.append(resolved.warning)
         return resolved
+
+    def planning_target(self) -> Resolved | None:
+        """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).
+
+        None means plan turns stay on the pane's own model: nothing is configured, and the default
+        (the main model at max reasoning) either cannot move the provider's effort knob or the
+        pane's effort is already max.
+        """
+        resolved = self.resolve("planning")
+        return None if resolved.is_main else resolved
 
     def vision_target(self) -> Resolved | None:
         """Where a turn carrying an image goes when the main model cannot read one (issue EM1E).

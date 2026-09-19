@@ -332,8 +332,9 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
+| `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 
-`configured` gains these five fields. `set_agent_options` applies them to the pane's agent at once (limits are
+`configured` gains these fields. `set_agent_options` applies them to the pane's agent at once (limits are
 read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
 `max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents are not affected:
 they keep their definition's `max_steps`, get `max(24, 3 × max_steps)` tool calls and no ledger or todos.
@@ -717,7 +718,10 @@ come from the messages. Context blocks Relay writes into a user message
 20000 entries.
 
 `SessionStore.save` refreshes the session's rows on **every autosave**, so the index follows the
-conversation without a separate crawl. Only sessions under `$XDG_DATA_HOME/relay/sessions` are
+conversation without a separate crawl. A turn that is still running writes its session too (at most
+every `MID_TURN_SAVE_S`, 10 s), so a conversation the user is looking at is listed and searchable
+while it happens rather than only once its turn ends — and is not lost if Relay stops mid-turn.
+Only sessions under `$XDG_DATA_HOME/relay/sessions` are
 indexed: a pane pointed at some other `session_dir` (tests, throwaway directories) stays out of
 it, and `RELAY_INDEX=off` disables indexing and the commands below entirely.
 
@@ -914,6 +918,11 @@ threads, entries, ms, conversations, bytes, schema_version, path}`.
 
 ### 14.8 Notes and deviations
 
+- A conversation is written to disk before its first turn ends: the prompt, the replies and each
+  tool result save through `Agent._autosave_soon()` (throttled by `MID_TURN_SAVE_S`, so a turn that
+  calls tools in a loop rewrites the file about every 10 s, not on every call). Without that, a
+  long first turn — and any pane that never finished one — had no session file, so it was absent
+  from this list and from search, and was lost when Relay stopped.
 - The index holds message text. It lives in the same 0700 directory as the sessions, is never
   synced, and holds nothing the session files do not already hold. There is no telemetry.
 - Since v2 the words of a query may sit in different turns (14.2); a quoted phrase still has to
@@ -998,6 +1007,22 @@ model server is excluded — its 5xx are deterministic, and its loading 503 keep
 wait inside the first-token budget.
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
+
+#### 15.2.2 A provider that still fails: the turn moves to another one
+
+When a provider fails a step even after those retries (a stall included; a truncated step is a
+budget problem, not a provider that will not answer), the agent continues the turn on the next
+provider that can run it without setup: the same tier's model — Main or Flash — on every other
+preset with a stored key, then Relay Free. Each is asked once, at most two besides the pane's own,
+and never a provider without a stored key, a local endpoint, or one already tried this turn. The
+swap lasts for the rest of the turn; `_end_failover` puts the pane's own model back before the
+turn's terminal event. Every move emits
+
+`provider_retry {turn_id, reason: "failover", attempt, max_attempts, from_model, to_model, step, text}`
+
+plus a `status`, and logs `provider_failover`. Subagents and side calls do not fail over (no
+resolver, injected provider); the whole behaviour is the `failover` agent option (12.1), on by
+default, from Options › Models › "Fall over to a working provider".
 The GUI prints `text` as a note line.
 
 ### 15.2.1 A step cut off at the output limit
@@ -2098,6 +2123,98 @@ the answer has to come in on, so it cannot block: the write is **parked** and re
 union-merge rule for the card threads, named against this board's folder) and is the only file
 written outside the board folder; it is listed so the GUI can say so.
 
+**Who asks, and in what order** (the desktop's half, 2026-09-19; `src/ProjectInit.h` is the table
+and `src/ProjectInitBlock.h` draws it). Exactly five acts may raise the question, once per project:
+
+| Trigger | Attach reason | Raised by |
+|---|---|---|
+| the first prompt sent to the agent in a pane standing in a git repository with no board | `agent-work` | `Pane::submitAgent` |
+| the agent's first card | `agent-card` | the worker's `board_init_request` |
+| opening the Switchboard (Ctrl+Shift+S, the palette, `/switchboard`) | `switchboard` | `RelayWindow::toggleBoardPane` |
+| `/card <text>` — the text is held and lands as the first card on the yes | `card-command` | `Pane` |
+| `/init`, which also clears a remembered no, and with no candidate offers the pane's own directory | `init-command` | `Pane`, and one palette item |
+
+A `cd`, launching Relay, hovering, `#` typed in the composer and opening a file **never** ask. A no
+is `projects::Registry::decline()` and outlives the process; "Not now" is neither a yes nor a no and
+only silences the first trigger for the rest of the session. The question is drawn inline in the
+pane, never as a dialog, and **never blocks what raised it**: the prompt goes to the agent first and
+the question appears beside it.
+
+The GUI's order on a yes is fixed by `_resolve`, not by taste. An **unattached** pane has no board
+object at all, so a `board_init` sent to it answers the no-board error: the tab is attached first
+with `set_board {project, state: "uninitialized"}` and `board_init` goes out only when the
+`board_state {applies: "now"}` for that attach arrives. Mid-turn that `set_board` is deferred to the
+end of the turn (19.11), which is exactly when a yes given mid-turn is meant to take effect. When
+the **worker** asked (`board_init_request`), the pane is attached already and `board_init_answer
+{accept: true}` is the whole of it — the worker creates the board and completes the held card.
+
+### 19.13 What is already in the project, and importing it (v3.1, 2026-09-18)
+
+Before the init question of 19.12 is asked, the GUI asks the worker what is in the project; after
+the board exists, it offers to turn what was found into cards. Three messages, all requiring an
+explicit `project`. Detail — what each tracker looks like, how an item maps onto a card, and why
+`source_key` is what it is — is in [`PROJECT-INIT-AND-IMPORT.md`](PROJECT-INIT-AND-IMPORT.md);
+`backend/relay_core/project_probe.py` reads, `board_import.py` writes.
+
+| Message | Reply |
+|---|---|
+| `project_probe {id?, project, kinds?}` | `project_probe_result {id, root?, …}` — §3 of that document, verbatim |
+| `board_import_propose {id?, project, kinds?}` | `board_import_proposals {id, root?, project, proposals, skipped}` |
+| `board_import_apply {id?, project?, keys, tab?, kinds?}` | `board_imported {id, root, project, cards, skipped}`, then `board_changed` |
+
+**`project` is required and absolute, and there is no default.** A missing, empty or relative one
+is an `error`: the worker runs in whatever directory the GUI started it in, and probing *that*
+would read a tree nobody asked about. `kinds` limits the run to some of
+`project_probe.TRACKER_KINDS`; an unknown kind is an error.
+
+**`project_probe`** needs no board — it is what is asked *before* there is one — writes nothing,
+opens no socket and runs no subprocess, and is safe to send repeatedly. It carries `root` only
+when that project already has a board. `board_import_propose` writes nothing either; `proposals`
+is `Proposal.to_dict()` each (title, status, labels, body, `tasks`, `source`, `depends_on`,
+`order`) and `skipped` counts the items already imported, so the dialog can say "23 of 30".
+
+**`board_import_apply`** needs a **ready** board: an uninitialized one answers `error` with the
+"create one first" text, since the GUI's path is `board_init` (19.12) and then this. `keys` is the
+ticked subset of the last `board_import_proposals` and nothing else from that message is trusted —
+the proposals are re-derived from the project here, so no card body ever comes off the wire. It
+goes through the same busy guard as an ask (`code: "board_busy"` while a Switchboard turn is
+running, `code: "forge_busy"` while a sync is), writes through `BoardTools` like every other owner
+write, and answers with one row per card (`{id, source_key, path, status, tab}`); `skipped` lists
+the keys that produced no card, because they were imported before or are no longer in the project.
+`project` defaults to the pane's own board's project and may not name another one.
+
+### 19.14 Syncing the board with GitHub issues (v3.1, 2026-09-18)
+
+Two messages on the worker that already owns the board. The mapping, the three-way merge, the
+privacy guard and the credential rules are in [`GITHUB-SYNC.md`](GITHUB-SYNC.md);
+`backend/relay_core/forge_sync.py` is the engine and `forge_github.py` the provider.
+
+| Message | Events |
+|---|---|
+| `forge_sync_plan {id?, repo?, base_url?}` | `forge_sync_planned {id, root, repo, dry_run: true, cards, creates, pushed, pulled, conflicts, needs_confirm, cap, idle, errors}` |
+| `forge_sync_run {id?, repo?, base_url?, confirm_bulk?}` | `forge_sync_progress {id, root, card, title, action, number, done, total}` per card, then `forge_sync_done {id, root, repo, pushed, pulled, imported, comments_out, comments_in, conflicts, errors, cards, retry_at?, retry_at_text?}` and `board_changed` |
+
+Both need a **ready** board and take the same busy guard as 19.13. The network work runs on a
+thread, like `hosted_quota` (13.9), so the message loop never waits on GitHub, and **exactly one**
+terminal event follows either way: `forge_sync_planned`, `forge_sync_done`, or `error {id, root,
+code, text}`. An error never carries a traceback and never a credential — the token lives in the
+provider, is scrubbed out of anything raised, and never crosses this pipe in either direction.
+`code` is `forge_auth` (no credential — offer a sign-in), `forge_rate_limited` (with `retry_at`
+and `retry_at_text`), `forge_unavailable`, `forge_privacy`, `forge_failed`, or
+`forge_sync_failed` for a bug here, whose `text` names only the exception type. A second sync, or
+a `board_import_apply`, while one is running answers `error {code: "forge_busy"}`.
+
+`repo` and `base_url` default to `board.yaml`'s `github:` block (`repo`, `base_url`, `create_cap`,
+`default_tab`, `comment_kinds`); a board with neither answers an `error` naming the file to put it
+in. The person → login map is **not** in `board.yaml`: it is per user, in
+`<board>/.private/forge-logins.yaml` (or `.json`), and without it an assignee is simply not
+synced. `forge_sync_plan` writes to neither side; `forge_sync_run` refuses and answers
+`needs_confirm: true` when the plan would create more than `cap` issues, until `confirm_bulk`.
+
+All six events of 19.13 and 19.14 are desktop-only in `remote/wire.py`: they carry local file
+paths and answer the desktop's own dialogs, and the card changes a phone cares about arrive in the
+`board_changed` that follows.
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
@@ -2324,6 +2441,7 @@ pane: it answers the model directly and emits `program_input_refused` so the pan
 | `granted` | bool | the user handed this program to the agent **for this turn** |
 | `reason` | string (≤60) | `delegated`, or why a grant ended: `take_over`, `password`, `program_exited` |
 | `program` | string (≤200) | the foreground program's name |
+| `guest` | string (≤40) | the guest agent the program is — `claude`, `codex` or empty (section 26) |
 | `question` | string (≤400) | what the screen says it is asking ("Do you want to continue? [Y/n]") |
 | `kind` | string (≤40) | the classifier's verdict: `none`, `shell_prompt`, `yes_no`, `choice`, `password`, `press_key`, `free_text` |
 | `masked` | bool | a password prompt |
@@ -2379,7 +2497,7 @@ A `cancelled` reply raises `Cancelled` instead, so a stopped turn unwinds like a
 
 ### 21.4 `program_state` (GUI → worker)
 
-`program_state {granted, reason, program, question, kind, masked, alt_screen, waiting,
+`program_state {granted, reason, program, guest, question, kind, masked, alt_screen, waiting,
 max_writes, screen_source, id?}` — the same fields as the grant, without `screen`. The pane sends
 it whenever any of them changes and the worker keeps quiet about it unless the message carried an
 `id`, in which case it answers `program_control {id, granted, reason, program, kind, masked,
@@ -2973,6 +3091,138 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   pane already has that session open, focuses that pane instead, so two workers never autosave one
   file; on a thread, Enter opens its history in the ⓘ pane.
 - `reset` now carries the new conversation's `session_id`.
+
+## 26. Guest agent panes: Claude Code and Codex (v3.2, 2026-09-19)
+
+Issue GT7X (`issues/features/2026-09-19-claude-codex-guest-integration.md`). A **guest** is an
+agent CLI — Claude Code or Codex — the user starts in a pane's shell, exactly as they would in
+any other terminal. Relay detects it and puts its own surfaces (composer, chips, sessions pane)
+around it. The registry is `backend/relay_core/guest.py` (static identity, well-known paths,
+installation probe); tests `tests/test_guest.py`. This section is the stub the guest phases
+extend; everything here is additive.
+
+### 26.1 Detection and `guest`
+
+The pane classifies the foreground command line on its program poll (`guestProgram`,
+`src/Pane.h`): the first token's leaf (`claude`, `claude-code`, `codex`, `codex-cli`), or —
+when the first token is a launcher (`node`, `nodejs`, `bun`, `bunx`, `deno`, `npx`) — the first
+non-flag token after it, matched by leaf name (script extensions `.js`/`.mjs`/`.cjs`/`.ts`
+stripped) or by an exact path component (`node …/@anthropic-ai/claude-code/cli.js`). This is
+one rule in two languages; `guest.classify_command` and `guestProgram` change together.
+
+The pane publishes the result as `guest` in `program_state` (21.4) and, while a grant is live,
+in `context.program_control` (21.2): the guest id, or `""`. The worker keeps it in the program
+control state; nothing else changes, and a pane whose foreground program is not a guest behaves
+exactly as before. Guest state is **not** saved in the window layout: a restored pane starts at
+a shell and re-detects when the user starts the guest again. A guest run inside tmux is not
+visible, the same limitation `remoteCommandLine` documents for ssh.
+
+### 26.2 Env injection point
+
+Pane shells are spawned with the `qputenv` values set in `startTerminal` (`src/Pane.h`). The
+Claude IDE bridge phase writes its lock file under `guest.claude_ide_lock_dir()` and injects
+`guest.bridge_env("claude", port)` (`CLAUDE_CODE_SSE_PORT`, `ENABLE_IDE_INTEGRATION`) there, so
+a `claude` started in the pane finds Relay's bridge. Codex has no IDE-bridge equivalent; its
+environment stays untouched.
+
+### 26.3 The contracts the guest phases share
+
+The phases below are built in parallel (bridge, hooks, codex, sessions, composer), so the seams
+between them are fixed here first and each phase codes against this section, not against another
+phase's implementation.
+
+**The guest event channel.** Everything a guest or its shim learns reaches the pane through one
+file, never a listener. The GUI writes `shell/guest-event.py` into the pane's data dir beside
+`shell/event.py` and exports `RELAY_GUEST_EVENT` beside `RELAY_RUNTIME_DIR` (section 26.2's
+injection point). The helper is called as `guest-event.py <event>` with the event's JSON on stdin
+and atomically replaces `guest.json` in the pane's runtime dir:
+
+```json
+{"token": "<pane token>", "sequence": "<fresh uuid4>", "event": "<name>", "guest": "claude|codex", "data": {}}
+```
+
+The pane stats `guest.json` exactly as `pollShell()` stats `state.json` (new inode -> read, token
+check, sequence check), on the same tick. `sequence` must change on every write. Events, v1:
+
+| event | data | from | effect |
+|---|---|---|---|
+| `hook` | `{name, payload}` - the raw hook JSON under `payload` | claude/codex hooks | pane state, notifications, permission prompts |
+| `statusline` | `{model, context_pct, ...}` - the fields the shim could parse | statusline shim | `guest_model`, `guest_context_pct` chips |
+| `state` | `{busy, turn?}` | rollout tail, bridge | `guest_busy`, composer routing |
+| `bridge` | `{tool, args}` | the IDE bridge sidecar | diff view, file opens, guest notifications |
+| `slash` | `{commands: ["/model", ...]}` | slash catalog scan | `/` popup guest entries |
+
+The hard invariant: **a shim with no `RELAY_GUEST_EVENT` in its environment is a no-op** - exit 0,
+print nothing (statusline shims print their passthrough line only), write nowhere. Hooks installed
+in a user's global settings must therefore be harmless in every other terminal.
+
+**`program_state` additions.** Three optional fields join `guest` (21.4, mirrored in 21.2):
+`guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
+`guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
+
+**Settings the shims live in.** Guest integration is per project and off by default (Options >
+Guests). Turning it on writes hooks into that project's `.claude/settings.json` /
+`~/.codex/config.toml` additively - existing entries are preserved verbatim, Relay's carry a
+`relay-guest` marker - and turning it off removes exactly the marked entries. The user's global
+`~/.claude/settings.json` is touched only by an explicit second opt-in.
+
+**File ownership** (phases may read anything, but only their own files change):
+`guest.py` is shared and changes only through the lead; hooks own `shell/` helper generation,
+`backend/relay_core/guest_hook.py` and the Pane.h/PaneState plumbing for `guest.json`; the bridge
+owns `backend/relay_core/guest_bridge.py` and the diff-view glue; codex owns
+`backend/relay_core/guest_codex.py`; sessions own `backend/relay_core/guest_sessions.py` and the
+conv_index source listing; the composer owns the router/`program_input` routing and the slash
+registry.
+
+### 26.4 Claude hooks and the statusline shim
+
+Hooks call the shim as `"$RELAY_PYTHON" -m relay_core.guest_hook <event>` (JSON on stdin), which
+forwards a `hook` event through the channel. The statusline command is the same shim in
+`statusline` mode: it emits the `statusline` channel event and prints one passthrough line, so
+claude still renders its own statusline unchanged. Permission decisions hook-side are Relay
+questions on the pane, answered through the shim's exit code / decision JSON (claude's contract),
+never auto-approved.
+
+### 26.5 The Claude IDE bridge
+
+One bridge per GUI run, started lazily by the first claude pane, loopback only, ephemeral port,
+lock file `guest.claude_ide_lock_dir()/<port>.lock` (pid, ideName "relay", workspaceFolders),
+removed at exit; the pane injects `guest.bridge_env("claude", port)` (section 26.2). It speaks the
+editor side of the IDE integration - WebSocket MCP (JSON-RPC 2.0: `initialize`, `tools/list`,
+`tools/call`), the twelve tools of the published protocol; `getDiagnostics` answers empty
+(Relay has no LSP source - documented, not faked). `openDiff` opens Relay's diff view and the
+tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJECTED`).
+A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
+server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
+
+### 26.6 Codex attach
+
+Codex has no IDE bridge (section 26.2): its attach is hooks (`notify`, `tui.notification_condition`
+in `~/.codex/config.toml`, the same additive marked-entry rules) plus a rollout tail -
+`guest.codex_sessions_dir()` watched for the active pane's newest rollout - emitting `state` and
+`statusline`-equivalent events (model, token counts when the rollout carries them). The
+app-server daemon remains Tier A, deferred.
+
+### 26.7 Sessions sources `claude` and `codex`
+
+The sessions pane lists guest sessions beside Relay's own: source `claude` reads
+`guest.claude_projects_dir()` (`<cwd-slug>/<session-id>.jsonl`), source `codex` reads the
+rollouts and `guest.codex_state_db()` (highest `state_*.sqlite`). A record is
+`{source, id, title, mtime, workspace, message_count, resume_command}`; `resume_command` respawns
+the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`; `codex resume`, fork per
+its CLI). Search spans all sources; the active pane's live transcript is tailed so a running
+session appears without a rescan.
+
+### 26.8 Composer routing and the slash registry
+
+While `program_state.guest` is non-empty the Relay prompt is that guest's composer. Text routes
+through the pane's existing input queue: typed when the guest waits at its input (paste-safe,
+newline only on submit), queued while `guest_busy` and submitted when it waits again. Relay `/`
+commands stay Relay's; the `/` popup additionally lists the guest's slash commands (badge, from
+the `slash` event, static fallback catalog otherwise) and choosing one types it into the guest.
+`@file` becomes the guest's own syntax. Relay never routes `!` shell lines silently: the user's
+spelling decides. Where Relay has the surface natively (model picker, compact, resume) the Relay
+surface is what the user sees; the guest's equivalent is a passthrough command, not a second UI.
 
 ## 27. The agent asks the user a question (v3.3, 2026-09-19)
 

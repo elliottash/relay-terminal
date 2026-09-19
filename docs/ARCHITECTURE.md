@@ -288,6 +288,38 @@ news until the pane has been the focused pane of the current tab in the active w
 tab icon is the most urgent state among its panes (a tab with no terminal shows its first special
 pane's type glyph). The poll runs every 400 ms and repaints a tab icon only when it changes.
 
+**Live states** (card #V8KT, owner 2026-09-19: "its not clear enough if a pane agent or program is
+running… the icons / anims should use blue for terminal work happening and violet for agent work
+happening"). Running, Working and Subagents are work happening *now*, and their marks move
+(`relay::panestatus::isLive`): the header glyph breathes on the waiting dots' 600 ms clock
+(`pulseScale` — a scale, never an opacity, so the ink keeps its contrast), the state's word sits
+beside it ("Command running", "Relaying…", "Subagents working" — `stateLabel`) in the work's own
+colour lifted to 4.5:1 on the header's ground (`stateText`), and a tab with anything live carries a
+breathing corner dot in that colour (`liveMarker`: the agent's violet whenever agent work — a turn
+or subagents — is live, else the terminal's blue) even when its icon is showing more urgent news,
+so "is something running over there?" never waits for the icon's turn. The dot yields its corner to
+the ssh mark and takes the one across. The desktop's reduce-motion signal — a cursor flash time of
+0, the same one that stills the caret and the waiting dots — draws every live mark at rest, and the
+news states (done, failed, needs you) never move: they pull the eye by being news.
+
+**The subagent badge** (card #YMSR, owner 2026-09-19: "in the pane header, add a badge with a
+number for number of subagents, if applicable") is how many agents that pane's agent has
+running, in the header beside the state's word: a violet chip carrying the agent's own
+four-point star and the count. It counts *live* subagents — waiting or running — which is the
+same number `Facts::liveSubagents` resolves a state from, so the badge and the state's glyph
+cannot disagree about the pane; an agent that finished is not work happening now, and the strip
+under the composer is where the ones that ended are read. Zero is not a "0":
+`relay::panestatus::subagentBadgeText` returns nothing and `PaneChrome::PaneSubagentBadge`
+hides itself, which is what "if applicable" asks for and what keeps a pane that has never
+started a subagent looking exactly as it did before. Its tooltip says the count in words and
+teaches the key that opens the subagents pane (Alt+A, `agent.subagentPane`, read live as the
+folded strip does). It is a read-out, not a button: a press on the header moves the pane.
+`relay::panestatus::subagentBadgeStyle` is the chip's fill, hairline and ink on whatever ground
+it lands on — the pane's background, or the ssh band's fill, which is where a mid-tone ground
+exposed `atLeast` choosing its pole by `isLight`'s 0.35 split rather than by measured contrast
+and returning white under 4.5:1; the helper now takes the pole that really is further from the
+ground, and the test asserts the number's 4.5:1 in every shipped theme on both grounds.
+
 **Resource meters** (card #D03W, owner 2026-09-19: "would it be possible to have small X%, X%
 indicators for CPU and RAM usage by pane and tab?"). What a pane costs this machine: CPU and
 memory summed over the pane's two process trees — the shell its pty spawned with whatever that
@@ -331,9 +363,10 @@ in-memory list per process, shared by every window: newest first, a kind per ent
 killed for memory, a password prompt waiting, a finished subagent, and the pane's own agent turn
 finishing, failing, or ending on a question ("Agent needs you", also when it left a command in the
 prompt box that its next turn waits on) — only when the user is not watching that pane
-(`Pane::watched()`: the active window, the current tab, the focused pane); #XM0T. Working, running,
-subagents and a suggested command are glyphs only (see "Pane types, pane states and remote
-sessions"). Each entry carries the pane's session token, so clicking it
+(`Pane::watched()`: the active window, the current tab, the focused pane); #XM0T. Working, running
+and subagents are the live marks (a breathing glyph, its word, the tab's dot — see "Pane types,
+pane states and remote sessions"); a suggested command is a glyph only. Each entry carries the
+pane's session token, so clicking it
 calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
 whatever window it now lives.
 
@@ -415,15 +448,21 @@ nothing is re-run.
 
 The prompt box's Up/Down history used to live in the `RichEditor` and die with the pane (owner
 report, 2026-09-18: "conversation history isnt persisting on exit and re-open. i cant do up arrows
-to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt-history.txt`
-(0600, in the 0700 directory `windows.json` is in), `relay::prompthistory` in
-`src/PromptHistory.h`.
+to see what i did before"). It first became one shared file, which the owner then corrected
+(2026-09-19: "the up/down history seems to be getting commands from other panes, not just mine" —
+"i want pane histories for up/down"). It is now one file per pane:
+`$XDG_DATA_HOME/relay/state/prompt-history/<id>.txt` (0600, in a 0700 tree beside `windows.json`),
+`relay::prompthistory` in `src/PromptHistory.h`.
 
-- **One history per person**, not one per pane, like a shell's. Every prompt box reads the same
-  file, so a new pane opens with what was typed in the pane beside it, and a browse that starts in
-  an open box first re-reads the file (`RichEditor::refreshHistory()`, on the Up that leaves the
-  draft) to take in what the other panes have added since. The file is only re-read when its size
-  or mtime has changed, so an idle box does no work.
+- **One history per pane.** The file is keyed by the pane's layout id — the same `scrollback` id
+  that names its saved terminal text (`src/WindowState.h`) — so Up and Down walk only what was
+  typed at that pane: the pane beside it has its own file, and a pane opened now starts empty. The
+  id survives a restart (the pane is restored with it) and a close-and-reopen ("restore last
+  closed" carries the node, id and all), which is what keeps the history the pane's own while
+  still outliving it. A browse that starts re-reads the pane's file first
+  (`RichEditor::refreshHistory()`, on the Up that leaves the draft), which is how a prompt written
+  at the door by a paired phone is there; the file is only re-read when its size or mtime has
+  changed, so an idle box does no work.
 - **Appended as it is submitted**, never on the way out: one O_APPEND write per line, so a Relay
   that is killed rather than quit loses nothing and two Relays running at once interleave their
   lines instead of overwriting each other. The whole file is rewritten only to trim it, once it
@@ -436,16 +475,22 @@ to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt
   enters the composer's document at all — it is typed in the separate masked field.
 - **A line typed away from the desktop counts too** (owner, 2026-09-18: "these should always be
   saved"). `Pane::submitRemote()` writes a prompt from a paired phone, tablet or guest browser
-  straight to the file — before it is routed, so one that bounces off an unconfigured agent is
-  still recallable, and never through the composer, whose draft and browse position belong to
-  whoever is at the desk. A remote *shell* command was already kept, by the same path as a local
+  straight to that pane's file — before it is routed, so one that bounces off an unconfigured
+  agent is still recallable, and never through the composer, whose draft and browse position
+  belong to whoever is at the desk. It is recalled in the pane it was sent to. A remote *shell* command was already kept, by the same path as a local
   one. `append()` stores a line identical to the one already at the end only once, which is what
   keeps the routed case (written at the door, then remembered again when the command runs) to a
   single entry — a prompt box can only dedupe against its own last line.
-- **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms, deletes
-  the file and calls `RichEditor::forgetHistory()`, which drops the copy every open prompt box
-  holds — including one part-way through a browse, which would otherwise keep offering what was
-  just forgotten. Text already in a box is left alone: it is the person's now.
+- **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms,
+  removes the whole per-pane directory (and the pre-2026-09-19 shared file, should one be left)
+  and calls `RichEditor::forgetAllHistory()`, which drops the copy every open prompt box holds —
+  including one part-way through a browse, which would otherwise keep offering what was just
+  forgotten. Text already in a box is left alone: it is the person's now.
+- **Bounded like the scrollback store.** Each pane's file is trimmed to its newest 1,000 entries
+  once it passes 512 KiB, and files whose pane is gone for good are pruned whenever the window
+  layout is written — the saved layout and the recently-closed list are the ids worth keeping,
+  the same list that prunes `state/scrollback/`. "Start a fresh window set" drops the store with
+  the layout: without the layout, no pane is coming back to claim its file.
 
 ## 4. Keyboard: Keymap, presets, palette
 
@@ -482,7 +527,7 @@ no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), clicking into another pane, mouse model/effort/mode pickers, clicking
-the directory line (`@`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
+the directory line (`@`), the palette's Update action (→ `/update`, `update.palette`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
 drags, the first `relay://` link, a click on the pane's ⓘ button (→ `agent.info`, Alt+I; → `/status` only while nothing is bound), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
@@ -1243,7 +1288,8 @@ tool call, capped tool output, Relay-run terminal command and captured command o
 mirrored into an external-content FTS5 table by triggers.
 
 The index is a **cache**, never the source of truth: `SessionStore.save` refreshes a session's rows
-on every autosave, `reconcile()` (run once per worker, on its first conversation command) picks up
+on every autosave — including the throttled mid-turn ones, so a conversation being had is already
+searchable — `reconcile()` (run once per worker, on its first conversation command) picks up
 files the index missed and drops rows whose file is gone, and `index_rebuild` recreates everything
 from the session JSON. A corrupt database is deleted and recreated, in the constructor and again if
 SQLite reports corruption mid-query; a v1 database is migrated in place to v2 (subagent threads),
@@ -1382,9 +1428,12 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the attempts run out. Every caller of `complete()` inherits it — pane turns, side calls, the key
   test. The hosted gateway decides from its own error body (a rate limit is waited out until its
   window reopens; a spent allowance is never waited out), and a local model server is excluded:
-  its 5xx are deterministic and its loading 503 has its own fixed wait.
+  its 5xx are deterministic and its loading 503 has its own fixed wait. A provider that still
+  fails a step hands the turn to another one (`agent.py` `_begin_failover`, card #G9VE): the same
+  tier's model on the next keyed preset, then Relay Free, at most two, for that turn only — the
+  pane keeps the model the user chose. Options › Models can turn it off (`agent/failover`).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
-  `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
+  `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator, the hosted gateway or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
   30 s socket timeout. Cancel closes the response from another thread.
 - Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's
@@ -1514,7 +1563,7 @@ prepared, `tool_started` carries a preview, and it executes immediately.
 | `edit_file` | replaces one exact string in an existing file (`old_string` → `new_string`, `replace_all` for every occurrence); refuses a file that does not exist, a string it cannot find, and one that occurs more than once without `replace_all`; same guards, SHA-256 recheck, atomic replace and checkpoint undo as `write_file`; neither is offered in plan mode |
 | `set_keybinding` | offered when the GUI sent a catalog (section 4) |
 | `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
-| `ask_user` | asks the user 1–4 multiple-choice questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). The pane prints the card in the amber "needs human" ink and goes to the `NeedsYou` state; numbers answer it, `0` skips, anything else is the user's own words. Never offered to a subagent, which cannot reach the user. Plan mode's prompt tells the planner to use it before `write_plan` rather than guess |
+| `ask_user` | asks the user 1–4 multiple-choice questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). The pane prints the card in the amber "needs human" ink and goes to the `NeedsYou` state; numbers answer it, `0` skips, anything else is the user's own words. Offered in plan mode only — a spec costs its tokens every turn, and a build turn that needs the user ends on a question instead — and never to a subagent, which cannot reach the user. Plan mode's prompt tells the planner to use it before `write_plan` rather than guess |
 
 File tools accept absolute paths and `..`, but every path is resolved and must land
 inside the workspace. Symlinks anywhere in the workspace part of the path, paths that
@@ -1759,7 +1808,7 @@ highlighted row (runs an action, flips a toggle, opens a choice, focuses a field
 ← → switch Options tabs while the search is empty, Esc clears the search and then closes; Esc
 in a control goes back to the search first. What was taken from the reference apps is written at the
 top of `src/SettingsPane.h`: Warp's search-first sections with instant apply, Claude Code's Enter/Esc
-panel that returns to the prompt, opencode's one command list that carries the toggles too.
+panel that returns to the prompt, JetBrains' and VS Code's action list kept apart from settings.
 
 ## 13. Per-pane isolation
 

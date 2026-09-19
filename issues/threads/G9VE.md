@@ -6,3 +6,24 @@ Which providers may a failing turn fall over to? My recommendation: only ones al
 
 <!-- relay:entry 20260919T050242Z-2q author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/184b22cd9a934409978320abb17637a1 -->
 - ✦ agent updated this card · waiting_on: (unset) → owner
+
+<!-- relay:entry 20260919T054939Z-er author=agent kind=decision model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+"yes exactly: other keyed presets from the same tier (main / flash), then Relay Free. this can be disabled in the models options page" — pane 1, 2026-09-19.
+
+<!-- relay:entry 20260919T054948Z-dd author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent updated this card · waiting_on: owner → (unset)
+
+<!-- relay:entry 20260919T054956Z-e0 author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260919T054959Z-rt author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent moved this card · Ready → In progress · Owner answered the candidate question; building it now.
+
+<!-- relay:entry 20260919T055415Z-a8 author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent updated this card · appended to `## Tasks`
+
+<!-- relay:entry 20260919T055420Z-bx author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent updated this card · appended to `## QA checklist`
+
+<!-- relay:entry 20260919T055426Z-bv author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
+- ✦ agent moved this card · In progress → Needs QA (LLM) · Implemented on the exact tree (build + backend tests green); checklist and evidence on the card. · evidence docs/qa_evidence/2026-09-19-provider-failover/

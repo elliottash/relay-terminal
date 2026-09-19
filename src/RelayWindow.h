@@ -20,6 +20,7 @@
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Projects.h"         // which project a tab is attached to, and the registry of known ones
+#include "ProjectInit.h"      // when "Initialize a project … here?" is asked, and by which trigger
 #include "Hints.h"
 #include "Notifications.h"
 #include "ScreenPrompt.h"
@@ -30,6 +31,7 @@
 #include "SshConfig.h"
 #include "TurnTranscript.h"
 #include "SettingsPane.h"
+#include "Isolation.h"        // the per-pane memory limits this page edits
 #include "LocalModelsSettings.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -59,6 +61,7 @@
 #include <QMap>
 #include <QSet>
 #include <QAbstractItemView>
+#include <QProcess>
 #include <QAbstractScrollArea>
 #include <QAction>
 #include <QApplication>
@@ -222,6 +225,13 @@ public:
         return m_projects;
     }
 
+    // "Initialize a project and create a Switchboard here?", raised or answered "Not now" for
+    // these projects (normalized paths) since Relay started (protocol 19.12). A no goes in the
+    // registry above and outlives the process; this outlives nothing, which is the difference
+    // between "no" and "not now". It is the whole process's, not one window's: the same project
+    // open in two windows is asked about once.
+    QSet<QString> &initSnoozed() { return m_initSnoozed; }
+
     // ----- saved window layout: "reopen where I left off" (src/WindowState.h) -------------------
     // Relay keeps one layout file per user and rewrites it, debounced, whenever the windows, tabs,
     // panes, directories or models change, and once more when the last window goes away. A crash
@@ -261,6 +271,7 @@ private:
     bool m_cleanShell = false;
     relay::projects::Registry m_projects;   // the known-projects file, loaded on first use
     bool m_projectsLoaded = false;
+    QSet<QString> m_initSnoozed;            // asked, or "Not now", since this Relay started
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_closedWatchers;
@@ -999,6 +1010,10 @@ private:
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) openShortcutsTab();
         else if (id == QStringLiteral("app.settings")) toggleSettingsPane(false);
+        else if (id == QStringLiteral("app.update")) {
+            updateApp();
+            hint(QStringLiteral("update.palette"), QStringLiteral("Next time: type /update in any prompt box"));
+        }
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -1644,6 +1659,14 @@ private:
         }
         models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
                                  QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
+        {
+            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a working provider"),
+                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on another "
+                                                                 "provider with a stored key and then Relay Free — that turn only. "
+                                                                 "The pane keeps the model you chose"), true);
+            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
+            models.rows << failover;
+        }
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
                                                 "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
@@ -1683,6 +1706,48 @@ private:
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
+        // Per-pane isolation (src/Isolation.h): the caps scale with the machine (agent RAM/16
+        // clamped to 2–8G, shell RAM/2 clamped to 4–16G), and these rows write the same
+        // [isolation] keys relay.conf takes, so a manual edit and this page agree.
+        terminal.rows << headingRow(QStringLiteral("Memory limits"));
+        terminal.rows << toggleRow(QStringLiteral("isolation/enabled"),
+                                   QStringLiteral("Per-pane memory limits"),
+                                   QStringLiteral("Each pane's shell and agent run in their own systemd scope, so a runaway "
+                                                   "command stops inside its pane; applies to new panes"), true);
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
+                                              QStringLiteral("Agent memory limit"),
+                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("2G"), QStringLiteral("4G"), QStringLiteral("8G"),
+                                               QStringLiteral("16G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::agentDefault()),
+                                               QStringLiteral("2 GiB"), QStringLiteral("4 GiB"), QStringLiteral("8 GiB"),
+                                               QStringLiteral("16 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
+            });
+            row.aliases = QStringLiteral("oom memory isolation worker limit kill");
+            terminal.rows << row;
+        }
+        {
+            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
+                                              QStringLiteral("Shell memory limit"),
+                                              QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
+                                              {QStringLiteral("auto"), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
+                                               QStringLiteral("32G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::shellDefault()),
+                                               QStringLiteral("4 GiB"), QStringLiteral("8 GiB"), QStringLiteral("16 GiB"),
+                                               QStringLiteral("32 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/shell_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
+            });
+            row.aliases = QStringLiteral("oom memory isolation shell limit kill");
+            terminal.rows << row;
+        }
         // SSH sessions (#S5SH, docs/SSH-AND-MOSH.md): the wrapper is set up when a pane's shell
         // starts, so the mode applies to new panes; the host lists are read at each login.
         terminal.rows << headingRow(QStringLiteral("SSH"));
@@ -2300,6 +2365,25 @@ private:
             detach.run = [this] { detachTab(m_tabs->currentWidget()); };
             items << detach;
         }
+        // The one passive entry point to "Initialize a project and create a Switchboard here?"
+        // (protocol 19.12). Offered only while the active pane is standing in a project that has
+        // no board: with a board there is nothing to create, and outside a project there is
+        // nothing to create it in. Choosing it here is the slow path, so it teaches `/init`.
+        if (const QString candidate = candidateProject();
+            !candidate.isEmpty() && relay::projects::boardDirOf(candidate).isEmpty()) {
+            PaletteItem init;
+            init.key = QStringLiteral("project.init"); init.section = panes;
+            init.label = QStringLiteral("Initialize a project here…");
+            init.detail = QStringLiteral("%1 · asks first, then creates %2/")
+                              .arg(candidate, relay::projectinit::boardFolderFor(candidate));
+            init.aliases = QStringLiteral("switchboard board project init cards start setup");
+            init.run = [this] {
+                if (!m_active) return;
+                m_active->askProjectInit(relay::projectinit::Trigger::InitCommand);
+                hint(QStringLiteral("init.palette"), QStringLiteral("Next time: type /init in any prompt box"));
+            };
+            items << init;
+        }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
@@ -2408,21 +2492,20 @@ private:
             };
             items << hints;
             // The prompt box's Up/Down history outlives a restart (src/PromptHistory.h), so there
-            // has to be a way to forget it. The file goes, and so does the copy every open prompt
-            // box holds — including one part-way through a browse.
+            // has to be a way to forget it. Every pane's file goes, and so does the copy every
+            // open prompt box holds — including one part-way through a browse.
             PaletteItem history; history.key = QStringLiteral("history.clear"); history.section = app;
             history.label = QStringLiteral("Clear prompt history");
             history.detail = QStringLiteral("Forget every line Up recalls, in every pane");
             history.aliases = QStringLiteral("prompt history up arrow forget clear erase commands prompts");
             history.run = [this] {
-                const QString path = relay::prompthistory::defaultPath();
                 if (QMessageBox::question(this, QStringLiteral("Clear prompt history"),
                                           QStringLiteral("Forget every line the prompt box recalls with Up?"),
                                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                     return;
                 QString error;
-                if (!relay::prompthistory::clear(path, &error)) { notice(error, 8000); return; }
-                RichEditor::forgetHistory(path);
+                if (!relay::prompthistory::clearAll(&error)) { notice(error, 8000); return; }
+                RichEditor::forgetAllHistory();
                 notice(QStringLiteral("Prompt history cleared."), 4000);
             };
             items << history;
@@ -3120,6 +3203,67 @@ public:
         });
     }
 
+    // /update and the palette's Update action: scripts/relay-update.py fetches the newest GitHub
+    // release's .deb for this distribution and architecture, checks it against the release's
+    // SHA256SUMS and installs it with pkexec (the password dialog is polkit's, never a prompt the
+    // app could read). Every line it prints becomes the window's notice. When it finishes with the
+    // UPDATED marker, Relay restarts itself: the new binary is started first, then the windows
+    // close through their ordinary path so layout and scrollback are saved for it to reopen.
+    void updateApp() {
+        if (m_updateProcess) { notice(QStringLiteral("An update is already running.")); return; }
+        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        const QString script = dataRoot() + QStringLiteral("/scripts/relay-update.py");
+        if (python.isEmpty() || !QFileInfo::exists(script)) {
+            notice(QStringLiteral("The updater is missing: %1").arg(script));
+            return;
+        }
+        auto *process = new QProcess(this);
+        m_updateProcess = process;
+        m_updateOutput.clear();
+        m_updateInstalled = false;
+        connect(process, &QProcess::readyReadStandardOutput, this, [this, process] {
+            m_updateOutput += process->readAllStandardOutput();
+            int cut;
+            while ((cut = m_updateOutput.indexOf('\n')) >= 0) {   // whole lines only; the rest waits for its newline
+                const QString line = QString::fromUtf8(m_updateOutput.left(cut)).trimmed();
+                m_updateOutput.remove(0, cut + 1);
+                if (line.startsWith(QStringLiteral("UPDATED ")))
+                    m_updateInstalled = true;
+                else if (!line.isEmpty())
+                    notice(line, 20000);
+            }
+        });
+        connect(process, &QProcess::readyReadStandardError, this, [this, process] {
+            // The script prints its errors as notice lines; what lands here is the unexpected
+            // (a traceback), better shown than swallowed.
+            const QString text = QString::fromUtf8(process->readAllStandardError()).simplified();
+            if (!text.isEmpty()) notice(text, 20000);
+        });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) notice(QStringLiteral("The updater could not start."));
+            m_updateProcess = nullptr;
+            process->deleteLater();
+        });
+        connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, process](int code, QProcess::ExitStatus) {
+            m_updateProcess = nullptr;
+            process->deleteLater();
+            if (code != 0 || !m_updateInstalled) return;
+            notice(QStringLiteral("Restarting Relay…"), 4000);
+            // The running process keeps its inode, so the path can be started before it closes;
+            // the arguments this instance was given (a --workspace, say) are the ones to keep.
+            QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                    QCoreApplication::arguments().mid(1));
+            for (QWidget *widget : QApplication::topLevelWidgets())
+                if (auto *window = dynamic_cast<RelayWindow *>(widget)) {
+                    window->m_confirmedClose = true;   // /update was asked for; no close dialog on top of it
+                    window->close();
+                }
+        });
+        process->start(python, {script, QStringLiteral("install")});
+        notice(QStringLiteral("Checking GitHub for the latest Relay…"), 20000);
+    }
+
     void openSharedPaneDialog() {
         QPointer<RelayWindow> self(this);
         relay::RemotePaneDialog::open(this, [self](relay::RemotePane *view) {
@@ -3220,8 +3364,13 @@ public:
     // or, pressed on it, go back to the last terminal pane.
     void toggleBoardPane() {
         QWidget *page = m_tabs->currentWidget();
+        // Pressed while the Switchboard is the pane in focus: close it through the pane's own
+        // close path (closeToolPane — the title-bar button and Esc use it too). It used to hand
+        // focus back and leave the pane open.
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board()) {
-            if (m_active) { setActiveLeaf(m_active); focusLeaf(m_active); }
+            m_boardClosedByToggle = true;
+            closeToolPane(tool);
+            m_boardClosedByToggle = false;
             return;
         }
         const QString workspace = boardWorkspace();
@@ -3246,9 +3395,11 @@ public:
                 return;
             }
         if (workspace.isEmpty()) {
-            // Nothing is created here and nothing is offered: a project with no Switchboard yet
-            // gets one quiet line, and the "Initialize a project and create a Switchboard here?"
-            // question is a later stage's (protocol 19.12).
+            // Trigger (3) of the init question: reaching for the Switchboard in a project that has
+            // none is the clearest moment to offer one (protocol 19.12). Still nothing is created
+            // before the yes, and a project the user has already declined gets the quiet line below
+            // instead — src/ProjectInit.h decides, not this key.
+            if (m_active && m_active->askProjectInit(relay::projectinit::Trigger::Switchboard)) return;
             const QString candidate = candidateProject();
             statusBar()->showMessage(
                 from.isEmpty()
@@ -3692,7 +3843,46 @@ private:
             w->attachTab(page, candidate, reason);
             return w->tabProject(page);
         };
+        // ----- the init question (protocol 19.12): facts in, the pane decides ------------------
+        // The rules are in src/ProjectInit.h and the pixels are in the pane; the window answers
+        // only what it knows. An attached tab reports its own project rather than the pane's
+        // candidate, so a pane that has `cd`-ed into another checkout never raises a question
+        // whose yes would silently re-point the tab (#JN7X's rule, unchanged).
+        pane->onProjectInitSituation = [guard]() -> relay::projectinit::Situation {
+            relay::projectinit::Situation situation;
+            auto *w = windowOf(guard);
+            if (!w) return situation;
+            const QString attached = w->tabProject(w->pageOf(guard));
+            situation.project = attached.isEmpty() ? relay::projects::candidateFor(guard->cwd()) : attached;
+            situation.cwd = guard->cwd();
+            if (situation.project.isEmpty()) return situation;
+            situation.hasBoard = !relay::projects::boardDirOf(situation.project).isEmpty();
+            situation.declined = w->m_manager->projects().isDeclined(situation.project);
+            situation.snoozed = w->m_manager->initSnoozed().contains(relay::projects::normalize(situation.project));
+            // A Pane is always the desktop's own; a guest sees somebody else's through
+            // relay::RemotePane, which has no worker of its own and never draws this question. The
+            // flag is answered all the same so the rule is stated where the question is raised.
+            situation.remote = false;
+            return situation;
+        };
+        pane->onProjectAttach = [guard](const QString &project, const QString &reason) {
+            if (auto *w = windowOf(guard)) w->attachTab(w->pageOf(guard), project, reason);
+        };
+        pane->onProjectInitEvent = [guard](const QString &project, const QString &what) {
+            auto *w = windowOf(guard);
+            if (!w || project.isEmpty()) return;
+            // "Not now" is not a no: it silences trigger (1) — the agent prompt — for the rest of
+            // this Relay session, and every explicit act asks again. Raising the question counts
+            // the same way, so one project is asked about once per session however many panes
+            // stand in it. A no is written to disk instead and nothing asks again, in any tab,
+            // after any restart; `/init` is the one thing that clears it.
+            if (what != QStringLiteral("reconsider"))
+                w->m_manager->initSnoozed().insert(relay::projects::normalize(project));
+            if (what == QStringLiteral("no")) w->m_manager->projects().decline(project);
+            else if (what == QStringLiteral("reconsider")) w->m_manager->projects().undecline(project);
+        };
         pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
+        pane->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
@@ -4777,6 +4967,10 @@ private:
         namespace ps = relay::panestatus;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
+        // The tab's live mark breathes on the poll's own beat (card #V8KT); a still desktop (a
+        // cursor flash time of 0) draws it at rest.
+        const bool animate = QApplication::cursorFlashTime() > 0;
+        if (animate) ++m_statusPulse;
         QSet<QWidget *> pages;
         bool relabel = false;
         QHash<QString, QString> liveUsage;   // session id → tag, for the Sessions pane (#D03W)
@@ -4809,6 +5003,9 @@ private:
                 const QString remoteLine = pane->remoteCommandLine();
                 const bool shared = pane->sharedWithPhone();
                 chrome->setStatus(state, remoteLine, shared);
+                // How many subagents this pane's agent has running (card #YMSR): the same count
+                // the state above was resolved from, so the badge and the glyph cannot disagree.
+                chrome->setSubagents(facts.liveSubagents);
                 // Shared with how many people, and who is driving when it is not the owner.
                 const relay::sharing::ChipState chip =
                     relay::RemoteShare::instance().sharingModel().chip(pane->sessionToken(), shared);
@@ -4831,11 +5028,17 @@ private:
                 relabel = true;
             }
             const ps::State top = ps::mostUrgent(states);
-            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6").arg(terminal).arg(int(top)).arg(remote)
+            // What is live in the tab whatever its icon is showing: a news icon (done, needs you)
+            // must not hide that work is happening in a sibling pane (card #V8KT).
+            const ps::State live = ps::liveMarker(states);
+            const int phase = animate && live != ps::State::Idle ? m_statusPulse : -1;
+            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8").arg(terminal).arg(int(top)).arg(remote)
+                                    .arg(int(live)).arg(phase)
                                     .arg(int(firstType.glyph)).arg(firstType.ink.name(), relay::theme::activeThemeId());
             if (m_tabIconKey.value(page) == key) continue;
             m_tabIconKey.insert(page, key);
-            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink, devicePixelRatioF()));
+            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink,
+                                                          devicePixelRatioF(), live, phase));
         }
         for (auto it = m_tabIconKey.begin(); it != m_tabIconKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
@@ -5217,6 +5420,15 @@ public:
     void closePane(QWidget *pane, bool record) {
         QWidget *page = pageOf(pane);
         if (!page) return;
+        // The Switchboard's own key (Ctrl+Shift+S) closes it too; a board pane closed any other
+        // way — the pane's ×, Ctrl+W — is the slow path that hint names, once.
+        if (!m_boardClosedByToggle)
+            if (auto *closedBoard = dynamic_cast<ToolPane *>(pane); closedBoard && closedBoard->board()) {
+                const QString boardKeys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
+                if (!boardKeys.isEmpty())
+                    hint(QStringLiteral("board.close"),
+                         QStringLiteral("Next time: %1 closes the Switchboard too").arg(boardKeys), 1);
+            }
         // Once per run, the first time something is closed: say how to get it back (owner, 2026-09-17).
         if (record) {
             static bool toldAboutRestore = false;
@@ -5368,9 +5580,17 @@ private:
     QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
     // One per Switchboard pane: "this pane has gone, release its worker if it was the last".
     QList<QMetaObject::Connection> m_boardWorkerHooks;
+    // /update: the one running updater (scripts/relay-update.py), its unread output and whether
+    // its final line was the UPDATED marker the restart waits for. One at a time.
+    QProcess *m_updateProcess = nullptr;
+    QByteArray m_updateOutput;
+    bool m_updateInstalled = false;
     QTabWidget *m_tabs = nullptr;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;
+    // True while toggleBoardPane is closing the Switchboard with its own key, so closePane does
+    // not hint that key to the person who has just used it.
+    bool m_boardClosedByToggle = false;
     QPointer<Pane> m_active;
     bool m_tabShareSyncQueued = false;   // syncTabShares is coalesced to one pass per event loop
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
@@ -5390,9 +5610,10 @@ private:
     QElapsedTimer m_beneathClock;
     QTimer m_beneathTimer;
     QPointer<QWidget> m_beneathPane, m_beneathAnchor;
-    // Pane state glyphs and tab icons (#XM0T): the poll, and each tab's last icon so it is only
-    // repainted when what it shows changes.
+    // Pane state glyphs and tab icons (#XM0T, #V8KT): the poll, the live mark's step on that
+    // poll's beat, and each tab's last icon so it is only repainted when what it shows changes.
     QTimer m_statusTimer;
+    int m_statusPulse = 0;
     QHash<QWidget *, QString> m_tabIconKey;
     QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
     bool m_fedLiveUsage = false;               // ... and whether any session tag was pushed last poll

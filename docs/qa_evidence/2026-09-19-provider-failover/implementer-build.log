@@ -1,0 +1,437 @@
+[0/2] Re-checking globbed directories...
+[1/435] Automatic MOC for target relay-windowstate
+[2/435] Automatic MOC for target relay-settings
+[3/435] Automatic MOC for target relay-prompthistory
+[4/435] Automatic MOC for target relay-backends
+[5/435] Automatic MOC for target relay-input
+[6/435] Automatic MOC for target relay-slash
+[7/435] Automatic MOC for target relay-panes
+[8/435] Automatic MOC for target relay-runtimedirs
+[9/435] Automatic MOC for target relay-projects
+[10/435] Automatic MOC for target relay-completion
+[11/435] Automatic MOC for target relay-modelsettings
+[12/435] Automatic MOC for target relay-titles
+[13/435] Automatic MOC for target relay-queuenav
+[14/435] Automatic MOC for target relay-images
+[15/435] Automatic MOC for target relay-panestatus
+[16/435] Automatic MOC for target relay-panestate
+[17/435] Automatic MOC for target relay-logging
+[18/435] Building CXX object CMakeFiles/relay-prompthistory.dir/relay-prompthistory_autogen/mocs_compilation.cpp.o
+[19/435] Automatic MOC for target relay-remotesession
+[20/435] Automatic MOC for target relay-hints
+[21/435] Automatic MOC for target relay-paneusage
+[22/435] Automatic MOC for target relay-aliases
+[23/435] Building CXX object CMakeFiles/relay-modelsettings.dir/relay-modelsettings_autogen/mocs_compilation.cpp.o
+[24/435] Automatic MOC for target relay-outputlinks
+[25/435] Building CXX object CMakeFiles/relay-projects.dir/relay-projects_autogen/mocs_compilation.cpp.o
+[26/435] Automatic MOC for target relay-toollabel
+[27/435] Building CXX object CMakeFiles/relay-backends.dir/relay-backends_autogen/mocs_compilation.cpp.o
+[28/435] Automatic MOC for target relay-remotefiles
+[29/435] Automatic MOC for target relay-sshconfig
+[30/435] Automatic MOC for target relay-markdown
+[31/435] Building CXX object CMakeFiles/relay-settings.dir/relay-settings_autogen/mocs_compilation.cpp.o
+[32/435] Building CXX object CMakeFiles/relay-windowstate.dir/relay-windowstate_autogen/mocs_compilation.cpp.o
+[33/435] Building CXX object CMakeFiles/relay-runtimedirs.dir/relay-runtimedirs_autogen/mocs_compilation.cpp.o
+[34/435] Building CXX object CMakeFiles/relay-completion.dir/relay-completion_autogen/mocs_compilation.cpp.o
+[35/435] Automatic MOC for target relay-theme
+[36/435] Automatic MOC for target relay-sharing
+[37/435] Building CXX object CMakeFiles/relay-logging.dir/relay-logging_autogen/mocs_compilation.cpp.o
+[38/435] Building CXX object CMakeFiles/relay-input.dir/relay-input_autogen/mocs_compilation.cpp.o
+[39/435] Building CXX object CMakeFiles/relay-slash.dir/relay-slash_autogen/mocs_compilation.cpp.o
+[40/435] Automatic MOC for target relay-conversations
+[41/435] Building CXX object CMakeFiles/relay-queuenav.dir/relay-queuenav_autogen/mocs_compilation.cpp.o
+[42/435] Automatic MOC for target relay-voice
+[43/435] Building CXX object CMakeFiles/relay-panestate.dir/relay-panestate_autogen/mocs_compilation.cpp.o
+[44/435] Automatic MOC for target relay-notifications
+[45/435] Automatic MOC for target relay-fileindex
+[46/435] Automatic MOC for target relay-requests
+[47/435] Building CXX object CMakeFiles/relay-queuenav.dir/src/QueueNav.cpp.o
+[48/435] Building CXX object CMakeFiles/relay-completion.dir/src/Completion.cpp.o
+[49/435] Linking CXX static library librelay-completion.a
+[50/435] Linking CXX static library librelay-queuenav.a
+[51/435] Building CXX object CMakeFiles/relay-runtimedirs.dir/src/RuntimeDirs.cpp.o
+[52/435] Linking CXX static library librelay-runtimedirs.a
+[53/435] Building CXX object CMakeFiles/relay-panes.dir/relay-panes_autogen/mocs_compilation.cpp.o
+[54/435] Building CXX object CMakeFiles/relay-images.dir/relay-images_autogen/mocs_compilation.cpp.o
+[55/435] Building CXX object CMakeFiles/relay-input.dir/src/InputPolicy.cpp.o
+[56/435] Linking CXX static library librelay-input.a
+[57/435] Building CXX object CMakeFiles/relay-notifications.dir/src/Notifications.cpp.o
+[58/435] Building CXX object CMakeFiles/relay-titles.dir/relay-titles_autogen/mocs_compilation.cpp.o
+[59/435] Automatic MOC for target relay-screen
+[60/435] Building CXX object CMakeFiles/relay-prompthistory.dir/src/PromptHistory.cpp.o
+[61/435] Linking CXX static library librelay-prompthistory.a
+[62/435] Building CXX object CMakeFiles/relay-screen.dir/relay-screen_autogen/mocs_compilation.cpp.o
+[63/435] Building CXX object CMakeFiles/relay-notifications.dir/relay-notifications_autogen/mocs_compilation.cpp.o
+[64/435] Linking CXX static library librelay-notifications.a
+[65/435] Building CXX object CMakeFiles/relay-panestatus.dir/relay-panestatus_autogen/mocs_compilation.cpp.o
+[66/435] Automatic MOC for target relay-editor
+[67/435] Building CXX object CMakeFiles/relay-editor.dir/relay-editor_autogen/mocs_compilation.cpp.o
+[68/435] Building CXX object CMakeFiles/relay-fileindex.dir/relay-fileindex_autogen/mocs_compilation.cpp.o
+[69/435] Building CXX object CMakeFiles/relay-paneusage.dir/relay-paneusage_autogen/mocs_compilation.cpp.o
+[70/435] Building CXX object CMakeFiles/relay-backends.dir/src/TerminalBackends.cpp.o
+[71/435] Linking CXX static library librelay-backends.a
+[72/435] Building CXX object CMakeFiles/relay-remotesession.dir/relay-remotesession_autogen/mocs_compilation.cpp.o
+[73/435] Building CXX object CMakeFiles/relay-panestate.dir/src/PaneState.cpp.o
+[74/435] Linking CXX static library librelay-panestate.a
+[75/435] Building CXX object CMakeFiles/relay-fileindex.dir/src/FileIndex.cpp.o
+[76/435] Building CXX object CMakeFiles/relay-logging.dir/src/Logging.cpp.o
+[77/435] Building CXX object CMakeFiles/relay-hints.dir/relay-hints_autogen/mocs_compilation.cpp.o
+[78/435] Linking CXX static library librelay-fileindex.a
+[79/435] Linking CXX static library librelay-logging.a
+[80/435] Building CXX object CMakeFiles/relay-remotefiles.dir/relay-remotefiles_autogen/mocs_compilation.cpp.o
+[81/435] Building CXX object CMakeFiles/relay-slash.dir/src/SlashCommands.cpp.o
+[82/435] Building CXX object CMakeFiles/relay-sshconfig.dir/relay-sshconfig_autogen/mocs_compilation.cpp.o
+[83/435] Linking CXX static library librelay-slash.a
+[84/435] Building CXX object CMakeFiles/relay-outputlinks.dir/relay-outputlinks_autogen/mocs_compilation.cpp.o
+[85/435] Building CXX object CMakeFiles/relay-conversations.dir/relay-conversations_autogen/mocs_compilation.cpp.o
+[86/435] Building CXX object CMakeFiles/relay-markdown.dir/relay-markdown_autogen/mocs_compilation.cpp.o
+[87/435] Building CXX object CMakeFiles/relay-titles.dir/src/PaneTitles.cpp.o
+[88/435] Linking CXX static library librelay-titles.a
+[89/435] Building CXX object CMakeFiles/relay-windowstate.dir/src/WindowState.cpp.o
+[90/435] Building CXX object CMakeFiles/relay-screen.dir/src/ScreenPrompt.cpp.o
+[91/435] Building CXX object CMakeFiles/relay-aliases.dir/relay-aliases_autogen/mocs_compilation.cpp.o
+[92/435] Linking CXX static library librelay-screen.a
+[93/435] Building CXX object CMakeFiles/relay-hints.dir/src/Hints.cpp.o
+[94/435] Linking CXX static library librelay-hints.a
+[95/435] Building CXX object CMakeFiles/relay-panes.dir/src/PaneLayout.cpp.o
+[96/435] Linking CXX static library librelay-panes.a
+[97/435] Building CXX object CMakeFiles/relay-theme.dir/relay-theme_autogen/mocs_compilation.cpp.o
+[98/435] Building CXX object CMakeFiles/relay-projects.dir/src/Projects.cpp.o
+[99/435] Building CXX object CMakeFiles/relay-paneusage.dir/src/PaneUsage.cpp.o
+[100/435] Building CXX object CMakeFiles/relay-markdown.dir/src/WordWrap.cpp.o
+[101/435] Building CXX object CMakeFiles/relay-images.dir/src/Images.cpp.o
+[102/435] Linking CXX static library librelay-paneusage.a
+[103/435] Building CXX object CMakeFiles/relay-toollabel.dir/relay-toollabel_autogen/mocs_compilation.cpp.o
+[104/435] Linking CXX static library librelay-projects.a
+[105/435] Linking CXX static library librelay-images.a
+[106/435] Building CXX object CMakeFiles/relay-remotesession.dir/src/RemoteSession.cpp.o
+[107/435] Linking CXX static library librelay-remotesession.a
+[108/435] Building CXX object CMakeFiles/relay-sharing.dir/relay-sharing_autogen/mocs_compilation.cpp.o
+[109/435] Building CXX object CMakeFiles/relay-settings.dir/src/SettingsPane.cpp.o
+[110/435] Linking CXX static library librelay-settings.a
+[111/435] Automatic MOC for target relay-localmodels
+[112/435] Building CXX object CMakeFiles/relay-localmodels.dir/relay-localmodels_autogen/mocs_compilation.cpp.o
+[113/435] Building CXX object CMakeFiles/relay-aliases.dir/src/Aliases.cpp.o
+[114/435] Linking CXX static library librelay-aliases.a
+[115/435] Building CXX object CMakeFiles/relay-voice.dir/relay-voice_autogen/mocs_compilation.cpp.o
+[116/435] Building CXX object CMakeFiles/relay-markdown.dir/src/MarkdownAnsi.cpp.o
+[117/435] Linking CXX static library librelay-markdown.a
+[118/435] Automatic MOC for target relay-completion-tests
+[119/435] Building CXX object CMakeFiles/relay-completion-tests.dir/relay-completion-tests_autogen/mocs_compilation.cpp.o
+[120/435] Automatic MOC for target relay-prompthistory-tests
+[121/435] Automatic MOC for target relay-fileindex-tests
+[122/435] Building CXX object CMakeFiles/relay-prompthistory-tests.dir/relay-prompthistory-tests_autogen/mocs_compilation.cpp.o
+[123/435] Building CXX object CMakeFiles/relay-fileindex-tests.dir/relay-fileindex-tests_autogen/mocs_compilation.cpp.o
+[124/435] Building CXX object CMakeFiles/relay-voice.dir/src/Voice.cpp.o
+[125/435] Building CXX object CMakeFiles/relay-conversations.dir/src/SessionInfo.cpp.o
+[126/435] Building CXX object CMakeFiles/relay-windowstate.dir/src/ClosedStack.cpp.o
+[127/435] Linking CXX static library librelay-voice.a
+[128/435] Linking CXX static library librelay-windowstate.a
+[129/435] Building CXX object CMakeFiles/relay-remotefiles.dir/src/RemoteFiles.cpp.o
+[130/435] Building CXX object CMakeFiles/relay-modelsettings.dir/src/ModelSettings.cpp.o
+[131/435] Linking CXX static library librelay-remotefiles.a
+[132/435] Linking CXX static library librelay-modelsettings.a
+[133/435] Automatic MOC for target relay-closedlist
+[134/435] Building CXX object CMakeFiles/relay-sshconfig.dir/src/SshConfig.cpp.o
+[135/435] Building CXX object CMakeFiles/relay-closedlist.dir/relay-closedlist_autogen/mocs_compilation.cpp.o
+[136/435] Linking CXX static library librelay-sshconfig.a
+[137/435] Automatic MOC for target relay-filepanes
+[138/435] Automatic MOC for target relay-runtimedirs-tests
+[139/435] Building CXX object CMakeFiles/relay-filepanes.dir/relay-filepanes_autogen/mocs_compilation.cpp.o
+[140/435] Building CXX object CMakeFiles/relay-requests.dir/relay-requests_autogen/mocs_compilation.cpp.o
+[141/435] Building CXX object CMakeFiles/relay-outputlinks.dir/src/OutputLinks.cpp.o
+[142/435] Building CXX object CMakeFiles/relay-runtimedirs-tests.dir/relay-runtimedirs-tests_autogen/mocs_compilation.cpp.o
+[143/435] Linking CXX static library librelay-outputlinks.a
+[144/435] Building CXX object CMakeFiles/relay-editor.dir/src/RichEditor.cpp.o
+[145/435] Automatic MOC for target relay-slash-tests
+[146/435] Linking CXX static library librelay-editor.a
+[147/435] Building CXX object CMakeFiles/relay-slash-tests.dir/relay-slash-tests_autogen/mocs_compilation.cpp.o
+[148/435] Automatic MOC for target relay-modelsettings-tests
+[149/435] Building CXX object CMakeFiles/relay-modelsettings-tests.dir/relay-modelsettings-tests_autogen/mocs_compilation.cpp.o
+[150/435] Automatic MOC for target relay-closedstack-tests
+[151/435] Automatic MOC for target relay-windowstate-tests
+[152/435] Building CXX object CMakeFiles/relay-closedstack-tests.dir/relay-closedstack-tests_autogen/mocs_compilation.cpp.o
+[153/435] Building CXX object CMakeFiles/relay-windowstate-tests.dir/relay-windowstate-tests_autogen/mocs_compilation.cpp.o
+[154/435] Automatic MOC for target relay-input-tests
+[155/435] Automatic MOC for target relay-editor-tests
+[156/435] Building CXX object CMakeFiles/relay-input-tests.dir/relay-input-tests_autogen/mocs_compilation.cpp.o
+[157/435] Building CXX object CMakeFiles/relay-toollabel.dir/src/ToolLabel.cpp.o
+[158/435] Building CXX object CMakeFiles/relay-editor-tests.dir/relay-editor-tests_autogen/mocs_compilation.cpp.o
+[159/435] Linking CXX static library librelay-toollabel.a
+[160/435] Automatic MOC for target relay-board
+[161/435] Building CXX object CMakeFiles/relay-board.dir/relay-board_autogen/mocs_compilation.cpp.o
+[162/435] Building CXX object CMakeFiles/relay-panestatus.dir/src/PaneStatus.cpp.o
+[163/435] Building CXX object CMakeFiles/relay-prompthistory-tests.dir/tests/prompthistory_test.cpp.o
+[164/435] Building CXX object CMakeFiles/relay-fileindex-tests.dir/tests/fileindex_test.cpp.o
+[165/435] Building CXX object CMakeFiles/relay-completion-tests.dir/tests/completion_test.cpp.o
+[166/435] Linking CXX static library librelay-panestatus.a
+[167/435] Linking CXX executable relay-prompthistory-tests
+[168/435] Building CXX object CMakeFiles/relay-theme.dir/src/ThemeFile.cpp.o
+[169/435] Linking CXX static library librelay-theme.a
+[170/435] Linking CXX executable relay-completion-tests
+[171/435] Linking CXX executable relay-fileindex-tests
+[172/435] Building CXX object CMakeFiles/relay-requests.dir/src/RequestsPanel.cpp.o
+[173/435] Building CXX object CMakeFiles/relay-board.dir/src/BoardWorkspace.cpp.o
+[174/435] Building CXX object CMakeFiles/relay-closedlist.dir/src/ClosedList.cpp.o
+[175/435] Linking CXX static library librelay-closedlist.a
+[176/435] Automatic MOC for target relay-highlight
+[177/435] Automatic MOC for target relay-screen-tests
+[178/435] Building CXX object CMakeFiles/relay-slash-tests.dir/tests/slashcommands_test.cpp.o
+[179/435] Building CXX object CMakeFiles/relay-runtimedirs-tests.dir/tests/runtimedirs_test.cpp.o
+[180/435] Automatic MOC for target relay-closedlist-tests
+[181/435] Automatic MOC for target relay-logging-tests
+[182/435] Building CXX object CMakeFiles/relay-closedlist-tests.dir/relay-closedlist-tests_autogen/mocs_compilation.cpp.o
+[183/435] Building CXX object CMakeFiles/relay-sharing.dir/src/SharingPane.cpp.o
+[184/435] Linking CXX executable relay-runtimedirs-tests
+[185/435] Automatic MOC for target relay-subagents
+[186/435] Linking CXX executable relay-slash-tests
+[187/435] Linking CXX static library librelay-sharing.a
+[188/435] Building CXX object CMakeFiles/relay-screen-tests.dir/relay-screen-tests_autogen/mocs_compilation.cpp.o
+[189/435] Building CXX object CMakeFiles/relay-board.dir/src/BoardWorker.cpp.o
+[190/435] Building CXX object CMakeFiles/relay-editor-tests.dir/tests/editor_test.cpp.o
+[191/435] Building CXX object CMakeFiles/relay-input-tests.dir/tests/inputpolicy_test.cpp.o
+[192/435] Building CXX object CMakeFiles/relay-conversations.dir/src/Conversations.cpp.o
+[193/435] Building CXX object CMakeFiles/relay-localmodels.dir/src/LocalModelsSettings.cpp.o
+[194/435] Linking CXX executable relay-editor-tests
+[195/435] Linking CXX static library librelay-localmodels.a
+[196/435] Linking CXX executable relay-input-tests
+[197/435] Linking CXX static library librelay-conversations.a
+[198/435] Building CXX object CMakeFiles/relay-logging-tests.dir/relay-logging-tests_autogen/mocs_compilation.cpp.o
+[199/435] Automatic MOC for target relay-settings-tests
+[200/435] Building CXX object CMakeFiles/relay-settings-tests.dir/relay-settings-tests_autogen/mocs_compilation.cpp.o
+[201/435] Building CXX object CMakeFiles/relay-highlight.dir/relay-highlight_autogen/mocs_compilation.cpp.o
+[202/435] Building CXX object CMakeFiles/relay-highlight.dir/src/ShellHighlighter.cpp.o
+[203/435] Automatic MOC for target relay-sharing-tests
+[204/435] Automatic MOC for target relay-conversations-tests
+[205/435] Building CXX object CMakeFiles/relay-sharing-tests.dir/relay-sharing-tests_autogen/mocs_compilation.cpp.o
+[206/435] Building CXX object CMakeFiles/relay-conversations-tests.dir/relay-conversations-tests_autogen/mocs_compilation.cpp.o
+[207/435] Building CXX object CMakeFiles/relay-requests.dir/src/RequestLedger.cpp.o
+[208/435] Automatic MOC for target relay-queuenav-tests
+[209/435] Linking CXX static library librelay-requests.a
+[210/435] Building CXX object CMakeFiles/relay-queuenav-tests.dir/relay-queuenav-tests_autogen/mocs_compilation.cpp.o
+[211/435] Automatic MOC for target relay-panestate-tests
+[212/435] Building CXX object CMakeFiles/relay-panestate-tests.dir/relay-panestate-tests_autogen/mocs_compilation.cpp.o
+[213/435] Building CXX object CMakeFiles/relay-subagents.dir/relay-subagents_autogen/mocs_compilation.cpp.o
+[214/435] Automatic MOC for target relay-requests-tests
+[215/435] Building CXX object CMakeFiles/relay-requests-tests.dir/relay-requests-tests_autogen/mocs_compilation.cpp.o
+[216/435] Building CXX object CMakeFiles/relay-screen-tests.dir/tests/screenprompt_test.cpp.o
+[217/435] Automatic MOC for target relay-panes-tests
+[218/435] Building CXX object CMakeFiles/relay-panes-tests.dir/relay-panes-tests_autogen/mocs_compilation.cpp.o
+[219/435] Linking CXX executable relay-screen-tests
+[220/435] Automatic MOC for target relay-outputlinks-tests
+[221/435] Building CXX object CMakeFiles/relay-outputlinks-tests.dir/relay-outputlinks-tests_autogen/mocs_compilation.cpp.o
+[222/435] Building CXX object CMakeFiles/relay-queuenav-tests.dir/tests/queuenav_test.cpp.o
+[223/435] Linking CXX executable relay-queuenav-tests
+[224/435] Building CXX object CMakeFiles/relay-closedstack-tests.dir/tests/closedstack_test.cpp.o
+[225/435] Building CXX object CMakeFiles/relay-subagents.dir/src/JobsPanel.cpp.o
+[226/435] Linking CXX executable relay-closedstack-tests
+[227/435] Building CXX object CMakeFiles/relay-modelsettings-tests.dir/tests/modelsettings_test.cpp.o
+[228/435] Automatic MOC for target relay-markdown-tests
+[229/435] Building CXX object CMakeFiles/relay-markdown-tests.dir/relay-markdown-tests_autogen/mocs_compilation.cpp.o
+[230/435] Building CXX object CMakeFiles/relay-board.dir/src/BoardModel.cpp.o
+[231/435] Building CXX object CMakeFiles/relay-closedlist-tests.dir/tests/closedlist_test.cpp.o
+[232/435] Automatic MOC for target relay-wordwrap-tests
+[233/435] Automatic MOC for target relay-backends-tests
+[234/435] Building CXX object CMakeFiles/relay-wordwrap-tests.dir/relay-wordwrap-tests_autogen/mocs_compilation.cpp.o
+[235/435] Building CXX object CMakeFiles/relay-backends-tests.dir/relay-backends-tests_autogen/mocs_compilation.cpp.o
+[236/435] Linking CXX executable relay-modelsettings-tests
+[237/435] Automatic MOC for target relay-notifications-tests
+[238/435] Linking CXX executable relay-closedlist-tests
+[239/435] Building CXX object CMakeFiles/relay-notifications-tests.dir/relay-notifications-tests_autogen/mocs_compilation.cpp.o
+[240/435] Automatic MOC for target relay-theme-tests
+[241/435] Building CXX object CMakeFiles/relay-theme-tests.dir/relay-theme-tests_autogen/mocs_compilation.cpp.o
+[242/435] Automatic MOC for target relay-titles-tests
+[243/435] Building CXX object CMakeFiles/relay-titles-tests.dir/relay-titles-tests_autogen/mocs_compilation.cpp.o
+[244/435] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentTranscript.cpp.o
+[245/435] Automatic MOC for target relay-panestatus-tests
+[246/435] Building CXX object CMakeFiles/relay-windowstate-tests.dir/tests/windowstate_test.cpp.o
+[247/435] Building CXX object CMakeFiles/relay-panestatus-tests.dir/relay-panestatus-tests_autogen/mocs_compilation.cpp.o
+[248/435] Linking CXX executable relay-windowstate-tests
+[249/435] Automatic MOC for target relay-paneusage-tests
+[250/435] Building CXX object CMakeFiles/relay-paneusage-tests.dir/relay-paneusage-tests_autogen/mocs_compilation.cpp.o
+[251/435] Building CXX object CMakeFiles/relay-highlight.dir/src/Theme.cpp.o
+[252/435] Building CXX object CMakeFiles/relay-logging-tests.dir/tests/logging_test.cpp.o
+[253/435] Building CXX object CMakeFiles/relay-panestate-tests.dir/tests/panestate_test.cpp.o
+[254/435] Linking CXX static library librelay-highlight.a
+[255/435] Automatic MOC for target relay-diffview
+[256/435] Building CXX object CMakeFiles/relay-panes-tests.dir/tests/panelayout_test.cpp.o
+[257/435] Building CXX object CMakeFiles/relay-diffview.dir/relay-diffview_autogen/mocs_compilation.cpp.o
+[258/435] Building CXX object CMakeFiles/relay-backends-tests.dir/tests/backends_test.cpp.o
+[259/435] Building CXX object CMakeFiles/relay-titles-tests.dir/tests/panetitles_test.cpp.o
+[260/435] Linking CXX executable relay-logging-tests
+[261/435] Linking CXX executable relay-panestate-tests
+[262/435] Linking CXX executable relay-titles-tests
+[263/435] Linking CXX executable relay-backends-tests
+[264/435] Building CXX object CMakeFiles/relay-sharing-tests.dir/tests/sharingpane_test.cpp.o
+[265/435] Building CXX object CMakeFiles/relay-filepanes.dir/src/FilePanes.cpp.o
+[266/435] Linking CXX executable relay-panes-tests
+[267/435] Building CXX object CMakeFiles/relay-wordwrap-tests.dir/tests/wordwrap_test.cpp.o
+[268/435] Linking CXX static library librelay-filepanes.a
+[269/435] Automatic MOC for target relay-themeswitch-tests
+[270/435] Building CXX object CMakeFiles/relay-themeswitch-tests.dir/relay-themeswitch-tests_autogen/mocs_compilation.cpp.o
+[271/435] Automatic MOC for target relay-remotepane
+[272/435] Linking CXX executable relay-wordwrap-tests
+[273/435] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentsPanel.cpp.o
+[274/435] Automatic MOC for target relay-remotesession-tests
+[275/435] Automatic MOC for target relay-buttonfit-tests
+[276/435] Building CXX object CMakeFiles/relay-remotesession-tests.dir/relay-remotesession-tests_autogen/mocs_compilation.cpp.o
+[277/435] Building CXX object CMakeFiles/relay-buttonfit-tests.dir/relay-buttonfit-tests_autogen/mocs_compilation.cpp.o
+[278/435] Linking CXX static library librelay-subagents.a
+[279/435] Automatic MOC for target relay-remotefiles-tests
+[280/435] Automatic MOC for target relay-filepanes-tests
+[281/435] Building CXX object CMakeFiles/relay-notifications-tests.dir/tests/notifications_test.cpp.o
+[282/435] Building CXX object CMakeFiles/relay-requests-tests.dir/tests/requests_test.cpp.o
+[283/435] Building CXX object CMakeFiles/relay-filepanes-tests.dir/relay-filepanes-tests_autogen/mocs_compilation.cpp.o
+[284/435] Building CXX object CMakeFiles/relay-markdown-tests.dir/tests/markdownansi_test.cpp.o
+[285/435] Automatic MOC for target relay-subagents-tests
+[286/435] Linking CXX executable relay-sharing-tests
+[287/435] Building CXX object CMakeFiles/relay-subagents-tests.dir/relay-subagents-tests_autogen/mocs_compilation.cpp.o
+[288/435] Building CXX object CMakeFiles/relay-outputlinks-tests.dir/tests/outputlinks_test.cpp.o
+[289/435] Building CXX object CMakeFiles/relay-remotefiles-tests.dir/relay-remotefiles-tests_autogen/mocs_compilation.cpp.o
+[290/435] Automatic MOC for target relay-jobs-tests
+[291/435] Linking CXX executable relay-notifications-tests
+[292/435] Building CXX object CMakeFiles/relay-jobs-tests.dir/relay-jobs-tests_autogen/mocs_compilation.cpp.o
+[293/435] Linking CXX executable relay-markdown-tests
+[294/435] Linking CXX executable relay-outputlinks-tests
+[295/435] Automatic MOC for target relay-sshconfig-tests
+[296/435] Linking CXX executable relay-requests-tests
+[297/435] Building CXX object CMakeFiles/relay-sshconfig-tests.dir/relay-sshconfig-tests_autogen/mocs_compilation.cpp.o
+[298/435] Automatic MOC for target relay-voice-tests
+[299/435] Building CXX object CMakeFiles/relay-voice-tests.dir/relay-voice-tests_autogen/mocs_compilation.cpp.o
+[300/435] Automatic MOC for target relay-aliases-tests
+[301/435] Building CXX object CMakeFiles/relay-aliases-tests.dir/relay-aliases-tests_autogen/mocs_compilation.cpp.o
+[302/435] Automatic MOC for target relay-images-tests
+[303/435] Building CXX object CMakeFiles/relay-images-tests.dir/relay-images-tests_autogen/mocs_compilation.cpp.o
+[304/435] Building CXX object CMakeFiles/relay-remotepane.dir/relay-remotepane_autogen/mocs_compilation.cpp.o
+[305/435] Building CXX object CMakeFiles/relay-diffview.dir/src/DiffView.cpp.o
+[306/435] Automatic MOC for target relay-hints-tests
+[307/435] Building CXX object CMakeFiles/relay-hints-tests.dir/relay-hints-tests_autogen/mocs_compilation.cpp.o
+[308/435] Building CXX object CMakeFiles/relay-paneusage-tests.dir/tests/paneusage_test.cpp.o
+[309/435] Linking CXX static library librelay-diffview.a
+[310/435] Automatic MOC for target relay-calllines
+[311/435] Building CXX object CMakeFiles/relay-calllines.dir/relay-calllines_autogen/mocs_compilation.cpp.o
+[312/435] Linking CXX executable relay-paneusage-tests
+[313/435] Building CXX object CMakeFiles/relay-buttonfit-tests.dir/tests/buttonfit_test.cpp.o
+[314/435] Automatic MOC for target relay-projects-tests
+[315/435] Building CXX object CMakeFiles/relay-projects-tests.dir/relay-projects-tests_autogen/mocs_compilation.cpp.o
+[316/435] Linking CXX executable relay-buttonfit-tests
+[317/435] Building CXX object CMakeFiles/relay-remotesession-tests.dir/tests/remotesession_test.cpp.o
+[318/435] Automatic MOC for target relay-copyonselect-tests
+[319/435] Building CXX object CMakeFiles/relay-copyonselect-tests.dir/relay-copyonselect-tests_autogen/mocs_compilation.cpp.o
+[320/435] Building CXX object CMakeFiles/relay-theme-tests.dir/tests/theme_test.cpp.o
+[321/435] Building CXX object CMakeFiles/relay-themeswitch-tests.dir/tests/themeswitch_test.cpp.o
+[322/435] Linking CXX executable relay-remotesession-tests
+[323/435] Building CXX object CMakeFiles/relay-jobs-tests.dir/tests/jobs_test.cpp.o
+[324/435] Building CXX object CMakeFiles/relay-panestatus-tests.dir/tests/panestatus_test.cpp.o
+[325/435] Building CXX object CMakeFiles/relay-images-tests.dir/tests/images_test.cpp.o
+[326/435] Linking CXX executable relay-theme-tests
+[327/435] Automatic MOC for target relay-diffview-tests
+[328/435] Building CXX object CMakeFiles/relay-diffview-tests.dir/relay-diffview-tests_autogen/mocs_compilation.cpp.o
+[329/435] Linking CXX executable relay-jobs-tests
+[330/435] Automatic MOC for target relay-toollabel-tests
+[331/435] Building CXX object CMakeFiles/relay-toollabel-tests.dir/relay-toollabel-tests_autogen/mocs_compilation.cpp.o
+[332/435] Linking CXX executable relay-images-tests
+[333/435] Linking CXX executable relay-themeswitch-tests
+[334/435] Automatic MOC for target relay-vterm-c
+[335/435] Building CXX object CMakeFiles/relay-settings-tests.dir/tests/settingspane_test.cpp.o
+[336/435] Building CXX object engine/CMakeFiles/relay-vterm-c.dir/relay-vterm-c_autogen/mocs_compilation.cpp.o
+[337/435] Linking CXX executable relay-panestatus-tests
+[338/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/keyboard.c.o
+[339/435] Automatic MOC for target relay-turntranscript-tests
+[340/435] Building CXX object CMakeFiles/relay-turntranscript-tests.dir/relay-turntranscript-tests_autogen/mocs_compilation.cpp.o
+[341/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/mouse.c.o
+[342/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/encoding.c.o
+[343/435] Building CXX object CMakeFiles/relay-subagents-tests.dir/tests/subagents_test.cpp.o
+[344/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/parser.c.o
+[345/435] Linking CXX executable relay-settings-tests
+[346/435] Building CXX object CMakeFiles/relay-remotefiles-tests.dir/tests/remotefiles_test.cpp.o
+[347/435] Building CXX object CMakeFiles/relay-voice-tests.dir/tests/voice_test.cpp.o
+[348/435] Linking CXX executable relay-remotefiles-tests
+[349/435] Linking CXX executable relay-subagents-tests
+[350/435] Building CXX object CMakeFiles/relay-hints-tests.dir/tests/hints_test.cpp.o
+[351/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/pen.c.o
+[352/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/unicode.c.o
+[353/435] Linking CXX executable relay-voice-tests
+[354/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/vterm.c.o
+[355/435] Linking CXX executable relay-hints-tests
+[356/435] Building CXX object CMakeFiles/relay-aliases-tests.dir/tests/aliases_test.cpp.o
+[357/435] Linking CXX executable relay-aliases-tests
+[358/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/state.c.o
+[359/435] Building CXX object CMakeFiles/relay-sshconfig-tests.dir/tests/sshconfig_test.cpp.o
+[360/435] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/screen.c.o
+[361/435] Linking CXX static library engine/librelay-vterm-c.a
+[362/435] Linking CXX executable relay-sshconfig-tests
+[363/435] Building CXX object CMakeFiles/relay-copyonselect-tests.dir/tests/copyonselect_test.cpp.o
+[364/435] Building CXX object CMakeFiles/relay-diffview-tests.dir/tests/diffview_test.cpp.o
+[365/435] Building CXX object CMakeFiles/relay-board.dir/src/BoardPane.cpp.o
+[366/435] Automatic MOC for target relay-terminal-engine
+[367/435] Building CXX object CMakeFiles/relay-calllines.dir/src/CallLines.cpp.o
+[368/435] Linking CXX static library librelay-board.a
+[369/435] Linking CXX executable relay-copyonselect-tests
+[370/435] Linking CXX static library librelay-calllines.a
+[371/435] Linking CXX executable relay-diffview-tests
+[372/435] Building CXX object CMakeFiles/relay-toollabel-tests.dir/tests/toollabel_test.cpp.o
+[373/435] Automatic MOC for target relay-board-tests
+[374/435] Building CXX object CMakeFiles/relay-board-tests.dir/relay-board-tests_autogen/mocs_compilation.cpp.o
+[375/435] Automatic MOC for target relay-boardworkspace-tests
+[376/435] Building CXX object CMakeFiles/relay-boardworkspace-tests.dir/relay-boardworkspace-tests_autogen/mocs_compilation.cpp.o
+[377/435] Linking CXX executable relay-toollabel-tests
+[378/435] Automatic MOC for target relay-calllines-tests
+[379/435] Building CXX object CMakeFiles/relay-calllines-tests.dir/relay-calllines-tests_autogen/mocs_compilation.cpp.o
+[380/435] Building CXX object CMakeFiles/relay-filepanes-tests.dir/tests/filepanes_test.cpp.o
+[381/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/CellTypes.cpp.o
+[382/435] Building CXX object CMakeFiles/relay-turntranscript-tests.dir/tests/turntranscript_test.cpp.o
+[383/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/KeyMapper.cpp.o
+[384/435] Linking CXX executable relay-filepanes-tests
+[385/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/VtCoreFactory.cpp.o
+[386/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/relay-terminal-engine_autogen/mocs_compilation.cpp.o
+[387/435] Building CXX object CMakeFiles/relay-conversations-tests.dir/tests/conversations_test.cpp.o
+[388/435] Building CXX object CMakeFiles/relay-turntranscript-tests.dir/src/TurnTranscript.cpp.o
+[389/435] Building CXX object CMakeFiles/relay-projects-tests.dir/tests/projects_test.cpp.o
+[390/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/BoxDrawing.cpp.o
+[391/435] Linking CXX executable relay-projects-tests
+[392/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/session/TerminalSession.cpp.o
+[393/435] Linking CXX executable relay-turntranscript-tests
+[394/435] Linking CXX executable relay-conversations-tests
+[395/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/FoldLayer.cpp.o
+[396/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/FoldSearch.cpp.o
+[397/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/pty/PtyUnix.cpp.o
+[398/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/backend/VTermBackend.cpp.o
+[399/435] Building CXX object CMakeFiles/relay-boardworkspace-tests.dir/tests/boardworkspace_test.cpp.o
+[400/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/LibVtermCore.cpp.o
+[401/435] Linking CXX executable relay-boardworkspace-tests
+[402/435] Building CXX object CMakeFiles/relay-calllines-tests.dir/tests/calllines_test.cpp.o
+[403/435] Linking CXX executable relay-calllines-tests
+[404/435] Building CXX object CMakeFiles/relay-remotepane.dir/src/RemotePane.cpp.o
+[405/435] Linking CXX static library librelay-remotepane.a
+[406/435] Automatic MOC for target relay-remotepane-tests
+[407/435] Building CXX object CMakeFiles/relay-remotepane-tests.dir/relay-remotepane-tests_autogen/mocs_compilation.cpp.o
+[408/435] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/TerminalView.cpp.o
+[409/435] Linking CXX static library engine/librelay-terminal-engine.a
+[410/435] Automatic MOC for target relay
+[411/435] Building CXX object CMakeFiles/relay.dir/src/BackendFactory.cpp.o
+[412/435] Building CXX object CMakeFiles/relay.dir/src/EngineBackend.cpp.o
+[413/435] Automatic MOC for target relay-engine-tests
+[414/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/relay-engine-tests_autogen/mocs_compilation.cpp.o
+[415/435] Building CXX object CMakeFiles/relay.dir/src/AgentUi.cpp.o
+[416/435] Building CXX object CMakeFiles/relay.dir/relay_autogen/mocs_compilation.cpp.o
+[417/435] Building CXX object CMakeFiles/relay-board-tests.dir/tests/boardmodel_test.cpp.o
+[418/435] Building CXX object CMakeFiles/relay.dir/src/TurnTranscript.cpp.o
+[419/435] Linking CXX executable relay-board-tests
+[420/435] Building CXX object CMakeFiles/relay.dir/src/SkillsDialog.cpp.o
+[421/435] Building CXX object CMakeFiles/relay.dir/src/Theme.cpp.o
+[422/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/main.cpp.o
+[423/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/FaintInkTest.cpp.o
+[424/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/FoldLayerTest.cpp.o
+[425/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/FoldSearchTest.cpp.o
+[426/435] Building CXX object CMakeFiles/relay-remotepane-tests.dir/tests/remotepane_test.cpp.o
+[427/435] Linking CXX executable relay-remotepane-tests
+[428/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/SessionTest.cpp.o
+[429/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/PtyTest.cpp.o
+[430/435] Building CXX object CMakeFiles/relay.dir/src/RemoteShare.cpp.o
+[431/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/CoreTest.cpp.o
+[432/435] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/ViewTest.cpp.o
+[433/435] Linking CXX executable engine/relay-engine-tests
+[434/435] Building CXX object CMakeFiles/relay.dir/src/main.cpp.o
+[435/435] Linking CXX executable relay
+build exit: 0
