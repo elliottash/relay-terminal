@@ -1,0 +1,20 @@
+# Board suites against landed commit b15c86e3 (clean git archive, offscreen QPA)
+# 2026-09-19, session k9x6-esc-filter
+
+$ cmake --build . --target relay-board-tests relay-boardsections-tests relay-boardworkspace-tests -j8
+[100%] Built target relay-boardworkspace-tests
+
+$ QT_QPA_PLATFORM=offscreen ./relay-board-tests
+PASS   : BoardModelTests::escOnTheMainPageGoesToTheFilterBar()
+Totals: 57 passed, 0 failed, 0 skipped, 0 blacklisted   (161ms)
+
+$ QT_QPA_PLATFORM=offscreen ctest -R "boardsections|boardworkspace" --output-on-failure
+100% tests passed, 0 tests failed out of 2
+
+Earlier, the same suite was also run on the pre-commit scratch tree
+(HEAD 941b35b7 + exactly the hunks that landed) with the same result:
+57 passed, 0 failed; the single new test first run in isolation:
+PASS BoardModelTests::escOnTheMainPageGoesToTheFilterBar()
+
+land.py's own build gate built target relay from the exact merged tree
+(/tmp/claude-1000/land/k9x6-esc-filter/verify) before the compare-and-swap.
