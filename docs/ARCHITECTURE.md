@@ -1398,8 +1398,19 @@ in every pane of every window. Only an explicit project action attaches: opening
 `/card`, picking a card with `#`, Execute-from-card. `RelayWindow::attachTab()` is the one funnel —
 the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
 the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
-worker **without ending its conversation**. "Detach this tab from <project>" is in the palette while
-a tab is attached; it closes nothing.
+worker **without ending its conversation**. An attached tab wears a **chip** with its project's name
+at the left of its label (`RelayWindow::syncTabProjectChip`, in the tab's left box beside the ⧉
+button); one click detaches, and "Detach this tab from <project>" stays in the palette as the
+keyboard path — either closes nothing. An unattached tab shows nothing at all. In a tab with no
+project whose pane stands in no candidate (`~/Downloads`), Ctrl+Shift+S, `/card` and the palette's
+"Attach this tab to a project…" open the **project picker** instead (`src/ProjectPicker.{h,cpp}`,
+library `relay-projectpicker`, hosted like the ⓘ view with `paneType` `projects`; card #916B): the
+projects Relay knows, most recently attached first and fuzzy-filtered as you type, the "Default
+project for loose cards" preselected when set, and "Initialize new project here" on top, which
+attaches the tab to the pane's own directory and sends `board_init {git_init: true}` with no second
+question — the choice is the consent (`docs/PROJECT-INIT-AND-IMPORT.md` §1). Options › Agent ›
+Switchboard lists the known projects (why each became known and when; Remove forgets the registry
+record and nothing else) and the declined ones (Undo).
 
 - **`src/BoardModel.{h,cpp}`** (`relay-board`): the pure logic — the rows the worker sends, the tab
   and column a card falls into, the filter language (`label:`, `status:`, `@assignee`,
@@ -1428,6 +1439,10 @@ file needs no schema bump (`relay::windowstate::tabNode`/`tabProject`).
 Inside the pane: arrows select, Enter opens a card, Esc closes it, `n` adds one, `m` moves it,
 `/` filters, `c` replies, `y` copies `#ID`, `t` sends `#ID` to the composer, `o` opens the card
 file, Ctrl+PgUp/PgDn switch tabs, and Alt+Shift+arrows move a card between columns or within one.
+The gear after the section checkboxes opens the section editor (`src/BoardSections.*`), which also
+names the board's folder and offers the one action that renames it — "Hide this board's folder" /
+"Show this board's folder" (`board_folder`, protocol 19.17; never on an `issues/` board) — and the
+`board_folder_changed` answer re-roots the view and reloads it.
 
 From the terminal: `#` after a space opens a card picker in agent or auto mode (in terminal mode
 `#` stays a Bash comment), a resolved `#K7Q2` travels with the prompt as `ask {cards: […]}`, and
@@ -1503,7 +1518,10 @@ cards #CCKY, #R6J0), which replaced both the conversation dialog and the resume 
 Ctrl+F find bar, which searches the terminal through `TerminalBackend::find()` and counts matches
 in the pane's conversation with `conversation_get {query}`. `/resume`, `/conversations`,
 Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)`: one
-manager per tab, bound to the pane that asked (its queries go to that pane's worker). Enter resumes
+manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
+**Project** chooser beside the Kind filter (#916B) lists the projects Relay knows, fed by the window
+from the registry (`setKnownProjects`), and asks the worker with `project` / `outside_projects`
+(protocol 14.3) — the index answers by workspace folder — rather than filtering rows client-side. Enter resumes
 in that pane (`resume`, or `load_state` with a session reference when the session belongs to
 another workspace); Shift+Enter opens it in a new pane through the same path as a fork; a session
 already open in some pane is focused there instead (`paneWithSession`). The "Subagent threads" box

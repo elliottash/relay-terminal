@@ -68,6 +68,26 @@ Three rules the GUI must keep:
    is `migrate`, which is a different operation from an import (it converts the files in
    place; see `docs/SWITCHBOARD-FORMAT.md` §6).
 
+### The one path that does not ask: "Initialize new project here"
+
+Since 2026-09-19 (card #916B) there is a sixth way a board comes to exist, and it is the one that
+asks nothing. In a pane standing in no project at all — `~/Downloads`, an admin folder — reaching
+for the Switchboard opens the **project picker** (`src/ProjectPicker.h`): the projects Relay knows,
+and, always first, **"Initialize new project here"**. Choosing that row *is* the explicit user
+action the consent rule exists for, so the question above is not shown a second time and no probe
+runs: `Pane::initProjectHere()` attaches the tab to the pane's own directory and sends
+`board_init {project, git_init: true}` once the attach has landed, exactly as a yes would. The
+worker creates the board and, because a directory nobody has made a project of is usually not a
+repository either, runs `git init` there — **only** when the directory is not inside a repository
+already: an existing checkout is never re-initialised and a parent repository's config is never
+touched. What it did comes back on the answering `board_state` as one line (`git: "git repository
+initialized"` / `"already a git repository"` / `"inside the git repository at …, which was left
+alone"`), and the pane repeats it on its created line. A `/card` typed in that pane is held through
+the picker and filed as the new board's first card. A directory the user once said no to may be
+chosen here all the same — choosing it is changing one's mind, and `Registry::remember()` clears
+the no. The import offer (§1) is not made on this path; `/init` in the new project still asks, and
+still offers it.
+
 ---
 
 ## 2. The probe is offline, read-only and bounded
