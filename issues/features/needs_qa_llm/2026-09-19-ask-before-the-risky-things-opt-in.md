@@ -1,8 +1,9 @@
 ---
 id: K2FV
 type: work
-status: ready
+status: needs-qa-llm
 labels: [feature]
+implemented_by: oz (Warp agent session)
 component: [gui, worker]
 milestone: beta
 workstream: agent
@@ -11,7 +12,7 @@ rank: zzzzzzn
 created: '2026-09-19'
 acceptance: a first launch asks which way you want it and nothing is allowed-by-default until you pick; picking the recommended setting gives exactly today's behaviour; picking the checklist makes each ticked action raise a card the turn waits on, with Allow once / this turn / always / Deny
 source: 'conversation, 2026-09-19: "i think we need to add ask back for the unapproved risky things that risk-averse users will want -- eg file removals, moves, edits, reads outside the project, etc." and "i want relay to be a smoother experience than most by default. when you open it first, it gives a warning and says recommended settings are allow all. but you ahve to explicitly pick that. and if you dont want it, you have the checklist of what needs ask/approvals"'
-links: {plans: [], commits: [], evidence: [], related: [3KB7, MQ9C, C1HH, D8J3, V2HM, ZYRB], github: null}
+links: {plans: [], commits: [d8319b4, 74fb6feb, 12a84f2], evidence: [docs/qa_evidence/2026-09-19-ask-before-risky-things/], related: [3KB7, MQ9C, C1HH, D8J3, V2HM, ZYRB], github: null}
 ---
 # Ask before the risky things — off by default, and chosen on the first launch
 
@@ -104,26 +105,26 @@ It runs with your user's permissions, inside the pane's workspace.
 
 ## Tasks
 
-- [ ] `backend/relay_core/approvals.py`: the capability set, the classifier for <!-- t:a2 -->
+- [x] `backend/relay_core/approvals.py`: the capability set, the classifier for <!-- t:a2 -->
       `delete_or_move` and `network` (reusing `security.segments()` and `_programs`, which #2Y96
       already made public), the decision function, and the refusal wording. Pure, and tested like
       `security.py` is
-- [ ] The ask round trip in `relay_core/questions.py`, as a second question kind rather than a <!-- t:b4 -->
+- [x] The ask round trip in `relay_core/questions.py`, as a second question kind rather than a <!-- t:b4 -->
       second mechanism: block, `wake_on_set`, survive Stop, answer or deny
-- [ ] `tools.py`: the check at `prepare()` for each capability, so nothing has run when the card <!-- t:c6 -->
+- [x] `tools.py`: the check at `prepare()` for each capability, so nothing has run when the card <!-- t:c6 -->
       goes up, and again at execute for `run_command` as #3KB7 does
-- [ ] Its own flag for "Relay may draw an approval card", distinct from `can_ask`, so a subagent's <!-- t:d8 -->
+- [x] Its own flag for "Relay may draw an approval card", distinct from `can_ask`, so a subagent's <!-- t:d8 -->
       action is approved rather than refused
-- [ ] Protocol 12.1: the settings, and the card's shape in the section that documents questions <!-- t:e1 -->
-- [ ] The checklist rows in Options › Security (#3KB7's section), with the classifier caveat <!-- t:f3 -->
+- [x] Protocol 12.1: the settings, and the card's shape in the section that documents questions <!-- t:e1 -->
+- [x] The checklist rows in Options › Security (#3KB7's section), with the classifier caveat <!-- t:f3 -->
       stated on the two rows that are approximate
-- [ ] The first-launch pane, `security/approvals_chosen`, and the cautious set until it is answered <!-- t:g5 -->
-- [ ] A "show the first-run choice again" action in Options › Security <!-- t:h7 -->
-- [ ] Tests: each capability asks when ticked and does not when not; Deny returns a refusal and the <!-- t:j9 -->
+- [x] The first-launch pane, `security/approvals_chosen`, and the cautious set until it is answered <!-- t:g5 -->
+- [x] A "show the first-run choice again" action in Options › Security <!-- t:h7 -->
+- [x] Tests: each capability asks when ticked and does not when not; Deny returns a refusal and the <!-- t:j9 -->
       turn continues; "always allow" writes the setting; Stop during a card ends the turn; a
       subagent's action draws a card naming it; the cautious set is what applies before the choice
       is made; and the classifier's obvious cases (`rm -rf`, `sudo mv`, `curl | sh`) are caught
-- [ ] Live under Xvfb: a card for each of the eight, and the first-launch screen on a fresh <!-- t:k2 -->
+- [x] Live under Xvfb: a card for each of the eight, and the first-launch screen on a fresh <!-- t:k2 -->
       `XDG_CONFIG_HOME`, with evidence
 
 ## Decisions
@@ -142,4 +143,20 @@ It runs with your user's permissions, inside the pane's workspace.
   that makes Relay unusable if ticked: "leave it out." So there is no way to be asked before an
   ordinary command; `delete_or_move` and `network` cover the commands worth stopping, and #3KB7's
   denylist covers the ones worth refusing outright.
+
+## QA checklist
+
+Implementer: Oz (Warp agent session) — commits d8319b42427a, 74fb6feb6879, 12a84f2ca210.
+Recommended verifier: a non-Claude model family (e.g. GLM 5.3 or GPT), per the lane rule in
+`issues/README.md`. Evidence: `docs/qa_evidence/2026-09-19-ask-before-risky-things/` —
+`implementer-notes.md` (the write-up, incl. the `rememberAlwaysAllowed` cautious-set bug the drive
+caught and the stale-stub phantom), `test-output.txt` (3413 tests OK), `state-{a,b}.conf`,
+`stub-{a,b}.jsonl`, `sessions-{a,b}.tgz`, and the drive screenshots.
+
+- [ ] A fresh `XDG_CONFIG_HOME` launch shows the first-launch pane (a-01); either button dismisses it for good and `approvals_chosen=true` lands in the conf (a-02, state-a.conf)
+- [ ] Each of the five capabilities on the cautious list raises its card, takes 1–4 only, and Esc does not deny (a-03…a-10; the refusal ✗ for the denied `type_into_program`)
+- [ ] "Always allow" unticks the matching Options › Security row and pushes the policy before the decision (a-11; the regression the drive found — before the first-launch choice the list starts from the cautious set — is covered by `test_always_before_the_first_launch_choice_starts_from_the_cautious_set`)
+- [ ] With the cautious set chosen, `create` and `network` behave per the checklist: create allowed once asked (b-01), network denied with the model-readable refusal (b-02, b-03, stub-b.jsonl)
+- [ ] `./scripts/test.sh` and the approvals/questions suites pass on a pristine export of main (test-output.txt; ctest 62/63 with `buttonfit` the known other-session regression on main)
+- [ ] No new shortcut, slash command or prefix came with this card, so the shortcut-hint registry needs no entry (implementer-notes.md records this)
 
