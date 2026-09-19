@@ -1,12 +1,12 @@
 ---
 id: XZZB
 type: work
-status: inbox
+status: needs-qa-llm
 labels: [settings, gui, ux]
 rank: i
 created: '2026-09-17'
 source: pane 1, 2026-09-17
-links: {plans: [], commits: [], evidence: [], github: null, related: [05J2]}
+links: {plans: [], commits: [64e6448, c55c07a, a74672f, 70bb60a], evidence: [docs/qa_evidence/2026-09-19-options-menu-followups/], github: null, related: [05J2]}
 ---
 # Improve the options (Settings) menu
 
@@ -108,3 +108,24 @@ are not lost work: both are cosmetic and neither has been asked for since the pa
 dialog — raise them again if the pane ever gets an About line.
 
 Evidence: `docs/qa_evidence/2026-09-19-options-menu-followups/`.
+
+## Resolution (found already delivered by the 2026-09-19 board sweep)
+
+This card is an analysis plus a tiered proposal list, and both the analysis and the proposals it
+called Tier 1 and Tier 2 were delivered — `64e6448` and `c55c07a` ("The Options pane marks what you
+changed, browses for a folder, and never shows a stale value"), with the 2026-09-19 update on the
+card itself (`a74672f`) recording findings 3, 8 and 11 and the Plans-folder Browse…, and `70bb60a`
+adding the implementer evidence under
+`docs/qa_evidence/2026-09-19-options-menu-followups/`.
+
+The card's own closing note already says what is left: **#05J2** (settings export/import) is the one
+proposal still open and is tracked on its own card, and the two cosmetic Tier 3 items are named as
+not-done rather than left implied. Nothing on this card needs doing; it had simply never left
+`inbox`.
+
+## QA checklist
+- [ ] The five hand checks named in `docs/qa_evidence/2026-09-19-options-menu-followups/NOTES.md`.
+- [ ] Search in the Options window reaches rows by their `aliases`, and the palette finds Settings rows from the root.
+- [ ] Toggling a row keeps scroll position and keyboard focus; an open window refreshes when a setting changes elsewhere.
+- [ ] The ↺ appears only on rows that differ from the default and puts them back.
+- [ ] "Start a fresh window set" asks first.

@@ -646,7 +646,8 @@ option out in full (→ its number, `question.number`; an answer in the user's o
 card working and is never corrected), dropping a pane on another's bottom edge (→ the move
 toward that pane then Move-down, `pane.dockBeneath`; the chord's own arming line is
 `pane.dockBeneath.chord`), the first reasoning delta of a turn (→ a click or `agent.thinkingPanel`
-folds it away, `thinking.fold`),
+folds it away, `thinking.fold`), closing a focused Switchboard by its button or the palette
+(→ `board.toggle` again, which closes it when it already has the focus, `board.close`; card #4XR8),
 and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
