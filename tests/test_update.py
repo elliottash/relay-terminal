@@ -80,6 +80,74 @@ class UpdateScriptTest(unittest.TestCase):
         # A source checkout must be told it is one, not offered a .deb that would shadow it.
         self.assertIsNone(self.updater.installed_deb_version(package="relay-not-a-package"))
 
+    def test_a_version_dpkg_cannot_read_is_not_read_as_older(self):
+        # dpkg exits 2 for a version it cannot parse, and reading that as "false" came out as
+        # "already the latest release" — the one answer that must never be a guess.
+        self.assertIsNone(self.updater.apt_newer("0.1.0-1~ubuntu24.04", "-1~ubuntu24.04"))
+        self.assertIsNone(self.updater.apt_newer("", "0.1.0-1~ubuntu24.04"))
+        self.assertIsNone(self.updater.apt_newer("0.1.0-1~ubuntu24.04", "   "))
+
+
+class FailedInstallTest(unittest.TestCase):
+    """What the user is told, and whether the file it names is still there.
+
+    `install_command` printed "The verified package is still at <path>" and then deleted the
+    directory holding it on the way out; so did the no-pkexec branch's "Run: sudo apt install
+    <path>". Every such line has to leave the download behind.
+    """
+
+    def setUp(self):
+        self.updater = load_updater()
+        self.said = []
+        self.updater.say = self.said.append
+        self.work = []
+
+        release = {"tag_name": "v9.9.9", "draft": False, "assets": [
+            {"name": "relay_9.9.9_ubuntu24.04_amd64.deb", "size": 1024,
+             "browser_download_url": "https://example.invalid/relay.deb"},
+            {"name": "SHA256SUMS", "browser_download_url": "https://example.invalid/SHA256SUMS"}]}
+        self.updater.latest_release = lambda: release
+        self.updater.installed_deb_version = lambda package="relay": "0.0.1-1~ubuntu24.04"
+
+        def download(url, destination):
+            destination.write_bytes(b"a package" if url.endswith(".deb") else
+                                    b"x  relay_9.9.9_ubuntu24.04_amd64.deb\n")
+            self.work.append(destination.parent)
+
+        self.updater.download = download
+        self.updater.sha256 = lambda path: "x"
+
+    def run_install(self):
+        return self.updater.install_command("ubuntu24.04", "x86_64", False, False)
+
+    def kept_path(self):
+        printed = [line for line in self.said if ".deb" in line]
+        self.assertTrue(printed, self.said)
+        return Path(printed[-1].split()[-1])
+
+    def test_the_package_outlives_a_failed_install(self):
+        self.updater.root_installer = lambda deb: ([("false")], "pkexec")
+        self.assertEqual(self.run_install(), 1)
+        self.assertIn("still at", " ".join(self.said))
+        self.assertTrue(self.kept_path().is_file(), self.said)
+
+    def test_the_package_outlives_a_machine_with_no_pkexec(self):
+        self.updater.root_installer = lambda deb: (self.updater.say(
+            f"Root is needed to install it. Run: sudo apt install {deb}"), None)[1]
+        self.assertEqual(self.run_install(), 2)
+        self.assertTrue(self.kept_path().is_file(), self.said)
+
+    def test_a_release_with_no_tag_is_refused(self):
+        self.updater.latest_release = lambda: {"tag_name": "", "draft": False, "assets": []}
+        self.assertEqual(self.run_install(), 1)
+        self.assertIn("no tag", " ".join(self.said))
+
+    def test_a_successful_install_leaves_nothing_behind(self):
+        self.updater.root_installer = lambda deb: ([("true")], "pkexec")
+        self.assertEqual(self.run_install(), 0)
+        self.assertIn("UPDATED v9.9.9", self.said)
+        self.assertEqual([d for d in self.work if d.exists()], [])
+
 
 if __name__ == "__main__":
     unittest.main()

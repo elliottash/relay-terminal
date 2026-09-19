@@ -6,6 +6,7 @@ and `resolve_token`'s subprocess steps are driven through an injected runner, so
 out to `gh` or `git`.
 """
 import unittest
+import urllib.error
 
 import fake_github as FG
 from relay_core import forge_github as GH
@@ -275,6 +276,88 @@ class ForkTests(ProviderTest):
         provider = GH.provider_for("me/terminal", FG.TOKEN, base_url=self.gh.base_url)
         self.assertEqual(provider.repo, "me/terminal")
         self.assertFalse(provider.repo_info().has_issues)
+
+
+# ------------------------------------------------------- transport failures
+
+class _Broken:
+    """An opener whose socket dies for the first `fail` requests, counting the methods it saw."""
+
+    def __init__(self, fail: int = 99):
+        self.fail = fail
+        self.methods: list[str] = []
+
+    def open(self, request, timeout=None):
+        self.methods.append(request.get_method())
+        if len(self.methods) <= self.fail:
+            raise urllib.error.URLError("connection reset")
+        raise AssertionError("the test did not expect a request to succeed")
+
+
+class TransportRetryTests(unittest.TestCase):
+    """A read may be repeated; a write may not.
+
+    A `POST` that dies on the socket may already have been carried out, so repeating it files a
+    second issue or posts a comment twice, and there is no idempotency key to offer GitHub.
+    """
+
+    def provider(self, opener):
+        return GH.GitHubProvider("relay/terminal", "tok", base_url="http://127.0.0.1:9",
+                                 opener=opener, sleep=lambda _s: None, max_attempts=3)
+
+    def test_a_listing_is_retried(self):
+        broken = _Broken()
+        with self.assertRaises(ForgeUnavailable):
+            self.provider(broken).list_issues()
+        self.assertEqual(broken.methods, ["GET", "GET", "GET"])
+
+    def test_creating_an_issue_is_not_retried(self):
+        broken = _Broken()
+        with self.assertRaises(ForgeUnavailable):
+            self.provider(broken).create_issue("a card", "body")
+        self.assertEqual(broken.methods, ["POST"])
+
+    def test_creating_a_comment_is_not_retried(self):
+        broken = _Broken()
+        with self.assertRaises(ForgeUnavailable):
+            self.provider(broken).create_comment(7, "hello")
+        self.assertEqual(broken.methods, ["POST"])
+
+    def test_updating_an_issue_is_not_retried(self):
+        broken = _Broken()
+        with self.assertRaises(ForgeUnavailable):
+            self.provider(broken).update_issue(7, title="new")
+        self.assertEqual(broken.methods, ["PATCH"])
+
+
+# ------------------------------------------------------- a listing too long to read
+
+class ListingCeilingTests(ProviderTest):
+    """A listing cut off at `MAX_PAGES` is refused rather than returned short.
+
+    The engine reads "this issue is not in the listing" as "this issue has not changed", so a
+    short listing makes it push a local card over a remote edit, and on a first sync file a second
+    copy of every issue past the cut.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.gh.page_size = 1
+        original = GH.MAX_PAGES
+        GH.MAX_PAGES = 2
+        self.addCleanup(setattr, GH, "MAX_PAGES", original)
+
+    def test_a_listing_that_does_not_fit_is_refused(self):
+        for n in range(3):
+            self.gh.make_issue(f"issue {n}")
+        with self.assertRaises(ForgeUnavailable) as caught:
+            self.provider().list_issues()
+        self.assertIn("200 rows", str(caught.exception))
+
+    def test_a_listing_that_fits_exactly_is_returned(self):
+        for n in range(2):
+            self.gh.make_issue(f"issue {n}")
+        self.assertEqual(len(self.provider().list_issues()), 2)
 
 
 if __name__ == "__main__":                                        # pragma: no cover

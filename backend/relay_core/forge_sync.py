@@ -878,7 +878,15 @@ class ForgeSync:
         self.provider = GuardedProvider(provider, self.guard)
         self.repo = getattr(provider, "repo", "") or ""
         self.state = SyncState(Path(state_path) if state_path else board.root / STATE_FILE, self.repo)
-        self._refuse_second_repo()
+        #: The issue listing's `ETag` and high-water mark, held back until the run is complete
+        #: (`_issue_index`, `_commit_listing`).
+        self._listing: dict = {}
+        #: card id -> the file's hash when this run read it, so a write can tell that somebody
+        #: else has edited the card since (`_base_hash`).  A sync runs on its own thread while
+        #: the pane and the agent write through `BoardTools`, and the hash is the only thing
+        #: standing between the two.
+        self._read_hash: dict[str, str] = {}
+        self._refuse_second_repo()        # reads the cards, so the two maps above exist first
         self.login_map = {str(k): str(v) for k, v in (login_map or {}).items()}
         self.reverse_logins = {v.lower(): k for k, v in self.login_map.items()}
         self.create_cap = int(create_cap)
@@ -933,8 +941,28 @@ class ForgeSync:
                 continue
             if card.private or _under_private(self.board, card):
                 continue
+            if card.path is not None:
+                self._read_hash[card.id] = B.file_hash(card.path)
             out.append(card)
         return out
+
+    def _base_hash(self, card: B.Card) -> str:
+        """The card file's hash as this run read it — what a write must still find there.
+
+        Taking it immediately before the write, which is what this code did, makes
+        `Board.save`'s check compare a hash with itself: it always passes, so a card the user
+        edited in the Switchboard pane (or the agent edited through `BoardTools`) while the sync
+        thread was talking to GitHub was silently overwritten with the version read minutes
+        earlier.  Reading it from here instead turns that race into a `BoardConflict`, which
+        `_sync` records as an error on the card and nothing is lost.
+        """
+        known = self._read_hash.get(card.id or "")
+        return known if known is not None else B.file_hash(card.path) if card.path else ""
+
+    def _note_written(self, card: B.Card, written: str) -> None:
+        """Remember what a successful save left on disk, so the next write in this run agrees."""
+        if card.id:
+            self._read_hash[card.id] = written
 
     # ---- field extraction ----------------------------------------------------
     def card_fields(self, card: B.Card) -> Fields:
@@ -991,13 +1019,22 @@ class ForgeSync:
 
     # ---- reading the forge ---------------------------------------------------
     def _issue_index(self, cards: Sequence[B.Card]) -> tuple[dict[int, Issue], bool]:
-        """Every issue that changed since the last run, by number, and whether it was a 304."""
+        """Every issue that changed since the last run, by number, and whether it was a 304.
+
+        The listing's `ETag` and high-water mark are **not** written into the state here; they go
+        into `self._listing`, and `_commit_listing` moves them across only when a run has planned
+        and applied every card.  Writing them at listing time was a way to lose a remote edit: the
+        first per-card `state.save()` persists them, so a run that then stops — a rate limit is the
+        ordinary case, and `_sync` returns right there — would leave the next run answered `304`,
+        or filtered past the issues it never reached.  Those cards' `base` is intact, and
+        `_plan_card` reads "no issue" as "the issue equals the baseline", so the next run would
+        push the local version straight over the remote edit without seeing a conflict.
+        """
         since = self.state.data.get("last_seen") or None
         etag = self.state.data.get("issues_etag") or None
         issues = self.provider.list_issues(since, etag)
         if issues is None:
             return {}, True
-        self.state.data["issues_etag"] = self.provider.list_etag
         index = {}
         newest = since or ""
         for issue in issues:
@@ -1006,8 +1043,14 @@ class ForgeSync:
             index[issue.number] = issue
             if issue.updated_at and issue.updated_at > newest:
                 newest = issue.updated_at
-        self.state.data["last_seen"] = newest
+        self._listing = {"issues_etag": self.provider.list_etag, "last_seen": newest}
         return index, False
+
+    def _commit_listing(self) -> None:
+        """Move the listing marks into the state, once everything this run planned has been done."""
+        if self._listing:
+            self.state.data.update(self._listing)
+            self._listing = {}
 
     # ---- planning and running ------------------------------------------------
     def plan(self) -> SyncResult:
@@ -1039,6 +1082,9 @@ class ForgeSync:
 
         planned: list[tuple[B.Card | None, Issue | None, CardPlan]] = []
         creates = 0
+        #: False as soon as a card is left unplanned or unapplied, which is what holds the
+        #: listing's ETag and `last_seen` back (`_issue_index`).
+        complete = True
         linked_numbers: set[int] = set()
         for card in cards:
             entry = self.state.get(card.id) or {}
@@ -1052,6 +1098,7 @@ class ForgeSync:
                 except ForgeRateLimited as exc:
                     result.retry_at = exc.retry_at
                     result.errors.append(str(exc))
+                    complete = False
                     break
                 except ForgeError as exc:
                     plan = CardPlan(card.id, card.title, number, action="error", note=str(exc))
@@ -1064,6 +1111,7 @@ class ForgeSync:
             except ForgeRateLimited as exc:
                 result.retry_at = exc.retry_at
                 result.errors.append(str(exc))
+                complete = False
                 break
             except (ForgeError, B.BoardError, OSError) as exc:
                 result.cards.append(CardPlan(card.id, card.title, number, action="error",
@@ -1111,7 +1159,7 @@ class ForgeSync:
             except ForgeRateLimited as exc:
                 result.retry_at = exc.retry_at
                 result.errors.append(str(exc))
-                self.state.save()
+                self.state.save()               # the listing marks stay behind: this run stopped
                 return result
             except ForgePrivacyError as exc:
                 plan.action, plan.note = "error", str(exc)
@@ -1129,7 +1177,7 @@ class ForgeSync:
             except ForgeRateLimited as exc:
                 result.retry_at = exc.retry_at
                 result.errors.append(str(exc))
-                self.state.save()
+                self.state.save()               # the listing marks stay behind: this run stopped
                 return result
             except (ForgeError, B.BoardError, OSError) as exc:
                 result.errors.append(_clean(exc))
@@ -1137,6 +1185,10 @@ class ForgeSync:
             done += 1
             self._progress(plan, done, total)
         self.state.data["repo"] = self.repo
+        if complete:
+            # Every card this run planned has been applied, so the next run may trust the
+            # listing marks: `since`/`If-None-Match` will not hide an issue nobody looked at.
+            self._commit_listing()
         self.state.save()
         logs.event(_log, "forge_sync_done", repo=self.repo, pushed=result.pushed,
                    pulled=result.pulled, created=result.creates, conflicts=len(result.conflicts))
@@ -1359,7 +1411,7 @@ class ForgeSync:
 
     def _write_card(self, card: B.Card, merged: Fields, pull: list) -> None:
         """Apply the pulled fields to the card file.  Bytes nothing pulled touches stay put."""
-        base_hash = B.file_hash(card.path)
+        base_hash = self._base_hash(card)
         if {"title", "prose", "tasks"} & set(pull):
             taken = {t.item_id for t in card.tasks() if t.item_id}
             card.body = render_body(merged.title, merged.prose, merged.tasks, taken)
@@ -1382,7 +1434,7 @@ class ForgeSync:
                 target = B.card_target_path(self.board, card, category)
                 if target is not None and not target.exists():
                     moved_to = target
-        self.board.save(card, base_hash=base_hash)
+        self._note_written(card, self.board.save(card, base_hash=base_hash))
         if moved_to is not None:
             B.move_card_file(card, moved_to)
         self.board.append_thread(
@@ -1395,9 +1447,9 @@ class ForgeSync:
         if links.get("github") == link:
             return
         links["github"] = link
-        base_hash = B.file_hash(card.path)
+        base_hash = self._base_hash(card)
         card.set("links", links)
-        self.board.save(card, base_hash=base_hash)
+        self._note_written(card, self.board.save(card, base_hash=base_hash))
 
     def _record_conflict(self, card: B.Card, number: int, conflicts: list, entry: dict) -> None:
         """Surface a conflict on the card's thread, once per distinct pair of versions."""

@@ -1030,5 +1030,96 @@ class MergeUnitTests(unittest.TestCase):
         self.assertEqual(F.strip_footer(body), "text")
 
 
+# ------------------------------------------- a run that stops half way
+
+class _StopsAfterOneCard(F.ForgeSync):
+    """An engine whose second card hits a rate limit.
+
+    Stopping half way is the ordinary case, not a contrived one: GitHub's secondary limit is what
+    a first sync of a real board runs into, and `_sync` returns right there. What is faked is only
+    *where* it stops, so the test can say which card was left untouched.
+    """
+
+    _applied = 0
+
+    def _apply_card(self, card, issue, plan, result):
+        self._applied += 1
+        if self._applied > 1:
+            raise F.ForgeRateLimited("GitHub rate limit reached; try again at 09:00", 1.0e9)
+        return super()._apply_card(card, issue, plan, result)
+
+
+class _EditsUnderneath(F.ForgeSync):
+    """An engine with somebody else writing the card file while it works.
+
+    A sync runs on its own thread (protocol 19.14) while the Switchboard pane and the agent write
+    through `BoardTools`, so this is what actually happens when the user edits a card during a sync.
+    """
+
+    edit = staticmethod(lambda: None)
+
+    def _apply_card(self, card, issue, plan, result):
+        type(self).edit()
+        return super()._apply_card(card, issue, plan, result)
+
+
+class StoppedRunTests(SyncCase):
+    def marks(self):
+        data = json.loads((self.root / F.STATE_FILE).read_text(encoding="utf-8"))
+        return data.get("issues_etag", ""), data.get("last_seen", "")
+
+    def test_a_stopped_run_leaves_the_listing_marks_where_the_last_whole_run_put_them(self):
+        first, second = self.card(title="Alpha card"), self.card(title="Beta card")
+        self.sync()
+        settled = self.marks()
+        self.gh.web_edit(1, title="Alpha as GitHub has it")
+        self.gh.web_edit(2, title="Beta as GitHub has it")
+
+        stopped = _StopsAfterOneCard(self.board, self.provider()).run(confirm_bulk=True)
+        self.assertTrue(stopped.retry_at)
+        # Nothing about the listing moved: the next run must be allowed to see both issues again.
+        self.assertEqual(self.marks(), settled)
+
+        again = self.sync()
+        self.assertEqual(again.errors, [])
+        titles = sorted(self.reload(c.id).title for c in (first, second))
+        self.assertEqual(titles, ["Alpha as GitHub has it", "Beta as GitHub has it"])
+
+    def test_a_whole_run_does_move_them(self):
+        self.card()
+        self.gh.make_issue("Theirs", "## Issue\nfrom github\n")
+        self.sync()
+        etag, last_seen = self.marks()
+        self.assertTrue(etag)
+        self.assertTrue(last_seen)
+
+
+class ConcurrentWriteTests(SyncCase):
+    def test_a_card_edited_while_the_sync_runs_is_not_overwritten(self):
+        card = self.card()
+        self.sync()
+        self.gh.web_edit(1, title="Their title")
+
+        def edit():
+            self.edit_card(card.id, body=self.reload(card.id).body + "\nThe pane wrote this.\n")
+
+        _EditsUnderneath.edit = staticmethod(edit)
+        self.addCleanup(setattr, _EditsUnderneath, "edit", staticmethod(lambda: None))
+        result = _EditsUnderneath(self.board, self.provider()).run(confirm_bulk=True)
+
+        self.assertTrue(result.errors, "the lost race should be reported")
+        self.assertIn("changed since it was read", " ".join(result.errors))
+        self.assertIn("The pane wrote this.", self.reload(card.id).body)
+
+    def test_the_same_sync_may_write_a_card_twice(self):
+        """A create links the card and a later pull rewrites it; the second write must still pass."""
+        card = self.card()
+        self.sync()
+        self.assertIn("relay/terminal#1", json.dumps(self.reload(card.id).front))
+        self.gh.web_edit(1, title="Their title")
+        self.sync()
+        self.assertEqual(self.reload(card.id).title, "Their title")
+
+
 if __name__ == "__main__":                                        # pragma: no cover
     unittest.main()

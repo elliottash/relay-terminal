@@ -615,7 +615,13 @@ class BoardCommands:
                 except (B.BoardError, OSError):            # pragma: no cover - unreadable tree
                     pass
 
-        threading.Thread(target=work, name="relay-forge-sync", daemon=True).start()
+        try:
+            threading.Thread(target=work, name="relay-forge-sync", daemon=True).start()
+        except RuntimeError as exc:
+            # The thread never started, so nothing will ever clear the flag: without this, one
+            # failure to spawn would answer `forge_busy` to every sync and import from here on.
+            self._forge_run = None
+            raise ValueError(f"The sync could not be started ({type(exc).__name__}).") from exc
 
     # ---- events ----------------------------------------------------------------
     def _tag(self, event: dict) -> dict:

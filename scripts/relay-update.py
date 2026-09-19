@@ -106,13 +106,26 @@ def installed_deb_version(package: str = "relay") -> str | None:
     return version or None
 
 
-def apt_newer(installed: str, candidate: str) -> bool:
-    """dpkg's own ordering: is the candidate strictly newer than what is installed?"""
-    result = subprocess.run(
-        ["dpkg", "--compare-versions", installed, "lt", candidate],
-        capture_output=True, timeout=15,
-    )
-    return result.returncode == 0
+def apt_newer(installed: str, candidate: str) -> bool | None:
+    """dpkg's own ordering: is the candidate strictly newer than what is installed?
+
+    None when dpkg could not answer. `dpkg --compare-versions` exits 0 for true and 1 for false,
+    but **2** for a version string it cannot parse — an empty release tag makes the candidate
+    `-1~ubuntu24.04` — and reading that as "false" is how a broken tag came out as "already the
+    latest release", which is the one answer that must never be a guess.
+    """
+    if not installed.strip() or not candidate.strip():
+        return None
+    try:
+        result = subprocess.run(
+            ["dpkg", "--compare-versions", installed, "lt", candidate],
+            capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode in (0, 1):
+        return result.returncode == 0
+    return None
 
 
 def latest_release() -> dict:
@@ -184,9 +197,16 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
     except Exception as error:  # a line the notice can show, not a traceback
         say(f"Could not reach GitHub: {error}")
         return 1
-    tag = release.get("tag_name", "")
+    tag = str(release.get("tag_name") or "")
+    if not tag.strip():
+        say("The latest GitHub release has no tag; nothing to install.")
+        return 1
     candidate = full_version(tag, slug)
-    if not apt_newer(installed, candidate):
+    newer = apt_newer(installed, candidate)
+    if newer is None:
+        say(f"Could not compare {installed} with {candidate}; nothing was installed.")
+        return 1
+    if not newer:
         say(f"Relay {installed} is already the latest release.")
         say(f"CURRENT {tag}")
         return 0
@@ -201,6 +221,10 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
 
     work = Path(tempfile.mkdtemp(prefix="relay-update-"))
     deb = work / name
+    #: True once a line has told the user where the .deb is. Deleting it after that made every
+    #: such line a lie — "Run: sudo apt install <path>" named a file this function had just
+    #: removed — so the download is kept exactly when its path has been printed.
+    keep = dry_run
     try:
         megabytes = max(asset.get("size", 0), 1) / (1 << 20)
         say(f"Downloading {name} ({megabytes:.1f} MB)…")
@@ -236,14 +260,19 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
 
         installer = root_installer(deb)
         if installer is None:
+            keep = True                 # it printed the sudo line, or where the package is
             return 2
         command, via = installer
         say("Installing (the password dialog is pkexec's)…")
+        # No timeout: the first thing this waits on is polkit's password dialog, and there is no
+        # sane number of seconds to give a person typing a password. Without a session to show it
+        # in, pkexec fails immediately, and apt's own lock wait is bounded.
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip().splitlines()
             say(f"Install failed ({via}): {detail[-1] if detail else 'unknown error'}.")
             say(f"The verified package is still at {deb}")
+            keep = True
             return 1
         now = installed_deb_version() or candidate
         say(f"Installed Relay {now}.")
@@ -258,7 +287,7 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
         say(f"UPDATED {tag}")
         return 0
     finally:
-        if not dry_run:
+        if not keep:
             shutil.rmtree(work, ignore_errors=True)
 
 
@@ -276,8 +305,15 @@ def check_command() -> int:
     except Exception as error:
         say(f"Could not reach GitHub: {error}")
         return 1
-    tag = release.get("tag_name", "")
-    if apt_newer(installed, full_version(tag, slug)):
+    tag = str(release.get("tag_name") or "")
+    if not tag.strip():
+        say("The latest GitHub release has no tag.")
+        return 1
+    newer = apt_newer(installed, full_version(tag, slug))
+    if newer is None:
+        say(f"Could not compare {installed} with {full_version(tag, slug)}.")
+        return 1
+    if newer:
         say(f"Update available: {tag} (installed: {installed}).")
         say(f"AVAILABLE {tag}")
     else:

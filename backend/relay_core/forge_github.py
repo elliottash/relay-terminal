@@ -45,6 +45,9 @@ MAX_BODY = 8 << 20
 MAX_WAIT = 60.0
 MAX_ATTEMPTS = 4
 
+#: Methods a transport failure may be retried on.  A write is not repeated: see `_send`.
+IDEMPOTENT = frozenset({"GET", "HEAD"})
+
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
@@ -247,7 +250,13 @@ class GitHubProvider(ForgeProvider):
                         self._rate_message(head, wait), self._clock() + wait) from None
                 raise self._http_error(error.code, head, body) from None
             except (urllib.error.URLError, TimeoutError, OSError) as error:
-                if attempt < self._max_attempts:
+                # Only a read is retried.  A `POST` or `PATCH` that dies on the socket may
+                # already have been carried out — a timeout on "create issue" that GitHub
+                # honoured comes back as a second issue, and on "create comment" as a double
+                # post — and the sync has no idempotency key to offer, so a transport failure
+                # on a write is reported rather than repeated.  A rate limit is different: the
+                # request was *refused*, and `_rate_wait` above still backs off for any method.
+                if attempt < self._max_attempts and method in IDEMPOTENT:
                     self._sleep(min(2.0 ** attempt, self._max_wait))
                     continue
                 reason = getattr(error, "reason", error)
@@ -303,8 +312,16 @@ class GitHubProvider(ForgeProvider):
             f"{self.host} answered HTTP {status}" + (f": {message[:200]}" if message else ".")))
 
     # ---- paging ---------------------------------------------------------------
-    def _get_all(self, path: str, query: dict | None = None, etag: str | None = None):
-        """Every page of a listing, or None when the first page answered 304."""
+    def _get_all(self, path: str, query: dict | None = None, etag: str | None = None, *,
+                 whole: bool = False):
+        """Every page of a listing, or None when the first page answered 304.
+
+        `whole=True` means a short listing would be *wrong*, not merely incomplete: the engine
+        reads "this issue is not in the listing" as "this issue has not changed", so a listing cut
+        off at `MAX_PAGES` would make it push the local card over a remote edit, and on a first
+        sync file a second copy of every issue past the cut.  There is no safe half of that, so it
+        is refused with the number to look at rather than half-done.
+        """
         url = self._url(path, {**(query or {}), "per_page": PER_PAGE})
         reply = self._send("GET", url, etag=etag)
         if reply.status == 304:
@@ -318,6 +335,10 @@ class GitHubProvider(ForgeProvider):
             out.extend(reply.body or [])
             nxt = _parse_next(reply.link)
             pages += 1
+        if nxt and whole:
+            raise ForgeUnavailable(
+                f"{self.repo}: that listing is longer than {MAX_PAGES * PER_PAGE} rows, which is "
+                "more than one sync can read safely. Narrow what the sync covers and try again.")
         return out, first_etag
 
     # ---- the ForgeProvider interface ------------------------------------------
@@ -335,7 +356,7 @@ class GitHubProvider(ForgeProvider):
     def list_issues(self, since: str | None = None, etag: str | None = None):
         rows, tag = self._get_all(f"/repos/{self.repo}/issues",
                                   {"state": "all", "sort": "updated", "direction": "desc",
-                                   "since": since}, etag)
+                                   "since": since}, etag, whole=True)
         if rows is None:
             self.list_etag = etag or ""
             return None
@@ -374,7 +395,7 @@ class GitHubProvider(ForgeProvider):
 
     def list_comments(self, number: int, since: str | None = None, etag: str | None = None):
         rows, tag = self._get_all(f"/repos/{self.repo}/issues/{int(number)}/comments",
-                                  {"since": since}, etag)
+                                  {"since": since}, etag, whole=True)
         if rows is None:
             self.comments_etag = etag or ""
             return None

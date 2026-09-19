@@ -94,6 +94,13 @@ never issues: they are filtered out of every listing.
                     "conflict": "9f2c…"}}}
 ```
 
+- `issues_etag` and `last_seen` are the *listing* marks, and they are written only when a run has
+  planned and applied every card. A run that stops half way — a rate limit is the ordinary reason —
+  leaves them where the last complete run put them, so the next run lists the same issues again
+  rather than being answered `304`, or filtered past an issue it never looked at. (Storing them at
+  listing time was a way to lose a remote edit: a card whose baseline is intact and whose issue is
+  missing from the listing reads as "the issue equals the baseline", and the next run would push the
+  local version over the remote change without seeing a conflict.)
 - It sits in the board's **private root**, which `switchboard/.gitignore` excludes from git; the
   engine writes that line if the board does not have it yet. It is per machine: the ETags and the
   `updated_at` values are conversations with one server, and a shared file would conflict on every

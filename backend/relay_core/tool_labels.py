@@ -710,7 +710,9 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
                 continue
             lines.append(str(question.get("question") or ""))
             given = answers[index] if index < len(answers) else None
-            lines.append("→ " + str((given or {}).get("answer") or "Unanswered"))
+            if not isinstance(given, dict):
+                given = {}
+            lines.append("→ " + str(given.get("answer") or "Unanswered"))
         sections.append(_section("questions", "text", "\n".join(lines), cap=DETAIL_TEXT_CAP,
                                  keep_empty=True))
     elif name == "type_into_program":
