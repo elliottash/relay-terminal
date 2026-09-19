@@ -2210,6 +2210,20 @@ host, event types, counts, durations and error types only; `scrub()` masks crede
 in every record as a second line of defence. There is still no telemetry: the files never leave the
 machine.
 
+**Which build this is** (owner, 2026-09-19: "where does relay say what build it is? put that in
+settings", then "do 2026-09-10.14H.01 (where XXH is the 24-H time)"). `scripts/build-id.py` runs as
+a `POST_BUILD` step of the `relay` target, so it numbers exactly the relinks of the app: the local
+date, the 24-hour hour, and a count that starts again each hour — `2026-09-19.14H.01`. It keeps the
+count in `.relay-build-seq.json` and writes the id to `relay.build-id`, both beside the binary; the
+file is installed with the binary, and a binary without one falls back to its own file time and a
+`.--` count. `relay::buildinfo::capture()` reads it once at start-up — the build *this process* is,
+which cannot change under it — while `idOnDisk()` re-reads it, which is what a fresh launch would
+get. Options > General > Diagnostics shows the first, with the version, the time the process
+started and its path, and adds a line when the two differ: a rebuild never reaches a running Relay,
+nor the windows it opens, because "New window" is in-process; quitting and reopening, or a launch
+from the taskbar (which runs the desktop entry's `Exec`), starts the new binary. The id is also a
+`build=` field on the `gui_start` log line.
+
 Actions > Diagnostics has "Open log folder" and "Log detail" (`off | error | info | debug |
 verbose`, setting `logging/level`, passed to workers as `RELAY_LOG_LEVEL`). **`verbose` also writes
 prompt text** and is the only level that does; it is off by default and says so in the menu.

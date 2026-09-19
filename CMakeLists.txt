@@ -434,6 +434,14 @@ if(RELAY_BUILD_APP)
         RELAY_VERSION="${PROJECT_VERSION}")
     target_compile_options(relay PRIVATE -Wall -Wextra -Wpedantic)
     install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # The build id (owner, 2026-09-19): 2026-09-19.14H.01 — the date, the hour, the count that hour.
+    # POST_BUILD runs exactly when `relay` was relinked, so the number counts real builds; it is
+    # written beside the binary (relay.build-id), which the app reads when it starts and shows in
+    # Options > General > Diagnostics. Installed with the binary; a binary without it says so.
+    add_custom_command(TARGET relay POST_BUILD
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-id.py $<TARGET_FILE_DIR:relay>
+        COMMENT "Numbering this build of relay" VERBATIM)
+    install(FILES $<TARGET_FILE_DIR:relay>/relay.build-id DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay

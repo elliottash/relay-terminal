@@ -15,6 +15,9 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <QDateTime>
+#include <QFile>
+
 #ifndef RELAY_VERSION
 #define RELAY_VERSION "0.0.0-dev"
 #endif
@@ -53,3 +56,25 @@ inline int relayFuzzyScore(const QString &needle, const QString &haystack) {
     return std::max(1, 5000 - (last - first) * 10 - first);
 }
 
+// Which build this is (owner, 2026-09-19: "where does relay say what build it is? put that in
+// settings"). scripts/build-id.py numbers every relink of the app — 2026-09-19.14H.01: the date,
+// the 24-hour hour, the count that hour — into `relay.build-id` beside the binary. capture() reads
+// it once, at start-up, which is the build this *process* is; idOnDisk() reads it again whenever
+// asked, which is the build a fresh launch would be. They differ after a rebuild: a running Relay
+// keeps the binary it started with, and so does every window it opens.
+namespace relay::buildinfo {
+inline QString idOnDisk() {
+    const QFileInfo exe(QCoreApplication::applicationFilePath());
+    QFile file(exe.absolutePath() + QStringLiteral("/relay.build-id"));
+    if (file.open(QIODevice::ReadOnly)) {
+        const QString id = QString::fromUtf8(file.readLine(64)).trimmed();
+        if (!id.isEmpty()) return id;
+    }
+    // A binary without its number (copied by hand, or built before numbering): its file time, in
+    // the same shape, with no count.
+    return exe.lastModified().toString(QStringLiteral("yyyy-MM-dd.HH'H'")) + QStringLiteral(".--");
+}
+struct Running { QString id; QDateTime started; };
+inline Running &running() { static Running r; return r; }
+inline void capture() { running() = Running{idOnDisk(), QDateTime::currentDateTime()}; }
+}  // namespace relay::buildinfo

@@ -275,9 +275,10 @@ int main(int argc, char **argv) {
     migrateOutputTokenCeiling(); // the old 32768 ceiling -> 0, "the model's own limit" (#Z79Y)
     // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
     relay::log::installMessageHandler();
-    relay::log::info(QStringLiteral("gui_start version=%1 pid=%2 level=%3")
+    relay::buildinfo::capture();   // which build this process is, before a rebuild can move the file
+    relay::log::info(QStringLiteral("gui_start version=%1 build=%4 pid=%2 level=%3")
                          .arg(QStringLiteral(RELAY_VERSION)).arg(QCoreApplication::applicationPid())
-                         .arg(relay::log::levelName(relay::log::level())));
+                         .arg(relay::log::levelName(relay::log::level()), relay::buildinfo::running().id));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.relayterminal.Relay"));
     try {
         // Theme icon when installed; the bundled PNG from the source tree or install otherwise.
