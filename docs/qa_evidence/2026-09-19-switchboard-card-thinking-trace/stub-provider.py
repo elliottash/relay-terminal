@@ -78,6 +78,24 @@ def first_user(request):
     return ""
 
 
+def turn_view(request):
+    """The last user message and the tool results that followed it: one card's conversation is
+    reused across turns (protocol 19.4), so the whole history cannot be counted per turn."""
+    messages = request.get("messages") or []
+    last = -1
+    for i, m in enumerate(messages):
+        if m.get("role") == "user":
+            last = i
+    tail = messages[last + 1:] if last >= 0 else []
+    text = ""
+    if last >= 0:
+        content = messages[last].get("content")
+        if isinstance(content, list):
+            content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+        text = content or ""
+    return text, [m for m in tail if m.get("role") == "tool"]
+
+
 def hash_of(request):
     for m in reversed(request.get("messages") or []):
         if m.get("role") == "tool":
@@ -88,14 +106,13 @@ def hash_of(request):
 
 
 def body(request):
-    tools = [m for m in request.get("messages") or [] if m.get("role") == "tool"]
-    text = first_user(request)
+    text, tools = turn_view(request)
     if "Discuss** turn" in text:
         if not tools:
             return {"reasoning": DISCUSS_FIRST,
                     "call": call("board_comment", {
-                        "card": "TRC1", "kind": "question",
-                        "text": "Should the thinking trace also be written to the card file, "
+                        "id": "TRC1", "kind": "question",
+                        "text": "1. Should the thinking trace also be written to the card file, "
                                 "or stay a live view of the running turn? I recommend the live "
                                 "view: the file is the record of what was said, not what was "
                                 "thought."})}

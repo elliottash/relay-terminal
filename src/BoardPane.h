@@ -183,9 +183,7 @@ private:
     void watchIssues();
     void showProblems(const QJsonArray &problems);
     void step(int delta);                  // Up/Down, across section breaks
-public: // TEMP-SHIM-9K5H (revert before land.py commit; unblocks boardfilter's in-progress test)
     void reorder(int delta);               // Alt+Shift+Up/Down, inside the section
-private:
     void shiftSection(int delta);          // Alt+Shift+Left/Right, to the next status
     void foldSelected();                   // Left
     void unfoldNearest();                  // Right

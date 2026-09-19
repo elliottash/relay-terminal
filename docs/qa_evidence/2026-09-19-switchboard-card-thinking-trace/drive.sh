@@ -116,28 +116,32 @@ shot() {   # shot <name> — parks the mouse off the card so no hover row is in 
     convert "$out/implementer-$1.png" -crop ${width}x760+280+40 +repage -scale 140% "$out/implementer-$1-card.png"
 }
 
-# The board on the sandbox project (Ctrl+Shift+S), then `c`: the selected card opens with its
-# reply box focused (typing on the list itself is quick-add, which is how the first run went
-# wrong: the question became a new card's title).
+# The board beside the terminal (Ctrl+Shift+S). The mouse path is deliberate: focus after the
+# board opens is the list, whose single-letter keys ('e' edits, 'o' opens the file) eat typed
+# words, and the filter eats the rest — so the section is clicked open, the card row clicked,
+# and the reply box clicked twice (two slow clicks: the editor is not the document, so a double
+# click there is harmless) before any letters are typed.
 k ctrl+shift+s; sleep 3
-k c; sleep 2
+xdotool mousemove 1050 250; xdotool click 1; sleep 0.8      # unfold Inbox
+xdotool mousemove 1050 282; xdotool click 1; sleep 2        # the card opens beside the list
+xdotool mousemove 1100 775; xdotool click 1; sleep 0.4; xdotool click 1; sleep 0.6
 
 # ---- Discuss: the trace streams, the agent asks mid-turn, the answer lands ---------------
 t "where should the thinking trace live?"
 k Return
-sleep 3.2
+sleep 2.6
 shot discuss-stream        # mid-block: the tail under a "✦ thinking…" header, in the thread
-sleep 6
+sleep 4.4
 shot question              # the question entry with the first block sealed above it
-sleep 8
+sleep 6
 shot done                  # both sealed blocks, the answer, the strip gone
 
 # ---- Plan: the trace while a plan is being made ------------------------------------------
+xdotool mousemove 1100 775; xdotool click 1; sleep 0.4; xdotool click 1; sleep 0.5
 k ctrl+Return              # an empty box plans: the card is the brief
-sleep 1
-sleep 4.5
+sleep 2.6
 shot plan-stream           # reasoning streaming while the plan turn runs
-sleep 12
+sleep 9
 shot plan-written          # `## Plan` on the card, the trace sealed above the closing answer
 
 grep -q "✦" "$work/issues/features/TRC1.md" && echo "TRACE LEAKED INTO THE CARD FILE" || true
