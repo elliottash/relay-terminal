@@ -132,6 +132,42 @@ private Q_SLOTS:
         QCOMPARE(pulseScale(4), pulseScale(0));
     }
 
+    // One cadence for every live mark (owner, 2026-09-19). The phase is a function of the clock
+    // alone, so the pane glyph, the tab dot and the marks in another window agree at every instant
+    // whatever each of them polls at; nothing here may depend on RelayWindow's 400 ms status poll.
+    void everyLiveMarkStepsOnTheSameGrid() {
+        QCOMPARE(kPulseStepMs, qint64(600));
+        // Four steps of the grid, in order, and then round again.
+        QCOMPARE(pulsePhaseAt(0), 0);
+        QCOMPARE(pulsePhaseAt(599), 0);
+        QCOMPARE(pulsePhaseAt(600), 1);
+        QCOMPARE(pulsePhaseAt(1200), 2);
+        QCOMPARE(pulsePhaseAt(1800), 3);
+        QCOMPARE(pulsePhaseAt(2400), 0);
+        // Any two marks reading the same instant read the same step, however far along the clock
+        // is: this is the whole of "they blink together".
+        const qint64 t = 1'758'000'000'000;   // a plausible wall clock, mid-step
+        for (qint64 offset = 0; offset < 4 * kPulseStepMs; ++offset)
+            QCOMPARE(pulsePhaseAt(t + offset), pulsePhaseAt(t + offset + 4 * kPulseStepMs));
+        // The step a mark is drawn at and the wait it arms are the same boundary: waiting that
+        // long lands in the next step, never twice in this one.
+        for (qint64 at : {qint64(0), qint64(1), qint64(599), qint64(600), t, t + 317}) {
+            const int wait = msToNextPulseStepAt(at);
+            QVERIFY(wait >= 1 && wait <= kPulseStepMs);
+            QCOMPARE(pulsePhaseAt(at + wait), (pulsePhaseAt(at) + 1) % 4);
+            QCOMPARE(pulsePhaseAt(at + wait - 1), pulsePhaseAt(at));
+        }
+        // A clock before the epoch steps in the same direction as one after it (a phase that
+        // counted backwards there would make the arithmetic above quietly untrue).
+        QCOMPARE(pulsePhaseAt(-1), 3);
+        QCOMPARE(pulsePhaseAt(-600), 3);
+        QCOMPARE(pulsePhaseAt(-601), 2);
+        QCOMPARE(msToNextPulseStepAt(-1), 1);
+        // And "now" is one of the steps, read off the same grid.
+        QVERIFY(pulsePhaseNow() >= 0 && pulsePhaseNow() <= 3);
+        QVERIFY(msToNextPulseStep() >= 1 && msToNextPulseStep() <= kPulseStepMs);
+    }
+
     // The live state's word is text, so its ink is lifted to 4.5:1 on whatever ground the header
     // is on — the pane's own background, or the ssh band a running command can sit above.
     void theStateWordIsLegibleOnEveryGround() {

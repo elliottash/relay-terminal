@@ -320,6 +320,11 @@ public:
         // Pane state glyphs and tab icons (#XM0T), and the remote-session header (#SPBN).
         connect(&m_statusTimer, &QTimer::timeout, this, [this] { refreshPaneStatus(); });
         m_statusTimer.start(kStatusPollMs);
+        // The tab's live dot steps on the shared blink grid, not on the poll (owner, 2026-09-19:
+        // one cadence). The poll decides what each tab's icon says; this timer only moves the
+        // blink on, at the grid's own boundary.
+        m_pulseTimer.setSingleShot(true);
+        connect(&m_pulseTimer, &QTimer::timeout, this, [this] { applyTabIcons(); });
         // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10). A knock, a request for the
         // keyboard or a guest prompt has to be noticed from another pane or another window, and
         // must never take the keyboard: the next keystroke would land on Admit. So it opens the
@@ -913,6 +918,13 @@ protected:
     void changeEvent(QEvent *event) override {
         QMainWindow::changeEvent(event);
         if (event->type() == QEvent::WindowStateChange) updateChromeState();
+        // Coming back to a window catches the writers that cannot say they wrote: a dialog that has
+        // just closed, relay.conf edited by hand, a second Relay. Only worth the redraw when this
+        // window is actually showing an Options pane — otherwise activating any window would
+        // rebuild every pane in the process.
+        if (event->type() == QEvent::ActivationChange && isActiveWindow() && m_tabs
+            && !settingsPanesIn(m_tabs->currentWidget()).isEmpty())
+            refreshSettingsPanes();
     }
 
     void resizeEvent(QResizeEvent *event) override {
@@ -971,7 +983,19 @@ private:
 
     // Saved window layout: forget it and stop saving for the rest of this session, so the next
     // start opens one new window. The windows on screen are left alone.
+    //
+    // It asks first (finding 11 of card #XZZB): the layout it throws away is every window, tab,
+    // pane and directory you had arranged, there is no way back to it, and nothing on screen
+    // changes when it happens — so run by mistake from the Actions list, the only sign was a notice,
+    // and the loss showed up at the next start.
     void startFreshWindowSet() {
+        if (QMessageBox::question(this, QStringLiteral("Start a fresh window set?"),
+                                  QStringLiteral("Relay forgets the saved layout — every window, tab, pane and "
+                                                 "directory it would reopen — and stops saving this session. "
+                                                 "The windows on screen are left as they are, and the next start "
+                                                 "opens one new window.\n\nThis cannot be undone."),
+                                  QMessageBox::Cancel | QMessageBox::Discard, QMessageBox::Cancel) != QMessageBox::Discard)
+            return;
         m_manager->forgetSavedLayout(true);
         notice(QStringLiteral("Saved window layout cleared. This session is no longer saved; the next start opens one fresh window."), 9000);
         const QString key = Keymap::instance().shortcutText(QStringLiteral("windows.fresh"));
@@ -1310,11 +1334,12 @@ private:
             QTimer::singleShot(400, this, [this, hintId, hintText] { hint(hintId, hintText); });
     }
 
-    // Something a setting depends on changed elsewhere (a keymap reload, a theme file): redraw.
-    void refreshSettingsPanes() {
-        for (int i = 0; i < m_tabs->count(); ++i)
-            for (ToolPane *tool : settingsPanesIn(m_tabs->widget(i))) tool->settings()->rebuild();
-    }
+    // Something a setting depends on changed elsewhere (a keymap reload, a theme file, a page put
+    // back to its defaults): redraw. Every Options pane in this process listens on the watch, in
+    // this window's other tabs and in the other windows too, so a value is never left on screen one
+    // edit out of date — which is what happened until 2026-09-19, when only the pane that made the
+    // edit rebuilt (finding 3 of card #XZZB). The pane's own controls notify the watch themselves.
+    static void refreshSettingsPanes() { relay::SettingsWatch::instance().notify(); }
 
     // Settings › Local models (card #24XJ). One per window: the rows are a section of the Options
     // pane, the messages go out through whichever pane is active — the same worker connection the
@@ -1386,6 +1411,7 @@ private:
         row.label = label;
         row.detail = detail;
         row.checked = QSettings().value(key, fallback).toBool();
+        row.changed = row.checked != fallback;
         row.onToggle = [this, key, extra](bool on) {
             QSettings().setValue(key, on);
             if (extra) extra(on);
@@ -1407,6 +1433,7 @@ private:
         row.label = label;
         row.detail = detail;
         row.number = QSettings().value(key, fallback).toInt();
+        row.changed = row.number != fallback;
         row.minimum = minimum;
         row.maximum = maximum;
         row.suffix = suffix;
@@ -1430,6 +1457,7 @@ private:
         row.detail = detail;
         row.placeholder = placeholder;
         row.text = QSettings().value(key).toString();
+        row.changed = !row.text.isEmpty();     // these ship empty; the placeholder says what empty means
         row.onText = [this, key, write](const QString &value) {
             if (write) write(value);
             else if (value.isEmpty()) QSettings().remove(key);
@@ -1457,6 +1485,7 @@ private:
         row.aliases = QStringLiteral("ssh hosts");
         row.placeholder = QStringLiteral("filly, backup.example.org");
         row.text = QSettings().value(key).toStringList().join(QStringLiteral(", "));
+        row.changed = !row.text.isEmpty();     // ships empty: no host is on either list
         row.onText = [key](const QString &value) {
             QStringList hosts;
             for (const QString &word : value.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts))
@@ -1540,8 +1569,10 @@ private:
         row.optionLabels = labels;
         row.current = current;
         row.onChoose = std::move(choose);
-        if (!fallback.isEmpty())
+        if (!fallback.isEmpty()) {
             row.reset = [fn = row.onChoose, fallback] { if (fn) fn(fallback); };
+            row.changed = current != fallback;
+        }
         return row;
     }
 
@@ -1584,6 +1615,7 @@ private:
             desktop.detail = QStringLiteral("When the agent finishes or needs you and this window is not in front");
             desktop.aliases = QStringLiteral("notify alerts popup bell toast");
             desktop.checked = relay::NotificationCenter::desktopEnabled();
+            desktop.changed = !desktop.checked;
             desktop.onToggle = [](bool on) { relay::NotificationCenter::setDesktopEnabled(on); };
             desktop.reset = [] { relay::NotificationCenter::setDesktopEnabled(true); };   // on when Relay ships
             general.rows << desktop;
@@ -1595,6 +1627,7 @@ private:
             hints.label = QStringLiteral("Shortcut hints");
             hints.detail = QStringLiteral("A brief tip when you do something the slow way and a key exists");
             hints.checked = relay::ShortcutHints::instance().enabled();
+            hints.changed = !hints.checked;
             hints.onToggle = [](bool on) { relay::ShortcutHints::instance().setEnabled(on); };
             // On when Relay ships. How often each hint has been shown is not a setting and is not
             // touched here; Actions › Reset shortcut hints is what forgets those counts.
@@ -1622,6 +1655,7 @@ private:
             reopen.detail = QStringLiteral("Windows, tabs, panes, directories and conversations come back");
             reopen.aliases = QStringLiteral("session persist startup warp layout remember where you left off");
             reopen.checked = WindowManager::restoreEnabled();
+            reopen.changed = !reopen.checked;    // on when Relay ships
             reopen.onToggle = [this](bool on) {
                 QSettings().setValue(QStringLiteral("windows/restore"), on);
                 if (on) m_manager->scheduleSave(); else m_manager->forgetSavedLayout(false);
@@ -1755,6 +1789,16 @@ private:
                                                                  "The pane keeps the model you chose"), true);
             failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
             models.rows << failover;
+            // Relay Free is the one failover target that is not already the user's own: another
+            // company's terms and a shared allowance, so it is opt-in even when failover is on
+            // (owner, 2026-09-19). A pane already running on Relay Free is unaffected.
+            relay::SettingRow hosted = toggleRow(QStringLiteral("agent/failover_hosted"),
+                                                 QStringLiteral("Allow Relay Free as a fallback when my own provider keeps failing"),
+                                                 QStringLiteral("Off: only your own providers with a stored key are tried. "
+                                                                "On: Relay's hosted service is the last resort, and the turn's "
+                                                                "conversation goes through it"), false);
+            hosted.aliases = QStringLiteral("failover relay free hosted fallback last resort");
+            models.rows << hosted;
         }
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
@@ -1938,9 +1982,15 @@ private:
             if (names.isEmpty()) settings.remove(QStringLiteral("skills/exclude"));
             else settings.setValue(QStringLiteral("skills/exclude"), names);
         });
-        agent.rows << textRow(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
-                              QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"),
-                              QStringLiteral("<project>/.relay/plans"));
+        {
+            // The one row whose value is a folder on this machine, so it is the one row with a
+            // Browse… button beside the box (card #XZZB); the box still takes a typed path.
+            relay::SettingRow plans = textRow(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
+                                              QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"),
+                                              QStringLiteral("<project>/.relay/plans"));
+            plans.browse = true;
+            agent.rows << plans;
+        }
         agent.rows << headingRow(QStringLiteral("Turn limits"));
         agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
                               QStringLiteral("Fraction of the model window, 0.50–0.98 (empty: 80% minus output room)"),
@@ -2050,6 +2100,8 @@ private:
                 QSettings().remove(QStringLiteral("voice/hold_key"));
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/hold_key"));
             };
+            // Derived rather than fixed, so "changed" is whether a key was ever chosen by hand.
+            hold.changed = QSettings().contains(QStringLiteral("voice/hold_key"));
             voice.rows << hold;
         }
         voice.rows << numberRow(QStringLiteral("voice/max_seconds"), QStringLiteral("Longest recording"),
@@ -5170,10 +5222,6 @@ private:
         namespace ps = relay::panestatus;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
-        // The tab's live mark blinks on the poll's own beat (cards #V8KT, #4E13); a still desktop
-        // (a cursor flash time of 0) draws it at rest.
-        const bool animate = QApplication::cursorFlashTime() > 0;
-        if (animate) ++m_statusPulse;
         QSet<QWidget *> pages;
         // One read of `appearance/pane_usage` for the whole poll: the chip, the tab label, the
         // tab tooltip and the Sessions row all answer to it (issue #D03W).
@@ -5247,17 +5295,13 @@ private:
             // What is live in the tab whatever its icon is showing: a news icon (done, needs you)
             // must not hide that work is happening in a sibling pane (card #V8KT).
             const ps::State live = ps::liveMarker(states);
-            const int phase = animate && live != ps::State::Idle ? m_statusPulse : -1;
-            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8").arg(terminal).arg(int(top)).arg(remote)
-                                    .arg(int(live)).arg(phase)
-                                    .arg(int(firstType.glyph)).arg(firstType.ink.name(), relay::theme::activeThemeId());
-            if (m_tabIconKey.value(page) == key) continue;
-            m_tabIconKey.insert(page, key);
-            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink,
-                                                          devicePixelRatioF(), live, phase));
+            m_tabMark.insert(page, TabMark{terminal, remote, top, live, firstType});
         }
         for (auto it = m_tabIconKey.begin(); it != m_tabIconKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
+        for (auto it = m_tabMark.begin(); it != m_tabMark.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabMark.erase(it);
+        applyTabIcons();   // after the pruning, so a closed tab cannot keep the blink armed
         for (auto it = m_tabUsageKey.begin(); it != m_tabUsageKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabUsageKey.erase(it);
         for (auto it = m_tabUsageShown.begin(); it != m_tabUsageShown.end();)
@@ -5274,6 +5318,54 @@ private:
                         if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()))
                             manager->setLiveUsage(liveUsage);
         m_fedLiveUsage = !liveUsage.isEmpty();
+    }
+
+    // What a tab's icon is drawn from, as the last poll read it. Kept per page so the blink can be
+    // moved on without walking every pane again — and so the icon the pulse redraws says exactly
+    // what the poll last decided it says.
+    struct TabMark {
+        bool terminal = false;
+        bool remote = false;
+        relay::panestatus::State top = relay::panestatus::State::Idle;
+        relay::panestatus::State live = relay::panestatus::State::Idle;
+        relay::panestatus::TypeStyle type;
+    };
+
+    // Draw every tab's icon for the step the wall clock is in now (owner, 2026-09-19: one cadence).
+    // The phase is relay::panestatus', the same one PaneStateGlyph paints with, so the dot on the
+    // tab and the glyph in the pane below it are lit and dark together — in this window and in
+    // every other one. A still desktop (a cursor flash time of 0) draws the mark at rest.
+    void applyTabIcons() {
+        namespace ps = relay::panestatus;
+        const bool animate = QApplication::cursorFlashTime() > 0;
+        const int phase = animate ? ps::pulsePhaseNow() : -1;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            const auto mark = m_tabMark.constFind(page);
+            if (mark == m_tabMark.constEnd()) continue;
+            const int marked = mark->live != ps::State::Idle ? phase : -1;
+            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8").arg(mark->terminal).arg(int(mark->top)).arg(mark->remote)
+                                    .arg(int(mark->live)).arg(marked)
+                                    .arg(int(mark->type.glyph)).arg(mark->type.ink.name(), relay::theme::activeThemeId());
+            if (m_tabIconKey.value(page) == key) continue;
+            m_tabIconKey.insert(page, key);
+            m_tabs->setTabIcon(i, relay::chrome::tabIcon(mark->terminal, mark->top, mark->remote, mark->type.glyph,
+                                                         mark->type.ink, devicePixelRatioF(), mark->live, marked));
+        }
+        armTabPulse();
+    }
+
+    // The next boundary of the blink grid, while anything in this window is live. Waiting for the
+    // 400 ms poll instead would show each step up to a poll late — the drift the one cadence is
+    // for — and the poll's interval is the meters' sampling interval, which is not ours to move.
+    void armTabPulse() {
+        if (m_pulseTimer.isActive()) return;   // already due on a boundary; two timers would not agree
+        if (QApplication::cursorFlashTime() <= 0) return;
+        for (auto it = m_tabMark.constBegin(); it != m_tabMark.constEnd(); ++it)
+            if (it->live != relay::panestatus::State::Idle) {
+                m_pulseTimer.start(relay::panestatus::msToNextPulseStep());
+                return;
+            }
     }
 
     // The tab's own share of the machine: every terminal pane in it summed (issue #D03W).
@@ -5885,8 +5977,9 @@ private:
     // Pane state glyphs and tab icons (#XM0T, #V8KT): the poll, the live mark's step on that
     // poll's beat, and each tab's last icon so it is only repainted when what it shows changes.
     QTimer m_statusTimer;
-    int m_statusPulse = 0;
+    QTimer m_pulseTimer;                       // the blink grid's next boundary, for the tab dots
     QHash<QWidget *, QString> m_tabIconKey;
+    QHash<QWidget *, TabMark> m_tabMark;
     QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
     QHash<QWidget *, relay::usage::Sample> m_tabUsageShown;  // ... the reading behind that text
     QHash<QWidget *, qint64> m_tabUsageAt;     // ... and when it last moved, for the hysteresis

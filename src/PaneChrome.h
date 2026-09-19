@@ -857,10 +857,9 @@ private:
         // the next step boundary rather than left free-running. Two panes that went live seconds
         // apart used to blink seconds apart — three busy panes in a row each flashing on their own
         // beat is noise, not a signal — and now every live mark in every window is on the same step.
-        static constexpr int kStepMs = 600;   // the waiting dots' clock: four steps, two levels
-        static int phaseNow() {
-            return int((QDateTime::currentMSecsSinceEpoch() / kStepMs) % 4);
-        }
+        // The grid itself is relay::panestatus::kPulseStepMs, which the tab's live dot reads too
+        // (owner, 2026-09-19: one cadence), so the glyph and the dot above it are never out of step.
+        static int phaseNow() { return relay::panestatus::pulsePhaseNow(); }
     protected:
         void paintEvent(QPaintEvent *) override {
             QPainter p(this);
@@ -873,9 +872,7 @@ private:
                                            blinking ? relay::panestatus::pulseScale(phaseNow()) : 1.0);
         }
     private:
-        void armPulse() {
-            m_pulse->start(int(kStepMs - QDateTime::currentMSecsSinceEpoch() % kStepMs));
-        }
+        void armPulse() { m_pulse->start(relay::panestatus::msToNextPulseStep()); }
         PaneChrome *m_chrome;
         QTimer *m_pulse = nullptr;
     };

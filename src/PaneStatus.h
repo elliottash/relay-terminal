@@ -77,6 +77,23 @@ State liveMarker(const QList<State> &states);
 // desktop's reduce-motion signal — and draws the mark at full size.
 qreal pulseScale(int phase);
 
+// ----- one cadence for every live mark (owner, 2026-09-19) ---------------------------------------
+// The step is read off the wall clock, so it is the same number in every widget, every window and
+// every process on this machine at any instant: the pane glyph (PaneStateGlyph), the tab's live
+// dot (RelayWindow::applyTabIcons) and anything added later all step together. It deliberately
+// does not depend on how often the caller looks — the tab dot used to count its own steps off the
+// 400 ms status poll, so two windows blinked on whatever beat each had started polling on, and a
+// tab could be dark while the glyph in the pane below it was lit.
+inline constexpr qint64 kPulseStepMs = 600;   // four steps of it, which pulseScale reads as two levels
+
+// The step `msSinceEpoch` falls in: 0, 1, 2 or 3, to hand straight to pulseScale().
+int pulsePhaseAt(qint64 msSinceEpoch);
+int pulsePhaseNow();
+// Milliseconds from `msSinceEpoch` to the next step boundary. Always 1..kPulseStepMs, never 0, so
+// a timer armed with it lands in the next step instead of firing twice inside this one.
+int msToNextPulseStepAt(qint64 msSinceEpoch);
+int msToNextPulseStep();
+
 // Everything the state is decided from. Each field is state a Pane already keeps.
 struct Facts {
     bool agentBusy = false;

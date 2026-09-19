@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PaneStatus.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -75,6 +76,27 @@ qreal pulseScale(int phase) {
     static const qreal steps[]{1.0, 0.62, 1.0, 0.62};
     return phase < 0 ? 1.0 : steps[phase % 4];
 }
+
+// The blink grid (owner, 2026-09-19: one cadence). Integer division alone would put every step
+// before the epoch in the wrong direction, so the step index floors rather than truncates; no
+// desktop clock is there, but a test may hand it one.
+static qint64 pulseStepIndex(qint64 msSinceEpoch) {
+    return msSinceEpoch >= 0 ? msSinceEpoch / kPulseStepMs
+                             : -((-msSinceEpoch + kPulseStepMs - 1) / kPulseStepMs);
+}
+
+int pulsePhaseAt(qint64 msSinceEpoch) {
+    return int(((pulseStepIndex(msSinceEpoch) % 4) + 4) % 4);
+}
+
+int pulsePhaseNow() { return pulsePhaseAt(QDateTime::currentMSecsSinceEpoch()); }
+
+int msToNextPulseStepAt(qint64 msSinceEpoch) {
+    const qint64 into = ((msSinceEpoch % kPulseStepMs) + kPulseStepMs) % kPulseStepMs;
+    return int(kPulseStepMs - into);
+}
+
+int msToNextPulseStep() { return msToNextPulseStepAt(QDateTime::currentMSecsSinceEpoch()); }
 
 State resolve(const Facts &facts, quint64 seenSerial) {
     // An open `ask_user` card outranks the running turn it belongs to (#MQ9C): the turn is
