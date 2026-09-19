@@ -263,11 +263,15 @@ QString closedAgo(qint64 closedAtMs, qint64 nowMs) {
     return QStringLiteral("closed %1 days ago").arg(seconds / 86400);
 }
 
-QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText) {
+QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText,
+                    const QString &usageTag) {
     QStringList tags;
     if (item.value(QStringLiteral("pinned")).toInt() > 0) tags << QStringLiteral("pinned");
     if (openNow) tags << QStringLiteral("open");
     else if (!closedText.isEmpty()) tags << closedText;
+    // What the conversation's pane is costing the machine right now (issue #D03W): live state
+    // like "open", so it sits beside it, and it is simply absent when the pane is idle.
+    if (!usageTag.isEmpty()) tags << usageTag;
     if (item.value(QStringLiteral("unfinished")).toBool()) tags << QStringLiteral("unfinished");
     const int files = item.value(QStringLiteral("files_count")).toInt();
     if (files > 0)
@@ -1034,7 +1038,9 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
     QString closedText;
     if (const auto it = m_closed.constFind(sessionId); it != m_closed.constEnd())
         closedText = closedAgo(it->second, QDateTime::currentMSecsSinceEpoch());
-    row->setData(0, kBadgeRole, thread ? QStringList() : badges(item, m_openSessions.contains(sessionId), closedText));
+    row->setData(0, kBadgeRole, thread ? QStringList()
+                                        : badges(item, m_openSessions.contains(sessionId), closedText,
+                                                 m_liveUsage.value(sessionId)));
 
     QString tip = item.value(QStringLiteral("workspace")).toString();
     if (thread)
@@ -1668,6 +1674,39 @@ void SessionManager::setOpenSessions(const QStringList &sessionIds) {
     if (m_openSessions == sessionIds) return;
     m_openSessions = sessionIds;
     if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+// What each open conversation's pane is using (issue #D03W), pushed by the window's status
+// poll: session id to a "cpu 12% · mem 3%" tag. Rows are patched in place rather than the
+// tree rebuilt — the numbers move every poll, and a rebuild would lose an unfold.
+void SessionManager::setLiveUsage(const QHash<QString, QString> &usage) {
+    if (m_liveUsage == usage) return;
+    if (m_tree) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        bool redraw = false;
+        // The union, not just the new keys: a pane that went idle drops out of `usage`, and its
+        // row has to lose the tag as surely as a busy pane's row gains one.
+        QSet<QString> touched;
+        for (auto it = usage.cbegin(); it != usage.cend(); ++it) touched.insert(it.key());
+        for (auto it = m_liveUsage.cbegin(); it != m_liveUsage.cend(); ++it) touched.insert(it.key());
+        for (const QString &sessionId : std::as_const(touched)) {
+            for (QTreeWidgetItem *row : m_rows.values(sessionId)) {
+                if (!row || row->data(0, kKindRole).toString() != QLatin1String("session")) continue;
+                const QJsonObject item =
+                    QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object();
+                const auto closed = m_closed.constFind(sessionId);
+                const QString closedText = closed != m_closed.constEnd()
+                                               ? closedAgo(closed->second, now) : QString();
+                const QStringList tags = badges(item, m_openSessions.contains(sessionId), closedText,
+                                                usage.value(sessionId));
+                if (row->data(0, kBadgeRole).toStringList() == tags) continue;
+                row->setData(0, kBadgeRole, tags);
+                redraw = true;
+            }
+        }
+        if (redraw) m_tree->viewport()->update();
+    }
+    m_liveUsage = usage;
 }
 
 void SessionManager::setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed) {

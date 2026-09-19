@@ -27,6 +27,7 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "PaneTitles.h"
+#include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
@@ -351,6 +352,16 @@ public:
         facts.lastAsked = m_lastAsked;
         facts.questionOpen = m_ask.open();
         return facts;
+    }
+    // This pane's share of the machine (issue #D03W): CPU and memory summed over the shell's
+    // process tree and the pane's agent worker, sampled by the window's status poll so every
+    // pane is measured on the same interval. An idle pane is a valid sample of nothing.
+    relay::usage::Sample usageSample() const { return m_usageSample; }
+    void refreshUsage() {
+        QList<qint64> roots;
+        if (const int shell = shellPid(); shell > 0) roots << shell;
+        if (m_worker.state() == QProcess::Running) roots << qint64(m_worker.processId());
+        m_usageSample = m_usageMeter.update(roots);
     }
     // The foreground program's command line while it is ssh, mosh or telnet; empty otherwise.
     // Read live from the terminal's foreground process group, so it is true exactly while the
@@ -11201,6 +11212,10 @@ private:
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;
+    // The pane's resource meter (usageSample() above); one baseline per pane, so percentages
+    // are always over the status poll's own interval.
+    relay::usage::Meter m_usageMeter;
+    relay::usage::Sample m_usageSample;
     QByteArray m_workerBuffer;
     QList<QByteArray> m_workerPending;
     QTimer m_poll, m_debounce;

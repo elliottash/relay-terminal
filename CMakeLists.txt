@@ -254,6 +254,12 @@ add_library(relay-panestatus STATIC src/PaneStatus.cpp src/PaneStatus.h)
 target_include_directories(relay-panestatus PUBLIC src)
 target_link_libraries(relay-panestatus PUBLIC ${RELAY_QT}::Gui)
 target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
+# A pane's share of the machine (issue #D03W): /proc counters of the shell's and the worker's
+# process trees, turned into CPU / memory percentages. QtCore only, so tests need no window.
+add_library(relay-paneusage STATIC src/PaneUsage.cpp src/PaneUsage.h)
+target_include_directories(relay-paneusage PUBLIC src)
+target_link_libraries(relay-paneusage PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-paneusage PRIVATE -Wall -Wextra -Wpedantic)
 
 # SSH and mosh sessions (card #S5SH, docs/SSH-AND-MOSH.md): which host a login reached, per
 # `ssh -G`, and the line that loads shell/remote-integration.sh into the remote shell.
@@ -402,7 +408,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -565,6 +571,9 @@ if(BUILD_TESTING)
     add_executable(relay-panestatus-tests tests/panestatus_test.cpp)
     target_link_libraries(relay-panestatus-tests PRIVATE relay-panestatus relay-theme ${RELAY_QT}::Test)
     add_test(NAME panestatus COMMAND relay-panestatus-tests)
+    add_executable(relay-paneusage-tests tests/paneusage_test.cpp)
+    target_link_libraries(relay-paneusage-tests PRIVATE relay-paneusage ${RELAY_QT}::Test)
+    add_test(NAME paneusage COMMAND relay-paneusage-tests)
     # Reads the shipped theme files from the source tree.
     set_tests_properties(panestatus PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(relay-remotesession-tests tests/remotesession_test.cpp)

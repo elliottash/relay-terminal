@@ -18,6 +18,7 @@
 #include "PaneView.h"
 
 #include "PaneStatus.h"
+#include "PaneUsage.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -624,6 +625,12 @@ public:
         }
     }
 
+    // The pane's resource meter (issue #D03W). Called by the same 400 ms poll that calls
+    // setStatus(); the chip hides itself when the pane is using nothing worth a read.
+    void setUsage(const relay::usage::Sample &sample) {
+        if (m_usageChip) m_usageChip->setSample(sample);
+    }
+
     // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10.3). The chip beside the pane's title
     // is the one thing always on screen while a pane is shared, so it is where "and two other
     // people are watching" and "alice has the keyboard" have to be said. A guest driving gets the
@@ -691,6 +698,7 @@ private:
         QWidget *header = pane->headerWidget();
         if (!row || !header) return;
         m_glyph = new PaneStateGlyph(this);
+        m_usageChip = new PaneUsageChip;
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
         m_phoneChip->setText(QStringLiteral("phone"));
@@ -700,6 +708,7 @@ private:
         row->insertWidget(0, m_glyph);
         row->insertWidget(1, m_remoteChip);
         row->insertWidget(2, m_phoneChip);
+        row->insertWidget(3, m_usageChip);
         m_backdrop = new RemoteBackdrop(pane);
         m_backdrop->hide();
         m_backdrop->lower();
@@ -790,6 +799,102 @@ private:
         bool m_alarm = false;
     };
 
+    // The pane's resource meter (issue #D03W): "12% 3%" with a die and a memory-module glyph,
+    // right of the phone chip in the header row. Quiet on purpose — plain ink, no band, colours
+    // only when a value is high — and absent while the pane costs nothing worth reading, so an
+    // idle terminal looks exactly as it did before.
+    class PaneUsageChip final : public QWidget {
+    public:
+        explicit PaneUsageChip() {
+            setObjectName(QStringLiteral("paneUsageChip"));
+            setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            setAccessibleName(QStringLiteral("Pane CPU and memory"));
+        }
+        void setSample(const relay::usage::Sample &sample) {
+            m_sample = sample;
+            const bool show = sample.valid && relay::usage::worthShowing(sample) && enabled();
+            if (show == isVisible() && m_text == text()) { update(); return; }
+            m_text = text();
+            setToolTip(QStringLiteral("This pane's share of this machine\n%1\n\n"
+                                      "Counts the shell, the program it is running and this pane's agent "
+                                      "worker, with their children. A remote pane measures the local ssh "
+                                      "client, not the far machine.")
+                           .arg(relay::usage::describe(sample)));
+            setVisible(show);
+            updateGeometry();
+            update();
+            // Appearing or leaving changes what the title has to elide around.
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
+        }
+        QSize sizeHint() const override {
+            if (!isVisible() && m_text.isEmpty()) return {0, 0};
+            const QFontMetrics metrics(font());
+            return {7 + kGlyph + 4 + metrics.horizontalAdvance(section(0)) + 10 + kGlyph + 4
+                        + metrics.horizontalAdvance(section(1)) + 7, 18};
+        }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            if (m_text.isEmpty()) return;
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            QPainter p(this);
+            p.setFont(font());
+            p.setRenderHint(QPainter::Antialiasing);
+            const QFontMetrics metrics(font());
+            int x = 7;
+            for (int i = 0; i < 2; ++i) {
+                const double value = i == 0 ? m_sample.cpuPercent : m_sample.ramPercent;
+                const QColor ink = value >= 85 ? t.error : value >= 60 ? t.warning : t.muted;
+                p.setPen(QPen(ink, 1.2));
+                if (i == 0) paintDie(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
+                else paintModule(p, QRectF(x, (height() - 12) / 2.0, kGlyph, kGlyph), ink);
+                x += kGlyph + 4;
+                const QString label = section(i);
+                p.setPen(ink);
+                p.drawText(QRectF(x, 0, metrics.horizontalAdvance(label) + 2, height()),
+                           Qt::AlignLeft | Qt::AlignVCenter, label);
+                x += metrics.horizontalAdvance(label);
+            }
+        }
+    private:
+        static constexpr int kGlyph = 13;
+        // A processor die: a square with a smaller square inside, pins on the sides.
+        static void paintDie(QPainter &p, const QRectF &r, const QColor &ink) {
+            p.setPen(QPen(ink, 1.1));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(QRectF(r.center().x() - 3, r.center().y() - 3, 6, 6), 1.5, 1.5);
+            for (int k = -1; k <= 1; ++k) {
+                const qreal y = r.center().y() + k * 2.4;
+                p.drawLine(QPointF(r.left() + 0.5, y), QPointF(r.center().x() - 3, y));
+                p.drawLine(QPointF(r.center().x() + 3, y), QPointF(r.right() - 0.5, y));
+            }
+        }
+        // A memory module: a body with pins along its bottom edge.
+        static void paintModule(QPainter &p, const QRectF &r, const QColor &ink) {
+            p.setPen(QPen(ink, 1.1));
+            p.setBrush(Qt::NoBrush);
+            const QRectF body(r.left() + 1, r.top() + 1.5, r.width() - 2, r.height() - 5.5);
+            p.drawRoundedRect(body, 1.2, 1.2);
+            for (int k = 0; k < 4; ++k) {
+                const qreal x = body.left() + 1.5 + k * 2.6;
+                if (x >= body.right() - 0.5) break;
+                p.drawLine(QPointF(x, body.bottom()), QPointF(x, r.bottom() - 0.5));
+            }
+        }
+        static bool enabled() {
+            return QSettings().value(QStringLiteral("appearance/pane_usage"), true).toBool();
+        }
+        QString section(int i) const {
+            return i == 0 ? m_text.section(QLatin1Char('/'), 0, 0) : m_text.section(QLatin1Char('/'), 1, 1);
+        }
+        QString text() const {
+            if (!m_sample.valid || !relay::usage::worthShowing(m_sample)) return {};
+            return relay::usage::formatPercent(m_sample.cpuPercent) + QLatin1Char('%') + QLatin1Char('/')
+                 + relay::usage::formatPercent(m_sample.ramPercent) + QLatin1Char('%');
+        }
+        relay::usage::Sample m_sample;
+        QString m_text;   // "12%/3%"; empty when the chip is hidden
+    };
+
     // The remote band behind a terminal's title row: the error hue, hatched, with a firm line under
     // it. Hatching is a texture no pane type uses, so it reads as "not here" even without colour.
     class RemoteBackdrop final : public QWidget {
@@ -820,6 +925,7 @@ private:
     int m_fullWidth = 0;
     PaneStateGlyph *m_glyph = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
+    PaneUsageChip *m_usageChip = nullptr;
     RemoteBackdrop *m_backdrop = nullptr;
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;

@@ -26,6 +26,7 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "PaneTitles.h"
+#include "PaneUsage.h"    // the tab-level sum of the panes' CPU / memory
 #include "SshConfig.h"
 #include "TurnTranscript.h"
 #include "SettingsPane.h"
@@ -1597,6 +1598,17 @@ private:
             });
             colours.aliases = QStringLiteral("color colors colour header tint band pane type group");
             appearance.rows << colours;
+        }
+        {
+            // Pane CPU / memory meters (issue #D03W): the chip beside each pane's title and the
+            // suffix in the tab label. The poll re-reads the key within its next tick.
+            relay::SettingRow usage = toggleRow(QStringLiteral("appearance/pane_usage"),
+                                               QStringLiteral("Pane CPU and memory"),
+                                               QStringLiteral("A small CPU % and memory % beside each pane's title, "
+                                                              "and in the tab label, while the pane is using the machine"),
+                                               true, [this](bool) { refreshPaneStatus(); });
+            usage.aliases = QStringLiteral("cpu memory ram usage load percent meter resource");
+            appearance.rows << usage;
         }
         sections << appearance;
 
@@ -4026,10 +4038,21 @@ private:
             refreshTabJudgement(page, titles);
             QString title = tabLabelFor(page, titles);
             if (leaves.size() > 1) title += QStringLiteral("  ·  %1").arg(leaves.size());
+            title += tabUsageSuffix(page);
             const QFontMetrics metrics(m_tabs->tabBar()->font());
             m_tabs->setTabText(i, metrics.elidedText(title, Qt::ElideRight, 260));
+            // The suffix is two bare numbers; the tooltip says which is which (issue #D03W).
+            const QString usageLine = [page, this] {
+                QList<relay::usage::Sample> samples;
+                for (QWidget *leaf : leavesIn(page))
+                    if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
+                const relay::usage::Sample combined = relay::usage::combined(samples);
+                return combined.valid ? QStringLiteral("CPU / memory of this tab's panes: ")
+                                          + relay::usage::describe(combined) : QString();
+            }();
             m_tabs->setTabToolTip(i, (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
                                      + (leaf ? leafCwd(leaf) : QString())
+                                     + (usageLine.isEmpty() ? QString() : QStringLiteral("\n\n") + usageLine)
                                      + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab"));
         }
         syncChrome();
@@ -4755,10 +4778,13 @@ private:
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
         QSet<QWidget *> pages;
+        bool relabel = false;
+        QHash<QString, QString> liveUsage;   // session id → tag, for the Sessions pane (#D03W)
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             pages.insert(page);
             QList<ps::State> states;
+            QList<relay::usage::Sample> usage;
             bool remote = false, terminal = false;
             ps::TypeStyle firstType;
             for (QWidget *leaf : leavesIn(page)) {
@@ -4770,6 +4796,10 @@ private:
                 terminal = true;
                 PaneChrome *chrome = chromeOf(pane);
                 if (!chrome) continue;
+                // The pane's resource meter (issue #D03W) is sampled here so every pane is
+                // measured over the same interval this poll keeps.
+                pane->refreshUsage();
+                if (chrome) chrome->setUsage(pane->usageSample());
                 const ps::Facts facts = pane->statusFacts();
                 const bool watched = focused && i == m_tabs->currentIndex() && leaf == m_activeLeaf;
                 if (!watched) chrome->watchedSince = 0;
@@ -4785,7 +4815,20 @@ private:
                 if (shared) chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
                 if (!remoteLine.isEmpty()) sshSessionSeen(pane, remoteLine);
                 states << state;
+                usage << pane->usageSample();
+                const QString sessionId = pane->sessionId();
+                if (!sessionId.isEmpty()) {
+                    const QString tag = relay::usage::liveTag(pane->usageSample());
+                    if (!tag.isEmpty()) liveUsage.insert(sessionId, tag);
+                }
                 remote = remote || !remoteLine.isEmpty();
+            }
+            // The tab label carries the tab's combined usage (issue #D03W); updateTitles()
+            // reads the panes' samples live, so this only asks for a relabel when the text moves.
+            const QString usageText = relay::usage::tabSuffix(relay::usage::combined(usage));
+            if (m_tabUsageKey.value(page) != usageText) {
+                m_tabUsageKey.insert(page, usageText);
+                relabel = true;
             }
             const ps::State top = ps::mostUrgent(states);
             const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6").arg(terminal).arg(int(top)).arg(remote)
@@ -4796,6 +4839,28 @@ private:
         }
         for (auto it = m_tabIconKey.begin(); it != m_tabIconKey.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
+        for (auto it = m_tabUsageKey.begin(); it != m_tabUsageKey.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageKey.erase(it);
+        // The session manager shows the same reading as a tag on each open conversation's row
+        // (issue #D03W). It never looks at a window itself; like setOpenSessions, this feeds it.
+        if (!liveUsage.isEmpty() || m_fedLiveUsage)
+            for (int i = 0; i < m_tabs->count(); ++i)
+                for (QWidget *leaf : leavesIn(m_tabs->widget(i)))
+                    if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                        tool && tool->kind() == ToolPane::Kind::Sessions)
+                        if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()))
+                            manager->setLiveUsage(liveUsage);
+        m_fedLiveUsage = !liveUsage.isEmpty();
+        if (relabel) updateTitles();
+    }
+
+    // The tab's own share of the machine: every terminal pane in it summed (issue #D03W). Same
+    // shape as tabUsageSuffix() so the poll's key and the label can never disagree.
+    QString tabUsageSuffix(QWidget *page) const {
+        QList<relay::usage::Sample> samples;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *pane = dynamic_cast<const Pane *>(leaf)) samples << pane->usageSample();
+        return relay::usage::tabSuffix(relay::usage::combined(samples));
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -5329,6 +5394,8 @@ private:
     // repainted when what it shows changes.
     QTimer m_statusTimer;
     QHash<QWidget *, QString> m_tabIconKey;
+    QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
+    bool m_fedLiveUsage = false;               // ... and whether any session tag was pushed last poll
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;
     QPointer<QToolButton> m_newTabButton;

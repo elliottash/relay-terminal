@@ -288,6 +288,23 @@ news until the pane has been the focused pane of the current tab in the active w
 tab icon is the most urgent state among its panes (a tab with no terminal shows its first special
 pane's type glyph). The poll runs every 400 ms and repaints a tab icon only when it changes.
 
+**Resource meters** (card #D03W, owner 2026-09-19: "would it be possible to have small X%, X%
+indicators for CPU and RAM usage by pane and tab?"). What a pane costs this machine: CPU and
+memory summed over the pane's two process trees — the shell its pty spawned with whatever that
+shell is running (an ssh client included), and the pane's agent worker with its children — read
+from `/proc` on the same 400 ms poll that resolves the states, so every pane is measured over the
+same interval. The rules and the arithmetic are `src/PaneUsage.{h,cpp}` (`relay-paneusage`,
+`relay::usage`, tests `tests/paneusage_test.cpp`): `/proc/<pid>/stat` and `/proc/<pid>/statm` are
+summed over a walk of `/proc/<pid>/task/<pid>/children` (capped at 256 processes), CPU ticks over
+the interval become a percentage *of the machine* (100 = every core), resident pages a percentage
+of physical memory. It shows three ways: a chip in the pane's header row right of the state's word
+(`PaneChrome::PaneUsageChip`, a die and a memory-module glyph, muted ink that only warns at
+60 %/85 %), a `· 12% / 3%` suffix on the tab label (tooltip spells out which is which, summed over
+the tab's panes), and a `cpu 12% · mem 3%` tag on the conversation's row in the Sessions pane
+(`SessionManager::setLiveUsage`, fed by the poll like `setOpenSessions`). A pane using nothing
+shows nothing anywhere: an idle terminal looks exactly as it did before, and the meters are local —
+a remote pane measures the ssh client, not the far machine. `appearance/pane_usage` turns them off.
+
 **Remote sessions** are a safety signal and ignore the colour setting. `Pane::remoteCommandLine()`
 is the foreground process group's command line while it is `ssh`, `mosh`, `mosh-client`, `telnet`
 or `autossh` — read live, so it is right when ssh was started with the prompt box hidden and clears
