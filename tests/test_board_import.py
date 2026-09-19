@@ -45,7 +45,9 @@ class ImportCase(unittest.TestCase):
         self.project.mkdir()
         for name in self.fixtures:
             shutil.copytree(FIXTURES / name, self.project, dirs_exist_ok=True)
-        self.root = self.project / "switchboard"
+        # The hidden folder Relay creates since 2026-09-19; `import-state.json` and the card paths
+        # in every proposal are derived from it.
+        self.root = self.project / B.DEFAULT_BOARD_FOLDER
         self.root.mkdir()
         (self.root / B.BOARD_CONFIG).write_text(self.config, encoding="utf-8")
         self.board = B.Board(self.root, self.project)

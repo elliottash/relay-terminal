@@ -13,7 +13,7 @@ Two steps, deliberately apart:
 
 Neither calls a model and neither uses the network.
 
-## Never twice: `source_key` and `switchboard/import-state.json`
+## Never twice: `source_key` and `<board folder>/import-state.json`
 
 Every item carries a `source_key` (`<kind>:<path>#<id>`) that is stable across edits to the
 file around it.  After `apply`, each key is recorded in two places:

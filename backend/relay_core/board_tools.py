@@ -47,10 +47,13 @@ from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
 
-#: The folders a project may keep its Switchboard in, newest spelling first (`board.BOARD_FOLDERS`).
+#: The folders a project may keep its Switchboard in, in precedence order (`board.BOARD_FOLDERS`):
+#: `.switchboard/`, `switchboard/`, `issues/`.
 BOARD_FOLDERS = B.BOARD_FOLDERS
 
-#: The folder a *new* board is created in: `<project>/switchboard/board.yaml`.
+#: The folder a *new* board is created in: `<project>/.switchboard/board.yaml`, hidden since the
+#: owner's decision of 2026-09-19.  A `configure` whose `board.folder` says otherwise overrides it
+#: for that pane (protocol 19.1), which is how the "Hidden Switchboard folder" option reaches here.
 BOARD_FOLDER = B.DEFAULT_BOARD_FOLDER
 
 #: What a pane's board is, at any moment (protocol 19.12):
@@ -140,9 +143,11 @@ _ID_ARG = {"type": "string", "description": "Card id, four characters (e.g. K7Q2
 
 TOOL_SPECS = [
     spec("board_list",
-         "List Switchboard cards (the project's switchboard/ tracker). One row per card: id, title, "
-         "type, status, tab, labels, assignee, waiting_on and thread size. Search here before "
-         "creating a card, so a request that already has one updates it instead.",
+         "List Switchboard cards: the project's own tracker, in its Switchboard folder "
+         "(`.switchboard/`, which a ripgrep search of the project skips, so this tool — not `rg` — "
+         "is how you find cards). One row per card: id, title, type, status, tab, labels, "
+         "assignee, waiting_on and thread size. Search here before creating a card, so a request "
+         "that already has one updates it instead.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
           "status": {"type": "string", "description": "Exact status, e.g. inbox, ready, in-progress, needs-qa-llm, done."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default view), plan or memory."},
@@ -830,7 +835,8 @@ class ToolContext:
 
 
 def find_board_root(workspace: str | os.PathLike | None,
-                    explicit_dir: str | os.PathLike | None = None) -> Path | None:
+                    explicit_dir: str | os.PathLike | None = None,
+                    folder: str | None = None) -> Path | None:
     """The board directory that governs `workspace`, or None when there is none.
 
     The one place the backend decides which board a message is about, so the worker, the agent's
@@ -842,9 +848,12 @@ def find_board_root(workspace: str | os.PathLike | None,
     **The rule, and the C++ `relay::boardRootFor` must match it exactly:** an explicit `board.dir`
     (protocol 19.1) always wins.  Otherwise the walk starts at the resolved workspace and climbs to
     the filesystem root; at each directory the candidates are tried in `B.BOARD_FOLDERS` order —
-    `switchboard/board.yaml` first, then `issues/board.yaml` — and the first hit wins.  So the
-    **nearest ancestor** wins over a further one whatever its spelling, and a single directory
-    holding both folders is its `switchboard/` one.
+    `.switchboard/board.yaml`, then `switchboard/board.yaml`, then `issues/board.yaml` — and the
+    first hit wins.  So the **nearest ancestor** wins over a further one whatever its spelling, and
+    a single directory holding more than one of them is read as the first in that order.
+
+    `folder` is the folder a board **would** go in, for an `explicit_dir` that names a project with
+    no board yet; it never affects the walk, which only ever finds folders that exist.
 
     **An absent or empty workspace has no board**: the process's cwd, the environment and this
     file's location are never consulted.  A worker started from the directory Relay was launched in
@@ -853,7 +862,7 @@ def find_board_root(workspace: str | os.PathLike | None,
     cards in a window that pointed somewhere else.
     """
     if explicit_dir is not None and str(explicit_dir).strip():
-        root = named_board_root(explicit_dir)
+        root = named_board_root(explicit_dir, folder)
         return root if (root / B.BOARD_CONFIG).is_file() else None
     if workspace is None or not str(workspace).strip():
         return None
@@ -868,14 +877,16 @@ def find_board_root(workspace: str | os.PathLike | None,
     return None
 
 
-def named_board_root(explicit_dir: str | os.PathLike) -> Path:
+def named_board_root(explicit_dir: str | os.PathLike, folder: str | None = None) -> Path:
     """The board directory a `board.dir` (or a `project`) names, whether or not it exists yet.
 
     It may name the board folder itself or the project that holds one, because the GUI has both in
     hand and should not have to guess which spelling the worker wants.  An existing `board.yaml`
-    decides it — the folder's own, then `switchboard/`, then `issues/`.  With none of them present
-    the name decides: a directory already called `switchboard` or `issues` is taken as the board
-    folder, and anything else is a project, whose board would be `<project>/switchboard`.
+    decides it — the folder's own, then `B.BOARD_FOLDERS` in order.  With none of them present the
+    name decides: a directory already called `.switchboard`, `switchboard` or `issues` is taken as
+    the board folder, and anything else is a project, whose board **would** go in `folder` — the
+    `board.folder` of the `configure` that pointed this worker, which is the "Hidden Switchboard
+    folder" option, defaulting to `.switchboard`.  Nothing is created here either way.
 
     Resolved, like the walk's answer in `find_board_root`, because `root` is what a GUI routes
     events by: two spellings of one directory must not look like two boards.
@@ -886,7 +897,9 @@ def named_board_root(explicit_dir: str | os.PathLike) -> Path:
     found = B.board_folder(here)
     if found is not None:
         return found
-    return here if here.name in B.BOARD_FOLDERS else here / B.DEFAULT_BOARD_FOLDER
+    if here.name in B.BOARD_FOLDERS:
+        return here
+    return here / (folder if folder in B.BOARD_FOLDERS else B.DEFAULT_BOARD_FOLDER)
 
 
 def board_at(root: str | os.PathLike) -> B.Board:
@@ -901,9 +914,10 @@ def board_at(root: str | os.PathLike) -> B.Board:
 
 
 def board_for(workspace: str | os.PathLike | None,
-              explicit_dir: str | os.PathLike | None = None) -> B.Board | None:
+              explicit_dir: str | os.PathLike | None = None,
+              folder: str | None = None) -> B.Board | None:
     """`find_board_root`, as a `Board`.  None when no board exists for this workspace."""
-    root = find_board_root(workspace, explicit_dir)
+    root = find_board_root(workspace, explicit_dir, folder)
     return None if root is None else board_at(root)
 
 

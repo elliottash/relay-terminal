@@ -889,7 +889,7 @@ class ConfigWriteTests(TempBoardTest):
 
 
 class BoardFolderTests(unittest.TestCase):
-    """`switchboard/` is where a new board goes; `issues/` is still read (protocol 19.12)."""
+    """`.switchboard/` is where a new board goes; the older spellings are still read (19.12)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -902,17 +902,33 @@ class BoardFolderTests(unittest.TestCase):
         (folder / B.BOARD_CONFIG).write_text(B.CONFIG_TEXT, encoding="utf-8")
         return folder
 
-    def test_a_new_board_goes_in_switchboard_and_the_older_spelling_is_still_read(self):
-        self.assertEqual(B.DEFAULT_BOARD_FOLDER, "switchboard")
-        self.assertEqual(B.BOARD_FOLDERS, ("switchboard", "issues"))
+    def test_a_new_board_is_hidden_and_the_older_spellings_are_still_read(self):
+        # Owner, 2026-09-19: a new board is `<project>/.switchboard/`. Reading is tolerant and
+        # ordered, and this tuple is the only definition of that order in the backend.
+        self.assertEqual(B.DEFAULT_BOARD_FOLDER, ".switchboard")
+        self.assertEqual(B.BOARD_FOLDERS, (".switchboard", "switchboard", "issues"))
+        self.assertEqual(B.new_board_folder(), ".switchboard")
+        self.assertEqual(B.new_board_folder(hidden=True), ".switchboard")
+        self.assertEqual(B.new_board_folder(hidden=False), "switchboard")
         self.assertIsNone(B.board_folder(self.dir))
         issues = self.make("issues")
         self.assertEqual(B.board_folder(self.dir), issues)
 
-    def test_a_project_with_both_folders_is_its_switchboard_one(self):
+    def test_the_first_folder_that_exists_wins_in_that_order(self):
         self.make("issues")
-        board = self.make("switchboard")
-        self.assertEqual(B.board_folder(self.dir), board)
+        shown = self.make("switchboard")
+        self.assertEqual(B.board_folder(self.dir), shown)
+        hidden = self.make(".switchboard")
+        self.assertEqual(B.board_folder(self.dir), hidden)
+
+    def test_a_hidden_board_is_found_and_names_itself_in_gitattributes(self):
+        board = B.Board(self.dir / ".switchboard", self.dir)
+        files = B.scaffold(board)
+        self.assertEqual(files, [".switchboard/board.yaml", ".switchboard/.gitignore",
+                                 ".switchboard/threads/.gitkeep", ".gitattributes"])
+        self.assertEqual(B.board_folder(self.dir), board.root)
+        self.assertIn(".switchboard/threads/*.md merge=union",
+                      (self.dir / ".gitattributes").read_text())
 
     def test_scaffold_writes_the_board_and_names_its_own_folder_in_gitattributes(self):
         board = B.Board(self.dir / "switchboard", self.dir)
@@ -931,6 +947,107 @@ class BoardFolderTests(unittest.TestCase):
         board = B.Board(self.dir / "issues", self.dir)
         B.scaffold(board)
         self.assertIn("issues/threads/*.md merge=union", (self.dir / ".gitattributes").read_text())
+
+
+class HideAndShowTheFolderTests(unittest.TestCase):
+    """`rename_board_folder`: the one explicit action that moves an existing board (2026-09-19)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+
+    def env(self):
+        # Never the caller's index: a test that runs git in a temp repo must not inherit
+        # GIT_INDEX_FILE from the session that launched it (CLAUDE.md).
+        env = dict(os.environ)
+        for name in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
+            env.pop(name, None)
+        return env
+
+    def git(self, *args, check=True):
+        return subprocess.run(["git", "-C", str(self.dir), *args], capture_output=True, text=True,
+                              check=check, env=self.env(), timeout=30)
+
+    def make(self, name: str, *, git: bool = False, commit: bool = False) -> B.Board:
+        board = B.Board(self.dir / name, self.dir)
+        B.scaffold(board)
+        card = B.new_card("work", "A card", "inbox", card_id="K7Q2", rank="m")
+        B.write_new_card(board, card, "features")
+        if git:
+            self.git("init", "-q")
+            self.git("config", "user.email", "t@example.com")
+            self.git("config", "user.name", "T")
+            if commit:
+                self.git("add", "-A")
+                self.git("commit", "-qm", "board")
+        return board
+
+    def test_git_mv_hides_a_committed_board_and_carries_the_gitattributes_line(self):
+        board = self.make("switchboard", git=True, commit=True)
+        move = B.rename_board_folder(board, True)
+        self.assertEqual((move.old, move.new, move.method, move.hidden),
+                         ("switchboard", ".switchboard", "git mv", True))
+        self.assertEqual(board.root, self.dir / ".switchboard")
+        self.assertFalse((self.dir / "switchboard").exists())
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".switchboard")
+        self.assertIsNotNone(board.card_by_id("K7Q2"))
+        self.assertIn(".switchboard/threads/*.md merge=union",
+                      (self.dir / ".gitattributes").read_text())
+        self.assertEqual(move.files, [".gitattributes"])
+        # git knows it as a rename, so the card's history is not broken.
+        staged = self.git("diff", "--cached", "--name-status", "-M").stdout
+        self.assertIn(".switchboard/features/", staged)
+        # And back again, by the same action.
+        back = B.rename_board_folder(board, False)
+        self.assertEqual((back.old, back.new, back.hidden), (".switchboard", "switchboard", False))
+        self.assertEqual(B.board_folder(self.dir), self.dir / "switchboard")
+
+    def test_a_board_outside_git_is_renamed_in_place(self):
+        board = self.make("switchboard")
+        move = B.rename_board_folder(board, True)
+        self.assertEqual(move.method, "rename")
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".switchboard")
+        self.assertIn("is now .switchboard/", move.summary())
+
+    def test_a_board_git_has_never_seen_is_renamed_in_place(self):
+        # Initialised but not committed: there is nothing for `git mv` to record, and it would
+        # refuse every path as untracked.
+        board = self.make("switchboard", git=True)
+        move = B.rename_board_folder(board, True)
+        self.assertEqual(move.method, "rename")
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".switchboard")
+
+    def test_uncommitted_changes_refuse_the_move_and_change_nothing(self):
+        board = self.make("switchboard", git=True, commit=True)
+        card = board.card_by_id("K7Q2")
+        card.path.write_text(card.path.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
+        with self.assertRaises(B.BoardError) as caught:
+            B.rename_board_folder(board, True)
+        self.assertIn("uncommitted", str(caught.exception))
+        self.assertTrue((self.dir / "switchboard").is_dir())
+        self.assertFalse((self.dir / ".switchboard").exists())
+
+    def test_an_existing_target_refuses_the_move(self):
+        board = self.make("switchboard")
+        (self.dir / ".switchboard").mkdir()
+        with self.assertRaises(B.BoardError) as caught:
+            B.rename_board_folder(board, True)
+        self.assertIn("already exists", str(caught.exception))
+        self.assertTrue((self.dir / "switchboard" / B.BOARD_CONFIG).is_file())
+
+    def test_an_issues_board_is_never_moved(self):
+        board = self.make("issues")
+        with self.assertRaises(B.BoardError) as caught:
+            B.rename_board_folder(board, True)
+        self.assertIn("issues/", str(caught.exception))
+        self.assertEqual(board.root, self.dir / "issues")
+
+    def test_a_board_that_is_already_that_way_round_is_refused(self):
+        board = self.make(".switchboard")
+        with self.assertRaises(B.BoardError) as caught:
+            B.rename_board_folder(board, True)
+        self.assertIn("already", str(caught.exception))
 
 
 if __name__ == "__main__":

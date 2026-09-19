@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Switchboard file format: cards, tasks, threads, ids, ranks (phase 0).
 
-The board *is* a folder in the project -- `switchboard/` on a board created from
-2026-09-18 on, `issues/` on one filed before that (`BOARD_FOLDERS`): one Markdown
+The board *is* a folder in the project -- `.switchboard/` on a board created from
+2026-09-19 on, `switchboard/` or `issues/` on an older one (`BOARD_FOLDERS`, in that
+precedence order): one Markdown
 file per card (YAML front matter plus a Markdown body), one append-only thread
 per card under `threads/`, and a generated index in `BOARD.md`.  Nothing here
 picks the folder; it is given one.  See `docs/SWITCHBOARD-FORMAT.md`.
@@ -959,18 +960,42 @@ agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
 """
 
-#: Where a project keeps its Switchboard, newest spelling first.  A board created from 2026-09-18
-#: on is `<project>/switchboard/`; `issues/` is the original spelling and is still read wherever it
-#: is found, so the boards that exist keep working untouched.  A project holding **both** is the
-#: `switchboard/` one: the list is in precedence order and every lookup walks it in order.
-BOARD_FOLDERS = ("switchboard", "issues")
+#: The folder a board is kept in, hidden first.  Owner's decision, 2026-09-19: a new board is
+#: created as `<project>/.switchboard/`, so the cards do not clutter the project's root listing —
+#: and so ripgrep-based agents, which skip hidden folders, stop matching every card on every code
+#: search (`docs/SWITCHBOARD-FORMAT.md`, "The folder").  `switchboard/` is what Relay created
+#: between 2026-09-18 and that decision, and `issues/` is the original spelling — including this
+#: repository's own, which is never moved.
+HIDDEN_BOARD_FOLDER = ".switchboard"
+VISIBLE_BOARD_FOLDER = "switchboard"
+LEGACY_BOARD_FOLDER = "issues"
 
-#: The folder a *new* board is created in.
-DEFAULT_BOARD_FOLDER = BOARD_FOLDERS[0]
+#: Where a project keeps its Switchboard, in precedence order: `.switchboard/board.yaml` first,
+#: then `switchboard/board.yaml`, then `issues/board.yaml`, and the **first that exists wins**.
+#: Reading is always tolerant — a board is used wherever it is found and nothing moves by itself —
+#: so this one list, walked in this one order, is the only definition of "which folder is the
+#: board" in the backend.  The C++ side repeats it once, in `relay::projects::boardFolders()`
+#: (src/Projects.h), and `tests/projects_test.cpp` pins the two to the same order.
+BOARD_FOLDERS = (HIDDEN_BOARD_FOLDER, VISIBLE_BOARD_FOLDER, LEGACY_BOARD_FOLDER)
+
+#: The folder a *new* board is created in: hidden, unless the GUI's "Hidden Switchboard folder"
+#: option is off, in which case it sends `board.folder` (protocol 19.1) and `new_board_folder()`
+#: answers with the visible spelling.  Nothing creates `issues/` any more.
+DEFAULT_BOARD_FOLDER = HIDDEN_BOARD_FOLDER
+
+
+def new_board_folder(hidden: bool = True) -> str:
+    """The folder name a board created now gets: `.switchboard`, or `switchboard` when shown."""
+    return HIDDEN_BOARD_FOLDER if hidden else VISIBLE_BOARD_FOLDER
 
 
 def board_folder(directory: str | os.PathLike) -> Path | None:
-    """The board directory inside `directory` (`switchboard/`, else `issues/`), or None."""
+    """The board directory inside `directory`, or None.
+
+    `BOARD_FOLDERS` order: `.switchboard/board.yaml`, then `switchboard/board.yaml`, then
+    `issues/board.yaml`.  The first that exists wins, so a project that somehow has two is read
+    as the first of them and the others are left where they are.
+    """
     here = Path(directory)
     for name in BOARD_FOLDERS:
         if (here / name / BOARD_CONFIG).is_file():
@@ -990,8 +1015,9 @@ GITIGNORE_TEXT = "# Private cards, plans, threads and memory (Switchboard privat
 
 
 class Board:
-    """The board tree (`switchboard/`, or `issues/` on a board filed before 2026-09-18):
-    cards, threads, config and the check rules.  `repo` is the project that holds it."""
+    """The board tree (`.switchboard/`, or the older `switchboard/` or `issues/` on a board that
+    was filed before 2026-09-19): cards, threads, config and the check rules.  `repo` is the
+    project that holds it."""
 
     def __init__(self, root: str | os.PathLike, repo: str | os.PathLike | None = None):
         self.root = Path(root)
@@ -1757,12 +1783,131 @@ def in_git_checkout(path: str | os.PathLike) -> bool:
     return False
 
 
+def _git_env() -> dict:
+    """The environment git is run in: this process's, minus the three variables that would point it
+    at another repository's index.  A worker started from a git hook inherits `GIT_INDEX_FILE`,
+    `GIT_DIR` and `GIT_WORK_TREE`, and a `git mv` run with them writes the hook's index instead of
+    the project's.
+    """
+    env = dict(os.environ)
+    for name in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(name, None)
+    return env
+
+
+def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                          timeout=30, check=check, env=_git_env())
+
+
+@dataclass
+class FolderMove:
+    """What `rename_board_folder` did, for the event the GUI shows."""
+    old: str                       # the old folder name, e.g. "switchboard"
+    new: str                       # the new folder name, e.g. ".switchboard"
+    root: str                      # the board's new absolute path
+    method: str                    # "git mv" or "rename"
+    hidden: bool                   # whether the board is hidden now
+    files: list[str] = field(default_factory=list)   # what else changed, relative to the project
+
+    def summary(self) -> str:
+        what = "hidden" if self.hidden else "shown"
+        return f"{self.old}/ is now {self.new}/ ({what}, {self.method})"
+
+
+def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
+    """Rename a board's folder to hide it (`.switchboard/`) or show it (`switchboard/`).
+
+    The one explicit action that moves an existing board (owner, 2026-09-19): reading is tolerant
+    and nothing moves by itself, so this runs only when the user asks for it.  `git mv` in a
+    checkout, a plain rename elsewhere, and the project's `.gitattributes` line is rewritten
+    against the new name so the threads keep their union merge.
+
+    Refused, with a `BoardError` that says why and changes nothing:
+
+      * the board is already that way round;
+      * the board folder is `issues/` — the original spelling, which whole repositories refer to
+        by name in their own instructions, scripts and hooks (this one does).  Relay never moves
+        it; a project that wants the new spelling moves it by hand;
+      * the target folder already exists;
+      * a card under the board folder has uncommitted text, staged or not.  `git mv` could carry
+        it, but the file would change path underneath whatever diff the user is reading; committing
+        first makes the move one clean rename.  A folder that has only been *moved* before, and not
+        edited, passes -- otherwise hiding a board and showing it again needed a commit in between.
+    """
+    old = board.root.name
+    target = new_board_folder(hidden)
+    if old == LEGACY_BOARD_FOLDER:
+        raise BoardError(
+            f"This board is in {LEGACY_BOARD_FOLDER}/, the original spelling. Relay never renames "
+            f"it: a repository's own instructions, scripts and hooks name that folder. Move it by "
+            f"hand if you want {target}/.")
+    if old == target:
+        raise BoardError(f"This board's folder is already {target}/.")
+    if old != (VISIBLE_BOARD_FOLDER if hidden else HIDDEN_BOARD_FOLDER):
+        raise BoardError(f"This board is in {old}/, which is neither {HIDDEN_BOARD_FOLDER}/ nor "
+                         f"{VISIBLE_BOARD_FOLDER}/. Relay renames only its own two spellings.")
+    destination = board.root.parent / target
+    if destination.exists():
+        raise BoardError(f"{target}/ already exists in {board.root.parent}. Nothing was moved.")
+
+    repo = Path(board.repo)
+    git = in_git_checkout(board.root)
+    tracked = False
+    if git:
+        listed = _git(repo, "ls-files", "-z", "--", old)
+        tracked = listed.returncode == 0 and bool(listed.stdout.strip("\0").strip())
+        if tracked:
+            dirty = _git(repo, "status", "--porcelain", "--untracked-files=no", "--", old)
+            if dirty.returncode == 0:
+                # `git mv` can carry any of these, so the refusal is a promise rather than a
+                # limitation: a card whose text is uncommitted must not change path underneath the
+                # diff the user is reading.  Content changes refuse -- unstaged in the work tree
+                # (the second column) or staged (`M` in the first).  A staged add, rename or
+                # deletion passes: that is the structure of a previous hide or show of this same
+                # folder, which git moves again without losing anything.
+                changed = [line[3:].split(" -> ")[-1] for line in dirty.stdout.splitlines()
+                           if len(line) > 3 and (line[1] != " " or line[0] == "M")]
+                if changed:
+                    raise BoardError(
+                        "This board has uncommitted card changes, so Relay will not move it: "
+                        + ", ".join(changed[:5])
+                        + ". Commit them first and the move is one clean rename.")
+
+    method = "rename"
+    if git and tracked:
+        moved = _git(repo, "mv", "--", old, target)
+        if moved.returncode != 0:
+            raise BoardError("git mv refused to move the board: "
+                             + (moved.stderr.strip() or moved.stdout.strip() or "no reason given"))
+        method = "git mv"
+    else:
+        # Not a checkout, or a board that has never been committed: there is nothing for git to
+        # record, so the folder is renamed in place.
+        try:
+            board.root.rename(destination)
+        except OSError as exc:
+            raise BoardError(f"Could not rename {old}/ to {target}/: {exc}") from exc
+
+    files: list[str] = []
+    attributes = repo / ".gitattributes"
+    if attributes.exists():
+        before = attributes.read_text(encoding="utf-8")
+        after = before.replace(gitattributes_line(old), gitattributes_line(target))
+        if after != before:
+            _atomic_write(attributes, after)
+            files.append(".gitattributes")
+    board.root = destination
+    return FolderMove(old=old, new=target, root=str(destination), method=method, hidden=hidden,
+                      files=files)
+
 def scaffold_files(board: Board) -> list[tuple[str, str]]:
     """The files a new board needs beside its cards, as (path, content) pairs.
 
     `.gitignore` goes inside the board folder; `.gitattributes` goes beside it in the project and
-    names this board's own folder (`switchboard/` or `issues/`), so a project that adopts the new
-    spelling gets the union-merge rule for the folder it actually has.
+    names this board's own folder (`.switchboard/`, `switchboard/` or `issues/`), so a board gets
+    the union-merge rule for the folder it actually has -- and keeps it when
+    `rename_board_folder()` hides or shows that folder.
     """
     out: list[tuple[str, str]] = []
     if not board.config_path.exists():

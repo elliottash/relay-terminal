@@ -4,7 +4,8 @@
 One Markdown file per alias, in the Switchboard format (`docs/SWITCHBOARD-FORMAT.md`): YAML front
 matter with `type: alias`, then the body.  Global aliases live in the global Switchboard
 (`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), local ones in the repository Switchboard
-(`<repo>/switchboard/aliases/`, `<repo>/issues/aliases/`, or `<repo>/.relay/aliases/`
+(`<repo>/.switchboard/aliases/`, `<repo>/switchboard/aliases/`, `<repo>/issues/aliases/`, or
+`<repo>/.relay/aliases/`
 in a project that has no board yet) --
 the owner's decision in `docs/TASKS-AND-MEMORY-DESIGN.md` section 9.
 
@@ -452,8 +453,8 @@ def global_root() -> Path:
 def local_root(workspace: str | os.PathLike | None) -> Path | None:
     """The project's Switchboard folder when it has one, else `<repo>/.relay`.
 
-    The folder is `switchboard/` on a board created from 2026-09-18 on and `issues/` on one filed
-    before it (`board.BOARD_FOLDERS`, newest spelling first).  `.relay/` is the same fallback the
+    The folder is the first of `board.BOARD_FOLDERS` this project has — `.switchboard/` on a board
+    created from 2026-09-19 on, then `switchboard/`, then `issues/`.  `.relay/` is the same fallback the
     plan cards use in a project with no board (`docs/TASKS-AND-MEMORY-DESIGN.md` section 9), so a
     project gets local aliases before it gets a board, and adopting a board later is a move, not
     a conversion.

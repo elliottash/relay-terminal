@@ -22,24 +22,31 @@ from relay_core import qa_verifiers as qa
 
 
 def default_board_dir() -> Path:
-    """The board of the checkout this is run in: `switchboard/`, else `issues/`.
+    """The board of the checkout this is run in: `.switchboard/`, else `switchboard/`, else `issues/`.
 
-    `board.BOARD_FOLDERS` is the one list of spellings, newest first, and this walks it in the
-    same order as the worker, so the command line and Relay agree about which board a project has.
+    `board.BOARD_FOLDERS` is the one list of spellings, in precedence order, and this walks it in
+    the same order as the worker, so the command line and Relay agree about which board a project
+    has -- including a **hidden** `.switchboard/`, which is what Relay creates since 2026-09-19 and
+    which a shell glob or a plain `ls` does not show.
+
+    A folder holding `board.yaml` wins over one that merely has the right name, so a half-made
+    `switchboard/` beside a real `.switchboard/` does not shadow the board.
     """
     here = Path.cwd()
     names = board_mod.BOARD_FOLDERS
+    roots = [here, *here.parents]
     try:
         top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True,
                              text=True, timeout=10)
         if top.returncode == 0 and top.stdout.strip():
-            for name in names:
-                candidate = Path(top.stdout.strip()) / name
-                if candidate.is_dir():
-                    return candidate
+            roots.insert(0, Path(top.stdout.strip()))
     except (OSError, subprocess.SubprocessError):
         pass
-    for folder in [here, *here.parents]:
+    for folder in roots:                       # a real board first, wherever it is above us
+        found = board_mod.board_folder(folder)
+        if found is not None:
+            return found
+    for folder in roots:                       # then a folder with the right name and no board.yaml
         for name in names:
             if (folder / name).is_dir():
                 return folder / name
@@ -125,8 +132,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--issues', '--board', dest='issues', type=Path, default=None,
-                        help='the board directory, switchboard/ or issues/ '
-                             '(default: the git checkout it is run in)')
+                        help='the board directory: .switchboard/, switchboard/ or issues/ '
+                             '(default: the board of the git checkout it is run in)')
     sub = parser.add_subparsers(dest='command', required=True)
 
     check = sub.add_parser('check', help='verify the card, task and thread format')

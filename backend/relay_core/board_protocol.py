@@ -32,7 +32,7 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_comment", "board_undo", "board_ask", "board_check",
-         "board_cleanup", "board_init", "board_init_answer",
+         "board_cleanup", "board_init", "board_init_answer", "board_folder",
          # Initializing a project and importing what is already in it (19.13,
          # docs/PROJECT-INIT-AND-IMPORT.md section 8).
          "project_probe", "board_import_propose", "board_import_apply",
@@ -89,6 +89,11 @@ def parse_board(block) -> dict:
                  by and used as `dir` when no `dir` is given.  No file is ever searched under it.
       `state`    "uninitialized" says the GUI is willing to offer creating a board here, so a
                  project with none still attaches (19.12).  Default "ready": no board, no attach.
+      `folder`   the folder a board this pane *creates* would go in: `.switchboard` (the default,
+                 hidden since the owner's decision of 2026-09-19) or `switchboard`, which is what
+                 the GUI sends when its "Hidden Switchboard folder" option is off.  It never
+                 affects reading: a board is found wherever it already is, in `B.BOARD_FOLDERS`
+                 order.
       `autonomy`, `limits`  as before.
     """
     if block is None:
@@ -105,6 +110,13 @@ def parse_board(block) -> dict:
         if value is not None and not isinstance(value, str):
             raise ValueError(f"board.{key} must be a path.")
         out[key] = value.strip() if isinstance(value, str) and value.strip() else None
+    folder = block.get("folder")
+    if folder is not None and not isinstance(folder, str):
+        raise ValueError("board.folder must be a folder name.")
+    folder = folder.strip() if isinstance(folder, str) else ""
+    if folder and folder not in B.BOARD_FOLDERS:
+        raise ValueError(f"board.folder must be one of {', '.join(B.BOARD_FOLDERS)}.")
+    out["folder"] = folder or None
     state = block.get("state")
     if state is not None:
         if state not in BOARD_STATES:
@@ -198,7 +210,8 @@ class BoardCommands:
         if not settings["attach"]:
             return None, None
         named = settings["dir"] or settings["project"]
-        root = named_board_root(named) if named else find_board_root(workspace)
+        root = (named_board_root(named, settings["folder"]) if named
+                else find_board_root(workspace, None, settings["folder"]))
         if root is None:
             return None, None
         board = board_at(root)
@@ -361,7 +374,8 @@ class BoardCommands:
         named = request.get("dir") or request.get("project")
         if named is not None and not (isinstance(named, str) and named.strip()):
             raise ValueError("board_init project must be a path.")
-        root = named_board_root(named) if named else (self.tools.board.root if self.tools else None)
+        root = (named_board_root(named, self.settings.get("folder")) if named
+                else (self.tools.board.root if self.tools else None))
         if root is None:
             raise ValueError("board_init needs a project to create the Switchboard in.")
         if self.tools is not None and root != self.tools.board.root and getattr(self.turns, "busy", False):
@@ -384,6 +398,36 @@ class BoardCommands:
     def _init_answer(self, request: dict, rid) -> None:
         """`board_init_answer {id, accept}`: the user's yes or no to a `board_init_request`."""
         self.init.answer(request)
+
+    # ---- hiding and showing the board's folder (protocol 19.15) ----------------
+    def _folder(self, request: dict, rid) -> None:
+        """`board_folder {hidden}`: rename this board's folder to `.switchboard/` or `switchboard/`.
+
+        The one thing that moves an existing board, and only because the user asked for it: reading
+        is tolerant in both directions (`B.BOARD_FOLDERS`) and nothing migrates by itself.  `git mv`
+        in a checkout, a plain rename outside one, and a refusal — with the reason, having changed
+        nothing — for an `issues/` board, an existing target or uncommitted changes.
+
+        A turn must not be running: the agent holds card paths under the old folder, and the
+        Switchboard pane's watcher is on it.  Afterwards the worker is re-pointed at the new root,
+        so the tools, the agent's tools and the GUI all move together.
+        """
+        hidden = request.get("hidden")
+        if type(hidden) is not bool:
+            raise ValueError("board_folder needs `hidden`: true to hide the folder, false to show it.")
+        tools = self._need_ready()
+        if getattr(self.turns, "busy", False):
+            raise ValueError("Stop the active agent turn before moving this board's folder.")
+        try:
+            move = B.rename_board_folder(tools.board, hidden)
+        except (B.BoardError, OSError) as exc:
+            raise ValueError(str(exc)) from exc
+        settings = parse_board({**self.settings["raw"], "dir": move.root,
+                                "folder": move.new if move.new in B.BOARD_FOLDERS else None})
+        self._point(self.workspace, settings)
+        self._send({"event": "board_folder_changed", "id": rid, "board": self.state_block(),
+                    "old": move.old, "new": move.new, "root": move.root, "hidden": move.hidden,
+                    "method": move.method, "files": list(move.files), "summary": move.summary()})
 
     def handles(self, kind: str) -> bool:
         return kind in TYPES
@@ -733,6 +777,8 @@ class BoardCommands:
             self._init(request, rid)
         elif kind == "board_init_answer":
             self._init_answer(request, rid)
+        elif kind == "board_folder":
+            self._folder(request, rid)
         elif kind == "project_probe":
             self._project_probe(request, rid)
         elif kind == "board_import_propose":

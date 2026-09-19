@@ -31,7 +31,10 @@ class SyncCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = Path(self.tmp.name).resolve()
-        self.root = self.repo / "switchboard"
+        # `.switchboard/`, the folder Relay creates since 2026-09-19: the sync's state file, its
+        # login map and every path it reports are derived from the board root, so a hidden board
+        # exercises all of them.
+        self.root = self.repo / B.DEFAULT_BOARD_FOLDER
         self.root.mkdir()
         (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
         (self.root / ".gitignore").write_text(B.GITIGNORE_TEXT, encoding="utf-8")
