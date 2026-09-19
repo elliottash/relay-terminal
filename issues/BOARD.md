@@ -2,15 +2,16 @@
      edit the card files and regenerate. -->
 # Board
 
-234 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+238 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (139)
+## Features (141)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
 | `#VZ69` | [improving the switchboard functionality](features/2026-09-19-improving-the-switchboard-functionality.md) | inbox |  |  | [8](threads/VZ69.md) |
 | `#9K5H` | [show the thinking trace in the swtichboard as well](features/2026-09-19-show-the-thinking-trace-in-the-swtichboard-as-we.md) | inbox |  |  | [3](threads/9K5H.md) |
+| `#5PY9` | [new convo had incorrect context remaining](features/2026-09-19-new-convo-had-incorrect-context-remaining.md) | inbox |  |  | [1](threads/5PY9.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#916B` | [A project picker, a personal inbox and a chip on the tab that says which project it is attached to](features/2026-09-19-project-picker-inbox-and-tab-chip.md) | ready |  | 0/7 |  |
@@ -31,6 +32,7 @@
 | `#V2HM` | [Let the agent fill in a password without ever seeing it](features/2026-09-19-let-the-agent-fill-in-a-password-without-seeing-i.md) | ready | agent | 0/9 |  |
 | `#K2FV` | [Ask before the risky things — off by default, and chosen on the first launch](features/2026-09-19-ask-before-the-risky-things-opt-in.md) | ready | agent | 0/10 |  |
 | `#QT8C` | [An agent internals pane: watch the thinking and the tool calls beside the terminal](features/2026-09-19-agent-internals-pane.md) | ready | agent |  |  |
+| `#4QM4` | [Measure the author x reviewer matrix: for Claude-made bugs, is Kimi or GLM the better reviewer?](features/2026-09-19-measure-the-author-x-reviewer-matrix-for-claude.md) | ready |  | 0/9 | [2](threads/4QM4.md) |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 | [1](threads/97EG.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 11/11 |  |
 | `#6DQ8` | [Calibrate isolation memory limits to system RAM and expose them in Options](features/2026-09-19-calibrate-isolation-memory-limits-to-system-ram.md) | in-progress |  |  | [5](threads/6DQ8.md) |
@@ -141,29 +143,29 @@
 | `#HDA9` | [/update: download and install the latest release, then restart](features/needs_qa_llm/2026-09-19-update-download-and-install-the-latest-release-t.md) | needs-qa-llm |  |  | [7](threads/HDA9.md) |
 | `#Z0VG` | [Plan-mode turns run on the main model pushed to max reasoning (the "planning" role)](features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md) | needs-qa-llm | agent |  | [2](threads/Z0VG.md) |
 | `#D03W` | [Per-pane CPU and memory meters in the header, tab and session manager](features/needs_qa_llm/2026-09-19-per-pane-cpu-and-memory-meters-in-the-header-tab.md) | needs-qa-llm |  |  | [7](threads/D03W.md) |
-| `#QG60` | [put shortcuts in parentheses in switchboard](features/needs_qa_llm/2026-09-19-put-shortcuts-in-parentheses-in-switchboard.md) | needs-qa-llm | agent |  |  |
-| `#T71W` | [Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier](features/needs_qa_llm/2026-09-19-cross-provider-qa-a-provider-model-signature-on.md) | needs-qa-llm | agent | 9/9 | [8](threads/T71W.md) |
+| `#QG60` | [put shortcuts in parentheses in switchboard](features/needs_qa_llm/2026-09-19-put-shortcuts-in-parentheses-in-switchboard.md) | needs-qa-llm | agent |  | [14](threads/QG60.md) |
+| `#T71W` | [Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier](features/needs_qa_llm/2026-09-19-cross-provider-qa-a-provider-model-signature-on.md) | needs-qa-llm | agent | 9/9 | [9](threads/T71W.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 
-## Bugs (93)
+## Bugs (95)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
+| `#DJX7` | [land.py's name gate cannot land a card move in one commit (rename collapse)](changes/2026-09-19-land-py-s-name-gate-cannot-land-a-card-move-in-o.md) | inbox |  |  | [1](threads/DJX7.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | ready | agent | 0/5 |  |
 | `#BDXG` | [Clicking the "updated todos" row does not unfold it](changes/2026-09-19-clicking-updated-todos-does-not-unfold.md) | ready | agent |  |  |
-| `#SHE3` | [Call todos "tasks" everywhere a person reads](changes/2026-09-19-call-todos-tasks-everywhere-a-person-reads.md) | ready | agent |  | [1](threads/SHE3.md) |
-| `#K48R` | [The thinking fold's height is not capped](changes/2026-09-19-thinking-fold-height-is-not-capped.md) | ready | agent |  |  |
 | `#BTYE` | [land.py's name gate refuses a moved file: git reports a rename as one path](changes/2026-09-19-land-py-s-name-gate-refuses-a-moved-file-git-rep.md) | ready |  |  | [2](threads/BTYE.md) |
+| `#99T0` | [The backend suite flakes under load, and one flake can hang ctest for 600 s](changes/2026-09-19-the-backend-suite-flakes-under-load.md) | in-progress | agent | 0/3 | [2](threads/99T0.md) |
 | `#ZYRB` | [Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead](changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md) | in-progress |  |  | [3](threads/ZYRB.md) |
-| `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  |  |
+| `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  | [1](threads/JN7X.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
 | `#P7QK` | [Model roles names providers, offers only the ones you hold a key for, and gives a tier that provider's tier model](changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md) | needs-qa-llm | agent |  |  |
@@ -240,9 +242,11 @@
 | `#W954` | ["command not found" under a request whose first word ends in a comma](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request-whose-first-wo.md) | needs-qa-llm | agent |  | [1](threads/W954.md) |
 | `#N3WC` | ["command not found" under a sentence that names a file](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-sentence-naming-a-fi.md) | needs-qa-llm | agent |  |  |
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
-| `#HQ2B` | [The "Relaying …" line belongs on the left, in the normal weight](changes/needs_qa_llm/2026-09-19-the-relaying-line-goes-left-and-loses-the-bold.md) | needs-qa-llm | agent | 5/5 |  |
+| `#HQ2B` | [The "Relaying …" line belongs on the left, in the normal weight](changes/needs_qa_llm/2026-09-19-the-relaying-line-goes-left-and-loses-the-bold.md) | needs-qa-llm | agent | 5/5 | [7](threads/HQ2B.md) |
 | `#6GX9` | [A conversation that is still in its first turn is never saved, so the sessions list and full-text search cannot see it](changes/needs_qa_llm/2026-09-19-a-conversation-that-is-still-in-its-first-turn-i.md) | needs-qa-llm |  |  | [5](threads/6GX9.md) |
 | `#N8VK` | [Ctrl+Enter should send now, not join the back of the queue](changes/needs_qa_llm/2026-09-19-ctrl-enter-should-send-now-not-join-the-queue.md) | needs-qa-llm | agent | 5/5 | [10](threads/N8VK.md) |
+| `#SHE3` | [Call todos "tasks" everywhere a person reads](changes/needs_qa_llm/2026-09-19-call-todos-tasks-everywhere-a-person-reads.md) | needs-qa-llm | agent |  | [1](threads/SHE3.md) |
+| `#K48R` | [The thinking fold's height is not capped](changes/needs_qa_llm/2026-09-19-thinking-fold-height-is-not-capped.md) | needs-qa-llm | agent |  |  |
 | `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
 | `#GMSC` | [Missing tests/paneusage_test.cpp breaks cmake generate for the whole tree](changes/done/2026-09-19-missing-tests-paneusage-test-cpp-breaks-cmake-ge.md) | done |  |  | [1](threads/GMSC.md) |
 
