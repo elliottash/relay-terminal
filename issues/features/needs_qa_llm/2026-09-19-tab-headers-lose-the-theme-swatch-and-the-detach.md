@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3-flash
 rank: zzzzzzzzzzi
 created: '2026-09-19'
 source: pane 1, 2026-09-19
-links: {plans: [], commits: [409e5e11, 7558c9b2], evidence: [docs/qa_evidence/2026-09-19-tab-header-cleanup/], related: [], github: null}
+links: {commits: [409e5e11, 7558c9b2, 2eabaa77, fb002856], evidence: [docs/qa_evidence/2026-09-19-tab-header-cleanup/], github: null, plans: [], related: []}
 ---
 # Tab headers lose the theme swatch and the ⧉ detach button
 
