@@ -1653,7 +1653,15 @@ may be in progress at once, the agent's own and its subagents' (owner, 2026-09-1
 in progress" rule); the panel and chip count each as active. `request_set`, `request_get` and `request_reask`
 remain in the protocol and in the worker, unused by the GUI. Toggle: `agent.requests` (Ctrl+Shift+K
 in the Relay preset; unbound in the Warp, VS Code and Konsole presets, where the key clears blocks,
-deletes a line, or clears scrollback), `/tasks`, `/requests`, `/todos`, the chip. `openItemsLine()`
+deletes a line, or clears scrollback), `/tasks`, `/requests`, `/todos`, the chip. **What a person
+reads says "task", never "todo"** (card #SHE3, owner 2026-09-19: "i would rather call todos tasks";
+"you can still call it todos internally"): the tool-call row is "updating tasks / updated tasks", the
+fold's section is `tasks`, and `update_todos`' own messages say task. The wire is unchanged — the
+`update_todos` tool, the `todos` and `todo_subagent` messages, `todos.py` and the C++ identifiers
+keep their names — and `/todos` still works but is a **hidden** `SlashCommand`: left out of the `/`
+popup and never completed from a prefix, so the palette never teaches the retired word, while the
+name stays known (an alias cannot take it and it is never reported as an unknown command).
+`openItemsLine()`
 and `auditLine()` name todos and the user's own quoted words, never `R<n>` ids. `done {stop_reason:
 "limit"}` prints a `relay://continue/<pane>` link handled by `WindowManager::handleOpen`; Continue
 sends an ordinary ask. `max_steps`, `max_tool_calls` and `audit_requests` live in QSettings
