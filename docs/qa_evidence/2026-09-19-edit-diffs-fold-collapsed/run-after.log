@@ -1,0 +1,216 @@
+--- the dialog ---
+Preset
+Base URL
+Model ID
+
+API key
+
+Extra request SON
+Output token limit
+
+‘Agent workspace
+
+‘Custom / current settings of
+htto://127.0.0.1:8741/V1
+
+relay-ga-stub
+
+Not needed for a model server on this machine
+
+Save entered key to the desktop keyring
+
+Import keys from Warp
+{}
+1024 o
+/tmp/tmp.uBehmF1 KHH/work Choose...
+
+Entered keys are kept in process memory unless you choose to save them to the desktop
+keyring. Keys are never written to settings files. Changing settings starts a new conversation.
+Provider access and billing depend on your account.
+
+The agent runs tools without asking. Shell commands are NOT sandboxed: they have your user
+permissions. File tools are restricted to this workspace. Terminal history is not sent
+
+‘automatically.
+
+This is a model server on this machine: prompts and tool results stay here, and no API key is
+
+needed.
+Save at 912 655 (dialog 650x527 at 415,147)
+> © work-2 x + O4eE
+
+© work @®< a x | © Approvals BOR
+
+To run a command as administrator (user "root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dec9: /tmp/tmp . uBehmF1KHH/work$
+
+Relay's agent runs commands and edits files without stopping to ask.
+That is what makes it fast, and it is what we recommend.
+It runs with your user's permissions, inside the pane's workspace.
+
+Until you choose, the cautious set asks first: edits, deletions, reads outside the workspace, your terminal
+and your programs.
+
+Allow everything — recommended Choose what needs approval
+
+walk through the tools
+
+itmp/tmp.uBehmF1KHH/work © 100% left relay-qa-stub(main) v
+
+--- shot 01-agent-ready above ---
+>» © work x + oO 42 RS —-0 x
+
+© walk through the toolsthrough the tools auto mpitmp.uBehmFikHH/work [G) BR x
+
+To run a command as administrator (user root"), use “sudo <command>".
+
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp . uBehmE1KHH/work$
+
+i toolsthrough the tool
+
+> relay-qa-stub
+
+» ran python3 script - 15 lines - exit 0
+
+> ran ls -la- 9 lines - exit 0
+
+» ran grep -rn ‘not-in-this-tree' notes.txt x - exit 1
+
+> read 4 files - 125 lines
+
+> edited alpha.py - +2 -1
+
+» wrote brand new.py - new - 1 line
+
+> edited big.txt - +30 -30
+
+Done. Every line above folds its own detail open.
+
++ 10 tool calls - 1s (Ctrl+click)
+
+Bhell commands or agent prompts... 2 for help auto
+/tmp/tmp.uBehmF1KHH/work © 93% left —_relay-qa-stub(main) v
+
+--- shot 02-rows-folded above ---
+alpha.py row at y=284
+Sou = = 2o4E Re
+
+© walk through the toolsthrough the tools auto ‘AAmp/tmp.uBehmFikHHAwork (G)
+
+relay-qa-stub
+
+ran python3 script - 15 lines - exit 0
+
+ran ls -la - 9 lines - exit 0
+
+ran grep -rn ‘not-in-this-tree’ notes.txt x - exit 1
+read 4 files - 125 lines
+
+edited alpha.py - +2 -1
+
+1,2 +1,3 @@
+
+keep = True
+open in pane - open alpha. py
+» wrote brand new.py - new - 1 line
+> edited big.txt - +30 -30
+Done. Every line above folds its own detail open.
+
++ 10 tool calls - 1s (Ctrl+click)
+
+| The prompt box is the input - Ctri+H types into the terminal
+
+Shell commands or agent prompts. 2? for help auto
+
+itmp/tmp.uBehmF1KHH/work 93% left relay-qa-stub(main) v
+
+--- shot 03-small-diff-unfolded above ---
+big.txt row at y=318
+> © work-2 x
+
+© walk through the toolsthrough the tools | auto
+
+> relay-qa-stub
+» ran python3 script - 15 lines
+>» ran ls -la - 9 lines - exit 0
+» ran grep -rn ‘not-in-this-tree’ notes.txt x
+>» read 4 files - 125 lines
+v edited 42-1
+1,2 +1,3 @@
+MALL
+SMALL
+HEXTRA
+keep
+> wrote new: 1 Line
+> edited +30 -30
+
+exit 0
+
+/tmp.uBehmFikHHwork |G)
+
+exit 1
+
+Done. Every line above folds its own detail open
+
++ 10 tool calls
+
+ds
+
+Shell com
+
+1s (Ctrl+click)
+
+or agent pr
+
+Amp/tmp.uBehmF1KHH/work ©
+
+2
+
+for help
+
+93% left relay-qa-stub (main)
+
+B
+
+K
+
+auto
+
+ry
+
+10
+1
+12
+13
+14
+15
+16
+17
+18
+19
+
++++ b/big. txt
+@@ -7,36 +7,36 @@
+line 7
+
+line 8
+
+line
+
+(edited
+(edited
+(edited
+(edited
+(edited
+(edited
+(edited
+(edited
+(edited
+(edited
+
+--- shot 04-big-diff-pane above ---
+wrote /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-19-edit-diffs-fold-collapsed/after-*.png
