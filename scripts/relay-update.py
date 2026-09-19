@@ -10,6 +10,14 @@ Run by /update (RelayWindow::updateApp) and on its own:
                                            --dry-run, install it (pkexec asks for
                                            the password) and print the marker
     relay-update.py install --restart      as above, then launch the new relay
+    ... --channel all|stable               which releases to offer: every published
+                                           release, betas included (the default), or
+                                           only the ones GitHub does not mark as a
+                                           prerelease. Relay passes the Update channel
+                                           option here.
+
+Within the chosen channel the **highest** version wins, in dpkg's ordering — GitHub
+lists releases by creation date, so a patch cut for an older tag is listed first.
 
 One short line per step, flushed as it happens: the app shows them as its notice.
 The last line is ``CURRENT <tag>`` or ``UPDATED <tag>`` — the marker the app
@@ -47,6 +55,14 @@ DISTRO_SLUGS = {
     ("debian", "13"): "debian13",
 }
 DPKG_ARCHS = {"x86_64": "amd64", "aarch64": "arm64", "i686": "i386", "i386": "i386"}
+
+# Which releases /update offers (owner decision, 2026-09-19). The default is what the script always
+# did — every published release, betas included — and "stable" leaves the prereleases out.
+CHANNELS = ("all", "stable")
+CHANNEL_DEFAULT = "all"
+CHANNEL_EMPTY = {"all": "GitHub returned no published release.",
+                 "stable": "GitHub has no stable release yet (every published release is a prerelease). "
+                           "Set the update channel to \"all\" to follow the betas."}
 
 
 def say(text: str) -> None:
@@ -128,16 +144,70 @@ def apt_newer(installed: str, candidate: str) -> bool | None:
     return None
 
 
-def latest_release() -> dict:
-    """The newest non-draft release from GitHub (betas included; they are the channel)."""
+def release_tag(release: dict) -> str:
+    return str(release.get("tag_name") or "")
+
+
+def in_channel(release: dict, channel: str) -> bool:
+    """Whether a release belongs to the chosen channel.
+
+    A draft is never offered: it has no public assets. ``all`` is the default channel and takes
+    every published release, prereleases included (the beta tags are what a preview user is
+    following). ``stable`` takes only the releases GitHub does not mark as a prerelease —
+    `gh release create --prerelease` is set for every tag with a `-` in it (docs/RELEASING.md), so
+    the flag and the tilde in the .deb version say the same thing.
+    """
+    if release.get("draft"):
+        return False
+    return not (channel == "stable" and release.get("prerelease"))
+
+
+def comparable_version(version: str) -> bool:
+    """Whether dpkg can read this version string at all (`apt_newer` answers None when it cannot)."""
+    return apt_newer(version, version) is not None
+
+
+def pick_release(releases, channel: str = CHANNEL_DEFAULT) -> dict | None:
+    """The highest-version release in `channel`, or None when the channel is empty.
+
+    GitHub lists releases in created-at order, so the first one is **not** the highest version: a
+    patch cut for an older tag is created last and was offered as "latest" (the dpkg comparison
+    below then refused it as a downgrade, which is right but reads as "already the latest
+    release"). So every candidate is compared with the same `dpkg --compare-versions` the rest of
+    this script uses, on the upstream version alone — the `-1~<slug>` suffix is the same for all of
+    them on one machine, and leaving it off keeps this decision independent of the distribution.
+
+    A tag dpkg cannot parse takes no part in the ordering, because there is no answer to guess:
+    it is skipped while any readable tag is in the channel, and only when none is does GitHub's
+    own order decide, exactly as it did before. The caller still compares what comes back with the
+    installed version and refuses an unreadable one there.
+    """
+    candidates = [r for r in releases if in_channel(r, channel)]
+    if not candidates:
+        return None
+    readable = [r for r in candidates if comparable_version(upstream_version(release_tag(r)))]
+    pool = readable or candidates
+    best = pool[0]
+    for release in pool[1:]:
+        if apt_newer(upstream_version(release_tag(best)), upstream_version(release_tag(release))):
+            best = release
+    return best
+
+
+def fetch_releases() -> list:
     request = urllib.request.Request(
         RELEASES_URL, headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         releases = json.load(response)
-    for release in releases:
-        if not release.get("draft"):
-            return release
-    raise RuntimeError("GitHub returned no published release.")
+    return releases if isinstance(releases, list) else []
+
+
+def latest_release(channel: str = CHANNEL_DEFAULT) -> dict:
+    """The highest-version release in `channel` (see `pick_release`)."""
+    release = pick_release(fetch_releases(), channel)
+    if release is None:
+        raise RuntimeError(CHANNEL_EMPTY[channel])
+    return release
 
 
 def download(url: str, destination: Path) -> None:
@@ -180,7 +250,8 @@ def root_installer(deb: Path) -> tuple[list[str], str] | None:
     return None
 
 
-def install_command(packages_slug: str | None, machine: str, dry_run: bool, restart: bool) -> int:
+def install_command(packages_slug: str | None, machine: str, dry_run: bool, restart: bool,
+                    channel: str = CHANNEL_DEFAULT) -> int:
     slug = packages_slug or distro_slug(read_os_release(Path("/etc/os-release")))
     if not slug:
         say(f"No release package for this distribution (built: {', '.join(sorted(set(DISTRO_SLUGS.values())))}).")
@@ -191,13 +262,14 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
         say("This Relay was not installed from a package — /update upgrades the .deb install.")
         return 1
 
-    say("Checking GitHub for the latest release…")
+    say("Checking GitHub for the latest release…" if channel == "all"
+        else "Checking GitHub for the latest stable release…")
     try:
-        release = latest_release()
+        release = latest_release(channel)
     except Exception as error:  # a line the notice can show, not a traceback
         say(f"Could not reach GitHub: {error}")
         return 1
-    tag = str(release.get("tag_name") or "")
+    tag = release_tag(release)
     if not tag.strip():
         say("The latest GitHub release has no tag; nothing to install.")
         return 1
@@ -291,7 +363,7 @@ def install_command(packages_slug: str | None, machine: str, dry_run: bool, rest
             shutil.rmtree(work, ignore_errors=True)
 
 
-def check_command() -> int:
+def check_command(channel: str = CHANNEL_DEFAULT) -> int:
     installed = installed_deb_version()
     if installed is None:
         say("This Relay was not installed from a package — /update upgrades the .deb install.")
@@ -301,11 +373,11 @@ def check_command() -> int:
         say(f"No release package for this distribution (built: {', '.join(sorted(set(DISTRO_SLUGS.values())))}).")
         return 1
     try:
-        release = latest_release()
+        release = latest_release(channel)
     except Exception as error:
         say(f"Could not reach GitHub: {error}")
         return 1
-    tag = str(release.get("tag_name") or "")
+    tag = release_tag(release)
     if not tag.strip():
         say("The latest GitHub release has no tag.")
         return 1
@@ -325,16 +397,21 @@ def check_command() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Update an apt-installed Relay from GitHub releases.")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("check", help="print whether a newer release exists")
-    install = commands.add_parser("install", help="download, verify and install the latest release")
+    channel = argparse.ArgumentParser(add_help=False)
+    channel.add_argument("--channel", choices=CHANNELS, default=CHANNEL_DEFAULT,
+                         help='which releases to offer: "all" (the default: every published '
+                              'release, betas included) or "stable" (no prereleases)')
+    commands.add_parser("check", parents=[channel], help="print whether a newer release exists")
+    install = commands.add_parser("install", parents=[channel],
+                                  help="download, verify and install the latest release")
     install.add_argument("--dry-run", action="store_true", help="download and verify, but do not install")
     install.add_argument("--restart", action="store_true", help="launch relay after installing")
     args = parser.parse_args(argv)
 
     try:
         if args.command == "check":
-            return check_command()
-        return install_command(None, os.uname().machine, args.dry_run, args.restart)
+            return check_command(args.channel)
+        return install_command(None, os.uname().machine, args.dry_run, args.restart, args.channel)
     except KeyboardInterrupt:
         return 130
 

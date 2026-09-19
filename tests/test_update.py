@@ -7,7 +7,9 @@ is, which Version: a tag becomes, which asset name it publishes as — is a pure
 function, and this is what keeps the download aimed at the right file. dpkg's own
 --compare-versions does the ordering, so the beta tilde sorts as dpkg sorts it.
 """
+import contextlib
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 
@@ -88,6 +90,136 @@ class UpdateScriptTest(unittest.TestCase):
         self.assertIsNone(self.updater.apt_newer("0.1.0-1~ubuntu24.04", "   "))
 
 
+class ChannelTest(unittest.TestCase):
+    """Which release the updater offers, from a list in GitHub's order (card #HDA9).
+
+    `latest_release` took the *first* non-draft release, and GitHub lists them by creation date: a
+    patch cut for an older tag is created last and came back as "latest". Owner decision, 2026-09-19:
+    the channel is an option — the default takes every published release, betas included, and
+    "stable" leaves the prereleases out — and within it the **highest** version wins, in the same
+    dpkg ordering the install decision uses.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.updater = load_updater()
+
+    def releases(self):
+        """GitHub's own order: newest-created first, and the versions out of order.
+
+        Note where 0.1.0 sits: dpkg's tilde puts `0.1.0~beta.3` *below* `0.1.0`, so the highest
+        release in the "all" channel here is the 0.2.0 beta and the highest stable one is 0.1.0.
+        """
+        return [
+            {"tag_name": "v0.1.0-beta.2", "draft": False, "prerelease": True},    # created last
+            {"tag_name": "v0.3.0", "draft": True, "prerelease": False},           # never offered
+            {"tag_name": "v0.2.0-beta.1", "draft": False, "prerelease": True},    # highest of all
+            {"tag_name": "v0.1.0", "draft": False, "prerelease": False},          # highest stable
+            {"tag_name": "v0.1.0-beta.3", "draft": False, "prerelease": True},
+        ]
+
+    def pick(self, releases, channel="all"):
+        release = self.updater.pick_release(releases, channel)
+        return None if release is None else release["tag_name"]
+
+    def test_the_highest_version_wins_not_the_first_listed(self):
+        # The first non-draft release in the list — what the script used to take — is the 0.1.0 beta.
+        self.assertEqual(self.pick(self.releases()), "v0.2.0-beta.1")
+
+    def test_a_draft_is_never_offered(self):
+        # v0.3.0 is the highest tag in the list and is a draft: it has no published assets.
+        for channel in self.updater.CHANNELS:
+            self.assertNotEqual(self.pick(self.releases(), channel), "v0.3.0")
+
+    def test_stable_leaves_the_prereleases_out(self):
+        self.assertEqual(self.pick(self.releases(), "stable"), "v0.1.0")
+
+    def test_stable_is_empty_rather_than_offering_a_beta(self):
+        betas = [r for r in self.releases() if r.get("prerelease") and not r["draft"]]
+        self.assertIsNone(self.pick(betas, "stable"))
+        self.assertEqual(self.pick(betas, "all"), "v0.2.0-beta.1")
+
+    def test_the_default_channel_is_every_published_release(self):
+        self.assertEqual(self.updater.CHANNEL_DEFAULT, "all")
+        self.assertEqual(self.updater.pick_release(self.releases())["tag_name"], "v0.2.0-beta.1")
+
+    def test_a_tag_dpkg_cannot_read_never_wins(self):
+        # An empty or unparseable tag has no place in the ordering: `apt_newer` answers None for it
+        # and there is nothing to guess. It is skipped while any readable tag is in the channel.
+        listed = [{"tag_name": "", "draft": False, "prerelease": False},
+                  {"tag_name": "v0.1.0", "draft": False, "prerelease": False},
+                  {"tag_name": "v0.1.1", "draft": False, "prerelease": False}]
+        self.assertEqual(self.pick(listed), "v0.1.1")
+
+    def test_a_channel_of_nothing_but_unreadable_tags_keeps_githubs_order(self):
+        # Nothing to compare: the first non-draft release comes back, as it always did, and the
+        # install decision refuses it with "Could not compare …" rather than guessing.
+        listed = [{"tag_name": "", "draft": False, "prerelease": False},
+                  {"tag_name": " ", "draft": False, "prerelease": False}]
+        self.assertIs(self.updater.pick_release(listed), listed[0])
+
+    def test_a_prerelease_flag_that_is_missing_counts_as_stable(self):
+        # Old releases published before --prerelease was used carry no flag at all.
+        listed = [{"tag_name": "v0.1.0", "draft": False}]
+        self.assertEqual(self.pick(listed, "stable"), "v0.1.0")
+
+    def test_an_empty_channel_says_which_one_it_was(self):
+        # A stable-only channel with nothing but betas in it must say so, and name the way out,
+        # rather than report the machine as up to date.
+        updater = load_updater()
+        updater.fetch_releases = lambda: [{"tag_name": "v0.2.0-beta.1", "draft": False, "prerelease": True}]
+        self.assertEqual(updater.latest_release("all")["tag_name"], "v0.2.0-beta.1")
+        with self.assertRaises(RuntimeError) as caught:
+            updater.latest_release("stable")
+        self.assertIn("no stable release", str(caught.exception))
+        updater.fetch_releases = lambda: [{"tag_name": "v0.1.0", "draft": True}]
+        with self.assertRaises(RuntimeError) as caught:
+            updater.latest_release("all")
+        self.assertIn("no published release", str(caught.exception))
+
+
+class ChannelFlagTest(unittest.TestCase):
+    """The --channel flag both commands take, and the channel each one asks GitHub for."""
+
+    def setUp(self):
+        self.updater = load_updater()           # a module of its own: these tests replace functions
+        self.said = []
+        self.updater.say = self.said.append
+        self.asked = []
+        self.updater.fetch_releases = lambda: [
+            {"tag_name": "v0.2.0-beta.1", "draft": False, "prerelease": True},
+            {"tag_name": "v0.1.0", "draft": False, "prerelease": False}]
+        self.updater.installed_deb_version = lambda package="relay": "0.0.1-1~ubuntu24.04"
+        real = self.updater.latest_release
+        self.updater.latest_release = lambda channel=self.updater.CHANNEL_DEFAULT: (
+            self.asked.append(channel), real(channel))[1]
+        self.updater.read_os_release = lambda path: "ID=ubuntu\nVERSION_ID=24.04\n"
+        # Both commands stop at the download, which is all these tests need to have happened.
+        def refuse(url, destination):
+            raise OSError("no network in a test")
+        self.updater.download = refuse
+
+    def test_check_asks_for_the_channel_it_was_given(self):
+        self.assertEqual(self.updater.main(["check", "--channel", "stable"]), 0)
+        self.assertEqual(self.asked, ["stable"])
+        self.assertIn("v0.1.0", " ".join(self.said))
+        self.assertNotIn("beta", " ".join(self.said))
+
+    def test_check_defaults_to_every_published_release(self):
+        self.assertEqual(self.updater.main(["check"]), 0)
+        self.assertEqual(self.asked, ["all"])
+        self.assertIn("v0.2.0-beta.1", " ".join(self.said))
+
+    def test_install_takes_the_flag_too(self):
+        self.assertEqual(self.updater.main(["install", "--channel", "stable", "--dry-run"]), 1)
+        self.assertEqual(self.asked, ["stable"])
+        self.assertIn("stable release", self.said[0])
+
+    def test_a_channel_that_is_not_one_is_refused(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.updater.main(["install", "--channel", "nightly"])
+
+
 class FailedInstallTest(unittest.TestCase):
     """What the user is told, and whether the file it names is still there.
 
@@ -106,7 +238,7 @@ class FailedInstallTest(unittest.TestCase):
             {"name": "relay_9.9.9_ubuntu24.04_amd64.deb", "size": 1024,
              "browser_download_url": "https://example.invalid/relay.deb"},
             {"name": "SHA256SUMS", "browser_download_url": "https://example.invalid/SHA256SUMS"}]}
-        self.updater.latest_release = lambda: release
+        self.updater.latest_release = lambda channel=self.updater.CHANNEL_DEFAULT: release
         self.updater.installed_deb_version = lambda package="relay": "0.0.1-1~ubuntu24.04"
 
         def download(url, destination):
@@ -138,7 +270,8 @@ class FailedInstallTest(unittest.TestCase):
         self.assertTrue(self.kept_path().is_file(), self.said)
 
     def test_a_release_with_no_tag_is_refused(self):
-        self.updater.latest_release = lambda: {"tag_name": "", "draft": False, "assets": []}
+        self.updater.latest_release = lambda channel=self.updater.CHANNEL_DEFAULT: {
+            "tag_name": "", "draft": False, "assets": []}
         self.assertEqual(self.run_install(), 1)
         self.assertIn("no tag", " ".join(self.said))
 

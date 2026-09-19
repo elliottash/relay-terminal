@@ -1663,6 +1663,30 @@ private:
             };
             general.rows << reopen;
         }
+        // Which releases /update offers (card #HDA9). It is an option and not a flag the user types,
+        // because /update is the whole surface: the channel has to be answered before the command
+        // runs. The updater's own default is the same "all", so an unset key and the shipped row
+        // agree.
+        general.rows << headingRow(QStringLiteral("Updates"));
+        {
+            relay::SettingRow channel = choiceRow(QStringLiteral("option:update/channel"),
+                                                  QStringLiteral("Update channel"),
+                                                  QStringLiteral("Which releases /update offers: every published "
+                                                                 "release, betas included, or only the finished ones"),
+                                                  {QStringLiteral("all"), QStringLiteral("stable")},
+                                                  {QStringLiteral("All releases, betas included"),
+                                                   QStringLiteral("Stable releases only")},
+                                                  updateChannel(), QStringLiteral("all"),
+                                                  [](const QString &value) {
+                                                      if (value == QStringLiteral("all"))
+                                                          QSettings().remove(QStringLiteral("update/channel"));
+                                                      else
+                                                          QSettings().setValue(QStringLiteral("update/channel"), value);
+                                                  });
+            channel.aliases = QStringLiteral("update upgrade release beta prerelease stable channel version");
+            general.rows << channel;
+        }
+
         // Diagnostics (issue SQAM): how much is logged persists, so it is an option; opening the log
         // folder is something you do, so it is in Actions (Relay › Open the log folder).
         general.rows << headingRow(QStringLiteral("Diagnostics"));
@@ -3408,6 +3432,15 @@ public:
         });
     }
 
+    // Which releases /update offers (owner decision, 2026-09-19): "all" is every published
+    // release, betas included — what Relay has always done, and what a preview user is following —
+    // and "stable" leaves GitHub's prereleases out. The updater takes it as --channel and picks the
+    // *highest* version in that channel, not the one GitHub happens to list first.
+    static QString updateChannel() {
+        const QString value = QSettings().value(QStringLiteral("update/channel")).toString();
+        return value == QStringLiteral("stable") ? value : QStringLiteral("all");
+    }
+
     // /update and the palette's Update action: scripts/relay-update.py fetches the newest GitHub
     // release's .deb for this distribution and architecture, checks it against the release's
     // SHA256SUMS and installs it with pkexec (the password dialog is polkit's, never a prompt the
@@ -3465,7 +3498,8 @@ public:
                     window->close();
                 }
         });
-        process->start(python, {script, QStringLiteral("install")});
+        process->start(python, {script, QStringLiteral("install"),
+                                QStringLiteral("--channel"), updateChannel()});
         notice(QStringLiteral("Checking GitHub for the latest Relay…"), 20000);
     }
 

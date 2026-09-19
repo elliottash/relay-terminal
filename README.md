@@ -28,6 +28,12 @@ release's `.deb` for its distribution and architecture, checks it against the re
 `SHA256SUMS`, installs it (pkexec asks for the password) and restarts itself. `relay-update.py
 check` does the same discovery without installing.
 
+**Update channel** (Options › General › Updates, or `relay-update.py --channel all|stable`):
+`all` is the default and offers every published release, betas included; `stable` offers only the
+releases that are not marked as a prerelease. Either way the *highest* version in the channel is
+the one offered — GitHub lists releases by creation date, so a patch cut for an older tag is not
+the newest version.
+
 A fresh install runs on Relay Free with no key (see "Privacy and your keys"). The AUR packages
 `relay-terminal` and `relay-terminal-git` are prepared but not yet published; see
 [docs/RELEASING.md](docs/RELEASING.md).
