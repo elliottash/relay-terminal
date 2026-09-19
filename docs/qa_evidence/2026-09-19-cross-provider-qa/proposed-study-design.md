@@ -202,3 +202,27 @@ The STRUCTURAL question — is there an author x reviewer interaction at all —
 transfer, and that is what the pilot is for. SWE-bench `experiments` (~80 submissions,
 same 500 instances, author = submission) is the repo-level follow-up, at much higher
 reviewer cost and with no bug taxonomy.
+
+## The rho to size against is ~0.44, from the only proper measurement (added 2026-09-19)
+
+The power table above leaves rho free. The one study that measures reviewer x reviewer properly —
+Kohli, "Nine Judges, Two Effective Votes" (arXiv 2605.29800), 9 frontier judges from 7 families,
+per-item success matrix, Kish n_eff — reports 9 judges carrying about 2 effective votes. Inverting
+the Kish formula, n_eff = n / (1 + (n-1) rho):
+
+    rho_bar = (9/2 - 1) / 8 = 0.44        (my inversion, not a number the paper states)
+
+So the mean pairwise correlation between judges is about 0.44, and 78% of nominal independence is
+lost. Read against the power table that puts the pilot at ~400-500 items per cell for a 15-point
+reviewer gap. CodeJudgeBench has ~810 Claude-authored items, so the pilot is adequately powered
+IF review correlation on code resembles correlation on judging. It may not: that inference is the
+gap this study exists to close, which is a pleasant circularity — the pilot's first output is the
+number that says whether the pilot was big enough.
+
+Caveat on the code-side number, so nobody cites it as more than it is: in "Bigger Isn't Always
+Better" (5 reviewers, 150 samples) all five found something on 55 items and none did on 19. Taking
+the all-five cell to imply a common rate of 0.82 and assuming independence would predict the
+none-found cell at 0.02%, against 12.7% observed — roughly 600x more co-failure. That arithmetic
+is mine and it is crude: it assumes one shared rate and ignores item difficulty, which is itself a
+large part of any raw co-failure. It illustrates the direction only. Kohli's 0.44 is the
+load-bearing figure because the Kish/double-fault machinery adjusts for what a raw count does not.
