@@ -2901,7 +2901,7 @@ Backend: `backend/relay_core/tool_labels.py` (pure functions, no I/O), wired int
 ▸ edited Pane.h · +212 −87              (click → the diff pane)
 ▸ started job: npm run dev
 ▸ started subagent “fix tests”
-▸ updated todos · 3 open
+▸ updated tasks · 3 open
 ▸ moved card #K7Q2 → done
 ✗ edit x.py · old_string was not found in the file
 ```
@@ -3029,7 +3029,7 @@ output, 128 KiB of file text or a diff). What the sections are, per kind:
 | `list` | `entries` (output), one per line, a directory marked with a trailing `/` |
 | `load_skill` | `skill` (output) |
 | `write_plan` | `plan` (text) |
-| `update_todos` | `todos` (args), one `[status] text` per line |
+| `update_todos` | `tasks` (args), one `[status] text` per line |
 | `agent` | `task` (text), `report` (text) |
 | `type_into_program` | `intent` (text), `keystroke` (code), `screen` (output) |
 | everything else | `arguments` (args), one `key: value` per line, and `changes` (args) when the result has them |

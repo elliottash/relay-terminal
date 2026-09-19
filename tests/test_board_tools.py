@@ -652,6 +652,11 @@ class SignatureTests(BoardToolsTest):
         self.assertIn("verified_by", B.FIELD_ORDER)          # and it survives a rewrite of the file
         self.assertEqual(self.board.check(), [])
 
+    def _with_verdict(self):
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                             "append_section": {"heading": "Verdict", "text": "pass"}})
+
     def test_relay_free_is_judged_by_the_gateways_upstream_not_by_the_gateway(self):
         # A card written on Relay Free (GLM-5.3 Flash today) may not be closed by GLM.
         self.sign("relay-free", "relay-main")
@@ -660,12 +665,34 @@ class SignatureTests(BoardToolsTest):
         self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
                          "relay-free/relay-main")
         self.sign("glm-coding", "glm-5.3")
-        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
-        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
-                                             "append_section": {"heading": "Verdict", "text": "pass"}})
+        self._with_verdict()
         refused = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                                      "reason": "verified"})
         self.assertEqual(refused["requires"], "independent_model")
+
+    def test_relay_free_may_not_close_a_card_at_all(self):
+        # Owner, 2026-09-19: verifying is not part of the free plan, whatever the upstream is.
+        self.sign("openai", "gpt-6-astra")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        self.sign("relay-free", "relay-lite")      # Gemini today: a different family, still refused
+        self._with_verdict()
+        refused = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                     "reason": "verified"})
+        self.assertEqual(refused["requires"], "independent_model")
+        self.assertIn("not available on Relay Free", refused["error"])
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-qa-llm")
+
+    def test_a_guest_pane_signs_the_model_the_harness_reported(self):
+        self.sign("guest:claude", "claude-opus-5-20260514")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
+                                           "reason": "starting"})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
+                         "anthropic/claude-opus-5-20260514 via claude-code")
+        # Claude Code is still Anthropic, so the verifier is chosen outside Anthropic.
+        block = self.tools.run("board_read", {"id": self.card_id})["qa"]
+        self.assertEqual(block["implementer_family"], "anthropic")
+        self.assertEqual(block["recommended"]["runner"], "guest:codex")
 
     def test_board_read_names_the_verifier_for_a_card_that_has_an_implementer(self):
         self.sign("anthropic", "claude-opus-5")
@@ -678,7 +705,8 @@ class SignatureTests(BoardToolsTest):
         self.assertEqual(block["recommended"]["model"], "codex")
         self.assertEqual([a["runner"] for a in block["alternates"]][0], "preset:glm-coding")
         self.assertEqual([s["family"] for s in block["skipped"]], ["anthropic"])
-        self.assertTrue(block["unavailable"])
+        # Relay Free says why it is not on offer rather than simply not being there.
+        self.assertIn(dict(QA.RELAY_FREE_ROW), block["unavailable"])
         self.assertEqual(block["commits"], [])               # a temporary board is not a git repo
 
     def test_a_card_with_no_implementer_carries_no_recommendation_at_all(self):
