@@ -21,3 +21,9 @@ Trade-off in j1: dispatching an explicit agent submit locally means the router n
 
 <!-- relay:entry 20260919T163802Z-k6 author=agent kind=event model=glm-5.3 pane=82f45235 turn=ded374951432485287ccc423bed079cd/050f489d959b49de94046fce865913e6 -->
 - ✦ agent updated this card · appended to `## QA checklist`; replaced `## Tasks`
+
+<!-- relay:entry 20260919T164121Z-xw author=agent kind=event model=glm-5.3 pane=82f45235 turn=ded374951432485287ccc423bed079cd/050f489d959b49de94046fce865913e6 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["C4M8", "KJ44"], "githu… → {"plans": [], "commits": ["ad7b455", "d633d6b"], "evidence": ["docs/qa_evidence/…
+
+<!-- relay:entry 20260919T164137Z-kk author=agent kind=event model=glm-5.3 pane=82f45235 turn=ded374951432485287ccc423bed079cd/050f489d959b49de94046fce865913e6 -->
+- ✦ agent moved this card · In progress → Needs QA (LLM) · Implemented and landed (ad7b455, d633d6b): the start rule, the local dispatch, the toast fix, the queuesubmit test, and the Xvfb evidence with the ask timed against the keypress. Ready for QA-LLM. · evidence docs/qa_evidence/2026-09-19-ctrl-enter-sends-now/
