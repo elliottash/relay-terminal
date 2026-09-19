@@ -408,7 +408,8 @@ class RemoteScriptTests(unittest.TestCase):
         s.run(typed_line(1))
         self.assertEqual(before, state())  # a second eval does nothing
         self.assertEqual(b"".join(before).count(b"133;A"), 1)  # PS1 wrapped once
-        self.assertIn(b'"\\C-x\\C-p": "__relay_r_redraw"', s.run("bind -X"))
+        # Bash 5.2 prints `"\C-x\C-p": "__relay_r_redraw"`; Bash 5.3 (Ubuntu 26.04) drops the colon.
+        self.assertRegex(s.run("bind -X"), rb'"\\C-x\\C-p":? "__relay_r_redraw"')
 
     def test_bash_prompt_array_and_old_bash_debug_trap(self):
         s = self.bash()
