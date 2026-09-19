@@ -3882,10 +3882,6 @@ private:
         m_thinkingFlushPending = false;
         const QString uri = m_thinkingAnchor;
         if (uri.isEmpty() || !m_backend) return;
-        // A turn pane opened on this turn — "open in pane" is what the capped fold points at — is
-        // the surface holding the whole block, so it follows the stream at the same four frames a
-        // second rather than freezing at whatever had arrived when it was opened.
-        pushThinkingToTurnPane(uri);
         // The reader may have folded it away since the last flush. setFoldContent() opens what it
         // sets, so a folded fold is left alone: pushing content would reopen it over their click.
         if (m_thinkingFoldOpen && !m_backend->foldExpanded(uri)) {
@@ -3896,41 +3892,18 @@ private:
         setFold(uri, thinkingFoldLines(uri, true));
     }
 
-    // The whole of this turn's reasoning into an open turn pane, if one is open on it. The fold in
-    // the grid is capped; the pane its "open in pane" link goes to is where the rest lives, so it
-    // is kept current while the block streams and once more when it ends (#K48R).
-    void pushThinkingToTurnPane(const QString &uri) {
-        const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
-        if (!ref.valid) return;
-        if (auto view = m_turnViews.value(ref.turn)) view->setThinking(m_turnThinking.value(ref.turn));
-    }
-
-    // How wide the fold's rows are wrapped: the grid less the block indent, which is what
-    // FoldLayer::layout() wraps at. The caps below count the rows the view paints, so they are
-    // counted at this width (#K48R).
-    int foldWrapCells() const {
-        const int columns = m_backend ? m_backend->columns() : 0;
-        return columns > relay::kFoldIndent + 4 ? columns - relay::kFoldIndent : 0;
-    }
-
-    // The fold's rows: the buffer rendered as markdown (src/CallLines.h, foldForMarkdown), capped
-    // at the height the owner asked for (#K48R) — the last six rendered rows while it streams,
-    // because the end is the part being written, and the first eighteen of a settled fold opened
-    // by hand, because that is where reading starts. What is cut is named on a muted row, and the
-    // link under it goes to the turn pane, which holds the whole of every block. Empty at done
-    // becomes a row that says so, because a blank fold reads as a dead one.
+    // The fold's rows: the buffer rendered as markdown (src/CallLines.h, foldForMarkdown), its
+    // tail while streaming — the end is the part being written — capped at 400 rows, with a link
+    // to the turn pane, which holds the whole of every block. Empty at done becomes a row that
+    // says so, because a blank fold reads as a dead one.
     QVector<relay::FoldLine> thinkingFoldLines(const QString &uri, bool tail) const {
         relay::calllines::FoldOptions options;
-        options.maxLines = tail ? relay::calllines::kThinkingStreamRows : relay::calllines::kThinkingDoneRows;
-        options.wrapCells = foldWrapCells();
-        options.tail = tail;
+        options.maxLines = 400;
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
         if (ref.valid)
             options.openInPane = QStringLiteral("relay://turn/%1/%2")
                                      .arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(ref.turn)));
         QString text = m_turnThinking.value(ref.valid ? ref.turn : QString());
-        // Six rows of a stream need nothing like the whole buffer re-rendered four times a second;
-        // 12,000 characters is far more than six rows at any width.
         if (tail) text = text.right(12000);
         const QVector<relay::FoldLine> lines = relay::calllines::foldForMarkdown(text, foldPalette(), options);
         return !lines.isEmpty() ? lines
@@ -3949,7 +3922,6 @@ private:
         m_lastThinkingAnchor = uri;   // Alt+R reopens this one until the next block replaces it
         m_thinkingFlushPending = false;   // a queued flush would resurrect a cleared anchor
         if (!m_backend || uri.isEmpty()) return;
-        pushThinkingToTurnPane(uri);   // the whole block, where the capped fold's link points
         const bool openNow = m_backend->foldExpanded(uri);
         if (openNow != m_thinkingFoldOpen) m_thinkingUserToggled = true;   // the reader clicked since
         setFold(uri, thinkingFoldLines(uri, false));
