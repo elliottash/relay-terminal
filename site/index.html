@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Relay Terminal — one prompt for your shell and your coding agent</title>
-  <meta name="description" content="A Linux terminal for agentic coding. One prompt box: commands run in your shell, everything else goes to the agent. Works the moment it opens on an included allowance, or on your own API keys. No account, no telemetry.">
+  <meta name="description" content="A Linux terminal for agentic coding. One prompt box: commands run in your shell, everything else goes to the agent, which answers in the terminal itself. Your issue tracker lives in git, your phone joins without an account, and any provider's key works. No telemetry.">
   <!-- The two panels the page can be in: IBM Beige and Dark Copper, the app's own themes. -->
   <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Relay Terminal — one prompt for your shell and your coding agent">
-  <meta property="og:description" content="A Linux terminal for agentic coding: an included allowance to start, your own API keys when you want them.">
+  <meta property="og:description" content="A Linux terminal for agentic coding: the agent answers in the terminal itself, the tracker lives in git, and any provider's key works. An included allowance to start.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/agent-inline.png">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
@@ -34,6 +34,7 @@
       <div class="top-right">
         <nav aria-label="Sections">
           <ul>
+            <li><a href="#why">Why Relay</a></li>
             <li><a href="#features">Features</a></li>
             <li><a href="#install">Install</a></li>
             <li><a href="#privacy">Privacy</a></li>
@@ -135,6 +136,62 @@
       </div>
     </section>
 
+    <section id="why" aria-labelledby="why-title">
+      <div class="wrap">
+        <h2 id="why-title">What only Relay does</h2>
+        <p class="intro">Warp, Wave and the command-line agents each put the agent somewhere else: a block, a
+          sidebar, a TUI of its own. Relay puts it in the terminal you already have, and keeps everything
+          else on your machine.</p>
+        <ol class="why">
+          <li>
+            <span class="num">01</span>
+            <h3>The agent answers in the terminal grid</h3>
+            <p>There is no agent pane. Prompts, answers, tool calls, diffs and command output print into the
+              scrollback in their own colours, folded where they run long. The agent reads the same screen you
+              do, so when you hand a pane over (Ctrl+Shift+J) it can drive vim, a REPL or an installer there.</p>
+          </li>
+          <li>
+            <span class="num">02</span>
+            <h3>A terminal engine Relay owns</h3>
+            <p>Relay renders the terminal itself, on a libvterm or libghostty-vt core. That is what lets the agent
+              see the screen and the scrollback, mask a password in the prompt box and fold a long tool call.
+              With the libghostty-vt core, a source-build option, 200 MB of output takes about 1.2 s where
+              Konsole takes 3.6 s on the same machine.</p>
+          </li>
+          <li>
+            <span class="num">03</span>
+            <h3>Every request is a ledger entry</h3>
+            <p>Relay keeps the list of what you asked, in your words, outside the model's memory. Multi-part asks
+              become tasks, compaction carries the open ones forward verbatim, and a turn ends with
+              <code>Tasks 3/5 (1 deferred, 1 failed)</code> rather than silence.</p>
+          </li>
+          <li>
+            <span class="num">04</span>
+            <h3>The tracker lives in the repository</h3>
+            <p>The Switchboard is your <code>issues/</code> folder as a board: one Markdown card per issue, plan or
+              memory, threads append-only, all in git and readable on GitHub. The agent files what it did not
+              finish, asks its questions on the card, and lands work in a QA lane that a different provider's
+              model can verify.</p>
+          </li>
+          <li>
+            <span class="num">05</span>
+            <h3>Any provider, including the ones you already pay for</h3>
+            <p>GLM Coding Plan, Kimi Code, MiniMax, OpenRouter, OpenAI, Anthropic, Gemini, any OpenAI-compatible
+              endpoint, or a model server on this machine. Pick one and Relay fills in Main, Flash and Lite; a
+              tier without a key steps down instead of failing. Claude Code and Codex run as guests in a pane, on
+              the subscription you already have.</p>
+          </li>
+          <li>
+            <span class="num">06</span>
+            <h3>Your phone, and other people, without an account</h3>
+            <p>Pair a phone from a QR code: an end-to-end encrypted session over a rendezvous that only ever sees
+              ciphertext. The phone sees the pane, types into the same routed prompt box and dictates. Invite
+              someone else with a role and an expiry, admit them by hand, and take the keyboard back by typing.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
     <section id="features" aria-labelledby="features-title">
       <div class="wrap">
         <h2 id="features-title">What it does</h2>
@@ -143,9 +200,10 @@
           <li class="sh">
             <h3>A real terminal, rendered by Relay</h3>
             <p>vim, htop, ssh, tmux, Claude Code and Codex run in it as they do anywhere else. Relay renders
-              the terminal itself instead of embedding someone else's: 200 MB of output takes about 1.3 s
-              against Konsole's 3.6 s on the same machine. Shell integration (OSC 7 and OSC 133) tracks the
-              working directory and marks prompts, commands and exit codes.</p>
+              the terminal itself instead of embedding someone else's. The packaged build uses the libvterm
+              core; a source build can add the libghostty-vt core, which takes about 1.2 s to show 200 MB of
+              output against Konsole's 3.6 s. Shell integration (OSC 7 and OSC 133) tracks the working
+              directory and marks prompts, commands and exit codes.</p>
           </li>
           <li class="sh">
             <h3>The prompt box is the only input</h3>
@@ -172,6 +230,12 @@
               agent. The caret and the syntax colouring show where the line is going before you press Enter.</p>
           </li>
           <li class="ag">
+            <h3>Plan first when you want to</h3>
+            <p>Shift+Tab puts the prompt in plan mode: the agent investigates read-only, asks you the questions
+              it has as numbered choices, and writes a plan that opens beside the pane for editing.
+              <strong>Execute</strong>, <strong>Execute in fresh context</strong> or <strong>Keep planning</strong>.</p>
+          </li>
+          <li class="ag">
             <h3>Nothing is silently dropped</h3>
             <p>Every request you make is tracked, and multi-part asks are split into tasks. A chip counts them
               — <code>Tasks 3/5 (1 deferred, 1 failed)</code> — and the list shows your words next to what the
@@ -190,6 +254,28 @@
               cheap model for labels and checks. Every tier and every job is editable. Bring your own
               key for GLM, Kimi, Kimi Code, MiniMax, OpenRouter, OpenAI, Anthropic or Gemini; the API keys
               window has a Test button and keeps keys in your system keyring.</p>
+          </li>
+          <li class="ag">
+            <h3>Subagents in their own tabs</h3>
+            <p>A task can go to a subagent with its own conversation and tab; the task list shows which one each
+              is working on. Alt+A opens this pane's subagents, Ctrl+Shift+X stops them all.</p>
+          </li>
+          <li class="sh">
+            <h3>SSH hosts, nothing installed there</h3>
+            <p>Pick a host from <code>~/.ssh/config</code> or type <code>user@host</code>. The pane knows the host
+              it is on, prompt marks keep working, and the agent keeps its tools: it runs commands there and reads
+              and edits remote files, showing the diff before it writes.</p>
+          </li>
+          <li class="ag">
+            <h3>Claude Code and Codex, inside Relay</h3>
+            <p>Pick either in the model box and it becomes the pane's agent, driven through its own headless
+              interface on your existing subscription. Terminal lines still go to your shell; nothing is typed into
+              a TUI or scraped from one.</p>
+          </li>
+          <li class="ag">
+            <h3>Local models</h3>
+            <p>Options › Local models finds, tests and adds a model server on this machine, and the agent can set one
+              up itself. <code>/local</code> moves a pane onto it and back.</p>
           </li>
           <li class="sh">
             <h3>Reopen where you left off</h3>
@@ -238,6 +324,16 @@
             <img src="assets/conversations.png" width="660" height="387" loading="lazy"
                  alt="The conversations window: a search box, filters, a list of saved conversations and terminal history, and a preview with the matches highlighted.">
             <figcaption>Search across conversations and terminal history (<code>/conversations</code>)</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="assets/switchboard.png" width="700" height="450" loading="lazy"
+                 alt="The Switchboard pane beside a terminal: sections from Inbox to Done, one card per row with its id, labels and a task count.">
+            <figcaption>The Switchboard (Ctrl+Shift+S): the repository's <code>issues/</code> folder as a board</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="assets/plan-mode.png" width="640" height="430" loading="lazy"
+                 alt="Plan mode: the agent asks three numbered questions in the terminal, and the written plan opens in a pane beside it with Execute buttons.">
+            <figcaption>Plan mode: the planner asks, the plan opens beside the pane</figcaption>
           </figure>
         </div>
       </div>
@@ -358,10 +454,12 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
               fewer marks.</p>
           </div>
           <div>
-            <p><strong>Platforms.</strong> Linux, built against Qt 5. Relay's own engine is the step towards
-              macOS and Windows; those builds are on the roadmap rather than in this beta.</p>
-            <p><strong>License.</strong> GPL-3.0-or-later. Relay is not a Konsole fork and reads or changes no
-              Konsole settings.</p>
+            <p><strong>Platforms.</strong> Linux, built against Qt 5 or Qt 6. Relay's own engine is the step towards
+              macOS and Windows; those builds are on the roadmap rather than in this beta. The phone view is a
+              web app that any recent browser opens; native apps are not started.</p>
+            <p><strong>License.</strong> GPL-3.0-or-later, all of it: the app, the engine, the phone app, the
+              rendezvous and the Relay Free gateway are in the one repository. Relay is not a Konsole fork and
+              reads or changes no Konsole settings.</p>
           </div>
         </div>
       </div>
