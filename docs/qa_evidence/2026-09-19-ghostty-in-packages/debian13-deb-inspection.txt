@@ -1,0 +1,33 @@
+$ dpkg-deb -f relay_0.1.0-1~debian13_arm64.deb Package Version Architecture Depends
+Package: relay
+Version: 0.1.0-1~debian13
+Architecture: arm64
+Depends: python3 (>= 3.10), python3-cryptography, bash, libc6 (>= 2.36), libgcc-s1 (>= 3.0), libkf6syntaxhighlighting6 (>= 6.0.0), libqt6core6t64 (>= 6.8.2), libqt6gui6 (>= 6.8.2), libqt6network6 (>= 6.1.2), libqt6widgets6 (>= 6.3.0), libstdc++6 (>= 14)
+Installed-Size: 12356
+
+$ dpkg-deb -c ... | grep -E 'bin/|\.so|\.a$'
+drwxr-xr-x root/root         0 2026-09-19 16:02 ./usr/bin/
+-rwxr-xr-x root/root   9001000 2026-09-19 16:02 ./usr/bin/relay
+-rw-r--r-- root/root        18 2026-09-19 15:53 ./usr/bin/relay.build-id
+
+$ readelf -d usr/bin/relay | grep NEEDED
+ 0x0000000000000001 (NEEDED)             Shared library: [libKF6SyntaxHighlighting.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt6Network.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt6Widgets.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt6Gui.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt6Core.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libstdc++.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+
+$ file usr/bin/relay
+ELF 64-bit LSB pie executable, ARM aarch64, version 1 (GNU/Linux), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=987d437c971a4d20ea7d56a1c79602ff8b51392f, for GNU/Linux 3.7.0, stripped
+
+$ strings -n 8 usr/bin/relay | grep -x 'Relay(libghostty-vt)'   # XTVERSION reply, exists only in GhosttyCore.cpp
+Relay(libghostty-vt)
+$ strings -e l usr/bin/relay | grep -xE 'ghostty|libvterm'   # the QStringLiteral core names from VtCoreFactory
+ghostty
+libvterm
+$ nm -D --undefined-only usr/bin/relay | grep -ciE 'zig|ghostty|compiler_rt'
+0

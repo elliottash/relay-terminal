@@ -20,6 +20,19 @@ step "relay --version / --help"
 QT_QPA_PLATFORM=offscreen relay --version
 help=$(QT_QPA_PLATFORM=offscreen relay --help); head -n 5 <<<"$help"
 
+step "emulator core: the package ships libghostty-vt"
+# VtCoreFactory lists ghostty first when it is compiled in, so it is the default core; the
+# XTVERSION reply "Relay(libghostty-vt)" exists only in GhosttyCore.cpp, so its presence in
+# the stripped binary is the proof. --engine-core=ghostty cannot be: an unknown core falls
+# back to the default silently (engine/session/TerminalSession.cpp).
+if grep -qF 'Relay(libghostty-vt)' /usr/bin/relay; then
+  echo "ok /usr/bin/relay carries the libghostty-vt core (default core: ghostty)"
+elif [[ ${RELAY_WITH_GHOSTTY:-1} == 0 ]]; then
+  echo "libvterm-only package (RELAY_WITH_GHOSTTY=0)"
+else
+  echo "/usr/bin/relay has no libghostty-vt core: the package would run on libvterm" >&2; exit 1
+fi
+
 step "backend worker protocol"
 reply=$(echo '{"type":"shutdown"}' | timeout 20 python3 -S /usr/share/relay/backend/worker.py)
 echo "$reply"

@@ -1,0 +1,13 @@
+# packaging/deb/docker-build-all.sh OUT '' debian:trixie ubuntu:24.04 -- build-debian-trixie.log, milestone lines (full log: 772 KB)
+2921:== libghostty-vt core (Zig from engine/scripts/zig.sha256, cache: /cache)
+2922:install-zig.sh: Zig 0.16.0 in /tmp/tmp.Kle6YYFjyo/zig
+2923:libghostty-vt f9a3f24a56bf05f70894e1a084809d4fffadf420 already in /cache/ghostty-vt/debian13-aarch64 (ghostty=f9a3f24a56bf05f70894e1a084809d4fffadf420 zig=0.16.0 cpu=baseline)
+2950:-- Relay engine: libghostty-vt core enabled (/cache/ghostty-vt/debian13-aarch64/lib/libghostty-vt.a)
+2987:[33/502] Localizing non-API symbols of libghostty-vt
+3184:[226/502] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/GhosttyCore.cpp.o
+3611:== relay carries the libghostty-vt core (default core: ghostty)
+3737:62/63 Test #62: backend-and-bash .................***Failed  232.37 sec
+7755:    Test #62: backend-and-bash .................   Passed  226.84 sec
+7757:63/63 Test #63: relay-engine-tests ...............   Passed   20.08 sec
+7759:100% tests passed, 0 tests failed out of 63
+7770:CPack: - package: /tmp/tmp.Kle6YYFjyo/relay_0.1.0-1~debian13_arm64.deb generated.

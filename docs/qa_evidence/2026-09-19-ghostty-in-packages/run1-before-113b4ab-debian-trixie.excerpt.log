@@ -1,0 +1,83 @@
+Setting up libkf6parts-dev (6.13.0-1) ...
+
+Processing triggers for ca-certificates (20250419) ...
+
+Updating certificates in /etc/ssl/certs...
+
+0 added, 0 removed; done.
+
+Running hooks in /etc/ca-certificates/update.d...
+
+done.
+
+== libghostty-vt core (Zig from engine/scripts/zig.sha256, cache: /cache)
+install-zig.sh: downloading https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz
+install-zig.sh: Zig 0.16.0 in /tmp/tmp.KlFXpfz50C/zig
+Cloning into '/tmp/tmp.KlFXpfz50C/ghostty-src'...
+libghostty-vt f9a3f24a56bf05f70894e1a084809d4fffadf420 installed in /cache/ghostty-vt/debian13-aarch64 (ghostty=f9a3f24a56bf05f70894e1a084809d4fffadf420 zig=0.16.0 cpu=baseline)
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+/src/src/RelayWindow.h:6176:54: warning: 'QPoint QMouseEvent::globalPos() const' is deprecated: Use globalPosition() [-Wdeprecated-declarations]
+ 6176 |             dragPaneMove(m_toolLeaf, mouse->globalPos());
+      |                                      ~~~~~~~~~~~~~~~~^~
+/usr/include/aarch64-linux-gnu/qt6/QtGui/qevent.h:225:19: note: declared here
+  225 |     inline QPoint globalPos() const { return globalPosition().toPoint(); }
+      |                   ^~~~~~~~~
+/src/src/RelayWindow.h:6183:75: warning: 'QPoint QMouseEvent::globalPos() const' is deprecated: Use globalPosition() [-Wdeprecated-declarations]
+ 6183 |             endToolHeaderDrag(static_cast<QMouseEvent *>(event)->globalPos(), true);
+      |                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+/usr/include/aarch64-linux-gnu/qt6/QtGui/qevent.h:225:19: note: declared here
+  225 |     inline QPoint globalPos() const { return globalPosition().toPoint(); }
+      |                   ^~~~~~~~~
+[501/502] Linking CXX executable relay
+2026-09-19.19H.01
+== relay carries the libghostty-vt core (default core: ghostty)
+Internal ctest changing into directory: /tmp/tmp.KlFXpfz50C
+Test project /tmp/tmp.KlFXpfz50C
+      Start  1: editor
+ 1/63 Test  #1: editor ...........................   Passed    0.20 sec
+      Start  2: prompthistory
+ 2/63 Test  #2: prompthistory ....................   Passed    0.01 sec
+63/63 Test #63: relay-engine-tests ...............***Failed   20.07 sec
+Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+********* Start testing of CoreTest *********
+Config: Using QtTest library 6.8.2, Qt 6.8.2 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 14.2.0), debian 13
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::plainTextAndCursor(ghostty)
+PASS   : CoreTest::plainTextAndCursor(libvterm)
+PASS   : CoreTest::sgrAttributesAndColours(ghostty)
+PASS   : CoreTest::sgrAttributesAndColours(libvterm)
+PASS   : CoreTest::wideAndCombiningCharacters(ghostty)
+   Loc: [/src/engine/tests/ViewTest.cpp(163)]
+QWARN  : ViewTest::typingReachesProgram(ghostty) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::typingReachesProgram(ghostty)
+QWARN  : ViewTest::typingReachesProgram(libvterm) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::typingReachesProgram(libvterm)
+QWARN  : ViewTest::ctrlCInterruptsForegroundJob(ghostty) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::ctrlCInterruptsForegroundJob(ghostty)
+QWARN  : ViewTest::ctrlCInterruptsForegroundJob(libvterm) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::ctrlCInterruptsForegroundJob(libvterm)
+QWARN  : ViewTest::mouseSelectionAndCopy(ghostty) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::mouseSelectionAndCopy(ghostty)
+Received signal 1 (SIGHUP) sent by PID 21061 UID 0QWARN  : ViewTest::mouseSelectionAndCopy(libvterm) This plugin does not support propagateSizeHints()
+
+         mouseSelectionAndCopy function time: 4ms, total time: 659ms
+Received signal 1 (SIGHUP)
+         mouseSelectionAndCopy function time: 4ms, total time: 659ms
+
+97% tests passed, 2 tests failed out of 63
+
+Label Time Summary:Errors while running CTest
+
+engine    = 120.00 sec*proc (1 test)
+
+Total Test time (real) = 470.66 sec
+
+The following tests FAILED:
+	 41 - paneusage (Failed)
+	 63 - relay-engine-tests (Timeout)                      engine

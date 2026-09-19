@@ -1,0 +1,29 @@
+# smoke-ubuntu-24-04.log: the smoke test's own sections (apt output left out)
+== package metadata
+Depends: python3 (>= 3.10), python3-cryptography, bash, libc6 (>= 2.36), libgcc-s1 (>= 3.0), libkf5syntaxhighlighting5 (>= 5.28.0), libqt5core5t64 (>= 5.15.1), libqt5gui5t64 (>= 5.15.1) | libqt5gui5-g
+== installed files
+ok /usr/bin/relay
+ok /usr/share/relay/backend/worker.py
+ok /usr/share/relay/shell/integration.bash
+ok /usr/share/relay/shell/event.py
+ok /usr/share/relay/scripts/relay-open
+ok /usr/share/relay/theme/terminal.conf
+ok /usr/share/applications/org.relayterminal.Relay.desktop
+ok /usr/share/metainfo/org.relayterminal.Relay.metainfo.xml
+ok /usr/share/icons/hicolor/scalable/apps/org.relayterminal.Relay.svg
+ok /usr/share/icons/hicolor/256x256/apps/org.relayterminal.Relay.png
+== relay --version / --help
+== emulator core: the package ships libghostty-vt
+ok /usr/bin/relay carries the libghostty-vt core (default core: ghostty)
+== backend worker protocol
+== GUI start under Xvfb (offscreen and xcb)
+[offscreen] exit status 124 (124 = still running at timeout)
+--- processes
+   5624    5617 /usr/bin/python3 -S -u /usr/share/relay/backend/worker.py
+   5625    5617 /bin/bash --noprofile --rcfile /usr/share/relay/shell/integration.bash -i
+[xcb] exit status 124 (124 = still running at timeout)
+--- processes
+   5787    5777 /usr/bin/python3 -S -u /usr/share/relay/backend/worker.py
+   5788    5777 /bin/bash --noprofile --rcfile /usr/share/relay/shell/integration.bash -i
+--- windows
+smoke test passed

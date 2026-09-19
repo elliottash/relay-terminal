@@ -24,8 +24,19 @@ Packaging pieces:
   the file adds `python3 (>= 3.10)` and `bash`, and recommends `libsecret-tools` and
   `xdg-utils`.
 - `packaging/deb/build-deb.sh`: installs build deps, builds out of tree, runs ctest, runs cpack.
+  It first builds the **libghostty-vt core into the package** (2026-09-19): it downloads the
+  Zig release pinned in `engine/scripts/zig.sha256` (`engine/scripts/install-zig.sh` verifies
+  the checksum), runs `engine/scripts/build-libghostty-vt.sh` at the pinned ghostty commit with
+  `-Dcpu=baseline`, configures with `-DRELAY_ENGINE_WITH_GHOSTTY=ON`, and checks the binary
+  carries the core. The archive is linked statically, so the `.deb` has no new dependency;
+  the packaged Relay defaults to the ghostty core (`--engine-core=libvterm` still picks the
+  other). A failed download or Zig build fails the package build on purpose;
+  `RELAY_WITH_GHOSTTY=0` is the deliberate libvterm-only package. `RELAY_CACHE_DIR` keeps the
+  tarball and the built archive between runs: `docker-build-all.sh` mounts `OUT_DIR/cache`,
+  and `release.yml`/`ci.yml` cache it with `actions/cache` keyed on the two pin files.
 - `packaging/deb/smoke-test.sh` + `packaging/smoke-installed.sh`: installs a `.deb` with apt
-  in a fresh container and checks the installed files, `relay --version/--help`, the backend
+  in a fresh container and checks the installed files, `relay --version/--help`, that the
+  binary carries the libghostty-vt core, the backend
   worker's `ready` event, and a 10-second GUI start under Xvfb
   (offscreen and xcb) that must spawn the Bash integration shell and the agent worker.
 - `packaging/deb/docker-build-all.sh [OUT] [SUFFIX] [IMAGE...]`: the same as CI, locally.
@@ -87,8 +98,10 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
    ```
 4. **What CI does** (`.github/workflows/release.yml`):
    - `source`: checks the tag against `CMakeLists.txt`, builds `relay-0.1.0-beta.1.tar.gz`.
-   - `deb` (6 jobs: 3 distributions x amd64/arm64): builds each `.deb` in its container with
-     the checkout mounted read-only, runs ctest, installs the `.deb` in a fresh container and
+   - `deb` (6 jobs: 3 distributions x amd64/arm64): restores the Zig/libghostty-vt cache,
+     builds each `.deb` in its container with
+     the checkout mounted read-only (Zig and the ghostty clone come from the network), runs
+     ctest, installs the `.deb` in a fresh container and
      runs the smoke test. Logs are uploaded as artifacts even on failure.
    - `release`: collects the `.deb`s and tarball, writes `SHA256SUMS`, and runs
      `gh release create --generate-notes --verify-tag` (`--prerelease` for tags with `-`).
@@ -123,6 +136,13 @@ in `release.yml` remove `false &&` from the `aur` job's `if:`.
 
 The package is named `relay-terminal` because `relay` is generic and other AUR packages
 (for example `sentry-relay`) install a `/usr/bin/relay`.
+
+The AUR packages build the **libvterm core only** (unlike the `.deb`s): the AUR forbids
+network access in `build()`, and ghostty's `zig build` fetches its Zig package dependencies
+(`build.zig.zon`) over the network. Shipping the ghostty core there means declaring the ghostty
+tarball at the pinned commit and every Zig dependency it needs as `source=()` entries with
+checksums, building with `zig build --system`, and pinning `zig` to 0.16 in `makedepends`;
+that is its own change.
 
 ## Website (GitHub Pages)
 

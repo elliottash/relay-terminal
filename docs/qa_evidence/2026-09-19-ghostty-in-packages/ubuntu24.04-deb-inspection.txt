@@ -1,0 +1,25 @@
+$ dpkg-deb -f relay_0.1.0-1~ubuntu24.04_arm64.deb Package Version Architecture Depends
+Package: relay
+Version: 0.1.0-1~ubuntu24.04
+Architecture: arm64
+Depends: python3 (>= 3.10), python3-cryptography, bash, libc6 (>= 2.36), libgcc-s1 (>= 3.0), libkf5syntaxhighlighting5 (>= 5.28.0), libqt5core5t64 (>= 5.15.1), libqt5gui5t64 (>= 5.15.1) | libqt5gui5-gles (>= 5.15.1), libqt5network5t64 (>= 5.0.2), libqt5pdf5 (>= 5.15.1), libqt5pdfwidgets5 (>= 5.15.1), libqt5widgets5t64 (>= 5.14.1), libstdc++6 (>= 11)
+Installed-Size: 12145
+
+$ readelf -d usr/bin/relay | grep NEEDED
+ 0x0000000000000001 (NEEDED)             Shared library: [libKF5SyntaxHighlighting.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5PdfWidgets.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5Pdf.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5Network.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5Widgets.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5Gui.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libQt5Core.so.5]
+ 0x0000000000000001 (NEEDED)             Shared library: [libstdc++.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-aarch64.so.1]
+
+$ strings -n 8 usr/bin/relay | grep -x 'Relay(libghostty-vt)'
+Relay(libghostty-vt)
+$ ls -l usr/bin/relay
+8785656 /tmp/claude-1000/-home-elliott-repos-relay-terminal/f8849095-41f1-4c4f-8c92-48466b8b3cc5/scratchpad/ghostty/xu/usr/bin/relay

@@ -1,0 +1,72 @@
+# Deeper checks in one ubuntu:24.04 container on the cached prefix (scratch scripts run.sh / run2.sh;
+# part 1 from the first invocation, whose part 2 failed to configure with RELAY_BUILD_APP=OFF, parts 2-3 from the second)
+### 1. libvterm-only package for comparison
+== RELAY_WITH_GHOSTTY=0: building a libvterm-only package
+CPack: - package: /work/build-novt/relay_0.1.0-1~ubuntu24.04_arm64.deb generated.
+relay_0.1.0-1~ubuntu24.04_arm64.deb
+### NEEDED, libvterm-only relay:
+[libKF5SyntaxHighlighting.so.5] [libQt5PdfWidgets.so.5] [libQt5Pdf.so.5] [libQt5Network.so.5] [libQt5Widgets.so.5] [libQt5Gui.so.5] [libQt5Core.so.5] [libstdc++.so.6] [libm.so.6] [libgcc_s.so.1] [libc.so.6] [ld-linux-aarch64.so.1] 
+### strings check (should print nothing):
+(no libghostty-vt marker, as expected)
+### (deps)
+### 2. engine-only build with the cached ghostty prefix
+ghostty=f9a3f24a56bf05f70894e1a084809d4fffadf420 zig=0.16.0 cpu=baseline
+-- Relay engine: libghostty-vt core enabled (/cache/ghostty-vt/ubuntu24.04-aarch64/lib/libghostty-vt.a)
+-- Configuring done (0.3s)
+[46/47] Building CXX object engine/CMakeFiles/relay-engine-tests.dir/tests/ViewTest.cpp.o
+[47/47] Linking CXX executable engine/relay-engine-tests
+### relay-engine-tests, CoreTest (both cores):
+PASS   : CoreTest::plainTextAndCursor(ghostty)
+PASS   : CoreTest::sgrAttributesAndColours(ghostty)
+PASS   : CoreTest::wideAndCombiningCharacters(ghostty)
+PASS   : CoreTest::emojiClusters(ghostty)
+PASS   : CoreTest::titleBellNotification(ghostty)
+PASS   : CoreTest::osc7WorkingDirectory(ghostty)
+PASS   : CoreTest::osc8Hyperlinks(ghostty)
+PASS   : CoreTest::hyperlinkRunsInAbsoluteRows(ghostty)
+PASS   : CoreTest::aWrappedHyperlinkRunEndsOnItsLastRow(ghostty)
+PASS   : CoreTest::theRowRoleOscMarksItsLine(ghostty)
+PASS   : CoreTest::osc133PromptMarks(ghostty)
+PASS   : CoreTest::promptJump(ghostty)
+PASS   : CoreTest::altScreen(ghostty)
+PASS   : CoreTest::scrollbackAndViewport(ghostty)
+PASS   : CoreTest::styledHistoryLines(ghostty)
+PASS   : CoreTest::historyLinesClampAndTouchNothing(ghostty)
+PASS   : CoreTest::reflowOnResize(ghostty)
+PASS   : CoreTest::rowsOnlyResizeKeepsCursorBelowAFullRow(ghostty)
+PASS   : CoreTest::selectionText(ghostty)
+PASS   : CoreTest::searchScrollback(ghostty)
+PASS   : CoreTest::deviceAttributesReply(ghostty)
+PASS   : CoreTest::keyEncoding(ghostty)
+PASS   : CoreTest::pasteAndFocus(ghostty)
+PASS   : CoreTest::mouseReporting(ghostty)
+PASS   : CoreTest::osc52ClipboardIsOptIn(ghostty)
+PASS   : CoreTest::cursorShape(ghostty)
+PASS   : CoreTest::dirtyTracking(ghostty)
+Totals: 56 passed, 0 failed, 0 skipped, 0 blacklisted, 3ms
+### relay-engine-tests, all (summary lines):
+Totals: 56 passed, 0 failed, 0 skipped, 0 blacklisted, 3ms
+Totals: 17 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
+Totals: 18 passed, 0 failed, 0 skipped, 0 blacklisted, 1ms
+Totals: 14 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
+Totals: 10 passed, 0 failed, 0 skipped, 0 blacklisted, 2044ms
+Totals: 16 passed, 0 failed, 0 skipped, 0 blacklisted, 2251ms
+Totals: 74 passed, 0 failed, 2 skipped, 0 blacklisted, 16504ms
+### 3. bench: big200.txt (209 715 200 bytes of base64, 99 chars per line)
+big200.txt bytes 209800000
+--- relay-engine-bench --core ghostty big200.txt (run 1)
+core=ghostty bytes=209800000 ms=264 MiBps=756.5 maxrss_kb=225140 after_load_kb=213716 history=11307 frames=0 last_row=""
+--- relay-engine-bench --core ghostty big200.txt (run 2)
+core=ghostty bytes=209800000 ms=263 MiBps=760.6 maxrss_kb=224948 after_load_kb=213716 history=11307 frames=0 last_row=""
+--- relay-engine-bench --core libvterm big200.txt (run 1)
+core=libvterm bytes=209800000 ms=4357 MiBps=45.9 maxrss_kb=234840 after_load_kb=213716 history=10000 frames=0 last_row=""
+--- relay-engine-bench --core libvterm big200.txt (run 2)
+core=libvterm bytes=209800000 ms=4356 MiBps=45.9 maxrss_kb=234844 after_load_kb=213716 history=10000 frames=0 last_row=""
+### lscpu
+Architecture:                            aarch64
+CPU(s):                                  20
+Model name:                              Cortex-X925
+CPU(s) scaling MHz:                      100%
+Model name:                              Cortex-A725
+CPU(s) scaling MHz:                      100%
+deep exit=0

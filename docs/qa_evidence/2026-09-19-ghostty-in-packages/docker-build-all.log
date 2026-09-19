@@ -1,0 +1,10 @@
+=== build debian:trixie
+=== smoke debian:trixie (relay_0.1.0-1~debian13_arm64.deb)
+    PASS
+=== build ubuntu:24.04
+=== smoke ubuntu:24.04 (relay_0.1.0-1~ubuntu24.04_arm64.deb)
+    PASS
+
+debian:trixie    PASS
+ubuntu:24.04     PASS
+docker-build-all exit=0

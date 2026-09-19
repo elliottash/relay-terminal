@@ -1,0 +1,32 @@
+# smoke-debian-trixie.log: the smoke test's own sections (apt output left out)
+== package metadata
+Package: relay
+Version: 0.1.0-1~debian13
+Depends: python3 (>= 3.10), python3-cryptography, bash, libc6 (>= 2.36), libgcc-s1 (>= 3.0), libkf6syntaxhighlighting6 (>= 6.0.0), libqt6core6t64 (>= 6.8.2), libqt6gui6 (>= 6.8.2), libqt6network6 (>= 
+== installed files
+ok /usr/bin/relay
+ok /usr/share/relay/backend/worker.py
+ok /usr/share/relay/shell/integration.bash
+ok /usr/share/relay/shell/event.py
+ok /usr/share/relay/scripts/relay-open
+ok /usr/share/relay/theme/terminal.conf
+ok /usr/share/applications/org.relayterminal.Relay.desktop
+ok /usr/share/metainfo/org.relayterminal.Relay.metainfo.xml
+ok /usr/share/icons/hicolor/scalable/apps/org.relayterminal.Relay.svg
+ok /usr/share/icons/hicolor/256x256/apps/org.relayterminal.Relay.png
+== relay --version / --help
+== emulator core: the package ships libghostty-vt
+ok /usr/bin/relay carries the libghostty-vt core (default core: ghostty)
+== backend worker protocol
+== GUI start under Xvfb (offscreen and xcb)
+[offscreen] exit status 124 (124 = still running at timeout)
+--- processes
+   6700    6697 /usr/bin/python3 -S -u /usr/share/relay/backend/worker.py
+   6701    6697 /bin/bash --noprofile --rcfile /usr/share/relay/shell/integration.bash -i
+[xcb] exit status 124 (124 = still running at timeout)
+--- processes
+   6867    6861 /usr/bin/python3 -S -u /usr/share/relay/backend/worker.py
+   6868    6861 /bin/bash --noprofile --rcfile /usr/share/relay/shell/integration.bash -i
+--- windows
+     0x200007 "Relay — /tmp": ("relay" "relay")  1152x720+0+0  +0+0
+smoke test passed

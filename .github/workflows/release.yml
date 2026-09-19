@@ -66,6 +66,15 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
+      - name: Cache the pinned Zig and the libghostty-vt build
+        # build-deb.sh builds the libghostty-vt core into every .deb (docs/ENGINE.md). The key
+        # changes with the Zig release (engine/scripts/zig.sha256) and the ghostty commit
+        # (engine/scripts/build-libghostty-vt.sh); on a miss the job downloads Zig and builds
+        # the archive, on a hit it reuses out/cache as docker-build-all.sh mounts it.
+        uses: actions/cache@v4
+        with:
+          path: out/cache
+          key: ghostty-vt-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('engine/scripts/zig.sha256', 'engine/scripts/build-libghostty-vt.sh') }}
       - name: Build, test, install and smoke-test in containers
         run: packaging/deb/docker-build-all.sh "$PWD/out" "${{ needs.source.outputs.deb_suffix }}" "${{ matrix.image }}"
       - name: Rename for release assets

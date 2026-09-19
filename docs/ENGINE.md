@@ -22,8 +22,9 @@ Performance: [ENGINE-PERF.md](ENGINE-PERF.md). Evidence:
 `RELAY_BUILD_ENGINE_SPIKE` still works as an alias) adds the manual harness and the benchmark.
 
 ```sh
-# Optional, recommended core: libghostty-vt (needs git, network, Zig 0.16.x)
-engine/scripts/build-libghostty-vt.sh ~/opt/ghostty-vt [path/to/zig]
+# Optional, recommended core: libghostty-vt (needs git, network, Zig 0.16.x; the .debs ship it)
+engine/scripts/install-zig.sh ~/opt/zig               # the pinned release, checksum-verified
+engine/scripts/build-libghostty-vt.sh ~/opt/ghostty-vt ~/opt/zig/zig
 
 cmake -S . -B build-engine -G Ninja -DRELAY_QT_MAJOR=5 -DRELAY_BUILD_APP=OFF -DBUILD_TESTING=ON \
   -DRELAY_BUILD_ENGINE=ON \
@@ -122,8 +123,17 @@ Risks and mitigations:
   bumping means re-running `relay-engine-tests` and the GUI scripts. Two API details already bit
   during integration (`DATA_CURSOR_STYLE` is the SGR style, `DATA_MOUSE_TRACKING` is a bool); the
   tests caught both.
-- **Zig in the toolchain.** CI and packaging need Zig 0.16 or a cached prebuilt archive per target.
-  If unavailable, the build falls back to the libvterm core automatically.
+- **Zig in the toolchain.** The packages ship the ghostty core (2026-09-19):
+  `packaging/deb/build-deb.sh` fetches the Zig release pinned in `engine/scripts/zig.sha256`
+  (`engine/scripts/install-zig.sh`, checksum-verified), builds the pinned commit with
+  `-Dcpu=baseline` and links it statically, so every `.deb` (Ubuntu 24.04, Debian 13,
+  Ubuntu 26.04, amd64 and arm64) defaults to ghostty with no new runtime dependency;
+  `release.yml` and `ci.yml` cache the tarball and the archive by those two pins. A failed
+  download or Zig build fails the package build; nothing falls back to libvterm by itself
+  (`RELAY_WITH_GHOSTTY=0` is the deliberate libvterm-only package). A plain source build
+  without `RELAY_ENGINE_WITH_GHOSTTY`, and the AUR package, still get the libvterm core:
+  the AUR forbids network access in `build()`, and ghostty's `zig build` fetches its Zig
+  dependencies, so the PKGBUILDs would have to declare each one as a source first.
 - **Symbol leakage of the static archive** (compiler_rt `memcpy`, `__chk_fail`, ...): localized on
   Linux; macOS and Windows need the equivalent step (TODO in `engine/CMakeLists.txt`).
 - **Scrollback limit is a byte budget** (about 10 bytes per cell); the line count is approximate.
@@ -404,8 +414,9 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
    `onPromptMark` (instead of Relay's `/proc` polling and Bash bridge) is still open.
 3. IME with fcitx5 and ibus on X11 and Wayland; accessibility with Orca.
 4. Theme: map `data/theme` to `ColorScheme`; font from Relay settings.
-5. Packaging: CI step for Zig 0.16 + `build-libghostty-vt.sh` (cache by commit), or ship with the
-   libvterm core where Zig is unavailable.
+5. ~~Packaging: CI step for Zig 0.16 + `build-libghostty-vt.sh` (cache by commit)~~ — done
+   (2026-09-19): the `.deb`s ship the ghostty core; see "Zig in the toolchain" above and
+   [RELEASING.md](RELEASING.md). Open: the AUR package (Zig dependencies as declared sources).
 
 ### macOS
 

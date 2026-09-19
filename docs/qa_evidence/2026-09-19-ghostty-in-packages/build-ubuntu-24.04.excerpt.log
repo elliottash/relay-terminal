@@ -1,0 +1,12 @@
+# build-ubuntu-24-04.log, milestone lines (the archive came from the cache: the first, interrupted run had built it)
+2307:== libghostty-vt core (Zig from engine/scripts/zig.sha256, cache: /cache)
+2308:install-zig.sh: Zig 0.16.0 in /tmp/tmp.HB9GrTFAVg/zig
+2309:libghostty-vt f9a3f24a56bf05f70894e1a084809d4fffadf420 already in /cache/ghostty-vt/ubuntu24.04-aarch64 (ghostty=f9a3f24a56bf05f70894e1a084809d4fffadf420 zig=0.16.0 cpu=baseline)
+2326:-- Relay engine: libghostty-vt core enabled (/cache/ghostty-vt/ubuntu24.04-aarch64/lib/libghostty-vt.a)
+2689:[356/501] Localizing non-API symbols of libghostty-vt
+2765:[432/501] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/GhosttyCore.cpp.o
+2836:== relay carries the libghostty-vt core (default core: ghostty)
+2962:62/63 Test #62: backend-and-bash .................   Passed  235.03 sec
+2964:63/63 Test #63: relay-engine-tests ...............   Passed   20.61 sec
+2966:100% tests passed, 0 tests failed out of 63
+2977:CPack: - package: /tmp/tmp.HB9GrTFAVg/relay_0.1.0-1~ubuntu24.04_arm64.deb generated.
