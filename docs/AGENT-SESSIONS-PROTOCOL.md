@@ -2996,10 +2996,101 @@ Claude IDE bridge phase writes its lock file under `guest.claude_ide_lock_dir()`
 a `claude` started in the pane finds Relay's bridge. Codex has no IDE-bridge equivalent; its
 environment stays untouched.
 
-### 26.3 What the later sections will hold
+### 26.3 The contracts the guest phases share
 
-The guest phases of issue GT7X extend this section: the Claude IDE bridge (WebSocket MCP `ide`
-server, the 12 tools, `openDiff` approvals); Claude hooks and the statusline shim (pane states,
-context/model chips); the Codex attach (daemon co-attach, or hooks and the rollout tail); the
-composer translator and guest slash catalog; and the sessions-index sources `claude` and
-`codex`. Each lands with its phase and is documented here as it does.
+The phases below are built in parallel (bridge, hooks, codex, sessions, composer), so the seams
+between them are fixed here first and each phase codes against this section, not against another
+phase's implementation.
+
+**The guest event channel.** Everything a guest or its shim learns reaches the pane through one
+file, never a listener. The GUI writes `shell/guest-event.py` into the pane's data dir beside
+`shell/event.py` and exports `RELAY_GUEST_EVENT` beside `RELAY_RUNTIME_DIR` (section 26.2's
+injection point). The helper is called as `guest-event.py <event>` with the event's JSON on stdin
+and atomically replaces `guest.json` in the pane's runtime dir:
+
+```json
+{"token": "<pane token>", "sequence": "<fresh uuid4>", "event": "<name>", "guest": "claude|codex", "data": {}}
+```
+
+The pane stats `guest.json` exactly as `pollShell()` stats `state.json` (new inode -> read, token
+check, sequence check), on the same tick. `sequence` must change on every write. Events, v1:
+
+| event | data | from | effect |
+|---|---|---|---|
+| `hook` | `{name, payload}` - the raw hook JSON under `payload` | claude/codex hooks | pane state, notifications, permission prompts |
+| `statusline` | `{model, context_pct, ...}` - the fields the shim could parse | statusline shim | `guest_model`, `guest_context_pct` chips |
+| `state` | `{busy, turn?}` | rollout tail, bridge | `guest_busy`, composer routing |
+| `bridge` | `{tool, args}` | the IDE bridge sidecar | diff view, file opens, guest notifications |
+| `slash` | `{commands: ["/model", ...]}` | slash catalog scan | `/` popup guest entries |
+
+The hard invariant: **a shim with no `RELAY_GUEST_EVENT` in its environment is a no-op** - exit 0,
+print nothing (statusline shims print their passthrough line only), write nowhere. Hooks installed
+in a user's global settings must therefore be harmless in every other terminal.
+
+**`program_state` additions.** Three optional fields join `guest` (21.4, mirrored in 21.2):
+`guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
+`guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
+
+**Settings the shims live in.** Guest integration is per project and off by default (Options >
+Guests). Turning it on writes hooks into that project's `.claude/settings.json` /
+`~/.codex/config.toml` additively - existing entries are preserved verbatim, Relay's carry a
+`relay-guest` marker - and turning it off removes exactly the marked entries. The user's global
+`~/.claude/settings.json` is touched only by an explicit second opt-in.
+
+**File ownership** (phases may read anything, but only their own files change):
+`guest.py` is shared and changes only through the lead; hooks own `shell/` helper generation,
+`backend/relay_core/guest_hook.py` and the Pane.h/PaneState plumbing for `guest.json`; the bridge
+owns `backend/relay_core/guest_bridge.py` and the diff-view glue; codex owns
+`backend/relay_core/guest_codex.py`; sessions own `backend/relay_core/guest_sessions.py` and the
+conv_index source listing; the composer owns the router/`program_input` routing and the slash
+registry.
+
+### 26.4 Claude hooks and the statusline shim
+
+Hooks call the shim as `"$RELAY_PYTHON" -m relay_core.guest_hook <event>` (JSON on stdin), which
+forwards a `hook` event through the channel. The statusline command is the same shim in
+`statusline` mode: it emits the `statusline` channel event and prints one passthrough line, so
+claude still renders its own statusline unchanged. Permission decisions hook-side are Relay
+questions on the pane, answered through the shim's exit code / decision JSON (claude's contract),
+never auto-approved.
+
+### 26.5 The Claude IDE bridge
+
+One bridge per GUI run, started lazily by the first claude pane, loopback only, ephemeral port,
+lock file `guest.claude_ide_lock_dir()/<port>.lock` (pid, ideName "relay", workspaceFolders),
+removed at exit; the pane injects `guest.bridge_env("claude", port)` (section 26.2). It speaks the
+editor side of the IDE integration - WebSocket MCP (JSON-RPC 2.0: `initialize`, `tools/list`,
+`tools/call`), the twelve tools of the published protocol; `getDiagnostics` answers empty
+(Relay has no LSP source - documented, not faked). `openDiff` opens Relay's diff view and the
+tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJECTED`).
+A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
+server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
+
+### 26.6 Codex attach
+
+Codex has no IDE bridge (section 26.2): its attach is hooks (`notify`, `tui.notification_condition`
+in `~/.codex/config.toml`, the same additive marked-entry rules) plus a rollout tail -
+`guest.codex_sessions_dir()` watched for the active pane's newest rollout - emitting `state` and
+`statusline`-equivalent events (model, token counts when the rollout carries them). The
+app-server daemon remains Tier A, deferred.
+
+### 26.7 Sessions sources `claude` and `codex`
+
+The sessions pane lists guest sessions beside Relay's own: source `claude` reads
+`guest.claude_projects_dir()` (`<cwd-slug>/<session-id>.jsonl`), source `codex` reads the
+rollouts and `guest.codex_state_db()` (highest `state_*.sqlite`). A record is
+`{source, id, title, mtime, workspace, message_count, resume_command}`; `resume_command` respawns
+the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`; `codex resume`, fork per
+its CLI). Search spans all sources; the active pane's live transcript is tailed so a running
+session appears without a rescan.
+
+### 26.8 Composer routing and the slash registry
+
+While `program_state.guest` is non-empty the Relay prompt is that guest's composer. Text routes
+through the pane's existing input queue: typed when the guest waits at its input (paste-safe,
+newline only on submit), queued while `guest_busy` and submitted when it waits again. Relay `/`
+commands stay Relay's; the `/` popup additionally lists the guest's slash commands (badge, from
+the `slash` event, static fallback catalog otherwise) and choosing one types it into the guest.
+`@file` becomes the guest's own syntax. Relay never routes `!` shell lines silently: the user's
+spelling decides. Where Relay has the surface natively (model picker, compact, resume) the Relay
+surface is what the user sees; the guest's equivalent is a passthrough command, not a second UI.
