@@ -315,6 +315,37 @@ class ContextTests(unittest.TestCase):
         self.assertIn("Never type into a password or passphrase prompt", agent_module.SYSTEM)
 
 
+class GuestStateTests(ControlTestCase):
+    """The guest's three optional fields ride on `program_state` beside `guest` (protocol 26.3):
+    what it runs on, how much of its context window it has used, and whether a guest turn is
+    going. Mirrored exactly as `guest` is, in validate_grant, _apply and summary (21.2)."""
+
+    def test_the_fields_are_carried(self):
+        self.control.begin_turn(GRANT)
+        summary = self.control.update({"guest": "claude", "guest_model": "claude-opus-4-6",
+                                       "guest_context_pct": 37, "guest_busy": True})
+        self.assertEqual(("claude", "claude-opus-4-6", 37, True),
+                         (summary["guest"], summary["guest_model"], summary["guest_context_pct"],
+                          summary["guest_busy"]))
+
+    def test_an_unknown_context_share_is_absent_not_zero(self):
+        self.control.begin_turn(GRANT)
+        summary = self.control.update({"guest": "codex"})
+        self.assertNotIn("guest_context_pct", summary)
+        self.assertIsNone(self.control.guest_context_pct)
+
+    def test_a_state_update_that_does_not_mention_the_share_keeps_it(self):
+        self.control.begin_turn(GRANT)
+        self.control.update({"guest": "claude", "guest_context_pct": 37})
+        self.assertEqual(37, self.control.update({"guest": "claude", "guest_busy": True})["guest_context_pct"])
+
+    def test_bad_values_are_refused(self):
+        for bad in ({"guest_context_pct": 101}, {"guest_context_pct": -1}, {"guest_context_pct": "50"},
+                    {"guest_context_pct": 1.5}, {"guest_busy": "yes"}, {"guest_model": "x" * 65}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_grant({"granted": True, **bad})
+
+
 class ExecutorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

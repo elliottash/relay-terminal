@@ -3054,6 +3054,46 @@ claude still renders its own statusline unchanged. Permission decisions hook-sid
 questions on the pane, answered through the shim's exit code / decision JSON (claude's contract),
 never auto-approved.
 
+**How a hook reaches the shim.** `-m relay_core.guest_hook` needs the backend on `sys.path`, so
+the pane appends its own backend directory to `PYTHONPATH` in `startTerminal`, beside
+`RELAY_GUEST_EVENT` (26.2's injection point): appended, never prepended, so the user's own
+`PYTHONPATH` keeps its order and their cwd still wins. `RELAY_PYTHON` is the interpreter the
+pane's shell already exports.
+
+**The channel helper's arguments.** `guest-event.py <event> [guest] [sequence]`: the shim names
+its own guest and, for a question it must recognize the answer to, the uuid4 sequence it wants
+the envelope to carry. Without them the helper picks its own fresh uuid4.
+
+**The permission question, in full.** The shim writes the `hook` event for `PreToolUse` with its
+own uuid4 sequence and then waits (up to `RELAY_GUEST_PERMISSION_TIMEOUT`, default 120 s) for
+`guest-answer.json` in the pane's runtime dir:
+
+```json
+{"token": "<pane token>", "sequence": "<the question's sequence>", "decision": "allow|deny"}
+```
+
+The pane writes it atomically when the user clicks Allow or Deny on the question bar, which is
+the same envelope discipline as `guest.json`: a token check and a sequence check, so an answer
+can only ever be for the question it names. The shim then prints claude's own
+`hookSpecificOutput.permissionDecision` JSON and exits 0. **An unanswered question prints nothing
+and exits 0** — claude then asks exactly as it would without Relay — so a permission is never
+granted on the user's behalf, and a pane that has gone away costs only the wait.
+
+**The statusline passthrough.** The shim always prints exactly one line, in every terminal with
+or without Relay: `RELAY_GUEST_STATUSLINE` (fields `{model}`, `{dir}`, `{cwd}`, `{session}`),
+default `"{model} · {dir}"`. The `statusline` event's data carries only the fields the shim could
+parse — `model`, and `context_pct` when the input says it (`context_pct`,
+`context_window.used_percentage` or `context.used_percentage`; `exceeds_200k_tokens` reads as
+100) — so `guest_context_pct` is absent rather than zero when nothing is known.
+
+**What the installer writes.** `relay_core.guest_install` adds one matcher group per event for
+`PreToolUse`, `UserPromptSubmit`, `Stop` and `Notification`, plus `statusLine`, each command
+ending in the `--relay-guest` token that marks it as Relay's. Existing entries are preserved
+verbatim; `statusLine` is a single slot, so a user's own line is kept rather than replaced (the
+chip then simply shows nothing). `remove` deletes exactly the marked entries, byte-for-byte
+leaving everything else as it was; the installer refuses to touch a file that is not a JSON
+object.
+
 ### 26.5 The Claude IDE bridge
 
 One bridge per GUI run, started lazily by the first claude pane, loopback only, ephemeral port,

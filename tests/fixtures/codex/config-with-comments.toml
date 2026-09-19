@@ -1,0 +1,38 @@
+# A codex config the way a user's can look: comments everywhere, a multi-line array, an inline
+# table, a quoted table path, a nested table under a quoted one, and a table that is not the
+# last thing in the file. Everything above the first header is a root key; everything below a
+# header belongs to that table, which is why Relay's own `notify` has to go at the top.
+model = "gpt-5.6-sol"                # the default model
+model_reasoning_effort = "low"
+
+# A multi-line array: one entry, several lines, with `#` inside comments and inside a string.
+shell_environment_policy.include_only = [
+  "PATH",      # where the tools live
+  "HOME",
+  "LANG",      # not "# commented out"
+]
+
+# Trusted workspaces, added by hand over time.
+[projects."/home/elliott/repos/relay-terminal"]
+trust_level = "trusted"
+
+[projects."/home/elliott/wondernauts"]
+trust_level = "trusted"
+
+[tui]
+notifications = false
+notification_condition = "unfocused"   # the default: notify only when unfocused
+
+[tui.model_availability_nux]
+gpt-6-astra = 4
+
+[marketplaces.codex-warp]
+source_type = "git"
+source = "https://github.com/warpdotdev/codex-warp.git"   # a git marketplace
+
+[plugins."warp@codex-warp"]
+enabled = true
+settings = { mode = "auto", retries = 3 }
+
+[history]
+persistence = "save-all"
