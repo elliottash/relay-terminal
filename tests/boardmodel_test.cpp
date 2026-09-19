@@ -619,10 +619,12 @@ void BoardModelTests::theViewRendersOneListFromAnEvent()
     // One list, not seven columns.
     QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardList")).size(), 1);
     QVERIFY(!view.findChild<QListWidget *>(QStringLiteral("boardColumn")));
-    // Done folds itself: its header is there with the count, its card is not.
+    // A new Switchboard is a compact overview: every header is present and every card starts
+    // folded away.
     QCOMPARE(sketch(view.rows()),
-             (QStringList{"# inbox 1", "K7Q2", "# discussing 0", "# ready 1", "M3XJ",
-                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# verified 0",
+             (QStringList{"# inbox 1 folded", "# discussing 0 folded", "# ready 1 folded",
+                          "# in-progress 0 folded", "# waiting 0 folded", "# needs-qa 0 folded",
+                          "# verified 0 folded",
                           "# done 1 folded"}));
     QCOMPARE(listOf(view)->count(), view.rows().size());
 
@@ -631,8 +633,7 @@ void BoardModelTests::theViewRendersOneListFromAnEvent()
                                  {"removed", QJsonArray{QStringLiteral("M3XJ")}}});
     QCOMPARE(view.model().total(), 2);
     QCOMPARE(view.model().card(QStringLiteral("K7Q2"))->status, QStringLiteral("ready"));
-    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
-             (QStringList{"K7Q2"}));
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
 }
 
 void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
@@ -656,6 +657,9 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
 void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    // This test exercises folding from an expanded restored layout; brand-new panes start with
+    // every section folded.
+    view.setCollapsedSections(QJsonArray{});
     view.handleEvent(opened({row("K7Q2", "ready", "features"), row("M3XJ", "inbox", "features")}));
     view.selectCard(QStringLiteral("K7Q2"));
     QListWidget *list = listOf(view);
@@ -676,7 +680,7 @@ void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
     QStringList folded;
     for (const QJsonValue &value : view.collapsedSections())
         folded << value.toString();
-    QCOMPARE(folded, (QStringList{"deferred", "done", "inbox"}));
+    QCOMPARE(folded, (QStringList{"inbox"}));
     view.setCollapsedSections(QJsonArray{QStringLiteral("ready")});
     QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
     QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("inbox"))).collapsed);
@@ -690,6 +694,7 @@ void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
 void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
     view.handleEvent(opened({row("K7Q2", "ready", "features"), row("M3XJ", "inbox", "features"),
                              row("N4YK", "inbox", "features", "j"),
                              row("DN01", "done", "features")}));
@@ -797,6 +802,7 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "in-progress", "features")}));
@@ -832,6 +838,7 @@ void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
 void BoardModelTests::aChangeRefillsTheListInPlace()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
     QPointer<QListWidget> list = listOf(view);
     QVERIFY(list);
@@ -1213,6 +1220,7 @@ void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
 void BoardModelTests::quickAddNamesTheSectionItAddsTo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "ready", "features")}));
@@ -1609,6 +1617,12 @@ void BoardModelTests::theVerifyLineNamesTheRecommendedVerifierAndWhatItSkipped()
     keyed.remove(QStringLiteral("alternates"));
     keyed.remove(QStringLiteral("skipped"));
     QCOMPARE(relay::board::verifyLine(keyed), QStringLiteral("Verify with GLM-5.3 (key)"));
+    // The worker's own word wins over the runner's prefix: a local model has no key.
+    const QJsonObject local{{"recommended", QJsonObject{{"family", "local"}, {"label", "Bonsai 2 27B"},
+                                                        {"runner", "preset:local:bonsai"},
+                                                        {"available", "on this machine"}}}};
+    QCOMPARE(relay::board::verifyLine(local), QStringLiteral("Verify with Bonsai 2 27B (on this machine)"));
+    QCOMPARE(relay::board::verifyRunner(local), QStringLiteral("preset:local:bonsai"));
 
     // Nothing available: the line says why, family by family, so the reader knows what to install.
     QJsonObject none{{"implemented_by", "anthropic/claude-opus-5"},
@@ -1828,6 +1842,7 @@ void BoardModelTests::aSignatureReadsAsItsModelAndItsHarness()
 void BoardModelTests::nothingIsMovedIntoVerifiedAndMovingOutIsOrdinary()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QJsonObject verified = row("K7Q2", "done", "features");

@@ -379,7 +379,10 @@ QString verifyLine(const QJsonObject &qa)
                    : QStringLiteral("No verifier available: ") + reasons.join(separator);
     }
     QStringList parts;
-    const QString word = runnerWord(verifyRunner(qa));
+    // The worker says how the verifier is available here ("installed", "key", "on this
+    // machine"); the runner's prefix is only the fallback, and it would call a local model "key".
+    const QString said = recommended.value(QStringLiteral("available")).toString().trimmed();
+    const QString word = said.isEmpty() ? runnerWord(verifyRunner(qa)) : said;
     parts << (word.isEmpty() ? QStringLiteral("Verify with %1").arg(entryLabel(recommended))
                              : QStringLiteral("Verify with %1 (%2)").arg(entryLabel(recommended), word));
     QStringList alternates;
