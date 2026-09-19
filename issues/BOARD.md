@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-225 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+227 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (134)
+## Features (136)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -29,11 +29,13 @@
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#R5TC` | [One pane's agent sends a message to another, inside one Relay](features/2026-09-19-relay-terminals-talk-to-each-other-and-to-claude.md) | ready | agent | 0/15 |  |
 | `#V2HM` | [Let the agent fill in a password without ever seeing it](features/2026-09-19-let-the-agent-fill-in-a-password-without-seeing-i.md) | ready | agent | 0/9 |  |
+| `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | ready | agent | 0/10 |  |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 | [1](threads/97EG.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 11/11 |  |
 | `#6DQ8` | [Calibrate isolation memory limits to system RAM and expose them in Options](features/2026-09-19-calibrate-isolation-memory-limits-to-system-ram.md) | in-progress |  |  | [5](threads/6DQ8.md) |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
 | `#3AZG` | [Cut a new GitHub release with the /connect (join) work so the laptop can install it](features/2026-09-19-cut-a-new-github-release-with-the-connect-join-w.md) | in-progress |  |  | [1](threads/3AZG.md) |
+| `#T71W` | [Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier](features/2026-09-19-cross-provider-qa-a-provider-model-signature-on.md) | in-progress | agent | 0/8 | [2](threads/T71W.md) |
 | `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
 | `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
