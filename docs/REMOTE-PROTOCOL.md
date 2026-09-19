@@ -1352,7 +1352,8 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
  "allowance":{"label":"Free · 73% left","percent_left":73,"warn":false,"detail":"182,400 of 250,000 tokens today · resets at 02:00"},
- "sessions":{"rows":[{"id":"s1","title":"…","when":"14:02","current":true,"running":false}],"can_new":true}}
+ "sessions":{"rows":[{"id":"s1","title":"…","when":"14:02","current":true,"running":false}],
+             "can_new":true,"can_open":true}}
 ```
 
 - `seq` rises; a client ignores anything older than what it has drawn. `running` is null when
@@ -1385,8 +1386,11 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
   `GUEST_SERVER_TYPES`, which section 10.1 makes an allow-list, so the owner's queue text, models
   and other conversations cannot reach a share.
 
-**Client → desktop.** All of these are `agent` except `pane_state_get` (`view`), and all are in
-`GUEST_NEVER`:
+**Client → desktop.** These are `agent` except `pane_state_get`, which is `view`, and
+`conversation_new` and `conversation_open`, which are `full` — the owner's three levels put the
+conversations before this one above typing in this one. All are in `GUEST_NEVER` except `compose`,
+which a guest editor may send: a guest's prompt is not passed on but held for the owner to admit
+(section 10.4), and `agent: false` is refused whatever their role.
 
 | Type | Body | What it does |
 |---|---|---|
@@ -1398,7 +1402,7 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
-| `compose` | `{pane,text,when,origin_name?}` | `when` is `now`, `queue` or `steer`; `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
+| `compose` | `{pane,text,when,msg_id?,agent?,origin_name?}` | `when` is `now` or `queue`; the text is 1–32,000 characters. `msg_id` is the client's own dedup id (`app/pane.js` mints 72 random bits), so a retried send is not two prompts. `agent: false` asks the desktop to route the line the way its own composer does, shell included, and is refused for anything but a `full` device and for every guest — a client only sends it when the state offered it a composer mode other than `agent`. `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
 
 Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and
 have no type here at all (section 6.6, `NEVER_FROM_CLIENT`).
