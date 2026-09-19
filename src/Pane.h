@@ -9874,19 +9874,14 @@ private:
         namespace t = relay::theme;
         const QString mode = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
         if (mode == QStringLiteral("none")) return QString();
-        const QColor ground = t::active().terminalBackground.isValid() ? t::active().terminalBackground : t::Background;
-        const bool light = ground.lightnessF() > 0.5;
-        QColor fill;
-        if (mode == QStringLiteral("chrome")) fill = t::SurfaceRaised;
-        else {
-            // The channel colour blended into the ground: strong enough to read as a band, faint
-            // enough that the text on it keeps its contrast (it is measured: see below).
-            const QColor channel = ink == Ink::User ? t::Shell : t::Agent;
-            const qreal w = light ? 0.16 : 0.22;
-            fill = QColor(int(channel.red() * w + ground.red() * (1 - w)), int(channel.green() * w + ground.green() * (1 - w)),
-                          int(channel.blue() * w + ground.blue() * (1 - w)));
-        }
-        const QColor text = t::Text;
+        // The channel colour itself — the violet the "Relaying…" line is written in, the cyan of
+        // the mode chip — with the chip ink on it (owner, 2026-09-19: "use the 'relaying...'
+        // violet or cyan color as the user-box highlight"; a blend of it into the ground read as
+        // a highlighter on beige). The pair is the one the prefix chips already wear, and the
+        // theme contract measures its contrast.
+        QColor fill, text;
+        if (mode == QStringLiteral("chrome")) { fill = t::SurfaceRaised; text = t::Text; }
+        else { fill = ink == Ink::User ? t::Shell : t::Agent; text = t::chipInk(fill); }
         return QStringLiteral("\x1b[1;48;2;%1;%2;%3;38;2;%4;%5;%6m")
             .arg(fill.red()).arg(fill.green()).arg(fill.blue()).arg(text.red()).arg(text.green()).arg(text.blue());
     }

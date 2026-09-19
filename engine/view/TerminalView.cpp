@@ -640,6 +640,12 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
             std::swap(fg, bg);
             bgDefault = false;
         }
+        // The shell's prompt row (OSC 133;A) sits on the prompt band, under every cell that
+        // brought no background of its own.
+        if (bgDefault && m_scheme.promptBand.isValid() && (line.marks & MarkPromptStart)) {
+            bg = m_scheme.promptBand;
+            bgDefault = false;
+        }
         if (line.selectionStart >= 0 && col >= line.selectionStart && col <= line.selectionEnd) {
             bg = m_scheme.selection;
             bgDefault = false;

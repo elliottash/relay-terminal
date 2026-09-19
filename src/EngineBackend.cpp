@@ -29,6 +29,7 @@ void EngineBackend::applySettings()
     // (owner, 2026-09-19). On by default; Options › Terminal turns it off.
     if (TerminalView *v = view())
         v->setLinksColouredAtRest(QSettings().value(QStringLiteral("terminal/colour_links"), true).toBool());
+    applyThemeColors();   // the prompt band follows the same option
 }
 
 // Font, spacing and cursor defaults come from data/theme/terminal.conf; colour comes from the
@@ -74,6 +75,19 @@ void EngineBackend::applyThemeColors()
     // The one colour that means "you can open this" (src/Theme.h, Link): the hover underline, the
     // fold rows' links, OSC 8 hyperlinks and, at rest, every path and URL the output holds.
     colors.link = theme::Link;
+    // The shell's prompt row wears a cyan band, the shell's channel colour blended into the ground
+    // (the row's ink is the shell's own — a coloured PS1 — so the band stays a tint, unlike the
+    // agent line's, whose ink Relay chooses). Off with Options › Terminal › "Band behind what you
+    // typed" = none. Needs shell integration, which is what marks the row.
+    const QString band = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
+    if (band == QStringLiteral("none")) colors.promptBand = QColor();
+    else {
+        const QColor ground = colors.background;
+        const QColor fill = band == QStringLiteral("chrome") ? theme::SurfaceRaised : theme::Shell;
+        const qreal w = band == QStringLiteral("chrome") ? 1.0 : (ground.lightnessF() > 0.5 ? 0.16 : 0.22);
+        colors.promptBand = QColor(int(fill.red() * w + ground.red() * (1 - w)), int(fill.green() * w + ground.green() * (1 - w)),
+                                   int(fill.blue() * w + ground.blue() * (1 - w)));
+    }
     // The engine numbers the 16 ANSI colours 0-7 then the bright eight, as the theme file does.
     if (spec.ansi.size() == 16)
         for (int i = 0; i < 16; ++i)

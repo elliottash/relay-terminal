@@ -844,4 +844,6 @@ void polishWindow(QWidget *window) {
         widget->style()->unpolish(widget); widget->style()->polish(widget);
     }
 }
+
+QColor chipInk(const QColor &fill) { return inkOn(fill); }
 }

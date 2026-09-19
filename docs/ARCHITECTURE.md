@@ -2187,11 +2187,16 @@ everywhere: hover still underlines, and the walk still selects.
 
 **The line you typed sits on a band** (owner, 2026-09-19, after Claude Code's grey band behind
 each prompt). `Pane::printInline` pads a `User` or `UserAgent` line with spaces to the pane's
-width and writes it on a 24-bit background: the destination colour blended into the terminal
-ground, cyan for the shell and violet for the agent, with the theme's `text` token as the ink, so
-the band says where the line went and the words keep full contrast. Options › Terminal › "Band
-behind what you typed" also offers the theme's raised surface, or none. Like every inline colour
-it is frozen at the value it was written with.
+width and writes it on a 24-bit background: the destination colour itself — the violet the
+"Relaying…" line is written in, the cyan of the mode chip — with `chipInk()` on it, the pair the
+prefix chips already wear (a blend of the colour into the ground read as a highlighter on beige;
+owner, 2026-09-19). A shell command is echoed by the shell, not by Relay, so its row is banded
+from the view side instead: with shell integration on, the row OSC 133;A marks sits on
+`ColorScheme::promptBand`, the shell colour blended into the ground, under every cell that brought
+no background of its own — a tint rather than the full colour, because that row's ink is the
+shell's own PS1. Options › Terminal › "Band behind what you typed" also offers the theme's raised
+surface, or none, for both. Like every inline colour the printed band is frozen at the value it
+was written with.
 
 **A hostname is one mark.** The pane header's ⇄ chip and the file preview's host chip are the same
 chip since 2026-09-19 — the error hue's fill and near-solid line, the text colour for the name —

@@ -749,6 +749,28 @@ private slots:
         QVERIFY(img.pixelColor(2 + 20 * cw + cw / 2, 2 + ch + ch / 2) != QColor(10, 20, 30));
     }
 
+    // The shell's prompt row — the one OSC 133;A marks, where the shell echoes what the user
+    // typed — sits on the scheme's prompt band, under every cell without a background of its own;
+    // a cell that brought one keeps it, and no other row is banded.
+    void thePromptRowSitsOnThePromptBand()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.promptBand = QColor(0x20, 0x40, 0x60);
+        t.view->setColorScheme(scheme);
+        t.backend->writeToDisplay("\x1b]133;A\x1b\\$ ls \x1b[41mred\x1b[0m\x1b]133;B\x1b\\\r\n\x1b]133;C\x1b\\output\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("output")));
+        const QImage img = t.grab();
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QCOMPARE(img.pixelColor(2 + 30 * cw + cw / 2, 2 + ch / 2), scheme.promptBand);        // past the text
+        QVERIFY(img.pixelColor(2 + 5 * cw + cw / 2, 2 + ch / 2).red() > 150);                  // the program's red stays
+        QVERIFY(img.pixelColor(2 + 30 * cw + cw / 2, 2 + ch + ch / 2) != scheme.promptBand);   // the output row is plain
+        scheme.promptBand = QColor();
+        t.view->setColorScheme(scheme);
+        QVERIFY(t.grab().pixelColor(2 + 30 * cw + cw / 2, 2 + ch / 2) != QColor(0x20, 0x40, 0x60));
+    }
+
     // ---- find, with the open folds in the sequence (#TK9C)
 
     void findFindsTextOnlyAnOpenFoldHas()

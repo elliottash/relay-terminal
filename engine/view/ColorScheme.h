@@ -22,6 +22,10 @@ struct ColorScheme {
     // "You can open this": the hover underline, OSC 8 and fold links, and (setLinksColouredAtRest)
     // every path or URL in the output. The host sets it from its theme's `[ui] link`.
     QColor link{0x12, 0xa4, 0x57};
+    // The band under the shell's own prompt row (the row OSC 133;A marks, where the command the
+    // user typed is echoed by the shell): painted behind every cell that has no background of its
+    // own. Invalid (the default) = no band. The host sets it from its shell colour.
+    QColor promptBand;
     // Folds (#TK9C): the tint behind an unfolded block and the rule down its
     // left edge. Invalid (the default) = mixed from background and foreground,
     // so a host that knows nothing about folds still gets a readable block.

@@ -128,6 +128,10 @@ void applyTheme(QApplication &app);
 void applyDarkTheme(QApplication &app);
 // Unpolish/polish and repaint every top-level widget and its children.
 void repolishAll();
+// The ink that stays legible on a chip filled with `fill`: a very dark or very light tint of the
+// fill itself (the @onShell / @onAgent stylesheet tokens are made with it). Painting code that
+// fills a band in a channel colour — the line the user typed — uses the same rule.
+QColor chipInk(const QColor &fill);
 
 // Name-based hooks for widgets that the stylesheet targets by object name.
 void polishWindow(QWidget *window);
