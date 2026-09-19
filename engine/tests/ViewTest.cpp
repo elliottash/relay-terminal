@@ -771,6 +771,41 @@ private slots:
         QVERIFY(t.grab().pixelColor(2 + 30 * cw + cw / 2, 2 + ch / 2) != QColor(0x20, 0x40, 0x60));
     }
 
+    // A row the host marked as typed by the user (OSC 7772) wears its role's band across the whole
+    // grid and its role's ink on every cell without a colour of its own — and because the row holds
+    // a role rather than a colour, a scheme switch recolours it where a written SGR never could
+    // (owner, 2026-09-19: "the background highlights shift with theme changes").
+    void aUserRowWearsItsRoleFromTheSchemeInForce()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.userAgentBand = QColor(0xab, 0x97, 0xf7); scheme.userAgentInk = QColor(0x10, 0x08, 0x30);
+        scheme.userShellBand = QColor(0x45, 0xc8, 0xee); scheme.userShellInk = QColor(0x04, 0x20, 0x2a);
+        t.view->setColorScheme(scheme);
+        t.backend->writeToDisplay("\x1b]7772;agent\x1b\\\x1b[1m* fix the build\x1b[0m\r\nplain reply\r\n"
+                                  "\x1b]7772;shell\x1b\\\x1b[1m! make\x1b[0m\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("! make")));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        const auto at = [&](const QImage &img, int row, int col) { return img.pixelColor(2 + col * cw + cw / 2, 2 + row * ch + ch / 2); };
+        QImage img = t.grab();
+        QCOMPARE(at(img, 0, 40), scheme.userAgentBand);                       // the band runs past the text
+        QVERIFY(rowHasColor(img, 0, ch, scheme.userAgentInk));                // the words are the role's ink
+        QVERIFY(at(img, 1, 40) != scheme.userAgentBand);                      // the reply under it is plain
+        QVERIFY(!rowHasColor(img, 1, ch, scheme.userAgentInk));
+        QCOMPARE(at(img, 2, 40), scheme.userShellBand);
+        QVERIFY(rowHasColor(img, 2, ch, scheme.userShellInk));
+        // The theme changes: same rows, new colours, nothing rewritten.
+        scheme.userAgentBand = QColor(0x75, 0x00, 0xc3); scheme.userAgentInk = QColor(0xf6, 0xee, 0xff);
+        scheme.userShellBand = QColor(); scheme.userShellInk = QColor(0x00, 0x49, 0xa9);   // "none": ink only
+        t.view->setColorScheme(scheme);
+        img = t.grab();
+        QCOMPARE(at(img, 0, 40), scheme.userAgentBand);
+        QVERIFY(rowHasColor(img, 0, ch, scheme.userAgentInk));
+        QVERIFY(at(img, 2, 40) != QColor(0x45, 0xc8, 0xee));
+        QVERIFY(rowHasColor(img, 2, ch, scheme.userShellInk));
+    }
+
     // ---- find, with the open folds in the sequence (#TK9C)
 
     void findFindsTextOnlyAnOpenFoldHas()

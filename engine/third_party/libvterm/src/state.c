@@ -2318,7 +2318,7 @@ const VTermLineInfo *vterm_state_get_lineinfo(const VTermState *state, int row)
 void vterm_state_relay_mark_cursor_line(VTermState *state, unsigned int marks)
 {
   if(state->pos.row >= 0 && state->pos.row < state->rows)
-    state->lineinfo[state->pos.row].relay_marks |= (marks & 0xF);
+    state->lineinfo[state->pos.row].relay_marks |= (marks & 0xFF);
 }
 
 /* RELAY PATCH */

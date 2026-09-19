@@ -302,7 +302,7 @@ typedef struct {
   unsigned int    doublewidth:1;     /* DECDWL or DECDHL line */
   unsigned int    doubleheight:2;    /* DECDHL line (1=top 2=bottom) */
   unsigned int    continuation:1;    /* Line is a flow continuation of the previous */
-  unsigned int    relay_marks:4;     /* RELAY PATCH: host line marks (e.g. OSC 133 A/B/C/D bits); scroll and reflow with the line */
+  unsigned int    relay_marks:8;     /* RELAY PATCH: host line marks (OSC 133 A/B/C/D bits, and the host's row roles above them); scroll and reflow with the line */
 } VTermLineInfo;
 
 /* Copies of VTermState fields that the 'resize' callback might have reason to

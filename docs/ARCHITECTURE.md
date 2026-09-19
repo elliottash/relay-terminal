@@ -2200,18 +2200,22 @@ are — is recoloured, so `git status` red and `ls` blue, which already say some
 and never on the alternate screen, which a full-screen program owns. The colour is a fourth channel here as
 everywhere: hover still underlines, and the walk still selects.
 
-**The line you typed sits on a band** (owner, 2026-09-19, after Claude Code's grey band behind
-each prompt). `Pane::printInline` pads a `User` or `UserAgent` line with spaces to the pane's
-width and writes it on a 24-bit background: the destination colour itself — the violet the
-"Relaying…" line is written in, the cyan of the mode chip — with `chipInk()` on it, the pair the
-prefix chips already wear (a blend of the colour into the ground read as a highlighter on beige;
-owner, 2026-09-19). A shell command is echoed by the shell, not by Relay, so its row is banded
-from the view side instead: with shell integration on, the row OSC 133;A marks sits on
-`ColorScheme::promptBand`, the shell colour blended into the ground, under every cell that brought
-no background of its own — a tint rather than the full colour, because that row's ink is the
-shell's own PS1. Options › Terminal › "Band behind what you typed" also offers the theme's raised
-surface, or none, for both. Like every inline colour the printed band is frozen at the value it
-was written with.
+**The line you typed sits on a band, and the band follows the theme** (owner, 2026-09-19, after
+Claude Code's grey band behind each prompt; then "use the 'relaying...' violet or cyan color as the
+user-box highlight"; then "can we change the design that the background highlights shift with theme
+changes"). The line carries a *role*, not a colour: `Pane::printInline` marks every row of a `User`
+or `UserAgent` line with the private `OSC 7772;shell` / `OSC 7772;agent`, which the libvterm fork
+keeps in the line's `relay_marks` beside the OSC 133 bits (`MarkUserShell`, `MarkUserAgent`), so it
+scrolls into history and reflows with the line. `TerminalView::paintRow` fills a marked row across
+the grid with `ColorScheme::userAgentBand` / `userShellBand` and paints every cell that brought no
+colour of its own in the matching ink; `EngineBackend::applyThemeColors` sets those from the live
+theme — the destination colour itself with `chipInk()` on it, the pair the prefix chips wear — and
+runs again on `themeChanged()`. Nothing is rewritten: the same rows are repainted in the new
+theme's colours, scrollback included. A shell command is echoed by the shell, not by Relay, so with
+shell integration on its row (OSC 133;A) sits on `promptBand`, a tint of the shell colour, since
+that row's ink is the shell's own PS1. Options › Terminal › "Band behind what you typed": channel,
+the theme's raised surface, or none (no band, the destination colour as the ink). GhosttyCore does
+not parse OSC 7772 yet — it is not built on this machine — so under it the line is bold and unbanded.
 
 **A hostname is one mark.** The pane header's ⇄ chip and the file preview's host chip are the same
 chip since 2026-09-19 — the error hue's fill and near-solid line, the text colour for the name —
@@ -2235,7 +2239,9 @@ distinguishable colours.
 written in, so `Pane::printInline` uses 24-bit RGB and accepts the freeze — except `Ink::Ask`, which
 is written with the *indexed* palette (bold yellow) because a question is the one piece of inline
 output still actionable after a theme switch. `MarkdownAnsi` is indexed throughout for the same
-reason. The rule: **inline output that stays actionable uses the indexed palette.**
+reason. The rule: **inline output that stays actionable uses the indexed palette.** The second way out is a row *role*: what a line
+is, kept in the line's marks and painted from the live scheme (the band behind what the user typed,
+above) — the right tool when the meaning is "this row is X" rather than "this word is blue".
 
 **The terminal.** Nothing is generated and nothing is checked in: `EngineBackend::applyThemeColors()`
 reads the active `ThemeSpec` straight into the view, on `themeChanged()`, so a running pane

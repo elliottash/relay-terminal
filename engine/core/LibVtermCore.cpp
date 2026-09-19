@@ -372,7 +372,7 @@ struct LibVtermCore::Impl {
             d->fillVtermCell(l, c, &cells[i], i == cols - 1);
         }
         info->continuation = l.continuation;
-        info->relay_marks = l.marks & 0xF;
+        info->relay_marks = l.marks & 0xFF;
         --d->count;
         --d->pushed;
         if (d->resizing)
@@ -625,6 +625,14 @@ struct LibVtermCore::Impl {
                 q->events.promptMark(mark, pos.row, exitCode);
             break;
         }
+        case 7772: {
+            // Relay's row role (CellTypes.h, MarkUserShell / MarkUserAgent): the cursor's line is
+            // one the user typed. Anything else in the body is ignored.
+            const PromptMark role = body == "shell" ? MarkUserShell : body == "agent" ? MarkUserAgent : PromptMark(0);
+            if (role)
+                vterm_state_relay_mark_cursor_line(state, role);
+            break;
+        }
         default:
             break;
         }
@@ -635,6 +643,7 @@ struct LibVtermCore::Impl {
         auto *d = static_cast<Impl *>(user);
         switch (command) {
         case 7: case 8: case 9: case 10: case 11: case 12: case 133: case 777:
+        case 7772:   // Relay's row role
             break;
         default:
             return 0;

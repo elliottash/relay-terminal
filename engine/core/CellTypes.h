@@ -54,6 +54,12 @@ enum PromptMark : uint8_t {
     MarkCommandStart = 1 << 1,    // OSC 133;B (end of prompt, user input starts)
     MarkOutputStart = 1 << 2,     // OSC 133;C
     MarkCommandFinished = 1 << 3, // OSC 133;D[;exit]
+    // Row roles, set by the host with the private OSC 7772 ("shell" / "agent"): a line the user
+    // typed, sent to that destination. A role is not a colour — the view paints the row's band and
+    // ink from the scheme it has *now*, so a theme switch recolours every such row, scrollback
+    // included, which no SGR colour written into the grid can do.
+    MarkUserShell = 1 << 4,
+    MarkUserAgent = 1 << 5,
 };
 
 struct Line {

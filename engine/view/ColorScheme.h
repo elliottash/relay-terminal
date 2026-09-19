@@ -26,6 +26,12 @@ struct ColorScheme {
     // user typed is echoed by the shell): painted behind every cell that has no background of its
     // own. Invalid (the default) = no band. The host sets it from its shell colour.
     QColor promptBand;
+    // Rows the host marked as typed by the user (OSC 7772, MarkUserShell / MarkUserAgent): the
+    // band the whole row sits on, and the ink of every cell that brought no colour of its own.
+    // Invalid band = no band; invalid ink = the row's own foreground. Resolved at paint time, so
+    // they follow a scheme change where a written colour could not.
+    QColor userShellBand, userShellInk;
+    QColor userAgentBand, userAgentInk;
     // Folds (#TK9C): the tint behind an unfolded block and the rule down its
     // left edge. Invalid (the default) = mixed from background and foreground,
     // so a host that knows nothing about folds still gets a readable block.

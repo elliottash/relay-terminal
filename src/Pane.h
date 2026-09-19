@@ -10114,24 +10114,6 @@ private:
         return t::Text;
     }
 
-    // The SGR for a user line on its band (empty when the setting is "none"): a 24-bit background
-    // and the text colour, bold. Options › Terminal › "Band behind what you typed".
-    static QString echoBandCode(Ink ink) {
-        namespace t = relay::theme;
-        const QString mode = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
-        if (mode == QStringLiteral("none")) return QString();
-        // The channel colour itself — the violet the "Relaying…" line is written in, the cyan of
-        // the mode chip — with the chip ink on it (owner, 2026-09-19: "use the 'relaying...'
-        // violet or cyan color as the user-box highlight"; a blend of it into the ground read as
-        // a highlighter on beige). The pair is the one the prefix chips already wear, and the
-        // theme contract measures its contrast.
-        QColor fill, text;
-        if (mode == QStringLiteral("chrome")) { fill = t::SurfaceRaised; text = t::Text; }
-        else { fill = ink == Ink::User ? t::Shell : t::Agent; text = t::chipInk(fill); }
-        return QStringLiteral("\x1b[1;48;2;%1;%2;%3;38;2;%4;%5;%6m")
-            .arg(fill.red()).arg(fill.green()).arg(fill.blue()).arg(text.red()).arg(text.green()).arg(text.blue());
-    }
-
     static QByteArray inkCode(Ink ink) {
         // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
         // Everything printed into the terminal is frozen at the colour it was written in — the
@@ -10295,30 +10277,37 @@ private:
             return;
         }
         out += wrapped(m_markdown.finish());
-        // The lines the user typed sit on a band (owner, 2026-09-19, after Claude Code's grey band
-        // behind each prompt): "channel" tints it in the destination colour — cyan for the shell,
-        // violet for the agent — with the theme's text colour on it, so the band says where the
-        // line went and the words stay at full contrast; "chrome" is the theme's raised surface
-        // (copper on Dark Copper); "none" is the bold coloured text of before. Each row is filled
-        // to the pane's edge with EL, which the engine paints in the current background.
-        const QString band = (ink == Ink::User || ink == Ink::UserAgent) ? echoBandCode(ink) : QString();
-        const QString code = band.isEmpty() ? QString::fromUtf8(inkCode(ink)) : band;
-        // The band runs to the pane's edge: each row is padded with spaces to the column count
-        // (the wrapper drops a space that would land past the edge, so a row never overflows),
-        // which the engine keeps as cells carrying the band's background. A row longer than the
-        // pane wraps at a word and its band covers the words.
-        const int columns = band.isEmpty() || !m_backend ? 0 : m_backend->columns();
-        QString body = code;
-        int width = 0;
-        const auto pad = [&] {
-            if (columns > 0 && width > 0 && width < columns) body += QString(columns - width, QLatin1Char(' '));
-            width = 0;
-        };
-        for (const QChar ch : clean) {
-            if (ch == '\n') { pad(); body += QStringLiteral("\x1b[0m\n") + code; }
-            else { body += ch; if (!ch.isLowSurrogate()) ++width; }
+        // A line the user typed carries a *role*, not a colour: every row of it is marked with the
+        // private OSC 7772 ("shell" / "agent"), and the engine view paints that row's band and ink
+        // from the theme in force when it paints (EngineBackend::applyThemeColors, ColorScheme.h).
+        // A colour written here would be frozen in the scrollback; a mark follows a theme switch
+        // (owner, 2026-09-19: "can we change the design that the background highlights shift with
+        // theme changes"). The text itself is bold in the default foreground.
+        if (ink == Ink::User || ink == Ink::UserAgent) {
+            const QByteArray mark = ink == Ink::User ? QByteArray("\x1b]7772;shell\x1b\\") : QByteArray("\x1b]7772;agent\x1b\\");
+            QString body = QStringLiteral("\x1b[1m");
+            for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n\x1b[1m"); else body += ch; }
+            body += QStringLiteral("\x1b[0m");
+            // The word wrapper breaks a long line into rows of its own, so the mark goes at the
+            // head of each row that holds something — never after the last newline, which would
+            // hand the role to whatever prints next.
+            const QByteArray rows = wrapped(body) + terminalLines(m_wrap.flush());
+            int from = 0;
+            while (from < rows.size()) {
+                int end = rows.indexOf("\r\n", from);
+                end = end < 0 ? rows.size() : end + 2;
+                const QByteArray row = rows.mid(from, end - from);
+                const bool empty = QByteArray(row).replace("\x1b[0m", "").replace("\x1b[1m", "").trimmed().isEmpty();
+                out += empty ? row : mark + row;
+                from = end;
+            }
+            m_atLineStart = clean.endsWith('\n');
+            writeTerminal(out);
+            return;
         }
-        pad();
+        const QString code = QString::fromUtf8(inkCode(ink));
+        QString body = code;
+        for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n") + code; else body += ch; }
         body += QStringLiteral("\x1b[0m");
         out += wrapped(body) + terminalLines(m_wrap.flush());
         m_atLineStart = clean.endsWith('\n');

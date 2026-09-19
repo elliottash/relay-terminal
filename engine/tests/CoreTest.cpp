@@ -205,6 +205,21 @@ private slots:
         QCOMPARE(runs[0].endRow, 2);
     }
 
+    // The host's row role (OSC 7772): a line the user typed, kept in the line's marks beside the
+    // OSC 133 bits so the view can paint it from the live theme. Unknown roles mark nothing.
+    void theRowRoleOscMarksItsLine()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        h.feed("\x1b]7772;agent\x1b\\* fix it\r\nreply\r\n\x1b]7772;shell\x07! make\r\n\x1b]7772;nonsense\x07x\r\n");
+        const ViewportFrame f = h.frame();
+        QCOMPARE(int(f.lines[0].marks), int(MarkUserAgent));
+        QCOMPARE(int(f.lines[1].marks), 0);
+        QCOMPARE(int(f.lines[2].marks), int(MarkUserShell));
+        QCOMPARE(int(f.lines[3].marks), 0);
+        QCOMPARE(h.marks.size(), 0);   // a role is not a prompt mark: no promptMark event
+    }
+
     void osc133PromptMarks()
     {
         QFETCH_GLOBAL(QString, core);

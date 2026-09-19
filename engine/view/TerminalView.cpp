@@ -623,6 +623,18 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
     // so here it is drawn as an ordinary one.
     const bool foldOwnsCurrent = foldsVisible() && m_foldSearch.currentIsFold();
 
+    // A row the host marked as typed by the user wears its role's band and ink from the scheme in
+    // force now (ColorScheme.h); the shell's own prompt row wears the prompt band. The band runs
+    // the full width of the grid, not just under the cells the row happens to hold.
+    const bool roleAgent = line.marks & MarkUserAgent, roleShell = !roleAgent && (line.marks & MarkUserShell);
+    const QColor roleBand = roleAgent ? m_scheme.userAgentBand : roleShell ? m_scheme.userShellBand : QColor();
+    const QColor roleInk = roleAgent ? m_scheme.userAgentInk : roleShell ? m_scheme.userShellInk : QColor();
+    const bool roleRow = roleAgent || roleShell;
+    const QColor rowBand = roleBand.isValid() ? roleBand
+        : (!roleRow && m_scheme.promptBand.isValid() && (line.marks & MarkPromptStart)) ? m_scheme.promptBand : QColor();
+    if (rowBand.isValid())
+        p.fillRect(QRect(m_padding, y, m_cols * m_cw, m_ch), rowBand);
+
     struct CellColors {
         QColor fg;
         QColor bg;
@@ -636,14 +648,15 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         QColor fg = resolve(c.fg, true);
         QColor bg = resolve(c.bg, false);
         bool bgDefault = CellColor::kind(c.bg) == CellColor::Default;
+        if (roleInk.isValid() && CellColor::kind(c.fg) == CellColor::Default)
+            fg = roleInk;
         if (c.attrs & AttrReverse) {
             std::swap(fg, bg);
             bgDefault = false;
         }
-        // The shell's prompt row (OSC 133;A) sits on the prompt band, under every cell that
-        // brought no background of its own.
-        if (bgDefault && m_scheme.promptBand.isValid() && (line.marks & MarkPromptStart)) {
-            bg = m_scheme.promptBand;
+        // On a banded row, a cell that brought no background of its own sits on the band.
+        if (bgDefault && rowBand.isValid()) {
+            bg = rowBand;
             bgDefault = false;
         }
         if (line.selectionStart >= 0 && col >= line.selectionStart && col <= line.selectionEnd) {
@@ -707,7 +720,7 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
     // reference that resolves. Empty when the option is off, on the alternate screen, or when the
     // row holds none.
     std::vector<char> restLink;
-    if (m_linksAtRest && !m_frame.altScreen)
+    if (m_linksAtRest && !m_frame.altScreen && !roleRow)   // a role row's ink is the role's
         restLinkColumns(realRow - m_frame.viewportTop, &restLink);
     const auto highlighted = [&line](int col) {
         for (const Line::Highlight &h : line.highlights)

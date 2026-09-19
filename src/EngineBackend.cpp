@@ -80,6 +80,21 @@ void EngineBackend::applyThemeColors()
     // agent line's, whose ink Relay chooses). Off with Options › Terminal › "Band behind what you
     // typed" = none. Needs shell integration, which is what marks the row.
     const QString band = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
+    // The rows Relay marks as typed by the user (OSC 7772): the band is the destination colour
+    // itself with the chip ink on it; "chrome" is the raised surface with the text colour; "none"
+    // is no band and the destination colour as the ink. The view resolves these at paint time, so
+    // every such row — scrollback included — follows a theme switch (owner, 2026-09-19: "can we
+    // change the design that the background highlights shift with theme changes").
+    if (band == QStringLiteral("none")) {
+        colors.userShellBand = colors.userAgentBand = QColor();
+        colors.userShellInk = theme::Shell; colors.userAgentInk = theme::Agent;
+    } else if (band == QStringLiteral("chrome")) {
+        colors.userShellBand = colors.userAgentBand = theme::SurfaceRaised;
+        colors.userShellInk = colors.userAgentInk = theme::Text;
+    } else {
+        colors.userShellBand = theme::Shell; colors.userShellInk = theme::chipInk(theme::Shell);
+        colors.userAgentBand = theme::Agent; colors.userAgentInk = theme::chipInk(theme::Agent);
+    }
     if (band == QStringLiteral("none")) colors.promptBand = QColor();
     else {
         const QColor ground = colors.background;
