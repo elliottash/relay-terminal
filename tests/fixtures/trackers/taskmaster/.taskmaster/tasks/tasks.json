@@ -1,0 +1,56 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Setup Express Server",
+        "description": "Initialize and configure Express.js server with middleware",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "details": "Create Express app with CORS, body parser, and error handling",
+        "testStrategy": "Start server and verify health check endpoint responds",
+        "subtasks": [
+          {"id": 1, "title": "Initialize npm project", "status": "done", "dependencies": [], "details": "npm init"},
+          {"id": 2, "title": "Configure middleware", "status": "done", "dependencies": [1]}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Add the session store",
+        "description": "Sessions survive a restart",
+        "status": "in-progress",
+        "dependencies": [1],
+        "priority": "medium",
+        "subtasks": [
+          {"id": 1, "title": "Pick a backend", "status": "done", "dependencies": []},
+          {"id": 2, "title": "Write the adapter", "status": "in-progress", "dependencies": [1]},
+          {"id": 3, "title": "Expire old sessions", "status": "pending", "dependencies": ["2.2"]}
+        ]
+      },
+      {
+        "id": "3",
+        "title": "Document the API",
+        "description": "A task whose id is a string, which happens in real files",
+        "status": "pending",
+        "dependencies": ["2"],
+        "priority": "low",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Drop the old client",
+        "status": "cancelled",
+        "dependencies": [],
+        "priority": "low"
+      }
+    ],
+    "metadata": {"version": "1.0.0", "lastModified": "2026-01-08T23:51:39.160Z", "taskCount": 4}
+  },
+  "feature-auth": {
+    "tasks": [
+      {"id": 1, "title": "OAuth integration", "description": "Log in with the forge", "status": "pending", "dependencies": [], "priority": "high"}
+    ],
+    "metadata": {"tags": ["feature-auth"]}
+  }
+}

@@ -1,0 +1,1 @@
+- [ ] T001 This directory is not `NNN-slug`, so spec-kit ignores it and so do we
