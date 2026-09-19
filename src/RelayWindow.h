@@ -3746,6 +3746,32 @@ public:
             pane->startBoardTask(task, card);
             w->updateTitles();
         };
+        // Verify (#T71W): the same pane beside the board, but on the verifier the worker picked —
+        // a different provider family from the one that implemented the card. A `preset:` runner
+        // is an ordinary Relay agent started on that preset and handed the brief as a board task
+        // (the card travels with it); a `guest:` runner is Claude Code or Codex launched in the
+        // pane's own shell with the brief as its first positional prompt, which is what both CLIs
+        // take (`relay_core.guest_launch.claude_argv` / `codex_argv` pass `extra` through
+        // untouched, after the flags), so the guest starts on the card rather than at an empty
+        // prompt. The launch flags themselves are the guest module's and are not touched here.
+        view->onVerifyCard = [guard, workspace](const QString &card, const QString &runner, const QString &task) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            const bool guest = runner.startsWith(QStringLiteral("guest:"));
+            const QString runnerId = runner.section(QLatin1Char(':'), 1);
+            if (runnerId.isEmpty()) return;
+            QJsonObject spec{{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}};
+            if (!guest) spec.insert(QStringLiteral("preset"), runnerId);
+            Pane *pane = nullptr;
+            try { pane = w->createPane(spec); }
+            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
+            w->insertBeside(guard, pane, Qt::Horizontal, false);
+            w->setActive(pane);
+            focusLeaf(pane);
+            if (guest) pane->launchGuest(runnerId, {task}, workspace);
+            else pane->startBoardTask(task, card);
+            w->updateTitles();
+        };
         view->onHint = [guard](const QString &id, const QString &keys) {
             auto *w = windowOf(guard);
             if (!w || keys.isEmpty()) return;

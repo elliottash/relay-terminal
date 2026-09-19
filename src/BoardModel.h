@@ -112,6 +112,40 @@ QString threadMarkdown(const QString &text, const QString &kind);
 QString executeTask(const QString &id, const QString &title, bool hasPlan, bool hasAcceptance,
                     const QString &note = QString());
 
+// ---- cross-provider QA (#T71W) --------------------------------------------------------------
+//
+// The worker puts a `qa` object on the `board_card_get` answer of every work card that has an
+// `implemented_by`: who implemented it, the one verifier it recommends, the alternates, and why
+// each family was skipped or is unavailable (the card's "Where it shows"; availability is the
+// worker's to compute, never the GUI's). These four read that object; they hold no policy of
+// their own, so the ranking can change in `backend/relay_core/qa_verifiers.py` alone.
+
+// A vendor family as a card line names it: "anthropic" -> "Claude", "openai" -> "OpenAI",
+// "relay-free" -> "Relay Free". An entry's own `label` wins where it has one.
+QString familyLabel(const QString &family);
+
+// The recommendation's runner id — "guest:codex", "guest:claude" or "preset:<id>" — or empty
+// when nothing is available. This is what Verify opens a pane on.
+QString verifyRunner(const QJsonObject &qa);
+// The recommendation's label ("Codex"), for the thread note and the brief; empty with no
+// recommendation.
+QString verifyLabel(const QJsonObject &qa);
+
+// The one line a card in a QA lane shows under its fields:
+//   "Verify with Codex (installed) · then GLM-5.3 · Claude skipped: implemented this card"
+// and, when no verifier is available at all:
+//   "No verifier available: Kimi: no key · Codex: not installed"
+// Empty for a card the worker sent no `qa` for.
+QString verifyLine(const QJsonObject &qa);
+
+// What the verifier's pane is handed when Verify is pressed on a card in a QA lane. The card
+// travels with it (`ask {cards: [id]}`) for a preset runner; a guest CLI gets this text alone as
+// its first prompt, so the brief says where to find the card as well as what to do with it.
+// `verifier` is the recommendation's label, `implementedBy` the card's signature, and `note`
+// whatever the owner had typed in the reply box, passed on verbatim.
+QString verifyTask(const QString &id, const QString &title, const QString &verifier,
+                   const QString &implementedBy, const QString &note = QString());
+
 // The body without its leading `# Title` line when that only repeats the title: the card
 // detail already shows the title in its header, so the heading would be said twice.
 QString bodyWithoutTitle(const QString &body, const QString &title);

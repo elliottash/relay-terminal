@@ -1542,5 +1542,205 @@ void BoardModelTests::aViewIgnoresEventsFromAnotherProjectsBoard()
     QCOMPARE(view.model().total(), 3);
 }
 
+// ---- cross-provider QA (#T71W) ---------------------------------------------------------------
+//
+// The worker puts a `qa` object on a work card's `board_card_get` answer: who implemented it, the
+// verifier it recommends, the alternates, and why every other family was skipped or is not here.
+// These four slots are the GUI's whole half of that contract — the line the card shows, the two
+// briefs, and the button and key that open a pane on the recommended runner. The fixture below is
+// the JSON shape the card's "Where it shows" section specifies, verbatim.
+
+namespace {
+
+QJsonObject qaBlock()
+{
+    const auto json = QByteArrayLiteral(R"({
+      "implemented_by": "anthropic/claude-opus-5", "implementer_family": "anthropic",
+      "recommended": {"family": "openai", "label": "Codex", "runner": "guest:codex",
+                      "model": "codex",
+                      "why": "first in the ranking that is not the implementer and is installed"},
+      "alternates": [{"family": "glm", "label": "GLM-5.3", "runner": "preset:glm-coding",
+                      "model": "glm-5.3"}],
+      "skipped": [{"family": "anthropic", "why": "implemented this card"}],
+      "unavailable": [{"family": "kimi", "why": "no key"}],
+      "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5", "agrees": true}]
+    })");
+    return QJsonDocument::fromJson(json).object();
+}
+
+// A card the worker hands over in the LLM QA lane, with its `qa` block.
+QJsonObject qaCard(const QJsonObject &qa)
+{
+    QJsonObject out = card(QStringLiteral("K7Q2"), QStringLiteral("Voice mode"),
+                           QStringLiteral("the issue"), QString(64, QLatin1Char('a')));
+    out.insert(QStringLiteral("status"), QStringLiteral("needs-qa-llm"));
+    out.insert(QStringLiteral("sections"), QJsonArray{"Issue", "Plan", "QA checklist"});
+    out.insert(QStringLiteral("front"),
+               QJsonObject{{"assignee", "agent"}, {"implemented_by", "anthropic/claude-opus-5"}});
+    if (!qa.isEmpty())
+        out.insert(QStringLiteral("qa"), qa);
+    return out;
+}
+
+}  // namespace
+
+void BoardModelTests::theVerifyLineNamesTheRecommendedVerifierAndWhatItSkipped()
+{
+    const QJsonObject qa = qaBlock();
+    QCOMPARE(relay::board::verifyRunner(qa), QStringLiteral("guest:codex"));
+    QCOMPARE(relay::board::verifyLabel(qa), QStringLiteral("Codex"));
+    QCOMPARE(relay::board::verifyLine(qa),
+             QStringLiteral("Verify with Codex (installed) · then GLM-5.3 · "
+                            "Claude skipped: implemented this card"));
+
+    // A preset runner is reachable because a key is stored, not because a CLI is installed.
+    QJsonObject keyed = qa;
+    keyed.insert(QStringLiteral("recommended"),
+                 QJsonObject{{"family", "glm"}, {"label", "GLM-5.3"}, {"runner", "preset:glm-coding"}});
+    keyed.remove(QStringLiteral("alternates"));
+    keyed.remove(QStringLiteral("skipped"));
+    QCOMPARE(relay::board::verifyLine(keyed), QStringLiteral("Verify with GLM-5.3 (key)"));
+
+    // Nothing available: the line says why, family by family, so the reader knows what to install.
+    QJsonObject none{{"implemented_by", "anthropic/claude-opus-5"},
+                     {"skipped", QJsonArray{QJsonObject{{"family", "anthropic"}, {"why", "implemented this card"}}}},
+                     {"unavailable", QJsonArray{QJsonObject{{"family", "openai"}, {"why", "not installed"}},
+                                                QJsonObject{{"family", "kimi"}, {"why", "no key"}}}}};
+    QCOMPARE(relay::board::verifyRunner(none), QString());
+    QCOMPARE(relay::board::verifyLine(none),
+             QStringLiteral("No verifier available: Claude skipped: implemented this card · "
+                            "OpenAI: not installed · Kimi: no key"));
+
+    // A worker that sends no `qa` at all says nothing on the card.
+    QVERIFY(relay::board::verifyLine(QJsonObject()).isEmpty());
+    // An entry with no label of its own is named by its family.
+    QCOMPARE(relay::board::familyLabel(QStringLiteral("anthropic")), QStringLiteral("Claude"));
+    QCOMPARE(relay::board::familyLabel(QStringLiteral("relay-free")), QStringLiteral("Relay Free"));
+    QCOMPARE(relay::board::familyLabel(QStringLiteral("nebula")), QStringLiteral("Nebula"));
+}
+
+void BoardModelTests::theExecuteTaskAsksForTheImplementedByTrailer()
+{
+    const QString task = relay::board::executeTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
+                                                   true, true);
+    QVERIFY2(task.contains(QStringLiteral("Implemented-By: <your provider/model>")), qPrintable(task));
+    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5")));
+    // The worker stamps the card's own field, so the agent is not asked to type it as well.
+    QVERIFY(task.contains(QStringLiteral("`implemented_by` is stamped")));
+}
+
+void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTrailer()
+{
+    const QString task = relay::board::verifyTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
+                                                  QStringLiteral("Codex"),
+                                                  QStringLiteral("anthropic/claude-opus-5"),
+                                                  QStringLiteral("check the Xvfb run too"));
+    QVERIFY(task.startsWith(QStringLiteral("Verify #T71W: Signatures\n")));
+    QVERIFY(task.contains(QStringLiteral("you are its verifier (Codex)")));
+    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
+    QVERIFY(task.contains(QStringLiteral("`## QA checklist`")));
+    QVERIFY(task.contains(QStringLiteral("docs/qa_evidence/")));
+    QVERIFY(task.contains(QStringLiteral("`qa-`")));
+    QVERIFY(task.contains(QStringLiteral("`## Verdict`")));
+    QVERIFY(task.contains(QStringLiteral("board_update_card")));
+    QVERIFY(task.contains(QStringLiteral("board_move_card")));
+    QVERIFY(task.contains(QStringLiteral("board_comment")));
+    QVERIFY(task.contains(QStringLiteral("Verified-By: <your provider/model>")));
+    QVERIFY(task.contains(QStringLiteral("Never fix the code yourself")));
+    // A guest CLI gets this text and nothing else, so it also says where the card lives.
+    QVERIFY(task.contains(QStringLiteral("issues/threads/T71W.md")));
+    QVERIFY(task.endsWith(QStringLiteral("The owner adds, verbatim:\ncheck the Xvfb run too")));
+}
+
+void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QString handedCard, handedRunner, handedTask;
+    int opened = 0;
+    view.onVerifyCard = [&](const QString &id, const QString &runner, const QString &task) {
+        ++opened;
+        handedCard = id;
+        handedRunner = runner;
+        handedTask = task;
+    };
+    QString hintId, hintKeys;
+    view.onHint = [&](const QString &id, const QString &keys) { hintId = id; hintKeys = keys; };
+    view.handleEvent(::opened({row("K7Q2", "needs-qa-llm", "features")}));
+    view.handleEvent(qaCard(qaBlock()));
+
+    // The line sits under the fields, in the muted ink, and says the whole recommendation.
+    auto *line = view.findChild<QLabel *>(QStringLiteral("boardCardVerifyLine"));
+    QVERIFY(line);
+    QVERIFY(!line->isHidden());
+    QVERIFY2(line->text().contains(QStringLiteral("Verify with Codex (installed) · then GLM-5.3 · "
+                                                  "Claude skipped: implemented this card")),
+             qPrintable(line->text()));
+
+    // The button carries its key like the others (#QG60), and is live because a runner exists.
+    QPushButton *verify = button(view, QStringLiteral("Verify"));
+    QVERIFY(verify);
+    QCOMPARE(verify->text(), QStringLiteral("Verify (v)"));
+    QVERIFY(!verify->isHidden());
+    QVERIFY(verify->isEnabled());
+
+    // The click: one progress note on the thread, no move — the card stays in its QA lane — and
+    // the pane is opened on the recommended runner with the QA brief.
+    sent.clear();
+    verify->click();
+    QCOMPARE(opened, 1);
+    QCOMPARE(handedCard, QStringLiteral("K7Q2"));
+    QCOMPARE(handedRunner, QStringLiteral("guest:codex"));
+    QVERIFY(handedTask.startsWith(QStringLiteral("Verify #K7Q2: Voice mode")));
+    QVERIFY(handedTask.contains(QStringLiteral("Verified-By:")));
+    QVERIFY(handedTask.contains(QStringLiteral("#K7Q2")));
+    QVERIFY(handedTask.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.at(0).value("type").toString(), QStringLiteral("board_comment"));
+    QCOMPARE(sent.at(0).value("kind").toString(), QStringLiteral("progress"));
+    QVERIFY2(sent.at(0).value("text").toString().startsWith(
+                 QStringLiteral("Verify · handed to a new terminal pane on Codex · first in the ranking")),
+             qPrintable(sent.at(0).value("text").toString()));
+    // A click is the slow path, so it says its key once (WARP.md hint rule).
+    QCOMPARE(hintId, QStringLiteral("board.verify"));
+    QCOMPARE(hintKeys, QStringLiteral("v"));
+
+    // `v` on the card's document does the same, and the reply box goes with it as the owner's note.
+    auto *doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(doc);
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QVERIFY(reply);
+    reply->setPlainText(QStringLiteral("watch the Xvfb run"));
+    sent.clear();
+    QTest::keyClick(doc, Qt::Key_V);
+    QCOMPARE(opened, 2);
+    QCOMPARE(handedRunner, QStringLiteral("guest:codex"));
+    QVERIFY(handedTask.endsWith(QStringLiteral("The owner adds, verbatim:\nwatch the Xvfb run")));
+    QCOMPARE(sent.size(), 1);
+    QVERIFY(sent.at(0).value("text").toString().endsWith(QStringLiteral("\n\nwatch the Xvfb run")));
+
+    // `v` from the list opens the selected card and verifies it, as `x` executes it.
+    view.selectCard(QStringLiteral("K7Q2"));
+    view.cardAction(QStringLiteral("verify"));
+    QCOMPARE(opened, 3);
+
+    // A card the worker sent no `qa` for: no line, and nothing to press.
+    view.handleEvent(qaCard(QJsonObject()));
+    QVERIFY(line->isHidden());
+    QVERIFY(!verify->isEnabled());
+    sent.clear();
+    opened = 0;
+    verify->click();
+    QCOMPARE(opened, 0);
+    QVERIFY(sent.isEmpty());
+
+    // And a card that is not in a QA lane at all does not offer it: there is nothing to verify yet.
+    view.handleEvent(card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
+    QVERIFY(line->isHidden());
+    QVERIFY(verify->isHidden());
+    QVERIFY(!verify->isEnabled());
+}
+
 QTEST_MAIN(BoardModelTests)
 #include "boardmodel_test.moc"

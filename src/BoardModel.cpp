@@ -172,16 +172,176 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
     lines << what.arg(ref) << QString();
     lines << QStringLiteral("The owner handed it to you from the Switchboard; it is already in "
                             "progress and assigned to the agent.")
-          << QStringLiteral("- When you start, set `implemented_by` on %1 to your model "
-                            "(board_update_card).").arg(ref)
+          // #T71W: the worker knows its own preset and model exactly and stamps `implemented_by`
+          // itself, so the agent is not asked to type a signature it can only guess at.
+          << QStringLiteral("- %1's `implemented_by` is stamped with your provider and model by "
+                            "the board itself; you do not have to set it.").arg(ref)
           << QStringLiteral("- Put %1 in the message of every commit you make for it, and after "
                             "each commit add its short hash to the card's `links.commits` "
                             "(board_update_card `fields.links`: the card's whole `links` object "
                             "from board_read, with the hash appended).").arg(ref)
+          // #T71W: the signature travels with the commits, not only with the card, so a reader of
+          // `git log --grep '#ID'` can tell who wrote each one. The card's own `implemented_by` is
+          // the worker's to stamp, so the agent is not asked for it twice.
+          << QStringLiteral("- Sign every one of those commits with the trailer "
+                            "`Implemented-By: <your provider/model>` (lower case, the model's "
+                            "vendor: `anthropic/claude-opus-5`, `openai/codex`, `glm/glm-5.3`) on "
+                            "its own line at the end of the message. The card's `implemented_by` "
+                            "is stamped for you; the trailer is not.")
           << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
                             "not only here.").arg(ref)
           << QStringLiteral("- When it lands, move %1 to needs-qa-llm with the evidence path and a "
                             "`## QA checklist`, as the Switchboard rules say.").arg(ref);
+    if (!note.trimmed().isEmpty())
+        lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
+    return lines.join(QLatin1Char('\n'));
+}
+
+// ---- cross-provider QA (#T71W) --------------------------------------------------------------
+
+QString familyLabel(const QString &family)
+{
+    static const QMap<QString, QString> names{
+        {QStringLiteral("openai"), QStringLiteral("OpenAI")},
+        // The design's own line reads "Claude skipped: …", and that is the name a reader of this
+        // board uses for the family; "Anthropic" would be the company, not the verifier.
+        {QStringLiteral("anthropic"), QStringLiteral("Claude")},
+        {QStringLiteral("glm"), QStringLiteral("GLM")},
+        {QStringLiteral("kimi"), QStringLiteral("Kimi")},
+        {QStringLiteral("deepseek"), QStringLiteral("DeepSeek")},
+        {QStringLiteral("gemini"), QStringLiteral("Gemini")},
+        {QStringLiteral("minimax"), QStringLiteral("MiniMax")},
+        {QStringLiteral("relay-free"), QStringLiteral("Relay Free")},
+        {QStringLiteral("local"), QStringLiteral("Local")}};
+    const QString known = names.value(family);
+    if (!known.isEmpty())
+        return known;
+    QString text = family;
+    text.replace(QLatin1Char('-'), QLatin1Char(' '));
+    if (!text.isEmpty())
+        text[0] = text.at(0).toUpper();
+    return text;
+}
+
+namespace {
+
+// One entry of `recommended` / `alternates` / `skipped` / `unavailable` as a name: its own
+// `label` when the worker sent one, else the family's.
+QString entryLabel(const QJsonObject &entry)
+{
+    const QString label = entry.value(QStringLiteral("label")).toString();
+    return label.isEmpty() ? familyLabel(entry.value(QStringLiteral("family")).toString()) : label;
+}
+
+// What the parenthesis after the recommendation says: how this verifier is reachable here. The
+// runner id is the worker's word on that, so nothing is looked up on this side.
+QString runnerWord(const QString &runner)
+{
+    if (runner.startsWith(QStringLiteral("guest:")))
+        return QStringLiteral("installed");
+    if (runner.startsWith(QStringLiteral("preset:")))
+        return QStringLiteral("key");
+    return {};
+}
+
+}  // namespace
+
+QString verifyRunner(const QJsonObject &qa)
+{
+    return qa.value(QStringLiteral("recommended")).toObject().value(QStringLiteral("runner")).toString();
+}
+
+QString verifyLabel(const QJsonObject &qa)
+{
+    const QJsonObject recommended = qa.value(QStringLiteral("recommended")).toObject();
+    return recommended.isEmpty() ? QString() : entryLabel(recommended);
+}
+
+QString verifyLine(const QJsonObject &qa)
+{
+    if (qa.isEmpty())
+        return {};
+    const QJsonObject recommended = qa.value(QStringLiteral("recommended")).toObject();
+    const QString separator = QStringLiteral(" · ");
+    if (recommended.isEmpty() || verifyRunner(qa).isEmpty()) {
+        // Nothing to open: the line says why, family by family, so the reader knows what to
+        // install or key rather than only that the button is dead.
+        QStringList reasons;
+        const auto collect = [&reasons](const QJsonArray &entries, const QString &word) {
+            for (const QJsonValue &value : entries) {
+                const QJsonObject entry = value.toObject();
+                const QString why = entry.value(QStringLiteral("why")).toString();
+                const QString name = entryLabel(entry) + word;
+                reasons << (why.isEmpty() ? name : QStringLiteral("%1: %2").arg(name, why));
+            }
+        };
+        collect(qa.value(QStringLiteral("skipped")).toArray(), QStringLiteral(" skipped"));
+        collect(qa.value(QStringLiteral("unavailable")).toArray(), QString());
+        return reasons.isEmpty()
+                   ? QStringLiteral("No verifier available.")
+                   : QStringLiteral("No verifier available: ") + reasons.join(separator);
+    }
+    QStringList parts;
+    const QString word = runnerWord(verifyRunner(qa));
+    parts << (word.isEmpty() ? QStringLiteral("Verify with %1").arg(entryLabel(recommended))
+                             : QStringLiteral("Verify with %1 (%2)").arg(entryLabel(recommended), word));
+    QStringList alternates;
+    for (const QJsonValue &value : qa.value(QStringLiteral("alternates")).toArray())
+        alternates << entryLabel(value.toObject());
+    if (!alternates.isEmpty())
+        parts << QStringLiteral("then ") + alternates.join(QStringLiteral(", "));
+    for (const QJsonValue &value : qa.value(QStringLiteral("skipped")).toArray()) {
+        const QJsonObject entry = value.toObject();
+        const QString why = entry.value(QStringLiteral("why")).toString();
+        parts << (why.isEmpty() ? QStringLiteral("%1 skipped").arg(entryLabel(entry))
+                                : QStringLiteral("%1 skipped: %2").arg(entryLabel(entry), why));
+    }
+    return parts.join(separator);
+}
+
+QString verifyTask(const QString &id, const QString &title, const QString &verifier,
+                   const QString &implementedBy, const QString &note)
+{
+    const QString ref = QStringLiteral("#") + id;
+    QStringList lines;
+    lines << QStringLiteral("Verify %1: %2").arg(ref, title) << QString();
+    QString who = QStringLiteral("The Switchboard card %1 is in a QA lane and you are its "
+                                 "verifier%2. ").arg(ref, verifier.trimmed().isEmpty()
+                                                              ? QString()
+                                                              : QStringLiteral(" (%1)").arg(verifier.trimmed()));
+    who += implementedBy.trimmed().isEmpty()
+               ? QStringLiteral("Somebody else implemented it; you check that work, you do not do it again.")
+               : QStringLiteral("%1 implemented it; you check that work, you do not do it again.")
+                     .arg(implementedBy.trimmed());
+    lines << who << QString();
+    // A preset runner gets the card attached (`ask {cards: [id]}`); a guest CLI is handed this
+    // text and nothing else, so the brief has to say where the card lives as well.
+    lines << QStringLiteral("The card is attached. If you cannot see it, its file is the one "
+                            "`grep -rl '%1' issues/` finds, and its thread is "
+                            "`issues/threads/%2.md`.").arg(ref, id)
+          << QStringLiteral("- Read %1, its `## QA checklist` and the implementer's evidence under "
+                            "`docs/qa_evidence/`.").arg(ref)
+          << QStringLiteral("- Run every item of the `## QA checklist` yourself and write down what "
+                            "you actually saw, not what should have happened.")
+          << QStringLiteral("- Put your own evidence in the card's evidence directory "
+                            "(`docs/qa_evidence/<date>-<slug>/`), in files whose names start with "
+                            "`qa-`, beside the implementer's.")
+          << QStringLiteral("- Write a `## Verdict` section on %1 with board_update_card: what "
+                            "passed, what failed, and what you ran it on.").arg(ref)
+          << QStringLiteral("- Then move %1 with board_move_card: to `done` when the checklist "
+                            "holds, or back to `in-progress` with the failures on the thread as a "
+                            "board_comment when it does not.").arg(ref)
+          << QStringLiteral("- Commit your evidence with %1 in the message and the trailer "
+                            "`Verified-By: <your provider/model>` (lower case, the model's vendor: "
+                            "`openai/codex`, `anthropic/claude-code`, `glm/glm-5.3`) on its own "
+                            "line at the end.").arg(ref)
+          << QStringLiteral("- Never fix the code yourself. Anything you find goes on %1's thread "
+                            "as a board_comment, or into a new bug card — a verifier that edits "
+                            "the code becomes its implementer, and the card would need verifying "
+                            "again.").arg(ref)
+          << QStringLiteral("- If you have no board_* tools (you are a guest CLI), write the "
+                            "`## Verdict`, the status and the thread entry into the card's own "
+                            "files, in the format the cards already there use.");
     if (!note.trimmed().isEmpty())
         lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
     return lines.join(QLatin1Char('\n'));

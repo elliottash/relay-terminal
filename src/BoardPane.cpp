@@ -796,6 +796,15 @@ public:
         m_meta->setObjectName(QStringLiteral("boardCardMeta"));
         layout->addWidget(m_meta);
 
+        // Cross-provider QA (#T71W): one line under the fields, in the same muted ink, naming the
+        // verifier the worker recommends for this card and what it skipped to get there. It is
+        // there only for a card in a QA lane whose `qa` block arrived with it.
+        m_verifyLine = new QLabel(this);
+        m_verifyLine->setWordWrap(true);
+        m_verifyLine->setObjectName(QStringLiteral("boardCardVerifyLine"));
+        m_verifyLine->hide();
+        layout->addWidget(m_verifyLine);
+
         m_doc = new QTextBrowser(this);
         m_doc->setObjectName(QStringLiteral("boardCardDocument"));
         m_doc->setOpenLinks(false);      // a relative link would otherwise replace the card
@@ -868,12 +877,21 @@ public:
         m_plan->setObjectName(QStringLiteral("boardReplyButton"));
         m_execute = new QPushButton(QStringLiteral("Execute (x)"), reply);
         m_execute->setObjectName(QStringLiteral("boardExecute"));
-        for (QPushButton *button : {m_comment, m_discuss, m_plan, m_execute})
+        // Verify (#T71W): the QA lane's counterpart of Execute — it also leaves the board for a
+        // pane, so it wears the same outline, and it is on screen only while the card is in a QA
+        // lane and the worker has said who should check it.
+        m_verify = new QPushButton(QStringLiteral("Verify (v)"), reply);
+        m_verify->setObjectName(QStringLiteral("boardExecute"));
+        m_verify->hide();
+        for (QPushButton *button : {m_comment, m_discuss, m_plan, m_execute, m_verify}) {
             button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
+            button->setProperty("fullLabel", button->text());   // what fitButtons() shortens from
+        }
         buttons->addWidget(m_comment);
         buttons->addWidget(m_discuss);
         buttons->addWidget(m_plan);
         buttons->addWidget(m_execute);
+        buttons->addWidget(m_verify);
         setModeTips();
         replyLayout->addLayout(buttons);
         layout->addWidget(reply);
@@ -902,6 +920,11 @@ public:
             if (onModeHint)
                 onModeHint(QStringLiteral("execute"));
             execute();
+        });
+        connect(m_verify, &QPushButton::clicked, this, [this] {
+            if (onModeHint)
+                onModeHint(QStringLiteral("verify"));
+            verify();
         });
         connect(m_comment, &QPushButton::clicked, this, [this] { submit(QString()); });
         connect(m_edit, &QToolButton::clicked, this, [this] {
@@ -952,6 +975,9 @@ public:
     std::function<void(const QString &text, const QString &mode)> onReply;
     // Execute: hand the card to a terminal pane. `note` is what was in the reply box.
     std::function<void(const QString &note)> onExecute;
+    // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
+    // different provider family from the one that implemented it. `note` is the reply box again.
+    std::function<void(const QString &note)> onVerify;
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void(const QString &what, const QString &value)> onMove;
@@ -972,6 +998,15 @@ public:
     bool hasPlan() const { return m_sections.contains(QStringLiteral("Plan"), Qt::CaseInsensitive); }
     bool hasAcceptance() const { return !m_front.value(QStringLiteral("acceptance")).toString().trimmed().isEmpty(); }
     bool busy() const { return m_busy; }
+    // The worker's `qa` block for this card, as it arrived (#T71W). Empty for a card it sent none
+    // for — an old worker, or a card with no `implemented_by` yet.
+    QJsonObject qa() const { return m_qa; }
+    // Whether this card is in a QA lane at all: that, and a `qa` block, is what puts the verify
+    // line and its button on screen.
+    bool inQaLane() const { return m_statusValue.startsWith(QStringLiteral("needs-qa")); }
+    // Whether there is something to open: the worker found a verifier that is not the implementer
+    // and is actually on this machine.
+    bool hasVerifier() const { return !board::verifyRunner(m_qa).isEmpty(); }
 
     // Plan: a turn that writes the card's `## Plan` (protocol 19.10). Words in the reply box go
     // with it as the owner's note; an empty box is fine — the card is the brief.
@@ -1013,6 +1048,39 @@ public:
         m_reply->clear();
         m_error->hide();
         onExecute(note);
+    }
+
+    // Verify (#T71W): hand the card to a pane on the recommended verifier. Unlike Execute it
+    // changes no status — the card stays in its QA lane until the verifier's verdict moves it —
+    // and there is nothing to arm: the checklist on the card is the brief, and a card with no
+    // recommendation says so rather than opening a pane on nobody.
+    void verify()
+    {
+        if (m_id.isEmpty() || m_editing || !onVerify)
+            return;
+        if (m_busy) {
+            showError(QStringLiteral("The agent is still answering on #%1. Stop it, or wait for it, "
+                                     "before handing the card to a verifier.").arg(m_id));
+            return;
+        }
+        if (!inQaLane()) {
+            showError(QStringLiteral("#%1 is not in a QA lane yet, so there is nothing to verify. "
+                                     "Move it to Needs QA (LLM) when it lands.").arg(m_id));
+            return;
+        }
+        if (!hasVerifier()) {
+            const QString why = board::verifyLine(m_qa);
+            showError(why.isEmpty()
+                          ? QStringLiteral("No verifier is available for #%1 yet.").arg(m_id)
+                          : why);
+            return;
+        }
+        const QString note = m_reply->toPlainText().trimmed();
+        if (!note.isEmpty())
+            m_reply->remember(note);
+        m_reply->clear();
+        m_error->hide();
+        onVerify(note);
     }
 
     void setChoices(const QStringList &statuses, const QList<QPair<QString, QString>> &tabs)
@@ -1078,6 +1146,8 @@ public:
         const QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path);
         m_meta->setText(meta);
         m_meta->setVisible(!meta.isEmpty());
+        m_qa = card.value(QStringLiteral("qa")).toObject();
+        showVerify();
         m_openFile->setEnabled(!m_path.isEmpty());
         m_body = board::bodyWithoutTitle(card.value(QStringLiteral("body")).toString(), title);
 
@@ -1229,6 +1299,12 @@ public:
     }
 
 protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QWidget::resizeEvent(event);
+        fitButtons();
+    }
+
     bool eventFilter(QObject *object, QEvent *event) override
     {
         if (object == m_reply && event->type() == QEvent::KeyPress
@@ -1272,6 +1348,10 @@ protected:
                 }
                 if (key->text() == QStringLiteral("x")) {
                     execute();
+                    return true;
+                }
+                if (key->text() == QStringLiteral("v")) {   // #T71W
+                    verify();
                     return true;
                 }
                 if (key->text() == QStringLiteral("d")) {
@@ -1340,7 +1420,7 @@ private:
         const auto set = [this](QPushButton *button, const QString &mode, const QString &label,
                                 const QString &tip) {
             const bool running = m_busy && m_busyMode == mode;
-            button->setText(running ? QStringLiteral("Stop") : label);
+            setLabel(button, running ? QStringLiteral("Stop") : label);
             button->setToolTip(running ? QStringLiteral("Stop the Switchboard agent") : tip);
             button->setEnabled(!m_busy || running);
         };
@@ -1353,6 +1433,82 @@ private:
         m_execute->setEnabled(!m_busy);
         m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
                                              "its agent builds it, and the card moves to In progress (x)"));
+        m_verify->setEnabled(!m_busy && hasVerifier());
+        fitButtons();
+    }
+
+    // A reply-row label without its key: "Discuss (Enter)" -> "Discuss". The key does not vanish —
+    // it is in the button's tooltip and in the pane's key legend either way.
+    static QString labelWithoutKey(const QString &label)
+    {
+        const int at = label.lastIndexOf(QStringLiteral(" ("));
+        return at > 0 && label.endsWith(QLatin1Char(')')) ? label.left(at) : label;
+    }
+
+    // Set a reply-row label and remember it at full length, so shortening is never one-way.
+    static void setLabel(QPushButton *button, const QString &text)
+    {
+        button->setProperty("fullLabel", text);
+        button->setText(text);
+    }
+
+    // The reply row carries each key in its label (#QG60: "Discuss (Enter)"). Five of those do not
+    // fit a narrow card — CardDetail's own minimum width lets the layout squeeze a button below its
+    // size hint, and the label then paints cut off at both ends — so when the row is tight the keys
+    // drop out of the labels first, the way a card row drops its decorative badges before its
+    // meaning (board::fitBadges). Only while the card is actually on screen: a width nothing has
+    // laid out yet says nothing about what fits.
+    void fitButtons()
+    {
+        if (!isVisible() || !m_replyFrame || m_replyFrame->isHidden())
+            return;
+        const QList<QPushButton *> row{m_comment, m_discuss, m_plan, m_execute, m_verify};
+        const int spacing = 6, margins = 16;
+        int wide = 0, shown = 0;
+        for (QPushButton *button : row) {
+            if (button->isHidden())
+                continue;
+            const QString label = button->property("fullLabel").toString();
+            const QString was = button->text();
+            button->setText(label);
+            wide += button->sizeHint().width();
+            button->setText(was);
+            ++shown;
+        }
+        const bool keys = wide + qMax(0, shown - 1) * spacing <= m_replyFrame->width() - margins;
+        for (QPushButton *button : row) {
+            const QString label = button->property("fullLabel").toString();
+            if (label.isEmpty())
+                continue;
+            const QString wanted = keys ? label : labelWithoutKey(label);
+            if (button->text() != wanted)
+                button->setText(wanted);
+        }
+    }
+
+    // The verify line and its button, from the `qa` block the card arrived with (#T71W). Both are
+    // on screen only while the card is in a QA lane: on any other card the recommendation would be
+    // an answer to a question nobody has asked yet.
+    void showVerify()
+    {
+        const QString line = inQaLane() ? board::verifyLine(m_qa) : QString();
+        m_verifyLine->setText(line.isEmpty()
+                                  ? QString()
+                                  : QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                        .arg(theme::TextMuted.name(), line.toHtmlEscaped()));
+        m_verifyLine->setVisible(!line.isEmpty());
+        m_verify->setVisible(inQaLane());
+        m_verify->setEnabled(!m_busy && hasVerifier());
+        const QString label = board::verifyLabel(m_qa);
+        m_verify->setToolTip(hasVerifier()
+                                 ? QStringLiteral("Hand the card to a new terminal pane on %1, from "
+                                                  "a different provider family than the one that "
+                                                  "implemented it; it runs the QA checklist (v)")
+                                       .arg(label)
+                                 : QStringLiteral("No verifier is available for this card: %1")
+                                       .arg(line.isEmpty() ? QStringLiteral("the board has not said who should check it")
+                                                           : line));
+        fitButtons();
     }
 
     // Two short lines of facts under the pickers, keys muted, the file a link that opens it.
@@ -1558,11 +1714,13 @@ private:
     }
 
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
+    QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_discuss = nullptr, *m_plan = nullptr, *m_execute = nullptr, *m_comment = nullptr;
+    QPushButton *m_verify = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
@@ -1575,6 +1733,7 @@ private:
     // `## Issue` text an edit starts from and is compared with.
     QString m_hash, m_issue;
     QJsonObject m_front;
+    QJsonObject m_qa;                 // the worker's verifier recommendation for this card (#T71W)
     QString m_statusValue;
     QStringList m_sections;           // the body's `## ` headings, for "has it a plan?"
     QString m_busyMode;               // "discuss" or "plan" while a turn runs
@@ -1848,6 +2007,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     };
     m_detail->onCancel = [this] { send({{QStringLiteral("type"), QStringLiteral("cancel")}}); };
     m_detail->onExecute = [this](const QString &note) { executeCard(note); };
+    m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
     m_detail->onModeHint = [this](const QString &mode) {
         if (!onHint)
             return;
@@ -1855,6 +2015,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.plan"), QStringLiteral("p"));
         else if (mode == QStringLiteral("execute"))
             onHint(QStringLiteral("board.execute"), QStringLiteral("x"));
+        else if (mode == QStringLiteral("verify"))
+            onHint(QStringLiteral("board.verify"), QStringLiteral("v"));
         else
             onHint(QStringLiteral("board.discuss"), QStringLiteral("Enter"));
     };
@@ -2814,6 +2976,7 @@ void BoardView::updateDetailLayout()
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
         "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>x</b> execute &nbsp; "
+        "<b>v</b> verify &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
         "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
@@ -2821,7 +2984,7 @@ void BoardView::updateDetailLayout()
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b>/<b>Tab</b> reply &nbsp; "
         "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>x</b> execute "
-        "&nbsp; <b>Ctrl+Shift+Enter</b> comment only");
+        "&nbsp; <b>v</b> verify &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     const bool stacked = width() < kStackedWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     if (m_keys->text() != keys)
@@ -2988,6 +3151,8 @@ void BoardView::cardAction(const QString &action)
     }
     if (action == QStringLiteral("plan"))
         m_detail->plan();
+    else if (action == QStringLiteral("verify"))
+        m_detail->verify();
     else
         m_detail->execute();
 }
@@ -3030,6 +3195,44 @@ void BoardView::executeCard(const QString &note)
                                                          : QStringLiteral("\n\n") + note)}});
     onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
                                            m_detail->hasAcceptance(), note));
+}
+
+// Verify (#T71W): the card goes to a terminal pane on the verifier the worker recommends — a
+// different provider family from the one that implemented it. The board records the hand-off the
+// way Execute does, minus the two writes that would be wrong here: the card keeps its QA status
+// (only the verdict moves it) and its assignee (the implementer is still the implementer). Then
+// the window opens the pane on that runner (`onVerifyCard`), whose agent — or guest CLI — gets the
+// QA brief (board::verifyTask).
+void BoardView::verifyCard(const QString &note)
+{
+    const QString card = m_detail->cardId();
+    if (card.isEmpty())
+        return;
+    if (!onVerifyCard) {
+        m_detail->showError(QStringLiteral("This window cannot open a terminal pane for the card."));
+        return;
+    }
+    const QJsonObject qa = m_detail->qa();
+    const QString runner = board::verifyRunner(qa);
+    if (runner.isEmpty())
+        return;                       // CardDetail::verify() has already said why on the card
+    const QString label = board::verifyLabel(qa);
+    const QString why = qa.value(QStringLiteral("recommended")).toObject()
+                            .value(QStringLiteral("why")).toString();
+    QString text = QStringLiteral("Verify · handed to a new terminal pane on %1").arg(label);
+    if (!why.isEmpty())
+        text += QStringLiteral(" · ") + why;
+    if (!note.isEmpty())
+        text += QStringLiteral("\n\n") + note;
+    send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
+          {QStringLiteral("kind"), QStringLiteral("progress")}, {QStringLiteral("text"), text}});
+    // The canonical signature is the `qa` block's; the card's own field is the fallback for a
+    // worker that sends no `qa` (and then there is no runner either, so this is belt and braces).
+    QString implementedBy = qa.value(QStringLiteral("implemented_by")).toString();
+    if (implementedBy.isEmpty())
+        implementedBy = m_detail->front().value(QStringLiteral("implemented_by")).toString();
+    onVerifyCard(card, runner,
+                 board::verifyTask(card, m_detail->title(), label, implementedBy, note));
 }
 
 void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)
@@ -3246,10 +3449,13 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         editSelected();
         return true;
     }
-    // `p` plans and `x` executes the open card, or the selected one (opening it first) (#XS6Q).
-    if ((text == QStringLiteral("p") || text == QStringLiteral("x"))
+    // `p` plans, `x` executes and `v` verifies the open card, or the selected one (opening it
+    // first) (#XS6Q; `v` is #T71W).
+    if ((text == QStringLiteral("p") || text == QStringLiteral("x") || text == QStringLiteral("v"))
         && (detailOpen() || !m_selected.isEmpty())) {
-        cardAction(text == QStringLiteral("p") ? QStringLiteral("plan") : QStringLiteral("execute"));
+        cardAction(text == QStringLiteral("p") ? QStringLiteral("plan")
+                   : text == QStringLiteral("v") ? QStringLiteral("verify")
+                                                 : QStringLiteral("execute"));
         return true;
     }
     if (key->key() == Qt::Key_Escape && detailOpen()) {

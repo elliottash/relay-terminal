@@ -415,6 +415,47 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
 - **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run
   commands and write files from a card thread. Discuss and Plan now cannot; that is Execute's job.
 
+### 4.10 Verify: the card names its cross-provider verifier (#T71W, 2026-09-19)
+
+A card in a QA lane says *who* should check it, and one key opens them. The recommendation is the
+worker's (`backend/relay_core/qa_verifiers.py`): the ranking, the lineage rule and what is actually
+installed or keyed on this machine are all its business, and it arrives with the card as a `qa`
+object on `board_card_get` (its shape is in the card, #T71W, under "Where it shows"). The GUI only
+reads it, so the order can change without touching a widget. Protocol: 19. Evidence:
+`docs/qa_evidence/2026-09-19-cross-provider-qa/`.
+
+- **The line** sits under the fields, in the same muted ink, and only while the card's status is
+  `needs-qa-*`: *"Verify with Codex (installed) · then GLM-5.3 · Claude skipped: implemented this
+  card"*. The parenthesis is how that verifier is reachable here — `guest:` is a CLI on PATH
+  ("installed"), `preset:` a stored key. With nothing available it reads *"No verifier available:
+  Claude skipped: implemented this card · Codex: not installed · Kimi: no key"*, so the reader knows
+  what to install rather than only that the button is dead (`board::verifyLine`).
+- **Verify (v)** stands beside Execute, in the same agent outline — it also leaves the board — and
+  is on screen only in a QA lane, enabled only when a runner exists.
+- **What it writes.** One `board_comment` of kind `progress`: *"Verify · handed to a new terminal
+  pane on Codex · <why the ranking chose it>"*, with the reply box's words after it as the owner's
+  note. **No status change and no assignee change**: the card stays in its QA lane until the
+  verifier's own verdict moves it, and the implementer stays the implementer.
+- **The pane.** A `preset:<id>` runner is an ordinary Relay agent pane created on that preset
+  (`createPane {preset}`) and handed the brief with `startBoardTask`, so the card travels with it as
+  `ask {cards: [id]}`. A `guest:<id>` runner is Claude Code or Codex launched in the pane's own
+  shell with the brief as its **first positional prompt** — both CLIs take one, and
+  `relay_core.guest_launch` passes a launch's `extra` through after the flags — so the guest starts
+  on the card instead of at an empty prompt. A guest has no `board_*` tools, so the brief says where
+  the card and its thread live and what to do without them.
+- **The brief** (`board::verifyTask`): read the card and its `## QA checklist`, run every item and
+  write down what was actually seen, put the evidence under the card's
+  `docs/qa_evidence/<date>-<slug>/` in files named `qa-…`, write `## Verdict` with
+  `board_update_card`, then `board_move_card` to `done` or back to `in-progress` with the failures
+  on the thread, and sign the evidence commit `Verified-By: <provider/model>`. **Never fix the code
+  yourself** — a verifier that edits the code becomes its implementer and the card would need
+  verifying again; what it finds goes on the thread or into a new bug card.
+- **The other half of the signature.** The Execute brief now asks for an `Implemented-By:
+  <provider/model>` trailer on every commit for the card, and says the card's own `implemented_by`
+  is stamped by the board, so no agent is asked to type a signature it can only guess at.
+- **Keys**: `v` on the open card and on the list (which opens the card first), the hint
+  `board.verify` on a click, and `v` in both key legends.
+
 ## 5. Referencing cards from the terminal
 
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker
