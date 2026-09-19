@@ -583,7 +583,7 @@ One configurable model per job. Backend: `backend/relay_core/roles.py` (resoluti
 call sites in `agent.py`, `subagents.py`, `session_protocol.py`, `observe_protocol.py` and `worker.py`;
 tests: `tests/test_roles.py`. Source: `issues/features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md` (owner,
 2026-09-17); the `planning` role (13.11):
-`issues/features/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md` (owner, 2026-09-19). All
+`issues/features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md` (owner, 2026-09-19). All
 additive: existing fields keep their meaning, and a worker that gets no `roles` behaves exactly as before.
 The newest role is `planning`, which serves plan-mode turns: by default the pane's own model pushed to
 `max` reasoning, so a plan is investigated harder without changing the pane's model (13.11).
