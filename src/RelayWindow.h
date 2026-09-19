@@ -1599,6 +1599,107 @@ private:
         return row;
     }
 
+    // Options › Claude Code and Codex (owner, 2026-09-19: "you should be able to pick the model
+    // and reasoning effort for those"). Two rows per guest, stored as `guests/<guest>/model` and
+    // `guests/<guest>/effort`; "Default" removes the key and leaves the choice to the CLI. The
+    // lists are the worker's (its `guest:` preset rows, 29.3): claude's aliases, and codex's own
+    // catalog once `codex debug models` has answered — until then, and for any name the list does
+    // not hold, the model is a text row. Both routes read the same two keys: the harness gets them
+    // in the `guest` block, the terminal launch as `--model` / `--effort` (codex: `-m` and
+    // `-c model_reasoning_effort=`), and a pane already on that guest is moved at once.
+    relay::SettingsSection guestAgentsSection() {
+        relay::SettingsSection section;
+        section.id = QStringLiteral("guests");
+        section.title = QStringLiteral("Claude Code and Codex");
+        section.blurb = QStringLiteral(
+            "Claude Code and Codex are picked in a pane's model box like any model, and run with "
+            "your own login. These are the model and the reasoning effort each one starts with. "
+            "Default leaves the choice to the CLI's own settings. /model claude opus and /effort "
+            "change them for one pane while it runs.");
+        const QJsonArray presets = m_active ? m_active->guestPresets() : QJsonArray();
+        const QList<QPair<QString, QString>> guests{{QStringLiteral("claude"), QStringLiteral("Claude Code")},
+                                                    {QStringLiteral("codex"), QStringLiteral("Codex")}};
+        const QString useDefault = QStringLiteral("default");
+        for (const auto &entry : guests) {
+            const QString guest = entry.first, name = entry.second;
+            QJsonObject preset;
+            for (const auto &item : presets)
+                if (item.toObject().value(QStringLiteral("guest")).toString() == guest) preset = item.toObject();
+            relay::SettingRow heading;
+            heading.kind = relay::SettingRow::Heading;
+            heading.id = QStringLiteral("heading:guests/") + guest;
+            heading.label = name;
+            section.rows << heading;
+            if (!preset.isEmpty() && !preset.value(QStringLiteral("installed")).toBool()) {
+                relay::SettingRow missing;
+                missing.kind = relay::SettingRow::Info;
+                missing.id = QStringLiteral("info:guests/") + guest;
+                missing.label = QStringLiteral("%1 is not installed: no `%2` on PATH.").arg(name, guest);
+                section.rows << missing;
+                continue;
+            }
+            const QString modelKey = guestSettingKey(guest, QStringLiteral("model"));
+            const QString effortKey = guestSettingKey(guest, QStringLiteral("effort"));
+            const QString model = QSettings().value(modelKey).toString().trimmed();
+            const QString effort = QSettings().value(effortKey).toString().trimmed();
+            auto store = [this, guest](const QString &key, const QString &value, const QString &useDefault) {
+                if (value.isEmpty() || value == useDefault) QSettings().remove(key);
+                else QSettings().setValue(key, value);
+                for (Pane *pane : allPanes()) pane->guestOptionsChanged(guest);
+                refreshSettingsPanes();
+            };
+            const QJsonArray models = preset.value(QStringLiteral("models")).toArray();
+            QStringList efforts;
+            for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) efforts << level.toString();
+            if (models.isEmpty()) {
+                // No list yet (codex's catalog is fetched in the background) or no worker at all:
+                // the name is typed, exactly as the CLI's own --model takes it.
+                relay::SettingRow row = textRow(modelKey, QStringLiteral("Model"),
+                    QStringLiteral("The model %1 starts on, as its own --model takes it").arg(name),
+                    QStringLiteral("default: the CLI's own"),
+                    [store, modelKey, useDefault](const QString &value) { store(modelKey, value.trimmed(), useDefault); });
+                row.aliases = QStringLiteral("claude codex guest model opus sonnet fable gpt");
+                section.rows << row;
+            } else {
+                QStringList values{useDefault}, labels{QStringLiteral("Default (the CLI's own)")};
+                for (const auto &item : models) {
+                    const QJsonObject entryModel = item.toObject();
+                    const QString id = entryModel.value(QStringLiteral("id")).toString();
+                    if (id.isEmpty()) continue;
+                    values << id;
+                    labels << entryModel.value(QStringLiteral("label")).toString(id);
+                    if (id == model) {
+                        // The efforts this model takes, when the guest says: codex's differ by model.
+                        QStringList own;
+                        for (const auto &level : entryModel.value(QStringLiteral("efforts")).toArray()) own << level.toString();
+                        if (!own.isEmpty()) efforts = own;
+                    }
+                }
+                if (!model.isEmpty() && !values.contains(model)) { values << model; labels << model; }   // typed by hand earlier
+                relay::SettingRow row = choiceRow(QStringLiteral("option:") + modelKey, QStringLiteral("Model"),
+                    QStringLiteral("The model %1 starts on").arg(name), values, labels,
+                    model.isEmpty() ? useDefault : model, useDefault,
+                    [store, modelKey, useDefault](const QString &value) { store(modelKey, value, useDefault); });
+                row.aliases = QStringLiteral("claude codex guest model opus sonnet fable gpt");
+                section.rows << row;
+            }
+            QStringList values{useDefault}, labels{QStringLiteral("Default (the CLI's own)")};
+            for (const QString &level : std::as_const(efforts)) { values << level; labels << level; }
+            if (!effort.isEmpty() && !values.contains(effort)) { values << effort; labels << effort; }
+            relay::SettingRow row = choiceRow(QStringLiteral("option:") + effortKey, QStringLiteral("Reasoning effort"),
+                QStringLiteral("How hard %1 thinks before it answers; /effort changes it for one pane").arg(name),
+                values, labels, effort.isEmpty() ? useDefault : effort, useDefault,
+                [store, effortKey, useDefault](const QString &value) { store(effortKey, value, useDefault); });
+            row.aliases = QStringLiteral("claude codex guest reasoning effort thinking low medium high max");
+            section.rows << row;
+        }
+        return section;
+    }
+    // One spelling of the key, shared with Pane::guestSetting.
+    static QString guestSettingKey(const QString &guest, const QString &key) {
+        return QStringLiteral("guests/%1/%2").arg(guest, key);
+    }
+
     QList<relay::SettingsSection> settingsSections() {
         QList<relay::SettingsSection> sections;
         QSettings settings;
@@ -1878,6 +1979,7 @@ private:
         // Right after Models, because a local endpoint is one more thing the model dropdown can
         // offer — it just has no key, so it is not in the API keys dialog (card #24XJ).
         sections << localModels().section();
+        sections << guestAgentsSection();
 
         relay::SettingsSection terminal;
         terminal.id = QStringLiteral("terminal");
@@ -2297,6 +2399,19 @@ private:
         privacy.rows << toggleRow(QStringLiteral("instructions/project_auto"),
                                   QStringLiteral("Load project instruction files automatically"),
                                   QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);
+        {
+            // Review B1 (protocol 26.7): the Sessions list reads Claude Code's and Codex's own
+            // transcripts into Relay's index so they can be listed, searched and resumed. The
+            // copy never leaves this machine, but it is a copy of every prompt and reply, and
+            // until this row there was no way to say no.
+            relay::SettingRow row = toggleRow(QStringLiteral("sessions/index_guests"),
+                                  QStringLiteral("List Claude Code and Codex sessions"),
+                                  QStringLiteral("Relay copies their prompts and replies into its own index (on this "
+                                                 "machine only) so Sessions can search and resume them. Off removes "
+                                                 "the copies; their own files are never touched"), true);
+            row.aliases = QStringLiteral("claude codex guest sessions index transcripts history privacy search");
+            privacy.rows << row;
+        }
         sections << privacy;
 
         relay::SettingsSection shortcuts;

@@ -626,6 +626,34 @@ public:
     int foregroundPid() const { return m_backend ? int(m_backend->foregroundProcessId()) : 0; }
     void sendShellInput(const QString &text) { if (m_backend) m_backend->sendText(text, false); }
     QList<QPair<QString, QString>> storedModels() const { return m_stored; }
+    // The worker's guest rows (29.3), for Options › Claude Code and Codex: whether each guest is
+    // installed, the models it offers and the reasoning efforts those take.
+    QJsonArray guestPresets() const {
+        QJsonArray rows;
+        for (const auto &item : m_presets)
+            if (item.toObject().value(QStringLiteral("group")).toString() == QStringLiteral("guest")) rows.append(item);
+        return rows;
+    }
+    // Options changed `guests/<guest>/model` or `…/effort`. A pane that is on that guest right now
+    // asks its harness to move (`set_model` with the `guest` block, as `/model claude opus` does);
+    // every other pane picks the new default up the next time it starts the guest.
+    void guestOptionsChanged(const QString &guest) {
+        if (guestOfPreset(m_currentPreset) != guest || !m_configured) return;
+        const QJsonObject preset = presetById(m_currentPreset);
+        m_guestRequest = QJsonObject();
+        QJsonObject request{{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
+                            {"base_url", preset.value(QStringLiteral("base_url")).toString()},
+                            {"model", QString()}};
+        request.insert(QStringLiteral("guest"), takeGuestRequest(m_currentPreset));
+        send(request);
+        status(QStringLiteral("%1 takes the new setting from its next turn.").arg(guestDisplayName(guest)));
+        changed();
+    }
+    // `guests/<guest>/<key>` (model, effort): the default a guest is started with, "" for the
+    // CLI's own. One spelling, shared with the Options page (RelayWindow::guestSettingKey).
+    static QString guestSetting(const QString &guest, const QString &key) {
+        return QSettings().value(QStringLiteral("guests/%1/%2").arg(guest, key)).toString().trimmed();
+    }
     QString currentPreset() const { return m_currentPreset; }
     QString model() const { return m_model; }
     QString sessionId() const { return m_sessionId; }
@@ -6071,6 +6099,11 @@ public:
             message.insert(QStringLiteral("type"), QStringLiteral("conversations"));
             message.insert(QStringLiteral("workspace"), self->m_workspace);
             message.insert(QStringLiteral("id"), QStringLiteral("conv-list"));
+            // Options › Privacy (review B1, protocol 26.7): whether Relay indexes the guests' own
+            // sessions at all. It travels with every listing, so the worker needs no second
+            // message and a change takes effect at the next list.
+            message.insert(QStringLiteral("index_guests"),
+                           QSettings().value(QStringLiteral("sessions/index_guests"), true).toBool());
             self->send(message);
         };
         view->onPreview = [self](const QString &sessionId, const QString &query) {
@@ -9765,9 +9798,15 @@ private:
     QJsonObject takeGuestRequest(const QString &presetId) {
         QJsonObject staged = m_guestRequest;
         m_guestRequest = QJsonObject();
-        if (guestOfPreset(presetId).isEmpty()) return QJsonObject();
+        const QString guest = guestOfPreset(presetId);
+        if (guest.isEmpty()) return QJsonObject();
         if (!staged.contains(QStringLiteral("permissions")))
             staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
+        // Options › Claude Code and Codex: the model and the reasoning effort this guest starts
+        // with, unless the pick named its own (`/model claude opus`).
+        for (const QString &key : {QStringLiteral("model"), QStringLiteral("effort")})
+            if (!staged.contains(key))
+                if (const QString value = guestSetting(guest, key); !value.isEmpty()) staged.insert(key, value);
         return staged;
     }
 
@@ -9895,6 +9934,12 @@ public:
         QStringList arguments{QStringLiteral("-m"), QStringLiteral("relay_core.guest_launch"), guest,
                               QStringLiteral("--runtime-dir"), m_runtime.path(), QStringLiteral("--cwd"), directory,
                               QStringLiteral("--port"), QString::number(port), QStringLiteral("--python"), m_python};
+        // The same defaults as the harness route (Options › Claude Code and Codex), as the CLI's
+        // own flags on the launch line; `guest_launch` leaves them out when `extra` names its own.
+        if (const QString model = guestSetting(guest, QStringLiteral("model")); !model.isEmpty())
+            arguments << QStringLiteral("--model") << model;
+        if (const QString effort = guestSetting(guest, QStringLiteral("effort")); !effort.isEmpty())
+            arguments << QStringLiteral("--effort") << effort;
         if (!extra.isEmpty()) arguments << QStringLiteral("--") << extra;
         launch->setArguments(arguments);
         m_guestLaunch = launch;
