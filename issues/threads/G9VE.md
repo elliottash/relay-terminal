@@ -27,3 +27,26 @@ Which providers may a failing turn fall over to? My recommendation: only ones al
 
 <!-- relay:entry 20260919T055426Z-bv author=agent kind=event model=glm-5.3 pane=7ee5d45b turn=6ffe5e5d778c463194abca45138bb113/5bb6146181b74cf69fcec26aab58a1ca -->
 - ✦ agent moved this card · In progress → Needs QA (LLM) · Implemented on the exact tree (build + backend tests green); checklist and evidence on the card. · evidence docs/qa_evidence/2026-09-19-provider-failover/
+
+<!-- relay:entry 20260919T183000Z-rv author=agent kind=note model=claude-fable-5.1 -->
+Review findings fixed on main, 2026-09-19. A provider that had already streamed part of an answer no
+longer hands the turn on (a per-call `produced` flag, the rule 15.2 uses for the stall retry); the
+failed provider's open HTTP response is closed before the swap; the swap now goes through the same
+code as `set_model` (history adapted to the new provider's dialect, context window, `max_tokens`,
+effort) and the restore undoes all of it; `_end_failover` runs in `_end_turn` beside
+`_end_vision_turn`, so the restore and its "Back to <model> (<preset>)." note
+(`provider_retry {reason: "failover_ended"}`) come before the turn's terminal event; a `set_model`
+arriving mid-failover waits for the turn's end instead of being overwritten; the Flash/Main decision
+reads the preset's Flash row directly, so an OpenRouter or local pane is no longer mistaken for a
+Flash one; two keys on one host (glm + glm-coding) count as one provider; a chain that ends in
+failure reports the *first* provider's error, prefixed with what else was tried, and carries only
+that error's `code`/`resets_at`; a resolver that raises is logged (`provider_failover_unavailable`)
+instead of swallowed; the note is emitted after the thinking block is closed. Protocol 15.2.1/15.2.2
+are in order and at the same depth, the `provider_retry` schema lists every reason it has, and
+`failover_candidates`' docstring no longer claims an order it does not have.
+
+One QA checklist item cannot be driven as written: **"A Flash pane/subagent fails over within
+Flash"** — the subagent half is untestable, because `subagents.py` builds its `Agent` without a
+roles resolver, so a subagent never fails over at all (by design, per the card). The pane half is
+covered by `tests/test_failover.py`. Whether subagents should fail over is the owner's call; giving
+them a resolver is a change to `subagents.py`, outside this review's scope.

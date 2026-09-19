@@ -13,6 +13,7 @@ resolver records a one-line warning, which the worker emits in ``model_roles``.
 from __future__ import annotations
 
 import copy
+import urllib.parse
 from dataclasses import dataclass
 
 from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
@@ -20,6 +21,14 @@ from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, m
                       validate_tier)
 from .provider import ProviderConfig
 from . import hosted, localmodels
+
+
+def _hostname(base_url: str) -> str:
+    """The host a preset's endpoint lives on, for "two keys, one service" (card #G9VE)."""
+    try:
+        return (urllib.parse.urlsplit(base_url or "").hostname or "").lower()
+    except ValueError:
+        return ""
 
 
 def _hosted(preset_id) -> bool:
@@ -467,19 +476,29 @@ class RoleResolver:
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
     def failover_candidates(self, tier: str, exclude) -> list[Resolved]:
-        """Providers a failing turn may move to, best first (owner, 2026-09-19): the tier's own
-        model on every other preset with a stored key, then Relay Free.
+        """Providers a failing turn may move to: the tier's own model on every other keyed preset,
+        in the catalog's order, and Relay Free last of all (owner, 2026-09-19).
+
+        The order inside the keyed presets is `PRESETS`' own — there is nothing to rank them by,
+        since Relay cannot know which of the user's keys is healthy — and only Relay Free's place
+        is deliberate: it is the included allowance, so it is spent only when nothing else answers.
 
         ``exclude`` is the preset ids already tried this turn, the failing provider first: each
-        provider is asked once, after its own transport retries. A preset without a stored key
-        never appears, because a turn must not start spending a key the user did not choose, and
-        neither does a local endpoint: it is not a keyed preset, and its answers are the
+        provider is asked once, after its own transport retries. A preset whose endpoint has the
+        same hostname as one already tried is skipped too: Z.AI's standard API and its Coding Plan
+        are two keys for one service, and a service that is down is down for both. A preset without
+        a stored key never appears, because a turn must not start spending a key the user did not
+        choose, and neither does a local endpoint: it is not a keyed preset, and its answers are the
         deterministic kind a failover would only repeat.
         """
         tier = validate_tier(tier)
+        hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
+        hosts.discard("")
         out: list[Resolved] = []
         for preset_id, preset in PRESETS.items():
             if preset_id in exclude or preset.hosted:
+                continue
+            if _hostname(preset.base_url) in hosts:
                 continue
             if not self.has_key(preset_id):
                 continue

@@ -1384,8 +1384,12 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   window reopens; a spent allowance is never waited out), and a local model server is excluded:
   its 5xx are deterministic and its loading 503 has its own fixed wait. A provider that still
   fails a step hands the turn to another one (`agent.py` `_begin_failover`, card #G9VE): the same
-  tier's model on the next keyed preset, then Relay Free, at most two, for that turn only — the
-  pane keeps the model the user chose. Options › Models can turn it off (`agent/failover`).
+  tier's model on the next keyed preset — never a second key on the same host, never after part of
+  an answer has been streamed — then Relay Free, at most two, for that turn only. The move converts
+  the history to the new provider's dialect and follows its context window, and the restore, before
+  the turn's terminal event, puts all of it back, so the pane keeps the model the user chose; if the
+  chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
+  Models can turn it off (`agent/failover`).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
   `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,

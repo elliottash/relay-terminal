@@ -7156,9 +7156,16 @@ private:
             ensureLineStart();
             printInline(QStringLiteral("🖼 No vision model · Options › Models › Vision model\n"), Ink::Error);
         } else if (type == QStringLiteral("provider_retry")) {
-            // The model went silent; the worker is retrying this turn once. Say so in the transcript.
+            // The model went silent, the request was refused, or the provider keeps failing and the
+            // turn has moved to another one (#G9VE). Say which in the transcript: a failover is not
+            // a warning — the turn is running, on a provider that answers — and its closing line
+            // only says the pane has the model the user chose back.
+            const QString reason = event.value(QStringLiteral("reason")).toString();
+            const QString mark = reason == QStringLiteral("failover")        ? QStringLiteral("⇄ ")
+                               : reason == QStringLiteral("failover_ended")  ? QStringLiteral("↩ ")
+                                                                            : QStringLiteral("⚠ ");
             ensureLineStart();
-            printInline(QStringLiteral("⚠ ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
+            printInline(mark + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
             // While a turn runs the clock owns the status line; a step note rides along with it

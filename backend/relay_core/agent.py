@@ -28,7 +28,7 @@ from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, validate_mode, validate_plan_args,
                        write_plan)
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort,
-                      model_supports_vision, provider_tier_model, resolve_preset, validate_effort)
+                      model_supports_vision, resolve_preset, tier_default, validate_effort)
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
@@ -79,6 +79,16 @@ def _error_text(event: dict) -> str | None:
     """The message of a failed turn, for the log. Relay's own error strings never quote a prompt,
     a tool result or a provider body (provider.py strips those), and logs.scrub() masks keys."""
     return str(event.get("text") or "")[:300] if event.get("event") == "error" else None
+
+
+def _provider_name(model: str, preset) -> str:
+    """How a failover note names where a turn is running (card #G9VE): the model, and the preset
+    it came from, because two stored keys for one vendor (Z.AI's standard API and its Coding Plan)
+    serve the same model id and the user needs to know which one was spent. Relay Free's label
+    already names it, and its model ids mean nothing to anyone."""
+    if preset is None:
+        return model
+    return preset.label if preset.hosted else f"{model} ({preset.label})"
 
 
 def _host(base_url: str) -> str:
@@ -333,6 +343,10 @@ class Agent:
         # The failover swap a turn is running under, or None (card #G9VE): the pane's own
         # provider, config and preset, put back when the turn ends.
         self._failover: dict | None = None
+        # Whether the model call now in flight has streamed any of an answer. Reset before every
+        # `complete()`; a call that produced output is never failed over or retried, because the
+        # user is already reading what it said (card #G9VE, the rule of 15.2).
+        self._produced_output = False
         # A set_model that arrived while a turn ran (issue 3ES1): applied before the next provider
         # request of that turn, or when it ends. `on_model_applied(agent)` lets the worker follow it
         # (subagent inheritance, role defaults) exactly as it follows an idle switch.
@@ -557,12 +571,22 @@ class Agent:
     def set_model(self, config: ProviderConfig, preset_id: str | None = None,
                   context_window: int | None = None, provider=None) -> None:
         """Swap the provider between turns, keeping the conversation."""
-        self.config = config
-        self.preset = resolve_preset(preset_id, config.base_url, config.model)
+        preset = resolve_preset(preset_id, config.base_url, config.model)
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider:
             self.provider = _provider_for(config, self.stall_timeout_s)
+        self._adopt_model(config, preset, context_window)
+
+    def _adopt_model(self, config: ProviderConfig, preset, context_window: int | None = None) -> None:
+        """Everything a model change does apart from choosing the provider object.
+
+        Shared by `set_model` and by the failover swap and its restore (card #G9VE), which used to
+        assign `self.config` alone: the conversation then went to the new provider in the old one's
+        reasoning dialect, and the context bar kept measuring it against the old window.
+        """
+        self.config = config
+        self.preset = preset
         self._apply_stall_timeout()
         if self.effort is not None:
             self.set_effort(self.effort)
@@ -611,7 +635,8 @@ class Agent:
         window = context_window or context_window_for(preset)
         with self._model_lock:
             fit = self.switch_fit(config, window)
-            same = (config.base_url, config.model) == (self.config.base_url, self.config.model) and not self._vision
+            same = ((config.base_url, config.model) == (self.config.base_url, self.config.model)
+                    and not self._vision and not self._failover)
             if "refuse" in fit and not same:
                 return {"applies": "refused", "reason": fit["refuse"], "context_window": window}
             if not idle:
@@ -647,7 +672,10 @@ class Agent:
         window = context_window or context_window_for(preset)
         with self._model_lock:
             running = self._vision["model"] if self._vision else self.config.model
-            if (config.base_url, config.model) == (self.config.base_url, self.config.model) and not self._vision:
+            # `self.config` is the failover provider's while a turn is failed over (#G9VE), so a
+            # switch to the model named there is a real switch, not a no-op to be dropped.
+            if ((config.base_url, config.model) == (self.config.base_url, self.config.model)
+                    and not self._vision and not self._failover):
                 self._pending_model = None
                 if self._switching is not None:
                     self._switching["cancelled"] = True
@@ -655,8 +683,9 @@ class Agent:
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
                                    "refused_fields": refused_fields}
-            # An image turn stays on its vision model to the end: the new model applies after it.
-            applies = "turn_end" if self._vision else "next_step"
+            # An image turn stays on its vision model to the end: the new model applies after it,
+            # and so does a turn that has failed over — `_end_failover` would undo a step switch.
+            applies = "turn_end" if (self._vision or self._failover) else "next_step"
             outcome = {"applies": applies, "in_flight_model": running, "context_window": window}
             if self.switch_fit(config, window)["compacts"]:
                 outcome["will_compact"] = True
@@ -700,7 +729,9 @@ class Agent:
         """
         with self._model_lock:
             pending = self._pending_model
-            if pending is None or (at == "step" and self._vision):
+            # A failed-over turn is a vision turn for this purpose: a switch landing at a step
+            # boundary would be overwritten by `_end_failover`, so it waits for the turn's end.
+            if pending is None or (at == "step" and (self._vision or self._failover)):
                 return None
             self._pending_model = None
             window = _pending_window(pending)
@@ -837,6 +868,10 @@ class Agent:
 
     def _provider_emit(self, event: dict) -> None:
         kind = event.get("event")
+        if kind == "delta":
+            # This call has put part of an answer on the user's screen: no retry and no failover
+            # may repeat it (card #G9VE).
+            self._produced_output = True
         if kind == "usage" and isinstance(event.get("usage"), dict):
             self._last_usage = event["usage"]
             sessions_usage.add_usage(self.usage_totals, event["usage"])
@@ -1250,17 +1285,23 @@ class Agent:
         except Exception as exc:
             self._subagents_rollback(batch, [])
             text = str(exc)[:2000] if isinstance(exc, (ValueError, ProviderError)) else f"Agent error ({type(exc).__name__})."
+            # A failover chain that ran out reports the failure that started it, not the last
+            # provider's (card #G9VE); `reported` is the exception whose code, if any, travels.
+            reported = exc
+            chain = self._failover_failure(exc)
+            if chain is not None:
+                text, reported = chain
             self._keep_unfinished_turn(f"failed ({text[:300]})")
             if self.track_requests:
                 self.requests.finish_turn(turn_id, False, self.todos.items)
             failed = {"event": "error", "turn_id": turn_id, "text": text,
                       "open_items": self._open_items(ctx, final=True)}
-            if isinstance(exc, ProviderError) and exc.code:
+            if isinstance(reported, ProviderError) and reported.code:
                 # Relay Free's refusals carry a code (quota_exhausted, free_unavailable, rate_limited)
                 # and when the allowance returns, so the pane can word it and offer a key of the
                 # user's own (protocol 13.9).
-                failed["code"] = exc.code
-                failed["resets_at"] = exc.resets_at
+                failed["code"] = reported.code
+                failed["resets_at"] = reported.resets_at
             self._end_turn(record, failed)
         finally:
             # Backstop: _end_turn already did both for every normal end state (issue EM1E).
@@ -1376,12 +1417,20 @@ class Agent:
                     raise
 
     def _failover_tier(self) -> str:
-        """The tier to fail over within: Flash while this agent runs its provider's Flash model
+        """The tier to fail over within: Flash while this agent runs its provider's own Flash model
         (a Flash pane or subagent), Main otherwise. Lite steps up to Main rather than down: a
-        failing turn is the one thing that must not get slower."""
-        if self.preset:
-            flash_model, _ = provider_tier_model(self.preset.id, "flash")
-            if flash_model == self.config.model:
+        failing turn is the one thing that must not get slower.
+
+        The Flash row is read directly rather than through `provider_tier_model`, which falls back
+        towards Main when a provider has no Flash of its own: a preset with no tier table, a local
+        endpoint, and OpenRouter (whose Main and Flash are the same DeepSeek model) would all
+        answer "flash" for a Main pane and hand the turn to other providers' Flash models.
+        """
+        preset = self.preset
+        if preset is not None:
+            entry = tier_default(preset.id, "flash")
+            if (entry is not None and entry[0] == preset.id and entry[1] == self.config.model
+                    and entry[1] != preset.model):
                 return "flash"
         return "main"
 
@@ -1390,21 +1439,31 @@ class Agent:
 
         Refused while a vision swap owns the provider (it made its own choice for this turn),
         with no roles resolver (a subagent or a test agent: it cannot know which providers are
-        keyed), for an injected provider (its owner decides), when the option is off, and on
-        cancel — a stopped turn stays stopped.
+        keyed), for an injected provider (its owner decides), when the option is off, once this
+        call has streamed part of an answer — the user is reading it, and a second provider would
+        write a second answer under it, which is the rule the stall retry follows (15.2) — and on
+        cancel: a stopped turn stays stopped.
         """
         if (not self.failover or self.roles is None or self._injected_provider or self._vision
-                or self.cancel_event.is_set()):
+                or self._produced_output or self.cancel_event.is_set()):
             return False
         swap = self._failover
         if swap is None:
-            swap = {"provider": self.provider, "config": self.config, "preset": self.preset,
-                    "tried": {self.preset.id} if self.preset else set(), "switches": 0}
+            swap = {"turn_id": record["turn_id"], "provider": self.provider, "config": self.config,
+                    "preset": self.preset, "window": self.context.window, "effort": self.effort,
+                    "tried": {self.preset.id} if self.preset else set(), "switches": 0,
+                    # What the turn's error says if the chain also fails: the model that failed
+                    # first, its exception, and the names of the providers tried after it.
+                    "from_model": self.config.model, "first_error": exc, "names": []}
         if swap["switches"] >= self.FAILOVER_PROVIDERS:
             return False
         try:
             candidates = self.roles.failover_candidates(self._failover_tier(), swap["tried"])
-        except Exception:                                   # a failover must never break the turn
+        except Exception as bad:                            # a failover must never break the turn
+            logs.event(_log, "provider_failover_unavailable", level_name="error",
+                       session=self.session_id, turn=record["turn_id"], step=step,
+                       model=self.config.model, preset=self.preset.id if self.preset else "",
+                       error=f"{type(bad).__name__}: {bad}"[:200])
             return False
         if not candidates:
             return False
@@ -1414,32 +1473,70 @@ class Agent:
         self._failover = swap
         from_model = self.config.model
         from_preset = self.preset.id if self.preset else ""
+        # The failed provider may still hold its HTTP response; once `self.provider` is replaced
+        # nothing can close it, and the turn-end check would only ever look at the replacement.
+        self._ensure_no_open_response(record["turn_id"], "failover")
+        # The note belongs in the transcript, not inside the thinking overlay the dead call opened.
+        self._close_thinking(record)
+        target_preset = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
         self.provider = _provider_for(target.config, self.stall_timeout_s)
-        self.config = target.config
-        self.preset = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
+        # Not `self.config = ...`: the new provider also needs the history in its own dialect, its
+        # own context window and this pane's effort in its own words.
+        self._adopt_model(target.config, target_preset)
+        to_name = _provider_name(target.config.model, target_preset)
+        swap["names"].append(to_name)
+        # Where the turn is now, for the note the restore emits.
+        swap["last_model"], swap["last_preset"] = target.config.model, target.preset_id or ""
         record["retries"] = record.get("retries", 0) + 1
-        text = (f"{from_model} keeps failing; continuing this turn on {target.config.model}.")
+        text = f"{from_model} keeps failing; continuing this turn on {to_name}."
         logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
                    step=step, from_model=from_model, from_preset=from_preset,
                    to_model=target.config.model, to_preset=target.preset_id or "",
                    host=_host(target.config.base_url), error=str(exc)[:160])
         self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "failover",
                    "attempt": swap["switches"], "max_attempts": self.FAILOVER_PROVIDERS,
-                   "from_model": from_model, "to_model": target.config.model, "step": step,
-                   "text": text})
+                   "from_model": from_model, "to_model": target.config.model,
+                   "to_preset": target.preset_id or "", "step": step, "text": text})
         self.emit({"event": "status",
                    "text": f"{from_model} failed · continuing on {target.config.model}"})
         return True
 
     def _end_failover(self) -> None:
-        """Put the pane's own provider back after a turn that failed over. Always runs, however
-        the turn ended, before the turn's terminal event."""
+        """Put the pane's own provider back after a turn that failed over, and say so the way an
+        image turn does. Always runs, however the turn ended, before the turn's terminal event."""
         swap, self._failover = self._failover, None
         if not swap:
             return
         self.provider = swap["provider"]
-        self.config = swap["config"]
-        self.preset = swap["preset"]
+        self.effort = swap["effort"]
+        # The restore is a model change too: the history goes back into this provider's dialect and
+        # the context bar back onto this model's window.
+        self._adopt_model(swap["config"], swap["preset"], swap["window"])
+        back = _provider_name(swap["config"].model, swap["preset"])
+        self.emit({"event": "provider_retry", "turn_id": swap["turn_id"], "reason": "failover_ended",
+                   "attempt": swap["switches"], "max_attempts": self.FAILOVER_PROVIDERS,
+                   "from_model": swap.get("last_model", ""), "from_preset": swap.get("last_preset", ""),
+                   "to_model": swap["config"].model,
+                   "to_preset": swap["preset"].id if swap["preset"] else "",
+                   "text": f"Back to {back}."})
+        self.emit({"event": "status", "text": f"Back to {swap['config'].model}"})
+
+    def _failover_failure(self, exc: Exception) -> tuple[str, Exception] | None:
+        """What a turn that failed over and then failed altogether reports, or None.
+
+        The last provider's message is the wrong one to show: "Relay Free's allowance is spent" is
+        not why the turn failed, the pane's own provider is, and its message is the one that says
+        what to do. The original failure is reported, prefixed with what else was tried, and only
+        the original's `code`/`resets_at` travel with it — a spare provider's quota window is not
+        this pane's to offer a key for (protocol 13.9).
+        """
+        swap = self._failover
+        if swap is None or not swap["names"] or not isinstance(exc, ProviderError):
+            return None
+        names = swap["names"]
+        also = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        first = swap["first_error"]
+        return f"{swap['from_model']} failed; {also} too: {str(first)[:1800]}", first
 
     def _model_call_on_provider(self, record: dict, ctx: dict, step: int) -> dict:
         """One model call, retried once when the provider stalls.
@@ -1459,6 +1556,7 @@ class Agent:
         cut_off = 0
         while True:
             call_started = time.monotonic()
+            self._produced_output = False
             try:
                 return self.provider.complete(self.messages, self.tools(), self._provider_emit,
                                               self.cancel_event)
@@ -1700,8 +1798,10 @@ class Agent:
                    retries=record.get("retries", 0), open_items=len(event.get("open_items") or []),
                    error=_error_text(event), leaked_socket=leaked or None)
         # An image is context for its own turn only (issue EM1E): the model swap goes back and the
-        # pictures leave the conversation here, before the terminal event, so that stays last.
+        # pictures leave the conversation here, before the terminal event, so that stays last. A
+        # failover swap goes back in the same place, and for the same reason (card #G9VE).
         self._end_vision_turn()
+        self._end_failover()
         self._forget_images()
         self.emit(self.turn_summary(record))
         self.emit(event)

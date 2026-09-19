@@ -983,8 +983,13 @@ started answer does not, because that text is already on the user's screen.
 
 New event, emitted before the retried model call:
 
-`provider_retry {turn_id, reason: "stall" | "truncated", attempt, max_attempts, seconds, step, text}`
-(`seconds` only for `"stall"`).
+`provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended",
+attempt, max_attempts, seconds, step, text}`
+
+`seconds` is sent only for `"stall"`, and `turn_id` is absent only for `"http"`, which the transport
+emits without knowing the turn. `"http"` is the transport's retry of a refused request (below);
+`"failover"` and `"failover_ended"` are the move to another provider and the return from it
+(15.2.2), and name the model and preset they move from and to.
 
 Since 2026-09-19 the transport itself also retries a *refused* request — HTTP 408, 409, 429 or any
 5xx from a provider that is not a local model server — up to six times, waiting what a
@@ -1000,24 +1005,7 @@ wait inside the first-token budget.
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 
-#### 15.2.2 A provider that still fails: the turn moves to another one
-
-When a provider fails a step even after those retries (a stall included; a truncated step is a
-budget problem, not a provider that will not answer), the agent continues the turn on the next
-provider that can run it without setup: the same tier's model — Main or Flash — on every other
-preset with a stored key, then Relay Free. Each is asked once, at most two besides the pane's own,
-and never a provider without a stored key, a local endpoint, or one already tried this turn. The
-swap lasts for the rest of the turn; `_end_failover` puts the pane's own model back before the
-turn's terminal event. Every move emits
-
-`provider_retry {turn_id, reason: "failover", attempt, max_attempts, from_model, to_model, step, text}`
-
-plus a `status`, and logs `provider_failover`. Subagents and side calls do not fail over (no
-resolver, injected provider); the whole behaviour is the `failover` agent option (12.1), on by
-default, from Options › Models › "Fall over to a working provider".
-The GUI prints `text` as a note line.
-
-### 15.2.1 A step cut off at the output limit
+#### 15.2.1 A step cut off at the output limit
 
 `max_tokens` is the budget for one model call, and on every provider that streams reasoning the
 thinking is spent from it. Since 2026-09-18 it defaults to *automatic* (`0`), which asks each model
@@ -1041,6 +1029,46 @@ no results is not a conversation a provider accepts.
 Usage is reported for a cut-off response before the failure, so the tokens it spent are counted in
 the session total and by the context tracker. They used to be dropped, which left the accounting
 short by the single largest request of the turn.
+
+#### 15.2.2 A provider that still fails: the turn moves to another one
+
+When a provider fails a step even after those retries (a stall included; a truncated step is a
+budget problem, not a provider that will not answer), the agent continues the turn on the next
+provider that can run it without setup: the same tier's model — Main or Flash — on every other
+preset with a stored key, then Relay Free. Each is asked once, at most two besides the pane's own,
+and never a provider without a stored key, a local endpoint, one already tried this turn, or one
+whose endpoint has the same hostname as a preset already tried (Z.AI's standard API and its Coding
+Plan are two keys for one service, and a service that is down is down for both). A step that has
+already streamed part of an answer is never moved either, for the reason 15.2 gives: that text is
+on the user's screen and a second provider would write a second answer under it.
+
+The move is a model change, not a swapped socket: the failed provider's response is closed first,
+the conversation is converted to the new provider's reasoning dialect (`adapt_history`), and the
+context window, `max_tokens` and this pane's effort follow the model the turn is now running on.
+The swap lasts for the rest of the turn; `_end_failover` puts the pane's own model, window and
+history back before the turn's terminal event, so `done`/`error`/`cancelled` stay last, and a
+`set_model` that arrives meanwhile lands at the turn's end rather than being undone by the restore
+(as an image turn's does, 12.6). Every move emits
+
+`provider_retry {turn_id, reason: "failover", attempt, max_attempts, from_model, to_model,
+to_preset, step, text}`
+
+plus a `status`, and logs `provider_failover`. The restore emits the same event with
+`reason: "failover_ended"` and `{from_model, from_preset}` naming the provider the turn ran on,
+`{to_model, to_preset}` the pane's own, and `text` `Back to <model> (<preset label>).` — both notes
+name the preset as well as the model in their text, because two stored keys for one vendor serve
+the same model id.
+
+When the chain runs out and the turn fails, the `error` reports **the first** provider's failure,
+prefixed with what else was tried ("glm-5.3 failed; kimi-k3 (Kimi · K3) and Relay Free too: …"),
+and carries `code`/`resets_at` only when that first failure had them: a spare provider's spent
+allowance is not what this pane should offer a key for (13.9).
+
+Subagents and side calls do not fail over (no resolver, injected provider); the whole behaviour is
+the `failover` agent option (12.1), on by default, from Options › Models › "Fall over to a working
+provider".
+
+The GUI prints `text` as a note line.
 
 ### 15.3 Socket hygiene
 
