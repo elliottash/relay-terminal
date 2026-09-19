@@ -9851,6 +9851,29 @@ private:
         return t::Text;
     }
 
+    // The SGR for a user line on its band (empty when the setting is "none"): a 24-bit background
+    // and the text colour, bold. Options › Terminal › "Band behind what you typed".
+    static QString echoBandCode(Ink ink) {
+        namespace t = relay::theme;
+        const QString mode = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
+        if (mode == QStringLiteral("none")) return QString();
+        const QColor ground = t::active().terminalBackground.isValid() ? t::active().terminalBackground : t::Background;
+        const bool light = ground.lightnessF() > 0.5;
+        QColor fill;
+        if (mode == QStringLiteral("chrome")) fill = t::SurfaceRaised;
+        else {
+            // The channel colour blended into the ground: strong enough to read as a band, faint
+            // enough that the text on it keeps its contrast (it is measured: see below).
+            const QColor channel = ink == Ink::User ? t::Shell : t::Agent;
+            const qreal w = light ? 0.16 : 0.22;
+            fill = QColor(int(channel.red() * w + ground.red() * (1 - w)), int(channel.green() * w + ground.green() * (1 - w)),
+                          int(channel.blue() * w + ground.blue() * (1 - w)));
+        }
+        const QColor text = t::Text;
+        return QStringLiteral("\x1b[1;48;2;%1;%2;%3;38;2;%4;%5;%6m")
+            .arg(fill.red()).arg(fill.green()).arg(fill.blue()).arg(text.red()).arg(text.green()).arg(text.blue());
+    }
+
     static QByteArray inkCode(Ink ink) {
         // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
         // Everything printed into the terminal is frozen at the colour it was written in — the
@@ -10014,9 +10037,30 @@ private:
             return;
         }
         out += wrapped(m_markdown.finish());
-        const QString code = QString::fromUtf8(inkCode(ink));
+        // The lines the user typed sit on a band (owner, 2026-09-19, after Claude Code's grey band
+        // behind each prompt): "channel" tints it in the destination colour — cyan for the shell,
+        // violet for the agent — with the theme's text colour on it, so the band says where the
+        // line went and the words stay at full contrast; "chrome" is the theme's raised surface
+        // (copper on Dark Copper); "none" is the bold coloured text of before. Each row is filled
+        // to the pane's edge with EL, which the engine paints in the current background.
+        const QString band = (ink == Ink::User || ink == Ink::UserAgent) ? echoBandCode(ink) : QString();
+        const QString code = band.isEmpty() ? QString::fromUtf8(inkCode(ink)) : band;
+        // The band runs to the pane's edge: each row is padded with spaces to the column count
+        // (the wrapper drops a space that would land past the edge, so a row never overflows),
+        // which the engine keeps as cells carrying the band's background. A row longer than the
+        // pane wraps at a word and its band covers the words.
+        const int columns = band.isEmpty() || !m_backend ? 0 : m_backend->columns();
         QString body = code;
-        for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n") + code; else body += ch; }
+        int width = 0;
+        const auto pad = [&] {
+            if (columns > 0 && width > 0 && width < columns) body += QString(columns - width, QLatin1Char(' '));
+            width = 0;
+        };
+        for (const QChar ch : clean) {
+            if (ch == '\n') { pad(); body += QStringLiteral("\x1b[0m\n") + code; }
+            else { body += ch; if (!ch.isLowSurrogate()) ++width; }
+        }
+        pad();
         body += QStringLiteral("\x1b[0m");
         out += wrapped(body) + terminalLines(m_wrap.flush());
         m_atLineStart = clean.endsWith('\n');

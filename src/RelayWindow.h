@@ -1757,6 +1757,18 @@ private:
                                    QStringLiteral("A file, folder, URL or #card Relay can open is green at rest, not only under "
                                                   "the pointer; a colour a program chose stays"),
                                    true, [this](bool) { for (Pane *pane : allPanes()) pane->applyTerminalSettings(); });
+        {
+            const QString current = QSettings().value(QStringLiteral("terminal/echo_band"), QStringLiteral("channel")).toString();
+            terminal.rows << choiceRow(QStringLiteral("option:echo_band"),
+                                       QStringLiteral("Band behind what you typed"),
+                                       QStringLiteral("The line you sent sits on a band: the channel's colour (cyan shell, violet agent), "
+                                                      "the theme's chrome, or none"),
+                                       {QStringLiteral("channel"), QStringLiteral("chrome"), QStringLiteral("none")},
+                                       {QStringLiteral("Channel colour"), QStringLiteral("Theme chrome"), QStringLiteral("None")},
+                                       current, QStringLiteral("channel"), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("terminal/echo_band"), value);
+            });
+        }
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);

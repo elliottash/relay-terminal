@@ -2185,6 +2185,14 @@ are — is recoloured, so `git status` red and `ls` blue, which already say some
 and never on the alternate screen, which a full-screen program owns. The colour is a fourth channel here as
 everywhere: hover still underlines, and the walk still selects.
 
+**The line you typed sits on a band** (owner, 2026-09-19, after Claude Code's grey band behind
+each prompt). `Pane::printInline` pads a `User` or `UserAgent` line with spaces to the pane's
+width and writes it on a 24-bit background: the destination colour blended into the terminal
+ground, cyan for the shell and violet for the agent, with the theme's `text` token as the ink, so
+the band says where the line went and the words keep full contrast. Options › Terminal › "Band
+behind what you typed" also offers the theme's raised surface, or none. Like every inline colour
+it is frozen at the value it was written with.
+
 **A hostname is one mark.** The pane header's ⇄ chip and the file preview's host chip are the same
 chip since 2026-09-19 — the error hue's fill and near-solid line, the text colour for the name —
 so "this is on another machine" reads the same whether it is your typing or a file that lives

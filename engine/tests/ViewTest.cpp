@@ -701,6 +701,54 @@ private slots:
         QVERIFY(!rowHasColor(img, 2, ch, scheme.link));
     }
 
+    // A theme switch reaches text already on the screen: an indexed colour (SGR 97, the agent's
+    // prose ink) is resolved through the palette the view has *now*, not the one the text was
+    // written under. Owner's QA, 2026-09-19: a pane that started on IBM Beige and switched to
+    // Dark Copper painted new prose in Beige's near-black ANSI 15 on Copper's charcoal.
+    void anIndexedColourFollowsTheSchemeItIsPaintedUnder()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.palette[15] = 0xff14120d;   // IBM Beige's "bright white"
+        scheme.palette[6] = 0xff0f5f5a;    // and its cyan
+        t.view->setColorScheme(scheme);
+        t.backend->writeToDisplay("\x1b[97mprose here\x1b[0m\r\n\x1b[36mcode here\x1b[0m\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("code here")));
+        const int ch = t.view->cellHeight();
+        QImage img = t.grab();
+        QVERIFY(rowHasColor(img, 0, ch, QColor(0x14, 0x12, 0x0d)));
+        QVERIFY(rowHasColor(img, 1, ch, QColor(0x0f, 0x5f, 0x5a)));
+        // Switch: Dark Copper's palette entries for the same two indices.
+        scheme.palette[15] = 0xfff4efe9;
+        scheme.palette[6] = 0xff56c8d8;
+        t.view->setColorScheme(scheme);
+        img = t.grab();
+        QVERIFY2(rowHasColor(img, 0, ch, QColor(0xf4, 0xef, 0xe9)), "SGR 97 text kept the old palette after the switch");
+        QVERIFY2(!rowHasColor(img, 0, ch, QColor(0x14, 0x12, 0x0d)), "the old bright white is still painted");
+        QVERIFY2(rowHasColor(img, 1, ch, QColor(0x56, 0xc8, 0xd8)), "SGR 36 text kept the old palette after the switch");
+        // And text written after the switch resolves through the new palette too.
+        t.backend->writeToDisplay("\x1b[97mlater\x1b[0m\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("later")));
+        img = t.grab();
+        QVERIFY2(rowHasColor(img, 2, ch, QColor(0xf4, 0xef, 0xe9)), "text written after the switch uses the old palette");
+    }
+
+    // Erase-to-end-of-line paints the current background to the pane's edge (background colour
+    // erase): what the host relies on for the band behind a line the user typed.
+    void eraseToEndOfLineCarriesTheBackground()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->writeToDisplay("\x1b[48;2;10;20;30mhi\x1b[K\x1b[0m\r\nnext\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("next")));
+        const QImage img = t.grab();
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QCOMPARE(img.pixelColor(2 + 20 * cw + cw / 2, 2 + ch / 2), QColor(10, 20, 30));
+        QCOMPARE(img.pixelColor(2 + 45 * cw + cw / 2, 2 + ch / 2), QColor(10, 20, 30));
+        QVERIFY(img.pixelColor(2 + 20 * cw + cw / 2, 2 + ch + ch / 2) != QColor(10, 20, 30));
+    }
+
     // ---- find, with the open folds in the sequence (#TK9C)
 
     void findFindsTextOnlyAnOpenFoldHas()
