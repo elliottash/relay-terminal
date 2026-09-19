@@ -71,6 +71,54 @@ cross-vendor verifier from a ranked list against the author's signature. That is
 and read); no score-keeping of verifier accuracy over time (a later card once verdicts exist); no
 change to the human QA lane.
 
+## What the ranking rests on (research, 2026-09-19)
+
+Full report with sources: `docs/qa_evidence/2026-09-19-cross-provider-qa/research-cross-model-qa.md`.
+
+**Prior art.** The practice is common and argued for; the mechanism is not shipped anywhere found.
+Claude Code's `/code-review` and `/ultrareview` are many agents, all Anthropic. OpenAI says outright
+that Codex's generator and reviewer are the same model, separated by training, not vendor. Cursor's
+Bugbot uses undisclosed models with no author-keyed rule; GitHub Copilot review refuses model choice.
+CodeRabbit, Greptile, Graphite, Qodo: one family, or an ensemble, with no rule against the author's.
+Aider's architect/editor is two models writing, not one checking the other. The closest things are
+hand-written repo policies (a `.ship.yaml` that refuses a reviewer equal to the author's model; a
+risk-tiered implementer→reviewer table whose author admits no comparative evidence exists), and
+"second opinion" MCP servers with a manually configured direction. Kilo measured that 32% of its
+attributed reviews already use a different model from the author, and its own cloud pins a *same*
+vendor cheaper model for BYOK reviews, for billing. So: ranked, installed-aware, family-skipping
+verifier recommendation off a signature is new as a product mechanism.
+
+**Error correlation.** Three findings shape the table:
+
+| Finding | Source | Number |
+|---|---|---|
+| Judges favour models similar to themselves; error similarity rises with capability | Goel et al., ICML 2025 (2502.04313) | judge score vs similarity r = 0.84; weak-to-strong gain vs dissimilarity r = −0.85 |
+| Large accurate models err together even across vendors | Kim et al., ICML 2025 (2506.07962) | when both err they agree ~60% |
+| Self-preference is a familiarity effect (low perplexity), so it is family-wide | Panickssery 2024 (2404.13076), Wataoka 2024 (2410.21819) | GPT-4 self-recognition 73.5%; holds for text it did not write |
+| A stronger judge is not a fairer one | Yang et al. 2026 (2604.22891) | capability uncorrelated or negatively correlated with low self-preference |
+| DeepSeek, Qwen and GLM are high-distillation; Claude and Gemini low | Lee et al. 2025 (2501.12619) | ranking |
+| Small models cannot judge code; a jury of disjoint families beats one big judge | Crupi 2025 (2507.16587), CodeJudgeBench (2507.10535), Verga 2024 (2404.18796) | frontier ≥ 80% agreement; PoLL > GPT-4 at 7× less |
+
+**Consequences taken into the design.**
+
+1. **Lineage groups:** `openai`, `anthropic`, `google`, `cn-open` (GLM, Kimi, DeepSeek, MiniMax,
+   Qwen), `local`. A GLM card verified by Kimi is close to self-review, so same-lineage verifiers
+   go after every other-lineage one, still offered, with the reason on the card.
+2. **Relay Free is not a family.** It is judged by the gateway's upstream for the role (today:
+   relay-main is GLM-5.3 Flash, relay-flash DeepSeek V4.1 Flash, relay-lite Gemini 3.5 Flash Lite),
+   so it cannot hand a GLM card back to GLM unnoticed. Its label names the upstream.
+3. **"Strongest available" is the wrong objective.** The order is: not the implementer; a different
+   lineage first; then the owner's capability order inside a lineage. Local models are last: own
+   lineage, but below the capability floor for judging code.
+4. **Calibration for the reader:** on real PRs every model in the one direct reviewer benchmark
+   scored F1 between 0.007 and 0.066, and F1 fell 15× from small to large diffs. Cross-family QA buys
+   a differently blind second reader, not a guarantee, and it buys the most on small diffs.
+
+**Left for later cards (needs the owner):** two verifiers from disjoint lineages on high-risk cards
+(the one configuration with direct published support); learning the ranking from Relay's own
+verdict log rather than fixing it (no published study compares same-family with cross-family
+escaped-defect rates, so that log would be the first evidence).
+
 ## Design
 
 ### Signature
@@ -108,7 +156,8 @@ change to the human QA lane.
   is left is the preference order. Every skip is reported with its reason so the card can say
   "Claude skipped: it implemented this" and "Codex: not installed".
 - **Default order** (owner's sketch, extended to the presets Relay has):
-  openai → anthropic → glm → kimi → deepseek → gemini → minimax → relay-free → local.
+  openai → anthropic → glm → kimi → deepseek → gemini → minimax → local. Relay Free is never a
+  verifier (owner, 2026-09-19): verifying is not available on the free plan.
   Lineage groups and any reordering come from the research report, recorded in the section below,
   and the table carries a comment per row saying why it sits where it does.
 
@@ -150,11 +199,18 @@ change to the human QA lane.
 - [ ] The worker stamps `implemented_by` from its own config on in-progress and on entering a QA lane; `verified_by` field, stamped on close; format doc and `check` <!-- t:a2 -->
 - [ ] `qa` block on `board_card_get` / `board_read`, with availability from the worker and the commit trailers of `links.commits`; protocol §19 <!-- t:a3 -->
 - [ ] `relay-board.py verifier <ID>` <!-- t:a4 -->
-- [ ] Execute brief asks for the `Implemented-By:` trailer; new `verifyTask` brief with `Verified-By:` <!-- t:b1 -->
-- [ ] Card detail: the recommendation line and **Verify (v)**; opens a guest or a preset pane with the brief; hint `board.verify`; Qt test <!-- t:b2 -->
-- [ ] Research report filed under `docs/qa_evidence/2026-09-19-cross-provider-qa/` and its lineage groups written into `VERIFIER_RANK` <!-- t:c1 -->
+- [x] Execute brief asks for the `Implemented-By:` trailer; new `verifyTask` brief with `Verified-By:` <!-- t:b1 -->
+- [x] Card detail: the recommendation line and **Verify (v)**; opens a guest or a preset pane with the brief; hint `board.verify`; Qt test <!-- t:b2 -->
+- [ ] Research report filed under `docs/qa_evidence/2026-09-19-cross-provider-qa/` and its lineage groups written into `VERIFIER_RANK` <!-- t:c1 s=in-progress -->
+- [ ] A derived **Verified** section (done + `verified_by`), the guest's exact model in the signature, and no Relay Free verifier (owner's answers, 2026-09-19) <!-- t:d1 -->
 - [ ] Land in `needs-qa-llm` with evidence and a `## QA checklist` <!-- t:c2 -->
 
 ## Decisions
 - 2026-09-19, owner: "where you skip yourself and otherwise pick the best one available; so for codex, you get claude if its installed, otherwise glm (if installed), etc."
 - 2026-09-19, owner: "do research on how errors / capacities are correlated across models, to make a ranking of preferred verifiers."
+- 2026-09-19, owner, on a same-lineage verifier being the only one available: "yes, offer with warning."
+- 2026-09-19, owner, on the guest CLI before an API key for the same family: "yes."
+- 2026-09-19, owner, on the ranking being advice and the different-family close staying the only hard rule: "yes."
+- 2026-09-19, owner: "i would say, relay free is never used for verifying -- so verifying is not available on the free plan." Relay Free leaves the verifier table; it still resolves through its upstream (GLM today) when it is the *implementer*; a Relay Free closer is refused.
+- 2026-09-19, owner, on a guest's signature: "lets try to record the model used." The form becomes `<vendor>/<model> via claude-code` (or `via codex`), falling back to `anthropic/claude-code` / `openai/codex` when the model cannot be observed.
+- 2026-09-19, owner: "so we need a Verified section in the switchboard?" Yes: a section derived from `verified_by` (status `done` with a verifier named), between Needs QA and Done. No new status, folder or migration; a card reaches it only by a QA close.
