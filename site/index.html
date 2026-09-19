@@ -153,10 +153,10 @@
           <li>
             <span class="num">02</span>
             <h3>A terminal engine Relay owns</h3>
-            <p>Relay renders the terminal itself, on a libvterm or libghostty-vt core. That is what lets the agent
-              see the screen and the scrollback, mask a password in the prompt box and fold a long tool call.
-              With the libghostty-vt core, a source-build option, 200 MB of output takes about 1.2 s where
-              Konsole takes 3.6 s on the same machine.</p>
+            <p>Relay renders the terminal itself, on the libghostty-vt core, which ships in every package from 0.1.0-beta.3 on. That is what
+              lets the agent see the screen and the scrollback, mask a password in the prompt box and fold a long
+              tool call. And it is fast: 200 MB of output in about 1.2 s where Konsole takes 3.6 s on the same
+              machine.</p>
           </li>
           <li>
             <span class="num">03</span>
@@ -200,10 +200,10 @@
           <li class="sh">
             <h3>A real terminal, rendered by Relay</h3>
             <p>vim, htop, ssh, tmux, Claude Code and Codex run in it as they do anywhere else. Relay renders
-              the terminal itself instead of embedding someone else's. The packaged build uses the libvterm
-              core; a source build can add the libghostty-vt core, which takes about 1.2 s to show 200 MB of
-              output against Konsole's 3.6 s. Shell integration (OSC 7 and OSC 133) tracks the working
-              directory and marks prompts, commands and exit codes.</p>
+              the terminal itself instead of embedding someone else's. Packages from 0.1.0-beta.3 on ship the libghostty-vt
+              core, which takes about 1.2 s to show 200 MB of output against Konsole's 3.6 s; a plain source build
+              uses the libvterm core unless you build the fast one. Shell integration (OSC 7 and OSC 133) tracks
+              the working directory and marks prompts, commands and exit codes.</p>
           </li>
           <li class="sh">
             <h3>The prompt box is the only input</h3>
@@ -381,8 +381,9 @@ cmake --install build      # optional, installs to ~/.local</code></pre>
           </article>
           <article>
             <h3>Choosing a core</h3>
-            <p>Relay's engine runs every pane. The libvterm core needs nothing extra; the libghostty-vt core
-              is optional and needs Zig to build.</p>
+            <p>Relay's engine runs every pane. Packages from 0.1.0-beta.3 on ship the libghostty-vt core as the default; a source
+              build gets the libvterm core, which needs nothing extra, unless you build the fast one with Zig
+              (<code>engine/scripts/build-libghostty-vt.sh</code>).</p>
             <pre><code>relay                          # the default core
 relay --engine-core=libvterm   # pick the emulator core</code></pre>
           </article>
