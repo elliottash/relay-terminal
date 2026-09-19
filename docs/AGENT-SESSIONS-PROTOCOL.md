@@ -3949,7 +3949,11 @@ running.
    Everything after `--` is the guest's own argv tail (26.7). The helper cleans the legacy entries,
    writes `<runtime dir>/guest/claude-settings.json` (mode 0600 in a 0700 directory, replaced
    atomically; contents `relay_entries()`, minus `statusLine` under the "kept" rule of 26.4) and
-   prints one JSON object: `{"ok", "guest", "argv", "env", "command", "settings", "legacy"}`.
+   prints one JSON object: `{"ok", "guest", "argv", "env", "command", "settings", "legacy",
+   "session_id"}`. A fresh claude is *told* its session (`--session-id <uuid4>`), so its transcript
+   is `<cwd-slug>/<session_id>.jsonl` before the first line is written and two claudes in one
+   directory cannot be mistaken for each other; a resumed one keeps its own; a fork, a
+   `--continue` and a fresh codex (which has no such flag) report `""`.
 4. The pane runs `command` as an ordinary terminal command — prefixed with `cd '<cwd>' && ` when the
    launch names a directory other than the pane's — through the same path as anything typed in
    terminal mode: now if the shell is at its prompt, queued until it is otherwise.

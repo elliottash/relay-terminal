@@ -118,6 +118,39 @@ class Argv(unittest.TestCase):
             self.assertTrue(document)
 
 
+class SessionId(unittest.TestCase):
+    """A claude Relay starts is told its session id, so its transcript is known and two claudes in
+    one directory cannot be mistaken for each other (review B7)."""
+
+    def test_a_fresh_claude_is_given_an_id(self):
+        extra, session = guest_launch.claude_session([])
+        self.assertEqual(["--session-id", session], extra)
+        self.assertRegex(session, r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+        self.assertNotEqual(session, guest_launch.claude_session([])[1])
+
+    def test_a_resumed_claude_keeps_its_own(self):
+        for extra in (["-r", "abc-123"], ["--resume", "abc-123"], ["--resume=abc-123"]):
+            with self.subTest(extra=extra):
+                self.assertEqual((extra, "abc-123"), guest_launch.claude_session(extra))
+
+    def test_a_fork_or_a_continue_has_an_id_relay_cannot_know(self):
+        for extra in (["-r", "abc", "--fork-session"], ["-c"], ["--continue"]):
+            with self.subTest(extra=extra):
+                self.assertEqual((extra, ""), guest_launch.claude_session(extra))
+
+    def test_the_command_line_carries_it_and_reports_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            fresh = guest_launch.command_line("claude", root, home=root)
+            resumed = guest_launch.command_line("claude", root, home=root, extra=["-r", "abc"])
+            codex = guest_launch.command_line("codex", root, home=root, python="/py", extra=["resume", "t-1"])
+            plain = guest_launch.command_line("codex", root, home=root, python="/py")
+        self.assertEqual(fresh["session_id"], fresh["argv"][fresh["argv"].index("--session-id") + 1])
+        self.assertEqual("abc", resumed["session_id"])
+        self.assertNotIn("--session-id", resumed["argv"])
+        self.assertEqual("t-1", codex["session_id"])
+        self.assertEqual("", plain["session_id"])
+
+
 class CommandLine(unittest.TestCase):
     def test_claude_with_a_live_bridge(self):
         with tempfile.TemporaryDirectory() as root:

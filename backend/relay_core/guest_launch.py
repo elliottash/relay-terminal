@@ -44,6 +44,7 @@ import os
 import shlex
 import sys
 import tempfile
+import uuid
 
 from . import guest, guest_codex, guest_install
 
@@ -133,6 +134,36 @@ def claude_argv(settings_path: str, extra=()) -> list[str]:
     return ["claude", "--settings", settings_path, CLAUDE_BYPASS, *extra]
 
 
+# Flags in `extra` that already say which session this claude is: a new id must not be forced
+# beside them (`--session-id` with `--resume` is an error unless the session is being forked).
+_CLAUDE_SESSION_FLAGS = ("-r", "--resume", "-c", "--continue", "--session-id", "--fork-session",
+                         "--from-pr", "--teleport")
+
+
+def claude_session(extra=()) -> tuple[list[str], str]:
+    """(`extra` to launch with, the session id Relay knows this claude by — "" when it cannot).
+
+    Two claudes in one directory used to be told apart by guessing: the live tail took the newest
+    transcript in the cwd's slug, so each pane could end up following the other's (review B7). A
+    claude Relay starts is simply *told* its id — `--session-id <uuid4>` — and the transcript is
+    then `<slug>/<that id>.jsonl`, known before the first line is written. A resumed session
+    already has its id (`-r <id>`); a fork gets a new one from claude that Relay does not know."""
+    extra = list(extra)
+    named = [word.split("=", 1)[0] for word in extra if word.startswith("-")]
+    if not any(flag in named for flag in _CLAUDE_SESSION_FLAGS):
+        session = str(uuid.uuid4())
+        return ["--session-id", session, *extra], session
+    if "--fork-session" in named or "-c" in named or "--continue" in named:
+        return extra, ""
+    for flag in ("-r", "--resume", "--session-id"):
+        for index, word in enumerate(extra):
+            if word == flag and index + 1 < len(extra) and not extra[index + 1].startswith("-"):
+                return extra, extra[index + 1]
+            if word.startswith(flag + "="):
+                return extra, word.split("=", 1)[1]
+    return extra, ""
+
+
 # ----- Codex -----------------------------------------------------------------------------------
 
 
@@ -194,27 +225,34 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
                  extra=(), home: str | None = None, python: str | None = None) -> dict:
     """Everything the pane needs to start `guest_id` in its shell, in one payload:
 
-        {"guest", "argv", "env", "command", "settings", "legacy"}
+        {"guest", "argv", "env", "command", "settings", "legacy", "session_id"}
 
     `env` is the IDE bridge's two variables for claude when `port` names a live bridge (empty
     otherwise, and always empty for codex); `command` is the one shell line — the assignments
     prefixed, every word quoted for the shell — that the pane types; `settings` is the claude
-    settings file's path (empty for codex); `legacy` lists the stopgap files that were cleaned.
+    settings file's path (empty for codex); `legacy` lists the stopgap files that were cleaned;
+    `session_id` is the guest session this launch will write (`claude_session`; a resumed codex
+    thread's id; "" when the guest picks one Relay cannot know in advance).
     """
     spec = guest.spec(guest_id)   # ValueError for anything the registry does not know
     legacy = clean_legacy(cwd, home)
     env: dict[str, str] = {}
     settings = ""
+    session_id = ""
     if spec.id == "claude":
         settings = write_claude_settings(runtime_dir, cwd, home)
+        extra, session_id = claude_session(extra)
         argv = claude_argv(settings, extra)
         if port:
             env = guest.bridge_env("claude", port)
     else:
         argv = codex_argv(python, extra)
+        extra = list(extra)
+        if len(extra) >= 2 and extra[0] == "resume":
+            session_id = extra[-1]      # codex has no flag to choose a new thread's id
     words = [f"{key}={shlex.quote(value)}" for key, value in env.items()] + [shlex.quote(word) for word in argv]
     return {"guest": spec.id, "argv": argv, "env": env, "command": " ".join(words),
-            "settings": settings, "legacy": legacy}
+            "settings": settings, "legacy": legacy, "session_id": session_id}
 
 
 def main(argv=None) -> int:
