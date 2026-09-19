@@ -11,7 +11,7 @@ rank: zzzz102
 created: '2026-09-18'
 acceptance: the always-on pane buttons read as brightly as the hover row used to
 source: 'issues/bug_intake.txt, 2026-09-18: "the permanent pane icons should use the brighter outline that we had with the dynamic pane icons"'
-links: {plans: [], commits: [ec48f5b], evidence: [docs/qa_evidence/2026-09-18-pane-buttons-brighter-outline/], related: [BVL1], github: null}
+links: {plans: [], commits: [4d8af02], evidence: [docs/qa_evidence/2026-09-18-pane-buttons-brighter-outline/], related: [BVL1], github: null}
 ---
 # The permanent pane buttons should keep the brighter outline
 

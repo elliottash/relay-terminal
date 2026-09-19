@@ -46,7 +46,7 @@ own data directory that every loose card would land in — is gone, and so is th
 idea that rode along with it in decision 2 ("proposed, not yet confirmed"): once there is no inbox
 folder, there is nothing left to back up. `relay::projects::inbox()`, `Board::Inbox` and
 `boardsRoot()` are removed from the C++ model, not merely unused, along with their tests
-(landed alongside the hidden-board-folder decision's C++ half, `9a3badec228f`, since both touched
+(landed alongside the hidden-board-folder decision's C++ half, `5c329706d63f`, since both touched
 `src/Projects.h`/`.cpp` the same day). In its place: one optional setting, **"Default project for
 loose cards"** (`relay::projects::defaultProject()`, `board/default_project` in `QSettings`, empty
 by default — a project folder, not a board, so it reads as unset if the project is moved or
@@ -69,7 +69,7 @@ Decisions 1, 4, 5 and 6 stand unchanged and are still open GUI work — see Task
 
 ## Tasks
 
-- [x] the hidden-board-folder discovery order and the `defaultProject()` setting that replaces the inbox, in `src/Projects.h`/`.cpp` (`9a3badec228f`) <!-- t:hb -->
+- [x] the hidden-board-folder discovery order and the `defaultProject()` setting that replaces the inbox, in `src/Projects.h`/`.cpp` (`5c329706d63f`) <!-- t:hb -->
 - [ ] `src/ProjectPicker.*` as a pane, fuzzy-filtered with `relayFuzzyScore`, offscreen widget test — known projects only, no inbox row, `defaultProject()` preselected when set <!-- t:2g -->
 - [ ] the tab chip and one-click detach; remove the palette-only detach once the chip exists <!-- t:mn -->
 - [ ] known projects in Options: list, reason, forget; declined projects: list, undo; alongside them, the "Hidden Switchboard folder" toggle and the "Default project for loose cards" row (both already have their `QSettings` keys and reader/writer functions — `board/hidden_folder`, `board/default_project` — only the Options rows are missing) <!-- t:d2 -->

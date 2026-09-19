@@ -7,7 +7,7 @@ component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
 assignee: agent
-implemented_by: Claude Opus 5 subagent (Claude Code session), 2026-09-19; follow-up 22651af by Claude Fable 5.1 (the coordinating session)
+implemented_by: Claude Opus 5 subagent (Claude Code session), 2026-09-19; follow-up 2c43e19 by Claude Fable 5.1 (the coordinating session)
 rank: zzzzzzw
 created: '2026-09-19'
 acceptance: a click on the "updated tasks" row unfolds it in place to the task list as it stood after that call — one row per task with its status glyph — and a second click folds it away; a backend with no fold layer still reaches the list; a test covers the click routing and the fold's rows

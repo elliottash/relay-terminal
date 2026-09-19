@@ -12,7 +12,7 @@ rank: zzzzzzy
 created: '2026-09-19'
 acceptance: a card that lands in the QA lane carries a canonical provider/model signature set by the worker, not typed; its commits carry the same signature as a trailer; the card shows one recommended verifier chosen from a ranked list that skips the implementer's family and anything not installed or keyed; Verify opens a pane on that verifier with the QA brief; and a same-family close is still refused
 source: 'owner, in the terminal, 2026-09-19 (pasted brief), plus mid-turn: "i''d like your input on this feature as well, and do research to see if this exists in other harnesses/systems"'
-links: {plans: [], commits: [eba4fed, d1d96b7, 2906807, a738b5e, 940438c, 83f2a1f, bc785fc, '0144880', b65d061], evidence: [docs/qa_evidence/2026-09-19-cross-provider-qa/], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
+links: {plans: [], commits: [62839dd, f7842b5, c7a5c45, 42da858, cd19eb1, 4ce298e, e44b253, '9cf0abb', 6e4d64b], evidence: [docs/qa_evidence/2026-09-19-cross-provider-qa/], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
 ---
 # Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier
 
@@ -183,7 +183,7 @@ escaped-defect rates, so that log would be the first evidence).
   button beside Execute. The button opens a terminal pane beside the board on the recommended
   runner: a guest runner goes through the pane's own harness-or-terminal decision (the wrapped
   guest as the pane's agent when the worker can run it, its TUI with the brief as the first prompt
-  only when it cannot; fixed in `b65d061` after the owner saw Verify open the bare Codex CLI); a preset runner creates the pane on that preset (`createPane {preset}`) and
+  only when it cannot; fixed in `6e4d64b` after the owner saw Verify open the bare Codex CLI); a preset runner creates the pane on that preset (`createPane {preset}`) and
   `startBoardTask`s the brief. The row's key `v` and a shortcut hint (`board.verify`) follow the
   WARP rule; the label carries its key in parentheses like the other buttons (#QG60).
 - **The Verify brief** (`relay::board::verifyTask`): read the card, run its `## QA checklist`,
@@ -220,12 +220,12 @@ escaped-defect rates, so that log would be the first evidence).
 
 | Commit | What |
 |---|---|
-| `2906807` | `backend/relay_core/qa_verifiers.py` (signature, family, lineage, `VERIFIER_RANK`, `recommend`), the worker's stamp on `implemented_by`, `verified_by`, the `qa` block on `board_card_get` / `board_read`, `relay-board.py verifier`, protocol §19.15 and the format doc |
-| `a738b5e`, `83f2a1f` | Relay Free never verifies and cannot close a QA card; a guest signs `<vendor>/<model> via claude-code` from the model its harness reports |
-| `d1d96b7` | the verify line, **Verify (v)**, `verifyTask`, the `Implemented-By:` bullet in the Execute brief, a pane on the recommended runner |
-| `940438c` | the derived **Verified** section, signature labels, the amber note |
-| `0144880` | the line takes the worker's `available` word, so a local model does not read "(key)" |
-| `b65d061` | Verify opens a guest verifier through the harness, like the model picker, with the TUI only as the fallback |
+| `c7a5c45` | `backend/relay_core/qa_verifiers.py` (signature, family, lineage, `VERIFIER_RANK`, `recommend`), the worker's stamp on `implemented_by`, `verified_by`, the `qa` block on `board_card_get` / `board_read`, `relay-board.py verifier`, protocol §19.15 and the format doc |
+| `42da858`, `4ce298e` | Relay Free never verifies and cannot close a QA card; a guest signs `<vendor>/<model> via claude-code` from the model its harness reports |
+| `f7842b5` | the verify line, **Verify (v)**, `verifyTask`, the `Implemented-By:` bullet in the Execute brief, a pane on the recommended runner |
+| `cd19eb1` | the derived **Verified** section, signature labels, the amber note |
+| `9cf0abb` | the line takes the worker's `available` word, so a local model does not read "(key)" |
+| `6e4d64b` | Verify opens a guest verifier through the harness, like the model picker, with the TUI only as the fallback |
 
 Implemented by Claude Opus 5 subagents (backend and GUI), orchestrated and reviewed by Claude
 Fable 5.1 in Claude Code; research by a third Opus agent. Tests at landing: `tests/test_qa_verifiers.py`

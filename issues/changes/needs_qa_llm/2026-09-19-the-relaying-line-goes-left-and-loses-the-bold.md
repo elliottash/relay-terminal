@@ -12,7 +12,7 @@ rank: zzzzzy
 created: '2026-09-19'
 acceptance: the "Relaying …" line above the prompt box is left-aligned with the prompt text and drawn in the normal weight, in every state it can show (agent turn, subagents, terminal program, blocked on a question)
 source: 'issues/feature_intake.txt, 2026-09-19: "the \"Relaying -- [action]. . .\" should be at the left and above the prompt box, more like how warp . claude does it. and not in bold."'
-links: {commits: [8cea490], evidence: [docs/qa_evidence/2026-09-19-relaying-line-left-normal/], github: null, plans: [], related: [4E13, V8KT]}
+links: {commits: [7a5221b], evidence: [docs/qa_evidence/2026-09-19-relaying-line-left-normal/], github: null, plans: [], related: [4E13, V8KT]}
 ---
 # The "Relaying …" line belongs on the left, in the normal weight
 

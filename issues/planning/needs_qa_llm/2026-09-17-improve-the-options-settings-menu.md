@@ -6,7 +6,7 @@ labels: [settings, gui, ux]
 rank: i
 created: '2026-09-17'
 source: pane 1, 2026-09-17
-links: {plans: [], commits: [64e6448, c55c07a, a74672f, 70bb60a], evidence: [docs/qa_evidence/2026-09-19-options-menu-followups/], github: null, related: [05J2]}
+links: {plans: [], commits: [624e750, cec6427, f1cd2ea, 7e17fd3], evidence: [docs/qa_evidence/2026-09-19-options-menu-followups/], github: null, related: [05J2]}
 ---
 # Improve the options (Settings) menu
 
@@ -79,7 +79,7 @@ and export/import (#05J2).
 
 ## Update (2026-09-19): the rest of the list, except #05J2
 
-Findings 3, 8 and 11 and the Browse… button are implemented (`64e6448` the pane, and the catalog
+Findings 3, 8 and 11 and the Browse… button are implemented (`624e750` the pane, and the catalog
 half beside it). What each one turned into:
 
 - **3 — a value is never one edit behind.** `relay::SettingsWatch` (src/SettingsPane.h) is one
@@ -112,9 +112,9 @@ Evidence: `docs/qa_evidence/2026-09-19-options-menu-followups/`.
 ## Resolution (found already delivered by the 2026-09-19 board sweep)
 
 This card is an analysis plus a tiered proposal list, and both the analysis and the proposals it
-called Tier 1 and Tier 2 were delivered — `64e6448` and `c55c07a` ("The Options pane marks what you
+called Tier 1 and Tier 2 were delivered — `624e750` and `cec6427` ("The Options pane marks what you
 changed, browses for a folder, and never shows a stale value"), with the 2026-09-19 update on the
-card itself (`a74672f`) recording findings 3, 8 and 11 and the Plans-folder Browse…, and `70bb60a`
+card itself (`f1cd2ea`) recording findings 3, 8 and 11 and the Plans-folder Browse…, and `7e17fd3`
 adding the implementer evidence under
 `docs/qa_evidence/2026-09-19-options-menu-followups/`.
 

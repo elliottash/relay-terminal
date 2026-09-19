@@ -10,9 +10,9 @@ Browse… button; #05J2 is the only proposal left and is its own card).
 
 | Commit | What |
 |---|---|
-| `64e6448` | `src/SettingsPane.{h,cpp}` + `tests/settingspane_test.cpp`: `SettingsWatch`, `SettingRow::changed` → the ↺ and the tab dot, `SettingRow::browse` → Browse…, `setFolderChooser` |
+| `624e750` | `src/SettingsPane.{h,cpp}` + `tests/settingspane_test.cpp`: `SettingsWatch`, `SettingRow::changed` → the ↺ and the tab dot, `SettingRow::browse` → Browse…, `setFolderChooser` |
 | (beside it) | `src/RelayWindow.h`: every row helper declares whether its value is the shipped one; Plans folder browses; `refreshSettingsPanes()` is the watch's notify; a window coming forward redraws its Options pane; "Start a fresh window set" asks first |
-| `c3387f4` | the ↺'s two stylesheet rules in `src/Theme.cpp` (swept in by the theme session's commit, which is where they now live) |
+| `9a418c7` | the ↺'s two stylesheet rules in `src/Theme.cpp` (swept in by the theme session's commit, which is where they now live) |
 
 No protocol change: `docs/AGENT-SESSIONS-PROTOCOL.md` is untouched, as the card said it would be.
 No new fast path, so the shortcut-hint registry needed no entry (WARP.md standing rule) — the ↺ and

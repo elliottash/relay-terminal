@@ -6,7 +6,7 @@ No provider account: `relay.conf` points the pane at `stub-provider.py` on 127.0
 thinking-fold harness shape, `2026-09-19-thinking-fold/drive.sh`).
 
 **Binary:** `/tmp/relay-7fd3/build/relay`, built from a clean `git worktree` of `main` at
-`424eff5` (2026-09-19 11:26, which contains the fix `7241a40`, landed 10:50) — *not* the repo's
+`2483a55` (2026-09-19 11:26, which contains the fix `450567e`, landed 10:50) — *not* the repo's
 `build/relay`, which by 11:32 carried uncommitted guest-bridge work in `src/Pane.h`.
 
 ## Reproduce
@@ -73,6 +73,6 @@ $ ctest --test-dir build -R calllines
 
 The owner's running Relay instance (pid 56781, started 11:30:55) maps a **deleted** binary —
 the repo's `build/relay` was rebuilt underneath it at 11:32. Restarting Relay picks up a build
-that contains `7241a40`. No Relay is installed outside the repo (`~/.local/bin`, `/usr/local`,
-`/usr` all have none), so "rebuild or update to at least `7241a40`" means the repo build plus a
+that contains `450567e`. No Relay is installed outside the repo (`~/.local/bin`, `/usr/local`,
+`/usr` all have none), so "rebuild or update to at least `450567e`" means the repo build plus a
 restart.

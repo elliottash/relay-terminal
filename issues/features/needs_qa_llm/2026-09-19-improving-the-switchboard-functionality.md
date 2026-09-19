@@ -6,7 +6,7 @@ assignee: agent
 implemented_by: claude-opus-5
 rank: zzzzzx
 created: '2026-09-19'
-links: {plans: [], commits: [1d8de06], evidence: [docs/qa_evidence/2026-09-19-switchboard-card-ux/], related: [QG60, XS6Q], github: null}
+links: {plans: [], commits: [e079f96], evidence: [docs/qa_evidence/2026-09-19-switchboard-card-ux/], related: [QG60, XS6Q], github: null}
 ---
 # improving the switchboard functionality
 

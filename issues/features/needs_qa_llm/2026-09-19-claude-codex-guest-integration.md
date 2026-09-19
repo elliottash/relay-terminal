@@ -45,7 +45,7 @@ special translator from the relay prompt into the claude code input and back."
 - [x] Composer delivery in a guest pane: terminal verdict → `!<command>` into the guest, agent verdict → the prompt; Relay's UI unchanged (§26.8) <!-- t:cd -->
 - [x] Sessions resume/fork go through `launchGuest` (same settings, flags and bridge as a pick), in the session's cwd, this pane or a new one <!-- t:s2 -->
 - [x] Codex parity written down honestly (§26.6): status, busy, notify, sessions, bypass yes; diffs in Relay no; Codex 0.155.1 hooks (Claude's schema, trust-gated) documented, not wired <!-- t:cp -->
-- [x] A guest turn running when the pane switches model: the pane shifts over at once like a native model switch, the guest's turn finishes and it is then asked to `/exit` (owner, 2026-09-19; `d020ddb`) <!-- t:q9 -->
+- [x] A guest turn running when the pane switches model: the pane shifts over at once like a native model switch, the guest's turn finishes and it is then asked to `/exit` (owner, 2026-09-19; `20f9e53`) <!-- t:q9 -->
 
 ## Decisions
 - 2026-09-19, owner: translator-in-pane first ("i dont need a headless protocol… a special translator from the relay

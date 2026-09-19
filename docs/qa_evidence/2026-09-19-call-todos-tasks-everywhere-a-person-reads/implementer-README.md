@@ -78,4 +78,4 @@ twice.
   tests.test_agent tests.test_keybindings` — 159 tests, OK (`implementer-backend-tests.log`).
 - `ctest --test-dir build` — 56 of 57 pass. The one failure is `settings`
   (`SettingsPaneTests::everyOpenPaneRedrawsWhenAValueIsWrittenAnywhereElse`), which belongs to the
-  Security-section work another session landed in `4181bd1` and is untouched by this card.
+  Security-section work another session landed in `0b30397` and is untouched by this card.

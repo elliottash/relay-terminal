@@ -9,14 +9,14 @@ assignee: agent
 rank: zzzzzzu
 created: '2026-09-19'
 acceptance: a pane on GhosttyCore shows the same band behind a line the user typed as a libvterm pane, built and seen on a machine where that core compiles
-source: 'noted while landing #f47e71c, 2026-09-19'
-links: {plans: [], commits: [f47e71c], evidence: [], related: [K3RT], github: null}
+source: 'noted while landing #bef461d, 2026-09-19'
+links: {plans: [], commits: [bef461d], evidence: [], related: [K3RT], github: null}
 ---
 # GhosttyCore does not parse the row-role OSC, so the band is missing under it
 
 ## Issue
 
-`f47e71c` marks a line the user typed with the private `OSC 7772;shell|agent` and keeps it in the
+`bef461d` marks a line the user typed with the private `OSC 7772;shell|agent` and keeps it in the
 line's `relay_marks`, which `TerminalView` paints as a band. Only the vendored libvterm fork
 implements it: `LibVtermCore` lets 7772 through its OSC allowlist and calls
 `vterm_state_relay_mark_cursor_line()`, and the fork widened `relay_marks` from 4 bits to 8

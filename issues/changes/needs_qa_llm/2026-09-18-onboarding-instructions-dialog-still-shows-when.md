@@ -7,7 +7,7 @@ implemented_by: Claude Opus 5 (Relay agent), 2026-09-18
 rank: zzzzzt
 created: '2026-09-18'
 source: pane 1, 2026-09-18
-links: {plans: [], commits: [7241a40], evidence: [], related: [MH58], github: null}
+links: {plans: [], commits: [450567e], evidence: [], related: [MH58], github: null}
 ---
 # Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead
 
@@ -16,7 +16,7 @@ the introductory agent instructions file was still showing when i didnt have any
 
 ## Resolution (found already implemented by the 2026-09-19 board sweep)
 
-`7241a40`. `Pane::initDefaultRelayMd()` writes the starter `relay.md` and points the agent at it
+`450567e`. `Pane::initDefaultRelayMd()` writes the starter `relay.md` and points the agent at it
 when a first launch finds no instruction files at all, instead of opening the chooser on an empty
 list. The comment above it quotes the owner's report verbatim. The quiet path is only first-run:
 `/instructions` and Options › Agent › Instructions still open the dialog on an empty list, because

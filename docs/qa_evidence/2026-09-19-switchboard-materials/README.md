@@ -5,8 +5,8 @@ This is the implementer's evidence for the two commits that did:
 
 | commit | what |
 |---|---|
-| `4ff6114` | `[board]` becomes theme data every theme carries: `face`, `metal`, `metal_dim` as first-class tokens, derived from a theme's own chrome when it names none, measured in `tests/theme_test.cpp` |
-| `fd4db1c` | the Switchboard is painted with them (`src/Theme.cpp` stylesheet, `src/BoardPane.cpp` delegate and empty board), with the live-switch and plumbing tests |
+| `5755a30` | `[board]` becomes theme data every theme carries: `face`, `metal`, `metal_dim` as first-class tokens, derived from a theme's own chrome when it names none, measured in `tests/theme_test.cpp` |
+| `a634e71` | the Switchboard is painted with them (`src/Theme.cpp` stylesheet, `src/BoardPane.cpp` delegate and empty board), with the live-switch and plumbing tests |
 
 Design: `docs/SWITCHBOARD-AESTHETIC.md` §3.1–3.4 and interventions 3 and 5. Token rules and the
 measurements below: `docs/THEMES.md` §6.

@@ -11,7 +11,7 @@ rank: zzy
 created: '2026-09-17'
 acceptance: the owner has answered the open questions below and each approved intervention is split into its own card
 source: 'owner, 2026-09-17: how far should the retro telephone-operator switchboard aesthetic go inside the Relay app itself?'
-links: {plans: [], commits: [4ff6114, fd4db1c], evidence: [docs/qa_evidence/2026-09-19-switchboard-materials], related: [0JA7, W5N2], github: null}
+links: {plans: [], commits: [5755a30, a634e71], evidence: [docs/qa_evidence/2026-09-19-switchboard-materials], related: [0JA7, W5N2], github: null}
 ---
 # How far the switchboard aesthetic goes inside the app
 
@@ -55,7 +55,7 @@ Two findings that stand on their own, independent of any of this:
 ## Decided and built: the board's materials (2026-09-19)
 
 Owner, on review item D7 — the `[board]` table that two themes carried with a comment saying nothing
-painted it: **"yeah build that out"**. Landed in `4ff6114` (the tokens) and `fd4db1c` (the
+painted it: **"yeah build that out"**. Landed in `5755a30` (the tokens) and `a634e71` (the
 painting), evidence in `docs/qa_evidence/2026-09-19-switchboard-materials/`.
 
 - `[board] face / metal / metal_dim` and `[flags] board_material` are first-class theme data, in

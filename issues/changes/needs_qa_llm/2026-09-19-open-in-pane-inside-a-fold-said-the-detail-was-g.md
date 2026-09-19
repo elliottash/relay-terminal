@@ -7,12 +7,12 @@ component: [gui]
 milestone: desktop-alpha
 workstream: agent
 assignee: agent
-implemented_by: Claude Fable 5.1 (batch review), 2026-09-19, in `7241a40`
+implemented_by: Claude Fable 5.1 (batch review), 2026-09-19, in `450567e`
 rank: zzzz112
 created: '2026-09-19'
 acceptance: clicking "open in pane" at the foot of an open tool-call fold opens that call's output in a preview pane, including for a call that ran seconds ago
 source: 'issues/bug_intake.txt, 2026-09-19: "i clicked on an open in pane item for a tool call and it gave an error ''calls detail not available in this pane any more''"'
-links: {commits: [7241a40], evidence: [docs/qa_evidence/2026-09-19-open-in-pane-inside-a-fold/], github: null, plans: [], related: [EC58, TK9C]}
+links: {commits: [450567e], evidence: [docs/qa_evidence/2026-09-19-open-in-pane-inside-a-fold/], github: null, plans: [], related: [EC58, TK9C]}
 ---
 # "open in pane" inside a fold always said the call's detail was gone — even one second after the call
 
@@ -23,7 +23,7 @@ in this pane any more"
 
 ## Reproduced (2026-09-19, live under Xvfb, isolated XDG dirs, scripted local model)
 
-Against `build/relay` as it stood at 10:26 — i.e. a build made *before* `7241a40` landed at 10:50:
+Against `build/relay` as it stood at 10:26 — i.e. a build made *before* `450567e` landed at 10:50:
 
 1. A turn whose agent calls `run_command` with `seq 1 40`. The pane draws `▸ ran seq 1 40 · 40 lines · exit 0`.
 2. Click the row. The fold opens with the 40 lines and its last row, the link `open in pane`.
@@ -44,22 +44,22 @@ but a different symptom from the ones #EC58's checklist lists: those are all abo
 has *gone* (a restored pane, a line past the map's bound), while this one never had a record under
 that key at all, so it failed on a live, seconds-old call.
 
-## Fixed on `main` by `7241a40` (#EC58, steps 1-3)
+## Fixed on `main` by `450567e` (#EC58, steps 1-3)
 
 That commit replaced the guard with `callId = record.callIds.isEmpty() ? ref.call : record.callIds.first()`,
 so the URI's own call id is used when the record lookup misses.
 
-**Verified, same steps, on a binary built from `main` at `7241a40`:** clicking `open in pane` opens
+**Verified, same steps, on a binary built from `main` at `450567e`:** clicking `open in pane` opens
 a preview pane titled `run_command-call_1.log` holding `RUN COMMAND / Working directory: … / seq 1 40`
 and the 40 lines. No status line.
 
 So there is nothing left to change in the code. What is left is QA of the path the owner actually
 clicked, which #EC58's own checklist does not cover, and the fact that **the owner is running a
-build older than `7241a40`** — the bug is in every Relay built before 2026-09-19 10:50.
+build older than `450567e`** — the bug is in every Relay built before 2026-09-19 10:50.
 
 ## Tasks
 
-- [ ] Owner: rebuild or update Relay to at least `7241a40`; the installed build that produced this <!-- t:k4 -->
+- [ ] Owner: rebuild or update Relay to at least `450567e`; the installed build that produced this <!-- t:k4 -->
       report predates the fix
 - [x] A regression test for the fold's link specifically: `foldOptions()` must produce an <!-- t:m7 -->
       `openInPane` URI that `parseUri()` reads back to a non-empty turn and a single call id, so a
@@ -83,7 +83,7 @@ build older than `7241a40`** — the bug is in every Relay built before 2026-09-
 - [x] Run a turn with a tool call, click the `▸` row to unfold it, then click `open in pane` at the
       foot of the fold: the call's output opens in a preview pane. The call is seconds old and the
       pane has not been restarted — this is the case that used to fail every time.
-      Verified 2026-09-19 (independent session, binary from a clean worktree of `main` at `424eff5`):
+      Verified 2026-09-19 (independent session, binary from a clean worktree of `main` at `2483a55`):
       `run` scene of the evidence drive — fold clicked ~6 s after the answer, preview pane
       `run_command-call_1.log` with `RUN COMMAND / Working directory / seq 1 40` and the 40 lines,
       no status line (`implementer-run-preview.png`).

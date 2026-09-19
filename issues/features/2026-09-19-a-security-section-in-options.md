@@ -11,7 +11,7 @@ rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
-links: {plans: [], commits: [77118fd, 4181bd1, 051a17c], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
+links: {plans: [], commits: [a68712d, 0b30397, 60af091], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
 ---
 # A Security section in Options, gathering what the agent may reach
 
@@ -143,7 +143,7 @@ but shipping one set first is the smaller step and matches how Relay's other set
 
 ## Landed so far (2026-09-19)
 
-**`77118fd` — the policy the worker enforces.** `backend/relay_core/security.py` (pure) plus its
+**`a68712d` — the policy the worker enforces.** `backend/relay_core/security.py` (pure) plus its
 wiring: the three lists ride protocol 12.1 beside `max_steps`, validated in `validate_turn_options`
 and returned under one `security_options` key, and `Agent` hands them to the executor's policy
 rather than setting them on itself. 33 cases in `tests/test_security.py`, including a `WiringTests`
@@ -166,7 +166,7 @@ so that one splits on whitespace.
 - [ ] `security/unattended_full_tools` and `agent/cross_pane`. Both govern something #R5TC has not <!-- t:m5 -->
       built yet — there is no unattended turn in Relay today — and a control that does nothing is
       worse than no control, so they land with that card.
-- [x] The OSC 52 row — landed in `051a17c`. `setClipboardWriteAllowed()` was on `TerminalView` <!-- t:n7 -->
+- [x] The OSC 52 row — landed in `60af091`. `setClipboardWriteAllowed()` was on `TerminalView` <!-- t:n7 -->
       but not on the `TerminalBackend` interface the Pane speaks to, so the gate was unreachable;
       a `ClipboardWrite` capability, the `VTermBackend` override and `Pane::applyClipboardPolicy()`
       are the missing rung. Off by default, verified live in both states. Reads stay impossible and

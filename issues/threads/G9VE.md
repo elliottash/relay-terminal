@@ -52,7 +52,7 @@ covered by `tests/test_failover.py`. Whether subagents should fail over is the o
 them a resolver is a change to `subagents.py`, outside this review's scope.
 
 <!-- relay:entry 20260919T210000Z-fo author=agent kind=note model=claude-fable-5.1 -->
-Four follow-on owner decisions of 2026-09-19 built on main (`e13ddf6`, plus the GUI row and the
+Four follow-on owner decisions of 2026-09-19 built on main (`903f69f`, plus the GUI row and the
 protocol section in a second commit).
 
 **Relay Free is opt-in as a failover target.** The one candidate that is not already the user's own

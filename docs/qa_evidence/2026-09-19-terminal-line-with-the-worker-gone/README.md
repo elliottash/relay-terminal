@@ -10,12 +10,12 @@ From an agent re-shooting the IDE-bridge evidence, 2026-09-19:
 > reaches the shell.
 
 It was seen while #N8VK was reworking Enter/queue routing, so the first question was whether
-ad7b455 / d633d6b had already fixed it. They had not: #N8VK took the explicit **agent** submit off
+8584b96 / d26cbb4 had already fixed it. They had not: #N8VK took the explicit **agent** submit off
 the router's round trip and left the explicit **terminal** submit on it.
 
 ## It reproduces, on the current `main`
 
-`before-*.png` is `main` at `40b4500` (`git archive refs/heads/main` into its own tree, configured
+`before-*.png` is `main` at `8791cd7` (`git archive refs/heads/main` into its own tree, configured
 and built there — never the shared checkout, which holds six sessions' uncommitted code).
 `after-*.png` is that same tree plus this change and nothing else. Both runs are the same script,
 `drive.py`, on the same display, one after the other.
@@ -23,7 +23,7 @@ and built there — never the shared checkout, which holds six sessions' uncommi
 Five scenes on one live pane. A marker file in the pane's working directory is the proof: it exists
 only if the shell ran the line.
 
-| | typed | key | main `40b4500` | with this change |
+| | typed | key | main `8791cd7` | with this change |
 |---|---|---|---|---|
 | a | `!echo RELAY-ENTER-A > a.txt`, worker healthy | Enter | **ran** | **ran** |
 | b | `!echo RELAY-ENTER-B > b.txt`, banner up | Enter | **nothing** | **ran** |

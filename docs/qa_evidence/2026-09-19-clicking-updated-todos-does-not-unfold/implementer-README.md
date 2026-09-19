@@ -1,6 +1,6 @@
 # #BDXG — clicking "updated tasks" unfolds to that call's task list. Implementer evidence
 
-Implemented by Claude Opus 5 subagent (Claude Code session), 2026-09-19, in `7804df6`. QA is another
+Implemented by Claude Opus 5 subagent (Claude Code session), 2026-09-19, in `6d476c7`. QA is another
 model's job: nothing in the card's checklist is ticked here.
 
 ## The live run

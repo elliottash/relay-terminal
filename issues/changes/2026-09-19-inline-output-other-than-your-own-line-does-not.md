@@ -9,14 +9,14 @@ assignee: agent
 rank: zzzzzzs
 created: '2026-09-19'
 acceptance: after a theme switch, the tool lines, notes, recaps, question cards and diff lines already in a pane's scrollback are drawn in the new theme's colours, as the user's own lines already are
-source: 'found while landing #f47e71c (the band that follows the theme), 2026-09-19'
-links: {plans: [], commits: [f47e71c], evidence: [docs/qa_evidence/2026-09-19-echo-band/], related: [], github: null}
+source: 'found while landing #bef461d (the band that follows the theme), 2026-09-19'
+links: {plans: [], commits: [bef461d], evidence: [docs/qa_evidence/2026-09-19-echo-band/], related: [], github: null}
 ---
 # Inline output other than your own line still keeps the colours it was printed in
 
 ## Issue
 
-A colour written into the terminal is frozen: the emulator cannot recolour its scrollback. `f47e71c`
+A colour written into the terminal is frozen: the emulator cannot recolour its scrollback. `bef461d`
 solved that for the one case the owner noticed — the line you typed — by giving the row a *role*
 (`OSC 7772`, `MarkUserShell` / `MarkUserAgent`) and letting `TerminalView::paintRow` resolve the
 band and the ink from the scheme in force at paint time.
@@ -28,7 +28,7 @@ theme switch those lines keep the old theme's colours — visible in
 `docs/qa_evidence/2026-09-19-echo-band/follows-theme-2-after-light.png`, where the muted tool lines
 fade almost into the beige ground.
 
-Per-tab themes (`c3387f4`) make this easier to hit: a tab's theme now changes under output that is
+Per-tab themes (`9a418c7`) make this easier to hit: a tab's theme now changes under output that is
 already on screen, and `/theme` invites exactly that.
 
 ## Approach

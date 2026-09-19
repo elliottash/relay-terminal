@@ -136,8 +136,8 @@ and both pass AAA-for-large. This is true with or without any of this proposal.
 
 ### 3.4 The materials as theme data, and degrading to a plain theme
 
-> **Built, 2026-09-19** (owner on review item D7: "yeah build that out"; commits `4ff6114` and
-> `fd4db1c`, evidence in `docs/qa_evidence/2026-09-19-switchboard-materials/`). What this section
+> **Built, 2026-09-19** (owner on review item D7: "yeah build that out"; commits `5755a30` and
+> `a634e71`, evidence in `docs/qa_evidence/2026-09-19-switchboard-materials/`). What this section
 > proposed is now the `[board]` table in every shipped theme, read by `src/ThemeFile.cpp` into
 > `ThemeSpec::board` and adopted into `relay::theme::BoardFace` / `BoardMetal` / `BoardMetalDim`
 > (`src/Theme.h`). The spellings that shipped are `face`, `metal`, `metal_dim` and the flag is
@@ -389,7 +389,7 @@ on the next paint.
 
 ## 7. Files this would touch, if approved
 
-Rows marked **done** landed on 2026-09-19 (`4ff6114`, `fd4db1c`).
+Rows marked **done** landed on 2026-09-19 (`5755a30`, `a634e71`).
 
 | Change | File · line |
 |---|---|
