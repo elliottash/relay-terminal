@@ -399,7 +399,7 @@ class BoardCommands:
         """`board_init_answer {id, accept}`: the user's yes or no to a `board_init_request`."""
         self.init.answer(request)
 
-    # ---- hiding and showing the board's folder (protocol 19.15) ----------------
+    # ---- hiding and showing the board's folder (protocol 19.17) ----------------
     def _folder(self, request: dict, rid) -> None:
         """`board_folder {hidden}`: rename this board's folder to `.switchboard/` or `switchboard/`.
 
