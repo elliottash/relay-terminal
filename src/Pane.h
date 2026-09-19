@@ -15,6 +15,7 @@
 #include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
+#include "ApprovalsPane.h"  // relay::approvals::cautious(): the card's "Always allow" writes the same list the checklist shows
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
 #include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
 #include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
@@ -2561,6 +2562,12 @@ public:
         QJsonArray questions;
         QList<QStringList> answers;
         int current = -1;
+        // Card #K2FV: the same round trip can carry an approval rather than the model's questions.
+        // One decision replaces the answers; `questions` holds the single synthesized line so every
+        // path that counts, closes or supersedes a card works unchanged.
+        bool approval = false;
+        QString capability;     // the checklist row the decision lands on ("always" unticks it)
+        QString subagent;       // set when a subagent's action drew the card, to name it as its
         bool open() const { return current >= 0 && current < questions.size(); }
     };
 
@@ -2574,27 +2581,57 @@ public:
         // id is answered with nothing first and its turn carries on. Protocol §27 has one question
         // open at a time, so this should never fire; it costs a line and it cannot deadlock.
         // A repeat of the same id is a redraw, not a supersession, and is not answered away.
+        // A superseded approval is denied rather than left unanswered: an approval nobody answers
+        // is a refusal on the worker's side (protocol 27.6), and the refusal should say so rather
+        // than look like a card that never arrived.
         const QString incoming = event.value(QStringLiteral("id")).toString();
         if (m_ask.open()) {
             const QString superseded = m_ask.id;
+            const bool wasApproval = m_ask.approval;
             closeQuestion(QString());
-            if (!superseded.isEmpty() && superseded != incoming)
-                send({{"type", "question_answer"}, {"id", superseded}, {"answers", QJsonArray()}});
+            if (!superseded.isEmpty() && superseded != incoming) {
+                if (wasApproval)
+                    send({{"type", "question_answer"}, {"id", superseded}, {"decision", QStringLiteral("deny")}});
+                else
+                    send({{"type", "question_answer"}, {"id", superseded}, {"answers", QJsonArray()}});
+            }
         }
         m_ask = Ask{};
         m_ask.id = incoming;
-        m_ask.questions = event.value(QStringLiteral("questions")).toArray();
-        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) {
+        // An approval card (card #K2FV, protocol 27.6) carries its own fields rather than a
+        // `questions` array, so it is turned into the one-question card it is drawn as — before the
+        // unreadable check, which would otherwise answer it away as empty, and an empty answer to
+        // an approval is a silent deny.
+        if (event.value(QStringLiteral("kind")).toString() == QStringLiteral("approval")) {
+            m_ask.approval = true;
+            m_ask.capability = event.value(QStringLiteral("capability")).toString();
+            m_ask.subagent = event.value(QStringLiteral("subagent")).toString();
+            m_ask.questions.append(QJsonObject{{QStringLiteral("header"), event.value(QStringLiteral("header"))},
+                                               {QStringLiteral("question"), event.value(QStringLiteral("question"))}});
+        } else {
+            m_ask.questions = event.value(QStringLiteral("questions")).toArray();
+        }
+        if (unreadableCard()) {
             // A card that cannot be drawn would otherwise leave the worker's turn blocked on an
             // answer nobody can type. Say so where the card would have been, and answer nothing:
-            // the tool reports every question unanswered and the turn carries on.
+            // the tool reports every question unanswered and the turn carries on. An approval is
+            // the one card whose "unanswered" must reach the worker as a deny (27.6) — allowing an
+            // action the pane could not read would be the opposite of the point.
             const QString id = m_ask.id;
+            const bool approval = m_ask.approval;
             m_ask = Ask{};
             ensureLineStart();
-            printInline(QStringLiteral("The agent asked a question this pane could not read; "
-                                       "it was left unanswered.\n"), Ink::Error);
+            printInline(approval
+                            ? QStringLiteral("The agent asked for an approval this pane could not read; it was not allowed.\n")
+                            : QStringLiteral("The agent asked a question this pane could not read; "
+                                             "it was left unanswered.\n"), Ink::Error);
             closeInline();
-            if (!id.isEmpty()) send({{"type", "question_answer"}, {"id", id}, {"answers", QJsonArray()}});
+            if (!id.isEmpty()) {
+                if (approval)
+                    send({{"type", "question_answer"}, {"id", id}, {"decision", QStringLiteral("deny")}});
+                else
+                    send({{"type", "question_answer"}, {"id", id}, {"answers", QJsonArray()}});
+            }
             refreshBackgroundWait();
             changed();
             return;
@@ -2631,8 +2668,19 @@ private:
         return question.value(QStringLiteral("options")).toArray();
     }
 
+    // Whether the card on hand can be drawn at all (see showQuestion). A plain card needs at least
+    // one question; an approval needs its header and question, since it draws from those alone.
+    bool unreadableCard() const {
+        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) return true;
+        if (!m_ask.approval) return false;
+        const QJsonObject question = questionAt(0);
+        return question.value(QStringLiteral("header")).toString().isEmpty()
+            || question.value(QStringLiteral("question")).toString().isEmpty();
+    }
+
     // The card for the question being asked now.
     void printQuestion() {
+        if (m_ask.approval) { printApproval(); return; }
         const QJsonObject question = questionAt(m_ask.current);
         const QJsonArray options = questionOptions(question);
         const bool multiple = question.value(QStringLiteral("multiple")).toBool();
@@ -2678,12 +2726,71 @@ private:
                               : QStringLiteral("%1 stops the turn").arg(stop);
     }
 
+    // The approval card's answers, in the order the pane prints them — `approvals.DECISIONS`
+    // (protocol 27.6): once / turn / always / deny.
+    static QStringList approvalDecisions() {
+        return {QStringLiteral("once"), QStringLiteral("turn"), QStringLiteral("always"), QStringLiteral("deny")};
+    }
+
+    // The approval card (card #K2FV): not a question the model thought of, an action the policy
+    // stopped. Four answers and no others — no free text, because the four are the whole decision
+    // space, and no skip, because "skipped" reaches the worker as a deny and a key that denies
+    // without saying so is the trap this card exists to close. A subagent's action draws the same
+    // card named as the subagent's, so the person at the desk knows who is asking.
+    void printApproval() {
+        const QJsonObject question = questionAt(0);
+        const QStringList decisions = approvalDecisions();
+        const QString header = m_ask.subagent.isEmpty()
+            ? question.value(QStringLiteral("header")).toString()
+            : QStringLiteral("%1 — %2").arg(m_ask.subagent, question.value(QStringLiteral("header")).toString());
+        // The question line ends with the subject after a newline: the ask is one line, the file or
+        // command it is about is the rest, in the quieter ink.
+        const QStringList lines = question.value(QStringLiteral("question")).toString().split(QLatin1Char('\n'));
+        ensureLineStart();
+        printInline(QStringLiteral("? %1 · %2\n").arg(header, lines.value(0)), Ink::Ask);
+        for (const QString &line : lines.mid(1)) printInline(QStringLiteral("  %1\n").arg(line), Ink::Note);
+        static const QStringList labels{QStringLiteral("Allow once"), QStringLiteral("Allow this turn"),
+                                        QStringLiteral("Always allow"), QStringLiteral("Deny")};
+        static const QStringList descriptions{QStringLiteral("this call only"),
+                                              QStringLiteral("the rest of this turn"),
+                                              QStringLiteral("also unticks the matching row in Options › Security"),
+                                              QStringLiteral("the agent is told no and carries on")};
+        for (int i = 0; i < decisions.size(); ++i) {
+            printInline(QStringLiteral("  %1  %2\n").arg(i + 1).arg(labels.at(i)), Ink::Ask);
+            printInline(QStringLiteral("     %1\n").arg(descriptions.at(i)), Ink::Note);
+        }
+        printInline(QStringLiteral("  Answer 1–4 · no skip, no free text.\n"), Ink::Note);
+        // Esc is not this card's key (see skipQuestion), so the footer names where Stop went, as
+        // the question card's footer does.
+        printInline(QStringLiteral("  %1.\n").arg(stopTurnHint()), Ink::Note);
+        closeInline();
+    }
+
+    // The approval card's answer: a number 1–4 or the word itself, and nothing else. Anything a
+    // person types that is not one of the four would reach the worker as a deny without their ever
+    // saying no, so it is refused and the card restated instead.
+    int readDecision(const QString &text) const {
+        bool ok = false;
+        const int number = text.toInt(&ok);
+        const QStringList decisions = approvalDecisions();
+        if (ok && number >= 1 && number <= decisions.size()) return number - 1;
+        for (int i = 0; i < decisions.size(); ++i)
+            if (decisions.at(i).compare(text, Qt::CaseInsensitive) == 0) return i;
+        return -1;
+    }
+
     // What the prompt box says while a card is up. Longest first, for a narrow pane.
     QStringList questionPlaceholders() const {
         if (!m_ask.open()) return {};
         const QJsonObject question = questionAt(m_ask.current);
-        const int count = questionOptions(question).size();
         const QString header = question.value(QStringLiteral("header")).toString();
+        if (m_ask.approval) {
+            // Four fixed answers, no skip and no own words, so the box says less than a question's.
+            return {QStringLiteral("%1 · answer 1–4").arg(header),
+                    QStringLiteral("answer 1–4"),
+                    QStringLiteral("allow or deny")};
+        }
+        const int count = questionOptions(question).size();
         if (count == 0)
             return {QStringLiteral("%1 · type your answer, or /skip").arg(header),
                     QStringLiteral("type your answer, or /skip"),
@@ -2714,6 +2821,8 @@ private:
         if (!m_ask.open()) return false;
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
+        // The approval card answers on its own terms — four decisions, no own words (readDecision).
+        if (m_ask.approval) return answerApproval(trimmed, author);
         const QJsonObject question = questionAt(m_ask.current);
         const relay::ask::Reading reading = readAnswer(trimmed);
         if (reading.kind == relay::ask::Reading::NoSuchOption) {
@@ -2743,11 +2852,46 @@ private:
         return true;
     }
 
+    // Enter in the prompt box while an approval card is up (see answerQuestion). A number or the
+    // decision's own word decides; anything else restates what the card takes, and the wait goes on.
+    bool answerApproval(const QString &text, const QString &author) {
+        const int index = readDecision(text);
+        if (index < 0) {
+            // Not one of the four: name what the card takes rather than send the words to the
+            // worker, which would read them as a deny the user never chose.
+            ensureLineStart();
+            printInline(QStringLiteral("Answer 1–4 · this card takes a number or the word itself\n"), Ink::Ask);
+            closeInline();
+            printApproval();
+            focusInput();
+            changed();
+            return true;
+        }
+        // The slow path (WARP.md's standing rule), on the same hint as a question card's: the
+        // decision typed out in full when its number would do.
+        if (approvalDecisions().at(index).compare(text, Qt::CaseInsensitive) == 0)
+            hint(QStringLiteral("question.number"),
+                 QStringLiteral("Next time: just type %1").arg(index + 1));
+        recordDecision(index, author);
+        return true;
+    }
+
     // Esc while a card is up (owner, 2026-09-19): this one question is skipped and the next goes
     // up, which is exactly what typing `0` or `/skip` does. Returns false when there is no card,
     // so Esc goes on stopping the turn everywhere else.
     bool skipQuestion() {
         if (!m_ask.open()) return false;
+        // The approval card is the exception: skipping it *is* denying, and Esc is the one key a
+        // person reaches for to make a card go away, so it must not decide anything. The card
+        // stays up; the line under it says why.
+        if (m_ask.approval) {
+            ensureLineStart();
+            printInline(QStringLiteral("Answer 1–4 · Esc does not deny this one\n"), Ink::Ask);
+            closeInline();
+            focusInput();
+            changed();
+            return true;
+        }
         recordAnswer(questionAt(m_ask.current), QStringList());
         return true;
     }
@@ -2784,6 +2928,50 @@ private:
         m_ask = Ask{};
         refreshBackgroundWait();
         changed();
+    }
+
+    // One approval decided (card #K2FV): echoed under the card like every answer, then sent as a
+    // `decision` rather than answers. `always` is the one decision that outlives the turn — the
+    // saved checklist is rewritten and the new policy pushed to the worker *before* the decision,
+    // so the answer lands on an agent that already allows what it asked about.
+    void recordDecision(int index, const QString &author = QString()) {
+        const QString decision = approvalDecisions().at(index);
+        const QJsonObject question = questionAt(0);
+        ensureLineStart();
+        // Signed when it came from somewhere else, like every answer.
+        printInline(QStringLiteral("✦ %1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(), decision,
+                                                     author.trimmed().isEmpty()
+                                                         ? QString()
+                                                         : QStringLiteral(" · from %1").arg(author.trimmed())),
+                    Ink::UserAgent);
+        closeInline();
+        if (decision == QStringLiteral("always")) rememberAlwaysAllowed();
+        send({{"type", "question_answer"}, {"id", m_ask.id}, {"decision", decision}});
+        m_ask = Ask{};
+        refreshBackgroundWait();
+        changed();
+    }
+
+    // "Always allow": the capability comes off the saved ask list (security/approvals_ask, the
+    // checklist in Options › Security) and the first-launch choice is marked made, then the whole
+    // policy is pushed exactly as the settings page pushes it — the card, the checklist and the
+    // worker all read the same keys, so nothing else needs telling. Before the choice is made the
+    // saved key is empty and the cautious set is what is in force, so the list starts there: read
+    // raw, an unanswered installation would store "ask about nothing" and flip the whole policy
+    // to allow-all with one card (the same reader the checklist rows use, approvalRow).
+    void rememberAlwaysAllowed() {
+        QSettings settings;
+        QStringList ask = settings.value(QStringLiteral("security/approvals_ask")).toStringList();
+        if (!settings.value(QStringLiteral("security/approvals_chosen"), false).toBool())
+            ask = relay::approvals::cautious();   // the set the checklist was displaying
+        ask.removeAll(m_ask.capability);
+        settings.setValue(QStringLiteral("security/approvals_ask"), ask);
+        settings.setValue(QStringLiteral("security/approvals_chosen"), true);
+        if (!m_configured) return;
+        QJsonObject request{{"type", "set_agent_options"}};
+        const QJsonObject options = requestOptions();
+        for (auto it = options.begin(); it != options.end(); ++it) request.insert(it.key(), it.value());
+        send(request);
     }
 
 public:
@@ -2972,6 +3160,13 @@ public:
         send({{"type", "agent_subscribe"}, {"id", id}, {"on", true}});
     }
     // ----- end subagents UI ---------------------------------------------------------------------
+
+    // ----- the first-launch approvals choice (card #K2FV) ---------------------------------------
+    // The window opens the approvals pane beside this pane (src/ApprovalsPane.h) when a
+    // configure lands in an installation whose choice is still unanswered. No `static`
+    // guard, unlike the instructions offer above: the state is the setting itself, and a
+    // pane closed without answering must meet the screen again at its next configure.
+    std::function<void()> onApprovalsChoice;
 
 protected:
     void resizeEvent(QResizeEvent *event) override {
@@ -3816,7 +4011,13 @@ private:
                 // in Options reaches the worker as "no rules" rather than as "unchanged".
                 {"command_denylist", QJsonArray::fromStringList(settings.value(QStringLiteral("security/command_denylist")).toStringList())},
                 {"readable_roots", QJsonArray::fromStringList(settings.value(QStringLiteral("security/readable_roots")).toStringList())},
-                {"secret_patterns", QJsonArray::fromStringList(settings.value(QStringLiteral("security/secret_patterns")).toStringList())}};
+                {"secret_patterns", QJsonArray::fromStringList(settings.value(QStringLiteral("security/secret_patterns")).toStringList())},
+                // The approvals checklist (card #K2FV), sent on the same terms as the lists above:
+                // always both keys, so an empty list reaches the worker as "ask about nothing"
+                // rather than "unchanged". `approvals_chosen` false is the first-launch state, in
+                // which the worker asks about the cautious set until the pane is answered.
+                {"approvals_ask", QJsonArray::fromStringList(settings.value(QStringLiteral("security/approvals_ask")).toStringList())},
+                {"approvals_chosen", settings.value(QStringLiteral("security/approvals_chosen"), false).toBool()}};
     }
 
     // Session-related configure fields from settings (protocol sections 1 and 8).
@@ -3889,6 +4090,13 @@ private:
             m_onboarding = true;
             QTimer::singleShot(400, this, [this] { openInstructions(); });
         }
+        // First launch: the approvals choice, one screen before anything else (card #K2FV).
+        // Timed after the instructions offer so the two never land in the same instant, and
+        // gated on the setting rather than a `static`: the pane's buttons are what write
+        // security/approvals_chosen, and until they do the cautious set stays in force and
+        // the screen comes back at the next configure (Options › Security shows it again).
+        if (!QSettings().value(QStringLiteral("security/approvals_chosen"), false).toBool() && onApprovalsChoice)
+            QTimer::singleShot(800, this, [this] { if (onApprovalsChoice) onApprovalsChoice(); });
     }
 
     // Saved window layout: reattach the conversation this pane had when Relay was last quit.

@@ -51,6 +51,7 @@
 #include "OutputLinks.h"
 #include "Conversations.h"
 #include "SessionInfo.h"
+#include "ApprovalsPane.h"   // the first-launch approvals choice: a pane beside the first one configured (card #K2FV)
 // The Sharing pane and the sidecar controller behind it (#W5N2): this header opens the pane,
 // answers RemoteShare's signals and reads sharing::Model for the pane-header chip.
 #include "RemoteShare.h"
@@ -1570,6 +1571,55 @@ private:
         return row;
     }
 
+    // `approvals.CAUTIOUS` (backend/relay_core/approvals.py): what asks before the first-launch
+    // choice is answered. One list with the card's "Always allow" and the first-launch pane's
+    // buttons (relay::approvals::cautious, src/ApprovalsPane.h), so the rows, a card and the pane
+    // can never disagree about what an unanswered Relay asks.
+    static QStringList approvalsCautious() { return relay::approvals::cautious(); }
+
+    // One row of the approvals checklist (card #K2FV): seven capabilities, one saved list
+    // (security/approvals_ask). The row stands for membership of that list, and an unticked Relay
+    // — the first-launch choice not yet answered — displays the cautious set rather than an empty
+    // list, because that is what is in force. Touching any row is itself the choice: the saved
+    // list only means something once it replaces the default, so the first toggle marks
+    // security/approvals_chosen and the rows become the saved list they were displaying.
+    relay::SettingRow approvalRow(const QString &capability, const QString &label, const QString &detail) {
+        const bool cautious = approvalsCautious().contains(capability);
+        QSettings settings;
+        const bool asksNow = settings.value(QStringLiteral("security/approvals_chosen"), false).toBool()
+            ? settings.value(QStringLiteral("security/approvals_ask")).toStringList().contains(capability)
+            : cautious;
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Toggle;
+        row.id = QStringLiteral("option:approvals/") + capability;
+        row.label = label;
+        row.detail = detail;
+        row.checked = asksNow;
+        row.changed = asksNow != cautious;
+        row.onToggle = [this, capability](bool on) {
+            QSettings settings;
+            QStringList ask = settings.value(QStringLiteral("security/approvals_ask")).toStringList();
+            if (!settings.value(QStringLiteral("security/approvals_chosen"), false).toBool()) {
+                ask = approvalsCautious();   // start from the set the rows were displaying
+                settings.setValue(QStringLiteral("security/approvals_chosen"), true);
+            }
+            if (on) { if (!ask.contains(capability)) ask << capability; }
+            else ask.removeAll(capability);
+            settings.setValue(QStringLiteral("security/approvals_ask"), ask);
+            if (m_active) m_active->agentOptionsChanged(QStringLiteral("security/approvals_ask"));
+        };
+        // Resetting any row forgets both keys — the shipped state is "no choice made, cautious
+        // set in force" — which is what the one checklist ships as. Idempotent, so the section's
+        // Reset to defaults running all seven leaves exactly that.
+        row.reset = [this] {
+            QSettings settings;
+            settings.remove(QStringLiteral("security/approvals_ask"));
+            settings.remove(QStringLiteral("security/approvals_chosen"));
+            if (m_active) m_active->agentOptionsChanged(QStringLiteral("security/approvals_ask"));
+        };
+        return row;
+    }
+
     static relay::SettingRow headingRow(const QString &label) {
         relay::SettingRow row;
         row.kind = relay::SettingRow::Heading;
@@ -2427,8 +2477,9 @@ private:
             info.kind = relay::SettingRow::Info;
             info.id = QStringLiteral("info:security");
             info.label = QStringLiteral(
-                "Relay allows by default and never stops to ask: the agent's commands and file edits run "
-                "without per-action approval. What bounds them is where they may reach, and that is what this "
+                "Relay allows by default: the agent's commands and file edits run without per-action "
+                "approval — Ask before, below, is the opt-in that stops the actions you tick on a card. "
+                "What bounds them is where they may reach, and that is what this "
                 "page sets. File tools are confined to the pane's workspace and refuse .ssh, .gnupg, .git, "
                 ".env and .pem/.key files, on this machine and on an ssh host. Commands run with your own user "
                 "permissions under a systemd memory limit — a denylist below is a guardrail against an obvious "
@@ -2466,6 +2517,37 @@ private:
                                                   "runs — copy for you, and lets anything else that reaches the "
                                                   "screen replace what you are about to paste. Reading your "
                                                   "clipboard is never allowed and has no switch."), false);
+        // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval card's "Always
+        // allow" unticks the matching row by writing the same list. The labels are the card's
+        // headers (approvals.LABELS), so the row a card names is the row that unticks.
+        security.rows << headingRow(QStringLiteral("Ask before"));
+        security.rows << approvalRow(QStringLiteral("edit"), QStringLiteral("Change a file that already exists"),
+                                     QStringLiteral("edit_file and write_file, on a file that is there"));
+        security.rows << approvalRow(QStringLiteral("create"), QStringLiteral("Create a new file"),
+                                     QStringLiteral("write_file, where no file is yet"));
+        security.rows << approvalRow(QStringLiteral("delete_or_move"), QStringLiteral("Delete or move files"),
+                                     QStringLiteral("rm, mv and the like, read from the command line — a script or a "
+                                                    "variable can still spell them another way"));
+        security.rows << approvalRow(QStringLiteral("read_outside"), QStringLiteral("Read outside the workspace"),
+                                     QStringLiteral("read_file and list_directory outside the pane's workspace; the "
+                                                    "readable-folders list above widens what counts as inside"));
+        security.rows << approvalRow(QStringLiteral("terminal"), QStringLiteral("Run in your terminal"),
+                                     QStringLiteral("run_in_terminal: the command runs in your own shell, not the "
+                                                    "agent's"));
+        security.rows << approvalRow(QStringLiteral("program"), QStringLiteral("Type into your program"),
+                                     QStringLiteral("type_into_program, on a program you have handed over"));
+        security.rows << approvalRow(QStringLiteral("network"), QStringLiteral("Reach the network"),
+                                     QStringLiteral("curl, wget, git push and the like, read from the command line"));
+        security.rows << buttonRow(QStringLiteral("option:approvals/again"), QStringLiteral("The first-launch choice"),
+                                   QStringLiteral("Cautious by default, or allow everything — shown on the first "
+                                                  "configure until it is answered"),
+                                   QStringLiteral("Show it again"), [this] {
+            QSettings().remove(QStringLiteral("security/approvals_chosen"));
+            if (m_active) {
+                m_active->agentOptionsChanged(QStringLiteral("security/approvals_ask"));
+                openApprovalsPane(m_active);
+            }
+        });
         sections << security;
 
 
@@ -3890,6 +3972,83 @@ public:
         updateTitles();
     }
 
+    // ----- the first-launch approvals pane (card #K2FV, src/ApprovalsPane.h) --------------------
+    // One screen beside a pane, whenever a configure lands in an installation whose choice is
+    // unanswered: allow everything — the recommendation — or the cautious checklist. A pane,
+    // not a dialog, and undismissable in itself, because a default nobody picked is not a
+    // choice; the chrome's × still closes it, and the next configure brings it back. Options
+    // › Security's "Show it again" raises the same pane on demand.
+    static ToolPane *approvalsPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                tool && tool->property("paneType").toString() == QStringLiteral("approvals"))
+                return tool;
+        return nullptr;
+    }
+
+    void openApprovalsPane(Pane *owner) {
+        if (!owner) return;
+        QWidget *page = pageOf(owner);
+        if (!page) return;
+        ToolPane *tool = approvalsPaneIn(page);
+        if (!tool) {
+            auto *view = new relay::ApprovalsView;
+            // Kind::Info, but found by its paneType rather than an owner property (that is
+            // infoPaneOf's match), so the ⓘ pane beside the same pane is untouched, and an
+            // unknown paneType styles this header as a brass tool pane titled "Approvals".
+            tool = new ToolPane(ToolPane::Kind::Info, view, view, owner->cwd());
+            tool->setProperty("paneType", QStringLiteral("approvals"));
+            relay::theme::polishWindow(tool);
+            tool->setObjectName(QStringLiteral("pane"));
+            QPointer<ToolPane> guard(tool);
+            QPointer<Pane> ownerGuard(owner);
+            // What the buttons write is the window's knowledge, not the view's — the ⓘ pane's
+            // links are wired the same way. Both write both keys; the shared tail is below.
+            view->onAllowEverything = [guard, ownerGuard] {
+                auto *w = windowOf(guard);
+                if (!w) return;
+                QSettings settings;
+                settings.setValue(QStringLiteral("security/approvals_ask"), QStringList{});
+                settings.setValue(QStringLiteral("security/approvals_chosen"), true);
+                w->approvalsAnswered(guard, ownerGuard, false);
+            };
+            view->onChooseChecklist = [guard, ownerGuard] {
+                auto *w = windowOf(guard);
+                if (!w) return;
+                QSettings settings;
+                settings.setValue(QStringLiteral("security/approvals_ask"), approvalsCautious());
+                settings.setValue(QStringLiteral("security/approvals_chosen"), true);
+                w->approvalsAnswered(guard, ownerGuard, true);
+            };
+            // The owner going takes the question with it; it reappears beside wherever the
+            // conversation is resumed and configured again.
+            connect(owner, &QObject::destroyed, tool, [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        if (QWidget *own = pageOf(tool)) m_tabs->setCurrentWidget(own);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
+    // Either button: the two keys are already written, so what is left is to make the answer
+    // real — every pane's worker hears the new list, the Security page redraws its ticks — and
+    // to take the pane that asked away again. The checklist answer lands the owner in Options
+    // › Security, where the same rows live on; the other lands the keyboard back with the owner.
+    void approvalsAnswered(ToolPane *tool, Pane *owner, bool checklist) {
+        for (Pane *pane : allPanes()) pane->agentOptionsChanged(QStringLiteral("security/approvals_ask"));
+        refreshSettingsPanes();
+        QPointer<ToolPane> guard(tool);
+        if (guard)
+            if (auto *w = windowOf(guard)) w->closePane(guard, false);
+        QPointer<Pane> back(owner);
+        auto *w = windowOf(back);
+        if (!w || !back) return;
+        w->setActiveLeaf(back);
+        if (checklist) w->openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("security"));
+        else w->focusLeaf(back);
+    }
+
     // ----- the Sharing pane (#W5N2, docs/REMOTE-PROTOCOL.md section 10) ------------------------
     // One per tab, beside the pane it was opened from. It shows every share this desktop has, so
     // a second one would only ever repeat the first.
@@ -4917,6 +5076,9 @@ private:
         pane->onOpenThreadInfo = [guard](const QString &threadId, const QString &dir, const QString &owner) {
             if (auto *w = windowOf(guard)) w->openInfoPane(guard, QString(), dir, threadId, owner);
         };
+        // The first-launch approvals choice (card #K2FV): the approvals pane beside this one,
+        // raised by Pane::onSessionConfigured while security/approvals_chosen is unset.
+        pane->onApprovalsChoice = [guard] { if (auto *w = windowOf(guard)) w->openApprovalsPane(guard); };
         pane->onSessionOpenElsewhere = [guard](const QString &sessionId, const QString &dir) {
             Pane *other = paneWithSession(sessionId, dir, guard);
             auto *w = other ? dynamic_cast<RelayWindow *>(other->window()) : nullptr;
