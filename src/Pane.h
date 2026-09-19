@@ -16,8 +16,6 @@
 #include "Theme.h"
 #include "BoardPane.h"
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
-#include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
-#include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
 #include "AgentUi.h"
 #include "Completion.h"
 #include "FileIndex.h"
