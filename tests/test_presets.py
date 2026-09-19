@@ -269,6 +269,47 @@ class GuiMirrorTests(unittest.TestCase):
         expected = {p.id: (p.label, p.base_url, p.model) for p in P.PRESETS.values()}
         self.assertEqual(mirrored, expected)
 
+    def test_one_serving_model_state_feeds_the_picker(self):
+        """The model box names the model actually serving the turn, from one state (C5).
+
+        Relay moves a turn off the pane's own model in three places — plan mode's `planning` role
+        (protocol 13.11), an image turn's vision model (17.3) and a failover onto a provider that
+        answers (15.2.2). Two of the three used to have a member of their own and the third had
+        nothing, so a turn that failed over went on claiming the pane's model was serving it. The
+        box, the tooltip and the clearing are one mechanism now, which is what this checks.
+        """
+        source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
+        # The retired members are gone, and with them the two prefixes only they used.
+        for retired in ("m_visionModel", "m_planModel", 'QStringLiteral("vision:")',
+                        'QStringLiteral("planning:")'):
+            self.assertNotIn(retired, source)
+        # All three events feed it, and each move's own `*_ended` takes it back out.
+        for event, call in (("vision_route", 'pushServingModel(QStringLiteral("vision"), event)'),
+                            ("plan_route", 'pushServingModel(QStringLiteral("plan"), event)'),
+                            ("vision_route_ended", 'popServingModel(QStringLiteral("vision"))'),
+                            ("plan_route_ended", 'popServingModel(QStringLiteral("plan"))')):
+            self.assertIn(call, source, event)
+        retry = source.split('type == QStringLiteral("provider_retry")', 1)[1].split("else if (type ==", 1)[0]
+        self.assertIn('if (reason == QStringLiteral("failover")) pushServingModel(reason, event);', retry)
+        self.assertIn('popServingModel(QStringLiteral("failover"))', retry)
+        # A stall, a truncated step or an HTTP retry is the same model trying again: not a move.
+        for reason in ('QStringLiteral("stall")', 'QStringLiteral("truncated")'):
+            self.assertNotIn(reason, retry)
+        # The turn's end empties it however the turn ended, so nothing can be left naming a model.
+        clock = source.split("void stopTurnClock() {", 1)[1].split("void tickTurnClock()", 1)[0]
+        self.assertIn("clearServingModels();", clock)
+        # One row in the box, marked with what moved the turn, and it is not a preset to pick.
+        picker = source.split("void refreshPickers() {", 1)[1].split("// ----- Claude Code and Codex", 1)[0]
+        self.assertIn('QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), serving.model)', picker)
+        self.assertIn('QStringLiteral("serving:") + serving.model', picker)
+        self.assertIn("servingTooltip()", picker)
+        guard = source.split("void selectModel(const QString &id) {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn('id.startsWith(QStringLiteral("serving:"))', guard)
+        # The tooltip says which model the turn goes back to, and that a pick still lands at its end.
+        tooltip = source.split("QString servingTooltip() const {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("for this turn; back to %2 after", tooltip)
+        self.assertIn("from the end of this turn", tooltip)
+
     def test_the_cpp_role_list_matches_roles_py(self):
         source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
         block = source.split("static QStringList roleIds() {", 1)[1].split("}", 1)[0]
