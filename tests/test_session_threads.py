@@ -232,14 +232,20 @@ INSERT INTO meta VALUES('schema_version', '1');
         self.assertEqual(conv_index.terminal_id(link), conv_index.terminal_id(real))
 
     def test_sort_and_paging(self):
-        self.store.save(session(OWNER, updated=1000.0, turns=9))
-        self.store.save(session("d" * 32, updated=5000.0, turns=1))
-        self.store.save(session("e" * 32, updated=3000.0, turns=4))
+        self.store.save(session(OWNER, updated=1000.0, turns=9, title="Zulu", model="alpha"))
+        self.store.save(session("d" * 32, updated=5000.0, turns=1, title="alpha", model="zulu"))
+        self.store.save(session("e" * 32, updated=3000.0, turns=4, title="Mike", model="mike"))
         index = self.index()
         ids = lambda result: [i["session_id"][0] for i in result["items"]]  # noqa: E731
         self.assertEqual(ids(index.search("", scope="all")), ["d", "e", "a"])
         self.assertEqual(ids(index.search("", scope="all", sort="oldest")), ["a", "e", "d"])
         self.assertEqual(ids(index.search("", scope="all", sort="longest")), ["a", "e", "d"])
+        # The header-click sorts (#EV45): fewest turns, and the Session and Model columns A→Z / Z→A.
+        self.assertEqual(ids(index.search("", scope="all", sort="shortest")), ["d", "e", "a"])
+        self.assertEqual(ids(index.search("", scope="all", sort="title")), ["d", "e", "a"])
+        self.assertEqual(ids(index.search("", scope="all", sort="title_desc")), ["a", "e", "d"])
+        self.assertEqual(ids(index.search("", scope="all", sort="model")), ["a", "e", "d"])
+        self.assertEqual(ids(index.search("", scope="all", sort="model_desc")), ["d", "e", "a"])
         first = index.search("", scope="all", limit=2)
         self.assertEqual((ids(first), first["next_offset"]), (["d", "e"], 2))
         second = index.search("", scope="all", limit=2, offset=2)

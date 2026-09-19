@@ -59,6 +59,17 @@ QString stripAnsi(const QByteArray &bytes, int maxChars = 4000);
 QString dateGroup(double epochSeconds, const QDateTime &now);
 QStringList dateGroupOrder();
 
+// Clicking a session-list header sorts by that column (the sort itself is the worker's, so the
+// group rows and the paging survive). `nextHeaderSort` is the sort a click on `column` asks for
+// next given the list's current sort: each column toggles between its two orders (Updated:
+// newest↔oldest, Turns: most↔fewest, Session and Model: A→Z↔Z→A), and a click on a column the
+// current sort does not belong to takes that column's first order. `headerSortColumn` is the
+// column a sort id shows its arrow in, -1 when it has none ("relevance" ranks matches, not a
+// column), and `headerSortOrder` the arrow's direction.
+QString nextHeaderSort(int column, const QString &current);
+int headerSortColumn(const QString &sort);
+Qt::SortOrder headerSortOrder(const QString &sort);
+
 // The chip label for one entry of the reply's `parsed.operators`: "file: parser.cpp", an excluded
 // word (`{key: "text", negated: true}`) as "not: pelican", a negated operator as "not model: kimi".
 QString chipText(const QJsonObject &op);
@@ -226,6 +237,8 @@ private:
     void fillFacets(const QJsonObject &facets);
     void updateStatus();
     void updateEmptyState();
+    // The header arrow for the sort the list is in (or none, for "relevance").
+    void updateSortIndicator();
     QString scopeId() const;
     QString selectedId() const;
     QJsonObject selectedItem() const;

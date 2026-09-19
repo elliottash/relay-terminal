@@ -191,7 +191,16 @@ SOURCES = ("agent", "terminal", "subagent", "claude", "codex")
 # The guest sources (protocol 26.7): their rows are written by guest_sessions.py from the guests'
 # own transcripts, never from Relay's session files, so a rebuild leaves them to `guest_reconcile`.
 GUEST_SOURCES = ("claude", "codex")
-SORTS = ("recent", "oldest", "longest", "relevance")
+SORTS = ("recent", "oldest", "longest", "shortest", "title", "title_desc", "model", "model_desc",
+         "relevance")
+# The keys the alphabetical sorts order by. `title` keys on the name the GUI shows — a custom
+# rename over the stored title — and `model` on what the Sessions pane's Model column displays
+# (`addSessionRow` in src/Conversations.cpp): the terminal rows say "terminal", the guest sources
+# their label, everything else its model. The CASE is written to match, so the two never drift
+# apart silently; both fall back to recency when the key ties.
+_TITLE_KEY = "COALESCE(NULLIF(c.custom_title, ''), c.title, '') COLLATE NOCASE"
+_MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 'Claude Code'"
+              " WHEN 'codex' THEN 'Codex' ELSE c.model END COLLATE NOCASE")
 # `relevance` tiers a conversation by the best kind it matched, then by how many entries matched,
 # then by recency: a title hit outranks a summary hit outranks a prompt outranks a reply outranks
 # tool or terminal output, however many of the weaker ones there are.
@@ -1689,9 +1698,12 @@ class ConversationIndex:
 
         Words are an AND over the whole conversation, not over one message: a conversation matches
         when every word or phrase occurs somewhere in it, and an excluded word must occur nowhere
-        in it. `sort` is "recent" (default), "oldest", "longest" (most turns) or "relevance" (the
+        in it. `sort` is "recent" (default), "oldest", "longest" (most turns), "shortest" (fewest),
+        "title"/"title_desc" (the custom title over the stored one, A→Z or Z→A), "model"/
+        "model_desc" (what the GUI's Model column shows, A→Z or Z→A) or "relevance" (the
         best kind matched first — title, then summary, then prompt, then reply, then tool and
-        terminal output — then the number of matching entries, then recency); pinned rows come
+        terminal output — then the number of matching entries, then recency); the alphabetical
+        orders break ties by recency, pinned rows come
         first in every order. `offset` pages through the list; `next_offset` is set when there is
         more. Subagent threads are rows too, but only with `include_threads` (or "subagent" named
         in `sources`): the list is about sessions, and threads are what the checkbox adds."""
@@ -1734,6 +1746,11 @@ class ConversationIndex:
             full_params.append(part)
         order = {"recent": "COALESCE(c.updated, 0) DESC", "oldest": "COALESCE(c.updated, 0) ASC",
                  "longest": "c.turns DESC, COALESCE(c.updated, 0) DESC",
+                 "shortest": "c.turns ASC, COALESCE(c.updated, 0) DESC",
+                 "title": _TITLE_KEY + " ASC, COALESCE(c.updated, 0) DESC",
+                 "title_desc": _TITLE_KEY + " DESC, COALESCE(c.updated, 0) DESC",
+                 "model": _MODEL_KEY + " ASC, COALESCE(c.updated, 0) DESC",
+                 "model_desc": _MODEL_KEY + " DESC, COALESCE(c.updated, 0) DESC",
                  "relevance": "best DESC, hits DESC, COALESCE(c.updated, 0) DESC"}[sort]
 
         def work(db):

@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -767,6 +768,76 @@ private slots:
         manager.setQuery(QStringLiteral("pelican"));
         QTest::qWait(200);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("longest"));
+    }
+
+    void headerClickSortsByThatColumn() {
+        // The helpers the click and the arrow run on (src/Conversations.cpp).
+        QCOMPARE(nextHeaderSort(1, QStringLiteral("recent")), QStringLiteral("oldest"));
+        QCOMPARE(nextHeaderSort(1, QStringLiteral("oldest")), QStringLiteral("recent"));
+        QCOMPARE(nextHeaderSort(1, QStringLiteral("title")), QStringLiteral("recent"));
+        QCOMPARE(nextHeaderSort(2, QStringLiteral("longest")), QStringLiteral("shortest"));
+        QCOMPARE(nextHeaderSort(2, QStringLiteral("anything")), QStringLiteral("longest"));
+        QCOMPARE(nextHeaderSort(0, QStringLiteral("title")), QStringLiteral("title_desc"));
+        QCOMPARE(nextHeaderSort(0, QStringLiteral("title_desc")), QStringLiteral("title"));
+        QCOMPARE(nextHeaderSort(3, QStringLiteral("model")), QStringLiteral("model_desc"));
+        QCOMPARE(nextHeaderSort(3, QStringLiteral("relevance")), QStringLiteral("model"));
+        QCOMPARE(headerSortColumn(QStringLiteral("recent")), 1);
+        QCOMPARE(headerSortColumn(QStringLiteral("shortest")), 2);
+        QCOMPARE(headerSortColumn(QStringLiteral("title_desc")), 0);
+        QCOMPARE(headerSortColumn(QStringLiteral("model")), 3);
+        QCOMPARE(headerSortColumn(QStringLiteral("relevance")), -1);
+        QCOMPARE(int(headerSortOrder(QStringLiteral("title"))), int(Qt::AscendingOrder));
+        QCOMPARE(int(headerSortOrder(QStringLiteral("longest"))), int(Qt::DescendingOrder));
+
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
+        QHeaderView *header = tree->header();
+        // Newest-first listing carries the arrow on Updated; a search sort has no column.
+        QCOMPARE(header->sortIndicatorSection(), 1);
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::DescendingOrder));
+        manager.setQuery(QStringLiteral("pelican"));
+        QTest::qWait(200);                                              // the box is debounced
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
+        QVERIFY(!header->isSortIndicatorShown());
+        manager.setQuery(QString());
+        QTest::qWait(200);
+        QVERIFY(header->isSortIndicatorShown());
+
+        // Updated: oldest first, and a second click toggles back; the combo follows both ways.
+        emit header->sectionClicked(1);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("oldest"));
+        QCOMPARE(sort->currentData().toString(), QStringLiteral("oldest"));
+        QCOMPARE(header->sortIndicatorSection(), 1);
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::AscendingOrder));
+        emit header->sectionClicked(1);
+        QVERIFY(!asked.last().contains(QStringLiteral("sort")));        // newest first is the default
+        QCOMPARE(sort->currentData().toString(), QStringLiteral("recent"));
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::DescendingOrder));
+
+        // Session by title; the click is the user's own sort, so typing does not take it back.
+        emit header->sectionClicked(0);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("title"));
+        QCOMPARE(sort->currentData().toString(), QStringLiteral("title"));
+        QCOMPARE(header->sortIndicatorSection(), 0);
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::AscendingOrder));
+        manager.setQuery(QStringLiteral("pelican"));
+        QTest::qWait(200);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("title"));
+        QCOMPARE(header->sortIndicatorSection(), 0);
+
+        // Turns and Model reach their own pairs too.
+        emit header->sectionClicked(2);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("longest"));
+        emit header->sectionClicked(2);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("shortest"));
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::AscendingOrder));
+        emit header->sectionClicked(3);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("model"));
+        QCOMPARE(header->sortIndicatorSection(), 3);
     }
 
     void filtersSendTheirOwnFieldsAndClear() {

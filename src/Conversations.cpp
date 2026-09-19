@@ -157,6 +157,35 @@ QStringList dateGroupOrder() {
             QStringLiteral("This month"), QStringLiteral("Older")};
 }
 
+QString nextHeaderSort(int column, const QString &current) {
+    switch (column) {
+        case 0:  return current == QLatin1String("title") ? QStringLiteral("title_desc")
+                                                          : QStringLiteral("title");
+        case 1:  return current == QLatin1String("recent") ? QStringLiteral("oldest")
+                                                           : QStringLiteral("recent");
+        case 2:  return current == QLatin1String("longest") ? QStringLiteral("shortest")
+                                                            : QStringLiteral("longest");
+        case 3:  return current == QLatin1String("model") ? QStringLiteral("model_desc")
+                                                          : QStringLiteral("model");
+        default: return current;
+    }
+}
+
+int headerSortColumn(const QString &sort) {
+    if (sort == QLatin1String("recent") || sort == QLatin1String("oldest")) return 1;
+    if (sort == QLatin1String("longest") || sort == QLatin1String("shortest")) return 2;
+    if (sort == QLatin1String("title") || sort == QLatin1String("title_desc")) return 0;
+    if (sort == QLatin1String("model") || sort == QLatin1String("model_desc")) return 3;
+    return -1;
+}
+
+Qt::SortOrder headerSortOrder(const QString &sort) {
+    return sort == QLatin1String("oldest") || sort == QLatin1String("shortest")
+                   || sort == QLatin1String("title") || sort == QLatin1String("model")
+               ? Qt::AscendingOrder
+               : Qt::DescendingOrder;
+}
+
 namespace {
 
 const char *const kOperatorKeys[] = {"project", "file", "model", "branch", "before", "after", "has", "is", "in"};
@@ -571,6 +600,11 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_sort->addItem(QStringLiteral("Newest first"), QStringLiteral("recent"));
     m_sort->addItem(QStringLiteral("Oldest first"), QStringLiteral("oldest"));
     m_sort->addItem(QStringLiteral("Most turns"), QStringLiteral("longest"));
+    m_sort->addItem(QStringLiteral("Fewest turns"), QStringLiteral("shortest"));
+    m_sort->addItem(QStringLiteral("Title A→Z"), QStringLiteral("title"));
+    m_sort->addItem(QStringLiteral("Title Z→A"), QStringLiteral("title_desc"));
+    m_sort->addItem(QStringLiteral("Model A→Z"), QStringLiteral("model"));
+    m_sort->addItem(QStringLiteral("Model Z→A"), QStringLiteral("model_desc"));
     m_sort->addItem(QStringLiteral("Best match"), QStringLiteral("relevance"));
 
     // The three-state filters of protocol 14.3, as a menu so the filter row stays one line in a
@@ -619,6 +653,10 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
+    // Qt's own tree sort stays off forever: it would reorder the group rows ("Continue", the
+    // date groups) and sort the display text ("14 min ago"). Sorting is asked of the worker —
+    // a header click is the Sort combo in another form (the sectionClicked wiring below).
+    m_tree->setSortingEnabled(false);
     // The unfolded rows wrap, so their height depends on how wide the first column is.
     connect(m_tree->header(), &QHeaderView::sectionResized, this,
             [this](int section, int, int) { if (section == 0) m_tree->doItemsLayout(); });
@@ -821,6 +859,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
             if (m_sort->currentData().toString() != want) {
                 const QSignalBlocker quiet(m_sort);
                 m_sort->setCurrentIndex(m_sort->findData(want));
+                // Blocked, so the currentIndexChanged wiring did not see this: the arrow moves here.
+                updateSortIndicator();
             }
         }
         scheduleQuery();
@@ -832,7 +872,18 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
             [this] { rebuildTree(selectedId()); });
     // A sort the user picked by hand is theirs: the query text stops changing it. The list's own
     // switches happen under a QSignalBlocker, so any change that arrives here is the user's.
-    connect(m_sort, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { m_sortChosen = true; });
+    connect(m_sort, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this] { m_sortChosen = true; updateSortIndicator(); });
+    // A header click sorts by that column through the combo's own chain: the combo follows (so it
+    // never names an order the list is not in), the click counts as the user's own sort, and the
+    // header shows the arrow. Qt's own tree sort is never used (see the tree's construction).
+    connect(m_tree->header(), &QHeaderView::sectionClicked, this, [this](int column) {
+        const QString next = nextHeaderSort(column, m_sort->currentData().toString());
+        if (next == m_sort->currentData().toString()) return;
+        const int at = m_sort->findData(next);
+        if (at >= 0) m_sort->setCurrentIndex(at);
+    });
+    updateSortIndicator();
     connect(m_threads, &QCheckBox::toggled, this, [this](bool on) {
         m_tree->headerItem()->setText(0, on ? QStringLiteral("Session / subagent thread") : QStringLiteral("Session"));
         requery();
@@ -1335,6 +1386,15 @@ void SessionManager::updateStatus() {
     else if (m_closed.contains(selectedId()))
         text += QStringLiteral(" · Alt+Enter reopens it where it was");
     m_status->setText(text);
+}
+
+// The header's sort arrow for the sort the list is in. "relevance" belongs to no column, so it
+// hides the arrow; every other sort points at its column, ascending or descending.
+void SessionManager::updateSortIndicator() {
+    QHeaderView *header = m_tree->header();
+    const int column = headerSortColumn(m_sort->currentData().toString());
+    header->setSortIndicatorShown(column >= 0);
+    if (column >= 0) header->setSortIndicator(column, headerSortOrder(m_sort->currentData().toString()));
 }
 
 void SessionManager::updateEmptyState() {
