@@ -445,6 +445,28 @@ class MergeTests(SyncCase):
         result = self.sync()
         self.assertEqual(result.conflicts, [])
 
+    def test_a_conflict_survives_a_quiet_sync_instead_of_pushing_over_it(self):
+        """The listing trap: an unresolved conflict, then nothing changes anywhere.
+
+        The conflicted card's baseline is deliberately left behind, so "absent from the
+        changed-issues listing" must not read as "the issue equals the baseline" — an unchanged
+        listing is not an unchanged issue *relative to that card*. Guessing that way pushes the
+        local version over the remote edit the conflict was about, which is the one write the
+        whole merge exists to prevent.
+        """
+        card = self.reload(self.card_id)
+        self.edit_card(self.card_id, body=card.body.replace("add voice transcribe mode",
+                                                            "local words"))
+        self.gh.web_edit(1, body=self.issue()["body"].replace("add voice transcribe mode",
+                                                              "remote words"))
+        first = self.sync()
+        self.assertEqual([c["field"] for c in first.conflicts], ["prose"])
+        second = self.sync()
+        self.assertEqual([c["field"] for c in second.conflicts], ["prose"])
+        self.assertIn("remote words", self.issue()["body"])
+        self.assertIn("local words", self.reload(self.card_id).body)
+        self.assertCheckClean()
+
 
 # -------------------------------------------------------------------- comments
 

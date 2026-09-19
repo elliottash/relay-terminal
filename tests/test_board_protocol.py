@@ -2083,5 +2083,140 @@ class ForgeSyncProtocolTests(ProtocolTest):
         self.assertEqual(self.gh.writes, [])
 
 
+class ForgeSyncAcceptanceTests(ForgeSyncProtocolTests):
+    """#GDQN's acceptance, walked end to end through the worker messages.
+
+    A shared work card and its GitHub issue stay in sync both ways — body, comments, status,
+    labels — across edits on either side, and a conflict is surfaced rather than lost. Every
+    Relay-side step is a `dispatch` (so the thread, the guards and the events the GUI will one
+    day render are all in the path); the GitHub side is `web_edit`/`web_comment`, which is a
+    human in a browser. The engine tests cover each field alone (`tests/test_forge_sync.py`);
+    this is the same walk at the level the Switchboard pane will drive it.
+    """
+
+    def sync_run(self, request_id: str) -> dict:
+        self.events.clear()
+        self.commands.dispatch({"type": "forge_sync_run", "id": request_id})
+        done = self.terminal("forge_sync_done")
+        self.assertEqual(done["event"], "forge_sync_done", done)
+        self.assertEqual(done["errors"], [], done)
+        return done
+
+    def hash_of(self, card_id: str) -> str:
+        card = self.board.card_by_id(card_id)
+        self.assertIsNotNone(card, f"#{card_id} is gone")
+        return B.file_hash(card.path)
+
+    def update_card(self, card_id: str, request_id: str, **patch) -> None:
+        """`board_update` with a fresh `base_hash`, the way the GUI sends it."""
+        events = self.send(type="board_update", id=request_id, card=card_id,
+                           base_hash=self.hash_of(card_id), patch=patch)
+        self.assertTrue([e for e in events if e["event"] == "board_written"], events)
+
+    def test_a_card_and_its_issue_stay_in_sync_both_ways(self):
+        card_id = self.make_card(title="Voice mode", text="add voice transcribe mode",
+                                 labels=["feature", "voice"])
+
+        # ---- first run: the card becomes an issue with every mapped field
+        done = self.sync_run("a1")
+        self.assertEqual(done["pushed"], 1)
+        self.assertEqual(done["conflicts"], [])
+        issue = self.gh.main.issues[1]
+        self.assertEqual(issue["title"], "Voice mode")
+        self.assertIn("add voice transcribe mode", issue["body"])
+        self.assertIn(f"<!-- relay-id: {card_id} -->", issue["body"])
+        self.assertEqual(sorted(l["name"] for l in issue["labels"]),
+                         ["feature", "status:inbox", "tab:features", "voice"])
+        self.assertEqual(self.board.card_by_id(card_id).front["links"]["github"],
+                         "relay/terminal#1")
+
+        # ---- edited here: body, labels, status and a comment all reach the issue
+        self.update_card(card_id, "a2",
+                         fields={"labels": ["feature", "voice", "beta"]},
+                         replace_section={"heading": "Issue",
+                                          "text": "add voice transcribe mode, streaming too"})
+        self.send(type="board_move", id="a3", card=card_id, status="ready",
+                  reason="triaged")
+        self.send(type="board_comment", id="a4", card=card_id, kind="note",
+                  text="Recording works; it needs a review.")
+        done = self.sync_run("a5")
+        self.assertEqual(done["pushed"], 1)
+        self.assertEqual(done["comments_out"], 1)
+        issue = self.gh.main.issues[1]
+        self.assertIn("streaming too", issue["body"])
+        self.assertEqual(sorted(l["name"] for l in issue["labels"]),
+                         ["beta", "feature", "status:ready", "tab:features", "voice"])
+        [comment] = self.gh.comments_of(1)
+        self.assertIn("it needs a review", comment["body"])
+        self.assertIn("<!-- relay-entry:", comment["body"])
+
+        # ---- edited there: body, labels, status and a comment all reach the card
+        self.gh.web_edit(1, body=issue["body"].replace(
+            "<!-- relay-sync -->", "Edited on the web.\n\n<!-- relay-sync -->"))
+        self.gh.web_edit(1, labels=["feature", "tab:features", "status:in-progress", "ui"])
+        self.gh.web_comment(1, "Filed from the web.", author="octocat")
+        done = self.sync_run("a6")
+        self.assertEqual(done["pulled"], 1)
+        self.assertEqual(done["comments_in"], 1)
+        card = self.board.card_by_id(card_id)
+        self.assertIn("Edited on the web.", card.body)
+        self.assertEqual(card.status, "in-progress")
+        self.assertEqual(list(card.front.get("labels") or []), ["feature", "ui"])
+        imported = self.board.thread(card_id)[-1]
+        self.assertEqual(imported.author, "octocat")
+        self.assertEqual(imported.attrs.get("via"), "github")
+        self.assertIn("Filed from the web.", imported.text)
+        self.assertTrue([e for e in self.events if e["event"] == "board_changed"])
+        problems = [str(p) for p in self.board.check() if p.severity == "error"]
+        self.assertEqual(problems, [])
+
+        # ---- and a quiet sync after that touches nothing
+        writes = len(self.gh.writes)
+        done = self.sync_run("a7")
+        self.assertEqual((done["pushed"], done["pulled"], done["comments_out"],
+                          done["comments_in"]), (0, 0, 0, 0))
+        self.assertEqual(len(self.gh.writes), writes)
+
+    def test_a_conflict_is_surfaced_rather_than_lost(self):
+        card_id = self.make_card(title="Voice mode", text="first words")
+        self.sync_run("c1")
+        number = self.board.card_by_id(card_id).front["links"]["github"].split("#")[1]
+
+        # The same prose edited on both sides, differently.
+        self.update_card(card_id, "c2", replace_section={"heading": "Issue",
+                                                         "text": "local words"})
+        self.gh.web_edit(int(number), body=self.gh.main.issues[int(number)]["body"].replace(
+            "first words", "remote words"))
+        done = self.sync_run("c3")
+        # The prose carries its `## Issue` heading; the words are what matter.
+        self.assertEqual([c["field"] for c in done["conflicts"]], ["prose"])
+        self.assertIn("local words", done["conflicts"][0]["card"])
+        self.assertIn("remote words", done["conflicts"][0]["issue"])
+        # Neither side is written, and the conflict is on the card's thread with both versions.
+        self.assertIn("local words", self.board.card_by_id(card_id).body)
+        self.assertIn("remote words", self.gh.main.issues[int(number)]["body"])
+        notes = [e for e in self.board.thread(card_id)
+                 if e.kind == "note" and "sync conflict" in e.text]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("local words", notes[0].text)
+        self.assertIn("remote words", notes[0].text)
+
+        # An unresolved conflict is reported again, but does not spam the thread.
+        entries = len(self.board.thread(card_id))
+        done = self.sync_run("c4")
+        self.assertEqual([c["field"] for c in done["conflicts"]], ["prose"])
+        self.assertEqual(len(self.board.thread(card_id)), entries)
+
+        # Resolving it on one side lets the sync through.
+        self.update_card(card_id, "c5", replace_section={"heading": "Issue",
+                                                         "text": "remote words"})
+        done = self.sync_run("c6")
+        self.assertEqual(done["conflicts"], [])
+        self.assertIn("remote words", self.board.card_by_id(card_id).body)
+        self.assertIn("remote words", self.gh.main.issues[int(number)]["body"])
+        problems = [str(p) for p in self.board.check() if p.severity == "error"]
+        self.assertEqual(problems, [])
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

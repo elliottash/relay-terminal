@@ -84,7 +84,7 @@ never issues: they are filtered out of every listing.
 {"version": 1, "repo": "owner/repo", "issues_etag": "\"ab12…\"",
  "last_seen": "2026-09-18T12:00:01Z",
  "cards": {"K7Q2": {"number": 12, "card_hash": "…", "updated_at": "…", "etag": "\"…\"",
-                    "comments_etag": "\"…\"",
+                    "comments_etag": "\"…\"", "current": true,
                     "base": {"title": "…", "prose": "…", "tasks": [["a3", false, "…"]],
                              "labels": ["voice"], "status": "ready", "tab": "features",
                              "assignee": null},
@@ -111,6 +111,18 @@ never issues: they are filtered out of every listing.
   `.json` in the private root is neither a card nor a thread. A sync leaves `check` clean.
 - It is rewritten **atomically after every card**, and after every comment, so a run killed half
   way resumes exactly where it stopped and never posts the same comment twice.
+- **`current` (per card)** is what makes an unchanged listing cheap *and* safe. A listing that
+  answers `304`, or a `since` filter that leaves an issue out, only means "nothing changed since
+  the last listing"; for a card whose baseline records everything the engine last saw of its
+  issue (`current: true`) that also means "the issue equals the baseline", and the run may merge
+  against the baseline without another request. A conflict keeps a field's baseline behind on
+  purpose, and an error can stop a run between a write and the baseline that records it, so both
+  set `current: false` — and for such a card the issue is **read again** (a real read, never a
+  conditional one, which would only prove it unchanged since a view the baseline does not hold)
+  before anything is pushed. Without this, the run after a conflict would push the local version
+  over the very remote edit the conflict was about. A state file from before the marker existed
+  has no `current` keys: every linked card is read once, then marked, and the runs after that are
+  conditional again.
 - **Losing it is survivable.** `links.github` in the card's front matter is the durable link, so
   no issue and no comment is created twice (a comment Relay posted is recognised by its hidden
   marker in the listing, not only by the state). Without a baseline the engine is conservative: a
@@ -144,7 +156,9 @@ A conflict **writes to neither side**. It is recorded:
 The baseline for a conflicted field stays where it was, so the conflict keeps being reported until
 someone resolves it by editing one side; the thread entry is written once per distinct pair of
 versions (`conflict` in the state file), so an unresolved conflict does not spam the thread on
-every sync.
+every sync. Nor does a quiet board resolve it by accident: the card's `current` flag is cleared
+(§3), so the run after a conflict reads the issue again and re-reports it rather than reading the
+unchanged listing as "the issue equals the baseline" and pushing over the remote edit.
 
 ## 5. Credentials
 

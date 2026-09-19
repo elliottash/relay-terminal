@@ -1090,9 +1090,15 @@ class ForgeSync:
             entry = self.state.get(card.id) or {}
             number = entry.get("number") or _linked_number(card, self.repo)
             issue = index.get(number) if number else None
-            if number and issue is None and not entry.get("base"):
-                # We know the number but have no baseline (state lost, or the card was linked by
-                # hand): read the issue rather than guess.
+            if number and issue is None and (not entry.get("base") or not entry.get("current")):
+                # We know the number, and may not equate the issue with the baseline: either
+                # there is none (state lost, or the card was linked by hand), or a conflict or
+                # an error deliberately left it behind. A 304 or `since`-filtered listing only
+                # says "nothing changed since the last listing", which for such a card is not
+                # "the issue equals the baseline" — reading that way would push the local
+                # version over the very remote edit the conflict was about. So the issue is
+                # read (no etag: a real read, never a 304 that would say nothing about the
+                # baseline) and the merge sees its true fields.
                 try:
                     issue = self.provider.get_issue(int(number))
                 except ForgeRateLimited as exc:
@@ -1103,6 +1109,10 @@ class ForgeSync:
                 except ForgeError as exc:
                     plan = CardPlan(card.id, card.title, number, action="error", note=str(exc))
                     result.cards.append(plan)
+                    result.errors.append(str(exc))
+                    if not dry_run:
+                        self._mark_lagging(card.id)
+                        self.state.save()
                     continue
             if number:
                 linked_numbers.add(int(number))
@@ -1117,6 +1127,9 @@ class ForgeSync:
                 result.cards.append(CardPlan(card.id, card.title, number, action="error",
                                              note=_clean(exc)))
                 result.errors.append(_clean(exc))
+                if not dry_run:
+                    self._mark_lagging(card.id)
+                    self.state.save()
                 continue
             if plan.action == "create":
                 creates += 1
@@ -1159,14 +1172,19 @@ class ForgeSync:
             except ForgeRateLimited as exc:
                 result.retry_at = exc.retry_at
                 result.errors.append(str(exc))
+                # The card may have stopped between a write and the baseline that records it,
+                # so the next run must read its issue again rather than trust the baseline.
+                self._mark_lagging(card.id)
                 self.state.save()               # the listing marks stay behind: this run stopped
                 return result
             except ForgePrivacyError as exc:
                 plan.action, plan.note = "error", str(exc)
                 result.errors.append(str(exc))
+                self._mark_lagging(card.id)
             except (ForgeError, B.BoardError, OSError) as exc:
                 plan.action, plan.note = "error", _clean(exc)
                 result.errors.append(_clean(exc))
+                self._mark_lagging(card.id)
             self.state.save()                 # per card, atomically: a crash resumes here
             done += 1
             self._progress(plan, done, total)
@@ -1302,6 +1320,18 @@ class ForgeSync:
         return Fields(**values), push, pull, conflicts
 
     # ---- applying ------------------------------------------------------------
+    def _mark_lagging(self, card_id: str) -> None:
+        """A card whose run errored: its baseline was not confirmed against its issue.
+
+        Nothing here decides whether the baseline *does* lag — a stop between two writes may
+        have left it accurate — only that the next run may not *assume* it, so the issue is
+        read again (the planning loop's `not entry.get("current")`) before anything is pushed.
+        Only linked cards are marked: an unlinked one has no baseline to doubt.
+        """
+        entry = self.state.get(card_id)
+        if entry and entry.get("number"):
+            entry["current"] = False
+
     def _apply_card(self, card: B.Card, issue: Issue | None, plan: CardPlan, result: SyncResult) -> None:
         if plan.action == "error":
             return
@@ -1312,7 +1342,7 @@ class ForgeSync:
             plan.number = issue.number
             entry.update({"number": issue.number, "updated_at": issue.updated_at,
                           "etag": issue.etag, "base": card_now.to_json(),
-                          "card_hash": B.file_hash(card.path)})
+                          "card_hash": B.file_hash(card.path), "current": True})
             self._link_card(card, issue.number)
             result.pushed += 1
             self._push_comments(card, issue.number, entry, plan, result)
@@ -1345,6 +1375,12 @@ class ForgeSync:
         entry["base"] = new_base
         entry["number"] = number
         entry["card_hash"] = B.file_hash(card.path)
+        # `current` is what lets a later run equate an issue that is absent from the
+        # changed-issues listing with this baseline (see `_sync`): it is true only when the
+        # baseline records everything the run saw of the issue. A conflict keeps a field's
+        # baseline behind on purpose, so for that card an unchanged listing is not an
+        # unchanged issue, and the next run reads the issue again.
+        entry["current"] = not conflicts
         if issue is not None:
             entry["updated_at"] = issue.updated_at
             entry["etag"] = issue.etag
@@ -1628,7 +1664,8 @@ class ForgeSync:
                                  author=SYNC_AUTHOR, kind="event", via="github", repo=self.repo)
         entry = self.state.card(card.id)
         entry.update({"number": issue.number, "updated_at": issue.updated_at, "etag": issue.etag,
-                      "base": self.card_fields(card).to_json(), "card_hash": B.file_hash(path)})
+                      "base": self.card_fields(card).to_json(), "card_hash": B.file_hash(path),
+                      "current": True})
         plan.card_id = card.id
         result.imported += 1
         # The issue gains the hidden id marker, so a human edit cannot orphan it.
