@@ -10,6 +10,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
@@ -27,6 +28,7 @@
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -449,7 +451,8 @@ void RemoteShare::paneState(const QString &paneId, const QJsonObject &state)
     send(message);
 }
 
-bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QString *error)
+bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QString *error,
+                            const QString &tab)
 {
     if (!hooks.view) {
         if (error) {
@@ -461,6 +464,7 @@ bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QStri
 
     Shared shared;
     shared.hooks = hooks;
+    shared.tab = tab;
     m_panes.insert(paneId, shared);
     sendPane(paneId);
     connect(hooks.view, &TerminalView::frameChanged, this, [this, paneId] {
@@ -486,9 +490,51 @@ void RemoteShare::stopAll()
 {
     for (const QString &paneId : m_panes.keys()) send({{"t", "unpane"}, {"id", paneId}});
     m_panes.clear();
+    if (!m_tabShares.isEmpty()) {
+        m_tabShares.clear();
+        emit tabSharesChanged();
+    }
     send({{"t", "stop"}});
     m_poll->stop();
     refreshSharedPanes();
+    emit sharingChanged();
+}
+
+QStringList RemoteShare::panesInTab(const QString &tab) const
+{
+    QStringList panes;
+    if (tab.isEmpty()) return panes;
+    for (auto it = m_panes.cbegin(); it != m_panes.cend(); ++it)
+        if (it->tab == tab) panes.append(it.key());
+    panes.sort();
+    return panes;
+}
+
+void RemoteShare::shareTab(const QString &tab)
+{
+    if (tab.isEmpty() || m_tabShares.contains(tab)) return;
+    m_tabShares.insert(tab);
+    emit tabSharesChanged();     // the window shares the tab's panes under it
+    emit sharingChanged();
+}
+
+void RemoteShare::unshareTab(const QString &tab)
+{
+    if (!m_tabShares.remove(tab)) return;
+    // Every pane that is shared because the tab was ends its share, which is what the owner
+    // asked for: the tab's guests leave, its invites burn, and nothing more of it is published.
+    for (const QString &paneId : panesInTab(tab)) endShare(paneId);
+    emit tabSharesChanged();
+    emit sharingChanged();
+}
+
+void RemoteShare::setPaneTab(const QString &paneId, const QString &tab)
+{
+    auto it = m_panes.find(paneId);
+    if (it == m_panes.end() || it->tab == tab) return;
+    it->tab = tab;
+    sendPane(paneId);            // the sidecar grows or shrinks the tabs' guests from this line
+    requestParticipants();
     emit sharingChanged();
 }
 
@@ -505,6 +551,7 @@ void RemoteShare::sendPane(const QString &paneId)
     const ViewportFrame &frame = it->hooks.view->frame();
     QJsonObject message{{"t", "pane"}, {"id", paneId}, {"title", title}, {"cwd", cwd},
                          {"status", status}, {"rows", frame.rows}, {"cols", frame.columns}};
+    if (!it->tab.isEmpty()) message["tab"] = it->tab;
     if (it->hooks.shellPid) message["pid"] = static_cast<double>(it->hooks.shellPid());
     if (it->hooks.foregroundPid)
         message["foreground_pid"] = static_cast<double>(it->hooks.foregroundPid());
@@ -609,15 +656,20 @@ void RemoteShare::setPasswordEntry(const QString &deviceId, bool allow)
 // One method per line, each doing nothing but naming it. The hub refuses every one of these from
 // the wire, so this file is the only place they are ever sent from.
 
-void RemoteShare::createInvite(const QString &paneId, const QString &role, int expires, int uses)
+void RemoteShare::createInvite(const QString &paneId, const QString &role, int expires, int uses,
+                               const QString &tab)
 {
-    send({{"t", "invite_create"}, {"pane", paneId}, {"role", role},
-          {"expires", expires}, {"uses", uses}});
+    QJsonObject message{{"t", "invite_create"}, {"pane", paneId}, {"role", role},
+                        {"expires", expires}, {"uses", uses}};
+    if (!tab.isEmpty()) message["tab"] = tab;
+    send(message);
 }
 
-void RemoteShare::createCode(const QString &paneId, const QString &role)
+void RemoteShare::createCode(const QString &paneId, const QString &role, const QString &tab)
 {
-    send({{"t", "code_create"}, {"pane", paneId}, {"role", role}});
+    QJsonObject message{{"t", "code_create"}, {"pane", paneId}, {"role", role}};
+    if (!tab.isEmpty()) message["tab"] = tab;
+    send(message);
 }
 
 void RemoteShare::revokeCode(const QString &code)
@@ -841,9 +893,22 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     // ----- inviting somebody else (docs/REMOTE-PROTOCOL.md section 10.2) ----------------------
     // Under the QR, not instead of it: pairing your own phone is the common case and stays the
     // first thing offered. This is the second, and it hands out a link rather than a device grant.
-    auto *inviteHeading = new QLabel(QStringLiteral("Invite someone to this pane"));
-    inviteHeading->setObjectName(QStringLiteral("settingsHeading"));
-    column->addWidget(inviteHeading);
+    // "Share the whole tab" (owner, 2026-09-18): every pane in the tab, and every pane added to
+    // it later, is shared, and a link made while this is ticked lets its guests into all of them.
+    // Hidden until the window says which tab this is (setTab).
+    m_wholeTab = new QCheckBox(QStringLiteral("Share the whole tab"));
+    m_wholeTab->hide();
+    connect(m_wholeTab, &QCheckBox::toggled, this, [this](bool on) {
+        RemoteShare &share = RemoteShare::instance();
+        if (on) share.shareTab(m_tab);
+        else share.unshareTab(m_tab);
+        updateWholeTab();
+    });
+    column->addWidget(m_wholeTab);
+
+    m_inviteHeading = new QLabel(QStringLiteral("Invite someone to this pane"));
+    m_inviteHeading->setObjectName(QStringLiteral("settingsHeading"));
+    column->addWidget(m_inviteHeading);
 
     auto *inviteRow = new QHBoxLayout;
     m_inviteRole = new QComboBox;
@@ -1157,11 +1222,45 @@ void RemoteShareDialog::updateRoleNote()
     fit();
 }
 
+void RemoteShareDialog::setTab(const QString &tab, int panes)
+{
+    m_tab = tab;
+    m_tabPanes = panes;
+    updateWholeTab();
+    connect(&RemoteShare::instance(), &RemoteShare::tabSharesChanged, this,
+            [this] { updateWholeTab(); }, Qt::UniqueConnection);
+}
+
+void RemoteShareDialog::updateWholeTab()
+{
+    if (!m_wholeTab) return;
+    m_wholeTab->setVisible(!m_tab.isEmpty());
+    const bool whole = RemoteShare::instance().isTabShared(m_tab);
+    {
+        const QSignalBlocker quiet(m_wholeTab);
+        m_wholeTab->setChecked(whole);
+    }
+    // Scope growth is the thing to be told about before, not after: the guests of a tab shared
+    // whole will see a pane the moment it is split off, so the box says so in its own words.
+    m_wholeTab->setToolTip(QStringLiteral(
+        "Every pane in this tab is shared, and every pane you add to it later is shared the moment "
+        "it opens. A link made while this is ticked lets its guests into all of them. Moving a pane "
+        "out of the tab, or closing it, takes it away from them."));
+    m_wholeTab->setText(m_tabPanes > 1
+                            ? QStringLiteral("Share the whole tab (%1 panes, and any you add)").arg(m_tabPanes)
+                            : QStringLiteral("Share the whole tab (and any pane you add to it)"));
+    if (m_inviteHeading)
+        m_inviteHeading->setText(whole ? QStringLiteral("Invite someone to this tab")
+                                       : QStringLiteral("Invite someone to this pane"));
+    setWindowTitle(whole ? QStringLiteral("Share this tab") : QStringLiteral("Share this pane"));
+}
+
 void RemoteShareDialog::createInvite()
 {
-    RemoteShare::instance().createInvite(m_paneId, m_inviteRole->currentData().toString(),
-                                         m_inviteExpiry->currentData().toInt(),
-                                         m_inviteUses->value());
+    RemoteShare &share = RemoteShare::instance();
+    share.createInvite(m_paneId, m_inviteRole->currentData().toString(),
+                       m_inviteExpiry->currentData().toInt(), m_inviteUses->value(),
+                       share.isTabShared(m_tab) ? m_tab : QString());
     m_inviteNote->setText(QStringLiteral("Making a link…"));
 }
 
@@ -1213,7 +1312,8 @@ void RemoteShareDialog::createCode()
     m_codeAskedAt = QDateTime::currentMSecsSinceEpoch();
     m_makeCode->setEnabled(false);
     m_codeAgain->setEnabled(false);
-    RemoteShare::instance().createCode(m_paneId, m_codeRole);
+    RemoteShare &share = RemoteShare::instance();
+    share.createCode(m_paneId, m_codeRole, share.isTabShared(m_tab) ? m_tab : QString());
     m_codeNote->setText(QStringLiteral("Making a code…"));
     fit();
 }

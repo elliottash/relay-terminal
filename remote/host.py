@@ -494,6 +494,9 @@ class Host:
         self.options: dict[str, ShareOptions] = {}      # per pane; "" is the default for all
         self.paused: set[str] = set()                   # panes the owner paused; "" is all of them
         self._share_state: dict[str, tuple[bool, str]] = {}   # what each pane was last told
+        # Which tab each shared pane is in, for panes the owner shared as a whole tab. A guest
+        # admitted to a tab gains the panes later added to it and loses the ones that leave.
+        self.pane_tabs: dict[str, str] = {}
         # The presence rule of 10.5 reads the **same** `window_active` signal section 9's
         # notifications do; `window_active` below feeds both. The default differs on purpose: the
         # notifier assumes the window is *not* focused (a missed push is worse than a spare one),
@@ -1453,7 +1456,8 @@ class Host:
     async def invite_create(self, panes: list[str], role: str = wire.VIEWER, *,
                             expires_in: float = guests_mod.DEFAULT_EXPIRY,
                             uses: int = 1,
-                            single_knock: bool = False) -> tuple[guests_mod.Invite, str]:
+                            single_knock: bool = False,
+                            tab: str = "") -> tuple[guests_mod.Invite, str]:
         """Open a room, mint an invite for it, and return the invite and the link.
 
         The room's ``ttl`` is the invite's lifetime, so a week-long invite does not point at a
@@ -1463,20 +1467,24 @@ class Host:
         for pane in panes:
             if not self.source.has_pane(pane):
                 raise wire.WireError("no_such_pane", "no such pane.")
+        if tab:
+            # A whole-tab invite names every pane the tab holds now; later ones join by pane_tab.
+            panes = list(panes) + sorted(pane for pane, where in self.pane_tabs.items()
+                                         if where == tab and pane not in panes)
         lifetime = max(60.0, min(float(expires_in or guests_mod.DEFAULT_EXPIRY),
                                  guests_mod.MAX_EXPIRY))
         room, granted = await self._open_room(lifetime)
         invite, secret = self.guests.create_invite(list(panes), role, room,
                                                    expires_in=min(lifetime, granted), uses=uses,
-                                                   single_knock=single_knock)
-        self.audit.record("invite_create", invite=invite.invite_id, panes=invite.panes,
+                                                   single_knock=single_knock, tab=tab)
+        self.audit.record("invite_create", invite=invite.invite_id, panes=invite.panes, tab=invite.tab,
                           role=invite.role, uses=invite.uses_left,
                           expires=round(invite.expires, 3))
         url = pairing.invite_url(self.app_base, self.identity.public, secret, room)
         return invite, url
 
     async def code_create(self, panes: list[str],
-                          role: str = wire.VIEWER) -> meetcode.CodeRecord:
+                          role: str = wire.VIEWER, *, tab: str = "") -> meetcode.CodeRecord:
         """A meeting code and a PIN for a pane (card #97EG).
 
         Behind the code is an ordinary invite — one use, the code's ten minutes, and
@@ -1487,7 +1495,7 @@ class Host:
         """
         invite, url = await self.invite_create(list(panes), role,
                                                expires_in=meetcode.CODE_LIFETIME, uses=1,
-                                               single_knock=True)
+                                               single_knock=True, tab=tab)
         return await self.codes.create(invite, url)
 
     def invite_revoke(self, invite_id: str) -> bool:
@@ -1520,6 +1528,64 @@ class Host:
         self.guests.remove(participant_id)          # closes the live session via _guest_changed
         self.control.drop_participant(participant_id)
         return True
+
+    def pane_tab(self, pane: str, tab: str) -> None:
+        """The desktop says which tab a shared pane is in ("" for a pane shared on its own).
+
+        Called **before** the pane list goes out, so the `panes` each guest is sent already
+        reflects the change. A pane joining a tab that is shared whole joins the scope of that
+        tab's guests; a pane leaving one (moved to another tab) leaves it. Both are audited before
+        the store changes, one row per participant (section 10.6).
+        """
+        old = self.pane_tabs.get(pane, "")
+        if tab:
+            self.pane_tabs[pane] = tab
+        else:
+            self.pane_tabs.pop(pane, None)
+        if old == tab:
+            # Already in this tab — but an invite minted since may not name it yet; add_to_tab
+            # is a no-op for rows that already hold it.
+            self._grow(tab, pane)
+            return
+        if old:
+            self._shrink(old, pane, reason="moved")
+        if tab:
+            self._grow(tab, pane)
+
+    def pane_gone(self, pane: str) -> None:
+        """A shared pane closed or stopped being shared: it leaves every tab scope it was in."""
+        old = self.pane_tabs.pop(pane, "")
+        if old:
+            self._shrink(old, pane, reason="closed")
+
+    def _grow(self, tab: str, pane: str) -> None:
+        invites, people = self.guests.tab_rows(tab)
+        for invite in invites:
+            if pane not in invite.panes:
+                self.audit.record("scope_grown", invite=invite.invite_id, tab=tab, pane=pane)
+        for participant in people:
+            if not participant.may_see(pane):
+                self.audit.record("scope_grown", participant=participant.participant_id,
+                                  tab=tab, pane=pane)
+        for participant in self.guests.add_to_tab(tab, pane):
+            for shown in participant.panes:
+                self.send_participants(shown)
+
+    def _shrink(self, tab: str, pane: str, *, reason: str) -> None:
+        _, people = self.guests.tab_rows(tab)
+        leaving = [p.participant_id for p in people if p.may_see(pane)]
+        for participant_id in leaving:
+            self.audit.record("scope_shrunk", participant=participant_id, tab=tab, pane=pane,
+                              reason=reason)
+            # Whatever they held on that pane goes with it: the keyboard, a pending ask for it,
+            # and prompts still waiting for the owner.
+            self.control.release(pane, control_mod.PARTICIPANT, participant_id)
+            self.controls.drop(pane, participant_id)
+            for item in self.prompts.for_participant(participant_id):
+                if item.pane == pane:
+                    self.prompts.drop(item.prompt_id)
+        self.guests.remove_from_tab(tab, pane)
+        self.send_participants(pane)
 
     async def share_end(self, pane: str) -> int:
         """Stop sharing a pane: every participant on it goes, and its invites burn."""

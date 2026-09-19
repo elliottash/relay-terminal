@@ -155,7 +155,7 @@ class PublicLinkInviteTests(unittest.IsolatedAsyncioTestCase):
         def __init__(self):
             self.asked = []
 
-        async def invite_create(self, panes, role, *, expires_in, uses):
+        async def invite_create(self, panes, role, *, expires_in, uses, **_):
             self.asked.append(uses)
             return PublicLinkInviteTests.FakeInvite(uses), "https://example.test/join#i=secret"
 

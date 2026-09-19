@@ -47,6 +47,9 @@ DEFAULT_EXPIRY = 24 * 3600           # section 10.2: a day
 MAX_EXPIRY = 7 * 86400               # capped at a week
 MAX_ATTEMPTS = 5                     # five wrong secrets burn the invite
 MAX_PANES_PER_INVITE = 8
+# A whole-tab invite grows as the owner splits the tab, so it has its own, larger ceiling; past it a
+# new pane is simply not added to the guests' scope (the owner can still share it on its own).
+MAX_PANES_PER_TAB = 32
 MAX_USES = 32
 
 KNOCKS_PER_MINUTE = 5                # per invite (section 10.2)
@@ -84,6 +87,10 @@ class Invite:
     # exactly as it always has — a knock consumes nothing until the owner admits it.
     single_knock: bool = False
     knocked_by: str = ""                # the claiming key, base64url; "" until the first knock
+    # A whole-tab invite (owner, 2026-09-18: "share whole tab"): the desktop's id for the tab.
+    # Every pane the owner later adds to that tab joins `panes` here and on everyone admitted
+    # through it — `add_to_tab`. "" is an ordinary invite for exactly the panes it names.
+    tab: str = ""
 
     @property
     def expired(self) -> bool:
@@ -129,6 +136,7 @@ class Participant:
     created: float = field(default_factory=time.time)
     last_seen: float = 0.0
     removed: bool = False
+    tab: str = ""                       # copied from the invite: this scope grows with the tab
 
     @property
     def key_bytes(self) -> bytes:
@@ -227,11 +235,15 @@ class GuestStore:
 
     def create_invite(self, panes: list[str], role: str, room: str, *,
                       expires_in: float = DEFAULT_EXPIRY, uses: int = 1,
-                      single_knock: bool = False) -> tuple[Invite, bytes]:
-        """Mint an invite and its one-and-only plaintext secret, which the caller puts in the URL."""
+                      single_knock: bool = False, tab: str = "") -> tuple[Invite, bytes]:
+        """Mint an invite and its one-and-only plaintext secret, which the caller puts in the URL.
+
+        With `tab`, the invite is for the whole tab: `panes` is what the tab holds now, and
+        `add_to_tab` extends it as panes are added."""
         if role not in wire.GUEST_ROLES:
             raise wire.WireError("not_permitted", f"{role!r} is not a role an invite may grant.")
-        wanted = [pane for pane in panes if isinstance(pane, str) and pane][:MAX_PANES_PER_INVITE]
+        wanted = [pane for pane in panes if isinstance(pane, str) and pane][
+            :MAX_PANES_PER_TAB if tab else MAX_PANES_PER_INVITE]
         if not wanted:
             raise wire.WireError("no_such_pane", "an invite has to name a pane.")
         lifetime = max(60.0, min(float(expires_in or DEFAULT_EXPIRY), MAX_EXPIRY))
@@ -240,7 +252,7 @@ class GuestStore:
                         expires=time.time() + lifetime,
                         uses_left=max(1, min(int(uses or 1), MAX_USES)),
                         secret_hash=hash_secret(secret), room=room,
-                        single_knock=bool(single_knock))
+                        single_knock=bool(single_knock), tab=str(tab or ""))
         self.invites[invite.invite_id] = invite
         self.save()
         return invite, secret
@@ -263,6 +275,70 @@ class GuestStore:
 
     def invites_for_pane(self, pane: str) -> list[Invite]:
         return [invite for invite in self.invites.values() if pane in invite.panes]
+
+    def add_to_tab(self, tab: str, pane: str) -> list[Participant]:
+        """A pane was added to a tab shared whole: it joins the scope of every live invite and
+        participant for that tab. Returns the participants whose scope grew, whom the caller tells.
+
+        This is the point of sharing a tab rather than its panes: the owner splits the tab and the
+        people he let in see the new pane without a second invite. It never widens anything else —
+        only rows that carry this tab, only while they are live, and never past MAX_PANES_PER_TAB.
+        """
+        if not tab or not pane:
+            return []
+        changed = False
+        for invite in self.invites.values():
+            if invite.tab == tab and not invite.dead and pane not in invite.panes \
+                    and len(invite.panes) < MAX_PANES_PER_TAB:
+                invite.panes.append(pane)
+                changed = True
+        grown: list[Participant] = []
+        for participant in self.participants.values():
+            if participant.tab == tab and participant.live and pane not in participant.panes \
+                    and len(participant.panes) < MAX_PANES_PER_TAB:
+                participant.panes.append(pane)
+                grown.append(participant)
+        if changed or grown:
+            self.save()
+        for participant in grown:
+            self._notify(participant.participant_id)
+        return grown
+
+    def tab_rows(self, tab: str) -> tuple[list[Invite], list[Participant]]:
+        """The live invites and participants whose scope is this whole tab."""
+        if not tab:
+            return [], []
+        return ([invite for invite in self.invites.values() if invite.tab == tab and not invite.dead],
+                [p for p in self.participants.values() if p.tab == tab and p.live])
+
+    def remove_from_tab(self, tab: str, pane: str) -> list[Participant]:
+        """A pane left a tab shared whole — closed, or moved to another tab. It leaves the scope
+        of that tab's invites and participants at once; `may_see` reads this record, so the next
+        frame of it is already refused. A participant left with nothing is removed and their
+        invite burned, as `end_share` does: a tab with no panes is a tab that closed.
+        """
+        if not tab or not pane:
+            return []
+        changed = False
+        for invite in self.invites.values():
+            if invite.tab == tab and pane in invite.panes:
+                invite.panes = [p for p in invite.panes if p != pane]
+                if not invite.panes:
+                    invite.burned = True
+                changed = True
+        shrunk: list[Participant] = []
+        for participant in self.participants.values():
+            if participant.tab == tab and participant.live and participant.may_see(pane):
+                participant.panes = [p for p in participant.panes if p != pane]
+                if not participant.panes:
+                    participant.removed = True
+                shrunk.append(participant)
+        if changed or shrunk:
+            self.prune()
+            self.save()
+        for participant in shrunk:
+            self._notify(participant.participant_id)
+        return shrunk
 
     def burn_invite(self, invite_id: str) -> bool:
         invite = self.invites.get(invite_id)
@@ -347,7 +423,7 @@ class GuestStore:
                                   name=self.unique_name(name),
                                   platform=identity_mod.clean_label(platform, 24),
                                   guest_key=stored, role=role, panes=list(invite.panes),
-                                  invite=invite.invite_id,
+                                  invite=invite.invite_id, tab=invite.tab,
                                   expires=min(invite.expires, time.time() + MAX_EXPIRY))
         self.participants[participant.participant_id] = participant
         self.save()

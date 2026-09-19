@@ -298,6 +298,9 @@ public:
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
+    // The window's id for the tab this pane is in, and how many terminals it holds, so the share
+    // dialog can offer "Share the whole tab". Unset (or "") offers only this pane.
+    std::function<QString(int *panes)> onShareTab;
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
     // Dragging the pane's header moves the whole pane; the window decides where it lands (owner,
@@ -3655,7 +3658,44 @@ public:
 
     void toggleShare() {
         relay::RemoteShare &share = relay::RemoteShare::instance();
+        int tabPanes = 0;
+        const QString tab = onShareTab ? onShareTab(&tabPanes) : QString();
         if (!share.isSharing(m_token)) {
+            QString error;
+            if (!startSharing(share.isTabShared(tab) ? tab : QString(), &error)) {
+                status(error);
+                return;
+            }
+        }
+        auto *dialog = new relay::RemoteShareDialog(m_token, window());
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setTab(tab, tabPanes);
+        connect(&share, &relay::RemoteShare::sharingChanged, dialog, [this] { updateShareChip(); });
+        dialog->show();
+    }
+
+    // The window shares this pane because its tab is shared whole — a pane just split off, or one
+    // moved in. Never silent: the share chip lights from the first frame and a toast says who can
+    // now see it, because the tab's guests gain it without the owner doing anything else.
+    void shareUnderTab(const QString &tab) {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        if (share.isSharing(m_token)) {
+            share.setPaneTab(m_token, tab);
+            updateShareChip();
+            return;
+        }
+        QString error;
+        if (!startSharing(tab, &error)) {
+            status(error);
+            return;
+        }
+        toast(QStringLiteral("Shared — this tab is shared, so everyone on it can see this pane."), 5000);
+    }
+
+    // Share this pane (no dialog). `tab` is the tab it is shared under, or "" on its own.
+    bool startSharing(const QString &tab, QString *error) {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        {
             relay::RemoteShare::PaneHooks hooks;
             // The engine hands the phone a frame of the screen (docs/ENGINE.md).
             if (auto *engine = dynamic_cast<relay::VTermBackend *>(m_backend)) {
@@ -3700,20 +3740,15 @@ public:
             onPaneState = [this](const QJsonObject &state) {
                 relay::RemoteShare::instance().paneState(m_token, state);
             };
-            QString error;
-            if (!share.sharePane(m_token, hooks, &error)) {
+            if (!share.sharePane(m_token, hooks, error, tab)) {
                 onPaneState = nullptr;   // nothing is listening after all
-                status(error);
-                return;
+                return false;
             }
             requestRemoteSessions();   // the session list a phone shows, before it asks
             m_paneState.publishNow();
             updateShareChip();
         }
-        auto *dialog = new relay::RemoteShareDialog(m_token, window());
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        connect(&share, &relay::RemoteShare::sharingChanged, dialog, [this] { updateShareChip(); });
-        dialog->show();
+        return true;
     }
 
     // A password line from a phone (docs/REMOTE-PROTOCOL.md section 6.7). The sidecar has

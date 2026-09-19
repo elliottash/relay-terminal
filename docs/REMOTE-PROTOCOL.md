@@ -702,6 +702,26 @@ an owner's own phone included, are refused with `not_permitted`.
 
 A participant is **scoped to the panes of their invite**. `panes` lists only those; any message
 naming another pane is `not_permitted`, and no event for another pane is ever fanned out to them.
+
+**The unit of sharing may be a tab** (owner, 2026-09-18: "share whole tab… so you can add more
+panes and they immediately get access to the workspace"). The desktop gives the tab page an id; the
+GUI's `pane` line carries it as `tab` for every pane shared under it, and an invite made with
+`tab` names every shared pane the tab holds and grows with it. What that means for later panes:
+
+* a pane added to the tab (split off, or moved in) is shared at once and **joins the scope** of
+  every live invite and participant of that tab. The hub records `scope_grown` (10.6) per
+  participant and per invite *before* the store changes, and changes it before the `panes` list
+  announcing the pane is filtered, so a guest is never sent a list without a pane they now hold.
+  The desktop is never silent about it: the new pane's share chip is lit from its first frame and
+  a toast says the tab's guests can see it;
+* a pane that **leaves** the tab — closed, or moved to a tab that is not shared whole — leaves
+  their scope at once (`scope_shrunk`), with any control token, pending control request and
+  pending prompt of theirs on it. `may_see` reads the live record, so its next frame is already
+  refused; a participant left with no pane is removed and their invite burned, as when a share ends;
+* nothing else widens. An invite without `tab` stays exactly the panes it names even when they sit
+  in a shared tab, a guest of one tab never gains a pane of another, and growth stops at
+  `MAX_PANES_PER_TAB` (32). Every rule above applies to a pane that joined later exactly as to the
+  first — a later pane's password prompt is refused to a guest the same way.
 Whatever their role a participant never gets: `secret_input`, `compose` with `agent:false` (the
 routing that can reach the shell), `set_mode`, model changes, reset, queue edits of other people's
 items, `voice`, `history_get` beyond the shared pane, push notifications, or the device list.
@@ -955,7 +975,9 @@ secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove
 `guest_prompt` (with the whole text), `prompt_decided` (with `approved` and, when it was not, why),
 `control_request`, `control_grant`, `control_refused`, `control_revoke`, `control_release`,
 `control_take`, `share_pause`, `share_options`, the meeting-code kinds of §10.7 (`code_create`,
-`code_attempt`, `code_used`, `code_burned`, `code_expired`), and the input a participant or a device sent:
+`code_attempt`, `code_used`, `code_burned`, `code_expired`), `scope_grown` and `scope_shrunk` (a
+pane joining or leaving a tab shared whole, §10.1, with the tab, the pane and the participant or
+invite), and the input a participant or a device sent:
 `line` with its text, `keys` and `paste` as byte counts. Every one of them carries the participant
 id, which is minted at the knock, so a refusal and an admission name the same person as the join
 and the leave that follow; a device's input names the device id instead, and neither line ever

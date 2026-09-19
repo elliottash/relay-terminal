@@ -17,6 +17,7 @@
 #include <QByteArray>
 #include <QDialog>
 #include <QJsonArray>
+#include <QSet>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -24,6 +25,7 @@
 
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -96,9 +98,26 @@ public:
 
     // Start the sidecar if needed and share this pane. Returns false with `error` set when the
     // pane cannot be shared (a KonsolePart pane, or the sidecar failed to start).
-    bool sharePane(const QString &paneId, const PaneHooks &hooks, QString *error);
+    // `tab` is set when the pane is shared as part of a whole tab: it rides on the first `pane`
+    // line, so the tab's guests hold the pane before the list announcing it reaches them.
+    bool sharePane(const QString &paneId, const PaneHooks &hooks, QString *error,
+                   const QString &tab = QString());
     void stopSharing(const QString &paneId);
     void stopAll();
+
+    // "Share whole tab" (owner, 2026-09-18). A tab shared whole is an id the window gives the tab
+    // page; every pane in it is shared under that id, the window shares each pane added later,
+    // and an invite made with the id grows with the tab (docs/REMOTE-PROTOCOL.md section 10.1).
+    bool isTabShared(const QString &tab) const { return !tab.isEmpty() && m_tabShares.contains(tab); }
+    bool hasTabShares() const { return !m_tabShares.isEmpty(); }
+    QString tabOf(const QString &paneId) const { return m_panes.value(paneId).tab; }
+    QStringList panesInTab(const QString &tab) const;
+    // Start sharing the tab whole. The window then shares its panes (tabSharesChanged).
+    void shareTab(const QString &tab);
+    // Stop: every pane shared under the tab stops being shared, and the tab's guests go with it.
+    void unshareTab(const QString &tab);
+    // A shared pane moved into a tab shared whole, or out of one ("" for on its own).
+    void setPaneTab(const QString &paneId, const QString &tab);
 
     void requestPairing();
     // Which of this machine's addresses the pairing link points at. A phone on the same Wi-Fi
@@ -118,12 +137,14 @@ public:
     // are here rather than in the Sharing pane so that the pane stays a view.
 
     // `invite_create {pane, role, expires, uses}` → an `invite` line with the link and its QR.
-    void createInvite(const QString &paneId, const QString &role, int expires, int uses);
+    // With `tab`, the invite is for the whole tab: its panes now and every one added later.
+    void createInvite(const QString &paneId, const QString &role, int expires, int uses,
+                      const QString &tab = QString());
     void revokeInvite(const QString &inviteId);
     // `code_create {pane, role}` → a `code` line: a four-letter meeting code and a four-digit PIN
     // that a person reads out instead of sending a link (#97EG). It always lasts ten minutes and
     // lets in one person; the sidecar mints an ordinary invite behind it.
-    void createCode(const QString &paneId, const QString &role);
+    void createCode(const QString &paneId, const QString &role, const QString &tab = QString());
     // `code_revoke {code}`: the code and its invite burn now; answered by `code_state` "burned".
     void revokeCode(const QString &code);
     // `knock_answer`. May lower the invite's role and never raise it; the hub checks that too.
@@ -174,6 +195,7 @@ signals:
     void failed(const QString &message);
     void inviteSent(bool ok, const QString &message);
     void sharingChanged();
+    void tabSharesChanged();
     // An `invite` line: the link to hand out, its QR, and what it grants.
     void inviteReady(const QString &url, const relay::QrMatrix &qr, const QString &role,
                      int uses, int expires);
@@ -219,8 +241,10 @@ private:
         QString lastStatus;
         QString lastTitle;
         QString lastCwd;
+        QString tab;              // the tab it is shared under, or "" for a pane on its own
         bool needFull = true;
     };
+    QSet<QString> m_tabShares;
 
     QProcess *m_process = nullptr;
     QByteArray m_pending;
@@ -239,8 +263,12 @@ class RemoteShareDialog final : public QDialog {
     Q_OBJECT
 public:
     explicit RemoteShareDialog(const QString &paneId, QWidget *parent = nullptr);
+    // The tab the pane is in, so "Share the whole tab" can be offered. `tab` is the window's id
+    // for the tab page; `panes` counts the terminals in it now, for the sentence beside the box.
+    void setTab(const QString &tab, int panes);
 
 private:
+    void updateWholeTab();
     void showPairing(const QString &url, const relay::QrMatrix &qr, int expires);
     void showInvite(const QString &url, const relay::QrMatrix &qr, const QString &role,
                     int uses, int expires);
@@ -261,6 +289,10 @@ private:
     void fit();
 
     QString m_paneId;
+    QString m_tab;
+    int m_tabPanes = 0;
+    QCheckBox *m_wholeTab = nullptr;
+    QLabel *m_inviteHeading = nullptr;
     QLabel *m_status = nullptr;
     QLabel *m_qr = nullptr;
     QLabel *m_url = nullptr;

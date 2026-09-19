@@ -547,6 +547,55 @@ class GuestReachTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_a_guest_of_one_tab_never_reaches_another_tab_as_either_grows(self):
+        """Share whole tab: the scope grows with the tab, and only with that tab. A guest on tab A
+        is refused every pane message for tab B's panes, and sent none of their frames, both
+        before and after panes are added to either tab (tests/test_remote_tab_share.py)."""
+        def add(harness, pane, tab):
+            if harness.source._pane(pane) is None:
+                harness.source._panes.append({"id": pane, "window": 1, "tab": pane, "title": pane,
+                                              "cwd": "~", "program": "", "control": "human",
+                                              "status": "idle", "unread": 0, "queue": 0,
+                                              "updated": 0})
+            harness.host.pane_tab(pane, tab)
+            harness.source._changed()
+
+        async def main():
+            async with Harness() as harness:
+                add(harness, "pane-1", "tab-a")
+                add(harness, "pane-2", "tab-b")
+                _, url = await harness.invite(panes=("pane-1",), role=wire.EDITOR, tab="tab-a")
+                client, _ = await harness.guest(url)
+                for moment in ("before", "after"):
+                    if moment == "after":
+                        add(harness, "pane-3", "tab-a")
+                        add(harness, "pane-4", "tab-b")
+                        await asyncio.sleep(0.2)
+                    self.assertEqual(sorted(harness.guests.live()[0].panes),
+                                     ["pane-1"] if moment == "before" else ["pane-1", "pane-3"])
+                    for other in ("pane-2", "pane-4") if moment == "after" else ("pane-2",):
+                        for kind, body in self.EVERY_PANE_MESSAGE:
+                            with self.subTest(moment=moment, pane=other, kind=kind):
+                                error = await refusal(client, kind, {"pane": other, **body})
+                                self.assertEqual(error["code"], "not_permitted", f"{kind}: {error}")
+                        harness.host._screen_event(other, {
+                            "t": "screen_diff", "pane": other, "rows": 4, "cols": 20,
+                            "lines": [{"row": 0, "segs": [{"text": "tab b"}]}]})
+                        harness.source._emit(other, {"event": "agent_text", "text": "tab b"})
+                        seen = []
+                        while True:
+                            try:
+                                message = await asyncio.wait_for(client.inbox.get(), 0.5)
+                            except asyncio.TimeoutError:
+                                break
+                            listed = [item.get("id") for item in message.get("items", [])
+                                      if isinstance(item, dict)] if message["t"] == "panes" else []
+                            if message.get("pane") == other or other in listed:
+                                seen.append(message)
+                        self.assertEqual(seen, [], f"{moment}: tab B reached a guest of tab A")
+                await client.close()
+        run(main())
+
     def test_a_guest_cannot_resume_a_stream_belonging_to_a_pane_that_is_not_theirs(self):
         """`resume` names streams rather than a pane, so the inbound pane check cannot see it.
         The outbound one in `Channel.send` is what has to hold."""

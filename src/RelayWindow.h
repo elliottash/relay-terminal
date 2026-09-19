@@ -308,6 +308,10 @@ public:
                     [this] { refreshSharingPanes(false); });
             connect(&share, &relay::RemoteShare::secondPassed, this,
                     [this] { refreshSharingPanes(true); });
+            // "Share whole tab": a tab switched on or off, and — as a backstop for any way a pane
+            // reaches or leaves a tab that no hook below names — once a second while one is on.
+            connect(&share, &relay::RemoteShare::tabSharesChanged, this, [this] { scheduleTabShareSync(); });
+            connect(&share, &relay::RemoteShare::secondPassed, this, [this] { syncTabShares(); });
         }
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncChromeButtons(); });
@@ -3452,6 +3456,12 @@ private:
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
+        pane->onShareTab = [guard](int *panes) {
+            auto *w = windowOf(guard);
+            return w ? w->shareTabId(w->pageOf(guard), panes) : QString();
+        };
+        // A pane opened in a tab that is shared whole is shared as soon as it is in the tab.
+        QTimer::singleShot(0, pane, [guard] { if (auto *w = windowOf(guard)) w->scheduleTabShareSync(); });
         // Protocol 23's four `local_*` events, and a `test_key` for a `local:` preset, belong to
         // Settings › Local models rather than to this pane's transcript (card #24XJ).
         pane->onLocalModelEvent = [guard](const QJsonObject &event) {
@@ -3691,7 +3701,54 @@ private:
         m_tabPhrase.remove(page);
     }
 
+    // ---- "Share whole tab" (owner, 2026-09-18) ----------------------------------------------------
+    // A tab page's id for sharing, made the first time somebody asks. It is a property of the page
+    // widget, so it follows the tab into another window; it is never saved, because a share does
+    // not outlive the process.
+    QString shareTabId(QWidget *page, int *panes = nullptr) const {
+        if (!page) return QString();
+        QString id = page->property("relayShareTab").toString();
+        if (id.isEmpty()) {
+            id = QStringLiteral("tab-") + QUuid::createUuid().toString(QUuid::Id128).left(10);
+            page->setProperty("relayShareTab", id);
+        }
+        if (panes) *panes = int(panesIn(page).size());
+        return id;
+    }
+
+    void scheduleTabShareSync() {
+        if (m_tabShareSyncQueued) return;
+        m_tabShareSyncQueued = true;
+        QTimer::singleShot(0, this, [this] { m_tabShareSyncQueued = false; syncTabShares(); });
+    }
+
+    // Make sharing match the tabs: every terminal in a tab shared whole is shared under that tab,
+    // and one shared under a tab it is no longer in follows it — into the tab it is in now if that
+    // one is shared whole, else out of the share altogether, since it was the tab that shared it.
+    void syncTabShares() {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        if (!share.hasTabShares()) return;   // unshareTab already ended every pane it shared
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            const QString id = page->property("relayShareTab").toString();
+            const bool whole = share.isTabShared(id);
+            for (Pane *pane : panesIn(page)) {
+                const QString token = pane->sessionToken();
+                const QString under = share.tabOf(token);
+                if (whole) {
+                    if (!share.isSharing(token) || under != id) pane->shareUnderTab(id);
+                } else if (!under.isEmpty() && share.isSharing(token)) {
+                    share.stopSharing(token);
+                    pane->toast(QStringLiteral("No longer shared — this pane left a shared tab."), 5000);
+                }
+            }
+        }
+    }
+
     void updateTitles() {
+        // Layout changes all end here (split, close, move, adopt), so this is where a pane that
+        // reached or left a tab shared whole is noticed at once rather than on the next second.
+        scheduleTabShareSync();
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             const auto leaves = leavesIn(page);
@@ -4881,6 +4938,7 @@ private:
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;
     QPointer<Pane> m_active;
+    bool m_tabShareSyncQueued = false;   // syncTabShares is coalesced to one pass per event loop
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
     QPointer<QWidget> m_activeLeaf;
     // Dragging a tool pane (explorer, preview, plan, Switchboard) by its header: the pane being

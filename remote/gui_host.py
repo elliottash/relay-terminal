@@ -7,7 +7,9 @@ the GUI never links a crypto library and this process never touches a widget.
 
   GUI → here
     {"t":"start","tls":true,"address":"...","port":0}       bring the service up
-    {"t":"pane","id":"p1","title":"...","cwd":"...","rows":R,"cols":C,"status":"idle"}
+    {"t":"pane","id":"p1","title":"...","cwd":"...","rows":R,"cols":C,"status":"idle","tab":"t3"}
+                                          `tab` only when the pane's tab is shared whole: its
+                                          guests gain the pane now, and lose it when it leaves
     {"t":"frame","pane":"p1","full":bool,"cursor":{...},"lines":[...],"rows":R,"cols":C,"alt":b}
     {"t":"agent","pane":"p1","event":{...}}                  one worker event, verbatim
     {"t":"unpane","id":"p1"}                                 pane closed or stopped sharing
@@ -29,6 +31,8 @@ the GUI never links a crypto library and this process never touches a widget.
   GUI → here, multiplayer (section 10.5). Desktop only: every one of these names is in
   wire.OWNER_ONLY, so the same message over the wire from any device is refused.
     {"t":"invite_create","pane":"p1","role":"viewer","expires":86400,"uses":1}  → `invite`
+                                          plus "tab":"t3" for the whole tab: every shared pane
+                                          in it now, and every pane added to it later
     {"t":"invite_email","url":"<the link just minted>","to":"alice@example.com","role":"viewer",
      "expiry":"expires in 24 hours","pane":"relay-terminal","from_name":"Elliott"}  → `invite_sent`
     {"t":"invite_revoke","id":"<invite id>"}
@@ -518,8 +522,14 @@ class Sidecar:
         if kind == "start":
             await self.start(message)
         elif kind == "pane":
+            # The tab first: a guest's scope has to include a new pane before the pane list that
+            # announces it is filtered for them, or they would be sent a list without it.
+            if self.host is not None:
+                self.host.pane_tab(str(message.get("id", "")), str(message.get("tab") or ""))
             self.source.set_pane(message)
         elif kind == "unpane":
+            if self.host is not None:
+                self.host.pane_gone(str(message.get("id", "")))
             self.source.drop_pane(message.get("id", ""))
         elif kind == "frame":
             self.source.set_frame(message)
@@ -853,6 +863,10 @@ class Sidecar:
 
     # ---- multiplayer (section 10.5) --------------------------------------------------------------
 
+    def _tab_scope(self, message: dict) -> str:
+        """The tab an invite is for, when the owner chose "Whole tab" — else ""."""
+        return str(message.get("tab") or "") if self.host is not None else ""
+
     async def invite_create(self, message: dict) -> None:
         """``invite_create {pane, role, expires, uses}`` → ``invite {id, url, qr}``."""
         if self.host is None:
@@ -871,7 +885,8 @@ class Sidecar:
             invite, url = await self.host.invite_create(
                 [str(pane) for pane in panes if pane],
                 str(message.get("role") or wire.VIEWER),
-                expires_in=expires, uses=int(message.get("uses") or 1))
+                expires_in=expires, uses=int(message.get("uses") or 1),
+                tab=self._tab_scope(message))
         except wire.WireError as error:
             self.emit({"t": "error", "message": error.message})
             return
@@ -894,8 +909,10 @@ class Sidecar:
             self.emit({"t": "error", "message": "sharing is not running."})
             return
         try:
-            record = await self.host.code_create([str(message.get("pane") or "")],
-                                                 str(message.get("role") or wire.VIEWER))
+            pane = str(message.get("pane") or "")
+            record = await self.host.code_create([pane],
+                                                 str(message.get("role") or wire.VIEWER),
+                                                 tab=self._tab_scope(message))
         except wire.WireError as error:
             self.emit({"t": "error", "message": error.message})
             return

@@ -1196,6 +1196,19 @@ function wire() {
   });
   rrp.addEventListener('panes', (event) => {
     paneItems = event.detail.items || [];
+    // The hub cuts this list down to this guest's scope, so it *is* the scope. For a tab shared
+    // whole that scope moves: a pane the owner adds to the tab arrives here as a new chip, and
+    // one closed or moved out of it goes, taking the view with it if it was the one open.
+    const ids = paneItems.map((item) => item.id).filter(Boolean);
+    if (ids.length) {
+      panes = ids;
+      if (guest) guest.panes = panes;
+      if (pane && !ids.includes(pane)) {
+        pane = '';
+        openPane(ids[0]);
+        return;
+      }
+    }
     renderPresence();
   });
   rrp.addEventListener('participants', (event) => onParticipants(event.detail));
