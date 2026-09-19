@@ -19,6 +19,7 @@ from . import route_assist
 from . import titles as session_titles
 from . import board_tools
 from . import todos as todo_tool
+from . import security
 from . import tool_labels
 from .attachments import content_parts as image_content_parts
 from .attachments import format_block as format_attachments
@@ -130,6 +131,11 @@ def validate_turn_options(request: dict) -> dict:
             out[key] = request[key]
     if request.get("stall_timeout_s") is not None:
         out["stall_timeout_s"] = validate_stall_timeout(request["stall_timeout_s"])
+    # Options › Security (#3KB7). Validated here so a bad rule is refused before anything changes,
+    # and returned under one key rather than three: it is handed to the executor's policy, not set
+    # on the Agent, so nothing between here and there has to know the individual names.
+    if values := security.validate(request):
+        out["security_options"] = values
     return out
 # Turn ids for turns started outside the queue (subagents, tests). A counter, not uuid4: no syscall
 # (which would release the GIL) between a turn's start and its first message.
@@ -311,7 +317,7 @@ class Agent:
                  max_program_writes: int = DEFAULT_MAX_WRITES,
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, failover: bool = True,
-                 roles=None, board=None):
+                 roles=None, board=None, security_options: dict | None = None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
@@ -325,7 +331,8 @@ class Agent:
         self._injected_provider = provider is not None
         self.provider = provider or _provider_for(config, self.stall_timeout_s)
         self._apply_stall_timeout()
-        self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
+        self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
+                                     policy=security.policy_from(security_options or {}))
         # Switchboard tools (relay_core.board_tools.BoardTools) or None when the workspace has no
         # issues/board.yaml or its autonomy is off. Protocol 17.
         self.board = board
@@ -495,13 +502,28 @@ class Agent:
 
     def set_options(self, request: dict) -> dict:
         """set_agent_options: turn limits and request tracking switches; applies from the next step."""
-        for key, value in validate_turn_options(request).items():
+        options = validate_turn_options(request)
+        policy_keys = options.pop("security_options", None)
+        for key, value in options.items():
             setattr(self, key, value)
+        if policy_keys:
+            self.set_security(policy_keys)
         if "todo_tool" in request:
             self.refresh_system_prompt()
         if "stall_timeout_s" in request:
             self._apply_stall_timeout()
         return self.options()
+
+    def set_security(self, values: dict) -> None:
+        """Replace the executor's Security policy (#3KB7). Only the keys present are changed, so a
+        `set_agent_options` that carries one list leaves the others alone."""
+        merged = {"command_denylist": list(self.executor.policy.command_denylist),
+                  "readable_roots": [str(root) for root in self.executor.policy.readable_roots],
+                  "secret_patterns": list(self.executor.policy.secret_patterns)}
+        merged.update(values)
+        policy = security.policy_from(merged)
+        self.executor.policy = policy
+        self.executor.workspace.policy = policy
 
     def options(self) -> dict:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,

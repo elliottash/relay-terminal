@@ -35,7 +35,7 @@ from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable
-from . import remote_files, remote_session
+from . import remote_files, remote_session, security
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
@@ -55,7 +55,7 @@ def looks_secret(part: str) -> bool:
             or part == ".env" or part.startswith(".env.") or part.endswith((".pem", ".key")))
 
 
-def remote_path(name: str) -> str:
+def remote_path(name: str, policy: security.Policy = security.EMPTY) -> str:
     """A path on the ssh host, checked with the rules that replace the workspace there (card #S5SH).
 
     It is absolute, `~/…`, or relative to the remote shell's directory. What is checked here is what
@@ -76,6 +76,9 @@ def remote_path(name: str) -> str:
         raise ValueError("This path is blocked by Relay's basic secret-file guard, which applies on the host "
                          "too: .ssh, .gnupg, .git, .env files, and .pem/.key files stay unread. If the user "
                          "needs something from one, ask them.")
+    if any(security.extra_secret(policy, part) for part in parts):
+        raise ValueError("This path is blocked by a secret pattern in Options › Security, which applies on "
+                         "the host too.")
     # The host's separator is "/" whatever this machine's is: normalise as POSIX.
     return posixpath.normpath(name)
 
@@ -172,12 +175,34 @@ class Prepared:
 
 
 class Workspace:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, policy: security.Policy = security.EMPTY):
         self.root = Path(root).expanduser().resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Workspace must be a directory.")
+        # Options › Security (#3KB7): folders a *read* may also land in, and extra secret
+        # patterns. Writing is never widened past the workspace.
+        self.policy = policy
 
-    def resolve(self, name: str, *, allow_missing: bool = False) -> Path:
+    def resolve(self, name: str, *, allow_missing: bool = False, for_read: bool = False) -> Path:
+        """Confine `name` to the workspace. A read may also land in a folder the user listed in
+        Options › Security (#3KB7); a write never can, so `for_read` is passed only by the read
+        tools. Every other guard — no symlinks, no secret files — applies to an extra folder
+        exactly as it does to the workspace."""
+        try:
+            return self._within(name, self.root, allow_missing=allow_missing)
+        except ValueError:
+            if not for_read or not self.policy.readable_roots:
+                raise
+        for root in self.policy.readable_roots:
+            try:
+                resolved = self._within(name, root, allow_missing=allow_missing)
+            except ValueError:
+                continue
+            return resolved
+        raise ValueError("Path escapes the workspace, and is not in a folder Options › Security "
+                         "lists as readable.")
+
+    def _within(self, name: str, root: Path, *, allow_missing: bool = False) -> Path:
         if not isinstance(name, str) or not name or "\x00" in name:
             raise ValueError("A valid path is required.")
         # Card #E99H (owner, 2026-09-18): an absolute path and a `..` in the middle of one are
@@ -186,24 +211,26 @@ class Workspace:
         # the symlink and secret-file guards below walk what it lands on.
         candidate = Path(name)
         if not candidate.is_absolute():
-            candidate = self.root / candidate
+            candidate = root / candidate
         # Collapse `..` textually first: a lexical path is what the guards below can walk, and it
         # keeps a `..` from being answered by the filesystem before this check runs.
         candidate = Path(os.path.normpath(candidate))
-        if not candidate.is_relative_to(self.root):
+        if not candidate.is_relative_to(root):
             raise ValueError("Path escapes the workspace.")
-        relative = candidate.relative_to(self.root)
+        relative = candidate.relative_to(root)
         # Refuse symlinks even when they lead back inside the workspace.
-        current = self.root
+        current = root
         for part in relative.parts:
             current /= part
             if current.is_symlink():
                 raise ValueError("File tools do not follow symlinks.")
         resolved = candidate.resolve(strict=not allow_missing)
-        if not resolved.is_relative_to(self.root):
+        if not resolved.is_relative_to(root):
             raise ValueError("Path escapes the workspace.")
         if any(looks_secret(part) for part in relative.parts):
             raise ValueError("This path is blocked by Relay's basic secret-file guard.")
+        if any(security.extra_secret(self.policy, part) for part in relative.parts):
+            raise ValueError("This path is blocked by a secret pattern in Options › Security.")
         return resolved
 
     @staticmethod
@@ -225,8 +252,13 @@ class Workspace:
 
 class ToolExecutor:
     def __init__(self, root: str, emit: Callable[[dict], None], cancel: threading.Event,
-                 keybindings: KeybindingCatalog | None = None, skills: SkillIndex | None = None):
-        self.workspace = Workspace(root)
+                 keybindings: KeybindingCatalog | None = None, skills: SkillIndex | None = None,
+                 policy: security.Policy = security.EMPTY):
+        # Options › Security (#3KB7): the command denylist, extra readable folders and extra
+        # secret patterns. Held here rather than in Workspace alone because the denylist guards
+        # run_command, which has no path to resolve.
+        self.policy = policy
+        self.workspace = Workspace(root, policy)
         # Skill folders are read only through the index, which confines paths to each skill.
         self.skills = skills if skills is not None and skills.skills else None
         # Replaced wholesale by the worker's "keybindings" message; read once per call.
@@ -371,6 +403,11 @@ class ToolExecutor:
             command = self._text(args, "command", maximum=16384)
             if not command.strip():
                 raise ValueError("Command must not be empty.")
+            # Options › Security (#3KB7). Checked here as well as at execution so the refusal is
+            # immediate and no preview shows a command that will not run. A denylist is honoured,
+            # not unevadable — see relay_core/security.py.
+            if rule := security.denied_command(self.policy, command):
+                raise ValueError(security.refusal(rule))
             background = args.get("background", False)
             if not isinstance(background, bool):
                 raise ValueError("background must be true or false.")
@@ -388,7 +425,8 @@ class ToolExecutor:
         if host:
             return self._prepare_remote_file(name, args, host)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096),
-                                      allow_missing=name in ("write_file", "edit_file"))
+                                      allow_missing=name in ("write_file", "edit_file"),
+                                      for_read=name in ("read_file", "list_directory"))
         if name == "read_file":
             return Prepared(name, args, f"READ FILE\n\n{path}", path)
         if name == "list_directory":
@@ -442,7 +480,7 @@ class ToolExecutor:
         replace the workspace are in remote_path() and in the scripts (relay_core/remote_files.py).
         A write reads the file first, over the same connection, so the user sees the real diff."""
         session = self._remote_ready(host)
-        path = remote_path(self._text(args, "path", maximum=4096))
+        path = remote_path(self._text(args, "path", maximum=4096), self.policy)
         user = session.get("user")
         header = f"Host: {f'{user}@{host}' if user else host} (over the user's ssh connection)\n"
         if name == "read_file":
@@ -605,7 +643,10 @@ class ToolExecutor:
             return self._run(args["command"], self.workspace.root, args["timeout_seconds"],
                              args.get("background", False), argv=argv, host=session["host"])
         if name == "run_command":
-            # Recheck paths at execution time.
+            # Recheck the denylist and the paths at execution time: the policy may have changed
+            # since prepare, and a path may have become a symlink.
+            if rule := security.denied_command(self.policy, args["command"]):
+                raise ValueError(security.refusal(rule))
             cwd = self.workspace.resolve(args.get("cwd", "."))
             return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False))
         if name == "command_output":
@@ -617,7 +658,8 @@ class ToolExecutor:
             return self._job_result(job)
         if prepared.host:
             return self._execute_remote_file(prepared)
-        path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"))
+        path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"),
+                                      for_read=name in ("read_file", "list_directory"))
         if name == "read_file":
             data = self.workspace.read_bytes(path)
             return {"path": args["path"], "content": data.decode("utf-8"), "sha256": hashlib.sha256(data).hexdigest()}
