@@ -210,6 +210,24 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual((agent.config.model, agent.context.window),
                          (target.model, target.context_window))
 
+    def test_the_route_and_the_return_name_the_preset_on_the_note_and_on_the_status(self):
+        # One shape for plan, vision and failover (protocol 15.2.2): both ends of both notes name
+        # the preset as well as the model, and the return says so on the status line too, which a
+        # plan turn did not emit at all.
+        agent = self.kimi_planner()
+        agent.ask("plan this change")
+        kimi, anthropic = PRESETS["kimi"].label, PRESETS["anthropic"].label
+        route = self.event("plan_route")
+        self.assertEqual(route["text"], f"Plan mode · this turn runs on kimi-k3 ({kimi}), "
+                                        f"then back to claude-opus-5 ({anthropic}).")
+        self.assertEqual((route["preset"], route["from_preset"]), ("kimi", "anthropic"))
+        ended = self.event("plan_route_ended")
+        self.assertEqual(ended["text"], f"Back to claude-opus-5 ({anthropic}).")
+        self.assertEqual((ended["preset"], ended["was_preset"]), ("anthropic", "kimi"))
+        statuses = [e["text"] for e in self.events if e["event"] == "status"]
+        self.assertIn(f"Plan turn · kimi-k3 ({kimi})", statuses)
+        self.assertIn(f"Back to claude-opus-5 ({anthropic})", statuses)
+
     # ----- nothing to swap: no event, no provider change ------------------------------
     def test_a_build_turn_emits_no_plan_route(self):
         agent = self.build(KIMI, "kimi")

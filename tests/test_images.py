@@ -348,6 +348,26 @@ class ImageTurnTests(unittest.TestCase):
         self.assertEqual(seen, [("kimi-k3", "kimi")])
         self.assertEqual(agent.session_data()["model"], "kimi-k3")
 
+    def test_the_route_and_the_return_name_the_preset_on_the_note_and_on_the_status(self):
+        # One shape for vision, plan and failover (protocol 15.2.2): both ends of both notes name
+        # the preset as well as the model, and the return says so on the status line too, which an
+        # image turn did not emit at all.
+        agent = self.build(OPENAI, "openai", {"vision": {"preset": "kimi", "model": "kimi-k3"}})
+        agent.ask("what is this?", attachments=self.attachment())
+        kimi = presets.PRESETS["kimi"].label
+        openai = presets.PRESETS["openai"].label
+        route = self.event("vision_route")
+        self.assertEqual(route["text"],
+                         f"Image in this prompt · this turn runs on kimi-k3 ({kimi}), "
+                         f"then back to gpt-6-astra ({openai}).")
+        self.assertEqual((route["preset"], route["from_preset"]), ("kimi", "openai"))
+        ended = self.event("vision_route_ended")
+        self.assertEqual(ended["text"], f"Back to gpt-6-astra ({openai}).")
+        self.assertEqual((ended["preset"], ended["was_preset"]), ("openai", "kimi"))
+        statuses = [e["text"] for e in self.events if e["event"] == "status"]
+        self.assertIn(f"Image turn · kimi-k3 ({kimi})", statuses)
+        self.assertIn(f"Back to gpt-6-astra ({openai})", statuses)
+
     # ----- images live for one turn ---------------------------------------------------
     def test_the_image_is_replaced_by_a_description_and_its_path_after_the_turn(self):
         agent = self.build(GLM, "glm")

@@ -1102,9 +1102,18 @@ to_preset, step, text}`
 
 plus a `status`, and logs `provider_failover`. The restore emits the same event with
 `reason: "failover_ended"` and `{from_model, from_preset}` naming the provider the turn ran on,
-`{to_model, to_preset}` the pane's own, and `text` `Back to <model> (<preset label>).` — both notes
-name the preset as well as the model in their text, because two stored keys for one vendor serve
-the same model id.
+`{to_model, to_preset}` the pane's own, and `text` `Back to <model> (<preset label>).`
+
+**One shape for all three swaps.** Relay moves a turn off the pane's own model in three places —
+this one, an image turn's vision model (17.3) and a plan turn's planning model (13.11) — and since
+2026-09-19 all three say it the same way. Every name in a move or a return note, and in the `status`
+that accompanies it, is **model plus preset label**: `glm-5.3 (Z.AI · GLM-5.3 · standard API)`,
+or the label alone for a hosted preset whose model id means nothing to anyone (`agent._provider_name`).
+Two stored keys for one vendor serve the same model id, so a bare model id does not say which key a
+turn is spending; the failover `status` used to name the bare model while its own transcript note
+named the preset. **Every move and every return emits a `status` as well as its transcript note** —
+`vision_route_ended` and `plan_route_ended` used to emit none, so the status line still said the
+turn was on the routed model after the pane had gone back to its own.
 
 When the chain runs out and the turn fails, the `error` reports **the first** provider's failure,
 prefixed with what else was tried ("glm-5.3 failed; kimi-k3 (Kimi · K3) and Relay Free too: …"),
@@ -1370,23 +1379,36 @@ New events:
 
 | Event | When | Fields |
 |---|---|---|
-| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
-| `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `was`, `text` |
+| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
+| `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `preset`, `was`, `was_preset`, `text` |
 
-Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last. No event is
+Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last, and each is
+followed by a `status`. No event is
 sent when the planning role resolves to the main agent, so a pane whose provider has no effort knob, or
 whose effort is already max, behaves exactly as it did before this section. `source` is the role's own
 resolution source (13.4): `default` for the built-in default, `configured` for a hand-picked one — never
 `main` or `fallback`, which are the cases that send no event at all. `text` is the sentence the pane
 prints: it names the serving model when it is not the pane's own, and otherwise says the pane's model
-runs at `max` reasoning.
+runs at `max` reasoning. Both ends of both notes name **model plus preset label**, and so do the two
+`status` lines, which is the one shape all three of Relay's turn swaps share (15.2.2).
+
+**The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the
+conversation is converted to the planning model's reasoning dialect (`adapt_history`), and the context
+window, `max_tokens` and the role's own effort follow the model the turn is now running on — so a
+planning model pinned to another vendor is not sent the pane's dialect, and a compaction inside the turn
+is measured against the window that is actually serving. `_end_plan_turn` puts the pane's own model,
+preset, window, dialect and effort back before the turn's terminal event. Nothing the pane's *own* model
+names changes while the swap is up: the session file, the sessions list, the resume picker and the
+full-text index read `agent._own_model()`, which answers out of the swap (12.6, 15.2.2).
 
 A `set_model` accepted while a plan turn runs is deferred to the turn's end (`applies: "turn_end"`, with
 `in_flight_model` the planning model), exactly like an image turn (section 2): the turn finishes on the
-model it started on. The GUI prints the routing line (`◆ <text>`) and names the serving model in the
+model it started on, and the switch lands after the restore rather than being undone by it. The GUI
+prints the routing line (`◆ <text>`) and names the serving model in the
 model chip while the turn runs, and clears it on `plan_route_ended` — the same behaviour as
 `vision_route` (17.3). A plan turn that also carries an image nests: the plan swap is decided first and
-the vision swap goes inside it.
+the vision swap goes inside it, so the image turn's own restore goes back to the *planning* model and the
+plan restore then goes back to the pane's own.
 
 ## 16. Voice transcription (v1.6, 2026-09-17)
 
@@ -1522,15 +1544,27 @@ New events:
 
 | Event | When | Fields |
 |---|---|---|
-| `vision_route` | an image turn starts on another model | `turn_id`, `model`, `from_model`, `preset`, `base_url`, `source`, `images`, `scope: "turn"`, `text` |
-| `vision_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `was`, `text` |
+| `vision_route` | an image turn starts on another model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `images`, `scope: "turn"`, `text` |
+| `vision_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `preset`, `was`, `was_preset`, `text` |
 | `vision_unavailable` | the turn is refused | `turn_id`, `model`, `images`, `text` |
 
 Both `vision_route` and `vision_route_ended` come **before** the turn's terminal event, so
-`done` / `error` / `cancelled` stay last. `vision_unavailable` is followed by the ordinary `error`
+`done` / `error` / `cancelled` stay last, and each is followed by a `status`. `vision_unavailable` is
+followed by the ordinary `error`
 with the same `text`: refused, not failed — nothing was sent to the provider, and the prompt stays in
 the conversation so it can be re-sent once a model is chosen. The GUI shows the routing line in the
-pane and names the serving model in the model chip while the turn runs.
+pane and names the serving model in the model chip while the turn runs. Both ends of both notes name
+**model plus preset label**, and so do the two `status` lines: the one shape all three of Relay's turn
+swaps share (15.2.2).
+
+**The swap is a model change, not a swapped socket**, exactly as a failover's is (15.2.2) and a plan
+turn's is (13.11): the conversation is converted to the vision model's reasoning dialect
+(`adapt_history` — Kimi refuses an assistant tool-call message with no `reasoning_content`), and the
+context window, `max_tokens` and the role's effort follow the model the turn is now running on, so a
+compaction inside the turn is measured against the window that is actually serving.
+`_end_vision_turn` puts the pane's own model, preset, window, dialect and effort back before the turn's
+terminal event, and what the pane's *own* model names — the session file, the sessions list, the resume
+picker, the index — reads `agent._own_model()` and is unaffected while the swap is up.
 
 ### 17.4 Images live for one turn
 

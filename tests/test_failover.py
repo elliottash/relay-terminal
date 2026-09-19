@@ -481,6 +481,24 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(failed['resets_at'], 1758326400)
         self.assertIn('allowance is spent', failed['text'])
 
+    def test_the_move_and_the_return_name_the_preset_on_the_note_and_on_the_status(self):
+        # One shape for all three of the mechanisms that move a turn (protocol 15.2.2): the status
+        # line named the bare model while the transcript note named model plus preset label, so the
+        # pane's status bar and its transcript disagreed about where the turn was.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent.ask('hello')
+        glm, kimi = PRESETS['glm'].label, PRESETS['kimi'].label
+        moved = next(e for e in self.retries() if e['reason'] == 'failover')
+        self.assertEqual(moved['text'], f'{MAIN.model} ({glm}) keeps failing; '
+                                        f'continuing this turn on kimi-k3 ({kimi}).')
+        back = next(e for e in self.events if e.get('reason') == 'failover_ended')
+        self.assertEqual(back['text'], f'Back to {MAIN.model} ({glm}).')
+        statuses = [e['text'] for e in self.events if e['event'] == 'status']
+        self.assertIn(f'{MAIN.model} ({glm}) failed · continuing on kimi-k3 ({kimi})', statuses)
+        self.assertIn(f'Back to {MAIN.model} ({glm})', statuses)
+
     def test_a_resolver_that_raises_is_logged_and_the_turn_fails_on_its_own_error(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
         roles = resolver({'kimi': 'k'})

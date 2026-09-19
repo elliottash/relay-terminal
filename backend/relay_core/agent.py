@@ -1359,6 +1359,10 @@ class Agent:
         return {"turn_id": turn_id, "provider": self.provider, "model": target.config.model,
                 "back_to": self.config.model, "config": self.config, "preset": self.preset,
                 "window": self.context.window, "effort": self.effort,
+                # Resolved once, for the adopt below and for the notes: like a failover's, they
+                # name the preset as well as the model (`_provider_name`).
+                "to_preset": resolve_preset(target.preset_id, target.config.base_url,
+                                            target.config.model),
                 # An injected provider is never replaced (its owner decides what serves the turn),
                 # so nothing is adopted for it either and there is nothing to put back.
                 "adopted": not self._injected_provider}
@@ -1380,8 +1384,24 @@ class Agent:
             return
         self.provider = _provider_for(target.config, self.stall_timeout_s)
         self.effort = None
-        self._adopt_model(target.config, resolve_preset(target.preset_id, target.config.base_url,
-                                                        target.config.model))
+        self._adopt_model(target.config, swap["to_preset"])
+
+    @staticmethod
+    def _preset_id(preset) -> str | None:
+        """A preset object's id, or None. The route events carry ids; their text carries labels."""
+        return preset.id if preset is not None else None
+
+    @staticmethod
+    def _route_names(swap: dict) -> tuple[str, str]:
+        """(where the turn went, where it goes back to), each as model plus preset label.
+
+        One shape for all three of the mechanisms that move a turn - plan, vision and failover
+        (15.2.2): both the move and the return name the preset, because two stored keys for one
+        vendor (Z.AI's standard API and its Coding Plan) serve the same model id and the note has
+        to say which one the turn is spending.
+        """
+        return (_provider_name(swap["model"], swap["to_preset"]),
+                _provider_name(swap["back_to"], swap["preset"]))
 
     def _route_back(self, swap: dict) -> None:
         """Undo `_route_to`: the pane's own provider, model, dialect, window and effort, exactly as
@@ -1427,13 +1447,15 @@ class Agent:
         logs.event(_log, "vision_route", session=self.session_id, turn=turn_id,
                    from_model=from_model, to_model=target.config.model,
                    host=_host(target.config.base_url), images=len(pictures), source=target.source)
+        to_name, back_name = self._route_names(swap)
         self.emit({"event": "vision_route", "turn_id": turn_id, "model": target.config.model,
                    "from_model": from_model, "preset": target.preset_id,
+                   "from_preset": self._preset_id(swap["preset"]),
                    "base_url": target.config.base_url, "source": target.source,
                    "images": len(pictures), "scope": "turn",
-                   "text": f"Image in this prompt · this turn runs on {target.config.model}, "
-                           f"then back to {from_model}."})
-        self.emit({"event": "status", "text": f"Image turn · {target.config.model}"})
+                   "text": f"Image in this prompt · this turn runs on {to_name}, "
+                           f"then back to {back_name}."})
+        self.emit({"event": "status", "text": f"Image turn · {to_name}"})
         return swap
 
     def _end_vision_turn(self) -> None:
@@ -1443,8 +1465,12 @@ class Agent:
         if not swap:
             return
         self._route_back(swap)
+        back_name = self._route_names(swap)[1]
         self.emit({"event": "vision_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
-                   "was": swap["model"], "text": f"Back to {swap['back_to']}."})
+                   "preset": self._preset_id(swap["preset"]), "was": swap["model"],
+                   "was_preset": self._preset_id(swap["to_preset"]),
+                   "text": f"Back to {back_name}."})
+        self.emit({"event": "status", "text": f"Back to {back_name}"})
 
     # ----- plan turns (owner, 2026-09-19) -----------------------------------------------
     def _begin_plan_turn(self, turn_id: str) -> dict | None:
@@ -1466,17 +1492,18 @@ class Agent:
         logs.event(_log, "plan_route", session=self.session_id, turn=turn_id,
                    from_model=from_model, to_model=target.config.model,
                    host=_host(target.config.base_url), effort=target.effort, source=target.source)
+        to_name, back_name = self._route_names(swap)
         if target.config.model != from_model:
-            text = (f"Plan mode · this turn runs on {target.config.model}, "
-                    f"then back to {from_model}.")
+            text = f"Plan mode · this turn runs on {to_name}, then back to {back_name}."
         else:
-            text = (f"Plan mode · this turn runs on {target.config.model} at "
+            text = (f"Plan mode · this turn runs on {to_name} at "
                     f"{target.effort or 'max'} reasoning.")
         self.emit({"event": "plan_route", "turn_id": turn_id, "model": target.config.model,
                    "from_model": from_model, "preset": target.preset_id,
+                   "from_preset": self._preset_id(swap["preset"]),
                    "base_url": target.config.base_url, "source": target.source,
                    "effort": target.effort, "scope": "turn", "text": text})
-        self.emit({"event": "status", "text": f"Plan turn · {target.config.model}"})
+        self.emit({"event": "status", "text": f"Plan turn · {to_name}"})
         return swap
 
     def _end_plan_turn(self) -> None:
@@ -1487,8 +1514,12 @@ class Agent:
         if not swap:
             return
         self._route_back(swap)
+        back_name = self._route_names(swap)[1]
         self.emit({"event": "plan_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
-                   "was": swap["model"], "text": f"Back to {swap['back_to']}."})
+                   "preset": self._preset_id(swap["preset"]), "was": swap["model"],
+                   "was_preset": self._preset_id(swap["to_preset"]),
+                   "text": f"Back to {back_name}."})
+        self.emit({"event": "status", "text": f"Back to {back_name}"})
 
     def _forget_images(self) -> None:
         """Replace every image still in the conversation with its description and path.
@@ -1598,6 +1629,7 @@ class Agent:
         self._failover = swap
         from_model = self.config.model
         from_preset = self.preset.id if self.preset else ""
+        from_name = _provider_name(from_model, self.preset)
         # The failed provider may still hold its HTTP response; once `self.provider` is replaced
         # nothing can close it, and the turn-end check would only ever look at the replacement.
         self._ensure_no_open_response(record["turn_id"], "failover")
@@ -1613,7 +1645,8 @@ class Agent:
         # Where the turn is now, for the note the restore emits.
         swap["last_model"], swap["last_preset"] = target.config.model, target.preset_id or ""
         record["retries"] = record.get("retries", 0) + 1
-        text = f"{from_model} keeps failing; continuing this turn on {to_name}."
+        # Both ends named the same way as the plan and vision notes: model plus preset label.
+        text = f"{from_name} keeps failing; continuing this turn on {to_name}."
         logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
                    step=step, from_model=from_model, from_preset=from_preset,
                    to_model=target.config.model, to_preset=target.preset_id or "",
@@ -1623,7 +1656,7 @@ class Agent:
                    "from_model": from_model, "to_model": target.config.model,
                    "to_preset": target.preset_id or "", "step": step, "text": text})
         self.emit({"event": "status",
-                   "text": f"{from_model} failed · continuing on {target.config.model}"})
+                   "text": f"{from_name} failed · continuing on {to_name}"})
         return True
 
     def _end_failover(self) -> None:
@@ -1644,7 +1677,7 @@ class Agent:
                    "to_model": swap["config"].model,
                    "to_preset": swap["preset"].id if swap["preset"] else "",
                    "text": f"Back to {back}."})
-        self.emit({"event": "status", "text": f"Back to {swap['config'].model}"})
+        self.emit({"event": "status", "text": f"Back to {back}"})
 
     def _failover_failure(self, exc: Exception) -> tuple[str, Exception] | None:
         """What a turn that failed over and then failed altogether reports, or None.
