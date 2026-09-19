@@ -1754,7 +1754,7 @@ private:
             }
             appearance.rows << choiceRow(QStringLiteral("option:theme"), QStringLiteral("Theme"),
                                          QStringLiteral("What Relay opens on and what a new tab starts with; this tab takes "
-                                                        "it at once. /light, /dark and /theme change one tab"),
+                                                        "it at once, and so do /light, /dark and /theme unless turned off below"),
                                          ids, labels, relay::theme::startupThemeId(),
                                          relay::theme::defaultThemeId(), [this](const QString &id) {
                 if (!chooseTheme(id, m_tabs->currentWidget(), true)) {
@@ -1774,6 +1774,11 @@ private:
             else relay::theme::setActiveTheme(relay::theme::startupThemeId(), false);
             m_tabs->tabBar()->update();
         });
+        appearance.rows << toggleRow(QStringLiteral("theme/commands_set_default"),
+                                     QStringLiteral("/light, /dark and /theme also set the default"),
+                                     QStringLiteral("The theme a command picks becomes what new tabs start with and what Relay opens "
+                                                    "on; off, a command changes only the tab you are in"),
+                                     true);
         appearance.rows << toggleRow(QStringLiteral("theme/new_tab_new_theme"), QStringLiteral("Start each new tab on the next theme"),
                                      QStringLiteral("A new tab takes the next theme in the list instead of the default, so "
                                                     "tabs are easy to tell apart"),
@@ -4127,7 +4132,13 @@ private:
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
         pane->onChooseTheme = [guard](const QString &id) {
-            if (auto *w = windowOf(guard)) return w->chooseTheme(id, w->pageOf(guard), false);
+            // A theme command also becomes the new-tab default, unless Options says otherwise.
+            if (auto *w = windowOf(guard)) {
+                const bool asDefault = themeCommandsSetDefault();
+                const bool ok = w->chooseTheme(id, w->pageOf(guard), asDefault);
+                if (ok && asDefault) w->refreshSettingsPanes();   // an open Options pane shows the new default
+                return ok;
+            }
             return relay::theme::setActiveTheme(id);
         };
         // The `board` block of every `configure` this pane sends (protocol 19.1). It is read at
@@ -4383,6 +4394,10 @@ private:
     // Two windows therefore never show two themes at once; the one you are in wins.
     static bool perTabThemes() { return QSettings().value(QStringLiteral("theme/per_tab"), true).toBool(); }
     static bool newTabNewTheme() { return QSettings().value(QStringLiteral("theme/new_tab_new_theme"), false).toBool(); }
+    // Owner, 2026-09-19: "/light or /dark or /theme … should [change the new-tab default]. but in
+    // options you can disable that". On: the command's theme is also what Relay opens on and what
+    // the next new tab starts with, exactly as if it had been picked in Options.
+    static bool themeCommandsSetDefault() { return QSettings().value(QStringLiteral("theme/commands_set_default"), true).toBool(); }
     static QString tabThemeOf(QWidget *page) { return page ? page->property("relayTheme").toString() : QString(); }
 
     void applyTabTheme(QWidget *page) {

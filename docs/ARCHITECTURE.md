@@ -2284,9 +2284,11 @@ window in front decides*: each tab page carries a `relayTheme` property, and
 change and window activation. Two windows therefore never show two themes at once; the one you are
 in wins. Options › Appearance › Theme is the **default** — `theme/name`, what Relay opens on and
 what a new tab starts with (`theme::startupThemeId()`); choosing it there also rethemes the tab you
-are in. `/light`, `/dark` and the new `/theme [name]` (a picker over every theme when bare) change
-only the current tab and leave the default alone; the first such choice pins the other tabs to what
-they were showing, so they do not follow. "Start each new tab on the next theme" (off by default)
+are in. `/light`, `/dark` and the new `/theme [name]` (a picker over every theme when bare) retheme
+the current tab and, by default, become that default too — the owner's call: a command is as much a
+choice as the picker. "/light, /dark and /theme also set the default" (`theme/commands_set_default`,
+on) turns that off, and then a command changes one tab only. Either way the first such choice pins
+the other tabs to what they were showing, so they do not follow. "Start each new tab on the next theme" (off by default)
 walks the theme list instead of inheriting the default. A tab's own theme is saved with the layout
 in the tab wrapper — `{"node", "theme"[, "project"]}`, only when it differs from the default
 (`windowstate::tabTheme()`) — and each tab wears it as a swatch on the tab bar: the theme's terminal
