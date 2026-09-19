@@ -1,4 +1,5 @@
 import json
+import shlex
 import socket
 import subprocess
 import sys
@@ -104,9 +105,15 @@ class SupervisorTests(unittest.TestCase):
 
     def test_queue_runs_in_order_without_overlap(self):
         p = self.use(GatedProvider())
-        ids = [self.sup.submit('first', 'queue'), self.sup.submit('second', 'queue'), self.sup.submit('third', 'queue')]
-        positions = [e['position'] for e in self.rec.of('queued')]
-        self.assertEqual(positions, [0, 1, 2])
+        first = self.sup.submit('first', 'queue')
+        # The dispatcher thread takes the head as soon as it is there, and a queued prompt reports
+        # the position it was put at. Reading the three positions without waiting raced that
+        # thread: on a loaded machine `first` was already dequeued when `second` was submitted, so
+        # the positions came out [0, 0, 1]. Wait for the head to start, and what the other two
+        # report is the queue's own ordering rather than a race.
+        self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == first)
+        ids = [first, self.sup.submit('second', 'queue'), self.sup.submit('third', 'queue')]
+        self.assertEqual([e['position'] for e in self.rec.of('queued')], [0, 0, 1])
         for _ in ids:
             p.release.release()
         for i in ids:
@@ -274,17 +281,29 @@ class WorkerQueueProtocolTests(unittest.TestCase):
         self.assertFalse(any(e['event'] == 'agent_started' for e in results))
 
     def test_failed_turn_pauses_queue(self):
-        # A local server holds each request briefly, then closes: every turn ends in a provider error,
-        # and the second prompt is reliably queued before the first one fails.
+        # A local server that accepts a request and then holds the connection open until this test
+        # closes it: the turn fails exactly when the test says so, not after a fixed wait.
+        #
+        # It used to close after 0.5 s, on the reasoning that the second prompt would be queued
+        # inside that window. Under load it was not: the first turn failed with an empty queue, so
+        # nothing paused (which is right — "the pause resets when the queue empties"), the second
+        # prompt then ran, and the `queue_changed {paused}` this loop waits for never came. The loop
+        # checked its deadline only between reads, so it sat in a blocking `readline()` on a worker
+        # that was waiting on stdin: the test never returned and took the whole `backend-and-bash`
+        # target to its 600 s ceiling with it. Both halves of that are fixed here — the failure is
+        # ordered against the second prompt, and nothing in this test can block forever.
         server = socket.socket(); server.bind(('127.0.0.1', 0)); server.listen()
         self.addCleanup(server.close)
+        fail_now = threading.Event()
+        self.addCleanup(fail_now.set)          # never leave the serve thread parked on it
         def serve():
             while True:
                 try:
                     conn, _ = server.accept()
                 except OSError:
                     return
-                time.sleep(0.5); conn.close()
+                fail_now.wait(30)
+                conn.close()
         threading.Thread(target=serve, daemon=True).start()
         base = f'http://127.0.0.1:{server.getsockname()[1]}/v1'
         script = ''.join(json.dumps(m) + '\n' for m in [
@@ -293,21 +312,33 @@ class WorkerQueueProtocolTests(unittest.TestCase):
             {'type': 'ask', 'id': 'b', 'text': 'two', 'when': 'queue'}])
         proc = subprocess.Popen([sys.executable, '-S', str(ROOT / 'backend/worker.py')], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, text=True, cwd=ROOT)
+        self.addCleanup(proc.kill)
+        # A readline() on a worker that is waiting on stdin never returns on its own. Killing the
+        # worker closes the pipe, readline() returns '' and the loop below ends: a broken run fails
+        # this one test instead of hanging the suite.
+        watchdog = threading.Timer(60, proc.kill)
+        watchdog.start()
+        self.addCleanup(watchdog.cancel)
         proc.stdin.write(script); proc.stdin.flush()
         events = []
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            events.append(json.loads(proc.stdout.readline()))
+        while True:
+            line = proc.stdout.readline()
+            self.assertTrue(line, 'the worker stopped before the queue paused: ' + json.dumps(events)[-2000:])
+            events.append(json.loads(line))
+            if events[-1]['event'] == 'queued' and events[-1].get('request_id') == 'b':
+                fail_now.set()          # both prompts are in the queue: let the first turn fail
             if events[-1]['event'] == 'queue_changed' and events[-1]['paused'] and events[-1]['running'] is None:
                 break
         proc.stdin.write(json.dumps({'type': 'queue_clear'}) + '\n' + json.dumps({'type': 'shutdown'}) + '\n')
         proc.stdin.close()
         events += [json.loads(line) for line in proc.stdout]
-        proc.wait(timeout=5)
+        proc.wait(timeout=30)
         queued = {e['request_id']: e['id'] for e in events if e['event'] == 'queued'}
         finished = [e for e in events if e['event'] == 'agent_finished']
         self.assertEqual([(e['id'], e['outcome']) for e in finished], [(queued['a'], 'error')])
-        self.assertEqual(events[-1]['items'], [])
+        # The last `queue_changed`, not the last event of all: the worker may say something else on
+        # its way out (KeyError: 'items' under load), and what this is about is the clear.
+        self.assertEqual([e for e in events if e['event'] == 'queue_changed'][-1]['items'], [])
         self.assertFalse(any(e['event'] == 'agent_started' and e['id'] == queued['b'] for e in events))
 
 
@@ -316,9 +347,23 @@ if __name__ == '__main__':
 
 
 class SlowToolThenAnswer:
-    """First call asks for a slow tool; later calls record what they saw and answer."""
-    def __init__(self, command='sleep 1'):
-        self.command, self.seen, self.calls = command, [], 0
+    """First call asks for a tool that runs until `release()`; later calls record and answer.
+
+    The tool used to be `sleep 1`, which every steering test then raced: the steering prompt has to
+    reach the supervisor *before* the turn's next step boundary, or the turn never takes it and
+    reports `steer_returned` instead of `steer_delivered`. On a loaded machine the second went by
+    before the test thread woke from `tool_started` and submitted, and the test waited five seconds
+    for an event that was never coming. The command now waits for a file, so the tool cannot end
+    until the test creates it — no window to miss.
+    """
+    def __init__(self, gate: Path):
+        self.gate = Path(gate)
+        self.command = 'until [ -e %s ]; do sleep 0.02; done' % shlex.quote(str(self.gate))
+        self.seen, self.calls = [], 0
+
+    def release(self):
+        """Let the tool finish, and with it the turn's next step boundary."""
+        self.gate.write_bytes(b'')
 
     def complete(self, messages, tools, emit, cancel):
         self.calls += 1
@@ -347,12 +392,17 @@ class SteerTests(unittest.TestCase):
         self.sup.set_agent(self.agent)
         return provider
 
+    def slow_tool(self):
+        """A provider whose first tool call waits in the workspace until `release()`."""
+        return self.use(SlowToolThenAnswer(Path(self.temp.name) / 'let-the-tool-finish'))
+
     def test_steer_joins_running_turn_after_tool_results(self):
-        p = self.use(SlowToolThenAnswer())
+        p = self.slow_tool()
         first = self.sup.submit('tool please', 'now')
         self.rec.wait(lambda e: e['event'] == 'tool_started')
         steer = self.sup.submit('also check README', 'steer', request_id='r1')
         self.assertEqual(self.rec.wait(lambda e: e['event'] == 'queued' and e['id'] == steer)['when'], 'steer')
+        p.release()          # the steer is in: the tool may reach its step boundary now
         self.rec.wait(lambda e: e['event'] == 'steer_delivered' and steer in e['ids'])
         self.assertEqual(self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)['outcome'], 'done')
         second_call = p.seen[1]
@@ -426,10 +476,11 @@ class SteerTests(unittest.TestCase):
         self.assertNotEqual(steer, item['id'])
 
     def test_unsteer_does_nothing_once_the_steer_was_delivered(self):
-        p = self.use(SlowToolThenAnswer())
+        p = self.slow_tool()
         self.sup.submit('tool please', 'now')
         self.rec.wait(lambda e: e['event'] == 'tool_started')
         self.sup.submit('also check README', 'steer', request_id='s1')
+        p.release()
         self.rec.wait(lambda e: e['event'] == 'steer_delivered')
         self.assertFalse(self.sup.unsteer('s1', 'i1'))
         escalated = self.rec.wait(lambda e: e['event'] == 'steer_escalated')
@@ -459,10 +510,11 @@ class SteerTests(unittest.TestCase):
             self.assertEqual(self.agent.requests.find(removed['ledger_id'])['status'], 'cancelled_by_user')
 
     def test_remove_refuses_a_steer_already_delivered(self):
-        self.use(SlowToolThenAnswer())
+        p = self.slow_tool()
         self.sup.submit('tool please', 'now')
         self.rec.wait(lambda e: e['event'] == 'tool_started')
         steer = self.sup.submit('also check README', 'steer', request_id='s1')
+        p.release()
         self.rec.wait(lambda e: e['event'] == 'steer_delivered')
         with self.assertRaises(ValueError):
             self.sup.remove(steer)
@@ -470,11 +522,12 @@ class SteerTests(unittest.TestCase):
         self.assertFalse(self.rec.of('steer_removed'))
 
     def test_queue_steer_upgrades_a_queued_prompt(self):
-        p = self.use(SlowToolThenAnswer('sleep 1'))
+        p = self.slow_tool()
         self.sup.submit('tool please', 'now')
         self.rec.wait(lambda e: e['event'] == 'tool_started')
         queued = self.sup.submit('upgrade me', 'queue')
         self.sup.steer(queued)
+        p.release()
         self.rec.wait(lambda e: e['event'] == 'steer_delivered' and queued in e['ids'])
         self.rec.wait(lambda e: e['event'] == 'agent_finished')
         self.assertTrue(p.seen[1][-1]['content'].endswith('\nupgrade me'))

@@ -589,12 +589,22 @@ class RemoteScriptTests(unittest.TestCase):
         s = PtyShell([tmux, "-L", socket_name, "attach"], self.env)
         self.addCleanup(s.close)
         os.write(s.master, typed_line(2).encode() + b"\r")
-        time.sleep(0.5)
+        # The integration is loaded once the shell draws its first *marked* prompt into the pane.
+        # Waiting half a second instead was a race the loaded machine won: the eval was still
+        # running, the next line went into it, the command never ran, and the pane held no 133;C
+        # mark for the assertion below to find. `s.read` keeps draining the pty while it waits.
+        marked_prompt = dcs(b"133;A") + b"RP> " + dcs(b"133;B")
+        s.read(lambda: marked_prompt in raw.read_bytes(), timeout=20)
         os.write(s.master, b"printf 'RE%sY\\n' AD\r")
         s.read(lambda: b"READY" in s.output, timeout=10)
         # And on to the prompt after it, so the command's D mark and the new A/B have been drawn.
         s.read(lambda: self.PROMPT in s.output[s.output.index(b"READY") + 5:], timeout=10)
 
+        # tmux's `pipe-pane` writes through a `cat`, which lags the client's own view of the same
+        # bytes: reading the file the moment the client has its next prompt caught it short of the
+        # command's marks, and that -- not anything the shell did -- is what failed 7 of 16 runs
+        # under load. Wait for the command's D mark, which is the last thing this needs, to arrive.
+        s.read(lambda: dcs(b"133;D;0") in raw.read_bytes(), timeout=20)
         pane = raw.read_bytes()  # what the shell wrote into the tmux pane
         self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), pane)
         self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", pane)

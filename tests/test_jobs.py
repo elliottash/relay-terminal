@@ -108,10 +108,22 @@ class JobToolTests(unittest.TestCase):
         self.assertEqual([job.id for job in self.tools.jobs.running()], [server["job_id"]])
 
     def test_shutdown_stops_every_job(self):
-        for _ in range(2):
-            self.run_tool("run_command", command="sleep 30", background=True)
+        # `shutdown()` is `stop_all(forget=True)`, and forgetting empties the table — so
+        # `jobs.running() == []` was true whether or not anything had been stopped, and this test
+        # could not fail. What it is for is that the processes are gone, so it holds on to the two
+        # jobs and waits on each one's `done` (the event `stop` itself waits on for three seconds;
+        # on a loaded machine that wait can return early and leave the job still dying, which is
+        # not a job that outlived shutdown).
+        jobs = [self.tools.jobs.get(self.run_tool("run_command", command="sleep 30",
+                                                 background=True)["job_id"])
+                for _ in range(2)]
+        self.assertEqual(len(self.tools.jobs.running()), 2)
         self.tools.shutdown()
-        self.assertEqual(self.tools.jobs.running(), [])
+        self.assertEqual(self.tools.jobs.running(), [])          # the table is empty as well
+        for job in jobs:
+            self.assertTrue(job.done.wait(30), f"{job.id} outlived shutdown")
+            self.assertTrue(job.stopped)
+            self.assertFalse(alive(job.process.pid), f"{job.id}'s process outlived shutdown")
 
     def test_timeouts_are_clamped_not_refused(self):
         self.assertEqual(self.tools.prepare("run_command", {"command": "true", "timeout_seconds": 5000}).arguments["timeout_seconds"], MAX_WAIT)
@@ -137,13 +149,55 @@ class JobToolTests(unittest.TestCase):
         self.assertTrue(result["output"].endswith("LAST\n"))
         self.assertEqual(result["omitted_bytes"], 100000 + 6 - MAX_OUTPUT)
 
+    def streamed(self):
+        return "".join(e["text"] for e in self.events if e.get("event") == "tool_output")
+
+    def open_when_a_call_is_waiting(self, gate, timeout=30):
+        """Create `gate` once some job has a live stream, i.e. once a call is waiting on it.
+
+        `JobTable.wait` installs the live callback and is the only thing that does, so this is the
+        moment after which output is streamed — and the only way to order a command's output
+        against it without a sleep. The command waits for the file; this waits for the callback.
+        """
+        def watch():
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                if any(job.live is not None for job in self.tools.jobs.running()):
+                    gate.write_bytes(b"")
+                    return
+                time.sleep(0.01)
+        thread = threading.Thread(target=watch, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, timeout)
+
     def test_the_live_stream_runs_only_while_a_call_waits(self):
-        result = self.run_tool("run_command", command="echo a; sleep 1.2; echo b", timeout_seconds=1)
-        streamed = "".join(e["text"] for e in self.events if e.get("event") == "tool_output")
-        self.assertEqual(streamed, "a\n")
-        time.sleep(0.6)   # "b" is printed with no call waiting: it is kept, not streamed
-        self.assertEqual("".join(e["text"] for e in self.events if e.get("event") == "tool_output"), "a\n")
-        self.assertEqual(self.run_tool("command_output", job_id=result["job_id"], wait_seconds=5)["output"], "b\n")
+        """Output while a call waits is streamed; output with no call waiting is kept instead.
+
+        This was one job — `echo a; sleep 1.2; echo b` against a one-second timeout — and both
+        halves were a race with that clock: "b" landed 0.2 s after the call gave up waiting, and
+        "a" had to be printed by a freshly spawned bash inside the same second. Under load each
+        half lost in turn, including the one nobody expected: an `echo` that finished before the
+        call reached `JobTable.wait` was not streamed either, because `wait` installs the live
+        callback only on a job that is still running. Both halves are ordered on events now.
+        """
+        # Printed after the call is waiting on it: streamed.
+        printing = self.root / "print-a-now"
+        self.open_when_a_call_is_waiting(printing)
+        done = self.run_tool("run_command", command=f"until [ -e {printing} ]; do sleep 0.02; done; echo a")
+        self.assertEqual((done["exit_code"], done["output"]), (0, "a\n"))
+        self.assertEqual(self.streamed(), "a\n")
+
+        # A command that prints only after its call has returned: its call waited on an empty pipe
+        # and handed the job back, so there is no live stream left for "b" to reach.
+        gate = self.root / "print-b-now"
+        later = self.run_tool("run_command", background=True,
+                              command=f"until [ -e {gate} ]; do sleep 0.02; done; echo b")
+        self.assertTrue(later["still_running"])
+        self.assertEqual(later["output"], "")
+        gate.write_bytes(b"")
+        self.assertTrue(self.tools.jobs.get(later["job_id"]).done.wait(30), "the gated job never ended")
+        self.assertEqual(self.streamed(), "a\n")
+        self.assertEqual(self.run_tool("command_output", job_id=later["job_id"], wait_seconds=5)["output"], "b\n")
 
 
 class JobListTests(unittest.TestCase):
@@ -171,13 +225,23 @@ class JobListTests(unittest.TestCase):
         self.assertEqual(self.tools.jobs_event()["jobs"], [])
 
     def test_a_handed_back_job_is_listed_and_its_end_announced(self):
-        result = self.run_tool("run_command", command="sleep 1; exit 2", timeout_seconds=0)
+        # This was `sleep 1; exit 2` against a one-second timeout. Under load the wait overran the
+        # sleep: the job had already finished when the call returned, so it was never handed back,
+        # nothing was listed and `lists()[-1]` raised IndexError. The command now ends only when
+        # this test lets it, so the call always returns on a job that is still running.
+        gate = Path(self.tmp.name) / "exit-now"
+        result = self.run_tool("run_command", timeout_seconds=1,
+                               command=f"until [ -e {gate} ]; do sleep 0.02; done; exit 2")
+        self.assertTrue(result["still_running"])
         first = self.lists()[-1]
         self.assertEqual([(j["job_id"], j["running"]) for j in first], [(result["job_id"], True)])
-        self.assertIn("sleep 1", first[0]["command"])
-        deadline = time.monotonic() + 5
+        self.assertIn("exit 2", first[0]["command"])
+        gate.write_bytes(b"")
+        self.assertTrue(self.tools.jobs.get(result["job_id"]).done.wait(30), "the gated job never ended")
+        # The end is announced too: the pump emits a `jobs` event when a handed-back job finishes.
+        deadline = time.monotonic() + 30
         while self.lists()[-1][0]["running"] and time.monotonic() < deadline:
-            time.sleep(0.05)
+            time.sleep(0.02)
         last = self.lists()[-1][0]
         self.assertFalse(last["running"])
         self.assertEqual(last["exit_code"], 2)

@@ -512,11 +512,21 @@ class GuestSessionRows(unittest.TestCase):
         # Nothing was written beside the transcript, and the transcript itself is untouched.
         self.assertEqual([path.name], [p.name for p in path.parent.iterdir()])
         before = path.read_bytes()
-        # A rescan that re-reads the file keeps both: update_guest merges them per key.
-        os.utime(path, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))
-        outcome = guest_sessions.reconcile(self.cmds.index())
-        self.assertEqual(1, outcome['refreshed'])
-        row = self.listed(self.ask())[session]
+        # Every listing above set a background reconcile going — the throttle is 0 in these tests —
+        # and one of those sometimes got to the touched file first, so the refresh this call is
+        # counting had already happened and `refreshed` came back 0. Turn the throttle up so no new
+        # one starts, and wait for any in flight to finish; then the rescan below is the only one.
+        with mock.patch.object(session_protocol, 'GUEST_RECONCILE_EVERY', 3600.0):
+            state = self.cmds._guest_state()
+            deadline = time.monotonic() + 10
+            while state['running'] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(state['running'], 'a background reconcile is still going')
+            # A rescan that re-reads the file keeps both: update_guest merges them per key.
+            os.utime(path, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))
+            outcome = guest_sessions.reconcile(self.cmds.index())
+            self.assertEqual(1, outcome['refreshed'])
+            row = self.listed(self.ask())[session]
         self.assertEqual(('Reading the drag', 1), (row['title'], row['pinned']))
         self.assertEqual(before, path.read_bytes())
 
@@ -591,11 +601,23 @@ class GuestSessionRows(unittest.TestCase):
         self.write_claude(session, cwd=str(self.root / 'repo'))
         calls = []
         real = guest_sessions.reconcile
+        # The reconcile is held on its own thread until all three listings are in. It used to run
+        # as soon as the first listing scheduled it, and on a loaded machine it *finished* before
+        # the third query was typed, so the second answer came back for 'drag' — which is what this
+        # test is about, and therefore not something to leave to how fast the machine is.
+        asked_everything = threading.Event()
+        self.addCleanup(asked_everything.set)
+
+        def held(index, *a, **k):
+            calls.append(1)
+            asked_everything.wait(30)
+            return real(index, *a, **k)
+
         with mock.patch.object(session_protocol, 'GUEST_RECONCILE_EVERY', 60.0), \
-             mock.patch.object(guest_sessions, 'reconcile',
-                               lambda index, *a, **k: (calls.append(1), real(index, *a, **k))[1]):
+             mock.patch.object(guest_sessions, 'reconcile', held):
             for query in ('', 'drag', 'pane'):
                 self.ask(query=query)
+            asked_everything.set()
             # The rows the rescan found are sent again for the *latest* query, not for the one
             # that set it going: by then the user has typed two more letters.
             event = self.rec.wait(lambda e: e['event'] == 'conversations' and e['items']
