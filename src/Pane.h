@@ -197,6 +197,9 @@ public:
 // What a line typed into the prompt box means for the question card on screen (#MQ9C,
 // protocol 27.4). Free and pure, so the whole decision sits in one place with nothing of the pane
 // around it: Pane::answerQuestion reads the options off the card and then only acts on this.
+// Keys are not lines and are not read here: Esc skips the current question (owner, 2026-09-19 —
+// `Pane::skipQuestion`, which is what `0` and `/skip` below mean) and Ctrl+Shift+Enter sends the
+// box to the shell instead, which is why a card can never take the terminal away.
 namespace relay::ask {
 
 struct Reading {
@@ -748,13 +751,13 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
-        // "role:" is a Main/Flash row, "gear:" the model options modal, and "vision:"/"planning:"
-        // the model this one turn is running on (an image, or plan mode's own role): none of them
+        // "role:" is a Main/Flash row, "gear:" the model options modal, and "serving:" the model
+        // this one turn is running on (an image, plan mode's own role, or a failover): none of them
         // is a preset to switch to. The first two are acted on where the box is built
         // (chooseAgentRole, openRolesDialog); this is the guard for the other callers — /model and
         // the roles modal.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
-            || id.startsWith(QStringLiteral("vision:")) || id.startsWith(QStringLiteral("planning:"))) return;
+            || id.startsWith(QStringLiteral("serving:"))) return;
         // "guest:" is Claude Code or Codex. Two shapes (protocol 29.4): the worker's harness
         // preset, which is an ordinary preset switch carrying a `guest` object, and — when the
         // worker cannot run that guest headless — the Tier B launch of its TUI in this pane's
@@ -2317,6 +2320,17 @@ public:
     // without them the question is open and whatever you type is the answer; `/skip` leaves any
     // question unanswered, and so does "0" when there are numbers to be clear of. Questions in one
     // call are asked one at a time; answering the last one sends them all back together.
+    // One move of the running turn off this pane's own model (C5). `why` is what moved it —
+    // "plan", "vision" or "failover" — which picks the mark the picker draws and the sentence its
+    // tooltip writes; `backTo` is the model the worker said the turn returns to, which for a
+    // nested move is the model outside it rather than the pane's own.
+    struct Serving {
+        QString model;
+        QString preset;
+        QString why;
+        QString backTo;
+    };
+
     struct Ask {
         QString id;
         QJsonArray questions;
@@ -2417,12 +2431,26 @@ private:
         }
         if (!options.isEmpty()) printInline(QStringLiteral("  0  Skip this one\n"), Ink::Note);
         printInline(options.isEmpty()
-                        ? QStringLiteral("  Type your answer · /skip to pass · Ctrl+Shift+Enter still runs a command.\n")
+                        ? QStringLiteral("  Type your answer · /skip or Esc passes · Ctrl+Shift+Enter still runs a command.\n")
                         : (multiple
-                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · Ctrl+Shift+Enter still runs a command.\n")
-                               : QStringLiteral("  A number, or your own words · Ctrl+Shift+Enter still runs a command.\n")),
+                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")
+                               : QStringLiteral("  A number, or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")),
                     Ink::Note);
+        // Esc is the card's skip now, not the turn's Stop (owner, 2026-09-19), so the footer says
+        // where Stop went. It has to: Esc was the only key that stopped a turn unless the user
+        // bound `agent.stop` themselves, and a card that quietly took the one Stop key away would
+        // leave a turn nobody could end.
+        printInline(QStringLiteral("  %1.\n").arg(stopTurnHint()), Ink::Note);
         closeInline();
+    }
+
+    // The turn's Stop, named the way the user can actually reach it: the shortcut they bound to
+    // `agent.stop`, or — with nothing bound, which is the default — the action itself. Read live
+    // from the Keymap, as every other key Relay prints is.
+    static QString stopTurnHint() {
+        const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
+        return stop.isEmpty() ? QStringLiteral("Actions \u203A Stop agent stops the turn")
+                              : QStringLiteral("%1 stops the turn").arg(stop);
     }
 
     // What the prompt box says while a card is up. Longest first, for a narrow pane.
@@ -2455,8 +2483,9 @@ private:
     }
 
     // Enter in the prompt box while a card is up. Returns false when there is no card, so the
-    // ordinary routing runs.
-    bool answerQuestion(const QString &text) {
+    // ordinary routing runs. `author` is the person a line from a paired device came from; empty
+    // for the desk, whose answers are unsigned because there is only one of them.
+    bool answerQuestion(const QString &text, const QString &author = QString()) {
         if (!m_ask.open()) return false;
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
@@ -2475,7 +2504,6 @@ private:
             return true;
         }
         const QStringList answer = reading.kind == relay::ask::Reading::Skip ? QStringList() : reading.labels;
-        m_ask.answers[m_ask.current] = answer;
         // The slow path for this card is typing an option out in full when its number would do
         // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in
         // the user's own words is the tool working as intended, not something to correct.
@@ -2486,16 +2514,38 @@ private:
                      QStringLiteral("Next time: just type %1").arg(i + 1));
                 break;
             }
+        recordAnswer(question, answer, author);
+        return true;
+    }
+
+    // Esc while a card is up (owner, 2026-09-19): this one question is skipped and the next goes
+    // up, which is exactly what typing `0` or `/skip` does. Returns false when there is no card,
+    // so Esc goes on stopping the turn everywhere else.
+    bool skipQuestion() {
+        if (!m_ask.open()) return false;
+        recordAnswer(questionAt(m_ask.current), QStringList());
+        return true;
+    }
+
+    // One question answered (or skipped): recorded, echoed under the card, and the next one put
+    // up — or, when that was the last, every answer sent back together. Every door into the card
+    // ends here, so Esc, the prompt box and a line from a paired device leave the same trace.
+    void recordAnswer(const QJsonObject &question, const QStringList &answer, const QString &author = QString()) {
+        m_ask.answers[m_ask.current] = answer;
         ensureLineStart();
-        printInline(QStringLiteral("✦ %1: %2\n").arg(question.value(QStringLiteral("header")).toString(),
+        // Signed when it came from somewhere else: on a shared or paired pane the person at the
+        // desk should be able to see that the answer in their transcript is not theirs.
+        printInline(QStringLiteral("✦ %1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(),
                                                      answer.isEmpty() ? QStringLiteral("skipped")
-                                                                      : answer.join(QStringLiteral(", "))),
+                                                                      : answer.join(QStringLiteral(", ")),
+                                                     author.trimmed().isEmpty()
+                                                         ? QString()
+                                                         : QStringLiteral(" · from %1").arg(author.trimmed())),
                     Ink::UserAgent);
         closeInline();
         ++m_ask.current;
-        if (m_ask.open()) { printQuestion(); refreshBackgroundWait(); return true; }
+        if (m_ask.open()) { printQuestion(); refreshBackgroundWait(); return; }
         sendAnswers();
-        return true;
     }
 
     void sendAnswers() {
@@ -8428,11 +8478,9 @@ private:
             // cannot read images. Said plainly, because the answer comes from a different model.
             ensureLineStart();
             printInline(QStringLiteral("🖼 ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
-            m_visionModel = event.value(QStringLiteral("model")).toString();
-            refreshPickers();
+            pushServingModel(QStringLiteral("vision"), event);
         } else if (type == QStringLiteral("vision_route_ended")) {
-            m_visionModel.clear();
-            refreshPickers();
+            popServingModel(QStringLiteral("vision"));
         } else if (type == QStringLiteral("vision_unavailable")) {
             // Refused, not failed: the `error` that follows carries the same text, so only the
             // "what to do about it" line is added here.
@@ -8443,11 +8491,9 @@ private:
             // default the pane's own at max reasoning. Said plainly, like the image routing.
             ensureLineStart();
             printInline(QStringLiteral("◆ ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
-            m_planModel = event.value(QStringLiteral("model")).toString();
-            refreshPickers();
+            pushServingModel(QStringLiteral("plan"), event);
         } else if (type == QStringLiteral("plan_route_ended")) {
-            m_planModel.clear();
-            refreshPickers();
+            popServingModel(QStringLiteral("plan"));
         } else if (type == QStringLiteral("provider_retry")) {
             // The model went silent, the request was refused, or the provider keeps failing and the
             // turn has moved to another one (#G9VE). Say which in the transcript: a failover is not
@@ -8459,6 +8505,12 @@ private:
                                                                             : QStringLiteral("⚠ ");
             ensureLineStart();
             printInline(mark + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
+            // A failover is the third way the turn leaves the pane's model, and the picker shows it
+            // exactly as it shows the other two (C5). The retries that are not a move — a stall, a
+            // truncated step, an HTTP retry — are the same model trying again, so they change
+            // nothing here.
+            if (reason == QStringLiteral("failover")) pushServingModel(reason, event);
+            else if (reason == QStringLiteral("failover_ended")) popServingModel(QStringLiteral("failover"));
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
             // While a turn runs the clock owns the status line; a step note rides along with it
@@ -9238,6 +9290,7 @@ private:
 
     void stopTurnClock() {
         m_paneState.changed();   // pane_state (relay-terminal-71)
+        clearServingModels();    // no turn, nothing serving it but the pane's own model (C5)
         if (m_turnClock) m_turnClock->stop();
         m_turnStep.clear();
         m_waitCall.clear();      // no turn, no agent_wait (#V7QD)
@@ -9266,18 +9319,22 @@ private:
         // place the user is looking while they decide.
         const bool asked = m_ask.open();
         if (asked) what = QStringLiteral("waiting for your answer");
-        const QString label = QStringLiteral("Relaying %1… · %2 s%3 · %4 stops")
+        // While a card is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
+        // offers the key that is actually live and the tooltip says where Stop went.
+        const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
+        const QString label = QStringLiteral("Relaying %1… · %2 s%3 · %4")
                                   .arg(what)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
-                                  .arg(stopWord);
+                                  .arg(keyHint);
         m_turnClockText = label;   // pane_state's clock, for a paired phone (relay-terminal-71)
         if (m_busyLine)
             m_busyLine->setBusy(asked ? relay::panestatus::State::NeedsYou : relay::panestatus::State::Working,
                                 label,
                                 asked
                                     ? QStringLiteral("The agent asked you something and its turn is blocked on the answer "
-                                                     "(%1 s so far). %2 stops the turn.").arg(seconds).arg(stopWord)
+                                                     "(%1 s so far). Esc skips this question. %2.")
+                                          .arg(seconds).arg(stopTurnHint())
                                       : QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
                                           .arg(seconds).arg(stopWord));
     }
@@ -9363,6 +9420,81 @@ private:
         hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
     }
 
+    // ----- the model serving this turn (C5, protocol 13.11 / 15.2.2 / 17.3) --------------------
+    // Every move of the running turn off this pane's own model comes through here, carrying the
+    // event that announced it: `vision_route` and `plan_route` name the model in `model` and the
+    // one it came from in `from_model`, a failover names them in `to_model` and `from_model`.
+    void pushServingModel(const QString &why, const QJsonObject &event) {
+        Serving serving;
+        serving.why = why;
+        serving.model = event.value(QStringLiteral("model")).toString();
+        serving.preset = event.value(QStringLiteral("preset")).toString();
+        if (serving.model.isEmpty()) {          // a failover's fields have the other names
+            serving.model = event.value(QStringLiteral("to_model")).toString();
+            serving.preset = event.value(QStringLiteral("to_preset")).toString();
+        }
+        serving.backTo = event.value(QStringLiteral("from_model")).toString();
+        if (serving.model.isEmpty()) return;   // an event that named no model has nothing to show
+        m_serving.append(serving);
+        refreshPickers();
+    }
+    // The move that ended is the one taken out, not simply the last: the three can end in any
+    // order, and popping the wrong one would leave the box naming a model the turn has left.
+    void popServingModel(const QString &why) {
+        for (int i = m_serving.size() - 1; i >= 0; --i)
+            if (m_serving.at(i).why == why) { m_serving.removeAt(i); refreshPickers(); return; }
+        if (m_serving.isEmpty()) return;
+        m_serving.removeLast();                // an end with no move behind it: leave nothing up
+        refreshPickers();
+    }
+    void clearServingModels() {
+        if (m_serving.isEmpty()) return;
+        m_serving.clear();
+        refreshPickers();
+    }
+    // The marks the transcript notes already use for the three: 🖼 an image turn, ◆ a plan turn,
+    // ⇄ a turn that moved provider. The box wears the same one, so the row and the line above it
+    // are visibly the same event.
+    static QString servingMark(const QString &why) {
+        return why == QStringLiteral("vision") ? QStringLiteral("🖼")
+             : why == QStringLiteral("plan")   ? QStringLiteral("◆")
+                                               : QStringLiteral("⇄");
+    }
+    // A preset's label from the worker's list, for the tooltip: two stored keys can serve one model
+    // id (15.2.2), so the id alone does not say which key this turn is spending.
+    QString presetLabelOf(const QString &presetId) const {
+        if (presetId.isEmpty()) return QString();
+        for (const auto &item : m_presets) {
+            const QJsonObject preset = item.toObject();
+            if (preset.value(QStringLiteral("id")).toString() == presetId)
+                return preset.value(QStringLiteral("label")).toString();
+        }
+        return QString();
+    }
+    QString servingName(const Serving &serving) const {
+        const QString label = presetLabelOf(serving.preset);
+        return label.isEmpty() || label == serving.model
+                   ? serving.model : QStringLiteral("%1 (%2)").arg(serving.model, label);
+    }
+    // What the box's tooltip says while another model serves the turn: what moved it, and that the
+    // pane comes back to its own model afterwards. Picking a model while this is up is the ordinary
+    // pick — the worker holds a `set_model` that arrives mid-swap until the turn ends (12.6) — so
+    // the tooltip says when it will take effect rather than pretending it cannot be made.
+    QString servingTooltip() const {
+        if (m_serving.isEmpty()) return QString();
+        const Serving &serving = m_serving.last();
+        const QString name = servingName(serving);
+        const QString back = serving.backTo.isEmpty() ? m_model : serving.backTo;
+        const QString because = serving.why == QStringLiteral("vision")
+            ? QStringLiteral("This turn carries an image, so it runs on %1").arg(name)
+            : serving.why == QStringLiteral("plan")
+            ? QStringLiteral("Plan mode: this turn runs on %1 (the planning role)").arg(name)
+            : QStringLiteral("This turn's provider kept failing, so it is finishing on %1").arg(name);
+        return QStringLiteral("%1 — for this turn; back to %2 after. Picking a model here still "
+                              "changes this pane's own model, from the end of this turn.")
+                   .arg(because, back.isEmpty() ? QStringLiteral("this pane's own model") : back);
+    }
+
     void refreshPickers() {
         m_paneState.changed();   // pane_state (relay-terminal-71): model and mode; changed() runs this
         if (!m_modelBox) return;
@@ -9430,24 +9562,18 @@ private:
         m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model options…"),
                             QStringLiteral("gear:modelOptions"));
         m_modelBox->setEnabled(true);
-        // Image context (protocol 17): while a turn with an image runs on another model, the chip
-        // says which one, so an answer never seems to come from the pane's own model.
-        if (!m_visionModel.isEmpty()) {
-            m_modelBox->insertItem(0, QStringLiteral("🖼 %1 · this turn").arg(m_visionModel),
-                                   QStringLiteral("vision:") + m_visionModel);
+        // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
+        // planning model, an image turn's vision model, or the provider a failover moved to. One
+        // row for all three, marked with what moved it, so an answer never seems to have come from
+        // the pane's own model; the tooltip says the pane gets that model back after the turn.
+        if (!m_serving.isEmpty()) {
+            const Serving &serving = m_serving.last();
+            m_modelBox->insertItem(0, QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), serving.model),
+                                   QStringLiteral("serving:") + serving.model);
             m_modelBox->setCurrentIndex(0);
         }
-        // Plan mode's own model role (protocol 13): while a plan turn runs on its planning model,
-        // the chip says which — when it is the pane's own model id, the bump is the tooltip's.
-        if (!m_planModel.isEmpty()) {
-            m_modelBox->insertItem(0, QStringLiteral("◆ %1 · this turn").arg(m_planModel),
-                                   QStringLiteral("planning:") + m_planModel);
-            m_modelBox->setCurrentIndex(0);
-        }
-        m_modelBox->setToolTip(modelTooltip(!m_visionModel.isEmpty()
-            ? QStringLiteral("This turn carries an image, so it runs on %1 and then goes back.").arg(m_visionModel)
-            : !m_planModel.isEmpty()
-            ? QStringLiteral("Plan mode: this turn runs on %1 (the planning role) and then goes back.").arg(m_planModel)
+        m_modelBox->setToolTip(modelTooltip(!m_serving.isEmpty()
+            ? servingTooltip()
             : !liveGuest.isEmpty()
             ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestDisplayName(liveGuest))
             : onGuestPreset()
@@ -10630,11 +10756,21 @@ private:
         // next tool call, which is what Enter on an empty prompt box does here (#C4M8). With no
         // turn to steer, the worker queues it, exactly as the desktop's own steer does.
         m_remoteAuthor = originName.trimmed();
-        // A question card is up (#MQ9C): the line answers it, wherever it was typed. The phone
-        // sees the card because it sees this pane's text; without this its answer would be queued
-        // as a prompt behind the very turn that is blocked waiting for it.
-        if (answerQuestion(trimmed)) { m_remoteAuthor.clear(); return; }
-        if (when == QLatin1String("steer") && m_agentBusy) {
+        // A question card is up (#MQ9C, protocol 27.4): the line answers it — but only when it was
+        // going to the agent anyway, which is the rule at the desk and now the rule here too
+        // (owner, 2026-09-19). This used to answer the card before anything was routed, so a phone
+        // could not reach the shell at all until somebody dealt with the question. These two doors
+        // are agent-bound by themselves: a steer is aimed at the running turn, and a device that
+        // cannot ask the router can only reach the agent. The routed line is decided in
+        // takeRemoteRoute, when the verdict is in.
+        const bool steering = when == QLatin1String("steer") && m_agentBusy;
+        if (relay::input::cardTakesRemoteLine({m_ask.open(), false, false})
+            && (steering || !route || !m_workerReady)
+            && answerQuestion(trimmed, m_remoteAuthor)) {
+            m_remoteAuthor.clear();
+            return;
+        }
+        if (steering) {
             m_remoteSubmit = true; submitAgent(trimmed, false, who); m_remoteSubmit = false;   // the name, not the id
             if (!m_entries.isEmpty() && m_entries.last().agent) {
                 m_lastQueuedEntryId = m_entries.last().id;
@@ -10662,10 +10798,25 @@ private:
         if (pending == m_remotePrompts.end()) return false;
         const RemotePrompt prompt = *pending;
         m_remotePrompts.erase(pending);
-        if (event.value(QStringLiteral("route")).toString() == QStringLiteral("shell")) {
+        const bool toShell = event.value(QStringLiteral("route")).toString() == QStringLiteral("shell");
+        // The card takes the line only now, and only when the router sent it to the agent (27.4):
+        // the question is what the agent is blocked on, and a command is not an answer to it.
+        if (relay::input::cardTakesRemoteLine({m_ask.open(), true, toShell})) {
+            m_remoteAuthor = prompt.author;
+            const bool answered = answerQuestion(prompt.text, prompt.author);
+            m_remoteAuthor.clear();
+            if (answered) return true;
+        }
+        if (toShell) {
             submitTerminal(prompt.text, false);
         } else {
-            m_remoteSubmit = true; submitAgent(prompt.text, false, prompt.origin); m_remoteSubmit = false;
+            // The name, not the id, and the author on the queue row: a routed prompt is as much
+            // somebody's as an unrouted one, and it used to arrive on the row with neither.
+            m_remoteAuthor = prompt.author;
+            m_remoteSubmit = true;
+            submitAgent(prompt.text, false, prompt.author.isEmpty() ? prompt.origin : prompt.author);
+            m_remoteSubmit = false;
+            m_remoteAuthor.clear();
         }
         return true;
     }
@@ -11236,6 +11387,12 @@ private:
         }
         // --- end subagents UI ---
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
+            // A question card is up: Esc skips that question rather than stopping the turn (owner,
+            // 2026-09-19). The turn is blocked on the person reading it, so the key under their
+            // hand should get them past the question, not end the work they are being asked about.
+            // There is no second Esc that stops either — on the last question Esc sends the answers
+            // and the turn carries on — and the card's footer says where Stop is instead.
+            if (skipQuestion()) return true;
             stopAgent();
             toast(QStringLiteral("Agent interrupted"));
             return true;
@@ -13792,10 +13949,14 @@ private:
     QString m_currentPreset;
     // model roles (protocol 13): this pane's role and the worker's last role table
     QString m_agentRole = QStringLiteral("main");
-    // The model this pane's current turn runs on because it carries an image, or empty (protocol 17).
-    QString m_visionModel;
-    // The model this pane's current plan-mode turn runs on (the planning role), or empty (protocol 13).
-    QString m_planModel;
+    // The models serving this pane's running turn instead of its own, innermost last, or empty
+    // when the turn is on the pane's own model (C5, owner 2026-09-19). Relay moves a turn off that
+    // model in three places — plan mode's `planning` role (protocol 13.11), an image turn's vision
+    // model (17.3), and a failover onto a provider that answers (15.2.2) — and they nest: an image
+    // inside a plan turn goes back to the *planning* model, not straight to the pane's. So it is
+    // one state fed by all three rather than a member each: every move pushes, every `*_ended`
+    // pops, and the end of the turn empties it however the turn ended.
+    QList<Serving> m_serving;
     QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog;
     QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;

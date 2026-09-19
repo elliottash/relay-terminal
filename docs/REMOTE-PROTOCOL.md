@@ -777,8 +777,14 @@ agent read.
 `question` and `question_closed` (the `ask_user` card, sessions protocol 27) are forwarded, but as
 of today no web client draws them and they are not in `GUEST_EVENTS`: an owner's phone and a share
 participant both see a question only as the card the desktop printed into the mirrored terminal.
-The owner can still answer from a paired device, because a remote line typed while a card is up is
-given to the card rather than the shell (`Pane::submitRemote`). There is no `question_answer` a
+The owner can still answer from a paired device: a remote line is routed first, exactly as a line
+typed at the desk is, and the card takes it when the router sends it to the agent
+(`relay::input::cardTakesRemoteLine`, `Pane::takeRemoteRoute`). A line the router sends to the
+**shell** runs in the shell — a card nobody has answered no longer locks a phone out of the
+terminal, which is what the old rule did by handing the card every line before routing it (owner,
+2026-09-19). A device that cannot ask the router at all — `route: false`, or a worker that is not
+up — can only reach the agent, so its line goes to the card as before, and a `when: "steer"` line
+is agent-bound by the sender's own choice and goes to the card too. There is no `question_answer` a
 guest may send; a guest's `compose` that the owner approves does reach the same path, which is the
 part of this still to be decided.
 

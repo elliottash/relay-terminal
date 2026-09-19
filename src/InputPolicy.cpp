@@ -111,6 +111,11 @@ QString Secret::take() {
 
 void Secret::wipe() { relay::input::wipe(m_text); }
 
+bool cardTakesRemoteLine(const RemoteLine &line) {
+    if (!line.cardOpen) return false;
+    return !(line.routerAsked && line.routedToShell);
+}
+
 bool commandMatchesPrompt(const QString &command, const QString &prompt) {
     if (command.trimmed().isEmpty() || prompt.trimmed().isEmpty()) return false;
     // A leading `cd <dir>` joined by && or ;, where <dir> may be quoted with spaces.

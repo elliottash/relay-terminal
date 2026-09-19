@@ -4002,7 +4002,7 @@ when the program poll sees the shell back at its prompt (`setGuest("")`) the cho
 rather than refused. Refusing is what ships, because an interrupt discards work the user cannot see
 from the picker.
 
-## 27. The agent asks the user a question (v3.3, 2026-09-19)
+## 27. The agent asks the user a question (v3.3, 2026-09-19; Esc and the remote line, v3.6)
 
 Plan mode could investigate and it could write a plan; between the two it could not reach the user,
 so a planner that was unsure guessed (card #MQ9C, owner: "aksing questions. the planner doesnt do
@@ -4021,7 +4021,8 @@ worker → (the tool returns; the turn goes on)
 ```
 
 `question_closed {id, reason}` is emitted instead when Stop or the end of the turn takes the card
-away before it was answered.
+away before it was answered. Stop is no longer Esc while a card is up (27.4): Esc skips the
+question in front of the user, and the turn's Stop is the `agent.stop` action.
 
 ### 27.2 `ask_user`
 
@@ -4073,8 +4074,15 @@ A card is drawn by the **desktop pane only**. `question` and `question_closed` a
 `FORWARDED_EVENTS` (docs/REMOTE-PROTOCOL.md section 6.4) but no web client draws them and they are
 not in `GUEST_EVENTS`, so a phone, a tablet or a share participant sees the question only as the
 text the desktop printed into the mirrored terminal, never as a card of its own. It can still be
-answered from there: a remote line typed while a card is up is given to the card rather than the
-shell (`Pane::submitRemote`), which is how an owner on their phone answers one.
+answered from there, by the desktop's own rule (owner, 2026-09-19): the line is **routed first**,
+and the card takes it only when the route is the agent (`relay::input::cardTakesRemoteLine`,
+decided in `Pane::takeRemoteRoute`). A line the router reads as a command runs in the shell, so an
+unanswered card no longer locks a paired device out of the terminal — `Pane::submitRemote` used to
+hand the card every line before anything was routed, which is the one thing the desktop has never
+done. A device that cannot ask the router (`route: false`, or the worker is not up) can only reach
+the agent, so its line is the card's, and so is a `when: "steer"` line, which its sender has already
+aimed at the agent. The answer is attributed to whoever typed it: the echo under the card reads
+`✦ <header>: <answer> · from <name>`.
 
 ### 27.4 What the user sees (GUI, card #4E13)
 
@@ -4095,11 +4103,24 @@ code does with what is typed, in order:
 | `1,3` | with `multiple`, picks both; without it, the first number is taken and the rest ignored |
 | anything else | their own words, which is the answer — for an open question this is the only case |
 | nothing | Enter on an empty box does nothing; the card stays |
+| `Esc` | skips this question, exactly as `0` does, and the next one goes up; whatever is in the box is left there (owner, 2026-09-19) |
 
 **Enter** submits whatever is in the box. **Ctrl+Shift+Enter** still runs it as a shell command, so
-a question from the agent never takes the terminal away. **Esc stops the turn**, as it does at any
-other point in a turn — it is not "skip this question", and the card goes away with the turn
-(`question_closed`). Questions from one call are asked one at a time; answering the last one sends
+a question from the agent never takes the terminal away. **Esc skips the question** (owner,
+2026-09-19): it records the same "unanswered" `0` does and puts the next question up, and on the
+last one it sends the answers back and the turn goes on. It used to stop the whole turn, which made
+the key nearest the reader's hand the most destructive thing on the card — a person who does not
+want to answer wants to move past the question, not end the work they are being asked about.
+
+**Stop, while a card is up, is the `agent.stop` action** — Actions › Stop agent, or the shortcut the
+user bound to it, since Relay ships `agent.stop` unbound and Esc was the only key that reached it.
+The card's last footer line says which of the two applies, read live from the Keymap, and so does
+the "Relaying waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
+can no longer promise. There is deliberately no second Esc that stops: on the last question a second
+Esc is an ordinary Esc in an idle pane. Stop still takes the card away with the turn
+(`question_closed`).
+
+Questions from one call are asked one at a time; answering the last one sends
 them all back together. There are no number keys to press without the box, no `t` for "type your
 own" and no key that dismisses the card: those would each be a mode, and the box is already there.
 

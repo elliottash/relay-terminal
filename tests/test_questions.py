@@ -334,7 +334,7 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn("if (!ok || index > labels.size()) return {Reading::NoSuchOption, {}, part};",
                       reading)
         self.assertIn("if (ok && index == 0) return {Reading::Skip, {}, {}};", reading)
-        answer = self.block("bool answerQuestion(const QString &text) {", "void sendAnswers()")
+        answer = self.block("bool answerQuestion(", "void sendAnswers()")
         branch = answer.split("Reading::NoSuchOption) {", 1)[1].split("return true;", 1)[0]
         self.assertIn("There is no option", branch)      # named, in the card's own ink
         self.assertIn("printQuestion();", branch)        # the card goes up again
@@ -352,6 +352,59 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn('{"type", "question_answer"}', superseded)   # the old turn is released
         self.assertIn("QJsonArray()", superseded)                  # with nothing answered
         self.assertIn("superseded != incoming", superseded)        # a redraw of the same id is not
+
+    def test_esc_skips_the_question_rather_than_stopping_the_turn(self):
+        # Owner, 2026-09-19: while a card is up Esc is "skip this one". It used to stop the turn,
+        # which made the key nearest the reader's hand end the work they were being asked about.
+        key = self.block("if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {",
+                         'toast(QStringLiteral("Agent interrupted"));')
+        self.assertIn("if (skipQuestion()) return true;", key)   # the card first; the turn only after
+        self.assertIn("stopAgent();", key)                       # ... and with no card, Esc still stops
+        skip = self.block("bool skipQuestion() {", "void recordAnswer(")
+        self.assertIn("if (!m_ask.open()) return false;", skip)
+        # The same thing typing `0` does: an empty answer recorded through the one shared path.
+        self.assertIn("recordAnswer(questionAt(m_ask.current), QStringList());", skip)
+        record = self.block("void recordAnswer(", "public:")
+        self.assertIn("m_ask.answers[m_ask.current] = answer;", record)
+        self.assertIn("++m_ask.current;", record)
+        self.assertIn("sendAnswers();", record)                  # the last question sends them all
+
+    def test_the_card_says_esc_skips_and_where_the_turns_stop_went(self):
+        # Relay ships `agent.stop` unbound, so Esc was the only keyboard Stop: a card that takes it
+        # over has to say where Stop is instead, in the user's own keys.
+        card = self.block("void printQuestion() {", "// The turn's Stop, named the way")
+        self.assertIn("0 or Esc skips", card)
+        self.assertIn("/skip or Esc passes", card)               # an open question has no numbers
+        self.assertIn("stopTurnHint()", card)
+        hint = self.block("static QString stopTurnHint() {", "\n    }")
+        self.assertIn('Keymap::instance().shortcutText(QStringLiteral("agent.stop"))', hint)
+        self.assertIn("Stop agent stops the turn", hint)         # nothing bound: name the action
+        self.assertIn('QStringLiteral("%1 stops the turn").arg(stop)', hint)
+        # And the busy caption stops promising a Stop that Esc no longer does.
+        clock = self.block("void tickTurnClock() {", "// The \"Relaying…\" line when no turn")
+        self.assertIn('asked ? QStringLiteral("Esc skips it")', clock)
+        self.assertIn("Esc skips this question. %2.", clock)
+
+    def test_a_line_from_a_paired_device_is_routed_before_the_card_sees_it(self):
+        # Owner, 2026-09-19: a phone's line used to be taken as the answer before anything was
+        # routed, so an unanswered card left the shell unreachable from that phone. The rule itself
+        # is `relay::input::cardTakesRemoteLine` (tests/inputpolicy_test.cpp); this is the wiring.
+        submit = self.block("void submitRemote(const QString &text, bool route, const QString &origin,",
+                            "// The router's verdict for a remote prompt")
+        self.assertIn("relay::input::cardTakesRemoteLine({m_ask.open(), false, false})", submit)
+        # ... and only for the two doors that are agent-bound with no router in them.
+        self.assertIn("(steering || !route || !m_workerReady)", submit)
+        route = self.block("bool takeRemoteRoute(const QString &id, const QJsonObject &event) {",
+                           "void submitTerminal(")
+        self.assertIn("relay::input::cardTakesRemoteLine({m_ask.open(), true, toShell})", route)
+        self.assertIn("submitTerminal(prompt.text, false);", route)   # a command still runs
+        # Whoever typed it keeps their name on it: on the card's echo and on the queue row.
+        self.assertIn("answerQuestion(prompt.text, prompt.author)", route)
+        self.assertIn("m_remoteAuthor = prompt.author;", route)
+        answer = self.block("bool answerQuestion(", "bool skipQuestion()")
+        self.assertIn("recordAnswer(question, answer, author);", answer)
+        self.assertIn("QStringLiteral(\" · from %1\").arg(author.trimmed())",
+                      self.block("void recordAnswer(", "public:"))
 
     def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
         # An empty id or no questions used to `return` and leave the worker blocked for good.

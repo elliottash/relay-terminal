@@ -305,6 +305,23 @@ private Q_SLOTS:
         QCOMPARE(handoffRefusalCode(HandoffAction::RefuseBusy), QStringLiteral("busy"));
         QCOMPARE(handoffRefusalCode(HandoffAction::RefuseChain), QStringLiteral("chain"));
     }
+    // A line from a paired phone while a question card is up (sessions protocol 27.4, #MQ9C).
+    void aRemoteLineReachesTheShellEvenWithAQuestionOpen() {
+        auto takes = [](bool cardOpen, bool routerAsked, bool routedToShell) {
+            return cardTakesRemoteLine({cardOpen, routerAsked, routedToShell});
+        };
+        // No card: nothing to take the line.
+        QVERIFY(!takes(false, true, false));
+        QVERIFY(!takes(false, false, false));
+        // The router sent it to the shell: it is a command, and a card does not take the terminal
+        // away from a phone any more than it does from the desk.
+        QVERIFY(!takes(true, true, true));
+        // Routed to the agent: the card is what the agent is waiting on, so the card answers.
+        QVERIFY(takes(true, true, false));
+        // No router in the decision at all — a view-or-agent device, or a worker that is not up:
+        // the line can only reach the agent, so the card takes it.
+        QVERIFY(takes(true, false, false));
+    }
     void handoffReportIsLabelledData() {
         using namespace relay::input;
         const QString report = handoffReport(QStringLiteral("ssh -t filly true"), 255,

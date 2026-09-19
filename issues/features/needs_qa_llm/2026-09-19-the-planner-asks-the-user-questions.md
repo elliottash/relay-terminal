@@ -88,7 +88,9 @@ choice or multi-select, a recommendation, an explanation under each option, keyb
   never to a subagent (it cannot see the pane, #C1HH's rule).
 - **`options` is optional** (owner, same day: "dont force multiple choice -- allow open-ended
   questions"). With options a number is the whole answer; without them the question is open and the
-  prompt box takes the words. `/skip` passes on either.
+  prompt box takes the words. `/skip` passes on either, and so does **Esc** (owner, 2026-09-19):
+  while a card is up Esc skips that question instead of stopping the turn, and the turn's Stop is
+  the `agent.stop` action, which the card's footer and the busy caption name.
 - A blocking round trip on the pattern of `type_into_program` (`program_input.py`): the worker emits
   `question`, the pane draws it, the pane answers `question_answer`, the turn thread wakes. Unlike
   that one it has no reply deadline — the user may be away — only Stop and a new prompt end it.
@@ -107,6 +109,7 @@ choice or multi-select, a recommendation, an explanation under each option, keyb
 - [x] `question` / `question_closed` classified as forwarded in `remote/wire.py`, and a line from a <!-- t:7p -->
       paired phone answers the card
 - [x] a shortcut hint on the slow path: typing an option out in full → "Next time: just type 2" <!-- t:h2 -->
+- [x] Esc skips the question rather than stopping the turn; the card's footer and the busy caption say where Stop went (owner, 2026-09-19) <!-- t:e5 -->
 - [x] tests: `tests/test_questions.py` (19), `tests/panestatus_test.cpp`, `tests/test_tool_labels.py` <!-- t:jy -->
 - [x] implementer evidence: `docs/qa_evidence/2026-09-19-the-planner-asks-questions/` <!-- t:dm -->
 

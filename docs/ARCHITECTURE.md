@@ -738,7 +738,7 @@ Pasting never submits.
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
 | Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
 | Shift+Enter | newline |
-| Esc | stop the agent turn, or interrupt the running program; Esc Esc in an empty box opens Rewind. It never takes control of the terminal (Ctrl+H or the "Take control" button do) |
+| Esc | skip the question on a card that is up (sessions protocol 27.4), else stop the agent turn, or interrupt the running program; Esc Esc in an empty box opens Rewind. It never takes control of the terminal (Ctrl+H or the "Take control" button do) |
 | PageUp / PageDown | scroll the terminal scrollback one page |
 
 Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
