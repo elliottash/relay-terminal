@@ -12,7 +12,7 @@ rank: zzzzzzzl
 created: '2026-09-19'
 acceptance: the pane chip, the tab suffix, the Sessions row's tag and the tooltips' first line all print the one string `cpu 12% · mem 3%` in plain words and the body face; no glyph is drawn anywhere in the meter; the halves, the narrow rung, the warning inks, the tooltip breakdown and the "usage meters" setting behave exactly as before
 source: 'issues/bug_intake.txt, 2026-09-19'
-links: {commits: [], evidence: [docs/qa_evidence/2026-09-19-usage-meter-words/], github: null, plans: [], related: [D03W, 0STR]}
+links: {commits: [82ea0b4, cc683aa], evidence: [docs/qa_evidence/2026-09-19-usage-meter-words/], github: null, plans: [], related: [D03W, 0STR]}
 ---
 # The usage meter says "cpu" and "mem" in words, in one string everywhere
 
@@ -93,7 +93,7 @@ numbers on the label, which name themselves now.
 
 ## QA checklist
 
-- [ ] `./build/relay-paneusage-tests` passes (21 cases) and `ctest --test-dir build` passes
+- [ ] `./build/relay-paneusage-tests` passes (21 cases) and `ctest --test-dir build` passes — 61 of 63 here, the two failures being other sessions' uncommitted `src/Theme.cpp` and `backend/relay_core/subagents.py` in the shared tree, neither on `main` (the evidence README names them)
 - [ ] A busy pane shows `cpu X% · mem Y%` in its header right of the state word — words, no glyphs, the header's muted ink
 - [ ] The tab label ends `  ·  cpu X% · mem Y%`, the same string as the chip
 - [ ] The Sessions pane's row still shows `cpu X% · mem Y%` beside "open" — the third surface, unchanged

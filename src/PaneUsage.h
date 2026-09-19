@@ -220,7 +220,7 @@ QString describe(const Sample &sample);
 inline constexpr int kTopProcesses = 5;
 
 // Sorts rows by CPU, then memory, then pid (so equal rows keep a stable order), drops the ones
-// whose percentages both round to 0 — a line reading "0% cpu · 0% mem" names nothing — and keeps
+// whose percentages both round to 0 — a line reading "cpu 0% · mem 0%" names nothing — and keeps
 // the first `limit`.
 QList<ProcessUsage> topProcesses(QList<ProcessUsage> rows, int limit = kTopProcesses);
 
