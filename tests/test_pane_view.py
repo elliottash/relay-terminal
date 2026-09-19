@@ -61,9 +61,9 @@ class PaneViewTests(unittest.TestCase):
 
     async def open(self, browser: Browser, name: str, *, query: str = "") -> None:
         await browser.navigate(f"{self.origin}/app/pane-demo.html?fixture={name}&bare=1{query}")
-        await browser.wait_for("document.body.dataset.demoReady === '1'"
+        await browser.wait_for("document.body && document.body.dataset.demoReady === '1'"
                                " && !!document.querySelector('.relay-pane')")
-        await browser.wait_for(f"document.body.dataset.demoSeq === '{fixture(name)['seq']}'")
+        await browser.wait_for(f"document.body && document.body.dataset.demoSeq === '{fixture(name)['seq']}'")
 
     async def sent(self, browser: Browser) -> list:
         return await browser.evaluate("JSON.stringify(window.paneDemo.sent)") and json.loads(

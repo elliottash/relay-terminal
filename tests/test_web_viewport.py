@@ -130,7 +130,7 @@ class ViewportTests(unittest.TestCase):
             try:
                 await self.window(browser, IPAD_LANDSCAPE[0], KEYBOARD_GAP)
                 await browser.navigate(f"{self.origin}/app/pane-demo.html?fixture=busy_queue&bare=1")
-                await browser.wait_for("document.body.dataset.demoReady === '1'"
+                await browser.wait_for("document.body && document.body.dataset.demoReady === '1'"
                                        " && !!document.querySelector('.relay-pane textarea')")
                 await browser.evaluate(frames(), timeout=10)
                 # The whole composer — the box and the strip under it, where the send button is —
