@@ -3,7 +3,7 @@
 These are **implementer** screenshots, not a QA verdict. Reproduce with
 
 ```
-docs/qa_evidence/2026-09-19-the-planner-asks-questions/drive.sh [build-dir]
+docs/qa_evidence/2026-09-19-the-planner-asks-questions/drive.sh [build-dir] [theme-id]
 ```
 
 which runs the app under Xvfb in a sandbox (its own `HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`
@@ -18,10 +18,20 @@ and `TMPDIR`) against `stub-provider.py` on loopback — a planner that answers 
 | `implementer-open.png` | The third question has **no options at all**: no numbered list, no `0`, the footer reads "Type your answer · /skip to pass" and the prompt box says "Wording · type your answer, or /skip". |
 | `implementer-answered.png` | All three answered, the last in the user's own sentence. The turn resumed, `write_plan` quoted both answers back into the plan (`## What you told me`), the plan pane opened with Execute / Execute in fresh context / Keep planning, and the folded line reads `asked you about Scope, Checks · 17 s`. |
 
+The `-beige.png` set is the same run on IBM Beige, and it is the one that proves the card follows
+the theme. Inline output is frozen at the colour it was written in — an emulator cannot recolour
+its scrollback — so the card is written with the **indexed** palette (bold yellow) rather than
+24-bit RGB, exactly as `MarkdownAnsi`'s **Need:** bold is. Each theme ships its own sixteen
+(`[terminal] palette`), so the same escape renders `#ecc476` on Relay Dark and the ochre `#7a5400`
+on the beige page. Had it been written in RGB, a card opened under a dark theme would still be
+wearing that theme's pale amber after a switch to beige, at about 1.6:1 on the cream screen — and
+a question is the one piece of inline output that is still actionable later.
+
 ## What a QA session should check
 
 - [ ] A question card appears in plan mode and the turn does not continue until it is answered.
-- [ ] The card is amber in every shipped theme, and legible on the light ones.
+- [ ] The card is amber in every shipped theme, and legible on the light ones — including a card
+      opened *before* the theme was switched, which is the case the indexed palette exists for.
 - [ ] The pane's status glyph and its tab go to "needs you" while the card is up, and back after.
 - [ ] A number answers; several numbers answer a `multiple` question; `0` skips; anything else is
       sent as the user's own words.

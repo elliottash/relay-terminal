@@ -8432,6 +8432,15 @@ private:
     }
 
     static QByteArray inkCode(Ink ink) {
+        // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
+        // Everything printed into the terminal is frozen at the colour it was written in — the
+        // emulator cannot recolour its scrollback — and a question card is the one piece of inline
+        // output that is still actionable after a theme switch. Indexed bold yellow is what each
+        // theme's own palette renders (`[terminal] palette[3]`: #ecc476 on Relay Dark, the ochre
+        // #7a5400 on IBM Beige), so the card follows the theme instead of keeping a dark theme's
+        // amber on a light ground. It is the colour MarkdownAnsi's **Need:** bold already uses
+        // for the same reason (src/MarkdownAnsi.h, card #4E13).
+        if (ink == Ink::Ask) return QByteArray("\x1b[1;33m");
         const QColor c = inkColor(ink);
         // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
         // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
@@ -8511,7 +8520,9 @@ private:
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format;
         format.setForeground(inkColor(ink));
-        if (ink == Ink::User) format.setFontWeight(QFont::Bold);
+        // The same bold the terminal gives these two: a line the user sent, and a question waiting
+        // on them (#MQ9C). Here the token itself is used — a widget repaints on a theme switch.
+        if (ink == Ink::User || ink == Ink::Ask) format.setFontWeight(QFont::Bold);
         cursor.insertText(clean, format);
         m_transcriptView->verticalScrollBar()->setValue(m_transcriptView->verticalScrollBar()->maximum());
         if (!m_transcriptDismissed && !m_transcript->isVisible()) m_transcript->show();

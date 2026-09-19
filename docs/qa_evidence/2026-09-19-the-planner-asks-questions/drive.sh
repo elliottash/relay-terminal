@@ -4,7 +4,7 @@
 # points a local model endpoint at stub-provider.py on 127.0.0.1, whose planner answers the first
 # call with `ask_user` and only writes its plan once the pane has answered.
 #
-#   docs/qa_evidence/2026-09-19-the-planner-asks-questions/drive.sh [build-dir]
+#   docs/qa_evidence/2026-09-19-the-planner-asks-questions/drive.sh [build-dir] [theme-id]
 #
 # Shots:
 #   implementer-card.png        the amber card for question 1, in plan mode, the turn blocked on it
@@ -12,6 +12,10 @@
 #   implementer-second.png      question 2 after "1" answered the first: the multi-select one
 #   implementer-open.png        question 3: no options at all, the prompt box takes the words
 #   implementer-answered.png    all three answered, the plan written from them
+#
+# Pass a theme id for the second set: `drive.sh <build> ibm-beige` writes implementer-*-beige.png,
+# which is what shows that the card's amber is the *theme's* (it is written with the indexed
+# palette, not 24-bit RGB, so it follows a theme switch).
 #
 # Isolation is off in the sandbox: the worker is normally launched under `systemd-run --user`, and
 # XDG_RUNTIME_DIR points at the sandbox here, so there is no user bus to place the scope on and the
@@ -23,6 +27,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 out=$PWD
 root=$(cd ../../.. && pwd)
 build=${1:-$root/build}
+theme=${2:-relay-dark}
+suffix=""; [[ $theme != relay-dark ]] && suffix="-${theme#*-}"
 width=1280 height=860
 port=${RELAY_QA_PORT:-8799}
 
@@ -64,7 +70,7 @@ cat >"$XDG_CONFIG_HOME/RelayTerminal/relay.conf" <<CONF
 [instructions]
 onboarded=true
 [theme]
-name=relay-dark
+name=$theme
 [provider]
 preset=local:stub
 [isolation]
@@ -86,8 +92,8 @@ xdotool windowmove "$win" 0 0 windowsize "$win" $width $height windowfocus "$win
 
 shot() {   # shot <name> [crop]
     xdotool mousemove $((width + 20)) $((height + 20)); sleep 0.8
-    import -window "$win" "$out/implementer-$1.png"
-    [[ -n ${2:-} ]] && convert "$out/implementer-$1.png" -crop "$2" +repage -scale 200% "$out/implementer-$1.png"
+    import -window "$win" "$out/implementer-$1$suffix.png"
+    [[ -n ${2:-} ]] && convert "$out/implementer-$1$suffix.png" -crop "$2" +repage -scale 200% "$out/implementer-$1$suffix.png"
     return 0
 }
 
