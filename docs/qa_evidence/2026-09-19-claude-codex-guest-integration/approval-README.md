@@ -45,12 +45,38 @@ Fixed by reading the paths from the item the adapter is already following for th
 Codex run's card reads **"edit …/approval-probe.txt (command failed; retry without sandbox?)"**:
 what, and why, in that order. Covered by `ApprovalDetail` in `tests/test_guest_harness_codex.py`.
 
-## What this does not cover
+## All four choices, both guests (2026-09-19)
 
-- The pane drawing the card. The approval is unreachable from the GUI today, because the picker
-  always sends `permissions: "bypass"`; if a permissions control is ever added, the card's four
-  options want an eye on them in a real pane.
-- `Allow for session`, `Deny` and `Deny and stop` against a live guest. Their wire words are
-  covered by unit tests against the recorded protocol; only `Allow` was spent here, at one turn
-  per guest.
-- `permissions: "deny"`, which refuses for the user and is unit-tested only.
+The first pass covered only `Allow`. The rest were run afterwards, one turn each:
+
+| choice | claude | codex | what was checked |
+|---|---|---|---|
+| Allow | pass | pass | the file is written, the turn ends normally |
+| Allow for session | pass | pass | the word is accepted and the work completes (see below) |
+| Deny | pass | pass | nothing is written, and the guest carries on and says so — claude: "The write was declined, so I did not create the file"; codex: "Couldn't create `approval-probe.txt` because the file-write request was denied" |
+| Deny and stop | pass | pass | nothing is written, `stop_reason=interrupted`, and it does not ask again |
+
+**"Allow for session" cannot be proved by a driver, and the run is honest about it.** Codex's own
+schema defines `acceptForSession` as "future changes to **the same files** should run without
+prompting" for a file change, and "future prompts in the same session-scoped approval cache" for a
+command; claude's session rule is written as narrowly as the thing that was asked about. Whether a
+later call is skipped is therefore the guest's judgement of sameness, and the guest picks its own
+tools. Four runs of that one choice bore this out: it edited a different file, then reached for a
+shell command, then honoured the scope and asked once, then skipped its own second step. The check
+is what the harness guarantees — the decision is accepted, the turn completes — and the ask count
+and the file's final contents are logged as observations.
+
+## Reachable from Options
+
+Until this run the path could not be reached from the interface at all: the picker always sent
+`permissions: "bypass"`. Options › Claude Code and Codex now has a third row per guest, **"When it
+wants to use a tool"** — *Just run it* (the default, and the owner's rule), *Ask me*, *Refuse it* —
+stored as `guests/<guest>/permissions` and read by the same code that carries the model and the
+effort. It reaches the picker's route, where Relay is the guest's editor and can draw the question.
+A guest running as a program in the terminal asks there, in its own words, and the row says so.
+
+## What this still does not cover
+
+- The pane drawing the card. The four options are a section 27 card like any other, and the shapes
+  are unit-tested, but no screenshot of one has been taken in a real pane.
+- `permissions: "deny"`, which refuses for the user without asking. Unit-tested only.

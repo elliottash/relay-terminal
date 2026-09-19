@@ -4684,9 +4684,17 @@ only what Relay already has a surface for). And claude's `tool_progress`, which 
 seconds and no output, is ignored rather than rendered: the pane's own turn clock already names the
 running step and counts the seconds.
 
-**An approval can be scoped.** `answer()` takes `once` (the default), `session`, or `stop` for a
-deny that ends the turn as well, so the card the pane draws under `permissions: "ask"` offers four
-choices rather than two. Codex has all three on the wire; Claude Code has them too — an allow may
+**An approval can be scoped, and is reachable.** `answer()` takes `once` (the default), `session`,
+or `stop` for a deny that ends the turn as well, so the card the pane draws under
+`permissions: "ask"` offers four choices rather than two. Which posture a guest starts in is
+Options › Claude Code and Codex's third row per guest ("When it wants to use a tool": just run it,
+ask me, refuse it), stored as `guests/<guest>/permissions` and carried in the `guest` block beside
+the model and the effort; `bypass` is the default and the owner's rule. It is the harness route's
+setting only — a guest running as a program in the terminal asks there, in its own words, and the
+launch's bypass flags are all-or-nothing. **`session` is the guest's own judgement of sameness**:
+codex caches "the same files" for a file change and "the same session-scoped approval" for a
+command, and claude writes a rule as narrow as what was asked about, so a later call the guest
+judges different is asked again and that is correct. Codex has all three on the wire; Claude Code has them too — an allow may
 carry a session rule and a deny may carry `interrupt: true` — and the rule Relay writes is kept as
 narrow as the thing that was asked about, never a blanket "Bash is allowed now". A scope the table
 does not recognise, and a card the user stops, is a plain deny.

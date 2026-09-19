@@ -10177,11 +10177,17 @@ private:
         if (guest.isEmpty()) return QJsonObject();
         if (!staged.contains(QStringLiteral("permissions")))
             staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
-        // Options › Claude Code and Codex: the model and the reasoning effort this guest starts
-        // with, unless the pick named its own (`/model claude opus`).
-        for (const QString &key : {QStringLiteral("model"), QStringLiteral("effort")})
+        // Options › Claude Code and Codex: the model, the reasoning effort and the permission
+        // posture this guest starts with, unless the pick named its own (`/model claude opus`).
+        for (const QString &key : {QStringLiteral("model"), QStringLiteral("effort"),
+                                   QStringLiteral("permissions")})
             if (!staged.contains(key))
                 if (const QString value = guestSetting(guest, key); !value.isEmpty()) staged.insert(key, value);
+        // The owner's rule is the default (29.1): a guest moves around the file system like
+        // Relay's own agent. `permissions` is only ever in the request when the user chose
+        // otherwise, and `bypass` above is what the worker assumes when it is absent.
+        if (staged.value(QStringLiteral("permissions")).toString() == QStringLiteral("bypass"))
+            staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
         return staged;
     }
 
@@ -10311,6 +10317,9 @@ public:
                               QStringLiteral("--port"), QString::number(port), QStringLiteral("--python"), m_python};
         // The same defaults as the harness route (Options › Claude Code and Codex), as the CLI's
         // own flags on the launch line; `guest_launch` leaves them out when `extra` names its own.
+        // Not the permission posture: a TUI guest asks in its own terminal, where the user answers
+        // it directly, so the launch's bypass flags are the owner's rule and nothing narrows them
+        // (29.3 — the setting is the harness route's, and the row says so).
         if (const QString model = guestSetting(guest, QStringLiteral("model")); !model.isEmpty())
             arguments << QStringLiteral("--model") << model;
         if (const QString effort = guestSetting(guest, QStringLiteral("effort")); !effort.isEmpty())

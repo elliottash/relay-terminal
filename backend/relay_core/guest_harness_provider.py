@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The worker side of Tier A: a guest harness standing in for the chat provider (protocol 29.3).
 
 `guest_harness.py` is the contract and `guest_harness_claude` / `guest_harness_codex` are the two
@@ -755,7 +755,7 @@ class _Turn:
 # answer this table does not know is a plain deny, which is what an unanswered approval is too.
 APPROVAL_CHOICES = (
     ("Allow", "Let it go ahead, this once.", {"behavior": "allow", "scope": "once"}),
-    ("Allow for session", "And anything like it, until this guest session ends.",
+    ("Allow for session", "And the same again, until this guest session ends.",
      {"behavior": "allow", "scope": "session"}),
     ("Deny", "Refuse this one and let it carry on.", {"behavior": "deny", "scope": "once"}),
     ("Deny and stop", "Refuse it and end the turn here.", {"behavior": "deny", "scope": "stop"}),

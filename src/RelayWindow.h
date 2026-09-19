@@ -1694,6 +1694,29 @@ private:
                 [store, effortKey, useDefault](const QString &value) { store(effortKey, value, useDefault); });
             row.aliases = QStringLiteral("claude codex guest reasoning effort thinking low medium high max");
             section.rows << row;
+            {
+                // What the guest does when it wants to run a command or change a file. Relay's own
+                // agent has no per-action approvals and neither does a guest by default (the
+                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's
+                // checkout is a fair reason to want the question, so it is offered rather than
+                // assumed. It applies to the picker's route, where Relay is the guest's editor and
+                // can draw the question; a guest running as a program in the terminal asks there,
+                // in its own words, and this row does not reach it.
+                const QString key = guestSettingKey(guest, QStringLiteral("permissions"));
+                const QString current = QSettings().value(key).toString().trimmed();
+                relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
+                    QStringLiteral("When it wants to use a tool"),
+                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
+                                   "Ask me puts each one to you as a card: Allow, Allow for session, "
+                                   "Deny, or Deny and stop the turn").arg(name),
+                    {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
+                    {QStringLiteral("Just run it"), QStringLiteral("Ask me"),
+                     QStringLiteral("Refuse it")},
+                    current.isEmpty() ? QStringLiteral("bypass") : current, QStringLiteral("bypass"),
+                    [store, key](const QString &value) { store(key, value, QStringLiteral("bypass")); });
+                ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
+                section.rows << ask;
+            }
         }
         return section;
     }

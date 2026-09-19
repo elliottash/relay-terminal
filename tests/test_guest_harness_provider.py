@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The worker side of Tier A (docs/AGENT-SESSIONS-PROTOCOL.md section 29.3).
 
 A guest is a preset, `HarnessProvider` stands in for the chat provider, and one harness turn is one
