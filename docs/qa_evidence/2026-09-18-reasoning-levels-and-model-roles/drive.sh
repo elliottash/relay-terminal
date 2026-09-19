@@ -145,10 +145,24 @@ effort_scene() {
     stop
 }
 
+# A control by its position inside the roles dialog. There is no window manager under Xvfb, so the
+# dialog's own geometry is its position on the screen and the two add up exactly.
+click_in_roles() {   # click_in_roles <x> <y>
+    eval "$(xdotool getwindowgeometry --shell "$roles_win")"
+    xdotool mousemove $((X + $1)) $((Y + $2)) click 1
+}
+
 roles_scene() {
     start glm-coding roles
     open_roles
     shot d-roles-modal "$roles_win"
+    # The Main row's effort list: the same three levels the Options page offers (scene b).
+    click_in_roles 780 144; sleep 1.5
+    shot e-roles-effort-list
+    k Escape; sleep 1
+    # Advanced: one row per job, each able to name its own provider.
+    click_in_roles 90 470; sleep 2
+    shot f-roles-advanced "$roles_win"
     stop
 }
 

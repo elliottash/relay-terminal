@@ -4035,8 +4035,22 @@ public:
             m_rolesDialog->openKeys = [this] { openKeysDialog(); };
             m_rolesDialog->onProviderChosen = [this](const QString &id) { selectModel(id); };
             m_rolesDialog->onRolesChanged = [this] { rolesChanged(); };
-            m_rolesDialog->onMainModelChosen = [this](const QString &model) { setMainModel(model); };
-            m_rolesDialog->onMainEffortChosen = [this](const QString &level) { setEffort(level); };
+            // Both duplicate a faster path, so both teach it (WARP.md's standing rule): the Main
+            // row's Model… is /model or the model chip, and its effort is Alt+. / Alt+, — the same
+            // hint the effort box in the prompt strip shows, under the same id, so the two of them
+            // share one show limit rather than teaching the same key twice.
+            m_rolesDialog->onMainModelChosen = [this](const QString &model) {
+                setMainModel(model);
+                hint(QStringLiteral("model.roles"),
+                     relay::ShortcutHints::nextTime(QStringLiteral("/model"), QStringLiteral("switch this pane's model")));
+            };
+            m_rolesDialog->onMainEffortChosen = [this](const QString &level) {
+                setEffort(level);
+                hint(QStringLiteral("effort.mouse"),
+                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.effortUp"))
+                         + QStringLiteral(" / ") + Keymap::instance().shortcutText(QStringLiteral("agent.effortDown")),
+                         QStringLiteral("raise / lower effort")));
+            };
         }
         m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
         m_rolesDialog->setProvider(m_currentPreset);
