@@ -8,6 +8,7 @@ file touches `~/.claude`, `~/.codex` or the real index.
 """
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -451,6 +452,31 @@ class Slugs(unittest.TestCase):
         self.assertEqual("/home/elliott", guest_sessions.claude_workspace_from_slug("-home-elliott"))
         self.assertEqual("", guest_sessions.claude_workspace_from_slug(""))
 
+    def test_decoding_asks_the_filesystem_where_the_separators_were(self):
+        """The encoding is lossy — a dash, an underscore and a space all become a dash — so the
+        naive split turned `/home/u/repos/relay-terminal` into `/home/u/repos/relay/terminal`.
+        That is not cosmetic: it becomes the row's workspace (scoping it to a project that does
+        not exist) and its `resume_cwd` (so `claude -r <id>` reports an unknown session)."""
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "home" / "u" / "repos" / "relay-terminal").mkdir(parents=True)
+        (root / "home" / "u" / "Dropbox" / "_Ash_Admin").mkdir(parents=True)
+        for cwd in ("/home/u/repos/relay-terminal", "/home/u/Dropbox/_Ash_Admin", "/home/u"):
+            with self.subTest(cwd=cwd):
+                slug = guest_sessions.claude_slug(cwd)
+                self.assertEqual(str(root) + cwd,
+                                 guest_sessions.claude_workspace_from_slug(slug, root=str(root)))
+
+    def test_decoding_falls_back_when_the_directory_is_gone_or_ambiguous(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        self.assertEqual("/gone/away",
+                         guest_sessions.claude_workspace_from_slug("-gone-away", root=str(root)))
+        # Two real names claude spells the same way: there is no answer, so the naive one stands.
+        (root / "a-b").mkdir()
+        (root / "a_b").mkdir()
+        self.assertEqual("/a/b", guest_sessions.claude_workspace_from_slug("-a-b", root=str(root)))
+
 
 # ----- scanning a home ----------------------------------------------------------------------------
 
@@ -604,6 +630,66 @@ class IndexIntegration(unittest.TestCase):
         self.assertIn(named, [record["id"] for record in guest_sessions.list_sessions(self.index)])
         again = guest_sessions.reconcile(self.index, str(self.home))
         self.assertEqual((0, 0, 0), (again["added"], again["refreshed"], again["removed"]))
+
+    def test_a_source_whose_directory_is_gone_prunes_nothing(self):
+        """`$HOME` can be wrong, a network home can be late, a guest can be uninstalled with its
+        history intact. Reading "no files" as "every session was deleted" emptied the pane and
+        took the pins and the custom titles with it — and a guest row has no file beside it to
+        restore either from."""
+        guest_sessions.reconcile(self.index, str(self.home))
+        shutil.rmtree(self.home / ".claude")
+        result = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(0, result["removed"])
+        self.assertIn(CLAUDE_ID, [record["id"] for record in guest_sessions.list_sessions(self.index)])
+        # A directory that is there and empty is a different statement, and it does prune.
+        (self.home / ".claude" / "projects").mkdir(parents=True)
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["removed"])
+
+    def test_a_transcript_that_cannot_be_read_keeps_its_row(self):
+        """A transient permission or IO failure is not a deleted session."""
+        guest_sessions.reconcile(self.index, str(self.home))
+        before = self.claude.stat().st_mode
+        os.utime(self.claude, (3000, 3000))          # changed, so it is not skipped as unchanged
+        self.claude.chmod(0o000)
+        self.addCleanup(self.claude.chmod, before)
+        if os.access(self.claude, os.R_OK):
+            self.skipTest("running as root: an unreadable file cannot be made")
+        result = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(0, result["removed"])
+        self.assertIn(CLAUDE_ID, [record["id"] for record in guest_sessions.list_sessions(self.index)])
+
+    def test_a_limit_of_zero_reads_nothing_and_prunes_nothing(self):
+        """`[:limit or None]` read *everything* at zero and dropped the oldest file at -1."""
+        guest_sessions.reconcile(self.index, str(self.home))
+        os.utime(self.claude, (4000, 4000))
+        for limit in (0, -1):
+            with self.subTest(limit=limit):
+                result = guest_sessions.reconcile(self.index, str(self.home), limit=limit)
+                self.assertEqual((0, 0, 0), (result["added"], result["refreshed"], result["removed"]))
+        self.assertEqual(2, len(guest_sessions.list_sessions(self.index)))
+
+    def test_only_the_named_source_is_pruned(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.rollout.unlink()
+        self.assertEqual(0, guest_sessions.reconcile(self.index, str(self.home),
+                                                     sources=("claude",))["removed"])
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home),
+                                                     sources=("codex",))["removed"])
+
+    def test_what_a_guest_row_puts_in_relays_index(self):
+        """The privacy surface, pinned: indexing a guest session copies its prompts and replies
+        into Relay's own database (`entries`, and the FTS index built off it), which is what makes
+        the sessions pane searchable. Nothing else of the transcript is kept — no file path, no
+        model, no tool output — and nothing is ever written back to the guest's files."""
+        guest_sessions.reconcile(self.index, str(self.home))
+        rows = self.index._run(lambda db: [dict(row) for row in db.execute(
+            "SELECT kind, text FROM entries WHERE session_id = ? ORDER BY seq", (CLAUDE_ID,))])
+        self.assertEqual(["title", "prompt", "reply", "tool_call"], [row["kind"] for row in rows])
+        by_kind = {row["kind"]: row["text"] for row in rows}
+        self.assertEqual("fix the pane drag", by_kind["prompt"])       # verbatim, up to MAX_PROMPT
+        self.assertEqual("Fixed it in Pane.h.", by_kind["reply"])      # verbatim, up to MAX_TEXT
+        self.assertTrue(by_kind["tool_call"].startswith("Edit "))
+        self.assertTrue(self.claude.is_file(), "the transcript itself is never touched")
 
     def test_reconcile_drops_the_row_but_never_the_transcript(self):
         guest_sessions.reconcile(self.index, str(self.home))

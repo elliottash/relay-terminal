@@ -3436,6 +3436,23 @@ live pane set at the instant of the write, because a pane can close and a symlin
 while the decision is on screen. Routing looks at `old_file_path` first and `new_file_path` is
 what gets written, so checking only the routing path is checking the wrong one.
 
+**Which pane a request belongs to.** Every pane registers, because the port is in its shell's
+environment before a claude could be started in it, so two panes open on one project is ordinary
+and only one of them may have a guest. The router ranks a candidate by, in order: the length of
+the workspace/cwd prefix that matched, whether that pane has a guest in its foreground right now
+(the registration's `guest` field, 26.1), and the registration's mtime. The middle term is what
+keeps a diff off the terminal beside the one the user is working in — without it the tie went to
+whichever registration was rewritten last, which is a shell that changed directory. **Two claudes
+in one project cannot be told apart** from the paths a request names: the newest registration wins
+and the diff may open beside the wrong one. The connection carries no pane identity (upstream's
+handshake has none), so closing that needs a peer-socket-to-pid walk, which is not built.
+
+**The pane's environment.** `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION`
+(`guest.bridge_env`, `relay::guestbridge::bridgeEnvKeys()`) are set with `qputenv`, which writes
+the *GUI process's* environment and so outlives the pane that wrote it. `startTerminal` therefore
+**clears both keys** whenever the bridge is off, failed or has no port — not merely leaves them
+unset, which is what handing every later shell a dead port looked like.
+
 **Implementation (claude-bridge phase).** The server is a spawned sidecar,
 `backend/relay_core/guest_bridge.py serve --state-dir <dir>`, one per GUI run, started lazily by
 the first pane's `startTerminal` through `src/GuestBridge.h` (the GUI's whole end of the bridge:
@@ -3461,13 +3478,19 @@ pending diff whose `tab_name` matches, on that connection, as `DIFF_REJECTED` (a
 wants. `closeAllDiffTabs` closes the calling connection's diffs only — two claudes share one
 sidecar, and one tidying up must not cancel what the user is reading in the other pane. A pending
 diff also ends by itself when its pane closes, when its connection drops, at shutdown, or after
-`DIFF_TIMEOUT_SECONDS` (30 minutes) on the wall clock. Every one of those answers `DIFF_REJECTED`:
+`DIFF_TIMEOUT_SECONDS` (30 minutes) on the monotonic clock (a clock step must not expire a diff
+the user is still reading, nor hold one open for an extra hour). Every one of those answers `DIFF_REJECTED`:
 a guest told no is recoverable, a guest blocked forever is not.
 
 **The socket itself.** Loopback, one auth token in `x-claude-code-ide-authorization`, compared
 with `hmac.compare_digest`. A connection that does not finish its HTTP head within
 `HANDSHAKE_SECONDS` (10) is dropped. Client frames must be masked (RFC 6455 §5.1) or the
-connection is failed with close code 1002. A frame, and a reassembled fragmented message, is
+connection is failed with close code 1002, as it is for the frames `remote/ws.py` also refuses: a
+reserved bit set with no extension negotiated, a control frame that is fragmented or longer than
+125 bytes, a continuation frame with nothing to continue, a second data frame inside a fragmented
+message, and an unknown opcode. The two frame layers remain separate code — `remote/ws.py` is not
+importable from the sidecar, which runs with only `backend/` on its path — and only `accept_key`
+is shared. A frame, and a reassembled fragmented message, is
 capped at `MAX_MESSAGE_BYTES` (4 MiB) and refused with 1009 *before* the announced bytes are read.
 Every `KEEPALIVE_SECONDS` (30) the sidecar pings each live connection, so an idle claude — and
 anything keeping state between the two — knows the bridge is alive. The accept-key helper is
@@ -3490,7 +3513,11 @@ for the shim: the sidecar calls it as `guest-event.py bridge claude` with the ev
 stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
 the §26.3 envelope and drops it on the pane's spool as its own file. A helper that is missing, fails, or
 has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
-`DIFF_REJECTED` — never a second writer beside the channel's own. It is run with a minimal
+`DIFF_REJECTED` — never a second writer beside the channel's own. The helper says which happened
+with its **exit code**: 0 when it wrote the event *or* when there is no pane around it at all (the
+no-op invariant above), 1 when a pane was named and the write failed. It returned 0 either way
+until this was fixed, so a spool that could not be written read as a delivered event and left the
+guest blocked on a decision no pane would ever show. It is run with a minimal
 environment — `PATH`, `HOME`, `PYTHONPATH`, the locale and `RELAY_RUNTIME_DIR` /
 `RELAY_SESSION_TOKEN` / `RELAY_PYTHON` — not the sidecar's own, which inherits the GUI's
 provider keys.
@@ -3535,7 +3562,32 @@ transcript file is named after, which is both what the guest resumes by and what
 keyed on. Search spans all sources; the active pane's live transcript is tailed so a running
 session appears without a rescan; `guest_sessions.reconcile(index, limit=N)` reads only the N
 newest transcripts per source and therefore prunes nothing (only a full reconcile drops rows
-whose transcript is gone).
+whose transcript is gone); `limit` counts files, and a limit of zero or less reads none.
+
+**What a full reconcile may prune, and what it may not.** A row goes only when its transcript is
+*known* to be gone. A source whose session directory is not there at all prunes nothing — `$HOME`
+can be wrong, a network home can be late, a guest can be uninstalled with its history intact — and
+neither does a transcript that is on disk but could not be stat'ed or parsed this time. A guest
+row's pin and custom title live only in the index (there is no `.meta.json` beside a guest
+session), so a row dropped by mistake takes them with it.
+
+**A claude project directory decodes against the filesystem.** `<cwd-slug>` replaces every
+non-alphanumeric character with a dash, so the split back is ambiguous whenever a real directory
+name holds one (`-home-u-repos-relay-terminal`). The transcript's own `cwd` lines are still the
+truth; when a transcript names none, `claude_workspace_from_slug` walks the real directories and
+takes the components that slugify to what the name says, falling back to the naive split only when
+the directory is gone or two children are spelled alike. The value is not cosmetic: it becomes the
+row's `workspace` and its `resume_cwd`.
+
+**What indexing a guest session copies.** Relay's index is a cache of the guests' own files and
+never writes to them, but it is a cache *of their text*: the session's title, every user prompt
+(to `MAX_PROMPT`), every assistant text block (to `MAX_TEXT`) and one line per tool call (its name
+plus the first 200 characters of its arguments) go into `entries` and are tokenised into the FTS
+index, which is what makes the sessions pane searchable across guests. The index file is mode 0600
+in Relay's own data directory and nothing leaves the machine (`remote/wire.py` withholds the guest
+events; a guest row is a conversation row like any other). There is no guest-specific opt-out —
+the whole index answers to `RELAY_INDEX` — and no worker calls `reconcile()` today, so nothing is
+copied until the sessions pane is wired up.
 
 ### 26.8 Composer routing and the slash registry
 

@@ -82,6 +82,16 @@ inline QJsonObject bridgeEnv(const QString &guest, int port) {
                        {QStringLiteral("ENABLE_IDE_INTEGRATION"), QStringLiteral("true")}};
 }
 
+// Every variable `bridgeEnv` can set, whether or not this call sets it. The pane's environment is
+// the *GUI process's* environment (`qputenv`), which outlives the pane that wrote it: iterating
+// over what `bridgeEnv` returned removed nothing when it returned nothing, so a run whose sidecar
+// had died — or whose bridge the user had just switched off — went on handing every later shell the
+// port of a socket nobody was listening on, and every claude started in one hung looking for it.
+// Clear from this list; set from `bridgeEnv`.
+inline QStringList bridgeEnvKeys() {
+    return {QStringLiteral("CLAUDE_CODE_SSE_PORT"), QStringLiteral("ENABLE_IDE_INTEGRATION")};
+}
+
 // May this reply path be written? The one rule `answerDiff` enforces: inside the replies
 // directory it names, and that is all. The reply file does not exist yet — it is what the call
 // writes — so its own path is absolute-and-cleaned, not canonical (`canonicalFilePath()` is empty
@@ -97,11 +107,13 @@ class Bridge {
 public:
     static Bridge &instance() {
         static Bridge bridge;
-        s_started = true;
         return bridge;
     }
-    // Whether a pane has ever asked for the bridge. A pane closing on a run that never used it
-    // must not bring its machinery (a state directory, a QProcess) into being just to say goodbye.
+    // Whether a pane has ever asked the bridge for a port. A pane closing on a run that never
+    // used it must not bring its machinery (a state directory, a QProcess) into being just to say
+    // goodbye — which is why this is *not* set by `instance()`: constructing the singleton is
+    // exactly the thing the flag exists to avoid, so a `started()` that `instance()` had already
+    // made true was a guard that could never fire.
     static bool started() { return s_started; }
 
     // Where Relay's data files are (backend/, shell/), so the sidecar can be run from the source
@@ -112,6 +124,7 @@ public:
     // call starts the sidecar and waits for its ready line; every later call is a field read.
     int portFor(const QString &python) {
         if (!enabled()) return 0;
+        s_started = true;   // asked for: from here on a closing pane has something to say goodbye to
         if (running()) return m_port;
         if (m_failed) return 0;
         start(python);
@@ -126,7 +139,7 @@ public:
     // skipped, so a caller may ask on every cwd change. False means "not registered" (the bridge
     // is off, or failed), which the caller retries rather than remembering.
     bool registerPane(const QString &token, const QString &runtimeDir, const QString &workspace,
-                      const QString &cwd, const QString &python) {
+                      const QString &cwd, const QString &python, const QString &guest) {
         if (!running() || token.isEmpty() || runtimeDir.isEmpty()) return false;
         const QJsonObject payload{
             {QStringLiteral("token"), token},
@@ -136,7 +149,12 @@ public:
             {QStringLiteral("helper"), m_data + QStringLiteral("/shell/guest-event.py")},
             {QStringLiteral("python"), python},
             {QStringLiteral("workspace"), workspace},
-            {QStringLiteral("cwd"), cwd}};
+            {QStringLiteral("cwd"), cwd},
+            // Which guest is in this pane's foreground right now, or "". Two panes open on one
+            // project are ordinary — every pane registers, because the port is in its shell's
+            // environment before a claude could be started there — and the one with a claude in it
+            // is the one a request from a claude belongs to (26.5).
+            {QStringLiteral("guest"), guest}};
         const QByteArray bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
         if (m_written.value(token) == bytes) return true;
         const QString path = m_stateDir + QStringLiteral("/panes/") + token + QStringLiteral(".json");

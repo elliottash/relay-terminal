@@ -220,6 +220,7 @@ class PaneRegistration:
     python: str            # the interpreter Relay runs (RELAY_PYTHON), for the helper
     workspace: str
     cwd: str
+    guest: str = ""        # the guest in the pane's foreground right now: "claude", or "" (26.1)
     path: str = ""         # the registration file this came from
     seen: float = 0.0
 
@@ -248,18 +249,28 @@ def load_registrations(directory: str) -> dict[str, PaneRegistration]:
             token=token, runtime_dir=runtime,
             helper=str(payload.get("helper") or ""), python=str(payload.get("python") or sys.executable),
             workspace=str(payload.get("workspace") or ""), cwd=str(payload.get("cwd") or ""),
+            guest=str(payload.get("guest") or ""),
             path=path, seen=os.stat(path).st_mtime)
     return panes
 
 
 def pane_for_path(panes: dict[str, PaneRegistration], path: str) -> PaneRegistration | None:
-    """The pane a request about `path` belongs to: the longest workspace/cwd prefix of it.
-    Ties go to the most recently written registration, so the pane the user is in wins."""
+    """The pane a request about `path` belongs to: the longest workspace/cwd prefix of it, and
+    among equals the one with a claude actually running in it.
+
+    Every pane registers — it has to, because the port is in its shell's environment before a
+    claude could be started there — so two panes open on one project are the ordinary case, and
+    only one of them may have a guest. Ranking a pane that is not running a guest level with one
+    that is put the diff on screen beside the wrong terminal: whichever registration had been
+    rewritten last won, which is a shell that changed directory, not a claude. The guest flag comes
+    second after the prefix length (a pane *inside* the file's own directory is still the better
+    answer) and the registration mtime remains the last resort, for two panes that really are
+    equivalent — two claudes in one project cannot be told apart from the paths alone."""
     if not path:
         return None
     target = os.path.realpath(path)
     best = None
-    best_key = (-1, 0.0)
+    best_key = (-1, 0, 0.0)
     for pane in panes.values():
         for root in (pane.workspace, pane.cwd):
             if not root:
@@ -267,7 +278,7 @@ def pane_for_path(panes: dict[str, PaneRegistration], path: str) -> PaneRegistra
             root = os.path.realpath(root)
             if target != root and not target.startswith(root.rstrip(os.sep) + os.sep):
                 continue
-            key = (len(root), pane.seen)
+            key = (len(root), 1 if pane.guest else 0, pane.seen)
             if key > best_key:
                 best, best_key = pane, key
     return best
@@ -304,15 +315,33 @@ def workspace_folders_of(panes: dict[str, PaneRegistration]) -> list[str]:
 # ----- the unified diff the pane will show ------------------------------------------------------
 
 
-def unified_diff(old_path: str, new_path: str, new_contents: str, old_contents: str | None) -> str:
+def diff_label(path: str, root: str = "") -> str:
+    """What the `a/`-`b/` header calls a file: its path inside `root`, as `tools.py` writes it.
+
+    Relay's own writes label a change `a/src/x.py`, relative to the workspace, and the diff view
+    strips the prefix and shows the rest. The bridge's paths are absolute and already resolved, so
+    without this the header read `a//home/you/project/src/x.py` — true, but not what the same view
+    shows for every other diff in the app."""
+    if not root or not path:
+        return path
+    root = root.rstrip(os.sep)
+    if path == root:
+        return os.path.basename(path) or path
+    return path[len(root) + 1:] if path.startswith(root + os.sep) else path
+
+
+def unified_diff(old_path: str, new_path: str, new_contents: str, old_contents: str | None,
+                 root: str = "") -> str:
     """The diff Relay's diff view shows for an openDiff, in the shape `tools.py` writes:
-    `a/` and `b/` headers (or `/dev/null` for a file claude is creating)."""
+    `a/` and `b/` headers (or `/dev/null` for a file claude is creating), the paths relative to
+    `root` — the workspace of the pane the diff is about — when they are inside it."""
     if old_contents is None:
         old_contents = ""
     diff = "".join(difflib.unified_diff(
         old_contents.splitlines(keepends=True), new_contents.splitlines(keepends=True),
-        fromfile=f"a/{old_path}" if old_contents or os.path.exists(old_path) else "/dev/null",
-        tofile=f"b/{new_path}"))
+        fromfile=f"a/{diff_label(old_path, root)}" if old_contents or os.path.exists(old_path)
+                 else "/dev/null",
+        tofile=f"b/{diff_label(new_path, root)}"))
     return diff
 
 
@@ -677,7 +706,8 @@ class Bridge:
         os.makedirs(self.replies_dir, exist_ok=True)
         reply_path = os.path.join(self.replies_dir, f"{uuid.uuid4()}.json")
         source = old_real or target
-        diff = unified_diff(source, target, contents, read_text(source))
+        diff = unified_diff(source, target, contents, read_text(source),
+                            root=pane.workspace or pane.cwd)
         # The event carries the resolved paths: what the pane shows the user is the file the
         # sidecar would actually write, symlinks and `..` already followed.
         sent = self.emit(pane, "openDiff",
@@ -826,7 +856,11 @@ class WebSocket:
         if not key:
             return await self._refuse("400 Bad Request", "missing Sec-WebSocket-Key")
         presented = headers.get(AUTH_HEADER, "")
-        if not self.auth_token or not hmac.compare_digest(presented, self.auth_token):
+        # Bytes, not str: `compare_digest` on two `str`s raises TypeError unless both are ASCII,
+        # and the presented one is whatever the peer put in the header. A non-ASCII token is a
+        # wrong token and gets the same 401 as an empty one, not a traceback and a dropped socket.
+        if not self.auth_token or not hmac.compare_digest(presented.encode("utf-8", "surrogateescape"),
+                                                         self.auth_token.encode()):
             return await self._refuse("401 Unauthorized", "bad or missing auth token")
         accept = websocket_accept(key)
         self.writer.write(("HTTP/1.1 101 Switching Protocols\r\n"
@@ -850,10 +884,30 @@ class WebSocket:
         close is echoed here, so the caller only ever sees data and disconnect."""
         chunks = []
         size = 0
+        started = False   # a data frame has opened a message that continuation frames extend
         while True:
             head = await self.reader.readexactly(2)
             fin, opcode = head[0] & 0x80, head[0] & 0x0F
             masked, length = head[1] & 0x80, head[1] & 0x7F
+            if head[0] & 0x70:
+                # RSV1-3 set with no extension negotiated (we offer none, so there is never one).
+                # A permessage-deflate frame read as plain text is garbage JSON at best.
+                await self.close(1002, "reserved bits are set")
+                return None
+            if opcode >= 0x8 and (not fin or length > 125):
+                # RFC 6455 §5.5: a control frame is never fragmented and never longer than 125
+                # bytes. Echoing a 4 MiB "ping" back is a peer's amplifier, not a keepalive.
+                await self.close(1002, "a control frame must be short and unfragmented")
+                return None
+            if opcode in (0x1, 0x2) and started:
+                await self.close(1002, "a new data frame arrived inside a fragmented message")
+                return None
+            if opcode == 0x0 and not started:
+                await self.close(1002, "a continuation frame with nothing to continue")
+                return None
+            if opcode not in (0x0, 0x1, 0x2, 0x8, 0x9, 0xA):
+                await self.close(1002, f"unknown opcode {opcode:#x}")
+                return None
             if not masked:
                 # RFC 6455 §5.1: a client frame is always masked, and a server that accepts an
                 # unmasked one is the hole the masking rule exists to close (a crafted HTTP form
@@ -882,6 +936,7 @@ class WebSocket:
                 continue
             chunks.append(payload)
             size += len(payload)
+            started = not fin
             if fin:
                 return b"".join(chunks).decode("utf-8", "replace")
 

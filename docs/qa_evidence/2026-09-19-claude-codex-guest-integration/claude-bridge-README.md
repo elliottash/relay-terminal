@@ -75,11 +75,31 @@ that does not exist and closes a `..` traversal that `cleanPath` alone would not
 `tests/guestbridge_test.cpp` unit-tests the rule, including
 `aReplyThatDoesNotExistYetIsAllowed` — the regression this run found.
 
+## Reviewed again, 2026-09-19 (second pass)
+
+The pictures above still stand; the code under them changed in five places, all unit-tested in
+`tests/test_guest_bridge.py` and `tests/guestbridge_test.cpp` rather than re-shot:
+
+* the shell's `CLAUDE_CODE_SSE_PORT` / `ENABLE_IDE_INTEGRATION` are now **cleared** when the
+  bridge is off or has no port (`qputenv` writes the GUI's own environment, so not-setting them
+  left the last port behind for every later pane);
+* `shell/guest-event.py` exits 1 when a pane was named and the spool write failed, which is the
+  exit code `openDiff`'s "failed emit is a DIFF_REJECTED" rule was already reading;
+* the sidecar's router prefers a pane with a guest in its foreground over one without, so a diff
+  does not open beside the terminal the user is *not* running claude in;
+* the frame layer refuses reserved bits, an oversized or fragmented control frame, a stray
+  continuation and an unknown opcode (1002), as `remote/ws.py` does;
+* a non-ASCII auth header is a 401 rather than a TypeError and a dropped socket.
+
 ## Not covered here
 
 The envelope, the tool set, lock-file lifecycle, stale-lock sweeping, pane routing, the path
 rule for what the sidecar will write, and the read loop's non-blocking settles (`close_tab`
 withdrawing a diff, the 30-minute expiry) are unit-tested instead
 (`tests/test_guest_bridge.py`, 83 tests), since they are about files and sockets rather than
-pixels. Two claudes sharing one sidecar, and a real Claude Code on the other end of the socket,
-remain for integration with upstream's client.
+pixels. A real Claude Code on the other end of the
+socket remains for integration with upstream's client. Two claudes sharing one sidecar is served
+— `closeAllDiffTabs` and a dropped connection touch only their own diffs — but **two claudes in
+one project cannot be routed apart**: a request names paths, both panes match them, and the
+connection carries no pane identity. The newest registration wins and the diff can open beside the
+wrong pane; closing that needs a peer-socket-to-pid walk that is not built (26.5).

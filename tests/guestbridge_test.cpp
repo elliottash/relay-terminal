@@ -36,6 +36,21 @@ private slots:
         QVERIFY(bridgeEnv(QStringLiteral("claude"), 65536).isEmpty());
     }
 
+    void everyKeyBridgeEnvCanSetIsInTheKeyList() {
+        // The pane clears from this list and sets from `bridgeEnv`, because `qputenv` writes the
+        // *GUI process's* environment: iterating over what `bridgeEnv` returned removed nothing
+        // when it returned nothing, so a sidecar that died left its port in every later shell and
+        // the claudes started in them hung dialling a closed socket. A key added to `bridgeEnv`
+        // and not to `bridgeEnvKeys` would bring that back.
+        const QStringList keys = bridgeEnvKeys();
+        const QJsonObject env = bridgeEnv(QStringLiteral("claude"), 41234);
+        QCOMPARE(keys.size(), env.size());
+        for (auto it = env.constBegin(); it != env.constEnd(); ++it)
+            QVERIFY2(keys.contains(it.key()), qPrintable(it.key()));
+        // "The bridge is off" must be expressible as "clear every one of them".
+        QVERIFY(bridgeEnv(QStringLiteral("claude"), 0).isEmpty());
+    }
+
     void aReplyThatDoesNotExistYetIsAllowed() {
         QTemporaryDir root;
         QVERIFY(root.isValid());

@@ -33,7 +33,7 @@ def make_state(root: str) -> str:
 
 
 def register_pane(state: str, workspace: str, cwd: str | None = None, helper: str | None = None,
-                  runtime: str | None = None) -> tuple[str, str]:
+                  runtime: str | None = None, guest: str = "claude") -> tuple[str, str]:
     """One pane registration, the file the GUI writes: token, runtime dir, helper, workspace.
     The default helper is the real shell/guest-event.py, exactly as the GUI registers it — the
     channel's writer is the contract these tests exercise, not a stand-in for it."""
@@ -43,7 +43,7 @@ def register_pane(state: str, workspace: str, cwd: str | None = None, helper: st
                                    {"token": token, "runtime_dir": runtime,
                                     "helper": str(HELPER) if helper is None else helper,
                                     "python": sys.executable, "workspace": workspace,
-                                    "cwd": cwd or workspace})
+                                    "cwd": cwd or workspace, "guest": guest})
     return token, runtime
 
 
@@ -195,10 +195,10 @@ class Registrations(unittest.TestCase):
 
 
 class PaneRouting(unittest.TestCase):
-    def _pane(self, token: str, workspace: str, cwd: str, seen: float):
+    def _pane(self, token: str, workspace: str, cwd: str, seen: float, guest: str = ""):
         return guest_bridge.PaneRegistration(token=token, runtime_dir="/tmp", helper="",
                                              python=sys.executable, workspace=workspace, cwd=cwd,
-                                             seen=seen)
+                                             guest=guest, seen=seen)
 
     def test_longest_prefix_wins(self):
         panes = {"outer": self._pane("outer", "/work", "/work", 1.0),
@@ -214,6 +214,30 @@ class PaneRouting(unittest.TestCase):
     def test_a_prefix_that_is_not_a_directory_boundary_does_not_match(self):
         panes = {"a": self._pane("a", "/work", "/work", 1.0)}
         self.assertIsNone(guest_bridge.pane_for_path(panes, "/workshop/x.py"))
+
+    def test_a_pane_running_a_guest_wins_a_tie(self):
+        """Two panes on one project is the ordinary case — every pane registers, because the port
+        is in its shell's environment before a claude could be started there — and the request came
+        from a claude, so it belongs to the pane that has one. Here the shell pane is the *newer*
+        registration (a shell that changed directory), so the mtime tie-break on its own put the
+        diff beside the wrong terminal."""
+        panes = {"guest": self._pane("guest", "/work", "/work", 1.0, guest="claude"),
+                 "shell": self._pane("shell", "/work", "/work", 2.0)}
+        self.assertEqual("guest", guest_bridge.pane_for_path(panes, "/work/x.py").token)
+
+    def test_a_deeper_pane_beats_a_guest_higher_up(self):
+        """The prefix is still what decides: a pane open *in* the file's own directory is the
+        better answer even when a guest is running one level up."""
+        panes = {"outer": self._pane("outer", "/work", "/work", 2.0, guest="claude"),
+                 "inner": self._pane("inner", "/work/sub", "/work/sub", 1.0)}
+        self.assertEqual("inner", guest_bridge.pane_for_path(panes, "/work/sub/x.py").token)
+
+    def test_two_panes_with_the_same_guest_still_fall_back_to_the_mtime(self):
+        """Two claudes in one project cannot be told apart from the paths they name; the newest
+        registration is the tie-break, and that is a documented limitation (26.5), not a rule."""
+        panes = {"first": self._pane("first", "/work", "/work", 1.0, guest="claude"),
+                 "second": self._pane("second", "/work", "/work", 2.0, guest="claude")}
+        self.assertEqual("second", guest_bridge.pane_for_path(panes, "/work/x.py").token)
 
     def test_the_newer_registration_breaks_a_tie(self):
         panes = {"old": self._pane("old", "/work", "/work", 1.0),
@@ -1012,6 +1036,73 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
         reply = await next_text(self.reader)
         self.assertEqual(12, reply["id"])
         self.assertEqual(12, len(reply["result"]["tools"]))
+
+    async def test_reserved_bits_fail_the_connection(self):
+        """No extension is ever negotiated, so RSV1 means a permessage-deflate frame, and reading
+        one as plain text is garbage JSON at best. remote/ws.py refuses it; this copy did not."""
+        frame = bytearray(client_frame(b'{"jsonrpc":"2.0","id":1,"method":"ping"}'))
+        frame[0] |= 0x40
+        self.writer.write(bytes(frame))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_an_oversized_control_frame_is_refused_not_echoed(self):
+        """RFC 6455 §5.5: a control frame is at most 125 bytes. A 'ping' of a megabyte answered
+        with a pong of a megabyte is an amplifier, not a keepalive."""
+        self.writer.write(client_frame(b"x" * 400, opcode=0x9))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_a_fragmented_control_frame_is_refused(self):
+        self.writer.write(client_frame(b"hi", opcode=0x9, fin=False))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_a_continuation_with_nothing_to_continue_is_refused(self):
+        self.writer.write(client_frame(b"tail", opcode=0x0))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_a_second_data_frame_inside_a_fragmented_message_is_refused(self):
+        self.writer.write(client_frame(b"head", opcode=0x1, fin=False))
+        self.writer.write(client_frame(b"another", opcode=0x1))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_a_ping_between_two_fragments_does_not_break_the_message(self):
+        """A control frame may sit between fragments (§5.4), and answering it must not be read as
+        a second message starting."""
+        payload = json.dumps({"jsonrpc": "2.0", "id": 13, "method": "ping", "params": {}}).encode()
+        half = len(payload) // 2
+        self.writer.write(client_frame(payload[:half], opcode=0x1, fin=False))
+        self.writer.write(client_frame(b"mid", opcode=0x9))
+        self.writer.write(client_frame(payload[half:], opcode=0x0))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual((0xA, b"mid"), (opcode, body))
+        self.assertEqual(13, (await next_text(self.reader))["id"])
+
+    async def test_a_non_ascii_auth_header_is_a_401_not_a_dropped_socket(self):
+        """`hmac.compare_digest` on two `str`s raises TypeError unless both are ASCII, and the
+        presented one is whatever the peer put in the header."""
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        self._writers.append(writer)
+        writer.write(("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Key: abcdefghijklmnop\r\n"
+                      "x-claude-code-ide-authorization: t\u00f6ken\r\n\r\n").encode("utf-8"))
+        await writer.drain()
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5.0)
+        self.assertIn("401", head.decode("latin-1").splitlines()[0])
 
     async def test_a_ping_is_answered_with_a_pong(self):
         self.writer.write(client_frame(b"are you there", opcode=0x9))

@@ -117,8 +117,24 @@ def _serialised(envelope: dict) -> str:
 
 
 def main(argv=None) -> int:
+    """Exit 0 when the event was written *or* when there is no pane to write it to; 1 when a pane
+    was named and the write failed.
+
+    Both halves of that are contracts. The no-op invariant (26.3) is the first: a shim with no
+    pane around it exits 0, prints nothing and writes nowhere, because hooks installed in a user's
+    global settings run in every other terminal too. The second is the bridge's (26.5): "a helper
+    that is missing, fails, or has no runtime dir to write is a failed emit — the event is not sent,
+    and `openDiff` answers `DIFF_REJECTED`". The caller can only tell those apart from the exit
+    code, and this returned 0 either way — so a spool that could not be written (a full disk, a
+    runtime dir whose mode changed) read as a delivered event and left the guest blocked on a
+    decision no pane would ever be shown.
+    """
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
+        return 0
+    # No pane around this process: not a failure, the whole point of the invariant. Asked before
+    # stdin is read, so a hook in a plain terminal does not even block on a pipe nobody fills.
+    if events_dir() is None or not os.environ.get("RELAY_SESSION_TOKEN", ""):
         return 0
     # The payload is whatever the caller could parse; an empty or malformed stdin is an event
     # with no data, never a crash that would pollute the guest's own output. More than the pane
@@ -128,9 +144,9 @@ def main(argv=None) -> int:
         data = json.loads(raw or "null")
     except ValueError:
         data = {"relay_truncated": True} if len(raw) > MAX_EVENT_BYTES else None
-    write_event(args[0], args[1] if len(args) > 1 else "", data,
-                args[2] if len(args) > 2 else None)
-    return 0
+    written = write_event(args[0], args[1] if len(args) > 1 else "", data,
+                          args[2] if len(args) > 2 else None)
+    return 0 if written else 1
 
 
 if __name__ == "__main__":

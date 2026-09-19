@@ -77,6 +77,40 @@ Index (`ConversationIndex` in a temporary directory):
 - `tests/fixtures/guest/` holds one real-shaped transcript of each guest (plus `state_5.sqlite`);
   parsing them fails if either format drifts.
 
+## Reviewed again, 2026-09-19 (second pass)
+
+Re-measured read-only on the same machine: `~/.claude/projects` is now **1.6 GiB** over 7 project
+directories and **626** `.jsonl` files, of which **546 (87 %) are nested `subagents/` transcripts**
+that `_claude_paths`' depth-1 glob correctly excludes — **80** are sessions. The largest single
+transcript is **98.9 MB**, and any mtime change re-reads it whole (the active pane's transcript
+changes every turn), which is the one real cost left in a warm reconcile; `LiveTail` already holds
+the incremental state that would fix it but nothing shares it with `reconcile`. `~/.codex/sessions`
+is 904 KiB, one rollout; `state_5.sqlite` is 236 KiB.
+
+Six correctness fixes landed in `backend/relay_core/guest_sessions.py`, with tests:
+
+* a full reconcile no longer prunes a source whose **session directory is absent** (a wrong or
+  late `$HOME` used to empty the pane, and a guest row's pin and custom title live only in the
+  index), nor a transcript that is on disk but could not be stat'ed or parsed;
+* `limit=0` read *everything* and `limit=-1` silently dropped the oldest file (`[:limit or None]`);
+* `claude_workspace_from_slug` decodes against the real directories, so
+  `-home-elliott-repos-relay-terminal` is `…/relay-terminal` and not `…/relay/terminal` — four of
+  the seven real project directories were being decoded to paths that do not exist, which is the
+  row's `workspace` **and** its `resume_cwd`;
+* `codex_live_transcript` takes the newest matching thread (the `SELECT … FROM threads` has no
+  `ORDER BY`, so it was following whichever row sqlite returned first — usually the oldest);
+* `LiveTail` notices a transcript replaced by one of the same size (st_dev/st_ino), and `_by_age`
+  really does break ties by name;
+* `to_record` and `item_to_record` agree on what an untitled session is called.
+
+The privacy surface is now pinned by a test and written down in §26.7: indexing a guest session
+copies its title, prompts, assistant text and tool-call names into Relay's `entries` table and its
+FTS index. There is no guest-specific opt-out.
+
+**What is still not wired.** `guest_sessions` has no production caller: `session_protocol`
+neither reconciles nor annotates, `sessions.check_id` rejects a dashed UUID, and
+`src/Conversations.cpp` has no guest source in its Kind filter. See the review report.
+
 ## Deviations from §26.7
 
 None in behaviour. Two notes for the lead:

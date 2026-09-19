@@ -52,6 +52,10 @@ log = logs.get("guest_sessions")
 # The two source kinds this module serves (the listing itself lives in conv_index, section 26.3).
 GUEST_SOURCES = conv_index.GUEST_SOURCES
 
+# What a session with nothing to call itself is called. One spelling, because the same session
+# reached two ways — tailed live (`to_record`) and out of the index (`item_to_record`) — used to be
+# blank one way and "Untitled" the other, and the pane's row changed under the user as it indexed.
+UNTITLED = "Untitled"
 MAX_TITLE = 200                  # record title cap, one line
 MAX_PROMPT_PREVIEW = 80          # title fallback: the first prompt, cut like titles.fallback_title
 MAX_TOOL_ARGUMENTS = 200         # tool_call entry: the arguments string is capped, not dropped
@@ -103,7 +107,7 @@ def to_record(data: dict, *, fork: bool = False) -> dict:
     workspace = str(data.get("workspace") or "")
     return {"source": data.get("source") or "",
             "id": str(data.get("id") or ""),
-            "title": " ".join(str(data.get("title") or "").split())[:MAX_TITLE],
+            "title": " ".join(str(data.get("title") or "").split())[:MAX_TITLE] or UNTITLED,
             "mtime": float(data.get("mtime") or 0.0),
             "workspace": workspace,
             "message_count": int(data.get("message_count") or 0),
@@ -120,7 +124,7 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
     workspace = str(item.get("workspace") or "")
     return {"source": source,
             "id": str(item.get("session_id") or item.get("id") or ""),
-            "title": " ".join(str(item.get("title") or "").split())[:MAX_TITLE] or "Untitled",
+            "title": " ".join(str(item.get("title") or "").split())[:MAX_TITLE] or UNTITLED,
             "mtime": float(updated if isinstance(updated, (int, float)) else 0.0),
             "workspace": workspace,
             "message_count": int(item.get("turns") or 0),
@@ -479,13 +483,58 @@ def claude_slug(cwd: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(cwd or ""))
 
 
-def claude_workspace_from_slug(slug: str) -> str:
-    """The best-effort path behind a claude project directory name: the leading dash is the
-    root and the rest are separators. A dash in a real name is indistinguishable from a
-    separator, so this is only a display fallback — the transcript's own `cwd` lines are the
-    truth and `parse_claude_transcript` prefers them."""
+def _slug_walk(tokens: list[str], root: str) -> str:
+    """The path whose components slugify to `tokens`, found by asking the filesystem.
+
+    The encoding is lossy — a dash, an underscore, a space and a dot all become a dash — so the
+    only way back is to look at the directories that exist and see which of them claude would
+    have spelled this way. At each level the longest run of tokens that matches exactly one real
+    child wins: `relay-terminal` is one directory, not `relay/terminal`, and `_Ash_Admin` comes
+    back with its underscores. Two children that slugify alike, or a level with no match at all,
+    is an answer this cannot give — "" then, and the caller falls back to the naive split.
+    """
+    here = Path(root)
+    index = 0
+    while index < len(tokens):
+        try:
+            children = [entry.name for entry in os.scandir(here) if entry.is_dir()]
+        except OSError:
+            return ""
+        chosen = ""
+        for take in range(len(tokens) - index, 0, -1):
+            candidate = "-".join(tokens[index:index + take])
+            matches = [name for name in children if claude_slug(name) == candidate]
+            if len(matches) > 1:
+                return ""                      # two real names claude spells the same way
+            if matches:
+                chosen, index = matches[0], index + take
+                break
+        if not chosen:
+            return ""
+        here = here / chosen
+    return str(here)
+
+
+def claude_workspace_from_slug(slug: str, *, root: str = "/") -> str:
+    """The path behind a claude project directory name.
+
+    The transcript's own `cwd` lines are still the truth and `parse_claude_transcript` prefers
+    them; this is for the transcripts that never named one. It used to be a naive split on the
+    dashes, which is wrong for any real directory whose own name holds one — four of the seven
+    project directories on the machine this was written on, including
+    `-home-elliott-repos-relay-terminal` → `/home/elliott/repos/relay/terminal`. That is not a
+    display wart: the value becomes the row's `workspace` (so the pane scopes it to a project
+    that does not exist) and its `resume_cwd` (so `claude -r <id>` runs in the wrong directory and
+    reports an unknown session). So the filesystem is asked first, and the naive split is only
+    what is left when the directory is gone or two of them are spelled alike.
+    """
     text = str(slug or "")
-    return "/" + text[1:].replace("-", "/") if text.startswith("-") else text.replace("-", "/")
+    if not text:
+        return ""
+    if not text.startswith("-"):
+        return text.replace("-", "/")
+    tokens = text[1:].split("-")
+    return _slug_walk(tokens, root) or "/" + text[1:].replace("-", "/")
 
 
 # ----- the codex threads database ----------------------------------------------------------------
@@ -545,13 +594,26 @@ def codex_thread_meta(db_path: str | Path | None) -> dict[str, dict]:
 
 
 def _by_age(paths) -> list[Path]:
-    """Paths newest first, ties broken by name; one that cannot be stat'ed sorts last."""
-    def stamp(path: Path) -> tuple[float, str]:
+    """Paths newest first, ties broken by name; one that cannot be stat'ed sorts last.
+
+    Two passes, because one `sorted(..., reverse=True)` over `(mtime, name)` reverses the name
+    too: same-mtime files then came back in *descending* name order, which is not what the
+    docstring said and made "the newest transcript" look arbitrary whenever a copy or a checkout
+    gave several files one timestamp."""
+    def stamp(path: Path) -> float:
         try:
-            return (path.stat().st_mtime, str(path))
+            return path.stat().st_mtime
         except OSError:
-            return (float("-inf"), str(path))
-    return sorted(paths, key=stamp, reverse=True)
+            return float("-inf")
+    return sorted(sorted(paths, key=str), key=stamp, reverse=True)
+
+
+def source_root(source: str, home: str | None = None) -> Path:
+    """The directory a guest keeps its sessions in. `reconcile` asks whether it is there before
+    it trusts an empty scan."""
+    guest.spec(source)
+    return Path(guest.claude_projects_dir(home) if source == "claude"
+                else guest.codex_sessions_dir(home))
 
 
 def _claude_paths(home: str | None) -> list[Path]:
@@ -577,26 +639,40 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
     """Newest-first, at most `limit` transcripts through `parse`; a transcript whose indexed
     mtime (`known`, keyed by session id) already matches the file's is not read at all.
 
-    Returns `(records, unchanged)` — `unchanged` being the session ids that were skipped, which
-    are still indexed and must not be mistaken for files that have gone away. The id a file is
-    looked up by here is `_file_id`, which is also the id its parse puts on the record and the
-    index keys the row by, so the lookup finds the row the last run wrote."""
+    Returns `(records, kept)`. `kept` is every session id that was *seen on disk* but produced no
+    record — the ones skipped as unchanged, and the ones that could not be read at all. Both are
+    still there, and a caller that prunes by "ids I did not see" must not mistake either for a
+    session that went away: a transient `stat` failure or an unreadable transcript used to drop
+    the row, and with it the pin or the title the user had given it (there is no file to restore
+    those from). The id a file is looked up by here is `_file_id`, which is also the id its parse
+    puts on the record and the index keys the row by, so the lookup finds the row the last run
+    wrote.
+
+    `limit` is a count of files: `None` is every one of them, and a limit of zero or less reads
+    none. `[:limit or None]` read *everything* at zero and silently dropped the oldest file at -1.
+    """
     records: list[dict] = []
-    unchanged: set[str] = set()
-    for path in _by_age(paths)[:limit or None]:
+    kept: set[str] = set()
+    ordered = _by_age(paths)
+    if limit is not None:
+        ordered = ordered[:max(int(limit), 0)]
+    for path in ordered:
         identifier = _file_id(path)
         try:
             mtime = path.stat().st_mtime
         except OSError:
+            kept.add(identifier)      # it is on disk; we just could not look at it this time
             continue
         indexed = (known or {}).get(identifier)
         if indexed is not None and abs(mtime - float(indexed)) < 1e-6:
-            unchanged.add(identifier)
+            kept.add(identifier)
             continue
         record = parse(path)
-        if record is not None:
-            records.append(record)
-    return records, unchanged
+        if record is None:
+            kept.add(identifier)      # unreadable or unparsable, but not gone
+            continue
+        records.append(record)
+    return records, kept
 
 
 def _scan(source: str, home: str | None, *, limit: int | None,
@@ -664,11 +740,21 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
     started = time.time()
     known = index.guest_file_stamps(sources)
     seen: set[str] = set()
+    prunable: set[str] = set()
     added = refreshed = 0
     for source in sources:
-        records, unchanged = _scan(source, home, limit=limit,
-                                   known={identifier: row[2] for identifier, row in known.items()})
-        seen |= unchanged
+        records, kept = _scan(source, home, limit=limit,
+                             known={identifier: row[2] for identifier, row in known.items()})
+        seen |= kept
+        # A source whose directory is not there has not "lost every session": `$HOME` can be
+        # wrong, a network home can be late, the guest can be uninstalled with its history intact.
+        # Pruning on that emptied the pane and took the pins and the custom titles with it — and
+        # a guest row has no file beside it to restore them from. So an absent root prunes
+        # nothing; a root that is there and empty still does.
+        if source_root(source, home).is_dir():
+            prunable |= {identifier for identifier, row in known.items() if row[0] == source}
+        else:
+            log.debug("guest reconcile: %s has no session directory; nothing pruned", source)
         for record in records:
             identifier = record["id"]
             if not identifier:
@@ -680,12 +766,16 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
             refreshed += row is not None
     removed = 0
     if limit is None:                    # a capped scan saw only the newest N: it may not prune
-        for identifier in known:
-            if identifier not in seen:
-                index.delete_session(identifier, remove_files=False)   # rows only, never files
-                removed += 1
-    return {"added": added, "refreshed": refreshed, "removed": removed,
-            "ms": int((time.time() - started) * 1000)}
+        for identifier in sorted(prunable - seen):
+            index.delete_session(identifier, remove_files=False)       # rows only, never files
+            removed += 1
+    outcome = {"added": added, "refreshed": refreshed, "removed": removed,
+               "ms": int((time.time() - started) * 1000)}
+    # A reconcile that dropped rows is the one thing here worth a line in the log: it is the only
+    # operation that loses something, and "the guest sessions disappeared" is otherwise a mystery.
+    logs.event(log, "guest sessions reconciled", sources=",".join(sources),
+               limit=-1 if limit is None else int(limit), **outcome)
+    return outcome
 
 
 def list_sessions(index: conv_index.ConversationIndex, *, sources=GUEST_SOURCES,
@@ -733,17 +823,25 @@ def claude_live_transcript(workspace: str | None = None, home: str | None = None
 
 
 def codex_live_transcript(workspace: str | None = None, home: str | None = None) -> Path | None:
-    """The rollout codex is writing in `workspace` right now. The threads database names the
-    newest thread's rollout outright; without one (or without a match) the rollouts are walked
-    newest-first and their `session_meta` line names the working directory."""
+    """The rollout codex is writing in `workspace` right now: of the threads the database says
+    belong to that directory, the one whose file was written last; without a database (or without
+    a match) the rollouts are walked newest-first and their `session_meta` line names the working
+    directory.
+
+    `SELECT … FROM threads` has no `ORDER BY`, so taking the first row whose `cwd` matched handed
+    back whichever thread sqlite happened to return first — in practice the *oldest* one the user
+    had ever opened in that directory. The tail then followed a transcript nothing was writing
+    to, which looks exactly like a guest that has stopped talking."""
     root = Path(guest.codex_sessions_dir(home))
     if not root.is_dir():
         return None
     if workspace:
-        for meta in codex_thread_meta(guest.codex_state_db(home)).values():
-            path = Path(meta.get("file") or "")
-            if meta.get("workspace") == workspace and path.is_file():
-                return path
+        candidates = [Path(meta.get("file") or "")
+                      for meta in codex_thread_meta(guest.codex_state_db(home)).values()
+                      if meta.get("workspace") == workspace]
+        matched = _by_age(path for path in candidates if path.is_file())
+        if matched:
+            return matched[0]
     newest = _by_age(path for path in root.rglob("*.jsonl") if CODEX_ROLLOUT.match(path.name))
     if not workspace:
         return newest[0] if newest else None
@@ -812,6 +910,7 @@ class LiveTail:
         self._offset = 0
         self._size = -1
         self._mtime: float | None = None
+        self._identity: tuple[int, int] | None = None   # (st_dev, st_ino): which file this is
         self._record: dict | None = None
         # codex's threads database, read at most every `META_REFRESH` seconds (see the class).
         self._meta: dict[str, dict] = {}
@@ -824,10 +923,16 @@ class LiveTail:
             stat = self.path.stat()
         except OSError:
             return self._record
-        if stat.st_size < self._offset:              # truncated or rotated: read it again
+        # Rotation is not only truncation: a transcript replaced by one of the *same* size (a copy
+        # back over it, a checkout, `claude -r` rewriting a compacted history) kept the old parser
+        # state and read the new file from the old offset. The inode says so where the size cannot.
+        identity = (stat.st_dev, stat.st_ino)
+        if stat.st_size < self._offset or (self._identity is not None and identity != self._identity):
             self._parser = _ClaudeParser() if self.source == "claude" else _CodexParser()
             self._offset = 0
-        if stat.st_mtime == self._mtime and stat.st_size == self._size:
+            self._record = None
+        self._identity = identity
+        if stat.st_mtime == self._mtime and stat.st_size == self._size and self._offset:
             return self._record                      # nothing appended
         try:
             with open(self.path, "rb") as handle:

@@ -1175,12 +1175,14 @@ private:
         startGuestTail(m_guest);
         sendProgramState();
         changed();
-        // The bridge follows the guest (26.5): a claude in the foreground means this pane must be
-        // routable before the first request can arrive, and a claude that exited means the pane is
-        // nobody's target again until another one starts. Codex has no IDE bridge and never
-        // registers — bridge_env("codex") is empty, so there is nothing to be found.
-        if (m_guest == QStringLiteral("claude")) registerWithBridge();
-        else if (m_guest.isEmpty()) unregisterFromBridge();
+        // The bridge follows the guest (26.5). The registration is rewritten either way — it names
+        // which guest is in the foreground now, and that is what tells the sidecar's router this
+        // pane is the one a claude's request belongs to. It is *not* removed when a guest exits:
+        // the pane keeps carrying the port in its shell's environment, so the next claude started
+        // there connects before the program poll has noticed it, and a pane that vanished from the
+        // router in between would have had its first request refused as unmatched. Only a closing
+        // pane unregisters.
+        registerWithBridge();
     }
 
     // ----- the codex rollout tail (GT7X, 26.6) -------------------------------------------------
@@ -1235,10 +1237,12 @@ private:
     // claude turns up in the foreground. Rewrites that would say exactly what the last one said
     // are dropped by the bridge itself, so this is cheap enough to ask for on every change.
     void registerWithBridge() {
+        // Asked before the singleton, not after: `Bridge::instance()` builds a state directory and
+        // a QProcess, and a run whose user never turned the bridge on should have neither.
+        if (!relay::guestbridge::enabled()) return;
         auto &bridge = relay::guestbridge::Bridge::instance();
-        if (!bridge.started()) return;   // nothing to register with yet
         bridge.setDataRoot(m_data);
-        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python);
+        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python, m_guest);
     }
 
     void unregisterFromBridge() {
@@ -7413,13 +7417,21 @@ private:
         // of no editor at all. Codex has no IDE bridge, so it gets nothing; when the bridge is off
         // or failed to start, `bridge_env` is empty and both keys are removed.
         {
-            auto &bridge = relay::guestbridge::Bridge::instance();
-            bridge.setDataRoot(m_data);
-            const int port = bridge.portFor(m_python);
+            int port = 0;
+            if (relay::guestbridge::enabled()) {
+                auto &bridge = relay::guestbridge::Bridge::instance();
+                bridge.setDataRoot(m_data);
+                port = bridge.portFor(m_python);
+            }
+            // qputenv writes the *GUI process's* environment, which every later shell inherits, so
+            // the keys have to be cleared rather than merely not set: a sidecar that died, or a
+            // bridge the user switched off, used to leave the last port behind for every pane
+            // started afterwards, and a claude in one of them hung dialling a closed socket.
             const QJsonObject env = relay::guestbridge::bridgeEnv(QStringLiteral("claude"), port);
-            for (auto it = env.constBegin(); it != env.constEnd(); ++it) {
-                if (it.value().toString().isEmpty()) qunsetenv(it.key().toUtf8().constData());
-                else qputenv(it.key().toUtf8().constData(), it.value().toString().toUtf8());
+            for (const QString &key : relay::guestbridge::bridgeEnvKeys()) {
+                const QString value = env.value(key).toString();
+                if (value.isEmpty()) qunsetenv(key.toUtf8().constData());
+                else qputenv(key.toUtf8().constData(), value.toUtf8());
             }
         }
         // Registered now, not at the first prompt: the port is already in this shell's
