@@ -28,6 +28,11 @@ struct Card {
     // (#T71W). Empty on everything else, and that is what puts a `done` card in Verified rather
     // than in Done — the section is derived, not a status of its own.
     QString verifiedBy;
+    // The card's whole text — body, then each thread entry — sent by the worker (protocol 19.2
+    // `text`, capped at 64 KiB there) so the filter's plain words search the whole card, not
+    // only the title (owner, 2026-09-19: "switchboard filter bar should be full text search").
+    // Not for drawing: the card detail reads the real body.
+    QString text;
     QString type = QStringLiteral("work");
     QStringList labels;
     int threadEntries = 0, tasksDone = 0, tasksTotal = 0;

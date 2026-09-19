@@ -774,6 +774,7 @@ Card Card::fromJson(const QJsonObject &object)
     card.path = object.value(QStringLiteral("path")).toString();
     card.implementedBy = object.value(QStringLiteral("implemented_by")).toString();
     card.verifiedBy = object.value(QStringLiteral("verified_by")).toString();
+    card.text = object.value(QStringLiteral("text")).toString();
     card.milestone = object.value(QStringLiteral("milestone")).toString();
     card.created = object.value(QStringLiteral("created")).toString();
     card.topic = object.value(QStringLiteral("topic")).toString();
@@ -1195,7 +1196,11 @@ bool Model::matches(const Card &card, const QString &filter)
             const QString haystack = card.id + QLatin1Char(' ') + card.title + QLatin1Char(' ')
                                      + card.labels.join(QLatin1Char(' ')) + QLatin1Char(' ')
                                      + card.assignee + QLatin1Char(' ') + card.milestone;
-            if (!haystack.contains(term, Qt::CaseInsensitive))
+            // Full text: a plain word also searches the card's whole body and thread (the
+            // worker's `text` on the row), not only the row's own fields. Checked apart so a
+            // long card's text is never copied into the haystack on every term.
+            if (!haystack.contains(term, Qt::CaseInsensitive)
+                && !card.text.contains(term, Qt::CaseInsensitive))
                 return false;
         }
     }

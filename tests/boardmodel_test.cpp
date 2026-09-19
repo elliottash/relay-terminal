@@ -335,9 +335,20 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     QVERIFY(Model::matches(card, QStringLiteral("#K7Q2")));
     QVERIFY(Model::matches(card, QStringLiteral("transcription")));
     QVERIFY(!Model::matches(card, QStringLiteral("clickable")));
+    // Plain words are full-text search (owner, 2026-09-19: "switchboard filter bar should be
+    // full text search"): the worker sends the card's body and thread as one `text` on the row,
+    // and a word matches it as readily as the title.
+    QVERIFY(!Model::matches(card, QStringLiteral("hotline")));
+    card.text = QStringLiteral("## Issue\nadd voice transcribe mode\n- dana asked for a hotline");
+    QVERIFY(Model::matches(card, QStringLiteral("hotline")));
+    QVERIFY(Model::matches(card, QStringLiteral("HOTLINE")));
+    QVERIFY(Model::matches(card, QStringLiteral("transcribe")));
+    QVERIFY(!Model::matches(card, QStringLiteral("supercalifragilistic")));
     // Every term has to match, not just one.
     QVERIFY(Model::matches(card, QStringLiteral("label:voice @agent transcription")));
     QVERIFY(!Model::matches(card, QStringLiteral("label:voice @dana")));
+    QVERIFY(Model::matches(card, QStringLiteral("label:voice hotline")));
+    QVERIFY(!Model::matches(card, QStringLiteral("label:voice clickable")));
 }
 
 void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()
@@ -346,6 +357,9 @@ void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()
     model.setConfig(config());
     QJsonObject tagged = row("K7Q2", "ready", "features");
     tagged.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("voice")});
+    // The row's `text` is the card's whole body and thread as the worker sends it (19.2); a
+    // plain word in it filters the list exactly like one in the title.
+    tagged.insert(QStringLiteral("text"), QStringLiteral("## Issue\nthe composer eats bullets"));
     model.reset(rows({tagged, row("M3XJ", "inbox", "features"), row("DN01", "done", "features")}));
     QCOMPARE(model.openCount(), 2);
 
@@ -360,6 +374,9 @@ void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()
     // Filtered, a section with no match gets out of the way, the counts follow, and nothing is
     // folded: a search that hid its own matches would be a search that does nothing.
     model.setFilter(QStringLiteral("label:voice"));
+    QCOMPARE(model.openCount(), 1);
+    QCOMPARE(sketch(model.rows(folded)), (QStringList{"# ready 1", "K7Q2"}));
+    model.setFilter(QStringLiteral("composer"));
     QCOMPARE(model.openCount(), 1);
     QCOMPARE(sketch(model.rows(folded)), (QStringList{"# ready 1", "K7Q2"}));
     model.setFilter(QStringLiteral("status:done"));

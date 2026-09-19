@@ -1,0 +1,4 @@
+2026-09-19T21:16:22.791Z INFO relay.worker pane=13d39c26 worker_start version=0.1.0 pid=835076 level=info
+2026-09-19T21:16:22.823Z INFO relay.worker pane=13d39c26 configured model=relay-main host=api.relay-terminal.ai role=main skills=1 agents=2 stall_s=60 session=d5e1fb6416ce46199210d62bb5fb362d
+2026-09-19T21:16:31.235Z INFO relay.worker pane=switchboard worker_start version=0.1.0 pid=836491 level=info
+2026-09-19T21:16:31.254Z INFO relay.worker pane=switchboard configured model=relay-main host=api.relay-terminal.ai role=main skills=1 agents=2 stall_s=60 session=90f6e58fda024da9a619aea79f072b79

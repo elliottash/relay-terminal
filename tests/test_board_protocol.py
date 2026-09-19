@@ -141,8 +141,56 @@ class OpenTests(ProtocolTest):
         board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
         row = board["cards"][0]
         for key in ("id", "title", "status", "tab", "labels", "assignee", "waiting_on", "rank",
-                    "thread_entries", "tasks_done", "tasks_total", "path"):
+                    "thread_entries", "tasks_done", "tasks_total", "path", "created", "updated",
+                    "text"):
             self.assertIn(key, row)
+
+    def test_a_row_says_when_the_card_last_changed(self):
+        card_id = self.make_card()
+        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
+        first = next(r for r in board["cards"] if r["id"] == card_id)["updated"]
+        self.assertRegex(first, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        # A comment touches the thread file, and the row's `updated` — the later of the card's
+        # and the thread's mtime — follows it, so the pane's Recently updated sort moves too.
+        time.sleep(1.05)
+        events = self.send(type="board_comment", id="c1", card=card_id, text="a nudge")
+        changed = [e for e in events if e["event"] == "board_changed"][-1]
+        after = next(r for r in changed["upserts"] if r["id"] == card_id)["updated"]
+        self.assertRegex(after, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertGreater(after, first)
+
+    def test_a_row_carries_the_whole_card_for_the_panes_full_text_filter(self):
+        card_id = self.make_card(text="the composer eats the third bullet point")
+        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
+        row = next(r for r in board["cards"] if r["id"] == card_id)
+        # The body rides on the row…
+        self.assertIn("## Issue", row["text"])
+        self.assertIn("the composer eats the third bullet point", row["text"])
+        # …and so does the thread: its words, its author, its kind. The comment's own
+        # `board_changed` carries the upsert, so a live filter matches it without a refresh.
+        events = self.send(type="board_comment", id="c1", card=card_id, author="dana",
+                           kind="question", text="does it work offline?")
+        changed = [e for e in events if e["event"] == "board_changed"][-1]
+        row = next(r for r in changed["upserts"] if r["id"] == card_id)
+        self.assertIn("does it work offline?", row["text"])
+        self.assertIn("dana", row["text"])
+        self.assertIn("question", row["text"])
+        # But not the entries' header metadata: `pane=switchboard` sits in every header, so the
+        # word "switchboard" would otherwise match every card that has a thread.
+        self.assertNotIn("relay:entry", row["text"])
+        self.assertNotIn("pane=", row["text"])
+
+    def test_the_rows_text_is_capped_so_the_board_message_stays_bounded(self):
+        card_id = self.make_card()
+        # Quick add refuses a text over 8000 characters, so a card long enough to test the cap
+        # is written through the Board itself.
+        card = self.board.card_by_id(card_id)
+        card.body = "# Voice mode\n\n## Issue\n" + "a very long ask " * 100_000
+        self.board.save(card)
+        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
+        text = next(r for r in board["cards"] if r["id"] == card_id)["text"]
+        self.assertLessEqual(len(text), P.MAX_ROW_TEXT)
+        self.assertTrue(text.startswith("# Voice mode"))
 
     def test_board_refresh_reports_only_what_changed(self):
         card_id = self.make_card()

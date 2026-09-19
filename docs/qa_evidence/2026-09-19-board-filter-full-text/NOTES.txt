@@ -1,0 +1,74 @@
+Full-text filter (card #PFNS) — how this evidence was taken, 2026-09-19
+
+The owner's ask, verbatim: "switchboard filter bar should be full text search". Until now a
+plain word in the filter box matched only the row's own fields (id, title, labels, assignee,
+milestone); a phrase remembered from a card's body or thread found nothing.
+
+What changed
+------------
+- backend/relay_core/board_protocol.py: every row the GUI receives (`board_open` and
+  `board_changed` upserts) now carries `text`: the card's body, then each thread entry's
+  author, kind and words, capped at MAX_ROW_TEXT = 64 KiB per card so the `board` message —
+  which carries every row at once — stays well inside the worker's 8 MiB line buffer.
+  Thread entry *headers* are left out on purpose: `pane=switchboard` sits in every header, so
+  the word "switchboard" would otherwise match every card with a thread.
+- backend/relay_core/board_tools.py: `_threads()` (the one pass that parses every thread file;
+  `_thread_counts()` is now a wrapper over it) so the count and the searchable text come from
+  a single read. `board_list`'s rows — an agent's tool result — stay light and carry no `text`.
+- src/BoardModel.{h,cpp}: `Card::text` parsed from the row; a plain filter term now also
+  matches it (checked apart from the small row-field haystack so a long card's text is never
+  copied per term).
+- src/BoardPane.cpp: the filter box's placeholder says what it does now:
+  "Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me".
+- docs: protocol 19.2 (the row and its `text`) and SWITCHBOARD-DESIGN 4.6 (Filtering).
+
+Measured, on this repository's own board (270 cards):
+  whole `board` message JSON ... 1665 KiB   (was ~100 KiB without text)
+  text bytes on rows .......... 1473 KiB
+  rows at the 64 KiB cap ...... 0            (largest card body on this board: 45 KB)
+  headroom to the 8 MiB buffer  ~4.8x
+
+Tests
+-----
+- tests/test_board_protocol.py: 132 tests OK, three new — a row carries body and thread words
+  (and not the entry headers' metadata), the comment's own board_changed upsert carries the
+  new thread text, and a 1.5 MB body is capped at MAX_ROW_TEXT.
+- tests/test_board_tools.py: 143 tests OK, one assertion added — board_list rows carry no
+  `text`.
+- tests/boardmodel_test.cpp (ctest `board`): the filter-language test gains body/thread words
+  (caseless, composing with label:/@ terms), and the row-JSON -> fromJson -> setFilter path is
+  pinned: a word only in a row's `text` filters the list exactly like one in the title.
+- ctest, the whole suite: every test passed but `buttonfit` — PRE-EXISTING on main and
+  unrelated (src/Theme.cpp's `QToolButton#tabProjectChip { font-size: 8.5pt }` from commit
+  7e3fb9ff is under the 9pt floor; filed as its own bug card). build/relay-buttonfit-tests
+  reproduces it with this change stashed nowhere: the 8.5pt rule is in HEAD's Theme.cpp.
+- ./scripts/test.sh (backend + Bash/PTY, 3413 tests): everything passed but one error in
+  tests/test_web_viewport.py (`getComputedStyle ... not of type 'Element'`), a browser-pane
+  test another session has in flight here; nothing in this change touches the web view.
+
+The wire itself
+---------------
+Spawning backend/worker.py exactly as the GUI does (python3 -u, configure + board_open over
+stdin) against a two-card board answers with the row
+  text: '# Where the queue badge goes\n\n## Issue\nthe badge should sit beside the count\n\n
+         dana question - does the hotline work offline?'
+  thread_entries: 1
+so the thread rides on the row through the real process boundary, not only in-unit-test.
+
+Live GUI, under Xvfb (drive.sh in this directory)
+-------------------------------------------------
+An isolated HOME/XDG_CONFIG_HOME/XDG_RUNTIME_DIR/TMPDIR project with two cards whose titles
+say nothing about the words searched for, and a thread entry on each. Scenes (screenshots +
+OCR in implementer-notes.txt, zoomed tools row in *-tools.png):
+  before           both sections, both cards, and the new placeholder visible:
+                   "Filter — any word in the ca…" (elided by the box's width)
+  word-in-body     "bullet"    -> INBOX 1, only "Voice transcription… #A1AA" survives
+  word-in-body2    "beside"    -> DISCUSSING 1, only "Where the queue ba… #B2BB"
+  word-in-thread   "hotline"   -> DISCUSSING 1, only #B2BB (the word is only in its thread)
+  word-in-thread2  "zeppelin"  -> INBOX 1, only #A1AA (the word is only in its thread)
+relay.log and the sandbox worker logs are copied beside this note.
+
+What was deliberately NOT exercised: a board large enough to approach the 8 MiB buffer
+(this repository's board is the largest at hand: 1.6 MiB); private cards' threads (the row
+for a private card carries its text the same way — the pane already reads private cards
+through board_card_get — but no scene here has one).

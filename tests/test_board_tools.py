@@ -113,6 +113,9 @@ class ListAndReadTests(BoardToolsTest):
         row = next(r for r in result["cards"] if r["id"] == first)
         for key in ("id", "title", "status", "tab", "labels", "assignee", "waiting_on", "thread_entries"):
             self.assertIn(key, row)
+        # The pane's rows carry the card's whole text for its full-text filter; an agent's tool
+        # result stays light — five kilobytes a card is not worth a list.
+        self.assertTrue(all("text" not in r for r in result["cards"]))
 
     def test_list_filters_by_tab_status_labels_and_query(self):
         voice = self.create(labels=["voice"])

@@ -1,0 +1,5 @@
+2026-09-19T21:16:22.632Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.17H.06 pid=835017 level=info
+2026-09-19T21:16:22.697Z INFO relay.gui worker_start pane=13d39c26 workspace_set=1
+2026-09-19T21:16:22.791Z INFO relay.gui event type=ready pane=13d39c26
+2026-09-19T21:16:22.824Z INFO relay.gui event type=configured pane=13d39c26 model=relay-main
+2026-09-19T21:16:31.179Z INFO relay.gui board_state pane=13d39c26 board=/tmp/relay-filter.68GqAB/home/project/.switchboard state=ready

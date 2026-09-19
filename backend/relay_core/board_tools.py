@@ -1377,18 +1377,25 @@ class BoardTools:
                 "tasks_total": len(tasks),
                 "tasks_done": sum(1 for task in tasks if task.done)}
 
-    def _thread_counts(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
+    def _threads(self) -> dict[str, list[B.ThreadEntry]]:
+        """Every card's thread entries, read once: the count on a row comes from here, and so
+        does the searchable text the protocol's own rows carry (19.2 `text`)."""
+        out: dict[str, list[B.ThreadEntry]] = {}
         for private in (False, True):
             folder = self.board.threads_dir(private)
             if not folder.is_dir():
                 continue
             for path in folder.glob("*.md"):
                 try:
-                    counts[path.stem.upper()] = len(B.parse_thread(path.read_text(encoding="utf-8")))
+                    entries = B.parse_thread(path.read_text(encoding="utf-8"))
                 except (OSError, UnicodeDecodeError):
                     continue
-        return counts
+                if entries:
+                    out[path.stem.upper()] = entries
+        return out
+
+    def _thread_counts(self) -> dict[str, int]:
+        return {card_id: len(entries) for card_id, entries in self._threads().items()}
 
     def _list(self, args: dict) -> dict:
         allowed = {"tab", "status", "type", "labels", "query", "limit"}

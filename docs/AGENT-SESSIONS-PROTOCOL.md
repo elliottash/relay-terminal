@@ -1959,10 +1959,17 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 no table of its own.
 
 A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
-thread_entries, tasks_done, tasks_total, created, milestone, topic, implemented_by}` — enough to
+thread_entries, tasks_done, tasks_total, created, milestone, topic, implemented_by, text}` — enough to
 draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only the first
 eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends them all.
 `component` is not in the row: the card detail reads it from `front`.)
+
+`text` (2026-09-19) is the card's whole searchable text — its body, then each thread entry's
+author, kind and words — capped at `board_protocol.MAX_ROW_TEXT` (64 KiB), so the pane's filter
+bar is full-text search rather than a title search. The entry headers' metadata is left out on
+purpose: `pane=switchboard` sits in every header, so the word "switchboard" would otherwise match
+every card with a thread. Only the GUI's rows carry it (`board_open`, `board_changed` upserts);
+`board_list`'s rows go to an agent's tool result and stay light.
 
 `issue` on `board_card` is the text of the card's own-words section and `issue_heading` the spelling
 that card uses for it — `Issue` since 2026-09-18, `Request` on a card filed before that (both are

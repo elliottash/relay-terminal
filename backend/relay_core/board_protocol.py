@@ -58,6 +58,11 @@ NOT_INITIALIZED_ERROR = ("This project has no Switchboard yet. Create one first 
 #: capped by `board_import.MAX_PROPOSALS`; this is the wire.
 MAX_IMPORT_KEYS = 1000
 
+#: The searchable text one row may carry (19.2 `text`): the card's whole body and thread for
+#: the pane's full-text filter.  Capped so `board`, which carries every row at once, stays well
+#: inside the worker's 8 MiB line buffer even on a board of long cards.
+MAX_ROW_TEXT = 64 * 1024
+
 #: The `code` a failed `forge_sync_*` answers with (19.14), so the GUI can offer the right thing:
 #: signing in, waiting until `retry_at`, or just saying what happened.
 FORGE_ERROR_CODES = {"ForgeAuthError": "forge_auth", "ForgeRateLimited": "forge_rate_limited",
@@ -856,9 +861,22 @@ class BoardCommands:
         self.emit(self._tag(event))
 
     # ---- rows -----------------------------------------------------------------
+    @staticmethod
+    def _search_text(card: B.Card, entries: list[B.ThreadEntry]) -> str:
+        """The card's whole text as one searchable string: its body, then each thread entry's
+        author, kind and words (protocol 19.2 `text`).
+
+        The entries' header metadata (timestamps, turn and pane ids) is left out on purpose:
+        `pane=switchboard` sits in every header, so a search for "switchboard" would match
+        every card that has a thread."""
+        parts = [card.body.strip()]
+        parts.extend(f"{entry.author} {entry.kind} {entry.text}".strip() for entry in entries)
+        return "\n\n".join(part for part in parts if part)
+
     def _rows(self) -> dict[str, dict]:
         tools = self._need()
-        counts = tools._thread_counts()
+        threads = tools._threads()
+        counts = {card_id: len(entries) for card_id, entries in threads.items()}
         rows: dict[str, dict] = {}
         for card in tools.board.cards():
             if card.id is None:
@@ -871,6 +889,10 @@ class BoardCommands:
             # The signatures travel on every row; the `qa` recommendation does not — it is per card
             # and costs a PATH and keyring probe, so it rides on `board_card_get` (19.15) instead.
             row["verified_by"] = card.front.get("verified_by")
+            # The whole card, so the pane's filter bar is full-text search (owner, 2026-09-19):
+            # body and thread together, capped at MAX_ROW_TEXT.  Only this row carries it —
+            # `board_list`'s rows go to an agent's tool result and stay light.
+            row["text"] = self._search_text(card, threads.get(card.id, []))[:MAX_ROW_TEXT]
             tasks = card.tasks()
             row["tasks_done"] = sum(1 for t in tasks if t.done)
             row["tasks_total"] = len(tasks)
