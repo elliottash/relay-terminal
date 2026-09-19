@@ -214,6 +214,22 @@ class RecordFields(unittest.TestCase):
                          (record["source"], record["id"], record["title"], record["mtime"],
                           record["workspace"], record["message_count"], record["resume_command"]))
 
+    def test_annotate_items_touches_only_the_guest_rows(self):
+        agent = {"source": "agent", "session_id": "abc", "turns": 3, "updated": 5.0}
+        claude = {"source": "claude", "session_id": CLAUDE_ID, "turns": 4, "updated": 6.0,
+                  "workspace": CWD, "title": "pane drag"}
+        codex = {"source": "codex", "session_id": CODEX_ID, "turns": 2, "updated": 7.0,
+                 "workspace": CWD, "title": "diff view"}
+        out = guest_sessions.annotate_items([agent, claude, codex])
+        self.assertEqual(agent, out[0], "a non-guest item is returned as the index gave it")
+        self.assertEqual(["claude", "-r", CLAUDE_ID], out[1]["resume_command"])
+        self.assertEqual((CLAUDE_ID, 6.0, 4), (out[1]["id"], out[1]["mtime"], out[1]["message_count"]))
+        self.assertEqual("pane drag", out[1]["title"], "the index's own fields stay put")
+        self.assertEqual(["codex", "resume", CODEX_ID], out[2]["resume_command"])
+        fork = guest_sessions.annotate_items([claude, codex], fork=True)
+        self.assertEqual([["claude", "-r", CLAUDE_ID, "--fork-session"], ["codex", "fork", CODEX_ID]],
+                         [item["resume_command"] for item in fork])
+
 
 # ----- claude transcripts ------------------------------------------------------------------------
 

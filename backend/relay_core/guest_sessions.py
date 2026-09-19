@@ -103,6 +103,26 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
                                              fork=fork)}
 
 
+def annotate_items(items, *, fork: bool = False) -> list[dict]:
+    """Index items with the protocol 26.7 record fields merged into the guest rows.
+
+    A `conversations` answer lists every source at once, so the worker does not have to know
+    which rows are guests: a guest item gains `id`, `mtime`, `message_count` and
+    `resume_command` (the argv the pane spawns to resume it, `--fork-session`/`codex fork`
+    when `fork`), and every other item comes back exactly as the index gave it.
+    """
+    out = []
+    for item in items or ():
+        if not isinstance(item, dict) or item.get("source") not in GUEST_SOURCES:
+            out.append(item)
+            continue
+        record = item_to_record(item, fork=fork)
+        out.append({**item, "id": record["id"], "mtime": record["mtime"],
+                    "message_count": record["message_count"],
+                    "resume_command": record["resume_command"]})
+    return out
+
+
 # ----- transcript parsing -----------------------------------------------------------------------
 #
 # One parser per guest accumulates a transcript's fields line by line, so the same code reads a
