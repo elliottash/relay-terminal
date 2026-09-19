@@ -70,7 +70,7 @@ everyone as one address. Leave it unset only when the port is reached directly.
 | `providers.<name>.base_url` | HTTPS only. Plain HTTP to loopback is allowed with `allow_insecure_loopback: true` (the tests) and refused otherwise. |
 | `providers.<name>.key_env` | Environment variable holding the key. Read on every request, so restarting after editing the env file rotates it. |
 | `providers.<name>.effort_style` | How the provider takes the effort: `reasoning` sends `{"reasoning": {"effort": "medium"}}` (OpenRouter); `reasoning_effort` sends `"reasoning_effort": "medium"` (OpenAI, DeepSeek, Gemini's OpenAI endpoint; the default); `none` sends nothing, for a model with no knob. |
-| `providers.<name>.price_per_mtok` | `model -> [input USD per million, output USD per million]`. **The numbers in the example are placeholders**: fill them from the providers' pricing pages before going live; they are what the ceilings count. |
+| `providers.<name>.price_per_mtok` | `model -> [input USD per million, output USD per million]`. The example's numbers are OpenRouter's list prices as fetched from `https://openrouter.ai/api/v1/models` on 2026-09-18 (GLM-5.3-Flash 0.09/0.30, DeepSeek V4.1 Flash 0.15/0.60, Gemini 3.5 Flash-Lite 0.30/2.50); re-check them when a role's upstream changes, because they are what the ceilings count. |
 | `quota` | Per installation: `tokens_per_day` (input plus output, UTC day), `requests_per_minute`, `concurrency_per_install`. |
 | `limits` | `global_concurrency`, `spend_per_day_usd` and `spend_per_month_usd` (all providers together), `per_provider_per_day_usd`, `registrations_per_ip_per_hour`, `challenges_per_ip_per_hour`. |
 | `token_ttl_seconds` | How long a registration token lives (at least 60). Clients re-register silently. |

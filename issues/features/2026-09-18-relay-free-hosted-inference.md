@@ -235,7 +235,7 @@ are kept; the decisions in it are unchanged):
 - [x] `relay-free` preset, `hosted.py`, `HostedChatProvider`, roles, `provider_config`, keytest, `presets` row, `hosted_quota`, protocol 13.9, tests (Phase 2) <!-- t:b2 -->
 - [x] Desktop: usable gate, first-run default, disclosure line, mirror row, keys-modal group and row, quota chip, exhausted message, privacy copy (Phase 3) <!-- t:d3 -->
 - [x] Docs and site: `docs/RELAY-FREE.md`, ROADMAP and WARP decision rows, README privacy, `site/index.html`, `site/free.html` (Phase 4) <!-- t:s4 -->
-- [ ] Deploy: `python3-cryptography`, unit, env file, cloudflared ingress, DNS (owner), live health check <!-- t:p5 -->
+- [x] Deploy: `python3-cryptography`, unit, env file, cloudflared ingress, DNS (owner), live health check <!-- t:p5 -->
 - [x] QA evidence under `docs/qa_evidence/2026-09-18-relay-free/` <!-- t:q6 -->
 
 ## What is left
@@ -252,3 +252,4 @@ are kept; the decisions in it are unchanged):
 ## Thread
 
 - 2026-09-18, implementer (Claude): landed as `6e83ee9`: gateway, backend, desktop, docs and site in one commit, built and tested on the exact tree (the tmux test in `test_ssh_shell` is flaky under load and passed on rerun). Left open: deploying the gateway (DNS, cloudflared ingress, env file with the OpenRouter key, real prices), the phone view's copy of the quota chip, and the Lite cap tuning.
+- 2026-09-18, implementer (Claude), on the owner's instruction with the owner's keys: deployed. `/opt/relay` on elliott-main-1 from the committed tree, user `relay-gateway`, `/etc/relay-gateway/{gateway.json,env}` (the OpenRouter key, mode 0600), unit enabled; the tunnel's remote ingress gained `api.relay-terminal.ai -> localhost:8790` as its first rule (25 rules, catch-all still last) and the zone a proxied CNAME to the tunnel. `/v1/health` answers publicly; a real `relay-lite` call from the desktop's client returned in 1.5 s with `hosted_quota` 44 of 250,000. Prices in `gateway.example.json` are OpenRouter's list prices of the day. The other hostnames on the shared tunnel still return 200.

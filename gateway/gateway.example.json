@@ -2,7 +2,10 @@
   "roles": {
     "relay-main": {
       "upstreams": [
-        {"provider": "openrouter", "model": "z-ai/glm-5.3-flash"}
+        {
+          "provider": "openrouter",
+          "model": "z-ai/glm-5.3-flash"
+        }
       ],
       "effort": "medium",
       "max_effort": "medium",
@@ -11,7 +14,10 @@
     },
     "relay-flash": {
       "upstreams": [
-        {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"}
+        {
+          "provider": "openrouter",
+          "model": "deepseek/deepseek-v4.1-flash"
+        }
       ],
       "effort": "low",
       "max_effort": "medium",
@@ -20,7 +26,13 @@
     },
     "relay-lite": {
       "upstreams": [
-        {"provider": "openrouter", "model": "google/gemini-3.5-flash-lite", "extra": {"temperature": 0}}
+        {
+          "provider": "openrouter",
+          "model": "google/gemini-3.5-flash-lite",
+          "extra": {
+            "temperature": 0
+          }
+        }
       ],
       "effort": "minimal",
       "max_effort": "medium",
@@ -34,9 +46,18 @@
       "key_env": "GATEWAY_OPENROUTER_KEY",
       "effort_style": "reasoning",
       "price_per_mtok": {
-        "z-ai/glm-5.3-flash": [0.06, 0.40],
-        "deepseek/deepseek-v4.1-flash": [0.14, 0.28],
-        "google/gemini-3.5-flash-lite": [0.10, 0.40]
+        "z-ai/glm-5.3-flash": [
+          0.09,
+          0.3
+        ],
+        "deepseek/deepseek-v4.1-flash": [
+          0.15,
+          0.6
+        ],
+        "google/gemini-3.5-flash-lite": [
+          0.3,
+          2.5
+        ]
       }
     },
     "deepseek": {
@@ -61,7 +82,9 @@
     "global_concurrency": 64,
     "spend_per_day_usd": 20,
     "spend_per_month_usd": 300,
-    "per_provider_per_day_usd": {"openrouter": 20},
+    "per_provider_per_day_usd": {
+      "openrouter": 20
+    },
     "registrations_per_ip_per_hour": 10,
     "challenges_per_ip_per_hour": 30
   },

@@ -139,7 +139,7 @@ touches neither.
 | `relay-free` preset, `hosted.py`, `HostedChatProvider`, roles, protocol 13.9 | Phase 2 |
 | Desktop default, disclosure line, keys-modal row, quota chip, exhausted message | Phase 3 |
 | Site and docs | this document, `site/free.html`, README and ROADMAP updates |
-| Live gateway at `api.relay-terminal.ai` | not deployed: needs the owner's DNS and tunnel change |
+| Live gateway at `api.relay-terminal.ai` | **live since 2026-09-18 20:14 UTC**: `relay-gateway.service` on the Hetzner box, the shared tunnel's first ingress rule, a proxied CNAME; the desktop's client streamed a Lite reply through it in 1.5 s |
 | Cost-aware routing, provider health, stronger identity, dashboard | Phase 4–5, not started |
 
 Card `#HG7K` records the phases' commits and QA evidence.

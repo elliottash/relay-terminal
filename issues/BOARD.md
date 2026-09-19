@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-180 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+181 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (107)
 
@@ -23,7 +23,7 @@
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress | agent |  | [1](threads/W5N2.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
-| `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 5/6 |  |
+| `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
 | `#KDK9` | [The Switchboard cleans itself up: `board_cleanup`, its three tools and its changelog](features/needs_qa_llm/2026-09-18-switchboard-cleanup-button.md) | needs-qa-llm | agent |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | agent |  |  |
@@ -116,7 +116,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (71)
+## Bugs (72)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -162,6 +162,7 @@
 | `#J314` | [A pane that is not being typed in never takes the keyboard](changes/needs_qa_llm/2026-09-18-panes-keep-their-own-keyboard.md) | needs-qa-llm | agent |  |  |
 | `#9V1F` | [Queued items are edited in the prompt box, and the highlighted top item holds the queue](changes/needs_qa_llm/2026-09-18-queue-items-edit-in-the-prompt-box.md) | needs-qa-llm | agent |  |  |
 | `#SB7K` | [Scrollback survives a quit and restart](changes/needs_qa_llm/2026-09-18-scrollback-survives-restart.md) | needs-qa-llm | agent |  |  |
+| `#EFRT` | [Every reasoning-effort picker offers the same levels, and never drops "high"](changes/needs_qa_llm/2026-09-18-reasoning-levels-one-list.md) | needs-qa-llm | agent |  |  |
 | `#WU4U` | [Relay compiles and runs against Qt 6, and the Ubuntu 26.04 `.deb` builds](changes/needs_qa_llm/2026-09-18-relay-builds-against-qt6.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
