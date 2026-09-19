@@ -459,7 +459,7 @@ signal `RichEditor::setCaretColor` takes the caret's blink from) draws the dots 
 no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
-tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
+tab close and ⧉ buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane

@@ -294,6 +294,7 @@ public:
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
+    std::function<void(const QString &code)> onJoinShared;   // /join CODE, /connect CODE
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
@@ -5048,6 +5049,8 @@ private:
             {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
             {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
             {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
+            {QStringLiteral("join"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session: their meeting code, then the PIN")},
+            {QStringLiteral("connect"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session (same as /join)")},
             {QStringLiteral("shell"), QStringLiteral("<command>"), QStringLiteral("Send to the terminal")},
             {QStringLiteral("agent"), QStringLiteral("<prompt>"), QStringLiteral("Send to the agent")}};
         return commands;
@@ -5390,6 +5393,11 @@ private:
         }
         else if (name == QStringLiteral("rename-tab")) {
             if (onRenameTab) onRenameTab(args, args.isEmpty());
+        }
+        else if (name == QStringLiteral("join") || name == QStringLiteral("connect")) {
+            // The code is public and four letters; the PIN is asked for in the dialog, never on
+            // the command line, where it would land in the prompt history.
+            if (onJoinShared) onJoinShared(args.trimmed().toUpper());
         }
         else if (name == QStringLiteral("switchboard")) {
             if (onOpenBoard) onOpenBoard();

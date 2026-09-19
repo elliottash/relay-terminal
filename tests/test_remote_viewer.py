@@ -441,6 +441,305 @@ class ResumeTests(unittest.TestCase):
             self.assertTrue(v.streams["panes"].high == 1)
 
 
+class GuestHarness:
+    """The security suite's real rendezvous and host with a code-and-PIN share on ``pane-1``,
+    and a guest-mode viewer whose stdout is a list."""
+
+    def __init__(self, role=wire.EDITOR, admit=True):
+        self.role = role
+        self.admit = admit
+        self.out: list[dict] = []
+
+    async def __aenter__(self):
+        from tests.test_remote_security import Harness as ShareHarness
+        # Never the real keyring: the host's Identity.create would store its key over the
+        # owner's own remote identity.
+        self.keyring = mock.patch.dict(os.environ, {"RELAY_KEYRING": "off"})
+        self.keyring.start()
+        self.share = await ShareHarness(admit=self.admit).__aenter__()
+        self.laptop = self.share.directory / "guest-laptop"
+        self.laptop.mkdir(mode=0o700)
+        self.viewer = viewer.Viewer(self.out.append, self.laptop, guest=True)
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.viewer.stop()
+        await self.share.__aexit__(*exc)
+        self.keyring.stop()
+
+    @property
+    def host(self):
+        return self.share.host
+
+    async def code(self):
+        return await self.host.code_create(["pane-1"], self.role)
+
+    def emitted(self, kind: str) -> list[dict]:
+        return [line for line in self.out if line.get("t") == kind]
+
+    def messages(self, kind: str | None = None) -> list[dict]:
+        return [line["message"] for line in self.out if line.get("t") == "message"
+                and (kind is None or line["message"].get("t") == kind)]
+
+    async def until(self, predicate, what: str, timeout: float = 10.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            value = predicate()
+            if value:
+                return value
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError(f"timed out waiting for {what}; the viewer said "
+                                     f"{[line.get('t') for line in self.out][-30:]}")
+            await asyncio.sleep(0.02)
+
+    async def join(self, record, pin=None) -> None:
+        await self.viewer.handle({"t": "join", "code": f"  {record.code.lower()} ",
+                                  "pin": record.pin if pin is None else pin, "name": "Elliott",
+                                  "platform": "Relay", "rendezvous": self.share.base})
+
+
+class GuestTests(unittest.TestCase):
+    def test_a_code_and_pin_join_as_a_guest_in_the_contract_order(self):
+        async def main():
+            capture = Capture()
+            root = logging.getLogger()
+            previous = root.level
+            root.addHandler(capture)
+            root.setLevel(logging.DEBUG)
+            try:
+                async with GuestHarness() as harness:
+                    knocks = []
+                    original = harness.host.knock_approver
+
+                    async def approver(request):
+                        knocks.append(request)
+                        return await original(request)
+                    harness.host.knock_approver = approver
+                    record = await harness.code()
+                    await harness.join(record)
+                    await harness.until(lambda: harness.emitted("welcome"), "the welcome")
+                    await harness.until(lambda: harness.emitted("status")[-1]["state"]
+                                        == "connected", "connected")
+
+                    order = [(line["t"], line.get("state")) for line in harness.out
+                             if line["t"] in ("status", "code", "joined", "welcome")]
+                    self.assertEqual(order[:5], [("status", "joining"), ("status", "knocking"),
+                                                 ("code", None), ("joined", None),
+                                                 ("welcome", None)])
+                    self.assertEqual(harness.emitted("status")[0]["message"],
+                                     "Checking the code and PIN…")
+                    self.assertEqual(harness.emitted("status")[1]["message"],
+                                     "Waiting for the host to let you in.")
+                    # The code the laptop shows is the one the host's dialog showed.
+                    self.assertEqual(harness.emitted("code")[0]["code"], knocks[0].code)
+                    self.assertEqual(knocks[0].name, "Elliott")
+
+                    joined = harness.emitted("joined")[0]
+                    self.assertEqual(joined["desktop"], "test desktop")
+                    self.assertEqual(joined["role"], wire.EDITOR)
+                    self.assertEqual(joined["panes"], ["pane-1"])
+                    self.assertGreater(joined["expires"], 0)
+                    welcome = harness.emitted("welcome")[0]
+                    self.assertEqual(welcome["capability"], "guest")
+                    self.assertEqual(welcome["role"], wire.EDITOR)
+                    self.assertEqual(welcome["desktop"], "test desktop")
+                    self.assertNotIn("device", welcome)
+                    # A participant, never a device.
+                    self.assertEqual(harness.share.devices.live(), [])
+                    self.assertIn(welcome["participant"], harness.share.guests.participants)
+
+                    # The session is the ordinary one: a message about pane-1 arrives.
+                    await harness.viewer.handle({"t": "open", "pane": "pane-1"})
+                    await harness.until(lambda: [m for m in harness.messages("screen_snapshot")
+                                                 if m.get("pane") == "pane-1"], "a snapshot")
+                    await harness.until(lambda: [m for m in harness.messages("control")
+                                                 if m.get("pane") == "pane-1"], "control")
+                    await harness.viewer.handle({"t": "send", "message": {
+                        "t": "compose", "pane": "pane-1", "text": "hello from the laptop"}})
+                    await harness.until(lambda: harness.messages("prompt_pending"),
+                                        "the guest's prompt waiting for the owner")
+
+                    # The record: 0600 in a 0700 directory, and what rejoin needs.
+                    path = viewer.GuestRecord.path(harness.laptop)
+                    self.assertEqual(path, harness.laptop / "guest" / "guest.json")
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                    self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+                    stored = json.loads(path.read_text())
+                    self.assertEqual(stored["rendezvous"], harness.share.base)
+                    self.assertEqual(stored["desktop_name"], "test desktop")
+                    self.assertEqual(stored["role"], wire.EDITOR)
+                    self.assertEqual(stored["joined"]["participant"], welcome["participant"])
+
+                    # Neither the PIN nor the key reaches stdout or a log.
+                    said = json.dumps(harness.out) + "\n".join(capture.lines)
+                    self.assertNotIn(stored["joined"]["static_private"], said)
+                    self.assertNotIn(f'"{record.pin}"', json.dumps(harness.out))
+                    self.assertNotIn(record.pin, "\n".join(capture.lines))
+                    self.assertNotIn("/join#", said)
+                    self.assertTrue({line["t"] for line in harness.out}
+                                    <= {"status", "code", "joined", "welcome", "message",
+                                        "error"})
+            finally:
+                root.removeHandler(capture)
+                root.setLevel(previous)
+        run(main())
+
+    def test_a_wrong_pin_says_so_and_stores_nothing(self):
+        async def main():
+            async with GuestHarness() as harness:
+                record = await harness.code()
+                wrong = f"{(int(record.pin) + 1) % 10000:04d}"
+                await harness.join(record, pin=wrong)
+                await harness.until(lambda: harness.emitted("error"), "the refusal")
+                error = harness.emitted("error")[-1]
+                self.assertEqual(error["reason"], "wrong_pin")
+                self.assertEqual(error["message"], "That PIN is not the one on their screen.")
+                await harness.until(lambda: harness.emitted("status")[-1]["state"] == "unjoined",
+                                    "unjoined")
+                self.assertFalse(viewer.GuestRecord.path(harness.laptop).exists())
+                self.assertIsNone(harness.viewer.record)
+                self.assertEqual(harness.emitted("joined"), [])
+
+                # A PIN that cannot be right is refused here and spends none of the three.
+                failures = record.failures
+                await harness.join(record, pin="12")
+                self.assertEqual(harness.emitted("error")[-1]["reason"], "wrong_pin")
+                self.assertEqual(record.failures, failures)
+                # An unknown code.
+                await harness.viewer.handle({"t": "join", "code": "ZZZZ", "pin": "1234",
+                                             "rendezvous": harness.share.base})
+                await harness.until(lambda: harness.emitted("error")[-1].get("reason")
+                                    == "no_such_code", "no_such_code")
+                self.assertEqual(harness.emitted("status")[-1]["state"], "unjoined")
+        run(main())
+
+    def test_a_refused_knock_is_not_admitted(self):
+        async def main():
+            async with GuestHarness(admit=False) as harness:
+                record = await harness.code()
+                await harness.join(record)
+                await harness.until(lambda: harness.emitted("error"), "the refusal")
+                self.assertEqual(harness.emitted("error")[-1],
+                                 {"t": "error", "message": "They did not let you in.",
+                                  "reason": "not_admitted"})
+                await harness.until(lambda: harness.emitted("status")[-1]["state"] == "unjoined",
+                                    "unjoined")
+                self.assertTrue(harness.emitted("code"))
+                self.assertFalse(viewer.GuestRecord.path(harness.laptop).exists())
+        run(main())
+
+    def test_the_host_removing_the_guest_ends_it_for_good(self):
+        async def main():
+            original = viewer.RETRY
+            viewer.RETRY = (0.2,)
+            try:
+                async with GuestHarness() as harness:
+                    record = await harness.code()
+                    await harness.join(record)
+                    await harness.until(lambda: harness.emitted("welcome"), "the welcome")
+                    participant = harness.emitted("welcome")[0]["participant"]
+                    await harness.host.participant_remove(participant)
+                    ended = await harness.until(lambda: harness.emitted("ended"), "ended")
+                    self.assertEqual(ended[0]["message"],
+                                     "This share has ended, or your access expired.")
+                    self.assertEqual(harness.emitted("status")[-1]["state"], "unjoined")
+                    self.assertFalse(viewer.GuestRecord.path(harness.laptop).exists())
+                    # And nothing tries again.
+                    await asyncio.sleep(0.6)
+                    self.assertEqual(len(harness.emitted("welcome")), 1)
+                    self.assertFalse([line for line in harness.emitted("status")
+                                      if line["state"] == "reconnecting"])
+                    await harness.viewer.handle({"t": "connect"})
+                    self.assertEqual(harness.emitted("status")[-1]["state"], "unjoined")
+            finally:
+                viewer.RETRY = original
+        run(main())
+
+    def test_a_stored_guest_record_rejoins_after_a_restart(self):
+        async def main():
+            async with GuestHarness(role=wire.VIEWER) as harness:
+                record = await harness.code()
+                await harness.join(record)
+                await harness.until(lambda: harness.emitted("welcome"), "the welcome")
+                participant = harness.emitted("welcome")[0]["participant"]
+                await harness.viewer.stop()
+
+                again = viewer.Viewer(harness.out.append, harness.laptop, guest=True)
+                harness.viewer = again
+                self.assertIsNotNone(again.record)
+                before = len(harness.emitted("welcome"))
+                await again.handle({"t": "connect"})
+                await harness.until(lambda: len(harness.emitted("welcome")) > before,
+                                    "a second welcome")
+                welcome = harness.emitted("welcome")[-1]
+                self.assertEqual(welcome["capability"], "guest")
+                self.assertEqual(welcome["role"], wire.VIEWER)
+                self.assertEqual(welcome["participant"], participant)
+                self.assertEqual(welcome["desktop"], "test desktop")
+                self.assertEqual(harness.messages("welcome")[-1]["t"], "welcome")
+                await harness.until(lambda: harness.emitted("status")[-1]["state"]
+                                    == "connected", "connected")
+
+                # A viewer may not compose: refused here before the hub has to.
+                errors = len(harness.emitted("error"))
+                await again.handle({"t": "send", "message": {"t": "compose", "pane": "pane-1",
+                                                             "text": "hi"}})
+                self.assertEqual(len(harness.emitted("error")), errors + 1)
+                self.assertIn("role", harness.emitted("error")[-1]["message"])
+                # Nor anything a guest never gets, whatever the role.
+                await again.handle({"t": "send", "message": {"t": "agent_stop",
+                                                             "pane": "pane-1"}})
+                self.assertIn("not open to guests", harness.emitted("error")[-1]["message"])
+                # Pairing is refused in guest mode.
+                await again.handle({"t": "pair", "url": "https://x/pair#v=1"})
+                self.assertIn("guest session", harness.emitted("error")[-1]["message"])
+
+                # Leaving says goodbye, deletes the record and says unjoined.
+                await again.handle({"t": "leave"})
+                self.assertEqual(harness.emitted("status")[-1]["state"], "unjoined")
+                self.assertFalse(viewer.GuestRecord.path(harness.laptop).exists())
+                self.assertFalse(again.connected)
+        run(main())
+
+    def test_a_dropped_guest_link_rejoins_and_resumes(self):
+        async def main():
+            original = viewer.RETRY
+            viewer.RETRY = (0.3,)
+            try:
+                async with GuestHarness() as harness:
+                    record = await harness.code()
+                    await harness.join(record)
+                    await harness.until(lambda: harness.emitted("welcome"), "the welcome")
+                    await harness.viewer.handle({"t": "open", "pane": "pane-1"})
+                    await harness.until(lambda: harness.messages("screen_snapshot"), "snapshot")
+                    harness.viewer.client.socket._writer.transport.abort()
+                    await harness.until(lambda: len(harness.emitted("welcome")) > 1,
+                                        "the rejoin", timeout=15)
+                    self.assertEqual(harness.emitted("welcome")[-1]["capability"], "guest")
+                    self.assertEqual(harness.emitted("ended"), [])
+                    self.assertTrue(viewer.GuestRecord.path(harness.laptop).exists())
+                    # The open pane is focused again on the new session.
+                    await harness.until(lambda: len(harness.messages("screen_snapshot")) >= 2,
+                                        "a fresh snapshot")
+            finally:
+                viewer.RETRY = original
+        run(main())
+
+    def test_an_expired_record_is_not_rejoined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            joined = viewer.client_mod.Joined(desktop_public=b"\x01" * 32, participant="p",
+                                              role=wire.VIEWER, panes=["pane-1"],
+                                              expires=1.0, static_private=b"\x02" * 32)
+            viewer.GuestRecord(joined, "http://127.0.0.1:1", "somebody").save(directory)
+            out: list[dict] = []
+            v = viewer.Viewer(out.append, directory, guest=True)
+            self.assertIsNone(v.record)
+            self.assertFalse(viewer.GuestRecord.path(directory).exists())
+            v.announce()
+            self.assertEqual(out[-1]["state"], "unjoined")
+
+
 class StdioTests(unittest.TestCase):
     def test_the_process_speaks_json_lines(self):
         with tempfile.TemporaryDirectory() as home:
@@ -462,6 +761,34 @@ class StdioTests(unittest.TestCase):
             self.assertEqual(out[2]["t"], "error")
             directory = Path(home) / "relay" / "viewer"
             self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+
+    def test_the_guest_process_starts_unjoined_and_refuses_pairing(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, XDG_DATA_HOME=home, RELAY_KEYRING="off")
+            lines = "\n".join(json.dumps(m) for m in (
+                {"t": "connect"},
+                {"t": "pair", "url": "https://example/pair#v=1"},
+                {"t": "join", "code": "", "pin": "1234"},
+                {"t": "stop"})) + "\n"
+            done = subprocess.run([sys.executable, "-m", "remote.viewer", "--guest"],
+                                  input=lines, capture_output=True, text=True, timeout=30,
+                                  env=env, cwd=ROOT)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            out = [json.loads(line) for line in done.stdout.splitlines()]
+            self.assertEqual(out[0], {"t": "status", "state": "unjoined",
+                                      "message": "Not in anyone's share."})
+            self.assertEqual(out[1]["state"], "unjoined")
+            self.assertEqual(out[2]["t"], "error")
+            self.assertEqual(out[3]["reason"], "no_such_code")
+            self.assertEqual(out[4]["state"], "unjoined")
+            # And the device process refuses a join.
+            done = subprocess.run([sys.executable, "-m", "remote.viewer"],
+                                  input=json.dumps({"t": "join", "code": "BQRT", "pin": "1234"})
+                                  + "\n", capture_output=True, text=True, timeout=30, env=env,
+                                  cwd=ROOT)
+            out = [json.loads(line) for line in done.stdout.splitlines()]
+            self.assertEqual(out[1]["t"], "error")
+            self.assertIn("guest session", out[1]["message"])
 
 
 if __name__ == "__main__":

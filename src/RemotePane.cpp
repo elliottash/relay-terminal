@@ -8,9 +8,11 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontMetricsF>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -26,6 +28,8 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QScrollBar>
 #include <QSettings>
 #include <QStackedWidget>
@@ -1002,7 +1006,14 @@ RemotePane::RemotePane(const QString &paneId, const QString &title, const QStrin
         send({{"t", "paste"}, {"text", text}});
     });
     connect(m_screen, &RemoteScreen::typedWhileWatching, this, [this] {
-        if (m_capability != QLatin1String("full"))
+        const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+        if (m_ended)
+            return;
+        if (guest())
+            showNote(m_role != QLatin1String("editor") ? QStringLiteral("Watching %1's pane: a viewer cannot type into it.").arg(owner)
+                     : m_asking ? QStringLiteral("Waiting for %1 to let you type…").arg(owner)
+                     : QStringLiteral("“Ask to type” above the terminal first; %1 decides.").arg(owner));
+        else if (m_capability != QLatin1String("full"))
             showNote(QStringLiteral("This device is paired for %1 only: it cannot type into the terminal.")
                          .arg(m_capability == QLatin1String("agent") ? QStringLiteral("the agent") : QStringLiteral("viewing")));
         else
@@ -1114,29 +1125,46 @@ RemotePane::~RemotePane()
 
 RemotePane *RemotePane::openFromViewer(const QString &paneId, const QString &title, const QString &desktop)
 {
-    RemoteViewer &viewer = RemoteViewer::instance();
+    return openFromViewer(paneId, title, desktop, RemoteViewer::instance());
+}
+
+RemotePane *RemotePane::openFromViewer(const QString &paneId, const QString &title, const QString &desktop,
+                                       RemoteViewer &viewer)
+{
+    // Both viewers live as long as the process, so the lambdas below may hold on to this one.
+    RemoteViewer *source = &viewer;
     viewer.send({{"t", "open"}, {"pane", paneId}});
     viewer.paneOpened(paneId);
-    auto *pane = new RemotePane(paneId, title, desktop, [](const QJsonObject &message) {
-        RemoteViewer::instance().sendToDesktop(message);
+    auto *pane = new RemotePane(paneId, title, desktop, [source](const QJsonObject &message) {
+        source->sendToDesktop(message);
     });
-    pane->setCapability(viewer.capability(), viewer.features());
+    pane->setCapability(viewer.isGuest() ? QStringLiteral("guest") : viewer.capability(), viewer.features());
+    if (viewer.isGuest()) {
+        pane->setRole(viewer.role());
+        pane->setParticipant(viewer.participant());
+    }
     pane->setMyDevice(viewer.device());
     connect(&viewer, &RemoteViewer::message, pane, &RemotePane::handle);
-    connect(&viewer, &RemoteViewer::welcome, pane, [pane](const QString &capability, const QStringList &features) {
-        pane->setMyDevice(RemoteViewer::instance().device());
-        pane->setCapability(capability, features);
+    connect(&viewer, &RemoteViewer::welcome, pane, [pane, source](const QString &capability, const QStringList &features) {
+        pane->setMyDevice(source->device());
+        pane->setCapability(source->isGuest() ? QStringLiteral("guest") : capability, features);
+        if (source->isGuest()) {
+            pane->setParticipant(source->participant());
+            pane->setRole(source->role());
+        }
     });
     connect(&viewer, &RemoteViewer::status, pane, &RemotePane::setConnection);
     // The viewer's own sentences ("Not connected to the desktop; that was not sent.") belong
     // where the thing that was not sent was typed.
     connect(&viewer, &RemoteViewer::failed, pane, [pane](const QString &message) { pane->showNote(message); });
-    pane->onClosed = [paneId] { RemoteViewer::instance().paneClosed(paneId); };
+    if (viewer.isGuest()) connect(&viewer, &RemoteViewer::ended, pane, &RemotePane::markEnded);
+    pane->onClosed = [source, paneId] { source->paneClosed(paneId); };
     return pane;
 }
 
 void RemotePane::send(QJsonObject message)
 {
+    if (m_ended) return;   // an ended pane is a record of what was on it, and says nothing
     message.insert(QStringLiteral("pane"), m_pane);
     if (m_sink) m_sink(message);
 }
@@ -1145,12 +1173,62 @@ void RemotePane::setCapability(const QString &capability, const QStringList &fea
 {
     if (!capability.isEmpty()) m_capability = capability;
     m_features = features;
-    m_screen->setHistoryEnabled(features.isEmpty() || features.contains(QStringLiteral("history")));
+    m_screen->setHistoryEnabled(!m_ended && (features.isEmpty() || features.contains(QStringLiteral("history"))));
+    applyGuestUi();
     updateDriveUi();
+}
+
+void RemotePane::setRole(const QString &role)
+{
+    if (role != QLatin1String("viewer") && role != QLatin1String("editor")) return;
+    m_role = role;
+    if (m_role != QLatin1String("editor")) {
+        m_asking = false;
+        // A demoted holder has already lost the keyboard on the desktop (section 10.3).
+        m_driving = false;
+    }
+    applyGuestUi();
+    updateDriveUi();
+}
+
+// What a guest sees of the pane: the screen, its scrollback, who has the keyboard and — for an
+// editor — asking to type and a prompt box. None of the pane_state strip: a guest is never sent
+// one, so the owner's model, conversations and queue are not theirs to see or to change.
+void RemotePane::applyGuestUi()
+{
+    if (!guest()) return;
+    const bool editor = m_role == QLatin1String("editor");
+    m_composer->setVisible(editor && !m_ended);
+    for (QWidget *widget : std::initializer_list<QWidget *>{m_mode, m_folder, m_sessions, m_clock, m_context, m_model, m_sendMenu, m_queue, m_thinking})
+        widget->hide();
+    m_box->setVisible(true);
+    m_send->setVisible(true);
+    const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+    m_box->setPlaceholderText(m_paused ? QStringLiteral("Paused by %1…").arg(owner) : QStringLiteral("Ask %1's agent…").arg(owner));
+    m_box->setEnabled(!m_paused);
+    m_send->setEnabled(!m_paused && !m_box->toPlainText().trimmed().isEmpty());
+}
+
+void RemotePane::markEnded(const QString &message)
+{
+    if (m_ended) return;
+    m_ended = true;
+    m_endedMessage = message.isEmpty() ? QStringLiteral("Your access to this pane ended.") : message;
+    m_driving = false;
+    m_asking = false;
+    m_claiming = false;
+    m_screen->setDriving(false);
+    m_screen->setHistoryEnabled(false);
+    m_composer->hide();
+    m_queue->hide();
+    m_thinking->hide();
+    updateDriveUi();
+    showNote(m_endedMessage, 0);
 }
 
 void RemotePane::setConnection(const QString &state, const QString &message)
 {
+    if (m_ended) return;   // the reason it ended stays on screen; nothing will reconnect it
     const bool was = m_connected;
     m_connected = state == QLatin1String("connected");
     if (m_connected) {
@@ -1175,9 +1253,11 @@ void RemotePane::setConnection(const QString &state, const QString &message)
 
 void RemotePane::handle(const QJsonObject &message)
 {
+    if (m_ended) return;
     const QString kind = str(message.value(QStringLiteral("t")));
     const QJsonValue paneValue = message.value(QStringLiteral("pane"));
     const bool mine = paneValue.isString() && paneValue.toString() == m_pane;
+    if (guest()) onGuestMessage(kind, message, mine);
     if (kind == QLatin1String("screen_snapshot") || kind == QLatin1String("screen_diff")) {
         if (mine) m_screen->apply(message);
     } else if (kind == QLatin1String("history")) {
@@ -1186,9 +1266,10 @@ void RemotePane::handle(const QJsonObject &message)
         if (!id.isEmpty() && id != m_historyRequest) return;   // a page we stopped waiting for
         m_screen->applyHistory(message);
     } else if (kind == QLatin1String("pane_state")) {
-        if (mine) updateState(message);
+        // Never sent to a guest (GUEST_SERVER_TYPES); one that arrived would draw the owner's strip.
+        if (mine && !guest()) updateState(message);
     } else if (kind == QLatin1String("queue_edit_text")) {
-        if (!mine) return;
+        if (!mine || guest()) return;
         m_box->setPlainText(str(message.value(QStringLiteral("text"))) + m_typedAhead);
         m_typedAhead.clear();
         m_box->setFocus();
@@ -1239,6 +1320,79 @@ void RemotePane::handle(const QJsonObject &message)
     }
 }
 
+// ---- a guest's messages (section 10), as app/guest.js follows them --------------------------------
+
+void RemotePane::onGuestMessage(const QString &kind, const QJsonObject &message, bool mine)
+{
+    const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+    if (kind == QLatin1String("welcome")) {
+        // A participant's welcome: {participant, role, panes, expires}, and no capability.
+        const QString participant = str(message.value(QStringLiteral("participant")));
+        if (!participant.isEmpty()) m_participant = participant;
+        setRole(str(message.value(QStringLiteral("role"))));
+    } else if (kind == QLatin1String("participants")) {
+        // The `you` row is this guest's own record, and where a live role change arrives. A role
+        // belongs to the person, not the pane, so every pane follows whichever pane it came for.
+        for (const QJsonValue &value : message.value(QStringLiteral("items")).toArray()) {
+            const QJsonObject item = value.toObject();
+            if (!item.value(QStringLiteral("you")).toBool()) continue;
+            const QString id = str(item.value(QStringLiteral("id")));
+            if (!id.isEmpty()) m_participant = id;
+            const QString role = str(item.value(QStringLiteral("role")));
+            if (!role.isEmpty() && role != m_role && (role == QLatin1String("viewer") || role == QLatin1String("editor"))) {
+                setRole(role);
+                if (mine)
+                    showNote(role == QLatin1String("editor")
+                                 ? QStringLiteral("%1 made you an editor: you can ask to type, and ask their agent.").arg(owner)
+                                 : QStringLiteral("%1 made you a viewer: you can watch this pane.").arg(owner), 8000);
+            }
+        }
+    } else if (kind == QLatin1String("control_pending")) {
+        if (!mine) return;
+        m_asking = true;
+        updateDriveUi();
+        // The hub drops an unanswered request after a minute without saying so; the waiting ends
+        // by itself rather than sitting there for ever.
+        const int serial = ++m_askSerial;
+        QTimer::singleShot(62000, this, [this, serial, owner] {
+            if (serial != m_askSerial || !m_asking || m_driving) return;
+            m_asking = false;
+            updateDriveUi();
+            showNote(QStringLiteral("Nobody answered. You can ask %1 to type again.").arg(owner));
+        });
+    } else if (kind == QLatin1String("prompt_pending")) {
+        if (mine) showNote(QStringLiteral("Waiting for %1 to approve your prompt.").arg(owner), 6000);
+    } else if (kind == QLatin1String("prompt_decided")) {
+        if (!mine) return;
+        if (message.value(QStringLiteral("approved")).toBool()) {
+            showNote(QStringLiteral("%1 approved your prompt · it went to their agent.").arg(owner));
+            return;
+        }
+        const QString reason = str(message.value(QStringLiteral("reason")));
+        showNote(reason == QLatin1String("lapsed") ? QStringLiteral("Nobody answered your prompt in ten minutes. You can send it again.")
+                 : reason == QLatin1String("paused") ? QStringLiteral("%1 paused guests before your prompt could run.").arg(owner)
+                 : reason == QLatin1String("removed") ? QStringLiteral("Your access to this pane ended before your prompt ran.")
+                 : QStringLiteral("%1 declined your prompt.").arg(owner), 8000);
+    } else if (kind == QLatin1String("share_state")) {
+        // No pane (or "") is the whole share.
+        const QString pane = str(message.value(QStringLiteral("pane")));
+        if (!pane.isEmpty() && pane != m_pane) return;
+        const bool paused = message.value(QStringLiteral("paused")).toBool();
+        const bool was = m_paused;
+        m_paused = paused;
+        m_pauseReason = str(message.value(QStringLiteral("reason")));
+        if (paused) m_asking = false;
+        applyGuestUi();
+        updateDriveUi();
+        if (paused)
+            showNote(m_pauseReason == QLatin1String("away")
+                         ? QStringLiteral("%1 is away: guests can act again when they are back.").arg(owner)
+                         : QStringLiteral("%1 paused guests: you can watch, not type or ask.").arg(owner), 0);
+        else if (was)
+            showNote(QStringLiteral("%1 let guests act again.").arg(owner), 3000);
+    }
+}
+
 // ---- control (section 10.3), as app/app.js onControl() ------------------------------------------
 
 void RemotePane::onControl(const QJsonObject &message)
@@ -1247,6 +1401,34 @@ void RemotePane::onControl(const QJsonObject &message)
     if (m_holder.isEmpty()) m_holder = QStringLiteral("owner");
     m_holderName = str(message.value(QStringLiteral("name")));
     m_holderDevice = str(message.value(QStringLiteral("device")));
+    if (guest()) {
+        // To a guest the holder is `owner`, `agent` or `participant:<id>`, and never a device.
+        // The answer to this guest's own request carries a reason; the broadcast does not.
+        const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+        const QString reason = str(message.value(QStringLiteral("reason")));
+        // The guest viewer says `driving` itself; the holder names this participant otherwise.
+        const QJsonValue driving = message.value(QStringLiteral("driving"));
+        const bool held = driving.isBool() ? driving.toBool()
+                                           : !m_participant.isEmpty() && m_holder == QStringLiteral("participant:") + m_participant;
+        const bool was = m_driving, asked = m_asking;
+        m_driving = held && m_role == QLatin1String("editor");
+        m_asking = false;
+        ++m_askSerial;
+        updateDriveUi();
+        if (m_driving && !was) {
+            showNote(QStringLiteral("What you type now goes to the program on %1's screen.").arg(owner));
+            m_screen->toLive();
+            m_screen->setFocus(Qt::OtherFocusReason);
+        } else if (asked && !m_driving && !reason.isEmpty()) {
+            showNote(reason == QLatin1String("lapsed") ? QStringLiteral("Nobody answered. You can ask to type again.")
+                                                       : QStringLiteral("%1 said no for now. You can ask again.").arg(owner));
+        } else if (was && !m_driving) {
+            showNote(m_holder == QLatin1String("owner") ? QStringLiteral("%1 took the keyboard back.").arg(m_holderName.isEmpty() ? owner : m_holderName)
+                     : m_holder == QLatin1String("agent") ? QStringLiteral("Their agent is driving this pane now.")
+                     : QStringLiteral("%1 is driving this pane now.").arg(m_holderName.isEmpty() ? QStringLiteral("Somebody else") : m_holderName));
+        }
+        return;
+    }
     // Which of the owner's devices is this one? The viewer says (`welcome.device`); a pane on a
     // sink that does not learns it from the handoff that answers its own control_request.
     if (m_claiming && m_myDevice.isEmpty() && m_holder == QLatin1String("owner") && !m_holderDevice.isEmpty())
@@ -1265,6 +1447,15 @@ void RemotePane::onControl(const QJsonObject &message)
 
 void RemotePane::requestControl()
 {
+    if (guest()) {
+        // A participant's control_request is a request, not a grant: the keyboard is theirs only
+        // when the owner's `control` names them.
+        if (m_role != QLatin1String("editor") || m_ended || m_paused || m_driving || m_asking) return;
+        send({{"t", "control_request"}});
+        m_asking = true;
+        updateDriveUi();
+        return;
+    }
     if (m_capability != QLatin1String("full")) return;
     send({{"t", "control_request"}});
     // The desktop's `control` is what makes it true, and it follows at once; the bar must not
@@ -1288,26 +1479,45 @@ void RemotePane::updateDriveUi()
 {
     const bool full = m_capability == QLatin1String("full");
     m_screen->setDriving(m_driving);
-    m_take->setVisible(full && !m_driving && m_connected);
     m_release->setVisible(m_driving);
     const QString desktop = m_desktop.isEmpty() ? QStringLiteral("the desktop") : m_desktop;
     QString words;
-    if (m_driving) {
-        words = QStringLiteral("You have the keyboard · keys go to %1").arg(desktop);
-    } else if (m_holder == QLatin1String("agent")) {
-        words = QStringLiteral("The agent has the keyboard");
-    } else if (m_holder.startsWith(QLatin1String("participant:"))) {
-        words = QStringLiteral("%1 has the keyboard").arg(m_holderName.isEmpty() ? QStringLiteral("A guest") : m_holderName);
-    } else if (!m_holderDevice.isEmpty() && m_holderDevice != m_myDevice) {
-        words = QStringLiteral("Another of your devices has the keyboard");
+    if (guest()) {
+        // One line that says whose pane this is and what this guest may do on it.
+        const bool editor = m_role == QLatin1String("editor");
+        const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+        m_take->setText(QStringLiteral("Ask to type"));
+        m_take->setToolTip(QStringLiteral("Ask %1 for the keyboard. They can take it back at any time.").arg(owner));
+        m_take->setVisible(editor && !m_ended && !m_driving && !m_asking && !m_paused && m_connected);
+        if (m_ended) words = m_endedMessage;
+        else if (m_driving) words = QStringLiteral("You have the keyboard · keys go to %1's pane").arg(owner);
+        else if (m_paused) words = QStringLiteral("Paused by %1 · watching %1's pane").arg(owner);
+        else if (m_asking) words = QStringLiteral("Asked %1 to let you type…").arg(owner);
+        else if (m_holder == QLatin1String("agent")) words = QStringLiteral("Watching %1's pane · their agent has the keyboard").arg(owner);
+        else if (m_holder.startsWith(QLatin1String("participant:")))
+            words = QStringLiteral("Watching %1's pane · %2 has the keyboard").arg(owner, m_holderName.isEmpty() ? QStringLiteral("another guest") : m_holderName);
+        else if (editor) words = QStringLiteral("%1's pane · You can ask to type; your prompts wait for %1").arg(owner);
+        else words = QStringLiteral("Watching %1's pane").arg(owner);
     } else {
-        words = full ? QStringLiteral("Watching") : m_capability == QLatin1String("agent")
-                ? QStringLiteral("Watching · you may talk to the agent") : QStringLiteral("Watching · view only");
+        m_take->setVisible(full && !m_driving && m_connected);
+        if (m_driving) {
+            words = QStringLiteral("You have the keyboard · keys go to %1").arg(desktop);
+        } else if (m_holder == QLatin1String("agent")) {
+            words = QStringLiteral("The agent has the keyboard");
+        } else if (m_holder.startsWith(QLatin1String("participant:"))) {
+            words = QStringLiteral("%1 has the keyboard").arg(m_holderName.isEmpty() ? QStringLiteral("A guest") : m_holderName);
+        } else if (!m_holderDevice.isEmpty() && m_holderDevice != m_myDevice) {
+            words = QStringLiteral("Another of your devices has the keyboard");
+        } else {
+            words = full ? QStringLiteral("Watching") : m_capability == QLatin1String("agent")
+                    ? QStringLiteral("Watching · you may talk to the agent") : QStringLiteral("Watching · view only");
+        }
     }
     m_driveLabel->setText(words);
     QStringList presence;
     for (const QJsonValue &value : m_presence) {
         const QJsonObject item = value.toObject();
+        if (item.value(QStringLiteral("you")).toBool()) continue;   // a guest's own row: the line above says it
         const QString name = str(item.value(QStringLiteral("name"))).isEmpty() ? QStringLiteral("someone") : str(item.value(QStringLiteral("name")));
         if (item.value(QStringLiteral("driving")).toBool()) presence << QStringLiteral("%1 is typing").arg(name);
         else if (item.value(QStringLiteral("online")) == QJsonValue(false)) presence << QStringLiteral("%1 is away").arg(name);
@@ -1315,6 +1525,8 @@ void RemotePane::updateDriveUi()
     }
     setPlain(m_presenceLabel, presence.join(QStringLiteral(" · ")));
 }
+
+QString RemotePane::driveText() const { return m_driveLabel->text(); }
 
 // ---- pane_state ----------------------------------------------------------------------------------
 
@@ -1613,6 +1825,21 @@ void RemotePane::compose(const QString &text, const QString &when)
 void RemotePane::sendPrompt(const QString &when)
 {
     const QString text = m_box->toPlainText();
+    if (guest()) {
+        // A guest's prompt is a request (section 10.4): it goes to the owner, who sees the whole
+        // text, and only an approved one reaches their agent — never the shell, so no `agent:
+        // false`. It always queues, as app/guest.js sends it: approving it never interrupts a turn.
+        if (m_role != QLatin1String("editor") || m_ended || text.trimmed().isEmpty()) return;
+        const QString owner = m_desktop.isEmpty() ? QStringLiteral("the owner") : m_desktop;
+        if (m_paused) { showNote(QStringLiteral("%1 paused guests: this was not sent.").arg(owner)); return; }
+        send({{"t", "compose"}, {"text", text}, {"when", "queue"}, {"msg_id", messageId()}});
+        m_box->clear();
+        if (!m_toldApproval) {
+            m_toldApproval = true;
+            showNote(QStringLiteral("Sent to %1. A guest's prompt waits for them to approve it before their agent sees it.").arg(owner), 8000);
+        }
+        return;
+    }
     compose(text, when.isEmpty() ? (busy() ? QStringLiteral("queue") : QStringLiteral("now")) : when);
 }
 
@@ -1622,6 +1849,7 @@ void RemotePane::enter()
 {
     const QString text = m_box->toPlainText();
     if (!text.trimmed().isEmpty()) { sendPrompt(); return; }
+    if (guest()) return;   // a guest's prompt is not theirs to steer or send now: it waits for the owner
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (m_staged.stage == 0 || now - m_staged.at > 15000) { m_staged = Staged(); return; }
     QSet<QString> known;
@@ -1651,8 +1879,10 @@ bool RemotePane::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_box) {
         if (enterKey && mods == Qt::NoModifier) { enter(); return true; }
         if (enterKey && mods == Qt::ControlModifier) {
-            // Send now, interrupting a running turn (agent.interrupt on the desktop).
-            if (!m_box->toPlainText().trimmed().isEmpty()) compose(m_box->toPlainText(), QStringLiteral("now"));
+            // Send now, interrupting a running turn (agent.interrupt on the desktop). A guest cannot
+            // interrupt anything: theirs is sent for approval like any other.
+            if (guest()) sendPrompt();
+            else if (!m_box->toPlainText().trimmed().isEmpty()) compose(m_box->toPlainText(), QStringLiteral("now"));
             return true;
         }
         if (key->key() == Qt::Key_Up && mods == Qt::NoModifier && m_box->toPlainText().isEmpty()) {
@@ -1748,12 +1978,22 @@ void RemotePane::setHeaderRightInset(int pixels)
 
 RemoteViewer &RemoteViewer::instance()
 {
-    static RemoteViewer viewer;
+    static RemoteViewer viewer(false);
     return viewer;
 }
 
-RemoteViewer::RemoteViewer()
+RemoteViewer &RemoteViewer::guest()
 {
+    static RemoteViewer viewer(true);
+    return viewer;
+}
+
+RemoteViewer::RemoteViewer(bool guest) : m_guest(guest)
+{
+    if (m_guest) {
+        m_capability = QStringLiteral("guest");
+        m_state = QStringLiteral("unjoined");
+    }
     if (QCoreApplication::instance())
         connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &RemoteViewer::stop);
 }
@@ -1788,8 +2028,9 @@ bool RemoteViewer::ensure(QString *error)
                 m_state = QStringLiteral("offline");
                 emit status(m_state, QStringLiteral("The viewer stopped."));
             });
-    if (script.isEmpty()) m_process->start(QStringLiteral("python3"), {QStringLiteral("-m"), QStringLiteral("remote.viewer")});
-    else m_process->start(QStringLiteral("python3"), {script});
+    QStringList arguments = script.isEmpty() ? QStringList{QStringLiteral("-m"), QStringLiteral("remote.viewer")} : QStringList{script};
+    if (m_guest) arguments << QStringLiteral("--guest");
+    m_process->start(QStringLiteral("python3"), arguments);
     if (!m_process->waitForStarted(5000)) {
         if (error) *error = QStringLiteral("python3 could not start the remote viewer.");
         m_process->deleteLater();
@@ -1832,8 +2073,27 @@ void RemoteViewer::handle(const QJsonObject &line)
     } else if (kind == QLatin1String("paired")) {
         m_desktop = str(line.value(QStringLiteral("desktop")));
         emit paired(m_desktop, str(line.value(QStringLiteral("fingerprint"))));
+    } else if (kind == QLatin1String("joined")) {
+        m_desktop = str(line.value(QStringLiteral("desktop")));
+        const QString role = str(line.value(QStringLiteral("role")));
+        if (!role.isEmpty()) m_role = role;
+        m_expires = qint64(line.value(QStringLiteral("expires")).toDouble());
+        m_capability = QStringLiteral("guest");
+        QStringList panes;
+        for (const QJsonValue &value : line.value(QStringLiteral("panes")).toArray())
+            if (value.isString()) panes.append(value.toString());
+        emit joined(m_desktop, m_role, panes);
+    } else if (kind == QLatin1String("ended")) {
+        m_role.clear();
+        m_participant.clear();
+        m_state = QStringLiteral("unjoined");
+        emit ended(str(line.value(QStringLiteral("message"))));
     } else if (kind == QLatin1String("welcome")) {
-        m_capability = str(line.value(QStringLiteral("capability")));
+        m_capability = m_guest ? QStringLiteral("guest") : str(line.value(QStringLiteral("capability")));
+        const QString role = str(line.value(QStringLiteral("role")));
+        if (!role.isEmpty()) m_role = role;
+        const QString participant = str(line.value(QStringLiteral("participant")));
+        if (!participant.isEmpty()) m_participant = participant;
         m_features.clear();
         for (const QJsonValue &value : line.value(QStringLiteral("features")).toArray()) m_features.append(value.toString());
         const QString desktop = str(line.value(QStringLiteral("desktop")));
@@ -1849,11 +2109,21 @@ void RemoteViewer::handle(const QJsonObject &line)
         } else if (t == QLatin1String("welcome")) {
             const QString name = str(message.value(QStringLiteral("desktop")).toObject().value(QStringLiteral("name")));
             if (!name.isEmpty()) m_desktop = name;
-            if (message.value(QStringLiteral("capability")).isString()) m_capability = str(message.value(QStringLiteral("capability")));
+            if (!m_guest && message.value(QStringLiteral("capability")).isString()) m_capability = str(message.value(QStringLiteral("capability")));
+            if (m_guest && message.value(QStringLiteral("role")).isString()) m_role = str(message.value(QStringLiteral("role")));
+        } else if (t == QLatin1String("participants") && m_guest) {
+            // The guest's own row keeps its role current, for the panes opened after a change.
+            for (const QJsonValue &value : message.value(QStringLiteral("items")).toArray()) {
+                const QJsonObject item = value.toObject();
+                if (!item.value(QStringLiteral("you")).toBool()) continue;
+                const QString role = str(item.value(QStringLiteral("role")));
+                if (role == QLatin1String("viewer") || role == QLatin1String("editor")) m_role = role;
+                if (!str(item.value(QStringLiteral("id"))).isEmpty()) m_participant = str(item.value(QStringLiteral("id")));
+            }
         }
         emit this->message(message);
     } else if (kind == QLatin1String("error")) {
-        emit failed(str(line.value(QStringLiteral("message"))));
+        emit failed(str(line.value(QStringLiteral("message"))), str(line.value(QStringLiteral("reason"))));
     }
 }
 
@@ -1899,6 +2169,8 @@ void RemoteViewer::stop()
     }
     m_openIds.clear();
     m_open = 0;
+    // A joined share goes with its sidecar: a later join starts a session of its own.
+    if (m_guest) delete GuestSession::current();
 }
 
 // ----- the dialog --------------------------------------------------------------------------------
@@ -2150,6 +2422,390 @@ void RemotePaneDialog::openSelected()
     const QString title = item->data(Qt::UserRole + 1).toString();
     RemotePane *pane = RemotePane::openFromViewer(id, title, RemoteViewer::instance().desktop());
     if (m_place) m_place(pane);
+    accept();
+}
+
+// ----- GuestSession ------------------------------------------------------------------------------
+
+namespace {
+QPointer<GuestSession> g_guestSession;
+} // namespace
+
+GuestSession *GuestSession::current() { return g_guestSession.data(); }
+
+GuestSession::GuestSession(Place place) : QObject(&RemoteViewer::guest()), m_place(std::move(place))
+{
+    RemoteViewer &viewer = RemoteViewer::guest();
+    connect(&viewer, &RemoteViewer::panesChanged, this, &GuestSession::sync);
+    // Each pane marks itself ended from the same signal; there is nothing left to follow.
+    connect(&viewer, &RemoteViewer::ended, this, &QObject::deleteLater);
+}
+
+GuestSession *GuestSession::start(const QStringList &panes, Place place)
+{
+    auto *session = new GuestSession(std::move(place));
+    // A rejoin of the share already open adopts its panes rather than opening them twice.
+    if (GuestSession *old = g_guestSession.data()) {
+        for (auto it = old->m_panes.cbegin(); it != old->m_panes.cend(); ++it)
+            if (it.value() && !it.value()->ended()) session->m_panes.insert(it.key(), it.value());
+        delete old;
+    }
+    g_guestSession = session;
+    for (const QString &id : panes) {
+        if (id.isEmpty() || session->m_known.contains(id)) continue;
+        session->m_known.insert(id);
+        if (!session->m_panes.value(id)) session->openPane(id);
+    }
+    return session;
+}
+
+QStringList GuestSession::openIds() const
+{
+    QStringList ids;
+    for (auto it = m_panes.cbegin(); it != m_panes.cend(); ++it)
+        if (it.value()) ids << it.key();
+    ids.sort();
+    return ids;
+}
+
+void GuestSession::openPane(const QString &id)
+{
+    RemoteViewer &viewer = RemoteViewer::guest();
+    QString title;
+    for (const QJsonValue &value : viewer.panes())
+        if (str(value.toObject().value(QStringLiteral("id"))) == id) title = str(value.toObject().value(QStringLiteral("title")));
+    RemotePane *pane = RemotePane::openFromViewer(id, title, viewer.desktop(), viewer);
+    m_panes.insert(id, pane);
+    const bool first = !m_placed;
+    m_placed = true;
+    if (m_place) m_place(pane, first);
+}
+
+void GuestSession::sync(const QJsonArray &items)
+{
+    QStringList scope;
+    for (const QJsonValue &value : items) {
+        const QString id = str(value.toObject().value(QStringLiteral("id")));
+        if (!id.isEmpty() && !scope.contains(id)) scope << id;
+    }
+    // Gone from the scope: the pane stays, with the reason on it, and the viewer stops streaming it.
+    const QSet<QString> known = m_known;
+    for (const QString &id : known) {
+        if (scope.contains(id)) continue;
+        m_known.remove(id);
+        if (QPointer<RemotePane> pane = m_panes.take(id)) {
+            pane->markEnded(QStringLiteral("No longer shared with you."));
+            pane->onClosed = nullptr;
+            RemoteViewer::guest().paneClosed(id);
+        }
+    }
+    // New to it: opened and placed beside the others, as a tab shared whole grows.
+    for (const QString &id : scope) {
+        if (m_known.contains(id)) continue;
+        m_known.insert(id);
+        if (!m_panes.value(id)) openPane(id);
+    }
+}
+
+// ----- JoinDialog --------------------------------------------------------------------------------
+
+namespace {
+
+// The viewer's reason, in words, for when it sends none of its own.
+QString joinErrorWords(const QString &reason)
+{
+    if (reason == QLatin1String("wrong_pin")) return QStringLiteral("That PIN is not right. Check it and try again.");
+    if (reason == QLatin1String("burned")) return QStringLiteral("That code had too many wrong PINs and no longer works. Ask for a new one.");
+    if (reason == QLatin1String("expired")) return QStringLiteral("That code has expired. Ask for a new one.");
+    if (reason == QLatin1String("no_such_code")) return QStringLiteral("Nothing is shared under that code. Check the four letters.");
+    if (reason == QLatin1String("not_admitted")) return QStringLiteral("You were not let in.");
+    if (reason == QLatin1String("rate_limited")) return QStringLiteral("Too many tries. Wait a minute, then try again.");
+    if (reason == QLatin1String("closed")) return QStringLiteral("The share closed before you were let in.");
+    return QStringLiteral("Joining did not work. Try again.");
+}
+
+QString loginName()
+{
+    const QString user = qEnvironmentVariable("USER");
+    return user.isEmpty() ? QDir::home().dirName() : user;
+}
+
+} // namespace
+
+JoinDialog::JoinDialog(const QString &code, Place place, QWidget *parent) : QDialog(parent), m_place(std::move(place))
+{
+    setWindowTitle(QStringLiteral("Join a shared session"));
+    setObjectName(QStringLiteral("joinDialog"));
+    setMinimumWidth(440);
+    auto *layout = new QVBoxLayout(this);
+    m_pages = new QStackedWidget;
+    layout->addWidget(m_pages, 1);
+    const QSettings settings;
+
+    m_formPage = new QWidget;
+    {
+        auto *v = new QVBoxLayout(m_formPage);
+        auto *intro = plainLabel(QStringLiteral("joinIntro"));
+        intro->setWordWrap(true);
+        intro->setText(QStringLiteral("Enter the meeting code and PIN from the person sharing. "
+                                      "They see your name and let you in."));
+        v->addWidget(intro);
+        auto *form = new QFormLayout;
+        m_code = new QLineEdit;
+        m_code->setObjectName(QStringLiteral("joinCode"));
+        m_code->setPlaceholderText(QStringLiteral("BQRT"));
+        m_code->setMaxLength(4);
+        m_code->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z]{0,4}")), m_code));
+        QString prefill;
+        for (const QChar c : code.trimmed())
+            if (c.isLetter() && c.unicode() < 128) prefill += c.toUpper();
+        m_code->setText(prefill.left(4));
+        m_pin = new QLineEdit;
+        m_pin->setObjectName(QStringLiteral("joinPin"));
+        m_pin->setEchoMode(QLineEdit::Password);
+        m_pin->setMaxLength(4);
+        m_pin->setPlaceholderText(QStringLiteral("4 digits"));
+        m_pin->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[0-9]{0,4}")), m_pin));
+        m_name = new QLineEdit;
+        m_name->setObjectName(QStringLiteral("joinName"));
+        const QString savedName = settings.value(QStringLiteral("remote/joinName")).toString();
+        m_name->setText(savedName.isEmpty() ? loginName() : savedName);
+        m_name->setMaxLength(64);
+        form->addRow(QStringLiteral("Code"), m_code);
+        form->addRow(QStringLiteral("PIN"), m_pin);
+        form->addRow(QStringLiteral("Your name"), m_name);
+        v->addLayout(form);
+
+        // The rendezvous, folded away: almost nobody joins through anything but the default.
+        const QString server = settings.value(QStringLiteral("remote/joinServer"), QString::fromLatin1(kDefaultServer)).toString();
+        auto *serverRow = new QHBoxLayout;
+        m_serverToggle = new QToolButton;
+        m_serverToggle->setObjectName(QStringLiteral("joinServerToggle"));
+        m_serverToggle->setText(QStringLiteral("Server…"));
+        m_serverToggle->setAutoRaise(true);
+        m_serverToggle->setCheckable(true);
+        m_server = new QLineEdit;
+        m_server->setObjectName(QStringLiteral("joinServer"));
+        m_server->setText(server);
+        m_server->setPlaceholderText(QString::fromLatin1(kDefaultServer));
+        serverRow->addWidget(m_serverToggle);
+        serverRow->addWidget(m_server, 1);
+        v->addLayout(serverRow);
+        // A server that is not the default is shown, so nobody joins through it without seeing it.
+        const bool custom = server != QLatin1String(kDefaultServer);
+        m_serverToggle->setChecked(custom);
+        m_server->setVisible(custom);
+        connect(m_serverToggle, &QToolButton::toggled, this, [this](bool on) {
+            m_server->setVisible(on);
+            if (on) m_server->setFocus();
+        });
+
+        m_error = plainLabel(QStringLiteral("joinError"));
+        m_error->setWordWrap(true);
+        m_error->setStyleSheet(QStringLiteral("color: %1;").arg(theme::Warning.name()));
+        m_error->hide();
+        v->addWidget(m_error);
+        v->addStretch(1);
+
+        auto *row = new QHBoxLayout;
+        auto *close = new QPushButton(QStringLiteral("Close"));
+        close->setAutoDefault(false);
+        connect(close, &QPushButton::clicked, this, &JoinDialog::reject);
+        m_join = new QPushButton(QStringLiteral("Join"));
+        m_join->setObjectName(QStringLiteral("joinButton"));
+        m_join->setDefault(true);
+        row->addStretch(1);
+        row->addWidget(close);
+        row->addWidget(m_join);
+        v->addLayout(row);
+
+        connect(m_code, &QLineEdit::textEdited, this, [this](const QString &text) {
+            const int at = m_code->cursorPosition();
+            if (text != text.toUpper()) {
+                m_code->setText(text.toUpper());
+                m_code->setCursorPosition(at);
+            }
+            // Four letters in: on to the PIN, as a code read out is typed in one go.
+            if (m_code->text().size() == 4 && m_pin->text().isEmpty()) m_pin->setFocus();
+        });
+        for (QLineEdit *edit : {m_code, m_pin, m_name, m_server}) {
+            connect(edit, &QLineEdit::textChanged, this, &JoinDialog::updateJoinButton);
+            connect(edit, &QLineEdit::returnPressed, this, &JoinDialog::join);
+        }
+        connect(m_join, &QPushButton::clicked, this, &JoinDialog::join);
+    }
+    m_pages->addWidget(m_formPage);
+
+    m_waitPage = new QWidget;
+    {
+        auto *v = new QVBoxLayout(m_waitPage);
+        m_wait = plainLabel(QStringLiteral("joinWait"));
+        m_wait->setWordWrap(true);
+        m_check = plainLabel(QStringLiteral("joinCheckCode"));
+        QFont big = m_check->font();
+        big.setPointSizeF(std::max<qreal>(22, big.pointSizeF() * 2.4));
+        big.setBold(true);
+        big.setLetterSpacing(QFont::AbsoluteSpacing, 4);
+        m_check->setFont(big);
+        m_check->hide();
+        // Full width with the text centred (see the pairing dialog's code page).
+        for (QLabel *label : {m_wait, m_check}) label->setAlignment(Qt::AlignHCenter);
+        v->addStretch(1);
+        v->addWidget(m_wait);
+        v->addWidget(m_check);
+        v->addStretch(1);
+        auto *row = new QHBoxLayout;
+        m_cancel = new QPushButton(QStringLiteral("Cancel"));
+        m_cancel->setObjectName(QStringLiteral("joinCancel"));
+        row->addStretch(1);
+        row->addWidget(m_cancel);
+        v->addLayout(row);
+        connect(m_cancel, &QPushButton::clicked, this, [this] {
+            RemoteViewer::guest().send({{"t", "leave"}});
+            backToForm(QString());
+        });
+    }
+    m_pages->addWidget(m_waitPage);
+    m_pages->setCurrentWidget(m_formPage);
+    updateJoinButton();
+    (m_code->text().size() == 4 ? m_pin : m_code)->setFocus();
+
+    RemoteViewer &viewer = RemoteViewer::guest();
+    connect(&viewer, &RemoteViewer::status, this, &JoinDialog::showStatus);
+    connect(&viewer, &RemoteViewer::code, this, [this](const QString &check) {
+        if (m_done) return;
+        m_check->setText(check);
+        m_check->setVisible(!check.isEmpty());
+    });
+    connect(&viewer, &RemoteViewer::failed, this, &JoinDialog::showError);
+    connect(&viewer, &RemoteViewer::joined, this, &JoinDialog::onJoined);
+    // A rejoin may come back as the share's pane list rather than a `joined` line of its own.
+    connect(&viewer, &RemoteViewer::panesChanged, this, [this](const QJsonArray &items) {
+        RemoteViewer &guest = RemoteViewer::guest();
+        if (m_done || !m_rejoin || !waiting() || guest.state() != QLatin1String("connected") || items.isEmpty()) return;
+        QStringList ids;
+        for (const QJsonValue &value : items) ids << str(value.toObject().value(QStringLiteral("id")));
+        onJoined(guest.desktop(), guest.role(), ids);
+    });
+
+    QString error;
+    if (!viewer.ensure(&error)) {
+        showError(error, QString());
+        m_join->setEnabled(false);
+        return;
+    }
+    viewer.setDialogUp(true);
+    updateJoinButton();
+    // Without a code, a guest record still stored from an earlier join is tried first.
+    if (m_code->text().isEmpty() && viewer.state() != QLatin1String("connected")) {
+        m_rejoin = true;
+        viewer.send({{"t", "connect"}});
+    }
+}
+
+JoinDialog::~JoinDialog()
+{
+    RemoteViewer &viewer = RemoteViewer::guest();
+    viewer.setDialogUp(false);
+    viewer.release();
+}
+
+void JoinDialog::open(QWidget *parent, const QString &code, std::function<void(RemotePane *pane, bool first)> place)
+{
+    auto *dialog = new JoinDialog(code, std::move(place), parent);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+}
+
+void JoinDialog::reject()
+{
+    // Closing while the knock waits takes it back, rather than leaving the owner a knock from
+    // somebody who is no longer there.
+    if (waiting() && !m_done) RemoteViewer::guest().send({{"t", "leave"}});
+    QDialog::reject();
+}
+
+bool JoinDialog::waiting() const { return m_pages->currentWidget() == m_waitPage; }
+
+void JoinDialog::updateJoinButton()
+{
+    static const QRegularExpression codeShape(QStringLiteral("^[A-Z]{4}$")), pinShape(QStringLiteral("^[0-9]{4}$"));
+    m_join->setEnabled(codeShape.match(m_code->text()).hasMatch() && pinShape.match(m_pin->text()).hasMatch()
+                       && !m_name->text().trimmed().isEmpty() && RemoteViewer::guest().running());
+}
+
+void JoinDialog::join()
+{
+    updateJoinButton();
+    if (!m_join->isEnabled()) return;
+    m_rejoin = false;
+    const QString server = m_server->text().trimmed().isEmpty() ? QString::fromLatin1(kDefaultServer) : m_server->text().trimmed();
+    RemoteViewer::guest().send({{"t", "join"}, {"code", m_code->text()}, {"pin", m_pin->text()},
+                                {"name", m_name->text().trimmed()}, {"platform", "Relay"}, {"rendezvous", server}});
+    m_error->hide();
+    m_wait->setText(QStringLiteral("Checking the PIN…"));
+    m_check->clear();
+    m_check->hide();
+    m_pages->setCurrentWidget(m_waitPage);
+    m_cancel->setFocus();
+}
+
+void JoinDialog::backToForm(const QString &message)
+{
+    if (!message.isEmpty()) setPlain(m_error, message);
+    m_check->hide();
+    m_pages->setCurrentWidget(m_formPage);
+    updateJoinButton();
+    (m_code->text().size() == 4 ? (m_pin->text().size() == 4 ? m_join : static_cast<QWidget *>(m_pin)) : m_code)->setFocus();
+}
+
+void JoinDialog::showStatus(const QString &state, const QString &message)
+{
+    if (m_done) return;
+    const QString desktop = RemoteViewer::guest().desktop();
+    const QString who = desktop.isEmpty() ? QStringLiteral("the person sharing") : desktop;
+    if (state == QLatin1String("joining")) {
+        if (waiting()) m_wait->setText(QStringLiteral("Checking the PIN…"));
+    } else if (state == QLatin1String("knocking")) {
+        if (waiting()) m_wait->setText(QStringLiteral("Waiting for %1 to let you in. They see the code").arg(who));
+    } else if (state == QLatin1String("connecting")) {
+        // The rejoin a dialog opened without a code asks for shows its progress; a viewer going
+        // back to a share it is still in after a refused join does not take the form away.
+        if (m_rejoin && !waiting()) m_pages->setCurrentWidget(m_waitPage);
+        if (waiting() && m_check->isHidden()) m_wait->setText(QStringLiteral("Connecting to %1…").arg(who));
+    } else if (state == QLatin1String("reconnecting")) {
+        if (waiting()) m_wait->setText(QStringLiteral("Reconnecting to %1…").arg(who));
+    } else if (state == QLatin1String("offline")) {
+        if (waiting()) backToForm(message.isEmpty() ? QStringLiteral("Offline: the server cannot be reached.") : message);
+    } else if (state == QLatin1String("unjoined")) {
+        if (waiting()) backToForm(message);
+    }
+    if (state == QLatin1String("unjoined") || state == QLatin1String("offline")) m_rejoin = false;
+}
+
+void JoinDialog::showError(const QString &message, const QString &reason)
+{
+    if (m_done) return;
+    const QString text = message.isEmpty() ? joinErrorWords(reason) : message;
+    backToForm(text);
+    if (reason == QLatin1String("wrong_pin")) {
+        m_pin->clear();
+        m_pin->setFocus();
+    }
+}
+
+void JoinDialog::onJoined(const QString &, const QString &, const QStringList &panes)
+{
+    if (m_done) return;
+    m_done = true;
+    QSettings settings;
+    settings.setValue(QStringLiteral("remote/joinName"), m_name->text().trimmed());
+    const QString server = m_server->text().trimmed();
+    if (server.isEmpty() || server == QLatin1String(kDefaultServer)) settings.remove(QStringLiteral("remote/joinServer"));
+    else settings.setValue(QStringLiteral("remote/joinServer"), server);
+    GuestSession::start(panes, m_place);
     accept();
 }
 

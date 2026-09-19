@@ -14,7 +14,9 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalSpy>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -105,7 +107,14 @@ struct Sent {
 class RemotePaneTest final : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }   // hint counts stay out of ~
+    void initTestCase()
+    {
+        QStandardPaths::setTestModeEnabled(true);   // hint counts stay out of ~
+        // The join dialog remembers the name and server; that stays out of ~ too.
+        QVERIFY(m_settings.isValid());
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_settings.path());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings.path());
+    }
     // ---- the painter's grid ----------------------------------------------------------------------
     void snapshotThenDiffGivesTheCells()
     {
@@ -569,6 +578,259 @@ for raw in sys.stdin:
         QVERIFY(kinds.contains(QStringLiteral("close")));
         QCOMPARE(kinds.last(), QStringLiteral("stop"));
         qunsetenv("RELAY_REMOTE_VIEWER");
+    }
+
+    // ---- a guest: somebody else's share, joined with a code and PIN ------------------------------
+    void guestPaneHidesTheOwnersControls()
+    {
+        Sent sent;
+        RemotePane pane(QStringLiteral("p1"), QStringLiteral("shell"), QStringLiteral("Ana"), sent.sink());
+        pane.setCapability(QStringLiteral("guest"), {});
+        pane.setRole(QStringLiteral("viewer"));
+        QVERIFY(pane.guest());
+        // A viewer: no composer, no asking to type, and a line that says whose pane it is.
+        QVERIFY(!pane.findChild<QWidget *>(QStringLiteral("remoteComposer"))->isVisibleTo(&pane));
+        QVERIFY(!pane.findChild<QPushButton *>(QStringLiteral("remoteTake"))->isVisibleTo(&pane));
+        QCOMPARE(pane.driveText(), QStringLiteral("Watching Ana's pane"));
+
+        // An editor: the prompt box, but none of the owner's strip — even if a pane_state came.
+        pane.setRole(QStringLiteral("editor"));
+        pane.handle(paneState(1, true));
+        QVERIFY(pane.findChild<QWidget *>(QStringLiteral("remoteComposer"))->isVisibleTo(&pane));
+        QVERIFY(pane.promptBox()->isVisibleTo(&pane));
+        QVERIFY(!pane.findChild<QToolButton *>(QStringLiteral("remoteModel"))->isVisibleTo(&pane));
+        QVERIFY(!pane.findChild<QToolButton *>(QStringLiteral("remoteSessions"))->isVisibleTo(&pane));
+        QVERIFY(!pane.findChild<QWidget *>(QStringLiteral("remoteQueue"))->isVisibleTo(&pane));
+        QVERIFY(pane.modelMenuLabels().isEmpty());
+        QVERIFY(pane.conversationMenuLabels().isEmpty());
+        QCOMPARE(pane.driveText(), QStringLiteral("Ana's pane · You can ask to type; your prompts wait for Ana"));
+        auto *take = pane.findChild<QPushButton *>(QStringLiteral("remoteTake"));
+        QVERIFY(take->isVisibleTo(&pane));
+        QCOMPARE(take->text(), QStringLiteral("Ask to type"));
+
+        // A prompt queues for the owner's approval, never routed to the shell, and says so once.
+        pane.promptBox()->setPlainText(QStringLiteral("run the tests"));
+        pane.sendPrompt();
+        QCOMPARE(sent.of(QStringLiteral("compose")).size(), 1);
+        const QJsonObject compose = sent.of(QStringLiteral("compose")).at(0);
+        QCOMPARE(compose.value(QStringLiteral("when")).toString(), QStringLiteral("queue"));
+        QVERIFY(!compose.contains(QStringLiteral("agent")));
+        QVERIFY(pane.noteText().contains(QStringLiteral("approve")));
+
+        // Asking to type is a request: the keyboard is ours only when `control` names us.
+        pane.handle({{"t", "participants"}, {"pane", "p1"},
+                     {"items", QJsonArray{QJsonObject{{"id", "g7"}, {"name", "me"}, {"role", "editor"}, {"you", true}}}}});
+        pane.requestControl();
+        QCOMPARE(sent.of(QStringLiteral("control_request")).size(), 1);
+        QVERIFY(!pane.driving());
+        QCOMPARE(pane.driveText(), QStringLiteral("Asked Ana to let you type…"));
+        pane.handle({{"t", "control"}, {"pane", "p1"}, {"holder", "participant:g7"}, {"name", "me"}});
+        QVERIFY(pane.driving());
+        pane.handle({{"t", "control"}, {"pane", "p1"}, {"holder", "owner"}, {"name", "Ana"}});
+        QVERIFY(!pane.driving());
+        QVERIFY(pane.noteText().contains(QStringLiteral("took the keyboard back")));
+
+        // Demoted in the participants list: the composer goes.
+        pane.handle({{"t", "participants"}, {"pane", "p1"},
+                     {"items", QJsonArray{QJsonObject{{"id", "g7"}, {"name", "me"}, {"role", "viewer"}, {"you", true}}}}});
+        QCOMPARE(pane.role(), QStringLiteral("viewer"));
+        QVERIFY(!pane.findChild<QWidget *>(QStringLiteral("remoteComposer"))->isVisibleTo(&pane));
+    }
+
+    void endedGuestPaneIsReadOnly()
+    {
+        Sent sent;
+        RemotePane pane(QStringLiteral("p1"), QStringLiteral("shell"), QStringLiteral("Ana"), sent.sink());
+        pane.setCapability(QStringLiteral("guest"), {});
+        pane.setRole(QStringLiteral("editor"));
+        pane.handle(snapshot(3, 10, 0));
+        pane.markEnded(QStringLiteral("Ana ended your access."));
+        QVERIFY(pane.ended());
+        QCOMPARE(pane.noteText(), QStringLiteral("Ana ended your access."));
+        QCOMPARE(pane.driveText(), QStringLiteral("Ana ended your access."));
+        QVERIFY(!pane.findChild<QWidget *>(QStringLiteral("remoteComposer"))->isVisibleTo(&pane));
+        QVERIFY(!pane.findChild<QPushButton *>(QStringLiteral("remoteTake"))->isVisibleTo(&pane));
+        const int before = int(sent.messages.size());
+        pane.requestControl();
+        pane.promptBox()->setPlainText(QStringLiteral("hello"));
+        pane.sendPrompt();
+        pane.handle({{"t", "control"}, {"pane", "p1"}, {"holder", "participant:g7"}});
+        QCOMPARE(int(sent.messages.size()), before);
+        QVERIFY(!pane.driving());
+        // A reconnect does not paper over the reason.
+        pane.setConnection(QStringLiteral("connected"), QString());
+        QCOMPARE(pane.noteText(), QStringLiteral("Ana ended your access."));
+    }
+
+    void joinDialogJoinsAndFollowsTheScope()
+    {
+        QTemporaryDir dir;
+        const QString log = dir.filePath(QStringLiteral("in.jsonl"));
+        const QString script = writeGuestViewer(dir, log);
+        qputenv("RELAY_REMOTE_VIEWER", script.toLocal8Bit());
+
+        struct Placed { QPointer<RemotePane> pane; bool first; };
+        QList<Placed> placed;
+        auto *dialog = new JoinDialog(QStringLiteral("bqrt"), [&placed](RemotePane *pane, bool first) {
+            placed.append({pane, first});
+        });
+        QPointer<JoinDialog> alive(dialog);
+        dialog->show();
+        auto *code = dialog->findChild<QLineEdit *>(QStringLiteral("joinCode"));
+        auto *pin = dialog->findChild<QLineEdit *>(QStringLiteral("joinPin"));
+        auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("joinName"));
+        auto *join = dialog->findChild<QPushButton *>(QStringLiteral("joinButton"));
+        QCOMPARE(code->text(), QStringLiteral("BQRT"));
+        QCOMPARE(pin->echoMode(), QLineEdit::Password);
+        QVERIFY(!name->text().isEmpty());
+        QVERIFY(!dialog->findChild<QLineEdit *>(QStringLiteral("joinServer"))->isVisibleTo(dialog));
+        QVERIFY(!join->isEnabled());
+        name->setText(QStringLiteral("Bea"));
+        pin->setText(QStringLiteral("4829"));
+        QVERIFY(join->isEnabled());
+        join->click();
+        // Page two: the knock and the code the owner sees.
+        auto *check = dialog->findChild<QLabel *>(QStringLiteral("joinCheckCode"));
+        QTRY_COMPARE(check->text(), QStringLiteral("12345"));
+        // Who the host is is not known before they let us in.
+        QTRY_COMPARE(dialog->findChild<QLabel *>(QStringLiteral("joinWait"))->text(),
+                     QStringLiteral("Waiting for the person sharing to let you in. They see the code"));
+        // The fake admits on a line of its own: every pane in scope is placed, the first as first.
+        RemoteViewer::guest().send({{"t", "admit"}});
+        QTRY_COMPARE(placed.size(), 2);
+        QTRY_VERIFY(!alive || !alive->isVisible());
+        delete alive.data();   // the window would have; the session outlives it
+        QCOMPARE(placed.at(0).first, true);
+        QCOMPARE(placed.at(1).first, false);
+        QCOMPARE(placed.at(0).pane->paneId(), QStringLiteral("p1"));
+        QCOMPARE(placed.at(1).pane->paneId(), QStringLiteral("p2"));
+        QVERIFY(placed.at(0).pane->guest());
+        QCOMPARE(placed.at(0).pane->role(), QStringLiteral("editor"));
+        QTRY_VERIFY(placed.at(0).pane->screen()->model().hasFrame());
+        QCOMPARE(QSettings().value(QStringLiteral("remote/joinName")).toString(), QStringLiteral("Bea"));
+        QVERIFY(GuestSession::current());
+        QCOMPARE(RemoteViewer::guest().openPanes(), 2);
+        // The owner's own device viewer was never started.
+        QVERIFY(!RemoteViewer::instance().running());
+
+        // A tab shared whole grows: the new pane is placed, not as first.
+        RemoteViewer::guest().send({{"t", "grow"}});
+        QTRY_COMPARE(placed.size(), 3);
+        QCOMPARE(placed.at(2).pane->paneId(), QStringLiteral("p3"));
+        QCOMPARE(placed.at(2).first, false);
+        // ...and shrinks: the pane that left is marked, not closed.
+        RemoteViewer::guest().send({{"t", "shrink"}});
+        QTRY_VERIFY(placed.at(0).pane->ended());
+        QCOMPARE(placed.at(0).pane->noteText(), QStringLiteral("No longer shared with you."));
+        QVERIFY(!placed.at(1).pane->ended());
+
+        // The owner ends it: every pane says so and goes read-only.
+        RemoteViewer::guest().send({{"t", "end"}});
+        QTRY_VERIFY(placed.at(1).pane->ended());
+        QVERIFY(placed.at(2).pane->ended());
+        QCOMPARE(placed.at(1).pane->noteText(), QStringLiteral("Ana ended your access."));
+        QVERIFY(!placed.at(1).pane->findChild<QWidget *>(QStringLiteral("remoteComposer"))->isVisibleTo(placed.at(1).pane));
+        QTRY_VERIFY(!GuestSession::current());
+
+        for (const Placed &p : placed) delete p.pane.data();
+        QTRY_VERIFY(!RemoteViewer::guest().running());
+        const QList<QJsonObject> in = readLog(log);
+        QJsonObject joinLine;
+        for (const QJsonObject &m : in) if (m.value(QStringLiteral("t")).toString() == QLatin1String("join")) joinLine = m;
+        QCOMPARE(joinLine.value(QStringLiteral("code")).toString(), QStringLiteral("BQRT"));
+        QCOMPARE(joinLine.value(QStringLiteral("pin")).toString(), QStringLiteral("4829"));
+        QCOMPARE(joinLine.value(QStringLiteral("name")).toString(), QStringLiteral("Bea"));
+        QCOMPARE(joinLine.value(QStringLiteral("platform")).toString(), QStringLiteral("Relay"));
+        QCOMPARE(joinLine.value(QStringLiteral("rendezvous")).toString(), QString::fromLatin1(JoinDialog::kDefaultServer));
+        QCOMPARE(in.first().value(QStringLiteral("argv")).toString(), QStringLiteral("--guest"));
+        qunsetenv("RELAY_REMOTE_VIEWER");
+    }
+
+    void joinDialogWrongPinGoesBack()
+    {
+        QTemporaryDir dir;
+        const QString script = writeGuestViewer(dir, dir.filePath(QStringLiteral("in.jsonl")));
+        qputenv("RELAY_REMOTE_VIEWER", script.toLocal8Bit());
+        int placed = 0;
+        auto *dialog = new JoinDialog(QStringLiteral("BQRT"), [&placed](RemotePane *pane, bool) { ++placed; delete pane; });
+        dialog->show();
+        auto *pin = dialog->findChild<QLineEdit *>(QStringLiteral("joinPin"));
+        auto *error = dialog->findChild<QLabel *>(QStringLiteral("joinError"));
+        auto *pages = dialog->findChild<QStackedWidget *>();
+        QWidget *form = pages->currentWidget();
+        pin->setText(QStringLiteral("1111"));   // the fake's wrong PIN
+        dialog->findChild<QPushButton *>(QStringLiteral("joinButton"))->click();
+        QVERIFY(pages->currentWidget() != form);
+        QTRY_COMPARE(pages->currentWidget(), form);
+        QVERIFY(pin->text().isEmpty());
+        QVERIFY(error->isVisibleTo(dialog));
+        QCOMPARE(error->text(), QStringLiteral("That PIN is not right."));
+        QCOMPARE(placed, 0);
+        // The status that follows the refusal leaves the form where it is.
+        QTest::qWait(100);
+        QCOMPARE(pages->currentWidget(), form);
+        delete dialog;
+        QTRY_VERIFY(!RemoteViewer::guest().running());
+        qunsetenv("RELAY_REMOTE_VIEWER");
+    }
+
+private:
+    QTemporaryDir m_settings;
+
+    // A guest viewer that knocks, is admitted on `admit`, grows and shrinks the scope on `grow` and
+    // `shrink`, ends on `end`, and refuses the PIN 1111.
+    static QString writeGuestViewer(QTemporaryDir &dir, const QString &log)
+    {
+        const QString script = dir.filePath(QStringLiteral("fake_guest_viewer.py"));
+        QFile file(script);
+        file.open(QIODevice::WriteOnly);
+        file.write(QStringLiteral(R"PY(
+import json, sys
+log = open(%1, "a")
+log.write(json.dumps({"t": "argv", "argv": " ".join(sys.argv[1:])}) + "\n"); log.flush()
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def panes(ids):
+    out({"t": "message", "message": {"t": "panes", "items": [{"id": i, "title": "t-" + i} for i in ids]}})
+for raw in sys.stdin:
+    m = json.loads(raw); log.write(raw); log.flush()
+    t = m["t"]
+    if t == "join":
+        out({"t": "status", "state": "joining"})
+        if m["pin"] == "1111":
+            out({"t": "error", "message": "That PIN is not right.", "reason": "wrong_pin"})
+            out({"t": "status", "state": "unjoined"})
+            continue
+        out({"t": "status", "state": "knocking", "message": ""})
+        out({"t": "code", "code": "12345"})
+    elif t == "admit":
+        out({"t": "joined", "desktop": "Ana", "role": "editor", "panes": ["p1", "p2"], "expires": 1900000000})
+        out({"t": "welcome", "capability": "guest", "role": "editor", "features": ["screen", "history"], "participant": "g7"})
+        out({"t": "status", "state": "connected"})
+        panes(["p1", "p2"])
+    elif t == "grow":
+        panes(["p1", "p2", "p3"])
+    elif t == "shrink":
+        panes(["p2", "p3"])
+    elif t == "end":
+        out({"t": "ended", "message": "Ana ended your access."})
+    elif t == "open":
+        out({"t": "message", "message": {"t": "screen_snapshot", "pane": m["pane"], "rows": 2, "cols": 5,
+             "base": 0, "cursor": {"row": 0, "col": 0}, "lines": [{"row": 0, "segs": [["hi", 0, 0, 0]]}]}})
+    elif t == "stop":
+        break
+)PY").arg(QString::fromLatin1(QJsonDocument(QJsonArray{log}).toJson(QJsonDocument::Compact)).mid(1).chopped(1)).toUtf8());
+        return script;
+    }
+
+    static QList<QJsonObject> readLog(const QString &path)
+    {
+        QList<QJsonObject> out;
+        QFile in(path);
+        if (!in.open(QIODevice::ReadOnly)) return out;
+        for (const QByteArray &raw : in.readAll().split('\n'))
+            if (!raw.trimmed().isEmpty()) out.append(QJsonDocument::fromJson(raw).object());
+        return out;
     }
 };
 

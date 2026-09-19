@@ -159,6 +159,28 @@ class Client:
                       static_private=self.static_private,
                       desktop_id=reply.get("desktop", {}).get("id", ""))
 
+    async def knock_admitted(self, url: str, *, name: str,
+                             platform: str) -> tuple[Joined, dict]:
+        """:meth:`knock`, also returning the desktop's `admitted` message itself.
+
+        The laptop's guest viewer (remote/viewer.py) keeps using this channel as its first
+        session, so it needs what `admitted` carries beyond the :class:`Joined` record — the
+        desktop's name, ``hub_epoch`` and ``features`` — exactly as a reconnect's `welcome` would.
+        """
+        link = pairing.parse_invite_url(url)
+        self.socket = await ws.connect(self._url(room=link["room"]))
+        await self._handshake(link["desktop_public"])
+        await self.send({"t": "knock", "invite": pairing.b64(link["secret"]),
+                         "name": name, "platform": platform})
+        await self.expect("knock_pending", timeout=30)
+        reply = await self.expect("admitted", timeout=180)
+        joined = Joined(desktop_public=link["desktop_public"], participant=reply["participant"],
+                        role=reply["role"], panes=list(reply.get("panes", [])),
+                        expires=float(reply.get("expires", 0)),
+                        static_private=self.static_private,
+                        desktop_id=reply.get("desktop", {}).get("id", ""))
+        return joined, reply
+
     async def join_with_code(self, code: str, pin: str, *, app_base: str = "",
                              timeout: float = 20.0) -> str:
         """Type a meeting code and a PIN (card #97EG); get back the invite link they stand for.
@@ -241,6 +263,39 @@ class Client:
         ``discard``, which is the client's cue to forget this record rather than retry."""
         return await self._reconnect(joined.static_private, joined.desktop_public,
                                      joined.desktop_id, joined.participant)
+
+    async def rejoin_reply(self, joined: Joined, timeout: float = 20.0) -> dict:
+        """:meth:`rejoin`, except that the desktop's goodbye is returned rather than raised.
+
+        :meth:`rejoin` turns a `bye` into ``WireError("closed")``, which cannot be told apart from
+        a dropped link; a caller that must forget the record on a `bye` carrying ``discard`` (or a
+        `revoked`) reads the message itself here. Returns the `welcome`, or that `bye`/`revoked`;
+        a link that closes with no word from the desktop comes back as this client's own
+        ``{"t":"bye","reason":"the link closed"}``, which carries no ``discard``.
+        """
+        self.static_private = joined.static_private
+        self.static_public = noise.public_of(self.static_private)
+        desktop_id = joined.desktop_id or _derive_desktop_id(joined.desktop_public)
+        self.socket = await ws.connect(self._url(desktop=desktop_id, device=joined.participant))
+        try:
+            await self._handshake(joined.desktop_public)
+        except noise.NoiseError as error:
+            raise PinMismatch("the desktop's key is not the one this device pinned.") from error
+        # A participant whose access ended is sent its goodbye straight after the handshake and
+        # the socket closed, so this send may find it gone; the goodbye is in the inbox anyway.
+        with contextlib.suppress(Exception):
+            await self.send({"t": "hello", "client": "relay-python/1",
+                             "proto": wire.PROTOCOL_VERSION})
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise asyncio.TimeoutError("waited for welcome")
+            message = await asyncio.wait_for(self.inbox.get(), left)
+            if message["t"] in ("welcome", "bye", "revoked"):
+                return message
+            if message["t"] == "error":
+                raise wire.WireError(message.get("code", "error"), message.get("message", ""))
 
     async def _reconnect(self, private: bytes, desktop_public: bytes, desktop_id: str,
                          channel_id: str) -> dict:

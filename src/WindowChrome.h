@@ -41,7 +41,7 @@ class ChromeButton final : public QToolButton {
 public:
     // Plus and TabClose are the tab row's own buttons; they are drawn here so the whole header
     // shares one stroke weight instead of mixing painted glyphs with the icon theme's bitmaps.
-    enum class Glyph { Bell, Gear, Minimize, Maximize, Restore, Close, Plus, TabClose };
+    enum class Glyph { Bell, Gear, Minimize, Maximize, Restore, Close, Plus, TabClose, Connect };
 
     explicit ChromeButton(Glyph glyph, QWidget *parent = nullptr, int size = kSize)
         : QToolButton(parent), m_glyph(glyph) {
@@ -139,6 +139,13 @@ protected:
             painter.drawRect(QRectF(centre + QPointF(-5.5, -2.5) * unit, QSizeF(8 * unit, 8 * unit)));
             painter.drawPolyline(QPolygonF({centre + QPointF(-2.5, -5.5) * unit, centre + QPointF(5.5, -5.5) * unit,
                                             centre + QPointF(5.5, 2.5) * unit}));
+            break;
+        case Glyph::Connect:
+            // A plug, the one on the app icon: two prongs, a body, and its cord.
+            painter.drawRoundedRect(QRectF(centre + QPointF(-1.5, -3.5) * unit, QSizeF(5 * unit, 7 * unit)), 1.2 * unit, 1.2 * unit);
+            painter.drawLine(centre + QPointF(-1.5, -1.8) * unit, centre + QPointF(-5.5, -1.8) * unit);
+            painter.drawLine(centre + QPointF(-1.5, 1.8) * unit, centre + QPointF(-5.5, 1.8) * unit);
+            painter.drawLine(centre + QPointF(3.5, 0) * unit, centre + QPointF(6, 0) * unit);
             break;
         case Glyph::Plus:
             painter.drawLine(centre + QPointF(-4.5, 0) * unit, centre + QPointF(4.5, 0) * unit);

@@ -277,6 +277,9 @@ private:
         // Relay-to-Relay: a pane another desktop shares, opened here as one of your own devices. No
         // default key, like pane.share: pairing is a deliberate act and the palette is the way in.
         add("remote.openShared", "terminal", "Open a shared pane: a pane your other desktop shares, here as one of your devices", {});
+        // Joining somebody else's share as a guest, with the meeting code and PIN they read out
+        // (owner, 2026-09-18). No default key: /join CODE in any prompt box is the fast path.
+        add("remote.join", "terminal", "Join a shared session: type the meeting code and PIN someone gave you", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});

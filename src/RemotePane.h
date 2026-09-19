@@ -13,10 +13,20 @@
 // contract, Qt → viewer: pair, connect, forget, open, close, send, stop; viewer → Qt: status, code,
 // paired, welcome, message (every server message verbatim), error.
 //
+// Joining somebody else's share with a meeting code and PIN is a second sidecar, `python3 -m
+// remote.viewer --guest`, so being a guest there never disturbs this Relay's own device session.
+// Its contract, Qt → viewer: join {code, pin, name, platform, rendezvous}, connect (rejoin the stored
+// guest record), leave, open, close, send, stop; viewer → Qt: status (unjoined, joining, knocking,
+// connecting, connected, reconnecting, offline), code (the knock's check code), joined {desktop,
+// role, panes, expires}, welcome, message, error {message, reason}, ended {message}. A guest is
+// never sent `pane_state` (docs/REMOTE-PROTOCOL.md section 10.1), so a guest pane draws the screen,
+// the keyboard's holder and, for an editor, a prompt box whose prompts wait for the owner.
+//
 // Three layers, so the rules are tested without a window or a sidecar (tests/remotepane_test.cpp):
 //   remoteview::ScreenModel  the cell grid and the scrollback column, app/screen.js's rules in C++
 //   RemotePane               the pane widget, talking through a Sink it is handed
-//   RemoteViewer             the one sidecar process, shared by every remote pane in the app
+//   RemoteViewer             a sidecar process: instance() for this Relay's own device, guest() for
+//                            the share it joined as a guest
 #include "PaneView.h"
 
 #include <QAbstractScrollArea>
@@ -49,6 +59,8 @@ class QStackedWidget;
 class QToolButton;
 
 namespace relay {
+
+class RemoteViewer;
 
 namespace remoteview {
 
@@ -237,13 +249,30 @@ public:
                QWidget *parent = nullptr);
     ~RemotePane() override;
 
-    // A pane opened through the app's viewer sidecar: wired to it, and closed on it when it goes.
+    // A pane opened through a viewer sidecar: wired to it, and closed on it when it goes. Without
+    // `viewer` it is the app's own device session, RemoteViewer::instance().
     static RemotePane *openFromViewer(const QString &paneId, const QString &title,
                                       const QString &desktop);
+    static RemotePane *openFromViewer(const QString &paneId, const QString &title,
+                                      const QString &desktop, RemoteViewer &viewer);
 
     // One server message, verbatim. Anything for another pane is ignored.
     void handle(const QJsonObject &message);
+    // `guest` is somebody else's share joined with a code: then setRole() says what the pane offers.
     void setCapability(const QString &capability, const QStringList &features);
+    bool guest() const { return m_capability == QLatin1String("guest"); }
+    // A guest's role, `viewer` or `editor`. A viewer watches; an editor may ask to type and may
+    // send prompts, which wait for the owner's approval.
+    void setRole(const QString &role);
+    QString role() const { return m_role; }
+    // This guest's participant id (the guest viewer's `welcome.participant`): how a guest knows
+    // the keyboard is theirs, as a device knows it by its device id.
+    void setParticipant(const QString &id) { if (!id.isEmpty()) m_participant = id; }
+    // The owner ended this guest's access, or the pane left what is shared with them: the reason
+    // stays on the pane, and nothing on it sends anything any more.
+    void markEnded(const QString &message);
+    bool ended() const { return m_ended; }
+    QString driveText() const;
     // The sidecar's own state: offline and reconnecting are said on the pane, and a reconnect asks
     // for a fresh screen and state.
     void setConnection(const QString &state, const QString &message);
@@ -286,7 +315,9 @@ private:
     void renderThinking();
     void renderQueue();
     void renderStrip();
+    void applyGuestUi();
     void onControl(const QJsonObject &message);
+    void onGuestMessage(const QString &kind, const QJsonObject &message, bool mine);
     void updateDriveUi();
     void hint(const QString &id, const QString &text);
     void rowMenu(const QString &rowId, const QPoint &globalPos);
@@ -319,6 +350,16 @@ private:
     QString m_typedAhead;             // keys typed on a row, for when its text comes back
     bool m_connected = true, m_everConnected = true;
     int m_noteSerial = 0;
+    // a guest (section 10): who this pane's participant is, and what the owner has allowed
+    QString m_role = QStringLiteral("viewer");
+    QString m_participant;            // learnt from `welcome` or the `you` row of `participants`
+    bool m_asking = false;            // a control_request is waiting for the owner
+    int m_askSerial = 0;
+    bool m_paused = false;
+    QString m_pauseReason;
+    bool m_toldApproval = false;      // the "your prompts wait" note is said once
+    bool m_ended = false;
+    QString m_endedMessage;
 
     RemoteScreen *m_screen = nullptr;
     QFrame *m_driveBar = nullptr;
@@ -342,14 +383,19 @@ private:
 };
 
 // ----- the sidecar ------------------------------------------------------------------------------
-// One per process. Holds the encrypted session to one desktop and every pane opened from it.
+// Two per process at most: instance() holds the encrypted session to this Relay's own desktop as
+// one of its devices, guest() the session to somebody else's share joined with a meeting code.
+// Each holds every pane opened from it.
 class RemoteViewer final : public QObject {
     Q_OBJECT
 public:
     static RemoteViewer &instance();
+    static RemoteViewer &guest();
+    bool isGuest() const { return m_guest; }
 
-    // Start `python3 -m remote.viewer` if it is not running. RELAY_REMOTE_VIEWER names a script
-    // to run instead (the test harness's fake viewer).
+    // Start `python3 -m remote.viewer` (with `--guest` for guest()) if it is not running.
+    // RELAY_REMOTE_VIEWER names a script to run instead (the test harness's fake viewer); it is
+    // passed `--guest` the same way.
     bool ensure(QString *error);
     void send(const QJsonObject &message);
     void sendToDesktop(const QJsonObject &message) { send({{"t", "send"}, {"message", message}}); }
@@ -364,6 +410,10 @@ public:
     QString capability() const { return m_capability; }
     QStringList features() const { return m_features; }
     QJsonArray panes() const { return m_panes; }
+    // A guest's role (`viewer` or `editor`) and when its access runs out (epoch seconds, 0 unknown).
+    QString role() const { return m_role; }
+    QString participant() const { return m_participant; }
+    qint64 expires() const { return m_expires; }
     int openPanes() const { return m_open; }
     void paneOpened(const QString &paneId);
     void paneClosed(const QString &paneId);
@@ -376,23 +426,59 @@ signals:
     void welcome(const QString &capability, const QStringList &features);
     void message(const QJsonObject &message);
     void panesChanged(const QJsonArray &items);
-    void failed(const QString &message);
+    // `reason` is the guest viewer's word for a refused join (wrong_pin, burned, expired,
+    // no_such_code, not_admitted, rate_limited, closed, internal); empty otherwise.
+    void failed(const QString &message, const QString &reason);
+    // Guest only: admitted to `desktop`'s share with `role`, able to see `panes`.
+    void joined(const QString &desktop, const QString &role, const QStringList &panes);
+    // Guest only: the owner ended this guest's access, and the record is gone.
+    void ended(const QString &message);
 
 private:
-    RemoteViewer();
+    explicit RemoteViewer(bool guest);
     ~RemoteViewer() override;
     void onReadable();
     void handle(const QJsonObject &line);
 
+    bool m_guest = false;
     QProcess *m_process = nullptr;
     QByteArray m_pending;
     QString m_state = QStringLiteral("offline");
     QString m_desktop, m_device, m_capability = QStringLiteral("view");
     QStringList m_features;
     QJsonArray m_panes;
+    QString m_role, m_participant;
+    qint64 m_expires = 0;
     QSet<QString> m_openIds;
     int m_open = 0;
     bool m_dialogUp = false;
+};
+
+// ----- a joined share -----------------------------------------------------------------------------
+// What keeps a guest's session going after the join dialog has closed. The share's scope can change
+// under a guest — a tab shared whole grows and shrinks as panes open and close in it — and every
+// `panes` list the viewer passes on is already cut down to it: a pane new to that list is opened
+// and placed, a pane gone from it is marked ended on screen. One at a time; a new join replaces it.
+class GuestSession final : public QObject {
+    Q_OBJECT
+public:
+    // `first` is true for the first pane placed by a join, false for every pane after it.
+    using Place = std::function<void(RemotePane *pane, bool first)>;
+    // Opens every pane in `panes` on RemoteViewer::guest() and places each; returns the session.
+    static GuestSession *start(const QStringList &panes, Place place);
+    static GuestSession *current();
+    // The panes this session opened that are still open.
+    QStringList openIds() const;
+
+private:
+    explicit GuestSession(Place place);
+    void sync(const QJsonArray &items);
+    void openPane(const QString &id);
+
+    Place m_place;
+    QHash<QString, QPointer<RemotePane>> m_panes;
+    QSet<QString> m_known;   // in scope when last told: a pane the person closed is not reopened
+    bool m_placed = false;   // the first pane placed is `first`
 };
 
 // ----- "Open a shared pane…" ----------------------------------------------------------------------
@@ -423,6 +509,45 @@ private:
     QPushButton *m_open = nullptr, *m_forget = nullptr;
     QLabel *m_status = nullptr;
     bool m_paired = false;
+};
+
+// ----- "Join a shared session…" -------------------------------------------------------------------
+// Somebody shares a pane or a tab and reads out a meeting code and a PIN (`/join BQRT`). Page one
+// takes the code, the PIN, the name the owner will see and — behind "Server…", since almost nobody
+// changes it — the rendezvous; page two waits for the owner to let this person in, showing the
+// check code the owner sees beside the knock. Once admitted, every pane in the guest's scope is
+// placed through `place` and a GuestSession keeps the share's later changes coming.
+class JoinDialog final : public QDialog {
+    Q_OBJECT
+public:
+    using Place = GuestSession::Place;
+    JoinDialog(const QString &code, Place place, QWidget *parent = nullptr);
+    ~JoinDialog() override;
+
+    static void open(QWidget *parent, const QString &code, std::function<void(RemotePane *pane, bool first)> place);
+    static constexpr const char *kDefaultServer = "https://join.relay-terminal.ai";
+
+public slots:
+    void reject() override;
+
+private:
+    void showStatus(const QString &state, const QString &message);
+    void showError(const QString &message, const QString &reason);
+    void onJoined(const QString &desktop, const QString &role, const QStringList &panes);
+    void updateJoinButton();
+    void join();
+    void backToForm(const QString &message);
+    bool waiting() const;
+
+    Place m_place;
+    QStackedWidget *m_pages = nullptr;
+    QWidget *m_formPage = nullptr, *m_waitPage = nullptr;
+    QLineEdit *m_code = nullptr, *m_pin = nullptr, *m_name = nullptr, *m_server = nullptr;
+    QToolButton *m_serverToggle = nullptr;
+    QLabel *m_error = nullptr, *m_wait = nullptr, *m_check = nullptr;
+    QPushButton *m_join = nullptr, *m_cancel = nullptr;
+    bool m_done = false;
+    bool m_rejoin = false;   // a `connect` for a stored record is out: its progress is shown here
 };
 
 } // namespace relay

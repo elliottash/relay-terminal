@@ -965,6 +965,7 @@ private:
         }
         else if (id == QStringLiteral("agent.subagentPane")) toggleSubagentPane();   // card #WD83
         else if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();   // Relay-to-Relay
+        else if (id == QStringLiteral("remote.join")) joinSharedSession();
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
@@ -2133,6 +2134,9 @@ private:
             items << actionItem(terminal, QStringLiteral("Open a shared pane…"),
                                 QStringLiteral("A pane your other desktop shares, here as one of your devices"),
                                 QStringLiteral("remote.openShared"));
+            items << actionItem(terminal, QStringLiteral("Join a shared session…"),
+                                QStringLiteral("The meeting code and PIN someone gave you · /join CODE"),
+                                QStringLiteral("remote.join"));
         }
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"),
@@ -3008,6 +3012,39 @@ public:
 
     // Relay-to-Relay (src/RemotePane.h): pair with the other desktop, pick one of its panes, and
     // it opens beside the active pane. Transient like the other hosted views: not saved.
+    // "Join a shared session" (owner, 2026-09-18): /join BQRT, /connect BQRT, the palette, or the
+    // plug at the top right. The host's panes open here as a guest's, in a tab of their own, and a
+    // pane the host adds later — a tab shared whole — opens beside the last one.
+    void joinSharedSession(const QString &code = QString()) {
+        QPointer<RelayWindow> self(this);
+        auto last = std::make_shared<QPointer<ToolPane>>();
+        relay::JoinDialog::open(this, code, [self, last](relay::RemotePane *view, bool first) {
+            if (!self) { delete view; return; }
+            auto *tool = new ToolPane(ToolPane::Kind::Info, view, view, self->activeCwd());
+            tool->setProperty("paneType", QStringLiteral("shared"));
+            tool->setProperty("paneLabel", QStringLiteral("Shared pane"));
+            relay::theme::polishWindow(tool);
+            QPointer<ToolPane> guard(tool);
+            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            RelayWindow *w = (!first && *last) ? windowOf(last->data()) : nullptr;
+            if (w) {
+                w->insertBeside(last->data(), tool, Qt::Horizontal, false);
+            } else {
+                w = self.data();
+                auto *page = new QWidget;
+                auto *layout = new QVBoxLayout(page);
+                layout->setContentsMargins(0, 0, 0, 0);
+                layout->addWidget(tool);
+                w->m_tabs->insertTab(w->m_tabs->currentIndex() + 1, page, QString());
+                w->m_tabs->setCurrentWidget(page);
+            }
+            *last = tool;
+            w->setActiveLeaf(tool);
+            focusLeaf(tool);
+            w->updateTitles();
+        });
+    }
+
     void openSharedPaneDialog() {
         QPointer<RelayWindow> self(this);
         relay::RemotePaneDialog::open(this, [self](relay::RemotePane *view) {
@@ -3436,6 +3473,7 @@ private:
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
+        pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
@@ -4032,6 +4070,22 @@ private:
         auto *rightRow = new QHBoxLayout(right);
         rightRow->setContentsMargins(6, 0, 6, 0);
         rightRow->setSpacing(2);
+        // The plug: into somebody else's session. Joining with a code is the common case, so it
+        // is the first entry; your own desktop's panes are the second (owner, 2026-09-18).
+        m_connect = new ChromeButton(ChromeButton::Glyph::Connect);
+        m_connect->setToolTip(QStringLiteral("Join a shared session"));
+        connect(m_connect, &QToolButton::clicked, this, [this] {
+            QMenu menu(this);
+            menu.addAction(QStringLiteral("Join with a code…"), this, [this] {
+                joinSharedSession();
+                hint(QStringLiteral("remote.join.button"),
+                     QStringLiteral("Next time: type /join and the code in any prompt box"));
+            });
+            menu.addAction(QStringLiteral("Open a pane your other desktop shares…"), this,
+                           [this] { openSharedPaneDialog(); });
+            menu.exec(m_connect->mapToGlobal(QPoint(0, m_connect->height())));
+        });
+        rightRow->addWidget(m_connect);
         m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
         connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
         rightRow->addWidget(m_bell);
@@ -4965,6 +5019,7 @@ private:
     static constexpr int kFrameMargin = 5;
     bool m_nativeFrame = false;
     QPointer<ChromeButton> m_bell, m_minimize, m_maximize, m_close;
+    QPointer<ChromeButton> m_connect;   // the plug: join a shared session
     // The tool-pane buttons, by the pane type each owns (relay::panestatus::toolButtons()).
     QHash<QString, QPointer<ChromeButton>> m_toolButtons;
     QPointer<NotificationsPopup> m_notifications;
