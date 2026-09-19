@@ -1,0 +1,11 @@
+2026-09-19T17:47:21.082Z INFO relay.gui gui_start version=0.1.0 pid=2241608 level=info
+2026-09-19T17:47:21.227Z INFO relay.gui worker_start pane=df74212e workspace_set=1
+2026-09-19T17:47:21.531Z INFO relay.gui event type=ready pane=df74212e
+2026-09-19T17:47:21.606Z INFO relay.gui event type=configured pane=df74212e model=stub
+2026-09-19T17:47:29.604Z INFO relay.gui event type=agent_started pane=df74212e turn_id=29f92156dada476885a71ffefc4d863e
+2026-09-19T17:47:29.896Z INFO relay.gui event type=turn_summary pane=df74212e turn_id=29f92156dada476885a71ffefc4d863e outcome=done ms=286
+2026-09-19T17:47:29.914Z INFO relay.gui event type=agent_finished pane=df74212e outcome=done
+2026-09-19T17:50:48.581Z INFO relay.gui event type=agent_started pane=df74212e turn_id=30ac2c6d77ad4302814b93d89f2c39c9
+2026-09-19T17:50:48.595Z INFO relay.gui event type=turn_summary pane=df74212e turn_id=30ac2c6d77ad4302814b93d89f2c39c9 outcome=error ms=14
+2026-09-19T17:50:48.595Z ERROR relay.gui event type=error pane=df74212e turn_id=30ac2c6d77ad4302814b93d89f2c39c9 msg="No model server is answering on 127.0.0.1:8816. Start it, for example `llama-server -m <model.gguf> --jinja --port 8816`, or the systemd user unit that serves it (docs/LOCAL-MODELS.md)."
+2026-09-19T17:50:48.595Z INFO relay.gui event type=agent_finished pane=df74212e outcome=error

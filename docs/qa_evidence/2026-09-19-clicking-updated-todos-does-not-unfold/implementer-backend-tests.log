@@ -1,0 +1,16 @@
+$ PYTHONPATH=backend:tests python3 -m unittest tests.test_tool_labels
+............................................................
+----------------------------------------------------------------------
+Ran 60 tests in 0.008s
+
+OK
+
+$ ctest --test-dir build -R "calllines|requests|toollabel|turntranscript" --output-on-failure
+    Start 55: calllines
+3/4 Test #55: calllines ........................   Passed    0.39 sec
+    Start 56: turntranscript
+4/4 Test #56: turntranscript ...................   Passed    0.27 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   0.85 sec
