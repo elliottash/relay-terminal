@@ -34,8 +34,7 @@ special translator from the relay prompt into the claude code input and back."
 - [x] Codex Tier B: ~~daemon co-attach spike~~ → marked settings + rollout tail (spike declined: the tail covers Tier B; daemon stays Tier A) <!-- t:yz -->
 - [x] Composer translator + slash registry (guest autocomplete, TUI-state-aware injection) <!-- t:sy -->
 - [x] Sessions pane: claude + codex conv_index sources, resume/fork, unified search <!-- t:2f -->
-- [ ] Live tail of the active pane's guest transcript (`guest_sessions.LiveTail` has no caller; a
-      running session's row refreshes on the next reconcile instead) <!-- t:lt -->
+- [ ] Live tail of the active pane's guest transcript (`guest_sessions.LiveTail` has no caller; a running session's row refreshes on the next reconcile instead) <!-- t:t1 -->
 - [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:bt -->
 - [x] Tier A headless harness adapters: the contract (`guest_harness.py`), `codex app-server` and `claude -p` stream-json adapters with recorded fixtures, the worker's `HarnessProvider` and `guest:` presets, the picker routed to the preset when usable (protocol §29). Un-deferred by the owner on 2026-09-19 ("i wanted Tier A now … go ahead and unlock that now") <!-- t:x2 -->
 - [ ] Tier A follow-ups: streaming tool output (`tool_output` kind), a context-window size in `usage`, "always allow" / "deny and stop" answers for Codex approvals, Codex's `--remote` co-attach of its TUI to Relay's app-server (attaches; not built on) <!-- t:a3 -->
