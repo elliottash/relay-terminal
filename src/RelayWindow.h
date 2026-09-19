@@ -19,6 +19,7 @@
 #include "BoardPane.h"
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
+#include "Projects.h"         // which project a tab is attached to, and the registry of known ones
 #include "Hints.h"
 #include "Notifications.h"
 #include "ScreenPrompt.h"
@@ -210,6 +211,16 @@ public:
     bool writesState();
     void forget(RelayWindow *window) { m_windows.removeAll(window); }
 
+    // ----- known projects (src/Projects.h) ------------------------------------------------------
+    // One registry for the whole process, read from disk the first time it is asked for. A tab
+    // attaching to a project is the only thing that writes it (RelayWindow::attachTab), so the
+    // file reads back as "you attached this because you opened its Switchboard" and never as a
+    // guess Relay made about a directory somebody happened to `cd` into.
+    relay::projects::Registry &projects() {
+        if (!m_projectsLoaded) { m_projectsLoaded = true; m_projects.load(); }
+        return m_projects;
+    }
+
     // ----- saved window layout: "reopen where I left off" (src/WindowState.h) -------------------
     // Relay keeps one layout file per user and rewrites it, debounced, whenever the windows, tabs,
     // panes, directories or models change, and once more when the last window goes away. A crash
@@ -247,6 +258,8 @@ private:
 
     QString m_workspace;
     bool m_cleanShell = false;
+    relay::projects::Registry m_projects;   // the known-projects file, loaded on first use
+    bool m_projectsLoaded = false;
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_closedWatchers;
@@ -370,8 +383,11 @@ public:
     // its board panes are about to be destroyed with it.
     ~RelayWindow() override { qApp->removeEventFilter(this); stopBoardWorkers(); }
 
-    // Build a tab from a layout node. Returns false if no pane could be created.
-    bool addTab(const QJsonObject &node, int index = -1) {
+    // Build a tab from a saved tab. Returns false if no pane could be created. The tab is either
+    // a bare layout node or the {"project", "node"} wrapper an attached tab saves as (#JN7X).
+    bool addTab(const QJsonObject &tab, int index = -1) {
+        const QJsonObject node = relay::windowstate::tabNode(tab);
+        const QString project = relay::windowstate::tabProject(tab);
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout(page); layout->setContentsMargins(0, 0, 0, 0);
         QWidget *root = nullptr;
@@ -386,6 +402,11 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
+        // A saved tab comes back attached to the project it was attached to. A project that has
+        // been moved or deleted comes back unattached and quiet rather than pointing the tab's
+        // panes at a directory that is not there.
+        if (!project.isEmpty() && QFileInfo(project).isDir())
+            attachTab(page, project, QString::fromLatin1(relay::projects::kReasonRestored));
         const auto leaves = leavesIn(page);
         if (!leaves.isEmpty()) { QWidget *first = leaves.first(); setActiveLeaf(first); QTimer::singleShot(0, first, [this, first] { focusLeaf(first); }); }
         updateTitles();
@@ -2234,6 +2255,18 @@ private:
             board.aliases = QStringLiteral("board issues cards todo trello kanban scratchpad tickets tracker");
             items << board;
         }
+        // Offered only while this tab is attached to a project (#JN7X): with no project there is
+        // nothing to detach from, and the quiet state must not advertise itself. No shortcut —
+        // detaching is rare, so there is no fast path to teach and no hint entry.
+        if (const QString project = tabProject(m_tabs->currentWidget()); !project.isEmpty()) {
+            PaletteItem detach;
+            detach.key = QStringLiteral("project.detach"); detach.section = panes;
+            detach.label = QStringLiteral("Detach this tab from %1").arg(relay::projects::nameFor(project));
+            detach.detail = QStringLiteral("%1 · its panes lose the card tools; an open Switchboard stays open").arg(project);
+            detach.aliases = QStringLiteral("project switchboard attach unattach board");
+            detach.run = [this] { detachTab(m_tabs->currentWidget()); };
+            items << detach;
+        }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
@@ -3092,6 +3125,63 @@ public:
         if (!onlyClocks) for (Pane *pane : allPanes()) pane->updateShareChip();
     }
 
+    // ----- which project a tab is attached to (card #JN7X, src/Projects.h) ---------------------
+    //
+    // The owner's model. **A tab is attached to at most one project, and starts attached to
+    // none.** Unattached is the normal, quiet state — no chip, no offers, and the tab's panes get
+    // no board tools and no board policy in their prompt — because most of the time the terminal
+    // is standing in ~/Downloads or an admin folder and there is no project to talk about.
+    //
+    // A pane's *candidate* project is derived fresh from its live terminal directory whenever it
+    // is needed (`candidateProject()`) and is never cached on the pane: a candidate is an offer,
+    // not an attachment. **Typing in the terminal never attaches.** Only an explicit project
+    // action does — opening the Switchboard, `/card`, picking a card with `#`, executing a card —
+    // and each of those is one of `projects::kReason*`. Attachment is sticky until it is
+    // detached, and a tab never switches project silently: a pane that has `cd`-ed into another
+    // checkout says so ("This tab's Switchboard is A; … belongs to B") instead of re-pointing.
+    //
+    // `attachTab` is the **only** writer of m_tabProject, the only caller of `Registry::remember`
+    // and the only place the tab's panes are re-pointed, so there is one answer to "how did this
+    // tab get a project" and one place to change what attaching does.
+    void attachTab(QWidget *page, const QString &project, const QString &reason) {
+        if (!page || project.isEmpty() || m_tabs->indexOf(page) < 0) return;
+        const QString normalized = relay::projects::normalize(project);
+        if (normalized.isEmpty() || m_tabProject.value(page) == normalized) return;
+        m_tabProject.insert(page, normalized);
+        // The registry record: why this project became known, and where its board is if it has
+        // one. A project with no board yet is remembered all the same — the tab is attached to it
+        // — with `board: none` until the init question is answered.
+        const QString dir = relay::projects::boardDirOf(normalized);
+        m_manager->projects().remember(
+            normalized, reason,
+            QString::fromLatin1(dir.isEmpty() ? relay::projects::kBoardNone : relay::projects::kBoardRepo), dir);
+        repointTabPanes(page);
+        m_manager->scheduleSave();
+    }
+
+    // "Detach this tab from <project>". Nothing is closed and nothing is written: an open
+    // Switchboard pane stays open showing that board, and the tab's panes simply lose the card
+    // tools on the next `set_board`.
+    void detachTab(QWidget *page) {
+        if (!page || !m_tabProject.contains(page)) return;
+        const QString was = m_tabProject.take(page);
+        repointTabPanes(page);
+        m_manager->scheduleSave();
+        statusBar()->showMessage(QStringLiteral("This tab is no longer attached to %1.")
+                                     .arg(relay::projects::nameFor(was)), 9000);
+    }
+
+    // The project this tab is attached to, or an empty string. The one reader.
+    QString tabProject(QWidget *page) const { return m_tabProject.value(page); }
+
+    // The active pane's candidate project, derived fresh from its live terminal directory.
+    // Deliberately not its `workspace()`, which is frozen when the pane is made and inherited
+    // from the directory Relay was launched in — the thing that made one project's board appear
+    // in every pane of every window (#JN7X).
+    QString candidateProject() const {
+        return m_active ? relay::projects::candidateFor(m_active->cwd()) : QString();
+    }
+
     // ----- Switchboard (docs/SWITCHBOARD-DESIGN.md 4, protocol 17) -----------------------------
     // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
@@ -3106,7 +3196,7 @@ public:
         // A tab holds one project's board (owner's rule: one project per tab), so an existing one
         // is what this key shows — but never silently as if it were the active pane's. When the
         // two disagree, say whose board is on screen: dropping a card on it writes into that
-        // project's `issues/`, not the one the pane is standing in.
+        // project's board folder, not the one the pane is standing in.
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
                 setActiveLeaf(tool); focusLeaf(tool);
@@ -3123,11 +3213,18 @@ public:
                 return;
             }
         if (workspace.isEmpty()) {
+            // Nothing is created here and nothing is offered: a project with no Switchboard yet
+            // gets one quiet line, and the "Initialize a project and create a Switchboard here?"
+            // question is a later stage's (protocol 19.12).
+            const QString candidate = candidateProject();
             statusBar()->showMessage(
                 from.isEmpty()
                     ? QStringLiteral("No pane to look from, so there is no Switchboard to open.")
-                    : QStringLiteral("No Switchboard for %1: no issues/board.yaml there or in any "
-                                     "directory above it.").arg(from),
+                    : candidate.isEmpty()
+                          ? QStringLiteral("No Switchboard for %1: no switchboard/board.yaml or "
+                                           "issues/board.yaml there or in any directory above it.").arg(from)
+                          : QStringLiteral("%1 has no Switchboard yet.")
+                                .arg(relay::projects::nameFor(candidate)),
                 9000);
             return;
         }
@@ -3136,6 +3233,9 @@ public:
         if (!tool) return;
         if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
         else if (page && page->layout()) page->layout()->addWidget(tool);
+        // Opening the Switchboard is the explicit project action: from here the tab is this
+        // project's, its panes get the card tools, and it stays so until it is detached.
+        attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
@@ -3201,8 +3301,45 @@ public:
     QString boardWorkspace() const {
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board())
             return tool->board()->workspace();
+        // An attached tab has one project and keeps it wherever its panes wander (#JN7X).
+        if (const QString attached = tabProject(m_tabs->currentWidget()); !attached.isEmpty())
+            return attached;
         if (!m_active) return QString();
-        return relay::boardRootFor({m_active->cwd(), m_active->workspace()});
+        // Unattached: the active pane's candidate, but only when that project already has a
+        // board. `boardRootFor` of the pane's live directory is exactly that — the walk stops at
+        // the nearest ancestor with a board, which is the candidate `projects::candidateFor()`
+        // returns whenever one exists. The pane's `workspace()` is deliberately not a candidate:
+        // it is frozen at creation and inherited from the launch directory.
+        return relay::boardRootFor({m_active->cwd()});
+    }
+
+    // ----- the `board` block a pane's worker is configured with (protocol 19.1) ----------------
+    //
+    // Three shapes, one per state of the tab:
+    //   unattached          -> {"attach": false}   — no tools, no policy block, no walk-up. The
+    //                          worker used to walk up from the pane's workspace with no block at
+    //                          all, which is how every pane "found" the launch project's board.
+    //   attached, has board -> {"dir", "project", "state": "ready"}
+    //   attached, no board  -> {"project", "state": "uninitialized"} — the worker attaches
+    //                          anyway, offers `board_create_card` alone and asks before creating
+    //                          anything (19.12). Nothing here creates a folder.
+    QJsonObject boardSettingsFor(QWidget *page) const {
+        const QString project = tabProject(page);
+        if (project.isEmpty()) return {{QStringLiteral("attach"), false}};
+        const QString dir = relay::projects::boardDirOf(project);
+        if (dir.isEmpty())
+            return {{QStringLiteral("project"), project}, {QStringLiteral("state"), QStringLiteral("uninitialized")}};
+        return {{QStringLiteral("dir"), dir}, {QStringLiteral("project"), project},
+                {QStringLiteral("state"), QStringLiteral("ready")}};
+    }
+
+    // Tell every terminal pane in the tab which board it is on now, without ending what it was
+    // talking about: `set_board` re-points the worker's tools and prompt block and leaves the
+    // Agent, its messages and its session id alone (protocol 19.11).
+    void repointTabPanes(QWidget *page) {
+        const bool attached = !tabProject(page).isEmpty();
+        const QJsonObject board = boardSettingsFor(page);
+        for (Pane *pane : panesIn(page)) pane->setBoard(attached ? board : QJsonObject());
     }
 
     // One worker per board root per window: a window showing two projects' boards runs two, each
@@ -3318,7 +3455,7 @@ public:
         tool->setObjectName(QStringLiteral("pane"));
         QPointer<ToolPane> guard(tool);
         // This view's own board root, so a second project's Switchboard in the same window writes
-        // through its own worker and into its own `issues/`.
+        // through its own worker and into its own board folder.
         view->onSend = [this, workspace](const QJsonObject &message) {
             if (relay::BoardWorker *worker = boardWorker(workspace)) worker->send(message);
         };
@@ -3491,6 +3628,37 @@ private:
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
+        // The `board` block of every `configure` this pane sends (protocol 19.1). It is read at
+        // the moment the configure is built, so a pane that is re-created or switches model comes
+        // back on the board its tab is attached to — or, while the tab is attached to nothing, on
+        // none at all.
+        pane->onBoardSettings = [guard]() -> QJsonObject {
+            auto *w = windowOf(guard);
+            return w ? w->boardSettingsFor(w->pageOf(guard)) : QJsonObject{{QStringLiteral("attach"), false}};
+        };
+        // "Has this pane a board it may talk to?" A non-empty `reason` (projects::kReason*) makes
+        // it an explicit project action: the tab attaches to the pane's candidate project first,
+        // but only when that project already has a board — a candidate with none is answered with
+        // one line and nothing is created. An empty reason attaches nothing and answers from the
+        // tab alone, so the `#` index, the idle tip and the shortcut hints stay quiet in a pane
+        // whose tab is attached to nothing.
+        pane->onBoardProject = [guard](const QString &reason, QString *why) -> QString {
+            auto *w = windowOf(guard);
+            if (!w) return {};
+            QWidget *page = w->pageOf(guard);
+            if (const QString attached = w->tabProject(page); !attached.isEmpty()) return attached;
+            if (reason.isEmpty()) return {};
+            const QString candidate = relay::projects::candidateFor(guard->cwd());
+            if (candidate.isEmpty() || relay::projects::boardDirOf(candidate).isEmpty()) {
+                if (why)
+                    *why = candidate.isEmpty()
+                               ? QStringLiteral("No Switchboard here: no project above %1 has one.").arg(guard->cwd())
+                               : QStringLiteral("%1 has no Switchboard yet.").arg(relay::projects::nameFor(candidate));
+                return {};
+            }
+            w->attachTab(page, candidate, reason);
+            return w->tabProject(page);
+        };
         pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // Right-click menu entries the window owns (issue #X2F1).
@@ -3567,9 +3735,25 @@ private:
         if (node.contains(QStringLiteral("board"))) {
             const QJsonObject board = node.value(QStringLiteral("board")).toObject();
             const QString workspace = board.value(QStringLiteral("workspace")).toString();
-            if (QFileInfo::exists(workspace + QStringLiteral("/issues/board.yaml")))
-                return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
-                                       board.value(QStringLiteral("hidden")).toArray());
+            // Either spelling of the board folder (protocol 19.12): a saved Switchboard whose
+            // project keeps its cards in `issues/` restores exactly like one that uses
+            // `switchboard/`.
+            if (!relay::projects::boardDirOf(workspace).isEmpty()) {
+                ToolPane *tool = createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
+                                                 board.value(QStringLiteral("hidden")).toArray());
+                // A restored Switchboard attaches its tab, unless the tab already has a project —
+                // the saved `project` on the tab wins, and a tab holds one. Queued, because
+                // buildNode() runs before the page the pane will live in exists.
+                QPointer<ToolPane> guard(tool);
+                QTimer::singleShot(0, tool, [guard, workspace] {
+                    auto *w = windowOf(guard);
+                    if (!w) return;
+                    QWidget *page = w->pageOf(guard);
+                    if (page && w->tabProject(page).isEmpty())
+                        w->attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonRestored));
+                });
+                return tool;
+            }
             // The project lost its board (or moved): a terminal in the directory this pane was
             // saved in, which is the project the person was working in. It used to open in the
             // launch directory, quietly moving the pane to another checkout.
@@ -3648,7 +3832,13 @@ private:
     QJsonObject serializeTab(int index) const {
         QWidget *page = m_tabs->widget(index);
         QWidget *root = page && page->layout() && page->layout()->count() ? page->layout()->itemAt(0)->widget() : nullptr;
-        return serializeNode(root);
+        const QJsonObject node = serializeNode(root);
+        // An attached tab saves as {"project", "node"} and an unattached one as the bare node it
+        // always was, so nothing changes for the quiet default and the schema does not move
+        // (src/WindowState.h). An empty node still reads as empty: restorableTabs() drops it.
+        const QString project = tabProject(page);
+        if (node.isEmpty() || project.isEmpty()) return node;
+        return {{QStringLiteral("project"), project}, {QStringLiteral("node"), node}};
     }
 
     void setActive(Pane *pane) { setActiveLeaf(pane); }
@@ -3752,6 +3942,7 @@ private:
 
     void forgetTab(QWidget *page) {
         m_tabNames.remove(page);
+        m_tabProject.remove(page);   // the tab is going: its project goes with it (#JN7X)
         m_tabKey.remove(page);
         m_tabRelated.remove(page);
         m_tabPhrase.remove(page);
@@ -3875,6 +4066,10 @@ private:
     // Tab labels (issue JRWQ): names set by hand, and the worker's last "same work?" judgement per
     // tab page, keyed by the pane titles it was made for.
     QMap<QWidget *, QString> m_tabNames, m_tabKey, m_tabPhrase;
+    // Which project each tab is attached to (#JN7X). Written only by attachTab()/detachTab() and
+    // cleared by forgetTab(); a tab that is not in it is attached to nothing, which is the
+    // ordinary state.
+    QMap<QWidget *, QString> m_tabProject;
     QMap<QWidget *, bool> m_tabRelated;
     QMap<QString, QPair<QPointer<QWidget>, QString>> m_tabLabelRequests;
     int m_tabLabelSerial = 0;
@@ -4723,6 +4918,10 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
+        // The new tab is attached to nothing, so a pane that came out of an attached one loses
+        // its board here rather than keeping the card tools of a project its tab no longer has
+        // (#JN7X). Opening the Switchboard, or `/card`, attaches this tab on its own terms.
+        repointTabPanes(page);
         setActiveLeaf(leaf);
         QTimer::singleShot(0, leaf, [leaf] { focusLeaf(leaf); });
         updateTitles();
@@ -4758,12 +4957,15 @@ private:
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
         const QString tabName = m_tabNames.value(page);
+        const QString project = m_tabProject.value(page);   // the tab's project travels with it
         forgetTab(page);
         m_tabs->removeTab(index);
         page->setParent(nullptr);
         RelayWindow *window = m_manager->newEmptyWindow(geometry().translated(40, 40));
         window->adoptPage(page, lastActive);
         if (!tabName.isEmpty()) window->renameTab(tabName, false, page);
+        if (!project.isEmpty())
+            window->attachTab(page, project, QString::fromLatin1(relay::projects::kReasonRestored));
         if (QWidget *current = m_tabs->currentWidget()) {
             QWidget *leaf = m_lastActive.value(current);
             if (!leaf) { const auto leaves = leavesIn(current); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }

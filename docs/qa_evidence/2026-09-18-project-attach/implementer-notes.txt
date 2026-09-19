@@ -1,0 +1,28 @@
+unattached: /card and Ctrl+Shift+S in ~/scratch/downloads wrote no file anywhere (fixture and this repo's issues/ and .relay/ identical before and after)
+no board yet: Ctrl+Shift+S and /card in a .git project with no board created nothing (no switchboard/ folder, no card, nothing in this repo)
+saved layout: window 0 tab 0 project=/tmp/rpa.ysaTcR/h/scratch/proj-new shape=wrapper
+saved layout: window 0 tab 1 project=/tmp/rpa.ysaTcR/h/scratch/proj-old shape=wrapper
+saved layout: window 0 tab 2 project=(unattached) shape=bare node
+
+tool lists the worker sent the model, in order (implementer-tools.log):
+turn=[Relay context: added by Relay, not typed by the user] messages=2   board_tools=0 [-] switchboard_prompt=no all=agent,agent_message,agent_wait,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Session so far:          messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Conversation:            messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=4   board_tools=6 [board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card] switchboard_prompt=yes all=agent,agent_message,agent_wait,board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Transcript:              messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=6   board_tools=6 [board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card] switchboard_prompt=yes all=agent,agent_message,agent_wait,board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=8   board_tools=0 [-] switchboard_prompt=no all=agent,agent_message,agent_wait,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+
+board_state events in the pane log (relay.log):
+2026-09-19T03:29:41.292Z INFO relay.gui board_state pane=361183c8 board=/tmp/rpa.ysaTcR/h/scratch/proj-new/switchboard state=ready
+2026-09-19T03:30:02.188Z INFO relay.gui board_state pane=912a8d96 board=/tmp/rpa.ysaTcR/h/scratch/proj-old/issues state=ready
+2026-09-19T03:30:59.560Z INFO relay.gui board_state pane=8879de06 board=none state=

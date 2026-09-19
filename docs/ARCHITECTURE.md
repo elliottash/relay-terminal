@@ -1130,10 +1130,25 @@ to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's S
 
 ## 10a. The Switchboard pane
 
-The Switchboard **is** the repository's `issues/` tree shown as a board: one card per issue, plan
-or memory, a thread per card, and an agent that writes to it. It appears only when the workspace
-has an `issues/board.yaml`. Design: `docs/SWITCHBOARD-DESIGN.md`; bytes:
-`docs/SWITCHBOARD-FORMAT.md`; protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 17.
+The Switchboard **is** a folder in the project shown as a board: one card per issue, plan or
+memory, a thread per card, and an agent that writes to it. The folder is `switchboard/` on a board
+made from 2026-09-18 on and `issues/` on one filed before that; its `board.yaml` is the marker, and
+that marker is the switch — everything here is inert without it. Design:
+`docs/SWITCHBOARD-DESIGN.md`; bytes: `docs/SWITCHBOARD-FORMAT.md`; protocol:
+`docs/AGENT-SESSIONS-PROTOCOL.md` section 19.
+
+**Which board, and whose** (card #JN7X, `src/Projects.h`, `src/BoardWorkspace.h`). A tab is
+attached to at most one project and **starts attached to none**, which is the quiet, normal state:
+no board tools, no board policy in the prompt, no tip and no offer. A pane's *candidate* project is
+derived fresh from its live terminal directory (`projects::candidateFor`) and is an offer, not an
+attachment; the pane's own `workspace()` is never consulted, because it is frozen at creation and
+inherited from the directory Relay was launched in — the reason one project's board used to appear
+in every pane of every window. Only an explicit project action attaches: opening the Switchboard,
+`/card`, picking a card with `#`, Execute-from-card. `RelayWindow::attachTab()` is the one funnel —
+the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
+the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
+worker **without ending its conversation**. "Detach this tab from <project>" is in the palette while
+a tab is attached; it closes nothing.
 
 - **`src/BoardModel.{h,cpp}`** (`relay-board`): the pure logic — the rows the worker sends, the tab
   and column a card falls into, the filter language (`label:`, `status:`, `@assignee`,
@@ -1143,8 +1158,9 @@ has an `issues/board.yaml`. Design: `docs/SWITCHBOARD-DESIGN.md`; bytes:
   A tab bar with counts, a filter field, horizontally scrolling columns of cards with drag and
   drop between them, quick add, and a card detail view on the right: the rendered body, the
   `## Tasks` checklist, the links, the thread and a reply box (`RichEditor`) that either asks the
-  Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on `issues/` turns any
-  write — this window, a pane agent, an editor, a `git pull` — into one debounced `board_refresh`.
+  Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on the board folder (the
+  one the `board` event named, else `projects::boardDirOf()`) turns any write — this window, a pane
+  agent, an editor, a `git pull` — into one debounced `board_refresh`.
 - **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **window**, configured with
   `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
   lazily on the first open and answers every `board_*` message of protocol 17.
@@ -1152,7 +1168,11 @@ has an `issues/board.yaml`. Design: `docs/SWITCHBOARD-DESIGN.md`; bytes:
 Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
 ("Switchboard") and `/switchboard`. `/card <text>` adds a card to the Inbox verbatim without
-opening anything. The layout node is `{"board": {"workspace", "tab"}}`.
+opening anything. Both attach the tab to the pane's candidate project; a candidate with no board
+yet gets one quiet status line and **nothing is created** (the init question is protocol 19.12).
+The layout node is `{"board": {"workspace", "tab"}}`, and a tab attached to a project is saved as
+`{"project": "…", "node": <tab node>}` — an unattached one keeps the bare node shape, so the layout
+file needs no schema bump (`relay::windowstate::tabNode`/`tabProject`).
 
 Inside the pane: arrows select, Enter opens a card, Esc closes it, `n` adds one, `m` moves it,
 `/` filters, `c` replies, `y` copies `#ID`, `t` sends `#ID` to the composer, `o` opens the card
@@ -1946,6 +1966,8 @@ of the platform and of the engine itself.
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
+| `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying `switchboard/board.yaml` then `issues/board.yaml` at each level |
+| `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |

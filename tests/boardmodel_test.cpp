@@ -295,6 +295,16 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     QVERIFY(Model::matches(card, QStringLiteral("folder:changes")));
     QVERIFY(Model::matches(card, QStringLiteral("folder:bugs")));
     QVERIFY(!Model::matches(card, QStringLiteral("folder:marketing")));
+    // Either spelling of the board folder is stripped off the path first (#JN7X): a card on a
+    // board made from 2026-09-18 on is in `switchboard/`, one filed before that in `issues/`.
+    QCOMPARE(card.folder(), QStringLiteral("changes"));
+    Card fresh = card;
+    fresh.path = QStringLiteral("switchboard/changes/2026-09-18-voice.md");
+    QCOMPARE(fresh.folder(), QStringLiteral("changes"));
+    QVERIFY(Model::matches(fresh, QStringLiteral("folder:changes")));
+    Card privateCard = card;
+    privateCard.path = QStringLiteral("switchboard/.private/changes/2026-09-18-voice.md");
+    QCOMPARE(privateCard.folder(), QStringLiteral("changes"));
     QVERIFY(Model::matches(card, QStringLiteral("@agent")));
     QVERIFY(!Model::matches(card, QStringLiteral("@dana")));
     QVERIFY(Model::matches(card, QStringLiteral("waiting:me")));

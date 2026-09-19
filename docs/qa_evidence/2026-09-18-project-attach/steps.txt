@@ -1,0 +1,172 @@
+A tab is attached to a project, and starts attached to none (card #JN7X, stage 1)
+================================================================================
+
+Implementer evidence, not a QA verdict. Run live under Xvfb with a fully isolated
+profile (HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_RUNTIME_DIR and TMPDIR all
+under one scratch directory) and RELAY_KEYRING=off, by
+
+    docs/qa_evidence/2026-09-18-project-attach/drive.sh <build-dir>
+
+Binary: a scratch build of the working tree (libvterm engine core; only that core
+builds on this machine). **Relay was launched from this repository**, which has a
+Switchboard of its own — exactly the trap the card is about: under the old rule
+every pane in every window found *this* repo's board, wherever its terminal was.
+
+The model is `stub-provider.py` on 127.0.0.1. It answers every turn "Done." and
+appends one line per request to implementer-tools.log holding the tool names and
+whether the system prompt carried a Switchboard block. That is how "the agent has
+no board tools before the attach and has them after, in the same conversation" is
+checked without a provider account: the `messages=` count is the conversation's
+length, so a turn that grew it was not a new chat.
+
+Fixture (in the sandbox, so nothing here is a real project):
+
+    scratch/downloads   a plain directory: no board, no .git, nothing above it
+    scratch/proj-new    .git + switchboard/board.yaml + card #NEW1   (new folder name)
+    scratch/proj-old    .git + issues/board.yaml      + card #OLD1   (older folder name)
+    scratch/proj-none   .git and nothing else         (a project with no board yet)
+
+
+1. An unattached tab is quiet, and writes nothing
+-------------------------------------------------
+implementer-01-unattached-downloads.png
+    `cd scratch/downloads`, then an agent turn. The pane header says
+    TERMINAL ~/scratch/downloads | AGENT WORKSPACE /home/elliott/repos/relay-terminal
+    — the frozen launch workspace is still this repo, and the pane still has no
+    board. Nothing on screen mentions a project, a board or an offer.
+
+    implementer-tools.log, first turn:
+        messages=2  board_tools=0  switchboard_prompt=no
+        all=agent,agent_message,agent_wait,command_output,edit_file,…
+    No `board_*` tool, and no Switchboard block in the system prompt.
+
+implementer-02-unattached-card-command.png (+ -bar)
+    `/card a card that must never be written` →
+        "No Switchboard here: no project above /…/scratch/downloads has one."
+    and nothing is sent to the worker.
+
+implementer-03-unattached-switchboard-key.png (+ -bar)
+    Ctrl+Shift+S says the same and opens nothing.
+
+    implementer-notes.txt: the whole fixture tree **and** this repository's
+    `issues/` and `.relay/` are byte-identical before and after. Before the fix
+    this is where a card landed in this repo.
+
+
+2. A project whose board is the new `switchboard/`
+--------------------------------------------------
+implementer-04-attached-switchboard-folder.png
+    `cd scratch/proj-new`, Ctrl+Shift+S: the Switchboard opens on
+    `proj-new/switchboard/` with card #NEW1. Opening it is the explicit project
+    action, so the tab is now attached to proj-new.
+
+    relay.log: board_state pane=361183c8 board=…/proj-new/switchboard state=ready
+
+implementer-05-attached-same-conversation.png
+    A second turn in the *same* terminal pane. The transcript still holds
+    "hello from downloads / Done." above it — no new chat — and the request the
+    worker sent the model is
+
+        messages=4  board_tools=6  switchboard_prompt=yes
+        [board_comment, board_create_card, board_list, board_move_card,
+         board_read, board_update_card]
+
+    messages went 2 → 4, so this is the same conversation with the card tools
+    added to it (protocol 19.11 `set_board`, not another `configure`).
+
+
+3. A project whose board is the older `issues/`
+------------------------------------------------
+implementer-06-attached-issues-folder.png
+    A new tab, `cd scratch/proj-old`, Ctrl+Shift+S: the Switchboard opens on
+    `proj-old/issues/` with card #OLD1. Same key, same behaviour, older folder
+    name — nothing is converted or moved.
+
+    relay.log: board_state pane=912a8d96 board=…/proj-old/issues state=ready
+
+
+4. A project with no board yet gets one quiet line and nothing else
+-------------------------------------------------------------------
+implementer-07-project-with-no-board.png (+ -bar)
+    A new tab, `cd scratch/proj-none` (a `.git` and nothing else), Ctrl+Shift+S:
+        "proj-none has no Switchboard yet."
+implementer-08-project-with-no-board-card.png (+ -bar)
+    `/card nothing may be created here either` → the same line in the pane.
+
+    implementer-notes.txt: no `switchboard/` folder appeared, no card was
+    written, and this repository is untouched. The "Initialize a project and
+    create a Switchboard here?" question is the next stage's work; this stage
+    creates nothing, ever.
+
+
+5. Quit and relaunch: the tabs come back attached
+--------------------------------------------------
+    SIGTERM (an ordinary quit: the layout is saved), then relaunch.
+
+    The saved layout, read back out of state/windows.json:
+        window 0 tab 0 project=…/scratch/proj-new  shape=wrapper
+        window 0 tab 1 project=…/scratch/proj-old  shape=wrapper
+        window 0 tab 2 project=(unattached)        shape=bare node
+    An attached tab is `{"project", "node"}`; an unattached one is the bare node
+    every earlier Relay wrote, so the file's schema version did not move.
+
+implementer-09-restored-attached.png
+    Both Switchboards are back in their own tabs ("Done; Switchboard · 1 open",
+    "proj-old; Switchboard · 1 open"), the third tab is the plain proj-none one.
+
+implementer-10-palette-no-detach-when-unattached.png
+    On that third, unattached tab the palette search "Detach this tab" finds
+    nothing: the quiet state does not advertise itself.
+
+implementer-11-restored-tab-is-attached.png,
+implementer-12-restored-tools-are-back.png
+    Back on tab 1. "Session loaded: "Done" · 2 turn(s)" — the conversation from
+    before the restart — and the turn run there is
+        messages=6  board_tools=6  switchboard_prompt=yes
+    so the restored tab was attached before its pane's first configure.
+
+
+6. Detaching
+------------
+implementer-13-palette-detach.png
+    The palette now offers
+        "Detach this tab from proj-new
+         Panes and tabs · /…/scratch/proj-new · its panes lose the card tools;
+         an open Switchboard stays open"
+
+implementer-14-after-detach.png (+ -bar)
+    "This tab is no longer attached to proj-new." Nothing closed: the Switchboard
+    pane is still open and still showing proj-new's cards.
+
+implementer-15-detached-same-conversation.png
+    One more turn in the same pane. The whole transcript is still there, and
+        messages=8  board_tools=0  switchboard_prompt=no
+    — the card tools are gone, the conversation is not.
+
+
+Not exercised live here
+-----------------------
+The `#` card picker's attach (reason "card-picker") and Execute-from-card's pane.
+Both go through the same one funnel as the paths above — `Pane::requestCardIndex`
+asks `onBoardProject(reason)`, which is `RelayWindow::attachTab()` — and the
+funnel is pinned by `tests/boardworkspace_test.cpp`
+(`attachTabIsTheOnlyWriterOfTheTabsProject`).
+
+
+Headless
+--------
+Scratch build of the exact working tree, `ctest` 51/52. The one failure is
+`backend-and-bash`, and its seven failing cases fail the same way on a pristine
+`git archive HEAD` export: six `test_ssh_shell` cases that pass as soon as
+TMPDIR is short enough for the ssh ControlPath, and `test_router`'s
+`test_shell_commands('./scripts/build.sh')`. Neither is this change's.
+
+New and extended tests:
+  tests/boardworkspace_test.cpp
+    eitherFolderNameIsABoardAndTheNearestOneWins  — the two-name walk
+    theWindowsRuleAsksThePaneAndNothingElse       — boardWorkspace() read as text
+    attachTabIsTheOnlyWriterOfTheTabsProject      — the one funnel
+    theConfigureFunnelAlwaysSendsABoardBlock      — Pane::withSessionFields
+  tests/windowstate_test.cpp
+    anAttachedTabRoundTripsAndABareOneStillWorks
+    anAttachedTabsScrollbackIsStillFound

@@ -212,6 +212,73 @@ private slots:
         QCOMPARE(currentOf(windows.first().toObject()), 0);
     }
 
+    // ----- a saved tab's project (card #JN7X) ---------------------------------------------------
+    // A tab attached to a project saves as {"project", "node"}; an unattached one keeps the bare
+    // node shape, so nothing changes for the quiet default and there is no schema bump. The whole
+    // risk is a reader that forgets to unwrap: a wrapper judged as a node is an unknown kind, so
+    // every attached tab — and any window whose tabs are all attached — is silently dropped on
+    // the first restore.
+    void anAttachedTabRoundTripsAndABareOneStillWorks() {
+        const QJsonObject bare = pane(QStringLiteral("/tmp"));
+        const QJsonObject wrapped{{"project", "/home/me/repo"}, {"node", bare}};
+
+        // Both shapes read back, and the bare one is unchanged in every respect.
+        QCOMPARE(tabNode(wrapped), bare);
+        QCOMPARE(tabProject(wrapped), QStringLiteral("/home/me/repo"));
+        QCOMPARE(tabNode(bare), bare);
+        QVERIFY(tabProject(bare).isEmpty());
+        // A layout written before this existed has no wrappers at all: every tab reads as
+        // attached to nothing, which is the quiet default anyway.
+        QVERIFY(tabProject(split(QStringLiteral("h"), QJsonArray{bare, bare})).isEmpty());
+        // "project" without a "node" object is not a wrapper — a node kind called `project`
+        // would be judged on its own merits rather than silently unwrapped.
+        QVERIFY(tabProject(QJsonObject{{"project", "/repo"}}).isEmpty());
+
+        // Usable, and kept by usableWindows() with its wrapper intact.
+        QVERIFY(isUsableNode(wrapped));
+        QVERIFY(isUsableNode(QJsonObject{{"project", "/repo"},
+                                         {"node", split(QStringLiteral("h"), QJsonArray{bare, bare})}}));
+        const QJsonArray windows = usableWindows(document(QJsonArray{
+            windowRecord(QRect(0, 0, 800, 600), QString(), QJsonArray{wrapped, bare}, 0)}));
+        QCOMPARE(windows.size(), 1);
+        const QJsonArray tabs = tabsOf(windows.first().toObject());
+        QCOMPARE(tabs.size(), 2);
+        QCOMPARE(tabs.at(0).toObject(), wrapped);
+        QCOMPARE(tabProject(tabs.at(0).toObject()), QStringLiteral("/home/me/repo"));
+        QVERIFY(tabProject(tabs.at(1).toObject()).isEmpty());
+
+        // A wrapper around a node that cannot be rebuilt is dropped like any other bad tab: the
+        // project is not a reason to keep a tab there is nothing to put in.
+        QVERIFY(!isUsableNode(QJsonObject{{"project", "/repo"}, {"node", QJsonObject{}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"project", "/repo"},
+                                          {"node", QJsonObject{{"explorer", QJsonObject{}}}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"project", "/repo"},
+                                          {"node", split(QStringLiteral("h"), QJsonArray{})}}));
+        const QJsonArray dropped = usableWindows(document(QJsonArray{
+            windowRecord(QRect(0, 0, 800, 600), QString(),
+                         QJsonArray{QJsonObject{{"project", "/repo"}, {"node", QJsonObject{}}}}, 0)}));
+        QCOMPARE(dropped.size(), 0);
+
+        // A project that is gone is a restore question, not a validity one: the tab still comes
+        // back (RelayWindow::addTab leaves it attached to nothing when the directory has gone).
+        QVERIFY(isUsableNode(QJsonObject{{"project", "/no/such/project"}, {"node", bare}}));
+    }
+
+    // An attached tab's panes must keep their saved terminal text: scrollbackIds() is what the
+    // prune keeps, so a wrapper it could not see through would delete every attached pane's file.
+    void anAttachedTabsScrollbackIsStillFound() {
+        DataHome home;
+        QJsonObject leaf = pane(QStringLiteral("/tmp"));
+        QJsonObject body = leaf.value(QStringLiteral("pane")).toObject();
+        const QString id = QStringLiteral("2b2a4c1e9f7d4a1b8c3e5f6a7b8c9d0e");
+        QVERIFY(isScrollbackId(id));
+        body.insert(QStringLiteral("scrollback"), id);
+        leaf.insert(QStringLiteral("pane"), body);
+        const QJsonArray windows{windowRecord(QRect(), QString(),
+                                              QJsonArray{QJsonObject{{"project", "/repo"}, {"node", leaf}}}, 0)};
+        QCOMPARE(scrollbackIds(windows), QStringList{id});
+    }
+
     // #RDQ7: a start opens exactly the windows the layout asks for and no more. usableWindows() is
     // the whole restore decision — main() opens one window per entry, and one plain window when it
     // comes back empty — so a fresh profile must yield none and a saved two-window set exactly two.

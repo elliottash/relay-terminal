@@ -99,6 +99,32 @@ A QA reopen is not a status: the card returns to Ready with label `reopened` and
 - Layout node `{"board": {"workspace", "tab"}}`; workspace = git root of the anchor cwd. Without `issues/board.yaml`
   the first open offers "Create board in issues/" or conversion of an existing tracker (section 7).
 
+**Which project a tab is attached to** (owner, 2026-09-18, card #JN7X; `src/Projects.h`). A **tab is attached to at
+most one project, and starts attached to none** — the quiet state, and the normal one: no chip, no hint about the
+board, no offer, and the tab's panes get no board tools and no board policy in their prompt (`configure`'s
+`board {attach: false}`, protocol 19.1). Most of the time the terminal is standing in `~/Downloads` or an admin folder
+and there is no project to talk about.
+
+- A pane's **candidate** project is `relay::projects::candidateFor(<the pane's live terminal cwd>)`, derived fresh
+  whenever it is needed and never cached on the pane: the nearest ancestor with a board, else the nearest with `.git`.
+  A candidate is an offer, not an attachment.
+- **Terminal commands never attach.** Only an explicit project action does: opening the Switchboard, `/card`, picking
+  a card with `#`, Execute-from-card. Each is one of the closed set of reasons in `src/Projects.h`, and that reason is
+  what the known-projects registry records.
+- Attachment is **sticky until detached**, and a tab never switches project silently: a pane that has `cd`-ed into
+  another checkout says so ("This tab's Switchboard is A; … belongs to B") instead of re-pointing. Detaching is the
+  palette's "Detach this tab from <project>", offered only while the tab is attached; it closes nothing — an open
+  Switchboard stays open on its board — and the panes simply lose the card tools.
+- Attaching and detaching send `set_board` (protocol 19.11) to every pane in the tab, so an agent **gains or loses the
+  card tools without losing the conversation it was in the middle of**.
+- A project's board is `<project>/switchboard/` (new) or `<project>/issues/` (an existing tracker, kept where it is),
+  and **it is only ever created after the user answers "Initialize a project and create a Switchboard here?"**
+  (protocol 19.12). Until then an attached project sends `board {project, state: "uninitialized"}` and a candidate with
+  no board gets one quiet status line on Ctrl+Shift+S and `/card` — nothing is written anywhere.
+- The layout saves an attached tab as `{"project": "…", "node": <tab node>}` and an unattached one as the bare node it
+  always was, so there is no schema bump (`relay::windowstate::tabNode`/`tabProject`). A restored tab comes back
+  attached when that directory is still there, and unattached and quiet when it is not.
+
 ### 4.2 Board view (`BoardPane`, a `ToolPane` leaf)
 
 > **Superseded by 4.6:** one scrolling list of rows, sectioned by status, with no tab row.
@@ -120,9 +146,11 @@ thinking collapses to "Thought 9 s"; tools collapse to one `turn_summary` line (
 queue), so card chats never pollute a pane's conversation. The Switchboard is per project: a window showing two
 projects' boards runs a worker for each, keyed by the board root, and each worker's events reach only the Switchboard
 views of that root. The worker is started with the first Switchboard opened on a root and stopped when the last one in
-the window closes. Which project a pane's board is comes from that pane alone — the terminal's own directory, then the
-pane's workspace (`relay::boardRootFor`, `src/BoardWorkspace.h`); there is deliberately no window-wide or process-wide
-fallback, because both are the directory Relay was launched in. It is stateless between turns: each turn is seeded from the body plus the
+the window closes. Which project a pane's board is comes from that pane alone — its **live terminal directory** and
+nothing else (`relay::boardRootFor`, `src/BoardWorkspace.h`, walking up to `/` and trying `switchboard/board.yaml`
+then `issues/board.yaml` at each level, so the nearest ancestor wins whatever its folder is called). There is
+deliberately no window-wide or process-wide fallback and the pane's own `workspace()` is not a candidate either: all
+three are the directory Relay was launched in, which is how one project's board reached every pane. It is stateless between turns: each turn is seeded from the body plus the
 thread (older entries summarized past a cap), so the *file* is the memory and a collaborator's Relay continues the same
 thread. Its model chip defaults to the anchor pane's preset.
 

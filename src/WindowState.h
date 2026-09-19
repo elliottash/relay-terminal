@@ -63,7 +63,26 @@ bool write(const QString &path, const QJsonObject &state, QString *error = nullp
 // malformed or foreign-version file yields an empty object and a one-line message in *error.
 QJsonObject read(const QString &path, QString *error = nullptr);
 
-// A pane tree that can be rebuilt: known node kinds only, non-empty splits, bounded depth.
+// ----- a saved tab's project (card #JN7X) -------------------------------------------------------
+//
+// A tab is attached to at most one project, and starts attached to none. An **attached** tab is
+// saved as a wrapper around the node it always was:
+//
+//   tab := node                                    (attached to nothing — unchanged)
+//         | {"project": "/abs/path", "node": node} (attached)
+//
+// so no schema bump: an unattached tab is byte-for-byte the shape every earlier Relay wrote, and
+// a layout written by an earlier Relay reads as "every tab unattached", which is the quiet
+// default anyway. The two readers below take either shape, and **everything that inspects a
+// saved tab goes through `tabNode()` first** — isUsableNode(), usableWindows(), scrollbackIds()
+// and ClosedStack's walk. Miss one and a wrapper looks like an unknown node kind, which drops
+// every attached tab (and with it, whole windows) on the first restore.
+QJsonObject tabNode(const QJsonObject &tab);
+// The project an attached tab was saved with; empty for the bare shape.
+QString tabProject(const QJsonObject &tab);
+
+// A pane tree that can be rebuilt: known node kinds only, non-empty splits, bounded depth. A tab
+// in the wrapper shape above is judged by the node inside it.
 bool isUsableNode(const QJsonObject &node, int depth = 0);
 // The windows of a document that are worth rebuilding (at least one usable tab each); unusable
 // tabs inside a kept window are dropped.

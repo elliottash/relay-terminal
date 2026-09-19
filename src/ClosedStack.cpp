@@ -51,6 +51,12 @@ void walk(const QJsonObject &node, const std::function<void(const QString &, con
 QJsonObject mapPanes(const QJsonObject &node, const std::function<QJsonObject(QJsonObject)> &edit, int depth = 0) {
     if (depth > windowstate::kMaxDepth) return node;
     QJsonObject out = node;
+    // An attached tab is the {"project", "node"} wrapper (#JN7X): edit the panes inside it and
+    // give the wrapper back, so the reopened tab still knows its project.
+    if (depth == 0 && node.value(QStringLiteral("node")).isObject()) {
+        out.insert(QStringLiteral("node"), mapPanes(windowstate::tabNode(node), edit, depth + 1));
+        return out;
+    }
     if (node.contains(kSplit)) {
         QJsonArray children;
         for (const auto &child : node.value(kChildren).toArray())
@@ -62,12 +68,16 @@ QJsonObject mapPanes(const QJsonObject &node, const std::function<QJsonObject(QJ
     return out;
 }
 
+// The tabs of a record as plain layout nodes. A tab attached to a project is saved as the
+// {"project", "node"} wrapper (#JN7X), so it is unwrapped here — this is the one funnel walk()'s
+// callers go through, and a wrapper reaching walk() would report its panes as one leaf of kind
+// "node" instead.
 QList<QJsonObject> tabNodes(const Record &record) {
     QList<QJsonObject> nodes;
     if (record.kind == Record::Window) {
-        for (const auto &tab : record.tabs) nodes.append(tab.toObject());
+        for (const auto &tab : record.tabs) nodes.append(windowstate::tabNode(tab.toObject()));
     } else {
-        nodes.append(record.layout);
+        nodes.append(windowstate::tabNode(record.layout));
     }
     return nodes;
 }

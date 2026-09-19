@@ -1,0 +1,16 @@
+turn=[Relay context: added by Relay, not typed by the user] messages=2   board_tools=0 [-] switchboard_prompt=no all=agent,agent_message,agent_wait,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Session so far:          messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Conversation:            messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=4   board_tools=6 [board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card] switchboard_prompt=yes all=agent,agent_message,agent_wait,board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Transcript:              messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=6   board_tools=6 [board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card] switchboard_prompt=yes all=agent,agent_message,agent_wait,board_comment,board_create_card,board_list,board_move_card,board_read,board_update_card,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=Pane titles:             messages=2   board_tools=0 [-] switchboard_prompt=no all=
+turn=[Relay context: added by Relay, not typed by the user] messages=8   board_tools=0 [-] switchboard_prompt=no all=agent,agent_message,agent_wait,command_output,edit_file,list_directory,load_skill,read_file,read_skill_file,run_command,run_in_terminal,set_keybinding,stop_command,update_todos,write_file

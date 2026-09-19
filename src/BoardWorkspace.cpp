@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "BoardWorkspace.h"
 
+#include "Projects.h"
+
 #include <QDir>
 #include <QFileInfo>
 
@@ -15,7 +17,10 @@ QString boardRootFor(const QStringList &candidates)
         if (candidate.isEmpty() || !QDir::isAbsolutePath(candidate))
             continue;
         for (QDir dir(candidate); ; ) {
-            if (QFileInfo::exists(dir.absoluteFilePath(QStringLiteral("issues/board.yaml"))))
+            // `switchboard/board.yaml` then `issues/board.yaml` at *this* directory before going
+            // up, so the nearest ancestor wins whatever the folder is called (protocol 19.1).
+            // boardDirOf() is the one place that ordering is written down.
+            if (!projects::boardDirOf(dir.absolutePath()).isEmpty())
                 return dir.absolutePath();
             if (!dir.cdUp())
                 break;

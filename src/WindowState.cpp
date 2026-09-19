@@ -24,6 +24,8 @@ const QLatin1String kScreen("screen");
 const QLatin1String kTabs("tabs");
 const QLatin1String kCurrent("current");
 const QLatin1String kTitles("titles");
+const QLatin1String kProject("project");
+const QLatin1String kNode("node");
 
 }  // namespace
 
@@ -131,8 +133,21 @@ QJsonObject read(const QString &path, QString *error) {
     return state;
 }
 
+QJsonObject tabNode(const QJsonObject &tab) {
+    const QJsonValue node = tab.value(kNode);
+    return node.isObject() ? node.toObject() : tab;
+}
+
+QString tabProject(const QJsonObject &tab) {
+    return tab.value(kNode).isObject() ? tab.value(kProject).toString() : QString();
+}
+
 bool isUsableNode(const QJsonObject &node, int depth) {
     if (depth > kMaxDepth || node.isEmpty()) return false;
+    // A saved *tab* may be the {"project", "node"} wrapper (#JN7X): judge what is inside it. Only
+    // at the top, because the wrapper is a tab's shape and never a node's; the depth still goes
+    // up, so a hand-edited file cannot nest wrappers into a loop.
+    if (depth == 0 && node.value(kNode).isObject()) return isUsableNode(tabNode(node), depth + 1);
     if (node.contains(QStringLiteral("split"))) {
         const QJsonArray children = node.value(QStringLiteral("children")).toArray();
         if (children.isEmpty()) return false;
@@ -310,7 +325,9 @@ QStringList scrollbackIds(const QJsonArray &windows) {
     for (const auto &value : windows) {
         if (!value.isObject()) continue;
         for (const auto &tab : tabsOf(value.toObject()))
-            if (tab.isObject()) collectScrollbackIds(tab.toObject(), &ids, 0);
+            // tabNode(): an attached tab is a wrapper, and its panes' saved text must still be
+            // found or the next prune deletes every one of them (#JN7X).
+            if (tab.isObject()) collectScrollbackIds(tabNode(tab.toObject()), &ids, 0);
     }
     return ids;
 }

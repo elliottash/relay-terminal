@@ -15,6 +15,7 @@
 #include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
+#include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
 #include "AgentUi.h"
 #include "Completion.h"
 #include "FileIndex.h"
@@ -294,6 +295,18 @@ public:
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
+    // ----- the project this pane's tab is attached to (card #JN7X, src/Projects.h) ------------
+    // The `board` block of every `configure` this pane sends (protocol 19.1). The window answers
+    // from the tab: `{"attach": false}` while the tab is attached to nothing, which is the quiet
+    // default and means no card tools and no board policy in the prompt.
+    std::function<QJsonObject()> onBoardSettings;
+    // "Has this pane a board it may talk to?", answered with the project's path or an empty
+    // string. A non-empty `reason` (projects::kReason*) makes it an explicit project action and
+    // attaches the tab to the pane's candidate project first — but only when that project
+    // already has a board; a candidate with none puts one line in `*why` and creates nothing.
+    // An empty reason never attaches, so the `#` index, the idle tip and the shortcut hints stay
+    // quiet in an unattached pane.
+    std::function<QString(const QString &reason, QString *why)> onBoardProject;
     std::function<void(const QString &code)> onJoinShared;   // /join CODE, /connect CODE
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
@@ -2451,6 +2464,11 @@ private:
         const QJsonObject tiers = tiersObject();
         if (!tiers.isEmpty()) request.insert(QStringLiteral("tiers"), tiers);
         if (m_agentRole != QStringLiteral("main")) request.insert(QStringLiteral("agent_role"), m_agentRole);
+        // Which Switchboard this pane's agent is on (protocol 19.1, card #JN7X). Sent on every
+        // configure, including `{"attach": false}` for a tab attached to nothing: a configure
+        // with *no* board block makes the worker walk up from the workspace instead, and the
+        // workspace is the launch directory, which is how one project's board reached every pane.
+        if (onBoardSettings) request.insert(QStringLiteral("board"), onBoardSettings());
         return request;
     }
 
@@ -5405,6 +5423,14 @@ private:
         }
         else if (name == QStringLiteral("card")) {
             if (args.trimmed().isEmpty()) { status(QStringLiteral("Usage: /card <what to remember>")); return; }
+            // An explicit project action: it attaches this tab to the pane's candidate project
+            // when that project has a Switchboard. When it has none, one quiet line and **nothing
+            // is created** — the "Initialize a project and create a Switchboard here?" question
+            // is a later stage's (protocol 19.12).
+            if (QString why; !attachForBoard(relay::projects::kReasonCardCommand, &why)) {
+                status(why.isEmpty() ? QStringLiteral("No Switchboard here.") : why);
+                return;
+            }
             // Quick add to the Inbox without opening the pane; the text is kept verbatim.
             send({{QStringLiteral("type"), QStringLiteral("board_create")},
                   {QStringLiteral("tab"), QStringLiteral("features")},
@@ -5918,7 +5944,9 @@ private:
         if (!m_lastPlanPath.isEmpty()) parts << QStringLiteral("plan");
         m_workChip->setText(parts.join(QStringLiteral(" · ")));
         m_workChip->setToolButtonStyle(parts.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
+        // The Switchboard sentence only in a pane whose tab is attached to a project: with no
+        // project there is no board for that key to open, and the chip must not imply one (#JN7X).
+        const QString keys = hasBoard() ? Keymap::instance().shortcutText(QStringLiteral("board.open")) : QString();
         m_workChip->setToolTip((tasks ? m_ledger.chipToolTip() + '\n' : QString())
                                + QStringLiteral("Issues, tasks and plan for this pane")
                                + (keys.isEmpty() ? QString() : QStringLiteral(" · %1 opens the Switchboard").arg(keys)));
@@ -7385,8 +7413,13 @@ private:
             {QStringLiteral("idle.agents"), QStringLiteral("Tip: ↓ from the prompt box selects running subagents")},
             {QStringLiteral("idle.palette"), QStringLiteral("Tip: %1 opens every action").arg(key("palette.open"))},
             {QStringLiteral("idle.prefix"), QStringLiteral("Tip: start with ! for the terminal or * for the agent")},
-            {QStringLiteral("idle.board"), QStringLiteral("Tip: %1 opens the Switchboard; # references a card").arg(key("board.open"))},
         };
+        // Only a pane whose tab is attached to a project has a Switchboard to tip about (#JN7X):
+        // an unattached pane says nothing about boards at all.
+        if (hasBoard())
+            tips << relay::ShortcutHints::Tip{
+                QStringLiteral("idle.board"),
+                QStringLiteral("Tip: %1 opens the Switchboard; # references a card").arg(key("board.open"))};
         // A tip is the least urgent toast there is: it waits for a quiet pane rather than a queue.
         if (m_toastQueue.size() || (m_toast && m_toast->isVisible())) return;
         const auto tip = relay::ShortcutHints::instance().nextIdleTip(tips);
@@ -9220,11 +9253,42 @@ private:
         if (m_editor->ghost().size()) m_editor->setGhost(QString());
     }
 
-    // "Next time: Ctrl+Shift+S" after the slow path (WARP.md's standing rule).
+    // "Next time: Ctrl+Shift+S" after the slow path (WARP.md's standing rule). A pane whose tab
+    // is attached to nothing has no Switchboard to open, so it teaches no shortcut for one.
     void boardShortcutHint(const QString &id) {
+        if (!hasBoard()) return;
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
         if (!keys.isEmpty())
             hint(id, relay::ShortcutHints::nextTime(keys, QStringLiteral("the Switchboard")));
+    }
+
+public:
+    // ----- the project this pane's tab is attached to (card #JN7X) ----------------------------
+
+    // Protocol 19.11: the tab has attached to a project, or let go of one. The worker gains or
+    // loses the card tools and the Switchboard block of its system prompt **without a new Agent**,
+    // so the conversation on screen carries straight on — which is the whole reason `set_board`
+    // exists rather than another `configure`. An empty block detaches (`"board": null`).
+    //
+    // Before the first `configure` there is nothing to re-point: the block travels on that
+    // configure instead (withSessionFields).
+    void setBoard(const QJsonObject &board) {
+        if (!m_configured) return;
+        send({{QStringLiteral("type"), QStringLiteral("set_board")},
+              {QStringLiteral("board"), board.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(board)}});
+    }
+
+private:
+    // Whether this pane's tab is attached to a project, without attaching anything or touching
+    // the filesystem. The quiet default is false.
+    bool hasBoard() const { return onBoardProject && !onBoardProject(QString(), nullptr).isEmpty(); }
+
+    // The explicit project actions of the owner's model: `/card` and the `#` card picker attach
+    // the tab to the pane's candidate project, when that project has a board. `why` is the one
+    // line to show when it has not; nothing is created either way.
+    bool attachForBoard(const char *reason, QString *why = nullptr) {
+        if (!onBoardProject) return false;
+        return !onBoardProject(QString::fromLatin1(reason), why).isEmpty();
     }
 
     // Switchboard events a *terminal* pane cares about: the card index behind the `#` picker,
@@ -9247,6 +9311,25 @@ private:
             noteBoardActivity(event);
             return true;
         }
+        // The worker has been re-pointed, or told to let go (protocol 19.11). The one that says
+        // `applies: "now"` is the one in force; a deferred one is only a promise about the end of
+        // the running turn, and the same event comes again when it lands. An unsolicited one (no
+        // `id`) arrives when a board is created under the pane.
+        if (type == QStringLiteral("board_state")) {
+            if (event.value(QStringLiteral("applies")).toString() != QStringLiteral("now")) return true;
+            const QJsonObject board = event.value(QStringLiteral("board")).toObject();
+            const QString root = board.value(QStringLiteral("root")).toString();
+            relay::log::info(QStringLiteral("board_state pane=%1 board=%2 state=%3")
+                                 .arg(m_token.left(8), root.isEmpty() ? QStringLiteral("none") : root,
+                                      board.value(QStringLiteral("state")).toString()));
+            // Another project's cards are not this one's: drop the picker index and the work
+            // chip's card list, and ask again the next time something needs them.
+            m_cardIndex.reset({});
+            m_cardIndexAsked = false;
+            m_workCards.clear();
+            updateWorkChip();
+            return true;
+        }
         return false;
     }
 
@@ -9260,7 +9343,10 @@ private:
         static const QRegularExpression token(QStringLiteral("(?:^|\\s)#([0-9A-Za-z]*)$"));
         const auto match = token.match(before);
         if (!match.hasMatch() || cursor.position() == m_cardDismissedAt) { hideCardPopup(); return; }
-        requestCardIndex();
+        // `#` in the composer is an explicit project action, so it may attach the tab — but only
+        // to a candidate project that already has a board. A pane in ~/Downloads gets no picker
+        // and nothing is created anywhere (#JN7X).
+        requestCardIndex(relay::projects::kReasonCardPicker);
         const QList<relay::board::Card> ranked = m_cardIndex.search(match.captured(1), 20);
         if (ranked.isEmpty()) { hideCardPopup(); return; }
         if (!m_cardList) {
@@ -9311,8 +9397,14 @@ private:
 
     // The board rows this pane knows, for the picker and for `ask {cards: […]}`. Asked for once
     // per conversation and kept up to date by board_changed.
-    void requestCardIndex() {
+    //
+    // **An unattached pane asks for nothing.** Its worker has no board (`attach: false`), so a
+    // `board_open` would only come back an error, and asking would be Relay looking for a project
+    // behind the user's back. `reason` non-null is the one exception: the user typed `#`, which
+    // is an explicit project action and attaches the tab to a candidate that has a board.
+    void requestCardIndex(const char *reason = nullptr) {
         if (m_cardIndexAsked || !m_configured) return;
+        if (reason ? !attachForBoard(reason) : !hasBoard()) return;
         m_cardIndexAsked = true;
         send({{QStringLiteral("type"), QStringLiteral("board_open")}});
     }

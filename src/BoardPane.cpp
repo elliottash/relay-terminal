@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "BoardPane.h"
+#include "Projects.h"   // which folder of a project is its board: `switchboard/`, else `issues/`
 #include "ToolLabel.h"
 
 #include <QApplication>
@@ -2155,13 +2156,16 @@ void BoardView::buildQuickAdd(QVBoxLayout *layout)
     });
 }
 
-// Watch `issues/` and its folders. A card write anywhere (this window, a pane agent, a
+// Watch the board folder and its subfolders. A card write anywhere (this window, a pane agent, a
 // collaborator's merge) becomes one debounced board_refresh, which the worker answers with the
 // rows that actually changed.
 void BoardView::watchIssues()
 {
-    const QString root = m_workspace + QStringLiteral("/issues");
-    if (!QFileInfo::exists(root))
+    // Which folder that is, rather than an assumption: `switchboard/` on a board made from
+    // 2026-09-18 on and `issues/` on an older one (protocol 19.12). The worker says so on the
+    // `board` event (`m_root`); before the first one, ask the filesystem the same way it does.
+    const QString root = m_root.isEmpty() ? projects::boardDirOf(m_workspace) : m_root;
+    if (root.isEmpty() || !QFileInfo::exists(root))
         return;
     if (!m_refresh) {
         m_refresh = new QTimer(this);

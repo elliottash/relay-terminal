@@ -480,9 +480,11 @@ bool Card::parked() const
 
 QString Card::folder() const
 {
-    // `issues/changes/2026-09-17-x.md`, or `issues/.private/changes/…` for a private card.
+    // `switchboard/changes/2026-09-17-x.md`, or `switchboard/.private/changes/…` for a private
+    // card. A board filed before 2026-09-18 keeps its folder's older name, `issues/` (#JN7X).
     QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    while (!parts.isEmpty() && (parts.first() == QStringLiteral("issues")
+    while (!parts.isEmpty() && (parts.first() == QStringLiteral("switchboard")
+                                || parts.first() == QStringLiteral("issues")
                                 || parts.first().startsWith(QLatin1Char('.'))))
         parts.removeFirst();
     return parts.size() > 1 ? parts.first() : QString();

@@ -55,7 +55,10 @@ add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane
     src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h)
 target_include_directories(relay-board PUBLIC src)
 # relay-toollabel: the cleanup run's progress line is the call's concise line (protocol section 23).
-target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel ${RELAY_QT}::Widgets)
+# relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
+# so the GUI's walk and the registry's can never disagree (#JN7X). The dependency only goes this
+# way; relay-projects stays QtCore-only and knows nothing about panes.
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the
