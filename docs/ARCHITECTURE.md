@@ -1512,15 +1512,29 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   `status`, and the refusal becomes the failure when either cap is reached. Every caller of
   `complete()` inherits it — pane turns, side calls, the key test. The hosted gateway decides from
   its own error body (a rate limit is waited out until its window reopens; a spent allowance is
-  never waited out) and its token refresh continues the same count and budget, and a local model
+  never waited out; a refusal it marks `retried` — one it already failed over across its own
+  upstreams — is final here, because the gateway owns those retries and asking again would re-run
+  its whole chain, which is also why `gateway/proxy.RETRYABLE_STATUSES` is kept equal to
+  `HTTP_RETRY_STATUSES`) and its token refresh continues the same count and budget, and a local model
   server is excluded: its 5xx are deterministic and its loading 503 has its own fixed wait. A provider that still
   fails a step hands the turn to another one (`agent.py` `_begin_failover`, card #G9VE): the same
   tier's model on the next keyed preset — never a second key on the same host, never after part of
-  an answer has been streamed — then Relay Free, at most two, for that turn only. The move converts
+  an answer has been streamed — then Relay Free where the pane allows it, at most two, for that turn
+  only. The move converts
   the history to the new provider's dialect and follows its context window, and the restore, before
   the turn's terminal event, puts all of it back, so the pane keeps the model the user chose; if the
   chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
-  Models can turn it off (`agent/failover`).
+  Models can turn it off (`agent/failover`). **Relay Free is the one target that needs permission**
+  (owner, 2026-09-19): every other candidate is a provider the user set up with a key they stored,
+  and Relay's hosted service is another company's terms and a shared allowance, so `failover_hosted`
+  (Options › Models, off by default) gates it and a pane already on Relay Free needs no tick.
+  **Subagents fail over on the pane's chain**: `subagents.py` hands each one the pane's role
+  resolver, its preset and both switches, which it did not before — without a resolver
+  `_begin_failover` cannot know which presets are keyed and refuses every move. **A routed step —
+  plan mode's or an image turn's — drops back to the pane's own model instead of failing the turn**
+  (`_drop_routing`, `provider_retry {reason: "route_dropped"}`): a pinned planning model whose
+  provider is down used to end the turn with the pane's own model sitting there able to answer, and
+  the ordinary chain now starts only if that model fails too.
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
   `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator, the hosted gateway or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
