@@ -500,7 +500,7 @@ QVector<FoldLine> foldForNote(const QString &text, const Palette &palette) {
 }
 
 QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palette,
-                                  const FoldOptions &options) {
+                                  const FoldOptions &options, int cells, bool tail) {
     QVector<FoldLine> out;
     if (markdown.isEmpty()) return out;
     MarkdownAnsi renderer;
@@ -512,12 +512,22 @@ QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palett
         for (const FoldSpan &span : line.spans)
             if (!span.text.trimmed().isEmpty()) blank = false;
     if (blank) return {};
+    // The cap is in rows the view will paint, so the lines are wrapped here, to the width the fold
+    // layer would have wrapped them to. Without it a single 5,000-character paragraph is one
+    // "line" and fills the screen (#K48R).
+    if (cells > 0) out = wrapFoldLines(out, cells);
     const int cap = options.maxLines > 0 ? options.maxLines : kFoldLineCap;
     if (out.size() > cap) {
-        const int earlier = out.size() - cap;
-        out.remove(0, earlier);
-        out.prepend(mutedRow(QStringLiteral("… %1 earlier lines · open in pane")
-                                 .arg(toollabel::thousands(earlier)), palette));
+        const int dropped = out.size() - cap;
+        if (tail) {
+            out.remove(0, dropped);
+            out.prepend(mutedRow(QStringLiteral("… %1 earlier lines · open in pane")
+                                     .arg(toollabel::thousands(dropped)), palette));
+        } else {
+            out.resize(cap);
+            out << mutedRow(QStringLiteral("… %1 more lines · open in pane")
+                                .arg(toollabel::thousands(dropped)), palette);
+        }
     }
     const FoldLine links = linkRow(palette, options);
     if (!links.spans.isEmpty()) out << links;

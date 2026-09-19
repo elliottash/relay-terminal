@@ -1,0 +1,151 @@
+--- stream-1 (body)
+~/project $
+
+vy + thinking...
+~ 51 earlier lines - open in pane
+50. step 50: check the gauge, the feed and the stable module
+51. step 51: check the gauge, the feed and the stable module
+52. step 52: check the gauge, the feed and the stable module
+53. step 53: check the gauge, the feed and the stable module
+54. step 54: check the gauge, the feed and the stable module
+55. step 55: check the gauge, the feed and the stable module
+open in pane
+
+a
+--- stream-2 (body)
+~/project $
+
+vy + thinking...
+~ 143 earlier lines - open in pane
+142. step 142: check the gauge, the feed and the stable module
+143. step 143: check the gauge, the feed and the stable module
+144. step 144: check the gauge, the feed and the stable module
+145. step 145: check the gauge, the feed and the stable module
+146. step 146: check the gauge, the feed and the stable module
+147. step 147: check the gauge, the feed and the stable module
+open in pane
+
+a
+--- stream-3 (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
+>» + thought for 19 s
+
+» stub
+
+Done. The route holds: ford before noon.
+—o
+| Ready )
+N
+--- done (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo root" for details.
+
+~/project $
+
+>» + thought for 19 s
+
+» stub
+
+Done. The route holds: ford before noon.
+--- reopened (body)
+To run a command as administrator (user "root"), use "sudo <command>".
+
+See "man sudo root" for details.
+
+~/project $
+
+vy « thought for 19 s
+Weighing the whole route
+1. step 1: check the gauge, the feed and the stable module
+2. step 2: check the gauge, the feed and the stable module
+3. step 3: check the gauge, the feed and the stable module
+4. step 4: check the gauge, the feed and the stable module
+5. step 5: check the gauge, the feed and the stable module
+6. step 6: check the gauge, the feed and the stable module
+7. step 7: check the gauge, the feed and the stable module
+8. step 8: check the gauge, the feed and the stable module
+9. step 9: check the gauge, the feed and the stable module
+10. step 10: check the gauge, the feed and the stable module
+11. step 11: check the gauge, the feed and the stable module
+12. step 12: check the gauge, the feed and the stable module
+13. step 13: check the gauge, the feed and the stable module
+14. step 14: check the gauge, the feed and the stable module
+15. step 15: check the gauge, the feed and the stable module
+16. step 16: check the gauge, the feed and the stable module
+. 224 more lines - open in pane
+open in pane
+
+» stub
+
+Done. The route holds: ford before noon.
+--- narrow-stream (body)
+e, because the ford is only safe before
+noon and then it considered the ponies a
+gain, weighing feed against distance, be
+cause the ford is only safe before noon
+and then it considered the ponies again,
+weighing feed against distanc
+open in pane
+isoning streams under the + line - a click or Alt+R folds it away
+{(__
+--- narrow-done (body)
+st distance, because the ford is only sa
+fe before noon and then it considered th
+e ponies again, weighing feed against di
+stance, because the ford is only safe be
+fore noon and then it considered the pon
+. 107 more lines - open in pane
+open in pane
+
+» stub
+
+Done. One paragraph, and the fold stayed
+
+six rows.
+--- link-before (body)
+~/project $
+
+vy + thought for 1s
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+» stub
+
+Done.
+link: clicking the fold's link at 110,211
+--- link-opened (body)
+Turn - 0 tool calls- 1s- thought 1s Open output
+
+~/project $
+
++ please think quick about ponies
+
+vy + thought for 1s
+
+Short check. The ponies are fine. Nothing else to do.
+open in pane
+
+» stub
+
+Done.
+Thinking
+Short check. The ponies are fine. Nothing else to do.
+> [Relay context: added by Relay, not typed by the user]
+The user's terminal pane is in °/tmp/relay-fold-cap.uJE162/home/project’. When
+that is inside the workspace, treat it as the current directory unless they say
+otherwise: it is the default working directory of run_command, and relative
+paths they mention are relative to it. When it is outside the workspace,
+run_command falls back to the workspace root, so pass a cwd or an absolute path
+for anything in it.
+This pane takes commands from you: run_in_terminal runs them in the user's real
+terminal. Each one is printed there with your intent Line before it runs and
+the user can stop it, so use it whenever a command is clearly the next step;
+Relay stops you after a few in a row without them.
+[End of Relay context]
+please think quick about ponies
+Done.

@@ -496,19 +496,86 @@ private slots:
         QVERIFY(foldForMarkdown(QStringLiteral("   \n"), palette(), {}).isEmpty());
     }
 
-    // The cap keeps the *tail*: the end of the reasoning is what a reader is looking for.
+    // `tail`: the end of the reasoning is what a reader watching a stream is looking for.
     void aLongThinkingFoldKeepsItsTail() {
         QString text;
         for (int at = 0; at < 30; ++at) text += QStringLiteral("thought %1\n").arg(at);
         FoldOptions options;
         options.maxLines = 10;
         options.openInPane = QStringLiteral("relay://open-call/p/t/thinking");
-        const QStringList rows = textsOf(foldForMarkdown(text, palette(), options));
+        const QStringList rows = textsOf(foldForMarkdown(text, palette(), options, 0, true));
         QCOMPARE(rows.size(), 12);   // the note, the last 10 rows, the links row
         QVERIFY(rows.first().startsWith(QStringLiteral("… 20 earlier lines")));
         QCOMPARE(rows.at(1), QStringLiteral("thought 20"));
         QCOMPARE(rows.at(10), QStringLiteral("thought 29"));
         QCOMPARE(rows.at(11), QStringLiteral("open in pane"));
+    }
+
+    // Without `tail` — the settled fold a reader opened by hand — the cap keeps the *start*, where
+    // reading begins, and says how much is below (#K48R).
+    void aSettledThinkingFoldKeepsItsHead() {
+        QString text;
+        for (int at = 0; at < 30; ++at) text += QStringLiteral("thought %1\n").arg(at);
+        FoldOptions options;
+        options.maxLines = 10;
+        options.openInPane = QStringLiteral("relay://turn/p/t");
+        const QStringList rows = textsOf(foldForMarkdown(text, palette(), options));
+        QCOMPARE(rows.size(), 12);   // the first 10 rows, the note, the links row
+        QCOMPARE(rows.first(), QStringLiteral("thought 0"));
+        QCOMPARE(rows.at(9), QStringLiteral("thought 9"));
+        QCOMPARE(rows.at(10), QStringLiteral("… 20 more lines · open in pane"));
+        QCOMPARE(rows.at(11), QStringLiteral("open in pane"));
+    }
+
+    // The caps are the owner's two numbers (#K48R) and they count *rendered* rows: a several
+    // thousand line block, and a single 5,000-character paragraph, are both cut to six rows while
+    // the block streams and eighteen once it has settled — at 40 columns as at 100.
+    void theThinkingCapsHoldOnAnyLengthOrShapeOfReasoning() {
+        QString many;
+        for (int at = 0; at < 4000; ++at) many += QStringLiteral("line %1 of the model's reasoning\n").arg(at);
+        QString paragraph;
+        while (paragraph.size() < 5000) paragraph += QStringLiteral("and then it considered the ponies again ");
+        for (int cells : {40, 100}) {
+            for (const QString &text : {many, paragraph}) {
+                FoldOptions stream;
+                stream.maxLines = kThinkingStreamRows;
+                stream.openInPane = QStringLiteral("relay://turn/p/t");
+                QStringList rows = textsOf(foldForMarkdown(text, palette(), stream, cells, true));
+                // The six rows of reasoning, the row naming what was cut, and the link row.
+                QCOMPARE(rows.size(), kThinkingStreamRows + 2);
+                QVERIFY(rows.first().startsWith(QStringLiteral("… ")));
+                QVERIFY(rows.first().endsWith(QStringLiteral(" earlier lines · open in pane")));
+                QCOMPARE(rows.last(), QStringLiteral("open in pane"));
+                for (const QString &row : rows) QVERIFY2(row.size() <= cells, qPrintable(row));
+
+                FoldOptions done = stream;
+                done.maxLines = kThinkingDoneRows;
+                rows = textsOf(foldForMarkdown(text, palette(), done, cells, false));
+                QCOMPARE(rows.size(), kThinkingDoneRows + 2);
+                QVERIFY(rows.at(kThinkingDoneRows).startsWith(QStringLiteral("… ")));
+                QVERIFY(rows.at(kThinkingDoneRows).endsWith(QStringLiteral(" more lines · open in pane")));
+                QCOMPARE(rows.last(), QStringLiteral("open in pane"));
+                for (const QString &row : rows) QVERIFY2(row.size() <= cells, qPrintable(row));
+            }
+        }
+    }
+
+    // Wrapping is the fold layer's own (relay::wrapFoldLines, engine/TerminalBackend.h): a row that
+    // fits is left alone, and the spans — with their ink and their links — survive the split.
+    void wrappingForTheCapKeepsTheSpansAndTheirInk() {
+        FoldOptions options;
+        options.maxLines = 100;
+        const QVector<FoldLine> rows = foldForMarkdown(
+            QStringLiteral("short\nsee [docs](https://example.com/a/very/long/path)\n"), palette(), options, 12);
+        QCOMPARE(textOf(rows.first()), QStringLiteral("short"));
+        QStringList texts = textsOf(rows);
+        for (const QString &row : texts) QVERIFY2(row.size() <= 12, qPrintable(row));
+        QCOMPARE(texts.join(QString()), QStringLiteral("shortsee docs (https://example.com/a/very/long/path)"));
+        bool sawLinkInk = false;
+        for (const FoldLine &row : rows)
+            for (const relay::FoldSpan &span : row.spans)
+                if (span.underline && span.fg == palette().link) sawLinkInk = true;
+        QVERIFY(sawLinkInk);
     }
 };
 

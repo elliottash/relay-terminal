@@ -1,0 +1,54 @@
+Suites for #K48R, run from this checkout on 2026-09-19 (shared tree: several sessions'
+uncommitted work is in it, which is what the two red lines below are).
+
+=== ctest --test-dir build ===
+55/58 Test #55: calllines ........................   Passed    0.42 sec
+56/58 Test #56: turntranscript ...................   Passed    0.28 sec
+57/58 Test #57: backend-and-bash .................***Failed  451.25 sec
+58/58 Test #58: relay-engine-tests ...............   Passed   11.48 sec
+
+97% tests passed, 2 tests failed out of 58
+
+Label Time Summary:
+engine    =  11.48 sec*proc (1 test)
+
+--
+The following tests FAILED:
+	 27 - escapees (Not Run)
+
+  27 escapees   — a test target another session (isolcost) added and has not built yet:
+                  ctest cannot run a binary that is not there. Nothing of this card's.
+  57 backend-and-bash — ./scripts/test.sh, below.
+
+=== the cases this card added or changed, verbatim ===
+
+PASS   : CallLinesTests::aLongThinkingFoldKeepsItsTail()
+PASS   : CallLinesTests::aSettledThinkingFoldKeepsItsHead()
+PASS   : CallLinesTests::theThinkingCapsHoldOnAnyLengthOrShapeOfReasoning()
+PASS   : CallLinesTests::wrappingForTheCapKeepsTheSpansAndTheirInk()
+Totals: 48 passed, 0 failed, 0 skipped, 0 blacklisted, 311ms
+
+PASS   : TurnTranscriptTests::theReasoningSurvivesTheTranscriptReply()
+Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 112ms
+
+PASS   : FoldLayerTest::preWrappedLinesLayOutOneRowEach()
+Totals: 18 passed, 0 failed, 0 skipped, 0 blacklisted, 7ms
+
+PASS   : ViewTest::initTestCase()
+PASS   : ViewTest::aLinkInsideAFoldOpens(libvterm)
+PASS   : ViewTest::aPlainClickOnALinkInsideAFoldOpensIt(libvterm)
+PASS   : ViewTest::cleanupTestCase()
+Totals: 4 passed, 0 failed, 0 skipped, 0 blacklisted, 585ms
+
+=== ./scripts/test.sh ===
+Ran 3146 tests in 489.895s
+
+FAILED (failures=3, errors=99)
+
+Every one of those is another session's work in flight in this shared checkout, none of it
+touched by this card:
+  99 errors  NameError: name 'read_guest_meta' — backend/relay_core/conv_index.py, uncommitted
+             (session gsess holds it; 'git status' shows it modified).
+  1 failure  test_web_theme.test_committed_file_is_current — app/pane-theme.css is stale after
+             another session's theme change.
+  2 failures test_ssh_shell.test_inside_a_real_tmux — the tmux/ssh case, environmental here.

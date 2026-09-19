@@ -1019,9 +1019,13 @@ exits. On the next `ready` event the buffer prints into the terminal and the pan
 the terminal's own grid, under an anchor row of its own — `▸ ✦ thinking…`, column 0, hyperlinked
 to `relay://call/<pane token>/<turn id>/thinking` (`thinking-2`, … for a model that resumes
 reasoning after its answer) — opened with the first delta, updated coalesced (~4 Hz, the last
-12 000 characters rendered as markdown, capped at 400 rows with an "open in pane" row to
-`relay://turn/…`; a click on a settled anchor answers from the pane's buffer, no worker round
-trip). A reader who folds it away mid-stream is not asked again: the flush notices
+12 000 characters rendered as markdown, with an "open in pane" row to `relay://turn/…`; a click on
+a settled anchor answers from the pane's buffer, no worker round trip). Its height is capped in the
+rows the view paints, not in lines (#K48R, owner's numbers from Warp): the **last 6** rows while it
+streams, under `… N earlier lines`; the **first 18** of a settled fold opened by hand, over
+`… N more lines · open in pane`. The rows are wrapped to the pane's width first
+(`relay::wrapFoldLines`), so a single long paragraph cannot escape the cap. A reader who folds it
+away mid-stream is not asked again: the flush notices
 `foldExpanded()` disagreeing and stops pushing — `setFoldContent` opens what it sets, which would
 reopen over their click. `thinking_done` settles the fold, collapses it unless the reader toggled
 it or the setting is `always`, and rewrites the anchor row in place to `▸ ✦ thought for N s` (a
@@ -1031,7 +1035,10 @@ arrived). How much of this runs at all is `agent/thinking_display` — `collapse
 settings file that still has the `agent/show_thinking` bool is migrated in place on first read.
 Alt+R (`agent.thinkingPanel`) toggles the latest fold, live while it streams and the last turn's
 afterwards, and every refusal toasts. The text is kept per turn whatever the display mode —
-`m_turnThinking` feeds the turn pane too. `turn_summary` (sent just before `done`) is stored
+`m_turnThinking` feeds the turn pane too, and that pane is where the capped fold's "open in pane"
+row goes: the view holds the reasoning and redraws it with the log, so the `turn_transcript` reply
+that lands after the pane opens no longer wipes it (#K48R), and the fold's 4 Hz flush keeps an open
+one current while the block streams. `turn_summary` (sent just before `done`) is stored
 per pane (last 50) and, when the turn used tools, prints `✦ N tool calls · T s` wrapped in an
 OSC 8 hyperlink to `relay://turn/<pane token>/<turn id>`. The live `tool_output {text}` stream and
 the stored reply `tool_output {stored: true, …}` share a name; the GUI branches on `stored`.

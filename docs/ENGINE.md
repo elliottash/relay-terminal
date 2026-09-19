@@ -285,9 +285,19 @@ anchor — hyperlinked to `relay://call/<pane>/<turn>/thinking` (`thinking-2`, `
 the later blocks of a model that resumes reasoning after its answer), and the fold opens with its
 first content. What it holds is the pane's own buffer rendered as markdown
 (`calllines::foldForMarkdown`), the tail while it streams (the last 12 000 characters — the end is
-the part being written), capped at 400 rows with a final row linking to the turn pane, which keeps
-the whole of every block. A click on a settled anchor answers from the same buffer: no worker
-round trip, however old the turn.
+the part being written), with a final row linking to the turn pane, which keeps the whole of every
+block. A click on a settled anchor answers from the same buffer: no worker round trip, however old
+the turn.
+
+**Its height is capped in rendered rows** (issue K48R; owner's numbers): the **last 6** rows while the block streams, under a muted
+`… N earlier lines`, and the **first 18** of a settled fold opened by hand, over a muted
+`… N more lines · open in pane`. A grid fold has no scroll view of its own, so the cap is the
+height. The count is of the rows the view will paint, not of the lines handed over: the content is
+wrapped first, by `relay::wrapFoldLines()` (`engine/TerminalBackend.h` — the same hard wrap at
+`columns - kFoldIndent` that `FoldLayer::layout()` does, asserted against the layer in
+`engine/tests/FoldLayerTest.cpp`), so one 5 000-character paragraph is 60 rows at 100 columns and
+is cut like any other. `FoldOptions::wrapCells` and `FoldOptions::tail` carry the two decisions
+into `calllines`.
 
 Updates are coalesced to ~4 Hz (one 250 ms single-shot at a time) — re-rendering the buffer as
 markdown per chunk would burn the CPU on a long stream. Because `setFoldContent()` opens what it
@@ -305,7 +315,16 @@ place on first read. Alt+R (`agent.thinkingPanel`) toggles the latest fold — l
 streams, the last turn's afterwards — and every refusal toasts, or the key would read as dead.
 All of it is in `src/Pane.h` (`thinkingDelta` … `finishThinkingFold`), on the same fold layer as
 the tool calls; evidence in
-[qa_evidence/2026-09-19-thinking-fold/](qa_evidence/2026-09-19-thinking-fold/).
+[qa_evidence/2026-09-19-thinking-fold/](qa_evidence/2026-09-19-thinking-fold/) and, for the caps,
+[qa_evidence/2026-09-19-thinking-fold-cap/](qa_evidence/2026-09-19-thinking-fold-cap/).
+
+The `open in pane` row of the fold is `relay://turn/<pane>/<turn>`: the turn pane, which holds the
+whole of the block whatever the fold shows. The view keeps that text (`TurnTranscriptView::
+setThinking()` holds it and redraws with the log) — before K48R the `turn_transcript` reply that
+lands a round trip after the pane opens cleared the log, so the link opened a pane with no
+reasoning in it, which is what "the open in pane link doesnt work" was. While the block streams the
+pane is refreshed on the fold's own 4 Hz flush, so it follows rather than freezing at what had
+arrived when it was opened.
 
 ### Limits (2026-09-18)
 

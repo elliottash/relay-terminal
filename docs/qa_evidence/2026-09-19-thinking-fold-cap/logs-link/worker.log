@@ -1,0 +1,4 @@
+2026-09-19T17:20:37.043Z INFO relay.worker pane=a9a7885d worker_start version=0.1.0 pid=1338262 level=info
+2026-09-19T17:20:37.075Z INFO relay.worker pane=a9a7885d configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=8a8ea7b9f9f04598a7b2c06f4427190d
+2026-09-19T17:20:45.938Z INFO relay.agent pane=a9a7885d turn_start session=8a8ea7b9f9f04598a7b2c06f4427190d turn=1a546e8fd38c4e7fbed90f46cdcbbd89 model=stub host=127.0.0.1 mode=build effort=high prompt_chars=31 messages=1 stall_s=60 max_steps=256
+2026-09-19T17:20:47.167Z INFO relay.agent pane=a9a7885d turn_end session=8a8ea7b9f9f04598a7b2c06f4427190d turn=1a546e8fd38c4e7fbed90f46cdcbbd89 outcome=done ms=1229 thinking_ms=1216 tools=0 retries=0 open_items=0

@@ -36,6 +36,12 @@ inline const QLatin1String kFoldPrefix("relay://call/");
 inline const QLatin1String kOpenPrefix("relay://open-call/");
 // What a fold is allowed to hold. Beyond it the fold ends with "… N more lines · open in pane".
 inline constexpr int kFoldLineCap = 5000;
+// The reasoning fold's two heights (#K48R; owner, 2026-09-19): while
+// the block streams it shows the *last* six rendered rows — the end is the part being written —
+// and a settled fold opened by hand shows the *first* eighteen. Rendered rows, at the pane's
+// current width: one long paragraph must not escape the cap by being a single line.
+inline constexpr int kThinkingStreamRows = 6;
+inline constexpr int kThinkingDoneRows = 18;
 
 // ----- the anchor URI -------------------------------------------------------------------------
 
@@ -193,11 +199,18 @@ QVector<FoldLine> foldForNote(const QString &text, const Palette &palette);
 // uses (MarkdownAnsi), then its ANSI mapped onto the fold's palette — prose muted (it is chrome
 // around the reply), code blocks in the code colour, links in the link colour, inline code bold
 // (as the terminal shows it), headings plain text, **Problem:** red.
-// Empty input comes back empty; the caller decides what a fold with nothing to show says. Beyond
-// `maxLines` rows the *earliest* lines go, with a note saying how many: the tail is where the
-// reasoning ended.
+// Empty input comes back empty; the caller decides what a fold with nothing to show says.
+//
+// `cells` above zero is the width the fold's rows are laid out at — the grid less
+// relay::kFoldIndent, where FoldLayer::layout() wraps — and makes `options.maxLines` a cap on the
+// rows the *view* will paint: the rows come back pre-wrapped to that width, which is what the view
+// would have done with them anyway, so a paragraph that wraps twenty times counts as twenty and
+// cannot escape the cap by being one line. Past the cap, `tail` keeps the *last* rows under a
+// "… N earlier lines" row — a stream's end is the part being written — and without it the first
+// rows are kept and the rest named on a "… N more lines" row. The two are arguments rather than
+// FoldOptions fields because this is the only fold that has an end worth keeping (#K48R).
 QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palette,
-                                  const FoldOptions &options);
+                                  const FoldOptions &options, int cells = 0, bool tail = false);
 
 // Control characters and escape sequences out of stored output: a fold row is text, and the view
 // paints it; an ANSI escape left in it would be drawn as mojibake.
