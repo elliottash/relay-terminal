@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 rank: zzzzzzzzzy
 created: '2026-09-19'
 source: pane relay-terminal, 2026-09-19
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-edit-diffs-fold-collapsed/], related: [], github: null}
+links: {plans: [], commits: [8147cc55, 3e12fa58, 7558c9b2, 16749b94], evidence: [docs/qa_evidence/2026-09-19-edit-diffs-fold-collapsed/], related: [TK9C], github: null}
 ---
 # Edit diffs fold under the row, collapsed by default
 
@@ -22,10 +22,11 @@ for edit_file snippets, keep those collapsed by default.
   worker's fifty-turn log has scrolled past the call. A big diff still opens the diff pane.
 
 ## Notes
-- The source half (`src/Pane.h`, `src/CallLines.{h,cpp}`, `src/SubagentTranscript.{h,cpp}`)
-  reached `main` inside the 18:00 tree sweep `8147cc55`, which committed this session's in-flight
-  `src/` edits along with other sessions' work. The card's own commit lands the tests, the
-  protocol/architecture wording and the QA evidence.
+- This landed in four pieces on 2026-09-19. The source (`src/Pane.h`, `src/CallLines.{h,cpp}`,
+  `src/SubagentTranscript.{h,cpp}`) went in the 18:00 tree sweep `8147cc55`, the headless tests in
+  the next sweep `3e12fa58`, and the protocol/architecture wording in the docs sweep `7558c9b2` —
+  all three committed this session's in-flight edits along with other sessions' work. The card and
+  the QA evidence land in its own commit `16749b94`.
 - Live evidence: `docs/qa_evidence/2026-09-19-edit-diffs-fold-collapsed/` — a real Relay under
   Xvfb against the #TK9C loopback stub: the folded pane, the small edit's fold opened by one
   Ctrl+click (from the stored diff), and the big edit's diff pane. Headless: `calllines`
