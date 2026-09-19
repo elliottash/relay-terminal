@@ -74,8 +74,11 @@ sessions in the actual relay terminal app on my laptop. sphinxpad should be reac
 - [x] Relay on the owner's laptop (sphinxpad): built, installed into his launcher, running; <!-- t:g7 -->
       `docs/qa_evidence/2026-09-18-sphinxpad-lan/README.md` holds what LAN testing on the four
       devices needs, and recommends Tailscale's certificate (both machines are already on it)
-- [ ] Relay-to-Relay: the owner's laptop pairs as a full device and its Relay draws a remote pane <!-- t:qw -->
-      from the same `pane_state` plus screen frames (after #W5N2's transport work settles)
+- [x] Relay-to-Relay: the owner's laptop pairs as a full device and its Relay draws a remote pane <!-- t:qw -->
+      from the same `pane_state` plus screen frames (after #W5N2's transport work settles).
+      Done in `src/RemotePane.cpp`: `handle()` takes `pane_state` into `updateState()` and draws the
+      strip, the session list honours `sessions.can_open`, and `compose()` sends `msg_id` and the
+      same routing rule as `app/pane.js`; `tests/remotepane_test.cpp` covers it.
 
 ## Live evidence
 
