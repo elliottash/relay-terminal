@@ -2336,7 +2336,7 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_add = new QToolButton(tools);
     m_add->setObjectName(QStringLiteral("boardAddButton"));
     m_add->setText(QStringLiteral("+  New card (n)"));
-    m_add->setToolTip(QStringLiteral("New card in the focused section (n)"));
+    m_add->setToolTip(QStringLiteral("New card in Inbox (n)"));
     m_add->setCursor(Qt::PointingHandCursor);
     m_add->setFocusPolicy(Qt::NoFocus);
     // Fixed, not the tool button's default: left to shrink, a QToolButton elides its own label to
@@ -3150,18 +3150,6 @@ bool BoardView::sectionTakesNewCards(const QString &columnId) const
            && landing != QStringLiteral("dropped");
 }
 
-// The section the keys act on: the one holding the selection, else the first on screen.
-QString BoardView::focusedSection() const
-{
-    const int at = board::rowOfCard(m_rows, m_selected);
-    if (at >= 0)
-        return m_rows.at(at).columnId;
-    for (const board::Row &row : m_rows)
-        if (row.kind == board::Row::Section)
-            return row.columnId;
-    return columnIds().value(0);
-}
-
 void BoardView::selectRow(int index)
 {
     if (index < 0 || index >= m_rows.size() || index >= m_list->count())
@@ -3481,7 +3469,22 @@ void BoardView::undoLast()
 
 void BoardView::quickAdd()
 {
-    quickAddIn(focusedSection());
+    // Inbox by default (owner, #5G43): `n` and the toolbar button create in the board's intake
+    // section, never in whatever section happens to hold the selection — with an in-progress card
+    // selected, every new card was starting life in In progress. A section's own + button is the
+    // way to add straight into that section.
+    QString intake;
+    for (const QString &id : columnIds()) {
+        if (!sectionTakesNewCards(id))
+            continue;
+        if (intake.isEmpty())
+            intake = id;      // a board reordered to have no Inbox: its first section
+        if (m_model.dropStatus(id) == QStringLiteral("inbox")) {
+            intake = id;
+            break;
+        }
+    }
+    quickAddIn(intake);
 }
 
 // The field sits over the list rather than inside a section: with one long list, a field at a

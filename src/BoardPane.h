@@ -189,7 +189,6 @@ private:
     // tabs there is no "current" category, and `m` re-files a card that belongs elsewhere.
     QString defaultCategory() const;
     bool sectionTakesNewCards(const QString &columnId) const;
-    QString focusedSection() const;
     int rowHeight() const;
 
     QString m_workspace;

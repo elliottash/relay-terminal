@@ -1269,16 +1269,17 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     QVERIFY(strip);
     QVERIFY(strip->isHidden());
 
-    // `n` with a card selected adds into that card's section, and says so.
+    // `n` with a card selected still adds in Inbox (owner, #5G43): the selection must not pick
+    // the section, or a card selected in In progress made every new card start there.
     view.selectCard(QStringLiteral("K7Q2"));
     view.quickAdd();
     QVERIFY(!strip->isHidden());
     QCOMPARE(field->placeholderText(),
-             QStringLiteral("Title of a new card in Ready to start — Enter opens it, Esc closes"));
+             QStringLiteral("Title of a new card in Inbox — Enter opens it, Esc closes"));
     field->setText(QStringLiteral("clickable paths in the output"));
     QTest::keyClick(field, Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
-    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("ready"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("inbox"));
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("clickable paths in the output"));
     // With no tabs a new card is filed in the board's first category folder; `m` re-files it.
     QCOMPARE(sent.last().value("tab").toString(), QStringLiteral("features"));
@@ -1316,8 +1317,13 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     // The reply box stands down while the card is being written.
     QVERIFY(view.findChild<QFrame *>(QStringLiteral("boardReply"))->isHidden());
 
-    // Nothing is created straight into Done: `n` there falls back to the first section.
+    // A section's own + is the one path that names a section: it adds straight into that one.
     view.closeDetail();
+    view.quickAddIn(QStringLiteral("ready"));
+    QCOMPARE(field->placeholderText(),
+             QStringLiteral("Title of a new card in Ready to start — Enter opens it, Esc closes"));
+    // Nothing is created straight into Done: `n` there falls back to the first section.
+    QTest::keyClick(field, Qt::Key_Escape);
     view.quickAddIn(relay::board::doneSection());
     QCOMPARE(field->placeholderText(),
              QStringLiteral("Title of a new card in Inbox — Enter opens it, Esc closes"));
