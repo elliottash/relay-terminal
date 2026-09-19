@@ -98,6 +98,8 @@ private slots:
     void anUntouchedPlanHasNothingToSay();
     void theGearSitsAfterTheSectionBoxesAndOpensThePage();
     void savingSendsOneBoardSectionsMessageAndClosesThePage();
+    void escLeavesTheSectionsAsTheyAre();
+    void aRenameReachesTheCheckboxAsWellAsTheHeader();
 };
 
 void BoardSectionsTests::thePlanIsTheSectionsAsTheyAreDrawn()
@@ -345,6 +347,57 @@ void BoardSectionsTests::savingSendsOneBoardSectionsMessageAndClosesThePage()
     QCOMPARE(view.model().sections().at(2).title, QStringLiteral("Up next"));
     // The id did not move: the cards are exactly where they were.
     QCOMPARE(view.model().sections().at(2).id, QStringLiteral("ready"));
+}
+
+void BoardSectionsTests::escLeavesTheSectionsAsTheyAre()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened());
+    view.findChild<QToolButton *>(QStringLiteral("boardSectionGear"))->click();
+    auto *page = view.findChild<QWidget *>(QStringLiteral("boardSectionEditor"));
+    QVERIFY(view.sectionsOpen());
+    // A staged edit and then Esc: nothing is written, and the page is gone.
+    auto *name = page->findChildren<QLineEdit *>(QStringLiteral("boardSectionName")).at(2);
+    name->setText(QStringLiteral("Up next"));
+    emit name->editingFinished();
+    QTest::keyClick(page, Qt::Key_Escape);
+    QVERIFY(!view.sectionsOpen());
+    QVERIFY(page->isHidden());
+    QVERIFY(sent.isEmpty());
+    // And the gear opens on the truth again rather than on the abandoned edit.
+    view.findChild<QToolButton *>(QStringLiteral("boardSectionGear"))->click();
+    QCOMPARE(page->findChildren<QLineEdit *>(QStringLiteral("boardSectionName")).at(2)->text(),
+             QStringLiteral("Ready to start"));
+}
+
+void BoardSectionsTests::aRenameReachesTheCheckboxAsWellAsTheHeader()
+{
+    // The checkbox row is rebuilt from the section list, which a rename leaves the *ids* of
+    // exactly as they were: comparing those alone left a box reading "READY TO START" under a
+    // header that already said "UP NEXT" (seen in the pane, 2026-09-19).
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened());
+    auto *checks = view.findChild<QWidget *>(QStringLiteral("boardSectionChecks"));
+    auto boxText = [checks] {
+        QStringList out;
+        for (QCheckBox *box : checks->findChildren<QCheckBox *>())
+            out << box->text();
+        return out;
+    };
+    QVERIFY(boxText().contains(QStringLiteral("READY TO START")));
+
+    QJsonObject config = ::config();
+    config.insert(QStringLiteral("column_titles"), QJsonObject{{"ready", "Up next"}});
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", QJsonArray{}},
+                                 {"removed", QJsonArray{}}, {"problems", QJsonArray{}},
+                                 {"config", config}});
+    QVERIFY(!boxText().contains(QStringLiteral("READY TO START")));
+    QVERIFY(boxText().contains(QStringLiteral("UP NEXT")));
+    // Still one box per section, and the gear is still the last thing in the row.
+    QCOMPARE(boxText().size(), view.model().sections().size());
+    QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardSectionGear")));
 }
 
 QTEST_MAIN(BoardSectionsTests)

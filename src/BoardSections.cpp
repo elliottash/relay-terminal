@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QHBoxLayout>
 #include <QJsonArray>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -276,6 +277,7 @@ QJsonObject SectionPlan::message() const
 SectionEditor::SectionEditor(QWidget *parent) : QWidget(parent)
 {
     setObjectName(QStringLiteral("boardSectionEditor"));
+    setFocusPolicy(Qt::StrongFocus);   // so Esc reaches keyPressEvent when the page opens
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 10, 12, 10);
     layout->setSpacing(8);
@@ -322,6 +324,17 @@ SectionEditor::SectionEditor(QWidget *parent) : QWidget(parent)
     });
     buttons->addWidget(m_save);
     layout->addLayout(buttons);
+}
+
+void SectionEditor::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Escape) {
+        event->accept();
+        if (onClose)
+            onClose();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }
 
 void SectionEditor::setModel(const Model &model)
@@ -373,11 +386,18 @@ void SectionEditor::rebuild()
         });
         cells->addWidget(name, 1);
 
+        // The status *ids*, not their titles: for a one-status section the titles only repeat the
+        // name beside them ("Inbox  Inbox"), and the id is the thing a rename does not change —
+        // which is the whole point of the column.
         auto *collects = new QLabel(row.statuses.isEmpty()
                                         ? QStringLiteral("closed and signed")
-                                        : joinTitles(row.statuses), line);
+                                        : row.statuses.join(QStringLiteral(", ")), line);
         collects->setObjectName(QStringLiteral("boardSectionStatuses"));
-        collects->setToolTip(QStringLiteral("The statuses this section collects"));
+        collects->setToolTip(row.statuses.isEmpty()
+                                 ? QStringLiteral("Verified is `done` plus a signature: no status "
+                                                  "of its own, and nothing can be moved into it.")
+                                 : QStringLiteral("The statuses this section collects: %1")
+                                       .arg(joinTitles(row.statuses)));
         cells->addWidget(collects, 2);
 
         auto *merge = new QToolButton(line);

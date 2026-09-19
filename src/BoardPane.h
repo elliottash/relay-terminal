@@ -226,6 +226,7 @@ private:
     QWidget *m_checks = nullptr;        // the section checkboxes, wrapping in a narrow pane
     QLayout *m_checksLayout = nullptr;
     QStringList m_checkIds;             // the sections the boxes stand for, in order
+    QStringList m_checkTitles;          // and what they were called when the boxes were built
     // The gear at the end of that row, and the page it opens in this pane.
     board::SectionEditor *m_sections = nullptr;
     bool m_sectionsOpen = false;

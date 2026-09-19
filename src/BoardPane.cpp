@@ -2503,9 +2503,13 @@ void BoardView::syncSectionChecks()
     }
     // The empty board draws one unlit jack per section under these names (EmptyBoard, above).
     static_cast<EmptyBoard *>(m_empty)->setSections(titles);
-    if (ids == m_checkIds)
+    // The names as well as the ids: renaming a section in the gear leaves the ids exactly as they
+    // were, and comparing those alone left a box reading "Ready to start" under a header that
+    // already said "Up next".
+    if (ids == m_checkIds && titles == m_checkTitles)
         return;
     m_checkIds = ids;
+    m_checkTitles = titles;
     while (QLayoutItem *item = m_checksLayout->takeAt(0)) {
         delete item->widget();
         delete item;
@@ -3249,6 +3253,7 @@ void BoardView::openSections()
     m_sectionsOpen = true;
     m_sections->setModel(m_model);
     m_sections->show();
+    m_sections->setFocus(Qt::OtherFocusReason);   // Esc closes the page from the moment it opens
     rebuild();
 }
 

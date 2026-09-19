@@ -23,6 +23,7 @@
 
 #include <functional>
 
+class QKeyEvent;
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
@@ -111,6 +112,11 @@ public:
 
     std::function<void(const QJsonObject &)> onSave;
     std::function<void()> onClose;
+
+protected:
+    // Esc leaves the sections as they are, which is what Cancel's tooltip promises and what Esc
+    // does everywhere else in this pane.
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     void rebuild();
