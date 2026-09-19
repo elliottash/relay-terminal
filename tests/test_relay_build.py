@@ -256,6 +256,18 @@ class RelayBuildTest(unittest.TestCase):
         self.assertEqual(missing.returncode, 5, missing.stdout)
         self.assertIn("did not pick up your change", missing.stdout)
 
+    def test_check_finds_a_qstringliteral_which_is_utf16_in_the_binary(self):
+        # No cmake needed: load the wrapper as a module and ask its search directly.
+        from importlib.machinery import SourceFileLoader
+        wrapper = SourceFileLoader("relay_build_under_test", str(SCRIPT)).load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            blob = Path(tmp) / "relay"
+            pad = b"\x7fELF" + b"\0" * ((1 << 20) - 9)      # puts the text across a chunk boundary
+            blob.write_bytes(pad + "open the task list".encode("utf-16-le") + b"\0\0narrow text\0")
+            self.assertTrue(wrapper.binary_contains(blob, "open the task list"))   # UTF-16LE
+            self.assertTrue(wrapper.binary_contains(blob, "narrow text"))          # UTF-8
+            self.assertFalse(wrapper.binary_contains(blob, "not in there"))
+
     def test_a_broken_configure_stops_the_build(self):
         root = self.make_project()
         (root / "CMakeLists.txt").write_text(CMAKELISTS + "\nmessage(FATAL_ERROR \"no\")\n")

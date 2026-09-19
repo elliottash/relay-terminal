@@ -177,20 +177,26 @@ def restamp(build_dir: Path, start_ns: int) -> int:
 
 
 def binary_contains(path: Path, needle: str) -> bool:
-    """Is this literal in the binary? (`grep -aF`, without spawning grep.)"""
-    data = needle.encode()
-    if not data:
+    """Is this literal in the binary? (`grep -aF`, without spawning grep.)
+
+    Looked for both as UTF-8 and as UTF-16LE: a `QStringLiteral("…")` -- most of Relay's
+    interface text -- is stored as UTF-16 in the binary, so a UTF-8 byte search alone reports a
+    change as missing when it is there (`strings -el build/relay` is the by-hand equivalent).
+    """
+    needles = [data for data in {needle.encode(), needle.encode("utf-16-le")} if data]
+    if not needles:
         return True
-    overlap = len(data) - 1
+    overlap = max(len(data) for data in needles) - 1
     tail = b""
     with open(path, "rb") as handle:
         while True:
             chunk = handle.read(1 << 20)
             if not chunk:
                 return False
-            if data in tail + chunk:
+            window = tail + chunk
+            if any(data in window for data in needles):
                 return True
-            tail = (tail + chunk)[-overlap:] if overlap else b""
+            tail = window[-overlap:] if overlap else b""
 
 
 # -------------------------------------------------------------------------- main
