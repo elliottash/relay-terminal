@@ -241,6 +241,78 @@ worker to pass it to `qa_verifiers.guest_signature`; those files belong to the #
 `BOARD.md` has no "verified by" column: the index groups by folder and the Done tab is a filter,
 so there is no Done table to put it in.
 
+## Second research pass, 2026-09-19: the ranking table is provisional, and the axis may not be lineage
+
+Owner asked for the item-level question the first pass did not answer: *"what is the cross-model
+correlation of review capabilities, at the task level… for a given bug type, is kimi success more
+correlated with claude or codex. if that doesnt exist, thats a paper"*, then *"for claude-made bugs,
+is kimi or glm better at reviewing them"*, and *"author x author and reviewer x reviewer
+correlations are also informative here"*. Two reports:
+[`research-verifier-rankings.md`](../../../docs/qa_evidence/2026-09-19-cross-provider-qa/research-verifier-rankings.md),
+[`research-error-correlation.md`](../../../docs/qa_evidence/2026-09-19-cross-provider-qa/research-error-correlation.md).
+Proposed study and its costing:
+[`proposed-study-design.md`](../../../docs/qa_evidence/2026-09-19-cross-provider-qa/proposed-study-design.md).
+
+**The object is a matrix, not a ranking.** `R[author][reviewer]`; this card's rule (one capability
+order plus a same-lineage skip) is its rank-1 approximation. The interaction is real and
+sign-flipping: Xiang et al., *"Cross-Model LLM Code Review: Should you use Claude to review Codex
+or vice versa?"* ([2607.21656](https://arxiv.org/abs/2607.21656), 116 tasks, all four cells)
+finds Claude reviewing Codex drafts raises them 71.6% → 89.7%, while Codex reviewing Claude drafts
+*lowers* them. A ranking cannot express that.
+
+**Three things now qualify what is written above, and two of them cut against it.**
+
+1. **The lineage axis is weakly supported for code.** Xiang et al. attribute their asymmetry to the
+   capability gap and to rewrite-versus-repair style, not to family; and Claude→Claude held its
+   baseline and beat Claude→Codex, so same-family review was not the loser. In *"Bigger Isn't
+   Always Better"* the union of two **same-family** reviewers cost the least accuracy and a
+   **cross-lineage** union the most, and the reviewer-side profile looks rank-1 (Security flat near
+   70% across four vendors, Logic and Architecture monotone in overall strength). If that
+   generalises, "pick the strongest available" is optimal and lineage is irrelevant.
+   The family effect that *is* measured — "Who Judges Matters"
+   ([2609.17857](https://arxiv.org/abs/2609.17857)): +6.7 pp family preference beyond
+   self-preference, panel composition flipping 18.5% of outcomes — is on general judging, not code.
+2. **Two verifiers on high-risk cards is weaker than it looked.** Kohli, *"Nine Judges, Two
+   Effective Votes"* ([2605.29800](https://arxiv.org/abs/2605.29800)): nine judges from seven
+   families carry about two independent votes, panels land 8–22 pp short of the independent-voting
+   ideal, and the best single judge matched the panel. That deferred idea should not be built on
+   the assumption that a second verifier adds a second opinion.
+3. **Verifier rank really does differ from author rank** (this supports the design): judge ranks
+   move up to 14 positions across judging benchmarks, one reward-model leaderboard is led by an 8B
+   model, and the capability floor looks like *reasoning*, not size — a thinking 8B beats
+   non-thinking 70Bs at judging code, while non-thinking instruct judges sit near chance.
+
+**What is unmeasured, and is therefore the paper.** The crossed author × reviewer design is
+published exactly once, at 2×2 (Claude × Codex). **No published cell anywhere has Kimi, GLM,
+MiniMax or DeepSeek reviewing Claude-authored code**, so the owner's question is unanswered.
+Reviewer × reviewer correlation is measured once for judging and once at n=150 for code review.
+Author × author is well measured. And nobody has tested whether the matrix **factorises through
+bug type** — `escape(A,B) = Σ_t e_A(t)·(1 − d_B(t))` from an author error profile and a reviewer
+detection profile — although both marginals exist separately in the literature. If it factorises,
+Relay stores two short vectors per family instead of an n×n table and a new model slots in after a
+handful of items; the residual on the diagonal is then a clean measurement of self-preference,
+separated from "this reviewer is simply weak at the bug types this author writes".
+
+**Consequence for this card: the order in `VERIFIER_RANK` stays, and its justification is
+downgraded from "the research says so" to "a defensible default pending measurement".** The
+different-family rule on closing a QA card is unaffected: it is a process-independence guarantee
+for the audit trail, which holds whatever the error correlations turn out to be. What is now
+marked provisional is only the *lineage ordering* — the claim that a cross-lineage verifier is
+better than a stronger same-lineage one.
+
+**The pilot that would settle it, and its cost.** `mattymchen/codejudgebench` (HuggingFace,
+Apache-2.0, splits verified live 2026-09-19) is one author model per split, each row carrying that
+author's correct and incorrect solution to the same problem with hidden-test ground truth — about
+810 Claude-authored items, plus Gemini and Qwen. Reviewing both responses measures detection and
+false-approval. The owner's exact question is ~3,240 judge calls on keys this machine already has,
+with no generation spend; the 4×4 including the same-family diagonal is ~7,700. Power simulation
+([`power.py`](../../../docs/qa_evidence/2026-09-19-cross-provider-qa/power.py)): 810 items gives
+0.99 power for a 15-point gap between two moderately independent reviewers, falling to 0.6 if they
+share blind spots — and that expensive case is the one where the choice matters least. The items
+are competitive-programming solutions, so absolute rates will not transfer to pull requests; the
+structural question of whether an author × reviewer interaction exists will. **Not run: it spends
+the owner's API credits, and that is his call.**
+
 ## QA checklist
 
 For a verifier outside the Anthropic family (on this machine `relay-board.py verifier T71W` names
@@ -254,4 +326,7 @@ Codex). Evidence under `docs/qa_evidence/2026-09-19-cross-provider-qa/`, files p
 - [ ] Live under Xvfb (isolated `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR` under a short path, `RELAY_KEYRING=off`): a `needs-qa-llm` card shows the verify line and **Verify (v)**; `v` and the click open a pane beside the board on the recommended runner with the brief (a Codex or Claude Code verifier runs through Relay's harness as the pane's agent, not as the bare CLI in the shell, whenever the model picker offers it that way); the thread gets one progress comment and the card does not move; the hint shows once.
 - [ ] A `done` card with `verified_by` sits in **Verified** with a `✓ <verifier>` badge, one without stays in Done, and a drag or `Alt+Shift+→` into Verified is refused with the sentence in design §4.11.
 - [ ] With no keys and no guest CLI on PATH the line is the amber Relay Free note, Verify is disabled and its tooltip says why.
+- [ ] The ranking table's provisional status is visible where it is edited: `VERIFIER_RANK`'s
+      comments say the lineage ORDER is a default pending measurement, not a finding, and point at
+      the second research pass.
 - [ ] The docs say what the code does: `docs/SWITCHBOARD-FORMAT.md` (`verified_by`), protocol §19.15, design §4.10 and §4.11, and the ranking table's row comments cite the research report.
