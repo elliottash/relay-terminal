@@ -109,15 +109,15 @@ def validate_grant(grant) -> dict:
     """`context.program_control` from the GUI: the user's consent for this one turn."""
     if grant is None:
         return {}
-    if not isinstance(grant, dict) or set(grant) - {"granted", "reason", "program", "question", "kind",
-                                                    "masked", "alt_screen", "waiting", "max_writes",
+    if not isinstance(grant, dict) or set(grant) - {"granted", "reason", "program", "guest", "question",
+                                                    "kind", "masked", "alt_screen", "waiting", "max_writes",
                                                     "screen", "screen_source"}:
         raise ValueError("context.program_control has an unknown field.")
     for key in ("granted", "masked", "alt_screen", "waiting"):
         if grant.get(key) is not None and type(grant[key]) is not bool:
             raise ValueError(f"context.program_control.{key} must be a boolean.")
-    for key, limit in (("reason", 60), ("program", 200), ("question", 400), ("kind", 40),
-                       ("screen_source", 40)):
+    for key, limit in (("reason", 60), ("program", 200), ("guest", 40), ("question", 400),
+                       ("kind", 40), ("screen_source", 40)):
         value = grant.get(key)
         if value is not None and (not isinstance(value, str) or len(value) > limit):
             raise ValueError(f"context.program_control.{key} must be text of at most {limit} characters.")
@@ -147,6 +147,7 @@ class ProgramControl:
         self.granted = False
         self.reason = ""
         self.program = ""
+        self.guest = ""
         self.question = ""
         self.kind = "none"
         self.masked = False
@@ -160,7 +161,7 @@ class ProgramControl:
     def _apply(self, state: dict) -> None:
         if "granted" in state:
             self.granted = bool(state.get("granted"))
-        for key in ("reason", "program", "question", "kind", "screen_source"):
+        for key in ("reason", "program", "guest", "question", "kind", "screen_source"):
             if key in state:
                 self[key] = state.get(key) or ""
         for key in ("masked", "alt_screen", "waiting"):
@@ -208,8 +209,8 @@ class ProgramControl:
 
     def summary(self) -> dict:
         return {"granted": self.granted, "reason": self.reason, "program": self.program,
-                "kind": self.kind, "masked": self.masked, "waiting": self.waiting,
-                "writes": self.writes, "max_writes": self.max_writes,
+                "guest": self.guest, "kind": self.kind, "masked": self.masked,
+                "waiting": self.waiting, "writes": self.writes, "max_writes": self.max_writes,
                 "screen_source": self.screen_source}
 
     def available(self) -> bool:

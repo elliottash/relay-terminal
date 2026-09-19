@@ -2312,6 +2312,7 @@ pane: it answers the model directly and emits `program_input_refused` so the pan
 | `granted` | bool | the user handed this program to the agent **for this turn** |
 | `reason` | string (≤60) | `delegated`, or why a grant ended: `take_over`, `password`, `program_exited` |
 | `program` | string (≤200) | the foreground program's name |
+| `guest` | string (≤40) | the guest agent the program is — `claude`, `codex` or empty (section 26) |
 | `question` | string (≤400) | what the screen says it is asking ("Do you want to continue? [Y/n]") |
 | `kind` | string (≤40) | the classifier's verdict: `none`, `shell_prompt`, `yes_no`, `choice`, `password`, `press_key`, `free_text` |
 | `masked` | bool | a password prompt |
@@ -2367,7 +2368,7 @@ A `cancelled` reply raises `Cancelled` instead, so a stopped turn unwinds like a
 
 ### 21.4 `program_state` (GUI → worker)
 
-`program_state {granted, reason, program, question, kind, masked, alt_screen, waiting,
+`program_state {granted, reason, program, guest, question, kind, masked, alt_screen, waiting,
 max_writes, screen_source, id?}` — the same fields as the grant, without `screen`. The pane sends
 it whenever any of them changes and the worker keeps quiet about it unless the message carried an
 `id`, in which case it answers `program_control {id, granted, reason, program, kind, masked,
@@ -2961,3 +2962,44 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   pane already has that session open, focuses that pane instead, so two workers never autosave one
   file; on a thread, Enter opens its history in the ⓘ pane.
 - `reset` now carries the new conversation's `session_id`.
+
+## 26. Guest agent panes: Claude Code and Codex (v3.2, 2026-09-19)
+
+Issue GT7X (`issues/features/2026-09-19-claude-codex-guest-integration.md`). A **guest** is an
+agent CLI — Claude Code or Codex — the user starts in a pane's shell, exactly as they would in
+any other terminal. Relay detects it and puts its own surfaces (composer, chips, sessions pane)
+around it. The registry is `backend/relay_core/guest.py` (static identity, well-known paths,
+installation probe); tests `tests/test_guest.py`. This section is the stub the guest phases
+extend; everything here is additive.
+
+### 26.1 Detection and `guest`
+
+The pane classifies the foreground command line on its program poll (`guestProgram`,
+`src/Pane.h`): the first token's leaf (`claude`, `claude-code`, `codex`, `codex-cli`), or —
+when the first token is a launcher (`node`, `nodejs`, `bun`, `bunx`, `deno`, `npx`) — the first
+non-flag token after it, matched by leaf name (script extensions `.js`/`.mjs`/`.cjs`/`.ts`
+stripped) or by an exact path component (`node …/@anthropic-ai/claude-code/cli.js`). This is
+one rule in two languages; `guest.classify_command` and `guestProgram` change together.
+
+The pane publishes the result as `guest` in `program_state` (21.4) and, while a grant is live,
+in `context.program_control` (21.2): the guest id, or `""`. The worker keeps it in the program
+control state; nothing else changes, and a pane whose foreground program is not a guest behaves
+exactly as before. Guest state is **not** saved in the window layout: a restored pane starts at
+a shell and re-detects when the user starts the guest again. A guest run inside tmux is not
+visible, the same limitation `remoteCommandLine` documents for ssh.
+
+### 26.2 Env injection point
+
+Pane shells are spawned with the `qputenv` values set in `startTerminal` (`src/Pane.h`). The
+Claude IDE bridge phase writes its lock file under `guest.claude_ide_lock_dir()` and injects
+`guest.bridge_env("claude", port)` (`CLAUDE_CODE_SSE_PORT`, `ENABLE_IDE_INTEGRATION`) there, so
+a `claude` started in the pane finds Relay's bridge. Codex has no IDE-bridge equivalent; its
+environment stays untouched.
+
+### 26.3 What the later sections will hold
+
+The guest phases of issue GT7X extend this section: the Claude IDE bridge (WebSocket MCP `ide`
+server, the 12 tools, `openDiff` approvals); Claude hooks and the statusline shim (pane states,
+context/model chips); the Codex attach (daemon co-attach, or hooks and the rollout tail); the
+composer translator and guest slash catalog; and the sessions-index sources `claude` and
+`codex`. Each lands with its phase and is documented here as it does.

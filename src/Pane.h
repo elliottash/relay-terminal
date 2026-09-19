@@ -16,6 +16,8 @@
 #include "Theme.h"
 #include "BoardPane.h"
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
+#include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
+#include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
 #include "AgentUi.h"
 #include "Completion.h"
 #include "FileIndex.h"
@@ -361,6 +363,9 @@ public:
         const QString program = line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
         return remoteSessionProgram(program) || relay::panestatus::isRemoteProgram(program) ? line : QString();
     }
+    // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
+    // Classified from the command line on every program poll (issue GT7X, protocol 26).
+    QString guest() const { return m_guest; }
     bool sharedWithPhone() const { return relay::RemoteShare::instance().isSharing(m_token); }
     bool processBusy() const {
         if (!m_backend) return false;
@@ -903,6 +908,7 @@ private:
             {QStringLiteral("granted"), m_delegated && processBusy() && !m_native && !masked},
             {QStringLiteral("reason"), m_delegated ? QStringLiteral("delegated") : m_delegationEnd},
             {QStringLiteral("program"), foregroundProgramName()},
+            {QStringLiteral("guest"), m_guest},
             {QStringLiteral("kind"), QString::fromLatin1(relay::screen::kindName(m_screenPrompt.kind))},
             {QStringLiteral("question"), m_screenPrompt.question},
             {QStringLiteral("masked"), masked},
@@ -918,6 +924,15 @@ private:
         if (message == m_lastProgramState) return;
         m_lastProgramState = message;
         send(message);
+    }
+
+    // The guest agent (Claude Code / Codex) the foreground program was classified as; empty
+    // for anything else. The worker hears about a change in the next program_state (26.1).
+    void setGuest(const QString &guest) {
+        if (guest == m_guest) return;
+        m_guest = guest;
+        sendProgramState();
+        changed();
     }
 
     // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
@@ -10014,11 +10029,48 @@ private:
         return names.contains(name);
     }
 
+    // Claude Code or Codex in the foreground (issue GT7X, protocol 26): the id
+    // backend/relay_core/guest.py gives the same command line, or empty. The CLI may be the
+    // native binary or a script a launcher runs (`node …/bin/codex` for the shebang install,
+    // `npx -y claude`, `node …/claude-code/cli.js` for the npm shim), so when the first token
+    // is a known launcher the first non-flag token after it decides, matched by leaf name or
+    // by an exact path component. One rule in two languages: change classify_command with this.
+    static QString guestIdFor(const QString &name) {
+        if (name == QStringLiteral("claude") || name == QStringLiteral("claude-code")) return QStringLiteral("claude");
+        if (name == QStringLiteral("codex") || name == QStringLiteral("codex-cli")) return QStringLiteral("codex");
+        return {};
+    }
+    static QString guestProgram(const QString &line) {
+        const QStringList tokens = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (tokens.isEmpty()) return {};
+        const QString first = QFileInfo(tokens.first()).fileName();
+        if (const QString id = guestIdFor(first); !id.isEmpty()) return id;
+        static const QSet<QString> launchers{QStringLiteral("node"), QStringLiteral("nodejs"), QStringLiteral("bun"),
+                                             QStringLiteral("bunx"), QStringLiteral("deno"), QStringLiteral("npx")};
+        if (!launchers.contains(first)) return {};
+        static const QStringList extensions{QStringLiteral(".js"), QStringLiteral(".mjs"),
+                                            QStringLiteral(".cjs"), QStringLiteral(".ts")};
+        for (int i = 1; i < tokens.size(); ++i) {
+            const QString &token = tokens.at(i);
+            if (token.startsWith(QLatin1Char('-'))) continue;   // the launcher's own flags: npx -y claude
+            QString leaf = QFileInfo(token).fileName();
+            for (const QString &extension : extensions)
+                if (leaf.endsWith(extension)) { leaf.chop(extension.size()); break; }
+            if (const QString id = guestIdFor(leaf); !id.isEmpty()) return id;
+            const QStringList components = token.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+            for (const QString &component : components)
+                if (const QString id = guestIdFor(component); !id.isEmpty()) return id;
+            return {};   // only the launcher's target decides; what follows are the guest's own arguments
+        }
+        return {};
+    }
+
     void pollProgram() {
         if (m_promptReported || !m_backend) {
             m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); checkPasswordPrompt();
             // The program is gone: the screen detection and the agent's permission go with it.
             endDelegation(QStringLiteral("program_exited"));
+            setGuest({});   // and the guest agent the program may have been (GT7X)
             updateScreenPrompt();
             updateTakeControl();
             return;
@@ -10067,6 +10119,7 @@ private:
                 m_waitTicks = 0;
             }
         }
+        setGuest(guestProgram(foregroundCommandLine()));   // GT7X: claude / codex, or "" again
         updateTakeControl();
     }
 
@@ -10585,8 +10638,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             endWaiting(true);
             updateOpaqueProgram();
             // The program is gone: the screen has nothing to ask and the agent's permission to
-            // type into it ends with it (cards YR21, C1HH).
+            // type into it ends with it (cards YR21, C1HH). The guest agent goes with it (GT7X).
             endDelegation(QStringLiteral("program_exited"));
+            setGuest({});
             updateScreenPrompt();
             m_remoteHandled = false; m_remoteProgram = false; endLogin();
             m_secretDeclined = false; m_secretNotified = false;
@@ -11258,6 +11312,7 @@ private:
     relay::screen::Detection m_screenPrompt;
     bool m_delegated = false;          // the user handed the foreground program to the agent
     QString m_delegatedProgram;
+    QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it
     QFrame *m_programBar = nullptr;    // the floating banner over the terminal
