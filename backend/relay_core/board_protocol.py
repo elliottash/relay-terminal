@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import board as B
 from .board_tools import (CARD_MODES, PLAN_HEADING, BoardTools, BoardToolError, ToolContext,
-                          card_brief, cleanup_brief, normalize_id)
+                          board_for, card_brief, cleanup_brief, normalize_id)
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_comment", "board_undo", "board_ask", "board_check",
@@ -65,34 +65,61 @@ class BoardCommands:
         self._cleanup_id = None
 
     # ---- wiring ---------------------------------------------------------------
-    def configure(self, workspace: str, request: dict | None = None) -> dict | None:
-        """Called from `configure`; returns the `board` block for the `configured` event."""
-        self.workspace = workspace
+    @staticmethod
+    def _settings(request: dict | None) -> dict:
         settings = (request or {}).get("board") or {}
         if not isinstance(settings, dict):
             raise ValueError("board must be an object.")
-        root = Path(settings.get("dir") or (Path(workspace) / "issues"))
-        if not (root / B.BOARD_CONFIG).is_file():
+        return settings
+
+    def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
+        """Called from `configure`; returns the `board` block for the `configured` event.
+
+        `workspace` is the workspace the GUI named, already resolved, or None when it named
+        none: a worker with no workspace has no board, never the board of the directory the
+        process happens to be running in.
+        """
+        self.workspace = str(workspace) if workspace else None
+        settings = self._settings(request)
+        board = board_for(workspace, settings.get("dir"))
+        self._repoint(None if board is None else board.root)
+        if board is None:
             self.tools = None
             return None
-        board = B.Board(root, Path(workspace))
         self.tools = BoardTools(board, emit=self.emit, autonomy=settings.get("autonomy"),
                                 limits=settings.get("limits"),
                                 context=ToolContext(actor="owner",
                                                     pane=os.environ.get("RELAY_PANE_ID") or None),
                                 enforce_limits=False, duplicate_check=False)
-        self._snapshot = {}
-        return {"dir": str(root), "autonomy": self.tools.autonomy, "limits": dict(self.tools.limits),
+        return {"dir": str(board.root), "root": str(board.root), "workspace": str(board.repo),
+                "autonomy": self.tools.autonomy, "limits": dict(self.tools.limits),
                 "cards": len(board.card_paths())}
 
-    def agent_tools(self, workspace: str, request: dict | None = None) -> BoardTools | None:
+    def _repoint(self, root: Path | None) -> None:
+        """Forget the board we were on when `configure` points this worker at another one.
+
+        A re-pointed worker must not answer for the project it left: the seeded card, the hash
+        it was seeded at, the turn's collected text and the mode its last brief was sent in all
+        belong to the old board, and diffing the new board against the old board's snapshot
+        would report every card of one project as an upsert of the other.
+        """
+        current = self.tools.board.root if self.tools is not None else None
+        if root is not None and root == current:
+            return
+        self._snapshot = {}
+        self._ask_card = self._ask_hash = self._ask_turn = None
+        self._ask_text = []
+        self._ask_mode = "discuss"
+        self._brief_mode = None
+
+    def agent_tools(self, workspace: str | None, request: dict | None = None) -> BoardTools | None:
         """The *agent's* instance of the tools for this workspace (guardrails on)."""
-        settings = (request or {}).get("board") or {}
-        root = Path(settings.get("dir") or (Path(workspace) / "issues"))
-        if not (root / B.BOARD_CONFIG).is_file():
+        settings = self._settings(request)
+        board = board_for(workspace, settings.get("dir"))
+        if board is None:
             return None
         pane = os.environ.get("RELAY_PANE_ID") or None
-        tools = BoardTools(B.Board(root, Path(workspace)), emit=self.emit,
+        tools = BoardTools(board, emit=self.emit,
                            autonomy=settings.get("autonomy"), limits=settings.get("limits"),
                            context=ToolContext(actor="agent", pane=pane))
         return None if tools.autonomy == "off" else tools
@@ -104,6 +131,20 @@ class BoardCommands:
         if self.tools is None:
             raise ValueError("This workspace has no Switchboard (issues/board.yaml is missing).")
         return self.tools
+
+    # ---- events ----------------------------------------------------------------
+    def _tag(self, event: dict) -> dict:
+        """Name the board an event is about (protocol 19.2), once, for every board event.
+
+        One window may have several projects open at the same time; `root` is what a GUI routes
+        by, so it belongs on every `board_*` event and not only on `board`.
+        """
+        if self.tools is not None and "root" not in event:
+            return {"root": str(self.tools.board.root), **event}
+        return event
+
+    def _send(self, event: dict) -> None:
+        self.emit(self._tag(event))
 
     # ---- rows -----------------------------------------------------------------
     def _rows(self) -> dict[str, dict]:
@@ -141,8 +182,8 @@ class BoardCommands:
         removed = [cid for cid in self._snapshot if cid not in rows]
         self._snapshot = rows
         self.rev += 1
-        event = {"event": "board_changed", "rev": self.rev, "upserts": upserts, "removed": removed,
-                 "problems": self._problems()}
+        event = self._tag({"event": "board_changed", "rev": self.rev, "upserts": upserts,
+                           "removed": removed, "problems": self._problems()})
         if write_id:
             event["write_id"] = write_id
         return event
@@ -164,21 +205,21 @@ class BoardCommands:
             tools = self._need()
             self._snapshot = self._rows()
             self.rev += 1
-            self.emit({"event": "board", "id": rid, "rev": self.rev,
-                       "root": str(tools.board.root), "workspace": str(tools.board.repo),
-                       "config": self._config(), "cards": list(self._snapshot.values()),
-                       "problems": self._problems()})
+            self._send({"event": "board", "id": rid, "rev": self.rev,
+                        "root": str(tools.board.root), "workspace": str(tools.board.repo),
+                        "config": self._config(), "cards": list(self._snapshot.values()),
+                        "problems": self._problems()})
         elif kind == "board_refresh":
             self.emit({**self._changed(), "id": rid})
         elif kind == "board_check":
-            self.emit({"event": "board_problems", "id": rid, "items": self._problems()})
+            self._send({"event": "board_problems", "id": rid, "items": self._problems()})
         elif kind == "board_card_get":
             tools = self._need()
             result = tools.run("board_read", {"id": request.get("card"),
                                               "thread_entries": min(50, int(request.get("thread_entries") or 50))})
             if result.get("error"):
                 raise ValueError(result["error"])
-            self.emit({"event": "board_card", **result, "card_id": result["id"], "id": rid})
+            self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid})
         elif kind in ("board_create", "board_update", "board_move", "board_comment"):
             self._write(kind, request, rid)
         elif kind == "board_undo":
@@ -187,7 +228,7 @@ class BoardCommands:
                 result = tools.undo(str(request.get("write_id") or ""))
             except BoardToolError as exc:
                 raise ValueError(str(exc)) from exc
-            self.emit({"event": "board_undone", **result, "card_id": result["id"], "id": rid})
+            self._send({"event": "board_undone", **result, "card_id": result["id"], "id": rid})
             self.emit(self._changed())
         elif kind == "board_ask":
             self._ask(request, rid)
@@ -252,8 +293,8 @@ class BoardCommands:
                        "code": result.get("code"), **{k: v for k, v in result.items()
                                                       if k in ("current_hash", "possible_duplicates")}})
             return
-        self.emit({"event": "board_written", **result, "card_id": result.get("id"),
-                   "id": rid, "kind": kind})
+        self._send({"event": "board_written", **result, "card_id": result.get("id"),
+                    "id": rid, "kind": kind})
         self.emit(self._changed(result.get("write_id")))
 
     # ---- the Switchboard agent -------------------------------------------------
@@ -296,9 +337,9 @@ class BoardCommands:
         self._ask_text = []
         self._ask_turn = None
         self._ask_mode = mode
-        self.emit({"event": "board_thread_appended", "id": rid, "card_id": card_id,
-                   "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": said,
-                   "mode": mode})
+        self._send({"event": "board_thread_appended", "id": rid, "card_id": card_id,
+                    "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": said,
+                    "mode": mode})
         # What the mode may touch is enforced by the agent's tools for the length of the turn,
         # not only asked for in the brief (protocol 19.10).
         if agent_tools is not None:
@@ -351,9 +392,9 @@ class BoardCommands:
         log = agent_tools.begin_cleanup(run_id, dry_run=dry_run, scope=scope or None,
                                         note=note or None, limits=request.get("limits"))
         self._cleanup_tools, self._cleanup_log, self._cleanup_id = agent_tools, log, rid
-        self.emit({"event": "board_cleanup_started", "id": rid, "run_id": run_id,
-                   "dry_run": dry_run, "scope": scope or None, "cards": log.cards_before,
-                   "limits": dict(log.limits), "changelog": log.changelog})
+        self._send({"event": "board_cleanup_started", "id": rid, "run_id": run_id,
+                    "dry_run": dry_run, "scope": scope or None, "cards": log.cards_before,
+                    "limits": dict(log.limits), "changelog": log.changelog})
         try:
             self.turns.submit(cleanup_prompt(tools, scope or None, note or None, dry_run), "now",
                               rid, None, None)
@@ -378,7 +419,7 @@ class BoardCommands:
                            "text": f"The cleanup ran but its changelog could not be written: {exc}"})
         else:
             log.changelog = ""       # a run that changed nothing leaves no file behind
-        self.emit({"event": "board_cleanup_summary", "id": rid, **log.summary_event()})
+        self._send({"event": "board_cleanup_summary", "id": rid, **log.summary_event()})
         try:
             self.emit(self._changed())
         except (B.BoardError, OSError):                     # pragma: no cover - unreadable tree
@@ -429,8 +470,8 @@ class BoardCommands:
         # A Discuss that edited the card, or a Plan that wrote its `## Plan`, changed the file:
         # the next question reseeds from it, so the conversation never argues with a stale copy.
         # An answer that changed nothing keeps the seeded conversation.
-        self.emit({"event": "board_thread_appended", "card_id": card_id, "author": "agent",
-                   "kind": "comment", "text": answer, "turn_id": turn_id, "mode": self._ask_mode})
+        self._send({"event": "board_thread_appended", "card_id": card_id, "author": "agent",
+                    "kind": "comment", "text": answer, "turn_id": turn_id, "mode": self._ask_mode})
 
     def _observe_cleanup(self, event: dict) -> dict:
         """Tag a cleanup turn's events so the pane shows them on the board, not on a card."""
@@ -560,8 +601,8 @@ def card_attachments(workspace: str | os.PathLike, cards, board: B.Board | None 
         return []
     if not isinstance(cards, list) or len(cards) > 10:
         raise ValueError("cards must be a list of at most 10 {id} objects.")
-    board = board or B.Board(Path(workspace) / "issues", Path(workspace))
-    if not board.config_path.is_file():
+    board = board or board_for(workspace)
+    if board is None or not board.config_path.is_file():
         raise ValueError("This workspace has no Switchboard (issues/board.yaml is missing).")
     by_id = {c.id: c for c in board.cards() if c.id}
     out = []

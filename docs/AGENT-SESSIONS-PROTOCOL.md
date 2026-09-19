@@ -1605,19 +1605,39 @@ the switch.
 
 ### 19.1 `configure` additions
 
-`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` overrides `<workspace>/issues`,
-`autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`; a per-user local
-override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
+`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` names the board's `issues/`
+directory outright, `autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`;
+a per-user local override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
 `max_creates_per_hour`. When a board is found, `configured` gains
 
 ```json
-"board": {"dir": "/repo/issues", "autonomy": "auto", "limits": {}, "cards": 86}
+"board": {"dir": "/repo/issues", "root": "/repo/issues", "workspace": "/repo",
+          "autonomy": "auto", "limits": {}, "cards": 86}
 ```
 
-and is absent otherwise, so the GUI knows whether to offer the pane. Two instances of the tools are
-built per worker: the **agent's**, with the guardrails of 17.7, and the **owner's**, used by the
-messages below with the rate limit and the duplicate check off — the guardrails exist to keep an
-agent honest, not the person typing.
+and is absent otherwise, so the GUI knows whether to offer the pane.
+
+**Which board, and only that board** (2026-09-18; owner: the Switchboard "behaves as global rather
+than per project"). Without `board.dir`, the worker walks up from the workspace it was given to the
+nearest ancestor holding `issues/board.yaml` — the GUI's rule, `relay::boardRootFor` — so a pane
+standing in `backend/relay_core` gets the project's board rather than none. `root` is that `issues/`
+directory and `workspace` the project root holding it; the project root is what
+`.relay/board-rate.json`, the cleanup changelogs and every event `path` hang off, so neither is the
+subdirectory the pane happened to be open in. A `configure` that names **no** workspace, or an empty
+one, has **no** board: the worker's own current directory is never consulted for it. It used to be
+(`Path("") / "issues"` is relative), so a window pointing elsewhere quietly opened the board of the
+directory Relay was launched from. Re-pointing a worker at another board forgets the card
+conversation and the row snapshot of the one it left.
+
+**Every `board_*` event carries `root`**, the string of that `issues/` directory: `board`,
+`board_changed`, `board_card`, `board_written`, `board_undone`, `board_problems`,
+`board_thread_appended`, `board_activity`, `board_cleanup_started` and `board_cleanup_summary`.
+A GUI with more than one project open routes by it instead of assuming an event belongs to whichever
+board it asked about last. (`board` also carries `workspace`, the project root.)
+
+Two instances of the tools are built per worker: the **agent's**, with the guardrails of 17.7, and
+the **owner's**, used by the messages below with the rate limit and the duplicate check off — the
+guardrails exist to keep an agent honest, not the person typing.
 
 The board is set up **before** the provider is resolved (2026-09-17). A `configure` that fails for
 want of a key answers `error` and no `configured`, but the board messages below still work: only

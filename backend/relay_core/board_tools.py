@@ -44,6 +44,9 @@ from . import board as B
 
 AUTONOMY = ("off", "suggest", "auto")
 
+#: The folder a project keeps its Switchboard in: `<project>/issues/board.yaml`.
+BOARD_FOLDER = "issues"
+
 #: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may lower the create ceiling.
 DEFAULT_LIMITS = {
     "max_creates_per_turn": 5,
@@ -770,6 +773,53 @@ class ToolContext:
         return out
 
 
+def find_board_root(workspace: str | os.PathLike | None,
+                    explicit_dir: str | os.PathLike | None = None) -> Path | None:
+    """The `issues/` directory that governs `workspace`, or None when there is none.
+
+    The one place the backend decides which board a message is about, so the worker, the agent's
+    tools and `#K7Q2` attachments all land on the same tree, and so does the GUI, which has always
+    walked up to the nearest ancestor holding `issues/board.yaml`.  Before 2026-09-18 the backend
+    took `<workspace>/issues` literally, so a pane opened in a subdirectory of a project saw no
+    board at all while the window's Switchboard showed one.
+
+    An explicit `board.dir` (protocol 19.1) always wins.  Otherwise the walk starts at the resolved
+    workspace and climbs to the filesystem root.  **An absent or empty workspace has no board**:
+    the process's cwd, the environment and this file's location are never consulted.  A worker
+    started from the directory Relay was launched in must not adopt *that* project's board because
+    the `configure` it was sent named no workspace — which is exactly what `workspace: ""` used to
+    do, quietly opening the launch directory's 186 cards in a window that pointed somewhere else.
+    """
+    if explicit_dir is not None and str(explicit_dir).strip():
+        # Resolved, like the walk's answer, because `root` is what a GUI routes events by: two
+        # spellings of one directory must not look like two boards.
+        root = Path(explicit_dir).expanduser().resolve()
+        return root if (root / B.BOARD_CONFIG).is_file() else None
+    if workspace is None or not str(workspace).strip():
+        return None
+    try:
+        here = Path(workspace).expanduser().resolve()
+    except OSError:                                     # pragma: no cover - unreadable path
+        return None
+    for directory in (here, *here.parents):
+        root = directory / BOARD_FOLDER
+        if (root / B.BOARD_CONFIG).is_file():
+            return root
+    return None
+
+
+def board_for(workspace: str | os.PathLike | None,
+              explicit_dir: str | os.PathLike | None = None) -> B.Board | None:
+    """`find_board_root`, as a `Board` whose `repo` is the directory that holds `issues/`.
+
+    The repo is where `.relay/board-rate.json`, the cleanup changelogs and every path in a
+    `board_activity` are relative to, so it must be the project root rather than whichever
+    subdirectory the pane happens to be open in.
+    """
+    root = find_board_root(workspace, explicit_dir)
+    return None if root is None else B.Board(root, root.parent)
+
+
 class BoardTools:
     """The `board_*` tools for one pane (or for the Switchboard worker)."""
 
@@ -819,14 +869,24 @@ class BoardTools:
         #: mode offers, and the card a Plan turn may write to. None for a pane's own turns.
         self.card_scope: CardScope | None = None
 
+    # ---- events ---------------------------------------------------------------
+    def _emit_board(self, event: dict) -> None:
+        """Send a board event naming the board it happened on (protocol 19.2).
+
+        One window can have several projects open, so every `board_*` event carries `root` — the
+        `issues/` directory it is about — and a GUI routes by it instead of assuming the events it
+        receives belong to whatever board it asked about last.
+        """
+        self.emit({"root": str(self.board.root), **event})
+
     # ---- lifecycle ------------------------------------------------------------
     @classmethod
     def for_workspace(cls, workspace: str | os.PathLike, **kwargs) -> "BoardTools | None":
         """The tools for a workspace, or None when it has no Switchboard or autonomy is off."""
-        root = Path(workspace) / "issues"
-        if not (root / B.BOARD_CONFIG).is_file():
+        board = board_for(workspace)
+        if board is None:
             return None
-        tools = cls(B.Board(root, Path(workspace)), **kwargs)
+        tools = cls(board, **kwargs)
         return None if tools.autonomy == "off" else tools
 
     def begin_turn(self, turn_id: str | None = None) -> None:
@@ -1157,9 +1217,9 @@ class BoardTools:
             activity["run_id"] = self.cleanup.run_id
             self.cleanup.record(CleanupChange(action=action, card_id=card_id, summary=summary,
                                               path=rel, write_id=write_id, cards=list(cards)))
-        self.emit(activity)
-        self.emit({"event": "board_changed", "upserts": [card_id] if card_id else [],
-                   "removed": [], "write_id": write_id})
+        self._emit_board(activity)
+        self._emit_board({"event": "board_changed", "upserts": [card_id] if card_id else [],
+                          "removed": [], "write_id": write_id})
         return write_id
 
     def _thread_size(self, card: B.Card) -> int:
@@ -1717,8 +1777,8 @@ class BoardTools:
             else:
                 B._atomic_write(here, before.decode("utf-8"))
         record.undone = True
-        self.emit({"event": "board_changed", "upserts": [] if removed else [record.card_id],
-                   "removed": removed, "write_id": write_id, "undo_of": write_id})
+        self._emit_board({"event": "board_changed", "upserts": [] if removed else [record.card_id],
+                          "removed": removed, "write_id": write_id, "undo_of": write_id})
         return {"undone": write_id, "id": record.card_id, "action": record.action,
                 "removed": bool(removed), "also_restored": len(record.others)}
 

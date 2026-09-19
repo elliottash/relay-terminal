@@ -30,7 +30,7 @@ class BoardToolsTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tmp.name)
+        self.repo = Path(self.tmp.name).resolve()
         self.root = self.repo / "issues"
         self.root.mkdir()
         (self.root / B.BOARD_CONFIG).write_text(self.config, encoding="utf-8")
@@ -636,7 +636,10 @@ class AutonomyTests(BoardToolsTest):
         self.assertEqual(self.board.cards(), [])
 
     def test_for_workspace_returns_nothing_without_a_board_and_nothing_when_off(self):
-        self.assertIsNone(T.BoardTools.for_workspace(self.repo / "nowhere"))
+        # A tree of its own: a subdirectory of this repo now finds the repo's board, as the GUI
+        # has always done, so "no board" has to be somewhere with no board above it either.
+        with tempfile.TemporaryDirectory() as elsewhere:
+            self.assertIsNone(T.BoardTools.for_workspace(Path(elsewhere).resolve()))
         self.assertIsNotNone(T.BoardTools.for_workspace(self.repo))
         (self.root / B.BOARD_CONFIG).write_text(
             CONFIG.replace("autonomy: auto", "autonomy: off"), encoding="utf-8")

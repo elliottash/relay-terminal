@@ -4,6 +4,10 @@
 
 No model, no network, no keyring: `board_ask` runs against a stub supervisor.
 """
+import json
+import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -14,6 +18,8 @@ from relay_core import board_protocol as P
 from relay_core import board_tools as T
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
+
+ROOT = Path(__file__).resolve().parents[1]
 
 CONFIG = """\
 version: 1
@@ -39,10 +45,26 @@ class StubTurns:
         return "q1"
 
 
+def boardless_dir(case) -> Path:
+    """A directory with no `issues/board.yaml` in it or above it.
+
+    A subdirectory of a project *does* have a board since 2026-09-18 (the backend walks up to
+    the nearest ancestor holding one, as the GUI always has), so "no board" has to be a tree of
+    its own rather than `<repo>/nowhere`.
+    """
+    tmp = tempfile.TemporaryDirectory()
+    case.addCleanup(tmp.cleanup)
+    elsewhere = Path(tmp.name).resolve() / "elsewhere"
+    elsewhere.mkdir()
+    if T.find_board_root(elsewhere) is not None:    # pragma: no cover - a board above the temp dir
+        case.skipTest(f"{elsewhere} has a Switchboard above it")
+    return elsewhere
+
+
 class ProtocolTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tmp.name)
+        self.repo = Path(self.tmp.name).resolve()
         self.root = self.repo / "issues"
         self.root.mkdir()
         (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
@@ -127,7 +149,7 @@ class OpenTests(ProtocolTest):
 
     def test_a_workspace_without_a_board_refuses_every_command(self):
         commands = P.BoardCommands(self.turns, self.events.append)
-        self.assertIsNone(commands.configure(str(self.repo / "nowhere"), {}))
+        self.assertIsNone(commands.configure(str(boardless_dir(self)), {}))
         with self.assertRaises(ValueError):
             commands.dispatch({"type": "board_open"})
 
@@ -318,7 +340,7 @@ class CardAttachmentTests(ProtocolTest):
         with self.assertRaises(ValueError):
             P.card_attachments(str(self.repo), [{"id": "AAAA"}])
         with self.assertRaises(ValueError):
-            P.card_attachments(str(self.repo / "nowhere"), [{"id": "AAAA"}])
+            P.card_attachments(str(boardless_dir(self)), [{"id": "AAAA"}])
 
     def test_nothing_referenced_means_nothing_attached(self):
         self.assertEqual(P.card_attachments(str(self.repo), []), [])
@@ -330,7 +352,7 @@ class CardAttachmentTests(ProtocolTest):
 class AgentWiringTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tmp.name)
+        self.repo = Path(self.tmp.name).resolve()
         (self.repo / "issues").mkdir()
         (self.repo / "issues" / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
         self.config = ProviderConfig("https://example.invalid/v1", "test-model", "k", {}, 1024)
@@ -719,6 +741,201 @@ class CardScopeAgentTests(unittest.TestCase):
         self.assertIn("matches", agent._execute(prepared, {}))
         tools.end_card_turn()
         self.assertIn("run_command", {t["function"]["name"] for t in agent.tools()})
+
+
+# ------------------------------------------ the board is per project, not per process
+
+class PerProjectTests(ProtocolTest):
+    """Which board a worker is about (owner report, 2026-09-18: "the Switchboard is global").
+
+    The backend used to take `<workspace>/issues` literally and to fall back to the process's
+    cwd, so a pane in a subdirectory saw no board while a pane with no workspace at all saw the
+    board of the directory Relay was launched from.  The rule is now the GUI's
+    (`src/BoardWorkspace.h`): the nearest ancestor holding `issues/board.yaml`, from the given
+    workspace and from nothing else.
+    """
+
+    def project(self, title="Other project card") -> Path:
+        """A second repository, with a Switchboard of its own and no cards."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name).resolve()
+        (repo / "issues").mkdir()
+        (repo / "issues" / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        return repo
+
+    def test_two_workspaces_keep_their_own_cards(self):
+        mine = self.make_card(title="First project card")
+        other = self.project()
+        block = self.commands.configure(str(other), {})
+        self.assertEqual(block["root"], str(other / "issues"))
+        self.assertEqual(block["cards"], 0)
+        self.send(type="board_create", id="r9", tab="features", status="inbox",
+                  title="Other project card", text="only on the other board")
+        board = self.send(type="board_open")[0]
+        self.assertEqual([c["title"] for c in board["cards"]], ["Other project card"])
+        self.assertEqual(board["root"], str(other / "issues"))
+        # The first project is untouched, and pointing back at it shows its own card again.
+        self.assertEqual(self.commands.configure(str(self.repo), {})["root"], str(self.root))
+        back = self.send(type="board_open")[0]
+        self.assertEqual([c["id"] for c in back["cards"]], [mine])
+        self.assertEqual(len(B.Board(other / "issues", other).cards()), 1)
+
+    def test_no_workspace_means_no_board_whatever_the_process_cwd_is(self):
+        elsewhere = boardless_dir(self)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.repo)          # the directory Relay was "launched from" has a board
+        for workspace in (str(elsewhere), "", None):
+            commands = P.BoardCommands(self.turns, self.events.append)
+            self.assertIsNone(commands.configure(workspace, {}), workspace)
+            self.assertIsNone(commands.agent_tools(workspace, {}), workspace)
+            with self.assertRaises(ValueError):
+                commands.dispatch({"type": "board_open"})
+            with self.assertRaises(ValueError):
+                P.card_attachments(workspace or "", [{"id": "AAAA"}])
+        # An explicit `board.dir` still wins, workspace or no workspace.
+        block = P.BoardCommands(self.turns, self.events.append).configure(
+            "", {"board": {"dir": str(self.root)}})
+        self.assertEqual(block["root"], str(self.root))
+
+    def test_a_subdirectory_finds_its_ancestors_board_and_the_repo_is_the_project_root(self):
+        card_id = self.make_card()
+        deep = self.repo / "backend" / "relay_core"
+        deep.mkdir(parents=True)
+        block = self.commands.configure(str(deep), {})
+        self.assertEqual(block["root"], str(self.root))
+        self.assertEqual(block["workspace"], str(self.repo))
+        board = self.send(type="board_open")[0]
+        self.assertEqual(board["workspace"], str(self.repo))
+        self.assertEqual([c["id"] for c in board["cards"]], [card_id])
+        # `repo` is what the rate file, the cleanup changelog and every event path hang off.
+        tools = self.commands.tools
+        self.assertEqual(tools.board.repo, self.repo)
+        self.assertEqual(tools.rate.path, self.repo / ".relay" / "board-rate.json")
+        self.send(type="board_comment", card=card_id, text="from a subdirectory")
+        self.assertTrue(self.of("board_activity")[0]["path"].startswith("issues/"))
+        # The agent's instance and `#K7Q2` attachments answer from the same tree.
+        agent_tools = self.commands.agent_tools(str(deep), {})
+        self.assertEqual(agent_tools.board.root, self.root)
+        self.assertEqual(agent_tools.board.repo, self.repo)
+        self.assertEqual(len(P.card_attachments(str(deep), [card_id])), 1)
+
+    def test_every_board_event_names_the_board_it_is_about(self):
+        self.turns.agent = StubBoardAgent(self.commands.agent_tools(str(self.repo), {}))
+        card_id = self.make_card()
+        seen: dict[str, object] = {}
+
+        def record(events):
+            for event in events:
+                if str(event.get("event", "")).startswith("board"):
+                    seen[event["event"]] = event.get("root", "missing")
+
+        record(self.send(type="board_open", id="o1"))
+        record(self.send(type="board_refresh", id="o2"))
+        record(self.send(type="board_check", id="o3"))
+        record(self.send(type="board_card_get", id="o4", card=card_id))
+        written = self.send(type="board_comment", id="w1", card=card_id, text="a note")
+        record(written)
+        write_id = [e for e in written if e["event"] == "board_written"][0]["write_id"]
+        record(self.send(type="board_undo", id="u1", write_id=write_id))
+        record(self.send(type="board_ask", id="a1", card=card_id, text="why?"))
+        record(self.send(type="board_cleanup", id="k1", dry_run=True))
+        self.events.clear()
+        self.commands.observe({"event": "delta", "text": "Nothing to tidy."})
+        self.commands.observe({"event": "done", "turn_id": "t-9"})
+        record(self.events)
+        self.assertEqual(set(seen), {"board", "board_changed", "board_problems", "board_card",
+                                     "board_written", "board_activity", "board_undone",
+                                     "board_thread_appended", "board_cleanup_started",
+                                     "board_cleanup_summary"})
+        self.assertEqual(set(seen.values()), {str(self.root)})
+
+    def test_re_pointing_the_worker_forgets_the_previous_project(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, text="why?")
+        self.assertEqual(self.commands._ask_card, card_id)
+        self.assertIsNotNone(self.commands._ask_hash)
+        self.assertTrue(self.commands._snapshot)
+        self.commands._ask_turn, self.commands._ask_text = "t-1", ["half an answer"]
+
+        other = self.project()
+        self.commands.configure(str(other), {})
+        self.assertIsNone(self.commands._ask_card)
+        self.assertIsNone(self.commands._ask_hash)
+        self.assertIsNone(self.commands._ask_turn)
+        self.assertEqual(self.commands._ask_text, [])
+        self.assertIsNone(self.commands._brief_mode)
+        self.assertEqual(self.commands._snapshot, {})
+        # The next question seeds a fresh conversation instead of continuing the old card's.
+        resets = self.turns.resets
+        new_card = self.make_card(title="Other card", text="on the other board")
+        self.send(type="board_ask", card=new_card, text="and this?")
+        self.assertEqual(self.turns.resets, resets + 1)
+        self.assertIn(f"[Switchboard card #{new_card}", self.turns.submitted[-1]["prompt"])
+        # Losing the board entirely clears it too.
+        self.commands.configure(str(boardless_dir(self)), {})
+        self.assertIsNone(self.commands.tools)
+        self.assertIsNone(self.commands._ask_card)
+        self.assertEqual(self.commands._snapshot, {})
+
+    def test_configuring_the_same_board_again_keeps_the_conversation(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, text="why?")
+        self.commands.configure(str(self.repo / "backend"), {})   # same project, deeper directory
+        self.assertEqual(self.commands._ask_card, card_id)
+
+
+class WorkerWorkspaceTests(unittest.TestCase):
+    """The real worker, run from a directory that *does* have a board (like Relay's own).
+
+    `request.get("workspace", os.getcwd())` let `workspace: ""` through, and `Path("") / "issues"`
+    is relative: a `configure` that named no workspace silently opened the board of the directory
+    Relay was launched from — this repository's 186 cards, in a window pointing somewhere else.
+    """
+
+    def worker(self, *requests, timeout=30) -> list[dict]:
+        proc = subprocess.Popen([sys.executable, "-S", "-u", str(ROOT / "backend" / "worker.py")],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, cwd=ROOT,
+                                env={**os.environ, "RELAY_KEYRING": "off"})
+        events = []
+        try:
+            for request in requests:
+                proc.stdin.write(json.dumps(request) + "\n")
+            proc.stdin.write(json.dumps({"type": "shutdown"}) + "\n")
+            proc.stdin.flush()
+            timer = threading.Timer(timeout, proc.kill)
+            timer.start()
+            for line in proc.stdout:
+                events.append(json.loads(line))
+            timer.cancel()
+        finally:
+            proc.wait(timeout=5)
+            for stream in (proc.stdin, proc.stdout):
+                try:
+                    stream.close()
+                except (BrokenPipeError, OSError):
+                    pass
+        return events
+
+    @staticmethod
+    def request(workspace) -> dict:
+        return {"type": "configure", "api_key": "k", "base_url": "http://127.0.0.1:9/v1",
+                "model": "test/model", "workspace": workspace}
+
+    def test_the_launch_directorys_board_is_never_adopted_by_a_workspaceless_configure(self):
+        self.assertTrue((ROOT / "issues" / B.BOARD_CONFIG).is_file(), "the worker's cwd has a board")
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            (project / "issues").mkdir()
+            (project / "issues" / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+            events = self.worker(self.request(""), self.request(str(project)))
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertEqual(len(configured), 2, events)
+        self.assertNotIn("board", configured[0])
+        self.assertEqual(configured[1]["board"]["root"], str(project / "issues"))
+        self.assertEqual(configured[1]["board"]["workspace"], str(project))
 
 
 if __name__ == "__main__":       # pragma: no cover
