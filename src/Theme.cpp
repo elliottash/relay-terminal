@@ -226,6 +226,12 @@ const ThemeSpec *loadTheme(const QString &id) {
     spec.builtin = !path.startsWith(configHomeDir() + QStringLiteral("/relay/"));
     if (!error.isEmpty())
         fprintf(stderr, "relay: theme %s: %s\n", qPrintable(id), qPrintable(error));
+    // One line for everything the file did not say and parseTheme could not work out from the
+    // theme's own colours. Worth saying: what is used instead is Relay Dark's, which in a light
+    // theme is very likely the wrong colour rather than merely a different one.
+    if (!spec.borrowed.isEmpty())
+        fprintf(stderr, "relay: theme %s: %s not set; used Relay Dark's — name them in %s\n",
+                qPrintable(id), qPrintable(spec.borrowed.join(QStringLiteral(", "))), qPrintable(path));
     return &*r.loaded.insert(id, spec);
 }
 
@@ -264,6 +270,8 @@ void adoptTokens(const ThemeSpec &spec) {
     Tool = ui("tool", Tool);
     // Always present as well: parseTheme() derives one from the theme's own ANSI 12 when silent.
     Link = ui("link", Link);
+    // parseTheme() has already put this theme's own accent here when the file was silent; the
+    // fallback stands for the compiled-in spec, which is not parsed.
     Shell = ui("shell", Accent);
     Agent = ui("agent", Agent);
 

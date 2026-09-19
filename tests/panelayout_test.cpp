@@ -338,6 +338,59 @@ private Q_SLOTS:
         QVERIFY(!chordKeyKeepsWindow(Qt::Key_T, QStringLiteral("tab.new")));
         QVERIFY(!chordKeyKeepsWindow(Qt::Key_Up, QStringLiteral("pane.moveUp")));
     }
+
+    // ----- the pane header's two elided labels ------------------------------------------------
+
+    // A crowded header at 820 px: the state glyph and word, the subagent badge and the ssh, phone
+    // and usage chips are all up, and the pane still shows a title and a directory that fit. The
+    // widths below are what those chips measure with the app font (glyph 16, "working" 62, "2
+    // subagents" 96, "ssh sphinxpad" 104, "phone" 52, "12% / 41%" 78, plus 8 px of spacing each
+    // and the 32 px the hover button row is kept clear of).
+    void aCrowdedHeaderStillFitsAtEightHundredAndTwenty() {
+        const int taken = 16 + 62 + 96 + 104 + 52 + 78 + 6 * 8 + 32;
+        const int wanted = 420;   // "TERMINAL  ~/src/relay-terminal" and then some
+        const HeaderSplit split = headerSplit(820, taken, wanted);
+        QVERIFY2(split.directory > 0, "the directory was dropped although there was room for it");
+        QVERIFY(split.directory >= kDirectoryFloorPx);
+        QVERIFY(split.title >= kTitleFloorPx);
+        // The whole row fits: nothing is left to the layout to clip mid-glyph.
+        QVERIFY2(split.title + split.directory + taken <= 820,
+                 qPrintable(QStringLiteral("title %1 + directory %2 + chrome %3 > 820")
+                                .arg(split.title).arg(split.directory).arg(taken)));
+    }
+
+    // The title is served first, and a directory with no room for a legible tail is dropped
+    // rather than shown as the half glyph a squeezed QLabel used to paint.
+    void theDirectoryGivesWayToTheTitleAndThenGoes() {
+        // Room for both: the directory takes what it asked for and the title keeps the rest.
+        const HeaderSplit roomy = headerSplit(900, 100, 300);
+        QCOMPARE(roomy.directory, 300);
+        QCOMPARE(roomy.title, 500);
+        // Squeezed: the title keeps its floor, the directory elides into what is left.
+        const HeaderSplit tight = headerSplit(300, 100, 300);
+        QCOMPARE(tight.title, kTitleFloorPx);
+        QCOMPARE(tight.directory, 120);
+        // No legible tail left: no directory at all, and every pixel goes to the title.
+        const HeaderSplit crammed = headerSplit(220, 100, 300);
+        QCOMPARE(crammed.directory, 0);
+        QCOMPARE(crammed.title, 120);
+        // Narrower than the title's own floor: the title still gets it, and nothing else does.
+        const HeaderSplit tiny = headerSplit(120, 100, 300);
+        QCOMPARE(tiny.directory, 0);
+        QCOMPARE(tiny.title, kTitleFloorPx);
+        // Nothing to show: no width is reserved for it.
+        QCOMPARE(headerSplit(900, 100, 0).directory, 0);
+        QCOMPARE(headerSplit(900, 100, 0).title, 800);
+    }
+
+    // The split must not depend on what the split decided, or showing the directory would change
+    // the room for the directory and the header would flicker between two answers.
+    void theSplitDoesNotMoveWithTheDirectoryItChose() {
+        for (int wanted : {0, 40, 200, 900}) {
+            const HeaderSplit split = headerSplit(820, 260, wanted);
+            QCOMPARE(split.title + split.directory, 560);
+        }
+    }
 };
 
 QTEST_MAIN(PaneLayoutTests)

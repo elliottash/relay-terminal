@@ -5486,8 +5486,17 @@ private:
 
     // The suffix the tab label carries, or nothing while the meters are switched off — the same
     // setting the chip obeys, read in the one place the poll reads it.
+    //
+    // It is the reading the tab is *already* labelled with, not a fresh one. The poll decides when
+    // the number may move (relay::usage::labelShouldFollow holds it still unless it shifted by a
+    // few points or a second has passed), and updateTitles() runs for all sorts of other reasons —
+    // a rename, a pane opening or closing, a theme change — so measuring again here put a new
+    // percent on the tab in between and undid the hysteresis. Before the first poll there is
+    // nothing displayed yet, so the live sample seeds the label.
     QString tabUsageSuffix(QWidget *page) const {
         if (!relay::usage::metersEnabled()) return {};
+        const auto shown = m_tabUsageKey.constFind(page);
+        if (shown != m_tabUsageKey.constEnd()) return *shown;
         return relay::usage::tabSuffix(tabUsageSample(page));
     }
 

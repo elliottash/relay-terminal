@@ -596,7 +596,9 @@ QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
         column->addWidget(note(facts.join(QStringLiteral(" · "))));
         auto *code = plain(request.code, "settingsRowLabel");
         code->setAlignment(Qt::AlignCenter);
-        code->setStyleSheet(QStringLiteral("font-size: 26px; font-weight: 600; letter-spacing: 6px;"));
+        // Points, not pixels (docs/ARCHITECTURE.md, "Legible text"): 19.5pt is the 26px this used
+        // to be at 96 dpi, and it follows the desktop's font scaling as the rest of the app does.
+        code->setStyleSheet(QStringLiteral("font-size: 19.5pt; font-weight: 600; letter-spacing: 6px;"));
         column->addWidget(code);
         column->addWidget(note(QStringLiteral(
             "Admit them only if their screen shows this same code. Anyone who saw the link can "

@@ -864,7 +864,9 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     askColumn->addWidget(m_askText);
     m_askCode = new QLabel;
     m_askCode->setAlignment(Qt::AlignCenter);
-    m_askCode->setStyleSheet(QStringLiteral("font-size: 28px; font-weight: 600; letter-spacing: 6px;"));
+    // In points, like every other size in the app (docs/ARCHITECTURE.md, "Legible text"): a pixel
+    // size ignores the desktop's font scaling. 21pt is the 28px this used to be at 96 dpi.
+    m_askCode->setStyleSheet(QStringLiteral("font-size: 21pt; font-weight: 600; letter-spacing: 6px;"));
     askColumn->addWidget(m_askCode);
     auto *askRow = new QHBoxLayout;
     auto *refuse = new QPushButton(QStringLiteral("Refuse"));

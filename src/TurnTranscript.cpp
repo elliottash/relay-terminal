@@ -159,7 +159,9 @@ void TurnTranscriptView::setTranscript(const QJsonObject &transcript) {
             QStringList calls;
             for (const auto &call : message.value(QStringLiteral("tool_calls")).toArray())
                 calls << (call.isObject() ? call.toObject().value(QStringLiteral("name")).toString() : call.toString());
-            if (!calls.isEmpty()) add(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), relay::theme::Warning, false);
+            // The tool line is brass (theme::Tool), not amber: amber is "this is waiting on you"
+            // and nothing but that (be81edb). A list of calls the agent already made is not.
+            if (!calls.isEmpty()) add(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), relay::theme::Tool, false);
         } else if (role == QStringLiteral("tool")) {
             QStringList lines = content.split(QLatin1Char('\n'));
             const int total = lines.size();

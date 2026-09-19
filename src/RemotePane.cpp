@@ -2614,7 +2614,14 @@ JoinDialog::JoinDialog(const QString &code, Place place, QWidget *parent) : QDia
 
         m_error = plainLabel(QStringLiteral("joinError"));
         m_error->setWordWrap(true);
-        m_error->setStyleSheet(QStringLiteral("color: %1;").arg(theme::Warning.name()));
+        // A join that failed is an error, so it is painted in the error token: amber is reserved
+        // for "this is waiting on you" (be81edb) and said the wrong thing here. Restyled on every
+        // theme change too — set once in the constructor, it kept the old theme's colour.
+        const auto restyleError = [this] {
+            m_error->setStyleSheet(QStringLiteral("color: %1;").arg(theme::Error.name()));
+        };
+        restyleError();
+        connect(theme::notifier(), &theme::Notifier::themeChanged, this, restyleError);
         m_error->hide();
         v->addWidget(m_error);
         v->addStretch(1);

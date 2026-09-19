@@ -341,6 +341,18 @@ class PaneCardTests(unittest.TestCase):
         self.assertNotIn("m_ask.answers", branch)        # nothing is recorded
         self.assertNotIn("sendAnswers", branch)          # and nothing is sent: the wait goes on
 
+    def test_a_superseded_card_is_answered_before_the_new_one_goes_up(self):
+        # Protocol 27 has one question open at a time, so a second `question` arriving while a
+        # card is up can only mean the first is stale. Dropping it used to be the whole of it,
+        # which would have left whoever asked it blocked on an answer nobody could still type.
+        show = self.block("void showQuestion(const QJsonObject &event) {",
+                          "m_ask.questions = event.value")
+        self.assertIn("closeQuestion(QString());", show)
+        superseded = show.split("closeQuestion(QString());", 1)[1]
+        self.assertIn('{"type", "question_answer"}', superseded)   # the old turn is released
+        self.assertIn("QJsonArray()", superseded)                  # with nothing answered
+        self.assertIn("superseded != incoming", superseded)        # a redraw of the same id is not
+
     def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
         # An empty id or no questions used to `return` and leave the worker blocked for good.
         show = self.block("void showQuestion(const QJsonObject &event) {",

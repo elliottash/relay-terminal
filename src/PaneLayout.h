@@ -46,6 +46,30 @@ int neighborIndex(const QRect &from, const QList<QRect> &candidates, Direction d
 // Ctrl+Alt+Down do nothing. Pane sizes are kept.
 void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor);
 
+// ----- the pane header's two elided labels ----------------------------------------------------
+//
+// A pane header is the title on the left and the directory on the right, with the state glyph,
+// the subagent badge and the ssh / phone / usage chips between them (PaneChrome puts those at the
+// front of the row). Both labels are elided by hand rather than left to the layout: a QLabel that
+// the layout has squeezed clips its text mid-glyph, which is how a crowded header came to end in
+// a stray half of a character instead of a path.
+//
+// `taken` is what everything that is not one of the two labels has already claimed — chips,
+// badge, spacing, the right inset PaneChrome asks for. `directoryWanted` is the width the
+// directory would like (its full text). The title is served first down to its floor; the
+// directory gets what is left, and is dropped entirely rather than shown as a stub when that is
+// less than a legible tail. The result always fits: title + directory + taken <= headerWidth
+// whenever the header is at least kTitleFloorPx + taken wide.
+inline constexpr int kTitleFloorPx = 80;       // never elide a title into less than this
+inline constexpr int kDirectoryFloorPx = 56;   // below this "…/x" says nothing; show no path
+
+struct HeaderSplit {
+    int title = 0;       // px the title may elide into; never below kTitleFloorPx
+    int directory = 0;   // px the directory may elide into; 0 means "do not show it at all"
+};
+
+HeaderSplit headerSplit(int headerWidth, int taken, int directoryWanted);
+
 // The edge of a pane that a drop at `local` (a point inside a pane of `size`) belongs to: the
 // nearest edge wins. Dropping just past the divider between two panes therefore names the edge
 // they already share, and the dragged pane keeps its place.

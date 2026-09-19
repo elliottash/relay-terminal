@@ -2226,10 +2226,21 @@ public:
 
     void showQuestion(const QJsonObject &event) {
         // A second card can only mean the first one is stale (a worker restart, a turn that was
-        // stopped between the emit and the reply): drop it rather than stack them.
-        if (m_ask.open()) closeQuestion(QString());
+        // stopped between the emit and the reply): drop it rather than stack them. Dropping it is
+        // not enough on its own, though — whoever asked the first question is still blocked on an
+        // answer to *that* id, and nobody can type one once the card is gone — so the superseded
+        // id is answered with nothing first and its turn carries on. Protocol §27 has one question
+        // open at a time, so this should never fire; it costs a line and it cannot deadlock.
+        // A repeat of the same id is a redraw, not a supersession, and is not answered away.
+        const QString incoming = event.value(QStringLiteral("id")).toString();
+        if (m_ask.open()) {
+            const QString superseded = m_ask.id;
+            closeQuestion(QString());
+            if (!superseded.isEmpty() && superseded != incoming)
+                send({{"type", "question_answer"}, {"id", superseded}, {"answers", QJsonArray()}});
+        }
         m_ask = Ask{};
-        m_ask.id = event.value(QStringLiteral("id")).toString();
+        m_ask.id = incoming;
         m_ask.questions = event.value(QStringLiteral("questions")).toArray();
         if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) {
             // A card that cannot be drawn would otherwise leave the worker's turn blocked on an
@@ -2876,7 +2887,11 @@ private:
         // A QLabel's minimum is its whole text. With the long "TERMINAL <path> │ AGENT
         // WORKSPACE <path>" form that made the pane refuse to go under ~1000 px, so a pane
         // opened beside it (the Switchboard, 2026-09-17) got a third of the window instead of
-        // half. Clipped from the left instead; the tooltip has the full paths.
+        // half. The minimum goes, and the text is elided from the left in updateHeader() to
+        // exactly the room the header has left, so the label asks for no more than it shows.
+        // Letting the layout do the squeezing instead cut the path mid-glyph — a crowded header
+        // ended in a stray half of a character where the directory should be. The tooltip has
+        // both paths in full whatever is shown.
         m_cwdLabel->setMinimumWidth(1);
         m_cwdLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_cwdLabel->installEventFilter(this);
@@ -12624,9 +12639,12 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!m_cwdLabel) return;
         const QString home = QDir::homePath();
         auto tilde = [&home](const QString &path) { return path.startsWith(home) ? QStringLiteral("~") + path.mid(home.size()) : path; };
-        m_cwdLabel->setText(width() >= 1000 || m_cwd == m_workspace
+        // The full line is kept here; updateHeader() decides how much of it fits and elides the
+        // rest away from the left, so the end of the path — the part that says where you are —
+        // is the part that survives.
+        m_cwdText = width() >= 1000 || m_cwd == m_workspace
             ? QStringLiteral("TERMINAL  ") + tilde(m_cwd) + (m_cwd == m_workspace ? QString() : QStringLiteral("     │     AGENT WORKSPACE  ") + tilde(m_workspace))
-            : tilde(m_cwd));
+            : tilde(m_cwd);
         m_cwdLabel->setToolTip(headerTooltip());
         updateHeader();
     }
@@ -12659,17 +12677,31 @@ public:
         if (!m_titleLabel) return;
         const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
         const QFontMetrics metrics(m_titleLabel->font());
-        // The title takes what the directory, the badge and the hover button row leave.
-        int taken = (m_cwdLabel ? m_cwdLabel->sizeHint().width() : 0)
-                    + (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
+        // What neither label gets: the badge, the margins and the hover button row.
+        int taken = (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
                     + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
-        // What PaneChrome put in the row too: the state glyph and the ssh / phone chips (#XM0T, #SPBN).
+        // What PaneChrome put in the row too: the state glyph and word, the subagent badge and
+        // the ssh / phone / usage chips (#XM0T, #SPBN, #D03W, #YMSR).
         for (int i = 0; m_headerLayout && i < m_headerLayout->count(); ++i)
             if (QWidget *w = m_headerLayout->itemAt(i)->widget(); w && !w->isHidden() && w != m_titleLabel
                 && w != m_titleEdit && w != m_titleAuto && w != m_cwdLabel)
                 taken += w->sizeHint().width() + m_headerLayout->spacing();
-        const int room = std::max(80, (m_headerWidget ? m_headerWidget->width() : width()) - taken);
-        m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, room));
+        // Both labels are elided by hand to what is actually left (relay::panes::headerSplit):
+        // the title first, down to its floor, then the directory. A directory the layout squeezed
+        // instead used to lose its last glyph to a clip and print half a character.
+        const int header = m_headerWidget ? m_headerWidget->width() : width();
+        const QFontMetrics cwdMetrics(m_cwdLabel ? m_cwdLabel->font() : m_titleLabel->font());
+        const int wanted = m_cwdLabel && !m_cwdText.isEmpty() ? cwdMetrics.horizontalAdvance(m_cwdText) : 0;
+        const relay::panes::HeaderSplit split = relay::panes::headerSplit(header, taken, wanted);
+        if (m_cwdLabel) {
+            // Hiding it keeps `taken` the same — the loop above skips the directory — so the
+            // split cannot change because of what the split decided.
+            m_cwdLabel->setVisible(split.directory > 0);
+            m_cwdLabel->setText(split.directory >= wanted
+                                    ? m_cwdText
+                                    : cwdMetrics.elidedText(m_cwdText, Qt::ElideLeft, split.directory));
+        }
+        m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, split.title));
         m_titleLabel->setToolTip(headerTooltip());
         if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
         // The badge says the name is still the model's to change; a hand-set one loses it.
@@ -12900,6 +12932,7 @@ private:
     RichEditor *m_editor = nullptr;
     QString m_modeValue = defaultInputMode();
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
+    QString m_cwdText;   // the directory line in full; the label shows as much of it as fits
     // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
     QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
     QLineEdit *m_titleEdit = nullptr;

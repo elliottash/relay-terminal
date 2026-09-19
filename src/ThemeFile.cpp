@@ -334,20 +334,55 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     if (spec.variant != QLatin1String("light")) spec.variant = QStringLiteral("dark");
     spec.description = scalar(QStringLiteral("theme.description"));
 
-    const auto readColors = [&](const QString &table, const QStringList &names,
-                                const QMap<QString, QColor> &from, QMap<QString, QColor> &into) {
+    // What the file itself names, and only that. A value that is not a colour is reported and
+    // treated as absent. Every gap is filled below, in one order that matters: a derivation from
+    // *this* theme's own colours first, and only then a borrow from `fallback`.
+    //
+    // The borrow used to come first, which made every derivation Theme.cpp documents dead code: a
+    // light theme that left `[ui] shell` out was handed Relay Dark's cyan on white paper instead
+    // of its own accent, and the same for `selection`, `disabled`, `accent_hover` and all nine
+    // `syntax.*` colours (2026-09-19 review).
+    const auto readColors = [&](const QString &table, const QStringList &names, QMap<QString, QColor> &into) {
         for (const QString &name : names) {
             const QString raw = scalar(table + QLatin1Char('.') + name);
+            if (raw.isEmpty()) continue;
             bool ok = false;
-            const QColor color = raw.isEmpty() ? QColor() : parseColor(raw, &ok);
+            const QColor color = parseColor(raw, &ok);
             if (ok) { into.insert(name, color); continue; }
-            if (!raw.isEmpty()) problems << QStringLiteral("%1.%2 is not a colour: %3").arg(table, name, raw);
-            const auto it = from.constFind(name);
-            if (it != from.constEnd()) into.insert(name, *it);
+            problems << QStringLiteral("%1.%2 is not a colour: %3").arg(table, name, raw);
         }
     };
-    readColors(QStringLiteral("ui"), uiTokenNames(), fallback.ui, spec.ui);
-    readColors(QStringLiteral("syntax"), syntaxTokenNames(), fallback.syntax, spec.syntax);
+    readColors(QStringLiteral("ui"), uiTokenNames(), spec.ui);
+    readColors(QStringLiteral("syntax"), syntaxTokenNames(), spec.syntax);
+
+    // Taken from `fallback` when the file is silent, because there is nothing to compute them
+    // from: the nine tokens every theme has to carry, the three meaning colours (a theme's own
+    // green, amber and red cannot be guessed from its accent) and the agent violet. Each one is
+    // named in `spec.borrowed`, which is what src/Theme.cpp's one warning line prints.
+    const auto borrow = [&](const QString &token) {
+        if (spec.ui.contains(token)) return;
+        const auto it = fallback.ui.constFind(token);
+        if (it == fallback.ui.constEnd()) return;
+        spec.ui.insert(token, *it);
+        spec.borrowed << QStringLiteral("ui.") + token;
+    };
+    for (const QString &name : requiredUi()) borrow(name);
+    for (const char *name : {"success", "warning", "error", "agent"}) borrow(QString::fromLatin1(name));
+
+    // Derived from this theme's own accent and muted text, as src/Theme.cpp's adoptTokens() and
+    // stylesheet say: `shell` *is* the accent (the two input destinations are the accent and the
+    // violet), and the accent's lighter, darker and dulled steps are the hover, the selection and
+    // the disabled grey. The steps are builtinDark()'s own arithmetic, so Relay Dark comes out
+    // unchanged whether it is read from its file or derived.
+    const auto derive = [&spec](const QString &token, const QColor &color) {
+        if (!spec.ui.contains(token) && color.isValid()) spec.ui.insert(token, color);
+    };
+    const QColor ownAccent = spec.uiColor(QStringLiteral("accent"));
+    derive(QStringLiteral("shell"), ownAccent);
+    derive(QStringLiteral("accent_hover"), ownAccent.isValid() ? ownAccent.lighter(115) : QColor());
+    derive(QStringLiteral("selection"), ownAccent.isValid() ? ownAccent.darker(200) : QColor());
+    const QColor ownMuted = spec.uiColor(QStringLiteral("text_muted"));
+    derive(QStringLiteral("disabled"), ownMuted.isValid() ? ownMuted.darker(150) : QColor());
     // `ui.action` is derived from this theme's own red rather than inherited (redOrangeFrom), and
     // `ui.tool` from its own amber (brassFrom), for the same reason: a colour that has to stay a
     // measured distance from another of *this* theme's colours cannot be borrowed from Relay Dark.
@@ -413,6 +448,32 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         if (spec.terminalBackgroundEnd.isValid()) grounds << spec.terminalBackgroundEnd;
         grounds.removeAll(QColor());
         spec.ui.insert(QStringLiteral("link"), linkFrom(spec.ansi.value(2, QColor(0x12, 0xa4, 0x57)), grounds));
+    }
+
+    // Every composer colour a theme leaves out is one of its *own* ui colours — the mapping
+    // src/Theme.cpp's adoptTokens() spells out. Done here, after `link` is settled, because
+    // `syntax.path` is the link colour: a path you can type is a path you can open.
+    const auto deriveSyntax = [&spec](const QString &token, const QString &from) {
+        if (spec.syntax.contains(token)) return;
+        const QColor color = spec.uiColor(from);
+        if (color.isValid()) spec.syntax.insert(token, color);
+    };
+    deriveSyntax(QStringLiteral("command"), QStringLiteral("shell"));
+    deriveSyntax(QStringLiteral("unknown"), QStringLiteral("error"));
+    deriveSyntax(QStringLiteral("flag"), QStringLiteral("warning"));
+    deriveSyntax(QStringLiteral("string"), QStringLiteral("success"));
+    deriveSyntax(QStringLiteral("path"), QStringLiteral("link"));
+    deriveSyntax(QStringLiteral("operator"), QStringLiteral("text_muted"));
+    deriveSyntax(QStringLiteral("variable"), QStringLiteral("agent"));
+    deriveSyntax(QStringLiteral("agent"), QStringLiteral("agent"));
+    deriveSyntax(QStringLiteral("token"), QStringLiteral("shell"));
+    // A theme so incomplete that even the derivation had nothing to work from still renders.
+    for (const QString &name : syntaxTokenNames()) {
+        if (spec.syntax.contains(name)) continue;
+        const auto it = fallback.syntax.constFind(name);
+        if (it == fallback.syntax.constEnd()) continue;
+        spec.syntax.insert(name, *it);
+        spec.borrowed << QStringLiteral("syntax.") + name;
     }
 
     // Intense foreground/background default to a step away from the base pair, which is what

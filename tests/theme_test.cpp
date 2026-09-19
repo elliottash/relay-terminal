@@ -592,6 +592,49 @@ private Q_SLOTS:
                  "the brass did not land on the amber's luminance");
     }
 
+    // A user theme names what it cares about and leaves the rest out. What it leaves out has to be
+    // worked out from its *own* colours wherever src/Theme.cpp documents how — `shell` is the
+    // accent, and every composer colour is one of the ui tokens — and borrowed from Relay Dark
+    // only where there is nothing to work it out from. Until 2026-09-19 the borrow ran first and
+    // the derivations were dead: this light theme, silent about `[ui] shell`, was painted Relay
+    // Dark's cyan, which is under 2:1 on paper.
+    void aLightThemeThatNamesNoShellColourGetsItsOwnAccent() {
+        QString error;
+        const ThemeSpec paper = parseTheme(QStringLiteral(
+            "[theme]\nname = \"Paper\"\nvariant = \"light\"\n"
+            "[ui]\nbackground = \"#fbfbf7\"\nsurface = \"#f2f2ec\"\nsurface_raised = \"#e8e8e0\"\n"
+            "border = \"#d6d6cc\"\nborder_strong = \"#a8a89c\"\ntext = \"#1c1c18\"\n"
+            "text_muted = \"#5a5a52\"\naccent = \"#1c5fa8\"\naccent_text = \"#ffffff\"\n"),
+            QStringLiteral("paper"), builtinDark(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const QColor accent = paper.uiColor(QStringLiteral("accent"));
+        QCOMPARE(paper.uiColor(QStringLiteral("shell")), accent);
+        QVERIFY2(paper.uiColor(QStringLiteral("shell")) != builtinDark().uiColor(QStringLiteral("shell")),
+                 "inherited Relay Dark's cyan instead of this theme's own accent");
+        // The rest of the accent's family is this theme's too, at builtinDark()'s own steps.
+        QCOMPARE(paper.uiColor(QStringLiteral("accent_hover")), accent.lighter(115));
+        QCOMPARE(paper.uiColor(QStringLiteral("selection")), accent.darker(200));
+        QCOMPARE(paper.uiColor(QStringLiteral("disabled")),
+                 paper.uiColor(QStringLiteral("text_muted")).darker(150));
+        // And so is every composer colour: `command` is the shell destination, `path` the link.
+        QCOMPARE(paper.syntaxColor(QStringLiteral("command")), accent);
+        QCOMPARE(paper.syntaxColor(QStringLiteral("path")), paper.uiColor(QStringLiteral("link")));
+        QCOMPARE(paper.syntaxColor(QStringLiteral("operator")), paper.uiColor(QStringLiteral("text_muted")));
+        QVERIFY2(paper.syntaxColor(QStringLiteral("command")) != builtinDark().syntaxColor(QStringLiteral("command")),
+                 "the composer kept Relay Dark's syntax palette");
+        // What no derivation covers is still borrowed — and named, so the loader can print one
+        // line saying which keys this theme is wearing Relay Dark's colours for.
+        QVERIFY2(!paper.borrowed.contains(QStringLiteral("ui.shell")), "shell was borrowed, not derived");
+        for (const char *token : {"ui.success", "ui.warning", "ui.error", "ui.agent"})
+            QVERIFY2(paper.borrowed.contains(QString::fromLatin1(token)), token);
+        QCOMPARE(paper.uiColor(QStringLiteral("success")), builtinDark().uiColor(QStringLiteral("success")));
+        // A theme that names everything borrows nothing, so no shipped theme logs that line.
+        for (const char *id : {"relay-dark", "relay-light", "dark-copper", "gruvbox-dark", "ibm-beige"})
+            QVERIFY2(shipped(QString::fromLatin1(id)).borrowed.isEmpty(),
+                     qPrintable(QString::fromLatin1(id) + QStringLiteral(": ")
+                                + shipped(QString::fromLatin1(id)).borrowed.join(QStringLiteral(", "))));
+    }
+
     // Owner, 2026-09-18: "make actions red-orange". The Actions pane's band, glyph and title-bar
     // button take `[ui] action`, a fifth meaning hue. It has to be a red-orange — not the red an
     // ssh pane is banded in, and not the amber the Switchboard uses — in every shipped theme, and

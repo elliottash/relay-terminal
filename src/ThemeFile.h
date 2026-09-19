@@ -67,6 +67,12 @@ struct ThemeSpec {
     QMap<QString, bool> flags;             // [flags]
     QMap<QString, QStringList> extra;      // everything else, "table.key" -> values
 
+    // Keys this file named neither itself nor by way of a derivation, and that had to be taken
+    // from Relay Dark ("ui.success", ...). Empty for a theme that stands on its own; src/Theme.cpp
+    // prints one line naming them when a theme is loaded, because a colour borrowed from a dark
+    // theme is very often wrong in a light one.
+    QStringList borrowed;
+
     bool isLight() const { return variant == QLatin1String("light"); }
     QColor uiColor(const QString &token, const QColor &fallback = QColor()) const;
     QColor syntaxColor(const QString &token, const QColor &fallback = QColor()) const;
@@ -87,10 +93,14 @@ QStringList syntaxTokenNames();
 // so far and sets *error.
 QMap<QString, QStringList> parseToml(const QString &text, QString *error = nullptr);
 
-// Parse a theme file. `id` is the file stem. Missing tokens are reported through *error and taken
-// from `fallback`, so a slightly wrong user theme still renders. One exception: `[ui] action`, the
-// Actions pane's red-orange, is turned out of the theme's own `error` at that red's luminance
-// rather than inherited, because another theme's orange need not be legible on this one's ground.
+// Parse a theme file. `id` is the file stem. A malformed value is reported through *error; a token
+// the file simply does not name is either derived from this theme's own colours — every
+// `syntax.*`, and the `ui` tokens Theme.cpp documents a derivation for (`shell` is the accent,
+// `accent_hover`, `selection` and `disabled` are steps from the accent and the muted text,
+// `action`, `tool` and `link` come from this theme's red, amber and green) — or, where there is no
+// derivation, taken from `fallback` and listed in `spec.borrowed`, so a slightly wrong user theme
+// still renders and its author is told what it inherited. Deriving first is the point: a colour
+// borrowed from Relay Dark need not be legible, or even the right hue, in the theme it lands in.
 ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fallback, QString *error = nullptr);
 
 // True when every required token and all 16 ANSI colours are present.

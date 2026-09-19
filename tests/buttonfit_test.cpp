@@ -143,6 +143,31 @@ private Q_SLOTS:
         }
         QVERIFY2(seen > 20, "no font-size rules found; the scan is broken");
         relay::theme::setActiveTheme(before);
+        // The live stylesheet is not the only place a font size is written: a widget can carry one
+        // of its own (`widget->setStyleSheet("font-size: …")`), and two pairing codes were in
+        // pixels there long after the theme's rules were all in points. Those never reach
+        // app->styleSheet(), so the sources are scanned for them as well.
+        const QRegularExpression inSource(QStringLiteral("font-size:\\s*([0-9.]+)\\s*([a-z]*)"));
+        QDir sources(QStringLiteral(RELAY_SOURCE_DIR) + QStringLiteral("/src"));
+        int perWidget = 0;
+        for (const QString &name : sources.entryList({QStringLiteral("*.cpp"), QStringLiteral("*.h")},
+                                                     QDir::Files, QDir::Name)) {
+            if (name == QStringLiteral("Theme.cpp")) continue;   // the stylesheet itself, measured above
+            QFile file(sources.filePath(name));
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+            const QString text = QString::fromUtf8(file.readAll());
+            auto it = inSource.globalMatch(text);
+            while (it.hasNext()) {
+                const auto m = it.next();
+                ++perWidget;
+                QVERIFY2(m.captured(2) == QStringLiteral("pt"),
+                         qPrintable(QStringLiteral("%1: \"%2\" is not in points").arg(name, m.captured(0))));
+                QVERIFY2(m.captured(1).toDouble() >= relay::theme::FloorPt,
+                         qPrintable(QStringLiteral("%1: \"%2\" is under the %3pt floor")
+                                        .arg(name, m.captured(0)).arg(relay::theme::FloorPt)));
+            }
+        }
+        QVERIFY2(perWidget > 0, "no per-widget font-size found; the source scan is broken");
         // legible() raises a small font and leaves a large one alone, in points or pixels.
         QFont tiny; tiny.setPointSizeF(7);
         QCOMPARE(relay::theme::legible(tiny).pointSizeF(), relay::theme::FloorPt);

@@ -119,7 +119,9 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
     case board::Badge::Assignee:
         return {theme::Text, theme::Border};
     case board::Badge::Private:
-        return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+        // Brass, not amber: a card being private is a fact about it, not somebody waiting on you,
+        // and amber means only the second (be81edb). Waiting above keeps the amber.
+        return {theme::Tool, mix(theme::Tool, theme::Surface, 0.5)};
     case board::Badge::Age:
     case board::Badge::Thread:
         return {theme::TextMuted, QColor()};

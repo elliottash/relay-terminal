@@ -93,6 +93,20 @@ PlacementWindow::Response PlacementWindow::mousePress(qint64 nowMs) {
     return {Action::Dismiss, Direction::Right};
 }
 
+HeaderSplit headerSplit(int headerWidth, int taken, int directoryWanted) {
+    HeaderSplit split;
+    const int free = std::max(0, headerWidth - std::max(0, taken));
+    // What is left once the title has its floor. Computed from the header and the chips only, so
+    // it does not move when the directory's own width does: showing or hiding the path cannot
+    // change the answer, and the two cannot oscillate against each other.
+    const int forDirectory = free - kTitleFloorPx;
+    split.directory = directoryWanted <= 0 || forDirectory < kDirectoryFloorPx
+                          ? 0
+                          : std::min(directoryWanted, forDirectory);
+    split.title = std::max(kTitleFloorPx, free - split.directory);
+    return split;
+}
+
 Direction dropEdge(const QPoint &local, const QSize &size) {
     const double fx = double(local.x()) / std::max(1, size.width());
     const double fy = double(local.y()) / std::max(1, size.height());
