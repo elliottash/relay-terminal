@@ -22,11 +22,11 @@ Shape of the thing, one process:
   directory (a pane's cwd moves; its registration is rewritten). A registration whose runtime
   dir has vanished is a closed pane and is dropped.
 * **The channel out** — everything the sidecar learns reaches its pane the one way protocol
-  26.3 allows: a `bridge` event that atomically replaces `guest.json` in the pane's runtime dir,
-  token and a fresh `sequence` uuid included. When the registered helper exists it is called as
-  `guest-event.py bridge` with the event JSON on stdin; when it does not (this phase lands beside
-  the hooks phase, not after it) the sidecar writes the same bytes itself. Either path is the
-  same file, same schema — see the note in docs/AGENT-SESSIONS-PROTOCOL.md section 26.5.
+  26.3 allows: a `bridge` event that atomically replaces `guest.json` in the pane's runtime dir.
+  The writer is the hooks phase's `shell/guest-event.py`, called as `guest-event.py bridge
+  claude` with the event's data on stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its
+  environment — the same single writer the shim's own events use, so the pane reads one file
+  one way, and the §26.3 envelope (token, fresh sequence, event, guest) is built in one place.
 * **Blocking tools** — `openDiff` carries `old_file_path`, `new_file_path`,
   `new_file_contents`; the sidecar computes the unified diff (difflib, `a/`-`b/` headers, the
   same shape `tools.py` writes) and puts it in the event beside a `reply` path. The pane shows
@@ -182,7 +182,7 @@ class PaneRegistration:
     """One pane of this GUI run, as the GUI registered it in the sidecar's state dir."""
     token: str
     runtime_dir: str
-    helper: str            # <data>/shell/guest-event.py, present once the hooks phase writes it
+    helper: str            # <data>/shell/guest-event.py — the channel's one writer (26.3)
     python: str            # the interpreter Relay runs (RELAY_PYTHON), for the helper
     workspace: str
     cwd: str
@@ -449,28 +449,38 @@ class Bridge:
     # ----- the guest event channel (protocol 26.3) ------------------------------------------------
 
     def emit(self, pane: PaneRegistration, tool: str, args: dict, reply_path: str | None = None) -> bool:
-        """One `bridge` event into the pane's runtime dir, via the helper when the hooks phase
-        has written one and byte-identically directly when it has not (section 26.5's note)."""
+        """One `bridge` event into the pane's runtime dir, written by `shell/guest-event.py` —
+        the channel's one writer (26.3): the helper builds the §26.3 envelope (token, fresh
+        sequence, event, guest) and replaces `guest.json` atomically; the bridge supplies only
+        the event's data on stdin. A helper that is missing, fails, or has nowhere to write is
+        a failed emit, and the caller tells claude so."""
+        if not (pane.helper and os.path.isfile(pane.helper)):
+            self.log(f"helper_missing tool={tool} helper={pane.helper!r}")
+            return False
+        if not os.path.isdir(pane.runtime_dir):
+            # The runtime dir belongs to the pane; when it is gone the pane is gone, and a quiet
+            # helper exit must not be read as a delivered event. (The registration poll drops
+            # such panes; this catches one that closed inside the tick.)
+            self.log(f"channel_error tool={tool} runtime_dir={pane.runtime_dir} is gone")
+            return False
         data = dict(args)
         data["tool"] = tool
         if reply_path:
             data["reply"] = reply_path
-        event = {"token": pane.token, "sequence": str(uuid.uuid4()),
-                 "event": "bridge", "guest": "claude", "data": data}
-        if pane.helper and os.path.isfile(pane.helper):
-            environment = dict(os.environ)
-            environment["RELAY_RUNTIME_DIR"] = pane.runtime_dir
-            environment["RELAY_SESSION_TOKEN"] = pane.token
-            environment.setdefault("RELAY_PYTHON", pane.python)
-            try:
-                run = subprocess.run([pane.python, pane.helper, "bridge"], input=json.dumps(event),
-                                     capture_output=True, text=True, timeout=10, env=environment)
-                if run.returncode == 0:
-                    return True
-                self.log(f"helper_failed tool={tool} code={run.returncode} {run.stderr.strip()[:200]}")
-            except (OSError, subprocess.SubprocessError) as error:
-                self.log(f"helper_error tool={tool} {error!r}")
-        return write_bridge_event(pane, event, self.log)
+        environment = dict(os.environ)
+        environment["RELAY_RUNTIME_DIR"] = pane.runtime_dir
+        environment["RELAY_SESSION_TOKEN"] = pane.token
+        environment.setdefault("RELAY_PYTHON", pane.python)
+        try:
+            run = subprocess.run([pane.python, pane.helper, "bridge", "claude"], input=json.dumps(data),
+                                 capture_output=True, text=True, timeout=10, env=environment)
+        except (OSError, subprocess.SubprocessError) as error:
+            self.log(f"helper_error tool={tool} {error!r}")
+            return False
+        if run.returncode != 0:
+            self.log(f"helper_failed tool={tool} code={run.returncode} {run.stderr.strip()[:200]}")
+            return False
+        return True
 
     # ----- JSON-RPC --------------------------------------------------------------------------------
 
@@ -613,31 +623,6 @@ class Bridge:
 
     def tool_executeCode(self, arguments: dict) -> dict:
         return json_result({"success": False, "message": "Relay has no notebook kernel."})
-
-
-def write_bridge_event(pane: PaneRegistration, event: dict, log=None) -> bool:
-    """TEMPORARY FALLBACK WRITER (delete this function and its call in Bridge.emit when the
-    hooks phase's shell/guest-event.py lands — that helper is then the only writer).
-
-    Writes the §26.3 envelope exactly as the helper would: atomic temp+rename, token, a fresh
-    uuid4 sequence, event "bridge", guest "claude". Byte-identical, so which writer ran is
-    invisible to the pane.
-
-    The runtime dir belongs to the pane: when it is gone the pane is gone, and this must fail
-    rather than recreate a directory no GUI will ever read (that would also make a closed pane
-    look live again to the registration poll)."""
-    if not os.path.isdir(pane.runtime_dir):
-        if log:
-            log(f"channel_error tool={event.get('data', {}).get('tool')} "
-                f"runtime_dir={pane.runtime_dir} is gone")
-        return False
-    try:
-        write_json_atomic(os.path.join(pane.runtime_dir, "guest.json"), event)
-        return True
-    except OSError as error:
-        if log:
-            log(f"channel_error tool={event.get('data', {}).get('tool')} {error!r}")
-        return False
 
 
 @dataclass

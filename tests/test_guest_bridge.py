@@ -20,6 +20,7 @@ from pathlib import Path
 from relay_core import guest_bridge
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
+HELPER = Path(__file__).resolve().parents[1] / "shell" / "guest-event.py"
 
 
 # ----- fixtures ---------------------------------------------------------------------------------
@@ -31,13 +32,16 @@ def make_state(root: str) -> str:
     return state
 
 
-def register_pane(state: str, workspace: str, cwd: str | None = None, helper: str = "",
+def register_pane(state: str, workspace: str, cwd: str | None = None, helper: str | None = None,
                   runtime: str | None = None) -> tuple[str, str]:
-    """One pane registration, the file the GUI writes: token, runtime dir, helper, workspace."""
+    """One pane registration, the file the GUI writes: token, runtime dir, helper, workspace.
+    The default helper is the real shell/guest-event.py, exactly as the GUI registers it — the
+    channel's writer is the contract these tests exercise, not a stand-in for it."""
     runtime = runtime or tempfile.mkdtemp(dir=state, prefix="runtime-")
     token = secrets.token_hex(8)
     guest_bridge.write_json_atomic(os.path.join(state, "panes", f"{token}.json"),
-                                   {"token": token, "runtime_dir": runtime, "helper": helper,
+                                   {"token": token, "runtime_dir": runtime,
+                                    "helper": str(HELPER) if helper is None else helper,
                                     "python": sys.executable, "workspace": workspace,
                                     "cwd": cwd or workspace})
     return token, runtime
@@ -332,33 +336,38 @@ class EventChannel(unittest.TestCase):
         self.bridge.emit(pane, "openFile", {"filePath": "/y"})
         self.assertNotEqual(first, read_guest_json(runtime)["sequence"])
 
-    def test_the_helper_is_the_writer_when_it_exists(self):
-        """The fallback writer must never be the one that wrote the file once the hooks phase's
-        shell/guest-event.py is there: the fake helper tags what it wrote."""
-        helper = os.path.join(self.root, "guest-event.py")
-        Path(helper).write_text(
-            "import json, os, sys\n"
-            "event = json.load(sys.stdin)\n"
-            "event['via'] = 'helper'\n"
-            "path = os.path.join(os.environ['RELAY_RUNTIME_DIR'], 'guest.json')\n"
-            "open(path + '.tmp', 'w').write(json.dumps(event))\n"
-            "os.replace(path + '.tmp', path)\n")
-        _, runtime = register_pane(self.state, self.workspace, helper=helper)
-        self.bridge.refresh_registrations()
-        pane = next(iter(self.bridge.panes.values()))
-        self.assertTrue(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
-        self.assertEqual("helper", read_guest_json(runtime)["via"])
-
-    def test_a_failing_helper_falls_back_to_the_identical_bytes(self):
-        helper = os.path.join(self.root, "guest-event.py")
-        Path(helper).write_text("import sys; sys.exit(3)\n")
-        _, runtime = register_pane(self.state, self.workspace, helper=helper)
+    def test_the_real_helper_writes_the_263_envelope(self):
+        """shell/guest-event.py is the channel's one writer, for the bridge as for the shim: the
+        envelope the pane reads is the one it builds — token from the environment, event and
+        guest from the sidecar's argv, the event's data from its stdin."""
+        _, runtime = register_pane(self.state, self.workspace)
         self.bridge.refresh_registrations()
         pane = next(iter(self.bridge.panes.values()))
         self.assertTrue(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
         event = read_guest_json(runtime)
         self.assertEqual("bridge", event["event"])
-        self.assertNotIn("via", event)
+        self.assertEqual("claude", event["guest"])
+        self.assertEqual(pane.token, event["token"])
+        self.assertTrue(event["sequence"])
+        self.assertEqual("openFile", event["data"]["tool"])
+        self.assertEqual("/x", event["data"]["filePath"])
+
+    def test_a_failing_helper_is_a_failed_emit(self):
+        """No second writer exists: a helper that fails means the event is simply not sent."""
+        helper = os.path.join(self.root, "guest-event.py")
+        Path(helper).write_text("import sys; sys.exit(3)\n")
+        _, runtime = register_pane(self.state, self.workspace, helper=helper)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertFalse(os.path.exists(os.path.join(runtime, "guest.json")))
+
+    def test_a_missing_helper_is_a_failed_emit(self):
+        _, runtime = register_pane(self.state, self.workspace, helper="")
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertFalse(os.path.exists(os.path.join(runtime, "guest.json")))
 
     def test_a_vanished_runtime_dir_is_a_logged_failure_not_a_crash(self):
         _, runtime = register_pane(self.state, self.workspace)

@@ -3124,16 +3124,16 @@ as one `bridge` event over the guest channel (26.3): the pane opens Relay's diff
 the banner whose action (Save) — also Ctrl+Shift+R, the visible banner's action — or whose
 dismissal (×) is the answer; on `FILE_SAVED` the *sidecar* writes the file, so the GUI never
 writes a user's file from a bridge event. `openFile` opens the preview pane; everything else
-the twelve tools ask for was answered sidecar-side already. Until the hooks phase's plumbing
-lands, the pane's `bridge`-only seam (`pollGuestEvent` → `guestBridgeEvent`) reads `guest.json`
-on `pollShell()`'s tick; the hooks phase folds that read into the shared channel plumbing and
-calls the (public) `guestBridgeEvent` directly.
+the twelve tools ask for was answered sidecar-side already. The `bridge` event arrives through
+the shared channel plumbing (26.3): `pollGuestEvent` → `handleGuestEvent`, whose `bridge`
+branch calls the pane's `guestBridgeEvent`.
 
-**The fallback writer.** The channel's writer is `shell/guest-event.py` (26.3). While that helper
-does not exist yet, the sidecar writes the same envelope itself — one clearly-marked function
-(`write_bridge_event`), byte-identical to what the helper will write, atomic tmp+rename. The
-envelope is the contract; the helper is the writer, and the fallback disappears with the phase
-that makes the helper real.
+**The channel's writer.** `shell/guest-event.py` (26.3) is the only writer, for the bridge as
+for the shim: the sidecar calls it as `guest-event.py bridge claude` with the event's data on
+stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
+the §26.3 envelope and replaces `guest.json` atomically. A helper that is missing, fails, or
+has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
+`DIFF_REJECTED` — never a second writer beside the channel's own.
 
 ### 26.6 Codex attach
 
