@@ -773,15 +773,6 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
-        // Theme swatches on the tabs: let the bar paint itself, then paint over it.
-        if (object == m_tabs->tabBar() && event->type() == QEvent::Paint && !m_paintingTabSwatches
-            && perTabThemes() && m_tabs->count() > 1) {
-            m_paintingTabSwatches = true;
-            QCoreApplication::sendEvent(object, event);
-            m_paintingTabSwatches = false;
-            paintTabSwatches();
-            return true;
-        }
         // Tab labels (issue JRWQ): double click a tab to name it by hand; Esc leaves it alone.
         if (object == m_tabs->tabBar() && event->type() == QEvent::MouseButtonDblClick) {
             const int index = m_tabs->tabBar()->tabAt(static_cast<QMouseEvent *>(event)->pos());
@@ -1976,8 +1967,8 @@ private:
         // Owner, 2026-09-19: "add an option, on by default, that themes are tab specific. and add
         // an option, off by default, to start tabs with a new theme."
         appearance.rows << toggleRow(QStringLiteral("theme/per_tab"), QStringLiteral("Each tab keeps its own theme"),
-                                     QStringLiteral("/light, /dark and /theme change the tab you are in, switching tabs switches "
-                                                    "the theme, and each tab shows its theme as a swatch"),
+                                     QStringLiteral("/light, /dark and /theme change the tab you are in; switching tabs switches "
+                                                    "the theme"),
                                      true, [this](bool on) {
             if (on) applyTabTheme(m_tabs->currentWidget());
             else relay::theme::setActiveTheme(relay::theme::startupThemeId(), false);
@@ -4352,14 +4343,13 @@ public:
     // ----- the chip on an attached tab (#916B) ------------------------------------------------
     // An attached tab wears its project's name at the left of its label, and one click on it
     // detaches. An unattached tab shows nothing at all: there is no "not attached" state to
-    // advertise, because unattached is the ordinary state. It lives in the tab's left box beside
-    // the ⧉ "move to new window" button (placeTabBarControls), so it moves with the tab and goes
-    // with it.
+    // advertise, because unattached is the ordinary state. It lives in the tab's left box
+    // (tabLeftBox), so it moves with the tab and goes with it.
     //
-    // The left box itself: one per tab, made by whichever of the two callers gets there first.
-    // A QTabBar side slot holds one widget, and this tab has two things to put there.
+    // The left box itself: one per tab, made for the project chip when a tab has one. A QTabBar
+    // side slot holds one widget, and the chip is what this tab puts there.
     //
-    // Both callers go from here straight to `box->layout()`, so what this returns must have one.
+    // The caller goes from here straight to `box->layout()`, so what this returns must have one.
     // The slot cannot simply be trusted to hold ours: QTabBar owns a side widget and deleteLater()s
     // it when its tab is removed, and `tabButton()` hands back whatever raw pointer it holds — so a
     // box on its way out, or any widget this window did not put there, would arrive as a null
@@ -4436,7 +4426,7 @@ public:
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")),
                                                 QStringLiteral("then “Detach this tab”")));
         });
-        box->layout()->addWidget(chip);   // after the ⧉ button, when that has been made
+        box->layout()->addWidget(chip);
         chip->show();                     // a child added to a shown box is otherwise shown a turn later
         relayoutTabLeftBox(index);
     }
@@ -5282,33 +5272,6 @@ private:
         m_manager->scheduleSave();
     }
 
-    // Each tab wears its theme as a swatch at its left edge: the theme's terminal ground over its
-    // accent, outlined in its own strong border so a charcoal swatch still shows on charcoal
-    // chrome. Painted over the tab bar after it has painted itself.
-    void paintTabSwatches() {
-        QTabBar *bar = m_tabs->tabBar();
-        QPainter p(bar);
-        p.setRenderHint(QPainter::Antialiasing);
-        for (int i = 0; i < bar->count(); ++i) {
-            QString id = tabThemeOf(m_tabs->widget(i));
-            if (id.isEmpty()) id = relay::theme::startupThemeId();
-            const relay::theme::ThemeSpec spec = relay::theme::specFor(id);
-            const QRect tab = bar->tabRect(i);
-            const QRectF swatch(tab.left() + 0.5, tab.top() + 6.5, 6, qMax(8, tab.height() - 11));
-            const QColor ground = spec.terminalBackground.isValid() ? spec.terminalBackground : spec.uiColor(QStringLiteral("background"));
-            QPainterPath shape; shape.addRoundedRect(swatch, 2, 2);
-            p.save();
-            p.setClipPath(shape);
-            p.fillRect(swatch, ground);
-            p.fillRect(QRectF(swatch.left(), swatch.bottom() - swatch.height() * 0.34, swatch.width(), swatch.height() * 0.34 + 1),
-                       spec.uiColor(QStringLiteral("accent")));
-            p.restore();
-            p.setPen(QPen(spec.uiColor(QStringLiteral("border_strong")), 1));
-            p.setBrush(Qt::NoBrush);
-            p.drawPath(shape);
-        }
-    }
-
     QJsonObject serializeTab(int index) const {
         QWidget *page = m_tabs->widget(index);
         QWidget *root = page && page->layout() && page->layout()->count() ? page->layout()->itemAt(0)->widget() : nullptr;
@@ -6147,38 +6110,8 @@ private:
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.new"));
         m_newTabButton->setToolTip(keys.isEmpty() ? QStringLiteral("New tab") : QStringLiteral("New tab  (%1)").arg(keys));
         m_newTabButton->show(); m_newTabButton->raise();
-        // A "move to new window" button on each tab, visible on the hovered tab.
         for (int i = 0; i < bar->count(); ++i) {
-            // The tab's left slot holds a box (tabLeftBox): this button first, then the project
-            // chip of an attached tab (#916B).
-            QWidget *box = tabLeftBox(i);
-            auto *detach = box->findChild<QToolButton *>(QStringLiteral("tabDetachButton"), Qt::FindDirectChildrenOnly);
-            if (!detach) {
-                detach = new QToolButton(box);
-                detach->setObjectName(QStringLiteral("tabDetachButton"));
-                detach->setText(QStringLiteral("⧉"));
-                detach->setAutoRaise(true);
-                detach->setFocusPolicy(Qt::NoFocus);
-                detach->setFixedSize(18, 18);
-                connect(detach, &QToolButton::clicked, this, [this, detach] {
-                    QTabBar *tabs = m_tabs->tabBar();
-                    for (int j = 0; j < tabs->count(); ++j)
-                        if (tabs->tabButton(j, QTabBar::LeftSide) == detach->parentWidget()) { moveTabToNewWindow(j); break; }
-                    const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.moveToNewWindow"));
-                    hint(QStringLiteral("tab.detach.mouse"), keys.isEmpty() ? QStringLiteral("Tip: “Move tab to new window” is in the palette; bind a key in keybindings.json")
-                                                                          : relay::ShortcutHints::nextTime(keys, QStringLiteral("move tab to new window")));
-                });
-                if (auto *row = qobject_cast<QHBoxLayout *>(box->layout())) row->insertWidget(0, detach);
-                detach->show();
-                relayoutTabLeftBox(i);
-            }
-            const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.moveToNewWindow"));
-            detach->setToolTip(keys.isEmpty() ? QStringLiteral("Move tab to new window") : QStringLiteral("Move tab to new window  (%1)").arg(keys));
             const bool hovered = bar->tabAt(bar->mapFromGlobal(QCursor::pos())) == i && bar->underMouse();
-            // Keep the space reserved so tabs do not jump; only the glyph appears on hover.
-            detach->setEnabled(m_tabs->count() > 1);
-            detach->setProperty("hovered", hovered);
-            detach->setText(hovered ? QStringLiteral("⧉") : QString());
 
             // Relay's own close cross. Qt's closable tabs take "window-close" from the icon
             // theme, which lands as a red disc next to the flat header glyphs.
