@@ -350,6 +350,17 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 | `failover_hosted` | bool | false | Relay Free may be one of those providers (15.2.2) |
+| `approvals_ask` | string[] | `[]` | capabilities that draw an approval card before the call runs (27.6) |
+| `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
+
+**Approvals (27.6, card #K2FV).** `approvals_ask` names capabilities from `edit`, `create`,
+`delete_or_move`, `read_outside`, `terminal`, `program`, `network`; an empty list means "ask about
+nothing", not "unchanged", which is why the GUI sends both keys on every `configure` and
+`set_agent_options`. While `approvals_chosen` is false — the first-launch screen not yet answered
+— the worker applies the cautious set (`edit`, `delete_or_move`, `read_outside`, `terminal`,
+`program`) whatever the list says, so a fresh Relay is never allow-everything by default. A card's
+"Always allow" (27.6) unticks the matching row by sending both keys again. Subagents follow the
+pane's policy, at spawn and whenever it changes.
 
 `configured` gains these fields. `set_agent_options` applies them to the pane's agent at once (limits are
 read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
@@ -4426,6 +4437,53 @@ own" and no key that dismisses the card: those would each be a mode, and the box
   suffix cannot be drawn differently from the words the user is reading.
 - **No deadline.** `type_into_program` gives the pane 20 s because a program is waiting; here a
   person is, and a timeout would report "failed" for "still thinking".
+
+### 27.6 Approval cards (card #K2FV, 2026-09-19)
+
+The questions of 27.1–27.4 are the model's; these are **Relay's, asked on the model's behalf**,
+before an action the user ticked on the first-launch checklist (Options › Security; the
+`approvals_ask`/`approvals_chosen` options of 12.1). A second *kind* of question on the same
+round trip, not a second mechanism (`ask_approval` in `backend/relay_core/questions.py`;
+capabilities and classifiers in `backend/relay_core/approvals.py`; tests `tests/test_approvals.py`):
+
+```
+worker → question {kind: "approval", id, capability, header, question, subject}
+          … the turn thread blocks exactly as for `ask_user` …
+GUI    → question_answer {id, decision: "once"|"turn"|"always"|"deny"}
+```
+
+| Field | |
+|---|---|
+| `kind` | `"approval"`; absent on an `ask_user` card |
+| `capability` | one of the seven of 12.1: which checklist row the action is |
+| `header` | the row's label, capitalised — the card and Options › Security use the same words |
+| `question` | `Allow the agent to <label>?`, a newline, then the subject |
+| `subject` | the file path or command the call is about |
+| `subagent`, `agent_id` | present when a subagent's action drew the card: its description and id |
+
+The decision: **once** allows this one call; **turn** allows the capability for the rest of the
+turn (forgotten when the next turn begins); **always** also unticks the matching row in Options ›
+Security — the pane sends `set_agent_options` with the new `approvals_ask`/`approvals_chosen`
+before it sends the decision; **deny** refuses the call and the turn carries on, the model told
+in `approvals.refusal()`'s words, which it must respect rather than route around. Deny is not
+Stop (27.4): Stop under a card still ends the wait (`question_closed`; the tool raises
+`Cancelled`). An invalid or absent decision is a **deny** — the safe side of a card nobody
+answered — and there is no skip: `0`, `/skip` and free text are not answers, and Esc does not
+deny, because the key nearest the reader's hand must not be the thing that silently allows or
+refuses.
+
+The check runs at the tool's **prepare**, so nothing has executed when the card goes up, and
+again at execute for `run_command` — the two-look rule the command denylist has. `delete_or_move`
+and `network` are **classifiers, not proofs**: they read the program names out of a Bash line, so
+`rm -rf build`, `sudo mv a b` and a plain `> existing` are caught and a variable, a script or a
+here-doc is not. What contains a command is the workspace, the secret-file guard and systemd
+isolation, exactly as before.
+
+A **subagent's** action draws the card in the same pane, named as the subagent's (`subagent`,
+`agent_id` above), and its `question_answer` routes back by id. The subagent's `can_ask` stays
+false — it still cannot ask the user anything — while the flag that lets Relay draw *this* kind
+of card is separate (`may_approve`), because the card is the pane's to answer, not the
+subagent's to ask. A **turn** allowance lives on the agent whose action asked.
 
 
 ## 28. Local model servers (card `#24XJ`, shipped 2026-09-18; written down v3.5, 2026-09-19)
