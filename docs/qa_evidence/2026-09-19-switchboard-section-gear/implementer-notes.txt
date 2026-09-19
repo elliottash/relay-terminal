@@ -1,0 +1,81 @@
+--- list
+>» © project; Switchboard-Sopen- 2 + 20 4 =e —o x
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". 5 open Filter — words, label:bug, status:done, folder:changes... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ INBOX DISCUSSING (READY TO START @JIN PROGRESS (WAITING NEEDS QA VERIFIED
+DONE
+~/project $ o °
+Relay Free: this pane's prompts and tool context go to Relay’s hosted se ‘6 problems - md - rank 'mF6FF" must be [0-9a-z]+ not ending in 0
+rvice and on to the model provider; Relay keeps request metadata
+only. Add your own key under Options > Models to keep it between you and > INBOX 1
+your provider.
+» DISCUSSING 1
+> READY TO START 1
+> IN PROGRESS 1
+> WAITING ©
+> NEEDS QA 1
+> VERIFIED 0
+> DONE 1
+Shell commands or agent prompts... ? for help auto
+~iproject © 100%left | Free Relay Free ‘J(s)(s
+Enter open eedit pplan xexecute vverify nnew +/-+fold section Alt+Shift+t! reorder Alt+Shift+— st:
+--- page
+>» © project; witchboard-Sopen- 2 « + 20 4 =(g)@ -o x
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". Sections are a view of the statuses: nothing here moves a card or changes one. A status no section
+See "man sudo root" for details. collects gets a section of its own.
+it mE
+<ypnencen 6 Inbox inbox Merge....
+Relay Free: this pane's prompts and tool context go to Relay’s hosted se Discussing discussing Merge... x
+rvice and on to the model provider; Relay keeps request metadata
+only. Add your own key under Options » Models to keep it between you and Ready to start ready Merge... |x
+your provider.
+In progress in-progress Merge... x
+Waiting needs-review, needs-labels, needs-ab Merge... x
+Needs QA needs-qa-lIm, needs-qa-human Merge... x
+Verified closed and signed Merge... | [x
+Done done, dropped Merge... | [ x
+New section Collects... Add section
+Shell commands or agent prompts... 2 for help auto Nothing changed yet.
+~/project | © 100%left | Free Relay Free ‘J(s)(s Cancel | Save sections
+--- renamed
+>» © project; witchboard-Sopen- 2 « + oO 4e@S -ox
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". Sections are a view of the statuses: nothing here moves a card or changes one. A status no section
+See "man sudo root" for details. collects gets a section of its own.
+it mE
+<ypnencen 6 Inbox inbox Merge....
+Relay Free: this pane's prompts and tool context go to Relay’s hosted se Discussing discussing Merge... x
+rvice and on to the model provider; Relay keeps request metadata
+only. Add your own key under Options » Models to keep it between you and Up next ready | Merge...) x
+your provider. —
+In progress in-progress Merge... x
+Waiting needs-review, needs-labels, needs-ab Merge... x
+Needs QA needs-qa-lIm, needs-qa-human Merge... x
+Verified closed and signed Merge... | [x
+Done done, dropped Merge... | [x
+New section Collects... Add section
+Shell commands or agent prompts... ? for help auto Will write: Ready to start + Up next
+~/project | © 100%left | Free Relay Free ~ ei Cancel Save sections
+--- saved
+>» © project; Switchboard-S open: 2 x + 20 4 =e —o x
+© project TERMINAL ~/project @) @ & x | % Switchboard BR x
+To run a command as administrator (user “root"), use “sudo <command>". 5 open Filter — words, label:bug, status:done, folder:changes... + New card (n) Clean up
+See “man sudo root" for details.
+~ (@ InBox GDISCUSSING (UP NEXT MIN PROGRESS MWAITING MPNEEDS QA MBVERIFIED DONE
+~/project $ &
+Relay Free: this pane's prompts and tool context go to Relay’s hosted se ‘6 problems - md - rank 'mF6FF" must be [0-9a-z]+ not ending in 0
+rvice and on to the model provider; Relay keeps request metadata
+only. Add your own key under Options > Models to keep it between you and > INBOX 1
+your provider.
+» DISCUSSING 1
+> UP NEXT 1
+> IN PROGRESS 1
+> WAITING ©
+> NEEDS QA 1
+> VERIFIED 0
+> DONE 1
+Shell commands or agent prompts... ? for help auto
+~iproject © 100%left | Free Relay Free ‘J(s)(s
+Enter open eedit pplan xexecute vverify nnew +/-+fold section Alt+Shift+t! reorder Alt+Shift+— st:

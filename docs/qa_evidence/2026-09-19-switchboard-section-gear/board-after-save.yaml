@@ -1,0 +1,5 @@
+# Switchboard configuration. Format: docs/SWITCHBOARD-FORMAT.md
+version: 1
+tabs: [{id: features, folder: features}, {id: bugs, folder: changes}, {id: done, filter: 'status:done,dropped'}]
+columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]
+column_titles: {ready: Up next}
