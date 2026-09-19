@@ -45,3 +45,9 @@ Landed 2a6fa27 (#5AWD): src/TranscriptGaps.h + tests/transcriptgaps_test.cpp (th
 
 <!-- relay:entry 20260919T185737Z-fz author=agent kind=event model=claude-fable-5-1 -->
 - ✦ agent moved this card · In progress → Needs QA (llm) · evidence docs/qa_evidence/2026-09-19-helpful-line-breaks/README.md
+
+<!-- relay:entry 20260919T185817Z-g2 author=agent kind=progress model=claude-fable-5-1 commit=0a919c3 -->
+Card move landed as 0a919c3. ctest (C++ suites, the backend suite excluded as unchanged): see the line below in this entry's follow-up; the new transcriptgaps test is in it.
+
+<!-- relay:entry 20260919T185856Z-gx author=agent kind=progress model=claude-fable-5-1 -->
+ctest --test-dir build (backend suite excluded, no backend change): 100% passed, 0 failed out of 61, transcriptgaps included. Ready for QA: checklist on the card, evidence in docs/qa_evidence/2026-09-19-helpful-line-breaks/.
