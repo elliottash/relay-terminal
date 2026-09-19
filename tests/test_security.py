@@ -1,9 +1,12 @@
 """The Security section's policy (card #3KB7): the command denylist, extra readable folders and
-extra secret patterns, as the worker enforces them."""
+extra secret patterns, as the worker enforces them — and the quiet pass that moved the hand-off,
+isolation and turn-bound rows onto this page."""
 import unittest
 from pathlib import Path
 
 from relay_core import security
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def policy(**kwargs) -> security.Policy:
@@ -216,6 +219,63 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(tools.policy.command_denylist, ("rm",))
         self.assertEqual(tools.policy.secret_patterns, (r"\.vault$",))   # untouched
         self.assertIs(tools.workspace.policy, tools.policy)
+
+
+class SectionPlacementTests(unittest.TestCase):
+    """The quiet pass (card #3KB7): the hand-off, isolation and turn-bound rows moved — not copied
+    — from the Agent and Terminal pages onto Security, with no hole left behind. The section list
+    is RelayWindow::settingsSections(), which needs a whole window to run, so read it as text, the
+    way settingspane_test.cpp's localModelsComeRightAfterModels() does."""
+
+    # What moved, as the row helper call that defines it. The keys are unchanged (every reader,
+    # agentOptionsChanged and requestOptions() are key-based), so it is the row that may only
+    # exist once, and only here.
+    MOVED = (
+        'choiceRow(QStringLiteral("option:terminal_handoff")',
+        'toggleRow(QStringLiteral("isolation/enabled")',
+        'choiceRow(QStringLiteral("option:agent_memory_max")',
+        'choiceRow(QStringLiteral("option:shell_memory_max")',
+        'toggleRow(QStringLiteral("isolation/cap_escapees")',
+        'numberRow(QStringLiteral("agent/max_auto_turns")',
+        'numberRow(QStringLiteral("agent/max_steps")',
+        'numberRow(QStringLiteral("agent/max_tool_calls")',
+        'toggleRow(QStringLiteral("agent/audit_requests")',
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        source = (ROOT / "src" / "RelayWindow.h").read_text(encoding="utf-8")
+        cls.spans = {}
+        for section in ("terminal", "agent", "security"):
+            start = f'{section}.id = QStringLiteral("{section}");'
+            end = f"sections << {section};"
+            assert start in source, start
+            assert end in source, end
+            cls.spans[section] = source[source.index(start):source.index(end)]
+        cls.source = source
+
+    def test_every_moved_row_is_defined_once_in_the_whole_window(self):
+        for row in self.MOVED:
+            self.assertEqual(self.source.count(row), 1, row)   # moved, not copied
+
+    def test_every_moved_row_lives_on_the_security_page(self):
+        for row in self.MOVED:
+            self.assertIn(row, self.spans["security"], row)
+
+    def test_the_pages_they_left_still_have_all_their_own_rows(self):
+        # No hole: each old home keeps the rows the card left there.
+        for row in ('toggleRow(QStringLiteral("terminal/shell_integration")',):
+            self.assertIn(row, self.spans["terminal"], row)
+        for row in ('textRow(QStringLiteral("agent/compact_threshold")',
+                    'numberRow(QStringLiteral("agent/stall_timeout_s")',
+                    'numberRow(QStringLiteral("agent/first_token_timeout_s")'):
+            self.assertIn(row, self.spans["agent"], row)
+            self.assertNotIn(row, self.spans["security"], row)
+
+    def test_no_moved_row_stayed_behind_on_the_page_it_came_from(self):
+        for row in self.MOVED:
+            self.assertNotIn(row, self.spans["agent"], row)
+            self.assertNotIn(row, self.spans["terminal"], row)
 
 
 if __name__ == "__main__":
