@@ -3971,7 +3971,7 @@ pane's composer typed into a working Codex instead of queueing, and the chip sta
 The sessions pane lists guest sessions beside Relay's own: source `claude` reads
 `guest.claude_projects_dir()` (`<cwd-slug>/<session-id>.jsonl`), source `codex` reads the
 rollouts and `guest.codex_state_db()` (highest `state_*.sqlite`). A record is
-`{source, id, title, mtime, workspace, message_count, resume_command, resume_cwd}`;
+`{source, id, title, mtime, workspace, raw_cwd, message_count, resume_command, resume_cwd}`;
 `resume_command` respawns the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`;
 `codex resume`, fork per its CLI) and **must be spawned with the working directory set to
 `resume_cwd`** (the session's own workspace, `""` when the transcript named none): both guests
@@ -3987,9 +3987,38 @@ whose transcript is gone); `limit` counts files, and a limit of zero or less rea
 **What a full reconcile may prune, and what it may not.** A row goes only when its transcript is
 *known* to be gone. A source whose session directory is not there at all prunes nothing — `$HOME`
 can be wrong, a network home can be late, a guest can be uninstalled with its history intact — and
-neither does a transcript that is on disk but could not be stat'ed or parsed this time. A guest
-row's pin and custom title live only in the index (there is no `.meta.json` beside a guest
-session), so a row dropped by mistake takes them with it.
+neither does a transcript that is on disk but could not be stat'ed or parsed this time.
+
+**What the user set outlives the index** (review B3). Relay's own sessions keep their title and
+pin in a `.meta.json` beside the session, so discarding the cache costs nothing; a guest row has
+no such file, because Relay may not write into `~/.claude` or `~/.codex`, and until this its pin,
+its name and the fact that the user had deleted it lived only in a database that `_connect()`
+throws away on a schema change. `guest-meta.json` beside the index (0600, replaced atomically, a
+corrupt file read as empty) holds them instead, keyed by source and session id, and the tables are
+seeded from it every time they are created.
+
+**A deleted guest row stays deleted** (review B2). Deleting one is index-only, as renaming and
+pinning are, so the transcript is still on disk and still parses — and the next reconcile used to
+put the session the user had just deleted straight back in the list. The deletion is now recorded
+(`forget`, in the store as well as the table) and reconcile skips a forgotten id; `unforget` is
+what a "show forgotten" listing would call. Reconcile's *own* pruning does not forget, so a
+session that vanished because a network home was late comes back when it returns.
+
+**Indexing the guests at all is a setting** (review B1). Relay's copy never leaves the machine,
+but it is a copy of every prompt and every reply, and there was no way to say no. Options ›
+Privacy's "List Claude Code and Codex sessions" (`sessions/index_guests`, on) rides every
+`conversations` request as `index_guests`; off, nothing under `~/.claude` or `~/.codex` is read and
+the guest rows leave the index. The store survives, so the pins and the names come back when it
+goes back on. `RELAY_INDEX_GUESTS` says the same thing to a worker with no GUI.
+
+**Reconcile reads only what was appended** (review B5). A transcript is append-only, and the
+owner's largest is 99 MB, so re-parsing it because its mtime moved (and rewriting all 20 000 of its
+entries) cost seconds per pass. Each transcript now carries a cursor — offset, size, mtime, inode
+and a fingerprint of its first bytes — and a file that only grew is parsed from the offset and its
+new entries appended; a shrink, an in-place rewrite or a new inode re-reads it whole. The cursor is
+written in the same transaction as the entries, so a crash between the two cannot leave the index
+claiming to have read more than it did. Measured on a 50 MB, 9 914-turn transcript: a 374-byte
+append took 5.02 s before and 0.039 s after. `LiveTail` and reconcile share the one reader.
 
 **A claude project directory decodes against the filesystem.** `<cwd-slug>` replaces every
 non-alphanumeric character with a dash, so the split back is ambiguous whenever a real directory
@@ -3997,7 +4026,14 @@ name holds one (`-home-u-repos-relay-terminal`). The transcript's own `cwd` line
 truth; when a transcript names none, `claude_workspace_from_slug` walks the real directories and
 takes the components that slugify to what the name says, falling back to the naive split only when
 the directory is gone or two children are spelled alike. The value is not cosmetic: it becomes the
-row's `workspace` and its `resume_cwd`.
+row's `workspace`.
+
+**`resume_cwd` is the raw cwd, not the resolved one** (review B4). A row's `workspace` is
+normalised (`Path.resolve()`) so that grouping and filters agree with the rest of Relay, but claude
+files a transcript under the slug of the directory it was *started* in: resume a session from a
+symlinked workspace in its resolved path and claude reports an unknown session. The transcript's
+own `cwd`, exactly as written, is kept as `raw_cwd`, and `resume_cwd` is that when it is known and
+the resolved workspace otherwise.
 
 **What indexing a guest session copies.** Relay's index is a cache of the guests' own files and
 never writes to them, but it is a cache *of their text*: the session's title, every user prompt
@@ -4451,7 +4487,7 @@ stopped — Relay never starts or stops one.
   OpenAI-compatible server has no effort knob Relay can rely on). Built-in rows carry
   `local: false`.
 
-## 29. Tier A: the guest as the pane's agent, through its headless harness (v3.6, 2026-09-19)
+## 29. Tier A: the guest as the pane's agent, through its headless harness (v3.7, 2026-09-19)
 
 Owner, 2026-09-19, un-deferring task t:x2 of GT7X: "i wanted Tier A now … go ahead and unlock that
 now." Section 26 runs Claude Code or Codex as a **TUI in the pane** and works around it: it types
@@ -4603,6 +4639,31 @@ restarts the harness with `resume` when it has a session id. Nothing is retried 
   their own round trip (`question` / `question_answer` with the raw per-question answer lists),
   not the Agent's `ask_user` machinery, and an unanswered or stopped approval is a deny.
 
+**The model and the reasoning effort are the guest's own** (owner, 2026-09-19: "you should be able
+to pick the model and reasoning effort for those"). The `guest` block of a `configure` or
+`set_model` carries `model`, `effort`, `resume`, `fork` and `permissions`, and nothing else; a
+`set_effort` on a guest pane tells the harness and answers the ordinary `effort_changed` rather
+than writing into a `ProviderConfig`, because the effort is a flag on the guest's own command line
+or a field of its own `turn/start`. `configured`, `model_changed` and `effort_changed` carry
+`guest_effort`. An effort is one short lowercase word, **not** one of Relay's four levels
+(`validate_effort`): Claude Code has five, and codex's catalogue names six and differs by model, so
+Relay's enum must not be mapped onto them. The `guest:` preset rows therefore carry the lists:
+`efforts` for the guest, and `models` as `[{id, label, efforts, default_effort}]` — claude's
+aliases are static, codex's come from `codex debug models`, which runs once per worker process in a
+background thread because `presets` is answered on the protocol thread and may not wait for a
+subprocess; until it lands the row says `models: []` and the GUI offers a text box.
+
+Changing the effort is not the same operation for the two guests, and the difference is the CLI's,
+not Relay's. **Codex** takes it on the next `turn/start` (`thread/start` takes it through
+`config: {model_reasoning_effort}`; `turn/start`'s `effort` is the only field of that name in the
+0.155.1 schema). **Claude Code** has no control request for it — `set_effort`, `setEffort` and
+`set_reasoning_effort` all answer "Unsupported control request subtype" in 2.1.278 — so
+`--effort` is a launch flag and `set_effort()` relaunches the process on the same session between
+turns, transparently: the pane keeps its conversation and sees a gap, never a mid-turn change.
+Before the first turn the relaunch reuses `--session-id`, because `claude --resume <an id it has
+not written yet>` exits 1. Codex validates an effort itself and its refusal is what the pane shows;
+claude's five are checked locally, because a bad one kills the process at startup.
+
 ### 29.4 The GUI side
 
 The model box's guest rows (26.9) are the worker's `guest:` presets when the worker reports them:
@@ -4615,6 +4676,20 @@ prints it inline or opens the diff pane past the inline limit, as for Relay's ow
 box's terminal/agent routing is the ordinary one and a terminal line runs in the pane's own shell,
 because there is no TUI to pipe it into. A guest sessions row resumes through the preset with
 `guest.resume`; Shift+Enter opens the new pane on that preset.
+
+**Options › Claude Code and Codex** holds the defaults: a Model row and a Reasoning effort row per
+guest, stored as `guests/<guest>/model` and `guests/<guest>/effort`, with "Default" removing the
+key and leaving the choice to the CLI's own settings. The lists are the preset row's `models` and
+`efforts`, and the effort list narrows to the picked model's own levels once there is one; with no
+worker, or before codex's catalogue has arrived, the model is a text row spelled as the CLI's
+`--model` takes it. **Both routes read the same two keys**: the harness gets them in the `guest`
+block (`Pane::takeGuestRequest`, unless the pick named its own, as `/model claude opus` does), and
+the Tier B launch passes them to `guest_launch` as `--model` / `--effort` (`-m` and
+`-c model_reasoning_effort=` for codex), left out when a sessions row already names its own. A pane
+already running that guest is moved at once with one `set_model`. A guest that is not installed
+says so instead of offering rows. The per-pane `/model claude opus` and `/effort` still win for
+that pane while it runs, and Relay's own four-level effort control must not map its enum onto a
+guest's levels (29.3).
 
 ### 29.5 Tests and evidence
 
