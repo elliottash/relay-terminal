@@ -1153,11 +1153,59 @@ def tail_main(argv: Sequence[str], env: dict | None = None,
     return 0
 
 
+def settings_main(argv: Sequence[str]) -> int:
+    """The settings entry point, which the Options › Guests row calls (GT7X):
+
+        guest_codex.py --enable | --disable | --settings-state [--home DIR] [--python PATH] [--script PATH]
+
+    One JSON object on stdout: the state `enable()` / `disable()` / `settings_state()` returned,
+    plus `ok`. A conflict is its own exit code (3) with the taken keys in `conflict`, because the
+    GUI must show that one verbatim and leave its toggle alone; any other failure is exit 1 with
+    the error in `error`. Reads and writes go through the library functions above and nothing
+    else, so the command line can never mean something the tests do not hold the library to.
+    """
+    options = {"home": None, "python": None, "script": None}
+    action = None
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument in ("--enable", "--disable", "--settings-state"):
+            action = argument[2:]
+        elif argument in ("--home", "--python", "--script") and index + 1 < len(argv):
+            index += 1
+            options[argument[2:]] = argv[index]
+        else:
+            print(json.dumps({"ok": False, "error": f"unknown option {argument!r}."}))
+            return 2
+        index += 1
+    if action is None:
+        print(json.dumps({"ok": False, "error": "choose --enable, --disable or --settings-state."}))
+        return 2
+    try:
+        if action == "enable":
+            result = enable(home=options["home"], python=options["python"], script=options["script"])
+        elif action == "disable":
+            result = disable(home=options["home"])
+        else:
+            result = settings_state(home=options["home"], script=options["script"])
+    except SettingsConflict as error:
+        print(json.dumps({"ok": False, "conflict": list(error.keys), "error": str(error)}))
+        return 3
+    except CodexError as error:
+        print(json.dumps({"ok": False, "error": str(error)}))
+        return 1
+    print(json.dumps({**result, "ok": True}))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, env: dict | None = None,
          runner: Callable[..., object] | None = None) -> int:
-    """The script entry point: `guest_codex.py notify <payload>` / `... tail [options]`."""
+    """The script entry point: `guest_codex.py notify <payload>` / `... tail [options]`, and the
+    settings flags the Options › Guests row uses (`--enable` / `--disable` / `--settings-state`)."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     command, rest = (arguments[0], arguments[1:]) if arguments else ("", [])
+    if command in ("--enable", "--disable", "--settings-state"):
+        return settings_main(arguments)
     if command == NOTIFY_EVENT:
         return notify_main(rest, env=env, runner=runner)
     if command == "tail":
