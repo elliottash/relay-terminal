@@ -790,16 +790,18 @@ protected:
             if (event->type() == QEvent::FocusOut) endTabRename();
         }
         // "New pane, then ← ↑ ↓ places it" (issue #78BN). The window closes on the first key or
-        // click; only a bare arrow acts, and everything else is passed on untouched. Which widget
-        // has the keyboard does not matter: with no focus at all the key reaches the window itself,
-        // and the arrow still places the pane (see #4PW5).
+        // click; a bare arrow acts, and so does one with Ctrl still held from the split key when
+        // the keymap leaves that chord free (card #JXWT), and everything else is passed on
+        // untouched. Which widget has the keyboard does not matter: with no focus at all the key
+        // reaches the window itself, and the arrow still places the pane (see #4PW5).
         if (m_placement.armed(m_placementClock.elapsed())
             && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
             && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
             using Placement = relay::panes::PlacementWindow;
             const auto *key = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
             const Placement::Response response =
-                key ? m_placement.keyPress(key->key(), key->modifiers(), m_placementClock.elapsed())
+                key ? m_placement.keyPress(key->key(), key->modifiers(), m_placementClock.elapsed(),
+                                           Keymap::instance().match(key))
                     : m_placement.mousePress(m_placementClock.elapsed());
             if (response.action == Placement::Action::Place) {
                 const auto direction = response.direction;
@@ -6725,13 +6727,14 @@ private:
 
     // Keyboard move: swap with the neighbor in that direction when they share a splitter,
     // otherwise dock on the neighbor's near side. Repeating keeps moving the pane that way.
+    // With no neighbor that way the pane is carried past the page's edge (movePastPageEdge).
     void moveActive(relay::panes::Direction direction) {
         endBeneathDock();   // a fresh move starts the chord over (#Q7Y9)
         QWidget *current = m_activeLeaf;
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
         QWidget *neighbor = neighborOf(current, direction);
-        if (!neighbor) { notice(QStringLiteral("No pane in that direction."), 2500); return; }
+        if (!neighbor) { movePastPageEdge(current, page, direction); return; }
         const Qt::Orientation orientation = relay::panes::orientationFor(direction);
         const bool towardStart = relay::panes::towardStart(direction);
         auto *splitter = dynamic_cast<QSplitter *>(current->parentWidget());
@@ -6749,6 +6752,73 @@ private:
         // A left/right move opens the two-second window in which the Move-down key docks the
         // pane beneath the neighbor it just moved toward (#Q7Y9): Ctrl+Alt+Left, Ctrl+Alt+Down.
         if (orientation == Qt::Horizontal) armBeneathDock(current, neighbor);
+    }
+
+    // The half of a keyboard move with no neighbour to swap with or dock beside: the pane is
+    // at the page's edge in that direction, and the move carries it PAST that edge into a
+    // column (left/right) or a row (up/down) of its own — the bottom pane of a stack in the
+    // page's rightmost column becomes the whole of a new rightmost column. takeLeaf and a
+    // reinsert, the same pair every other move uses, so the shell, the agent and the
+    // scrollback travel with it: the root splitter takes the pane at its end (or start) when
+    // it already runs that way, and is wrapped in a new splitter of that orientation when the
+    // page runs the other way. The notice stays only where the move would change nothing: the
+    // tab's only pane, and a pane that already fills that edge alone.
+    void movePastPageEdge(QWidget *current, QWidget *page, relay::panes::Direction direction) {
+        const QRect pageArea(QPoint(0, 0), page->size());
+        const QRect area(current->mapTo(page, QPoint(0, 0)), current->size());
+        if (leavesIn(page).size() <= 1) {
+            notice(QStringLiteral("This pane is already the only pane in its tab."), 4000);
+            return;
+        }
+        if (relay::panes::fillsTheEdge(area, pageArea, direction)) {
+            notice(QStringLiteral("This pane already has that edge to itself."), 2500);
+            return;
+        }
+        const QList<QPointer<QSplitter>> chain = relay::panes::enclosingSplitters(current);
+        QSplitter *root = chain.isEmpty() ? nullptr : chain.last().data();
+        if (!root) return;   // a page with more than one pane always has a splitter above them
+        const Qt::Orientation orientation = relay::panes::orientationFor(direction);
+        const bool towardStart = relay::panes::towardStart(direction);
+        // Read before takeLeaf, while the list still describes the page the pane is leaving;
+        // takeLeaf's unwrapping keeps the root's child count, so the list still fits after.
+        if (root->orientation() == orientation) {
+            // The pane always comes out of a stack here — a pane alone at the far end of a
+            // matching root fills the edge and was refused above — so takeLeaf's unwrapping
+            // happens inside the root and never empties it.
+            const QList<int> kept = root->sizes();
+            if (!takeLeaf(current)) return;
+            root->insertWidget(towardStart ? 0 : root->count(), current);
+            current->show();
+            const QList<int> sized = relay::panes::sizesAfterEdgeDock(kept, towardStart);
+            if (sized.size() == root->count()) root->setSizes(sized);
+        } else {
+            // The page runs the other way — rows, for a left/right move — so the pane goes past
+            // the whole page: the root is wrapped in a splitter of the move's orientation, the
+            // same dance insertBeside does around an anchor, with the root in the anchor's
+            // place. The root is wrapped BEFORE takeLeaf detaches the pane: on a two-pane page
+            // takeLeaf would otherwise unwrap the root away into the page layout and delete it,
+            // and the wrapper would be built around a splitter that is already going.
+            auto *outer = newSplitter(orientation);
+            if (QWidget *parent = root->parentWidget(); parent && parent->layout())
+                delete parent->layout()->replaceWidget(root, outer);
+            outer->addWidget(root);
+            root->show(); outer->show();
+            if (!takeLeaf(current)) return;   // may collapse the root to its other pane, inside outer
+            outer->insertWidget(towardStart ? 0 : outer->count(), current);
+            current->show();
+            // Size after the layout settles; sizes set on a hidden splitter follow size hints
+            // instead. One equal share of the page's now two top-level regions is its half.
+            QPointer<QSplitter> guard(outer);
+            QTimer::singleShot(0, outer, [guard] {
+                if (!guard) return;
+                const int total = guard->orientation() == Qt::Horizontal ? guard->width() : guard->height();
+                guard->setSizes({total / 2, total - total / 2});
+            });
+        }
+        setActiveLeaf(current); focusLeaf(current);
+        updateTitles();
+        // No beneath-dock chord to arm (#Q7Y9): it docks the pane beneath the neighbour it just
+        // moved toward, and past the page's edge there is no neighbour on that side.
     }
 
     QWidget *neighborOf(QWidget *current, relay::panes::Direction direction) const {

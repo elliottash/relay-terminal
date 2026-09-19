@@ -282,6 +282,49 @@ private Q_SLOTS:
         QVERIFY2(after.at(1) > 200, "and neither half is the equal share the splitter used to force");
     }
 
+    // ----- moving a pane past the page's edge --------------------------------------------------
+
+    // A pane that already spans the page across the direction of travel has that edge to
+    // itself; one that only reaches it — a pane of a stack — still has a column to be given.
+    void fillingTheEdgeMeansNothingToMove() {
+        const QRect page(0, 0, 1000, 600);
+        const QRect rightmostAlone(700, 0, 300, 600);      // a lone pane in the rightmost column
+        const QRect rightmostStacked(700, 300, 300, 300);  // the bottom pane of a stack there
+        const QRect topRowAlone(0, 0, 1000, 200);          // a lone pane in the topmost row
+        const QRect topRowStacked(500, 0, 500, 200);       // the right half of that row
+        const QRect only(0, 0, 1000, 600);                 // the tab's only pane
+        QVERIFY(fillsTheEdge(rightmostAlone, page, Direction::Right));
+        QVERIFY(!fillsTheEdge(rightmostStacked, page, Direction::Right));
+        QVERIFY(fillsTheEdge(topRowAlone, page, Direction::Up));
+        QVERIFY(!fillsTheEdge(topRowStacked, page, Direction::Up));
+        QVERIFY(fillsTheEdge(only, page, Direction::Left));
+        QVERIFY(fillsTheEdge(only, page, Direction::Down));
+        // A rounding pixel short of the boundary still counts as filling it.
+        QVERIFY(fillsTheEdge(QRect(700, 2, 300, 598), page, Direction::Right));
+    }
+
+    // The newcomer's share is one of the regions there will be once it has landed; the panes
+    // that were already on the page keep their relative sizes, and nothing is created or lost.
+    void edgeDockGivesTheNewcomerOneEqualShare() {
+        QCOMPARE(sizesAfterEdgeDock({300, 690}, false), QList<int>({200, 460, 330}));
+        QCOMPARE(sizesAfterEdgeDock({300, 690}, true), QList<int>({330, 200, 460}));
+        // A page with one region is wrapped, and half is that one equal share of two.
+        QCOMPARE(sizesAfterEdgeDock({900}, true), QList<int>({450, 450}));
+        // Rounding is absorbed by the widest pane, never by the total: 301 splits into a 100
+        // share and a 201 remainder that keeps 100:201's proportions.
+        QCOMPARE(sizesAfterEdgeDock({100, 201}, true), QList<int>({100, 67, 134}));
+        // What cannot be divided says so, rather than sizing the pane to nothing.
+        QVERIFY(sizesAfterEdgeDock({}, false).isEmpty());
+        QVERIFY(sizesAfterEdgeDock({0, 0}, true).isEmpty());
+        for (const QList<int> &sizes : {QList<int>{300, 690}, QList<int>{200, 500, 300}, QList<int>{100, 201}})
+            for (bool atStart : {false, true}) {
+                const QList<int> after = sizesAfterEdgeDock(sizes, atStart);
+                QCOMPARE(after.size(), sizes.size() + 1);
+                QCOMPARE(std::accumulate(after.cbegin(), after.cend(), 0),
+                         std::accumulate(sizes.cbegin(), sizes.cend(), 0));
+            }
+    }
+
     // ----- the edge a dragged pane is dropped on ----------------------------------------------
 
     void dropEdgePicksTheNearestEdge() {
@@ -350,18 +393,19 @@ private Q_SLOTS:
         PlacementWindow window;
         window.arm(0);
         QVERIFY(window.armed(0));
-        const auto left = window.keyPress(Qt::Key_Left, Qt::NoModifier, 100);
+        const auto left = window.keyPress(Qt::Key_Left, Qt::NoModifier, 100, QString());
         QCOMPARE(int(left.action), int(PlacementWindow::Action::Place));
         QCOMPARE(int(left.direction), int(Direction::Left));
         // One arrow only: the window is closed afterwards.
         QVERIFY(!window.armed(150));
-        QCOMPARE(int(window.keyPress(Qt::Key_Up, Qt::NoModifier, 150).action), int(PlacementWindow::Action::None));
+        QCOMPARE(int(window.keyPress(Qt::Key_Up, Qt::NoModifier, 150, QString()).action),
+                 int(PlacementWindow::Action::None));
 
         for (const auto pair : {std::make_pair(int(Qt::Key_Up), Direction::Up),
                                 std::make_pair(int(Qt::Key_Down), Direction::Down),
                                 std::make_pair(int(Qt::Key_Right), Direction::Right)}) {
             window.arm(0);
-            const auto response = window.keyPress(pair.first, Qt::NoModifier, 10);
+            const auto response = window.keyPress(pair.first, Qt::NoModifier, 10, QString());
             QCOMPARE(int(response.action), int(PlacementWindow::Action::Place));
             QCOMPARE(int(response.direction), int(pair.second));
         }
@@ -371,12 +415,51 @@ private Q_SLOTS:
         PlacementWindow window;
         // Alt+Left still focuses the pane to the left.
         window.arm(0);
-        const auto alt = window.keyPress(Qt::Key_Left, Qt::AltModifier, 10);
+        const auto alt = window.keyPress(Qt::Key_Left, Qt::AltModifier, 10, QString());
         QCOMPARE(int(alt.action), int(PlacementWindow::Action::Dismiss));
         QVERIFY(!window.armed(10));
         // A letter closes the window and is passed on, so it still reaches the prompt box.
         window.arm(0);
-        QCOMPARE(int(window.keyPress(Qt::Key_A, Qt::NoModifier, 10).action), int(PlacementWindow::Action::Dismiss));
+        QCOMPARE(int(window.keyPress(Qt::Key_A, Qt::NoModifier, 10, QString()).action),
+                 int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+    }
+
+    // The hand that typed Ctrl+E has not let go yet (card #JXWT): Ctrl still held places the pane,
+    // and Shift may ride along because Ctrl+Shift+E, the twin a program cannot swallow, leaves
+    // both down — but only while the keymap leaves the chord free.
+    void placementAcceptsArrowsWithCtrlHeld() {
+        PlacementWindow window;
+        window.arm(0);
+        const auto down = window.keyPress(Qt::Key_Down, Qt::ControlModifier, 100, QString());
+        QCOMPARE(int(down.action), int(PlacementWindow::Action::Place));
+        QCOMPARE(int(down.direction), int(Direction::Down));
+        QVERIFY(!window.armed(100));
+        window.arm(0);
+        const auto up = window.keyPress(Qt::Key_Up, Qt::ControlModifier | Qt::ShiftModifier, 100, QString());
+        QCOMPARE(int(up.action), int(PlacementWindow::Action::Place));
+        QCOMPARE(int(up.direction), int(Direction::Up));
+        // A chord the keymap binds keeps doing what it always does: the window closes and the key
+        // is passed on. Konsole binds Ctrl+Shift+Down to focus-below, and a hand-bound Ctrl+Down
+        // is that too.
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::ControlModifier | Qt::ShiftModifier, 10,
+                                     QStringLiteral("pane.focusDown")).action),
+                 int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::ControlModifier, 10,
+                                     QStringLiteral("pane.focusDown")).action),
+                 int(PlacementWindow::Action::Dismiss));
+        // Alt or Meta with the arrow is never placement, bound or not: Ctrl+Alt+arrow moves a
+        // pane, and Alt+arrow focuses one.
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::ControlModifier | Qt::AltModifier, 10, QString()).action),
+                 int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::ShiftModifier, 10, QString()).action),
+                 int(PlacementWindow::Action::Dismiss));
         QVERIFY(!window.armed(10));
     }
 
@@ -384,11 +467,13 @@ private Q_SLOTS:
         PlacementWindow window;
         window.arm(0);
         for (int key : {int(Qt::Key_Control), int(Qt::Key_Shift), int(Qt::Key_Alt), int(Qt::Key_Meta), int(Qt::Key_AltGr)}) {
-            QCOMPARE(int(window.keyPress(key, Qt::NoModifier, 10).action), int(PlacementWindow::Action::None));
+            QCOMPARE(int(window.keyPress(key, Qt::NoModifier, 10, QString()).action),
+                     int(PlacementWindow::Action::None));
             QVERIFY(window.armed(10));
         }
         // The arrow that follows still places the pane.
-        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::NoModifier, 20).action), int(PlacementWindow::Action::Place));
+        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::NoModifier, 20, QString()).action),
+                 int(PlacementWindow::Action::Place));
     }
 
     void placementExpiresAfterTwoSeconds() {
@@ -397,7 +482,7 @@ private Q_SLOTS:
         QVERIFY(window.armed(PlacementWindow::kTimeoutMs - 1));
         QVERIFY(!window.armed(PlacementWindow::kTimeoutMs));
         // An arrow typed after the window closed is passed on, not swallowed.
-        const auto late = window.keyPress(Qt::Key_Left, Qt::NoModifier, PlacementWindow::kTimeoutMs + 500);
+        const auto late = window.keyPress(Qt::Key_Left, Qt::NoModifier, PlacementWindow::kTimeoutMs + 500, QString());
         QCOMPARE(int(late.action), int(PlacementWindow::Action::Dismiss));
         QVERIFY(!window.armed(PlacementWindow::kTimeoutMs + 500));
     }
@@ -407,7 +492,8 @@ private Q_SLOTS:
         window.arm(0);
         QCOMPARE(int(window.mousePress(10).action), int(PlacementWindow::Action::Dismiss));
         QVERIFY(!window.armed(10));
-        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 20).action), int(PlacementWindow::Action::None));
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 20, QString()).action),
+                 int(PlacementWindow::Action::None));
         // A click with no window open is nothing at all.
         QCOMPARE(int(window.mousePress(30).action), int(PlacementWindow::Action::None));
     }
@@ -417,7 +503,8 @@ private Q_SLOTS:
         window.arm(0);
         window.cancel();
         QVERIFY(!window.armed(0));
-        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 10).action), int(PlacementWindow::Action::None));
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 10, QString()).action),
+                 int(PlacementWindow::Action::None));
     }
 
     // ----- "move left/right, then the Move-down key docks it beneath" (card #Q7Y9) ------------

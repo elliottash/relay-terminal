@@ -61,7 +61,8 @@ void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor) {
     splitter->setSizes(sizes);
 }
 
-PlacementWindow::Response PlacementWindow::keyPress(int key, Qt::KeyboardModifiers modifiers, qint64 nowMs) {
+PlacementWindow::Response PlacementWindow::keyPress(int key, Qt::KeyboardModifiers modifiers, qint64 nowMs,
+                                                    const QString &boundAction) {
     if (!m_armed) return {};
     // A modifier held down on its own is not yet a keystroke.
     if (key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta
@@ -69,9 +70,14 @@ PlacementWindow::Response PlacementWindow::keyPress(int key, Qt::KeyboardModifie
         return {};
     if (!armed(nowMs)) { m_armed = false; return {Action::Dismiss, Direction::Right}; }
     const auto mods = modifiers & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
-    // Only a bare arrow places: Alt+Left already focuses the pane to the left, and a shortcut
-    // should keep doing what it always does.
-    if (mods == Qt::NoModifier) {
+    // A bare arrow places, and so does one with Ctrl still held (Shift may ride along, because
+    // Ctrl+Shift+E leaves both down) — but only while the keymap leaves that chord free: a bound
+    // shortcut keeps doing what it always does, so Alt+Left still focuses the pane to the left
+    // and the konsole preset's Ctrl+Shift+Down still focuses below.
+    const bool places = mods == Qt::NoModifier
+        || ((mods == Qt::ControlModifier || mods == (Qt::ControlModifier | Qt::ShiftModifier))
+            && boundAction.isEmpty());
+    if (places) {
         switch (key) {
         case Qt::Key_Left: m_armed = false; return {Action::Place, Direction::Left};
         case Qt::Key_Up: m_armed = false; return {Action::Place, Direction::Up};
@@ -207,6 +213,40 @@ QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex) {
         out.append(share / 2);
         out.append(share - share / 2);
     }
+    return out;
+}
+
+bool fillsTheEdge(const QRect &pane, const QRect &page, Direction direction) {
+    // The few pixels of slack neighbourIndex allows, so a pane that exactly reaches the page's
+    // boundary is not read as falling short of it by a rounding pixel.
+    constexpr int slack = 4;
+    if (direction == Direction::Left || direction == Direction::Right)
+        return pane.top() <= page.top() + slack && pane.bottom() >= page.bottom() - slack;
+    return pane.left() <= page.left() + slack && pane.right() >= page.right() - slack;
+}
+
+QList<int> sizesAfterEdgeDock(const QList<int> &sizes, bool atStart) {
+    qint64 total = 0;
+    for (int size : sizes) total += size;
+    if (sizes.isEmpty() || total <= 0) return {};
+    const qint64 share = total / (sizes.size() + 1);
+    const qint64 rest = total - share;
+    QList<int> kept;
+    kept.reserve(sizes.size());
+    int widest = 0, keptTotal = 0;
+    for (int i = 0; i < sizes.size(); ++i) {
+        kept.append(int((qint64(sizes.at(i)) * rest + total / 2) / total));
+        keptTotal += kept.last();
+        if (sizes.at(i) > sizes.at(widest)) widest = i;
+    }
+    // Proportional scaling rounds. The widest pane absorbs what the rounding left over, where
+    // one pixel is least visible, so the list still sums to what the splitter had.
+    kept[widest] += int(rest) - keptTotal;
+    QList<int> out;
+    out.reserve(sizes.size() + 1);
+    if (atStart) out.append(int(share));
+    out += kept;
+    if (!atStart) out.append(int(share));
     return out;
 }
 

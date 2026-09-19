@@ -151,11 +151,30 @@ QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex);
 
 // Put sizes recorded from enclosingSplitters() back. A splitter that has gone away, or whose
 // children changed in between so the sizes no longer describe it, is skipped.
+// True when `pane` already fills the page across the direction of travel — the page's full
+// height for a left/right move, its full width for an up/down one — so moving it past that
+// edge would only hand it what it already has alone. The caller asks once the neighbour search
+// has come back empty, which is the other half of "nothing to change": the top pane of a stack
+// reaches the page's right edge too, but it does not span the page, so a column of its own is
+// still a move.
+bool fillsTheEdge(const QRect &pane, const QRect &page, Direction direction);
+
+// The sizes for a pane moved past the page's edge, at the start or the end of the root
+// splitter it joins: the newcomer takes one equal share of the whole splitter — the page's
+// top-level regions plus itself — and the panes already there keep their relative sizes, so a
+// column pulled out of a two-wide page leaves three thirds, and a hand-set wide column stays
+// proportionally wide. `sizesAfterDock`'s twin for the one dock that has no neighbour whose
+// share could be halved: the pane leaves the page's edge, not a pane beside it. An empty
+// answer means there is nothing to divide (a splitter not laid out yet), and the caller keeps
+// whatever sizes Qt chose for the insert.
+QList<int> sizesAfterEdgeDock(const QList<int> &sizes, bool atStart);
+
 void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes);
 // The short window after "new pane" put a pane on the right, during which Left, Up or Down
 // re-dock that pane to the named side instead (issue #78BN). Right keeps it where it is, and
 // anything else — another key, a click, or two seconds passing — closes the window and behaves
-// normally, so arrows typed a moment later still reach the shell or the prompt box.
+// normally, so arrows typed a moment later still reach the shell or the prompt box. Ctrl may
+// still be held from the split key (card #JXWT): see `keyPress` for how far that goes.
 //
 // No widgets and no timers: the caller passes a monotonic clock in milliseconds, so the rules
 // can be tested on their own (tests/panelayout_test.cpp).
@@ -181,7 +200,15 @@ public:
 
     // A key press anywhere in the window. Modifier-only presses (Ctrl, Shift, Alt, Meta, AltGr)
     // keep the window open, because they are the first half of a shortcut, not "any other key".
-    Response keyPress(int key, Qt::KeyboardModifiers modifiers, qint64 nowMs);
+    //
+    // A bare arrow places the pane, and so does one with Ctrl still held (card #JXWT): the hand
+    // that typed Ctrl+E has not let go yet, and Shift may ride along — Ctrl+Shift+E is the twin
+    // a program cannot swallow, and it leaves both down. But only while the keymap leaves that
+    // chord free: `boundAction` is the action the keymap binds to this exact key chord, empty
+    // when none, and a bound shortcut keeps doing what it always does — Alt+Left focuses the
+    // pane to the left, Ctrl+Alt+arrow moves one, and the konsole preset's Ctrl+Shift+Down
+    // focuses below.
+    Response keyPress(int key, Qt::KeyboardModifiers modifiers, qint64 nowMs, const QString &boundAction);
     // Any mouse press closes the window. Never consumes the click.
     Response mousePress(qint64 nowMs);
 
