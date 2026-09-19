@@ -1735,6 +1735,102 @@ sourced) always shows a preview of exactly what would be stored, with the origin
 the worker writes from its own copy of that preview. The agent may propose an alias for a command
 run three times or more — a suggestion only, logged in `worker.log`.
 
+## 11a. Guest agents: Claude Code and Codex in a pane
+
+A **guest** is a CLI agent process (Claude Code, Codex) running in an ordinary terminal pane — not
+a Relay worker, not a BYOK preset. Relay's posture is the same as Warp's guest terminal agent
+("Relay does not try to turn Claude Code into a second worker backend; it observes, and it touches
+a guest only through the guest's own sanctioned surfaces", issue `GT7X`): no reverse-engineered
+internals, no keystroke automation, and any contact beyond observation is a step Relay offers and
+the user confirms — Relay never reaches into a project on its own. The reference spec is
+`docs/AGENT-SESSIONS-PROTOCOL.md` section 26, whose contracts (§26.3–26.8) are binding; every
+deviation from this section is written down there. Guests are **local-only**: none of the pane's
+`guest_model` / `guest_context_pct` / `guest_busy` state or the five guest event kinds crosses the
+wire to a remote host (`WITHHELD_EVENTS` in `remote/wire.py`, one regression test). The module
+root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no exceptions).
+
+- **Detection** (`guest.py`, and the pane's foreground watch): one `GuestSpec` per tool and
+  `classify_command()` over the live foreground argv — mirrored in C++ where the pane already
+  classifies its foreground process, one rule in two languages kept side by side — so a pane
+  *knows* it is running claude or codex (`Pane::guest()`) without scraping the screen.
+  `detect_installations()` answers what is installed from the tool itself (binary, version,
+  config dir), and an unreadable install is "installed, details unknown", never a guess.
+  Install state is never inferred from files by the GUI either: it is the installers' own
+  `--status` (below), re-read each time the Guests page is shown.
+- **One event channel** (§26.3): everything a guest phase learns reaches its pane as one
+  envelope — `{"token", "sequence", "event", "guest", "data"}`, the event one of `hook`,
+  `statusline`, `state`, `bridge`, `slash` — written by the single `shell/guest-event.py`
+  helper as a whole-file atomic replace of `guest.json` in the pane's runtime dir, which the
+  pane polls **by inode** beside `state.json` and dispatches in `Pane::pollGuestEvent`. The
+  pane accepts only its own pane token and a fresh sequence, and a missing `RELAY_GUEST_EVENT`
+  makes the helper a no-op that writes nowhere, so the entries Relay leaves in a tool's
+  settings are inert in an ordinary terminal. All five kinds are withheld from the wire, and
+  any future one is refused by the same regression test until an explicit owner decision adds
+  it to `KNOWN_EVENTS`.
+- **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`):
+  marked, additive entries in the project's `.claude/settings.json` — hooks `PreToolUse`,
+  `UserPromptSubmit`, `Stop` and `Notification` calling `"$RELAY_PYTHON" -m relay_core.guest_hook
+  <event>`, plus a `statusLine` shim that feeds the pane's guest chip while claude still
+  renders its own line. Every Relay command carries the `--relay-guest` marker, and turning
+  Guests off removes exactly the marked entries and nothing else. A statusline the user wrote
+  themselves is kept, not overwritten (the chip then simply has nothing to show), and a
+  `PreToolUse` is answered as a Relay question on the pane — never auto-approved. The global
+  `~/.claude/settings.json` gets the same entries only behind a second, explicit opt-in, and
+  only ever in addition to the project install.
+- **Codex: `notify` and the rollout tail** (§26.6, `guest_codex.py`): Codex has no IDE bridge
+  and no project scope, so its two marked entries — `notify` (run at the end of a turn with
+  the JSON payload as one argv item) and `[tui] notification_condition = "always"` (Codex
+  otherwise stays quiet in the focused terminal) — live in the user's `~/.codex/config.toml`
+  and fire in every terminal, which is exactly why the channel's no-op invariant matters. A
+  small TOML *document* model keeps every untouched byte untouched — enabling then disabling
+  returns the file byte for byte — and a key the user already owns is a hard
+  `SettingsConflict`, never overwritten. What the pane knows about a codex turn comes from
+  `notify` (which also reaches Relay's notification centre) and from tailing the newest
+  rollout under `~/.codex/sessions/YYYY/MM/DD/`; the app-server daemon stays Tier A.
+- **The Claude IDE bridge** (§26.5, `guest_bridge.py`, one sidecar per GUI run): Relay plays
+  the *editor* side of Claude Code's IDE integration — JSON-RPC 2.0 over a loopback-only
+  WebSocket, discovered upstream's own way: `CLAUDE_CODE_SSE_PORT` and
+  `ENABLE_IDE_INTEGRATION` in the pane's shell environment (`guest.bridge_env`, injected when
+  the terminal starts) and the `~/.claude/ide/<port>.lock` file a claude started anywhere
+  reads to find the same server. It serves the twelve IDE tools; `getDiagnostics` answers
+  `[]` — Relay has no LSP source, documented rather than faked. `openDiff` is the blocking
+  one: the unified diff travels the one channel as a `bridge` event, the pane shows Relay's
+  diff view ("claude proposes changes to …"), and the call returns only when the user decides
+  — `FILE_SAVED`, after the *sidecar* writes the file, so the GUI never writes a user file —
+  or `DIFF_REJECTED`, which is also what an unmatched, timed-out or abandoned request gets,
+  because a guest left hanging is worse than a guest told no. Every path an openDiff names
+  must `realpath`-resolve inside the one pane's workspace, checked again at the moment of the
+  write. `guest.diffSave` accepts the open proposal from the keyboard and carries the
+  feature's shortcut hint ("Next time: %1 saves claude's change").
+- **Sessions** (§26.7, `guest_sessions.py`): Claude's `~/.claude/projects/<cwd-slug>/`
+  transcripts and Codex's `~/.codex/sessions/` rollouts are two more Conversations sources
+  (`claude`, `codex`) beside Relay's own sessions and subagent threads. A record is
+  `{source, id, title, mtime, workspace, message_count, resume_command}`, and
+  `resume_command` is always the tool's own (`claude -r <id>`, `codex resume <id>`, and their
+  fork variants) — resuming is the tool's affair, run in a pane like any other command. The
+  index is a cache as everywhere else (`guest_sessions.reconcile()` on the worker's first
+  conversation command), and rename / pin / delete stay index-only: Relay never edits the
+  tool's files.
+- **Composer and input** (`guest_slash.py`, `src/Pane.h`): the pane builds the guest's slash
+  catalog from a static `relay_core.guest_slash` scan (claude: the built-ins plus the skills
+  and legacy-command locations it documents; codex: the stable TUI set), refreshed by live
+  `slash` events, and shows those commands in the `/` menu marked as the guest's own. Picking
+  one sends it to the pane as plain text — queued while the guest is busy ("Queued · sent to
+  <guest> when it is ready") — and the router treats a guest pane's composer as terminal
+  input throughout, the translator passing only what a TUI can take.
+- **Options** (Settings › Guests, `src/RelayWindow.h`): the rows are a thin front end over
+  the two installer command lines — `relay_core.guest_install` (project scope, and global
+  behind its own opt-in) and `relay_core.guest_codex` — each run with `-S -u -m` and the
+  shipped backend *appended* to PYTHONPATH, so the user's own environment keeps precedence.
+  The rows never guess at the files: showing the page re-reads `--status`, every apply draws
+  its state from the installer's own JSON answer, and the notice names the file that was
+  written — including the cases where what the user wrote themselves was kept because it is
+  theirs. No row declares a reset: off is what Relay ships, and off is idempotent.
+
+The pane's guest state rides the ordinary `program_state` (`guest_model`, `guest_context_pct`,
+`guest_busy`) so the title bar, tab labels and remote clients that are allowed to see process
+state can render it; it is stripped from wire frames like the rest of the guest surface.
+
 ## 12. Keys, keyring and imports
 
 `backend/relay_core/keystore.py`. A model server on this machine has no key and no entry here: its

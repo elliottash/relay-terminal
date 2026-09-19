@@ -43,6 +43,7 @@
 #include "Conversations.h"
 #include "SessionInfo.h"
 #include "Logging.h"
+#include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"
@@ -244,6 +245,9 @@ class Pane final : public QWidget {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
+        // A guest-composer entry is neither a Relay-agent prompt nor a shell command. It stays
+        // in the pane's one delivery queue until this named guest reports that it is idle.
+        QString guest;
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -259,7 +263,8 @@ public:
         QString label() const {
             const QString what = fix ? QStringLiteral("fix request")
                                  : written() ? QStringLiteral("terminal result") : text;
-            return author.isEmpty() ? what : author + QStringLiteral(" · ") + what;
+            const QString labelled = guest.isEmpty() ? what : guestDisplayName(guest) + QStringLiteral(" · ") + what;
+            return author.isEmpty() ? labelled : author + QStringLiteral(" · ") + labelled;
         }
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
@@ -324,6 +329,11 @@ public:
     ~Pane() override {
         m_closing = true;
         qApp->removeEventFilter(this);
+        // The bridge: this pane is gone, so its registration ends here — and so does any diff it
+        // still owes claude an answer to. Rejecting is the only honest answer once nobody can
+        // show the change (26.5).
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("pane closed"));
+        unregisterFromBridge();
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
@@ -341,6 +351,25 @@ public:
                 m_worker.waitForFinished(1000);
             }
         }
+    }
+
+    // Scan asynchronously: an unreadable home/config directory or a vanished guest helper must
+    // not block a keystroke in the pane. The helper publishes a normal `slash` event atomically.
+    void publishGuestSlashCatalog(const QString &guest) {
+        if (guest != QStringLiteral("claude") && guest != QStringLiteral("codex")) return;
+        auto *scan = new QProcess(this);
+        scan->setWorkingDirectory(m_cwd);
+        scan->setProgram(m_python);
+        scan->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
+                            QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
+        connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, scan, guest](int code, QProcess::ExitStatus exit) {
+                    if (exit != QProcess::NormalExit || code != 0)
+                        status(QStringLiteral("Could not read %1 slash commands.").arg(guestDisplayName(guest)));
+                    scan->deleteLater();
+                });
+        connect(scan, &QProcess::errorOccurred, this, [scan](QProcess::ProcessError) { scan->deleteLater(); });
+        scan->start();
     }
 
     // ----- interface used by RelayWindow ----------------------------------------------------
@@ -445,6 +474,23 @@ public:
     // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
     // Classified from the command line on every program poll (issue GT7X, protocol 26).
     QString guest() const { return m_guest; }
+    // One `bridge` event from this pane's guest channel (26.3, 26.5): what the IDE bridge's
+    // sidecar learned from a claude connected to it, handed in by the channel's own reader
+    // (handleGuestEvent) — the fold the seam was waiting for.
+    // `openDiff` is the one that asks for Relay surfaces of its own (the diff view, and the
+    // banner that decides it); `openFile` opens the preview pane. Everything else — a selection,
+    // a dirty flag, the diagnostics Relay does not have — was answered by the sidecar, which is
+    // the only side that can answer it.
+    void guestBridgeEvent(const QJsonObject &data) {
+        const QString tool = data.value(QStringLiteral("tool")).toString();
+        if (tool == QStringLiteral("openDiff")) { showGuestDiff(data); return; }
+        if (tool == QStringLiteral("openFile")) {
+            const QString path = data.value(QStringLiteral("filePath")).toString();
+            if (!path.isEmpty() && onOpenPath) onOpenPath(path, 0);
+            return;
+        }
+        relay::log::debug(QStringLiteral("guest_bridge_tool pane=%1 tool=%2").arg(paneLogId(), tool));
+    }
     bool sharedWithPhone() const { return relay::RemoteShare::instance().isSharing(m_token); }
     bool processBusy() const {
         if (!m_backend) return false;
@@ -914,6 +960,7 @@ private:
     // Keystrokes the agent may send into one program in one turn. The worker enforces it too.
     static constexpr int kMaxProgramWrites = 20;
     static constexpr int kScreenSnapshotChars = 8000;
+    static constexpr int kGuestModelMax = 64;   // program_state.guest_model's ceiling (26.3)
 
     relay::screen::Signals screenSignals() const {
         relay::screen::Signals sig;
@@ -992,12 +1039,16 @@ private:
     // a running turn before its next model call (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
     QJsonObject programStateMessage() const {
         const bool masked = m_secretMode || m_screenPrompt.masked;
-        return QJsonObject{
+        QJsonObject state = QJsonObject{
             {QStringLiteral("type"), QStringLiteral("program_state")},
             {QStringLiteral("granted"), m_delegated && processBusy() && !m_native && !masked},
             {QStringLiteral("reason"), m_delegated ? QStringLiteral("delegated") : m_delegationEnd},
             {QStringLiteral("program"), foregroundProgramName()},
             {QStringLiteral("guest"), m_guest},
+            // The guest's live facts (26.3): what it is running on, and whether a turn of its own
+            // is going. Its context share joins below, only when the statusline could say.
+            {QStringLiteral("guest_model"), m_guestModel.left(kGuestModelMax)},
+            {QStringLiteral("guest_busy"), m_guestBusy},
             {QStringLiteral("kind"), QString::fromLatin1(relay::screen::kindName(m_screenPrompt.kind))},
             {QStringLiteral("question"), m_screenPrompt.question},
             {QStringLiteral("masked"), masked},
@@ -1005,6 +1056,8 @@ private:
             {QStringLiteral("waiting"), m_screenPrompt.actionable() || m_waiting},
             {QStringLiteral("max_writes"), kMaxProgramWrites},
             {QStringLiteral("screen_source"), canShowAgentTheScreen() ? QStringLiteral("engine") : QStringLiteral("none")}};
+        if (m_guestContextPct >= 0) state.insert(QStringLiteral("guest_context_pct"), m_guestContextPct);
+        return state;
     }
 
     void sendProgramState() {
@@ -1020,8 +1073,261 @@ private:
     void setGuest(const QString &guest) {
         if (guest == m_guest) return;
         m_guest = guest;
+        // A guest that left (or changed) takes its live facts and its open question with it;
+        // the next statusline or state event repopulates them (26.3).
+        clearGuestState();
+        m_guestSlashCommands.clear();
+        if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
         sendProgramState();
         changed();
+        // The bridge follows the guest (26.5): a claude in the foreground means this pane must be
+        // routable before the first request can arrive, and a claude that exited means the pane is
+        // nobody's target again until another one starts. Codex has no IDE bridge and never
+        // registers — bridge_env("codex") is empty, so there is nothing to be found.
+        if (m_guest == QStringLiteral("claude")) registerWithBridge();
+        else if (m_guest.isEmpty()) unregisterFromBridge();
+    }
+
+    // ----- the Claude IDE bridge: this pane's registration, and its diffs (GT7X, 26.5) --------
+    //
+    // The sidecar routes a request by the longest workspace/cwd prefix of the paths it names, so
+    // every pane tells it where it is — once at shell start (the shell carries the port; a claude
+    // started in it connects back), again when the cwd or the workspace moves, and again when a
+    // claude turns up in the foreground. Rewrites that would say exactly what the last one said
+    // are dropped by the bridge itself, so this is cheap enough to ask for on every change.
+    void registerWithBridge() {
+        auto &bridge = relay::guestbridge::Bridge::instance();
+        if (!bridge.started()) return;   // nothing to register with yet
+        bridge.setDataRoot(m_data);
+        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python);
+    }
+
+    void unregisterFromBridge() {
+        if (!relay::guestbridge::Bridge::started()) return;
+        relay::guestbridge::Bridge::instance().unregisterPane(m_token);
+    }
+
+    // The pane's answer to a blocking openDiff (26.5): the diff view shows the change, this is
+    // what the user decided. FILE_SAVED makes the *sidecar* write the file — the GUI never writes
+    // a user's file from a bridge event — and either answer returns the waiting tool call.
+    void settleGuestDiff(const QString &outcome, const QString &why) {
+        if (!m_guestDiff.pending) return;
+        const GuestDiff diff = m_guestDiff;
+        m_guestDiff = GuestDiff();
+        relay::guestbridge::Bridge::instance().answerDiff(diff.replyPath, outcome);
+        const QString name = QFileInfo(diff.file).fileName();
+        const bool saved = outcome == relay::guestbridge::fileSaved();
+        relay::log::info(QStringLiteral("guest_bridge_diff pane=%1 saved=%2 reason=%3")
+                             .arg(paneLogId()).arg(saved ? 1 : 0).arg(why));
+        // A closing pane settles its debt without staging a toast nobody will ever see.
+        if (!m_closing)
+            toast(saved ? QStringLiteral("Saved claude's changes to %1").arg(name)
+                        : QStringLiteral("Kept the file as it was · claude's changes to %1 were not applied").arg(name));
+    }
+
+    // `openDiff` from the bridge: Relay's diff view beside this pane, and the banner that decides.
+    // The decision is the banner's action (save) or its dismissal (reject), because claude's call
+    // blocks until one of them — an unanswered diff is a claude left waiting forever.
+    void showGuestDiff(const QJsonObject &data) {
+        const QString reply = data.value(QStringLiteral("reply")).toString();
+        const QString file = data.value(QStringLiteral("file")).toString();
+        const QString diff = data.value(QStringLiteral("diff")).toString();
+        const QString tabName = data.value(QStringLiteral("tab_name")).toString();
+        if (reply.isEmpty()) {
+            // Not a protocol event a pane can answer, so it is not answered: logged and dropped.
+            relay::log::error(QStringLiteral("guest_bridge_diff_no_reply pane=%1").arg(paneLogId()));
+            return;
+        }
+        // A second openDiff while one waits: claude replaced its proposal, and the first call
+        // cannot be answered any more. Rejecting it is the only honest answer.
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("replaced"));
+        m_guestDiff.replyPath = reply;
+        m_guestDiff.file = file;
+        m_guestDiff.pending = true;
+        const QString name = QFileInfo(file).fileName();
+        if (diff.isEmpty() || !onOpenDiff) {
+            // Nowhere to show the change is nowhere to decide it: refuse rather than leave claude
+            // waiting on a question this pane cannot put to anyone.
+            relay::log::error(QStringLiteral("guest_bridge_diff_unshowable pane=%1").arg(paneLogId()));
+            settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("no diff view"));
+            return;
+        }
+        onOpenDiff(tabName.isEmpty() ? name : tabName, diff);
+        const QString where = m_workspace.isEmpty() ? name : QStringLiteral("%1 · %2").arg(name, m_workspace);
+        showBanner(QStringLiteral("claude proposes changes to %1").arg(where), QStringLiteral("Save"),
+                   [this] {
+                       settleGuestDiff(relay::guestbridge::fileSaved(), QStringLiteral("saved"));
+                       hideBanner();
+                   });
+        // The banner's action is Ctrl+Shift+R's too (restartStopped runs the visible banner's
+        // action); teaching that once is cheaper than a claude left waiting on a decision nobody
+        // knows is one keystroke away.
+        if (const QString key = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell")); !key.isEmpty())
+            hint(QStringLiteral("guest.diffSave"),
+                QStringLiteral("Next time: %1 saves claude's change").arg(key));
+    }
+
+    // ----- the guest event channel (issue GT7X, protocol 26.3) ---------------------------------
+    // Everything a guest or its shim learns arrives as guest.json in the runtime dir, written
+    // atomically by shell/guest-event.py, and is polled exactly as pollShell() polls state.json:
+    // a new inode means a new event, then a token check and a sequence check, on the same tick.
+    void pollGuestEvent() {
+        const QString guestPath = m_runtime.filePath(QStringLiteral("guest.json"));
+        struct stat info;
+        if (::stat(QFile::encodeName(guestPath).constData(), &info) != 0) return;
+        if (m_guestSeen && info.st_ino == m_guestInode && info.st_size == m_guestSize
+            && info.st_mtim.tv_sec == m_guestMtime.tv_sec && info.st_mtim.tv_nsec == m_guestMtime.tv_nsec) return;
+        QFile file(guestPath);
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
+        m_guestSeen = true; m_guestInode = info.st_ino; m_guestSize = info.st_size; m_guestMtime = info.st_mtim;
+        const auto envelope = QJsonDocument::fromJson(file.readAll()).object();
+        if (envelope.value(QStringLiteral("token")).toString() != m_token) return;
+        const auto sequence = envelope.value(QStringLiteral("sequence")).toString();
+        if (sequence.isEmpty() || sequence == m_guestSequence) return;
+        m_guestSequence = sequence;
+        handleGuestEvent(sequence, envelope.value(QStringLiteral("event")).toString(),
+                         envelope.value(QStringLiteral("data")).toObject());
+    }
+
+    // One event off the channel: the hooks phase's own events (26.3), the bridge phase's (26.5),
+    // and `slash`, Relay's own scanned fallback catalog (26.8).
+    void handleGuestEvent(const QString &sequence, const QString &name, const QJsonObject &data) {
+        if (name == QStringLiteral("statusline")) {
+            m_guestModel = data.value(QStringLiteral("model")).toString().simplified().left(kGuestModelMax);
+            const QJsonValue share = data.value(QStringLiteral("context_pct"));
+            m_guestContextPct = share.isDouble() && 0 <= share.toInt() && share.toInt() <= 100 ? share.toInt() : -1;
+            updateGuestChip();
+            sendProgramState();
+            changed();
+        } else if (name == QStringLiteral("state")) {
+            setGuestBusy(data.value(QStringLiteral("busy")).toBool());
+        } else if (name == QStringLiteral("hook")) {
+            handleGuestHook(sequence, data.value(QStringLiteral("name")).toString(),
+                            data.value(QStringLiteral("payload")).toObject());
+        } else if (name == QStringLiteral("bridge")) {
+            guestBridgeEvent(data);
+        } else if (name == QStringLiteral("slash")) {
+            QStringList commands;
+            static const QRegularExpression command(QStringLiteral("^/[A-Za-z0-9][A-Za-z0-9._-]*$"));
+            for (const QJsonValue &value : data.value(QStringLiteral("commands")).toArray()) {
+                const QString item = value.toString().trimmed();
+                if (command.match(item).hasMatch() && !commands.contains(item, Qt::CaseInsensitive))
+                    commands << item;
+            }
+            m_guestSlashCommands = commands;
+            updateSlashPopup();
+        }
+    }
+
+    void setGuestBusy(bool busy) {
+        if (busy == m_guestBusy) return;
+        m_guestBusy = busy;
+        updateGuestChip();
+        sendProgramState();
+        changed();
+        if (!m_guestBusy) pumpQueue();
+    }
+
+    // A hook the guest's shim forwarded (26.4). A permission request becomes a Relay question
+    // on the pane; a notification reaches the notification centre; the rest only moves state.
+    void handleGuestHook(const QString &sequence, const QString &name, const QJsonObject &payload) {
+        if (name == QStringLiteral("PreToolUse")) {
+            showGuestQuestion(sequence, payload);
+        } else if (name == QStringLiteral("Notification")) {
+            const QString message = payload.value(QStringLiteral("message")).toString().simplified();
+            if (!message.isEmpty()) notify(guestDisplayName(m_guest), message);
+        } else if (name == QStringLiteral("UserPromptSubmit")) {
+            setGuestBusy(true);   // a guest turn has begun; Stop ends it
+        } else if (name == QStringLiteral("Stop")) {
+            setGuestBusy(false);
+        }
+    }
+
+    // The permission question: the guest asks before a tool run, the shim holds the hook open,
+    // and Relay answers through guest-answer.json. It is never answered on the guest's behalf —
+    // the bar stays until the user clicks, and a shim that times out falls back to the guest's
+    // own asking, so nothing is auto-approved.
+    void showGuestQuestion(const QString &sequence, const QJsonObject &payload) {
+        if (!m_guestBar) return;
+        m_guestQuestionSeq = sequence;
+        const QString tool = payload.value(QStringLiteral("tool_name")).toString();
+        const QJsonObject input = payload.value(QStringLiteral("tool_input")).toObject();
+        QString detail = input.value(QStringLiteral("command")).toString();
+        for (const char *field : {"file_path", "path", "url", "pattern"})
+            if (detail.isEmpty()) detail = input.value(QLatin1String(field)).toString();
+        QString label = guestDisplayName(m_guest)
+                        + QStringLiteral(" wants to run %1").arg(tool.isEmpty() ? QStringLiteral("a tool") : tool);
+        if (!detail.isEmpty()) label += QStringLiteral(" · ") + detail.simplified().left(80);
+        m_guestBarLabel->setText(m_guestBarLabel->fontMetrics().elidedText(label, Qt::ElideMiddle,
+                                                                           std::max(200, width() - 420)));
+        m_guestBarLabel->setToolTip(label);
+        m_guestBar->adjustSize();
+        m_guestBar->show();
+        m_guestBar->raise();
+        placeGuestBar();
+    }
+
+    void hideGuestQuestion() {
+        m_guestQuestionSeq.clear();
+        if (m_guestBar) m_guestBar->hide();
+    }
+
+    // The clicked answer, written atomically beside the events for the shim waiting on this
+    // exact sequence; the shim turns it into the hook's decision (claude's contract, 26.4).
+    void answerGuestPermission(bool allow) {
+        const QString sequence = m_guestQuestionSeq;
+        hideGuestQuestion();
+        if (sequence.isEmpty() || m_runtime.path().isEmpty()) return;
+        QSaveFile file(m_runtime.filePath(QStringLiteral("guest-answer.json")));
+        if (!file.open(QIODevice::WriteOnly)) return;
+        file.write(QJsonDocument(QJsonObject{{QStringLiteral("token"), m_token},
+                                             {QStringLiteral("sequence"), sequence},
+                                             {QStringLiteral("decision"), allow ? QStringLiteral("allow")
+                                                                                 : QStringLiteral("deny")}})
+                       .toJson(QJsonDocument::Compact));
+        file.commit();
+        status(allow ? QStringLiteral("Allowed in Relay.") : QStringLiteral("Denied in Relay."));
+    }
+
+    void clearGuestState() {
+        m_guestModel.clear();
+        m_guestContextPct = -1;
+        m_guestBusy = false;
+        hideGuestQuestion();
+        updateGuestChip();
+    }
+
+    // The guest's chip in the prompt-box strip: its model and, when the statusline could say,
+    // how much of its context window is in use. The same idiom as the context chip beside it.
+    void updateGuestChip() {
+        if (!m_guestChip) return;
+        if (m_guest.isEmpty()) { m_guestChip->hide(); return; }
+        const QString model = m_guestModel.isEmpty() ? guestDisplayName(m_guest) : m_guestModel;
+        m_guestChip->setText(m_guestContextPct >= 0
+                                 ? QStringLiteral("%1 · %2%").arg(model, QString::number(m_guestContextPct)) : model);
+        m_guestChip->setProperty("warn", m_guestContextPct >= 90);
+        m_guestChip->style()->unpolish(m_guestChip); m_guestChip->style()->polish(m_guestChip);
+        m_guestChip->setToolTip(QStringLiteral("%1 · %2 of its context window%3")
+                                    .arg(guestDisplayName(m_guest),
+                                         m_guestContextPct >= 0 ? QStringLiteral("%1%").arg(m_guestContextPct)
+                                                                : QStringLiteral("an unknown share"),
+                                         m_guestBusy ? QStringLiteral(" · a turn is running") : QString()));
+        m_guestChip->show();
+    }
+
+    // The question bar floats over the terminal's top-left, opposite the program banner's
+    // top-right (placeTakeControl), so both can be up at once without overlapping.
+    void placeGuestBar() {
+        if (!m_guestBar || !m_guestBar->isVisible() || !m_terminalHost) return;
+        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const QSize size = m_guestBar->sizeHint();
+        const int barWidth = std::min(size.width(), std::max(240, host.width() - 20));
+        m_guestBar->setGeometry(host.left() + 10, host.top() + 8, barWidth, size.height());
+        m_guestBar->raise();
+    }
+
+    static QString guestDisplayName(const QString &guest) {
+        return guest == QStringLiteral("codex") ? QStringLiteral("Codex") : QStringLiteral("Claude Code");
     }
 
     // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
@@ -1317,6 +1623,7 @@ public:
         if (!m_currentPreset.isEmpty()) configurePreset(m_currentPreset, false);
         updatePaths();
         changed();
+        registerWithBridge();   // the bridge routes by workspace too (26.5)
     }
 
     // ----- the terminal pane's right-click menu (issue #X2F1) -------------------------------------
@@ -1942,6 +2249,7 @@ protected:
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
         placeTakeControl();
+        placeGuestBar();
         placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
@@ -2487,6 +2795,34 @@ private:
         });
         bannerRow->addWidget(m_takeControl);
         m_programBar->hide();
+        // A guest's permission question (GT7X, 26.4): the PreToolUse hook holds the shim open,
+        // and this bar is where the user answers it. The same banner idiom, the opposite
+        // corner, so a question and the program banner never sit on top of each other.
+        m_guestBar = new QFrame(this);
+        m_guestBar->setObjectName(QStringLiteral("programBanner"));
+        m_guestBar->setAttribute(Qt::WA_StyledBackground);
+        auto *questionRow = new QHBoxLayout(m_guestBar);
+        questionRow->setContentsMargins(10, 4, 6, 4);
+        questionRow->setSpacing(8);
+        m_guestBarLabel = new QLabel(m_guestBar);
+        m_guestBarLabel->setObjectName(QStringLiteral("programBannerLabel"));
+        m_guestBarLabel->setTextFormat(Qt::PlainText);
+        questionRow->addWidget(m_guestBarLabel, 1);
+        auto *allowTool = new QPushButton(m_guestBar);
+        allowTool->setObjectName(QStringLiteral("delegateChip"));
+        allowTool->setCursor(Qt::PointingHandCursor);
+        allowTool->setFocusPolicy(Qt::NoFocus);
+        allowTool->setText(QStringLiteral("Allow"));
+        connect(allowTool, &QPushButton::clicked, this, [this] { answerGuestPermission(true); });
+        questionRow->addWidget(allowTool);
+        auto *denyTool = new QPushButton(m_guestBar);
+        denyTool->setObjectName(QStringLiteral("takeControlChip"));
+        denyTool->setCursor(Qt::PointingHandCursor);
+        denyTool->setFocusPolicy(Qt::NoFocus);
+        denyTool->setText(QStringLiteral("Deny"));
+        connect(denyTool, &QPushButton::clicked, this, [this] { answerGuestPermission(false); });
+        questionRow->addWidget(denyTool);
+        m_guestBar->hide();
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
         setupJobsUi(layout);        // commands the agent left running, beneath that
@@ -2510,6 +2846,16 @@ private:
         m_ctxLabel->setTextFormat(Qt::PlainText);
         m_ctxLabel->hide();
         row->addWidget(m_ctxLabel);
+        // The guest agent's context (GT7X, 26.3): its model and context share, fed by the
+        // statusline shim through the guest event channel. Hidden without a guest, like every
+        // chip here that has nothing to say.
+        m_guestChip = new QLabel;
+        m_guestChip->setObjectName(QStringLiteral("stripChipLabel"));
+        m_guestChip->setAccessibleName(QStringLiteral("Guest agent context"));
+        m_guestChip->setTextFormat(Qt::PlainText);
+        m_guestChip->setMinimumWidth(1);
+        m_guestChip->hide();
+        row->addWidget(m_guestChip);
         // Relay Free's allowance (protocol 13.9): "Free · 73% left", the same chip idiom as the
         // context bar beside it, shown only while this pane's main preset is the hosted one.
         m_quotaLabel = new QLabel;
@@ -5441,10 +5787,32 @@ private:
             if (description.size() > 60) description = description.left(59).trimmed() + QChar(0x2026);
             commands.append({skill.name, skill.args, QStringLiteral("Skill · ") + description});
         }
+        // A guest catalog follows every Relay-owned surface. Relay's own names (and its aliases
+        // and skills) win a collision, while a guest-only or newly introduced command passes
+        // through verbatim rather than Relay diagnosing it as unknown.
+        QStringList guestNames;
+        int guestStart = -1;
+        if (!m_guest.isEmpty()) {
+            taken.clear();
+            for (const auto &command : std::as_const(commands)) taken << command.name;
+            guestStart = commands.size();
+            for (const QString &slash : std::as_const(m_guestSlashCommands)) {
+                const QString name = slash.mid(1);
+                if (taken.contains(name, Qt::CaseInsensitive)) continue;
+                commands.append({name, QString(), QStringLiteral("%1 · guest").arg(guestDisplayName(m_guest))});
+                guestNames << name;
+            }
+        }
         for (int i = 0; i < commands.size(); ++i) {
             // Name prefix first, then names containing the query; descriptions do not match.
             const QString name = commands[i].name.toLower();
-            const int score = name.startsWith(query) ? 3000 - i : name.contains(query) ? 2000 - i : 0;
+            int score = name.startsWith(query) ? 3000 - i : name.contains(query) ? 2000 - i : 0;
+            // With nothing typed the scores follow declaration order, so the nine visible rows
+            // would all be Relay's and the guest's commands — appended last — sat below the fold
+            // no QA run or user would ever scroll to. While a guest is active the composer is
+            // that guest's input line (§26.8): open the list with its commands. Typing a query
+            // restores the usual order, where Relay's names win a tie.
+            if (score > 0 && query.isEmpty() && guestStart >= 0 && i >= guestStart) score += 9000;
             if (score > 0) ranked.append({score, i});
         }
         std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked &a, const Ranked &b) { return a.score > b.score; });
@@ -5462,6 +5830,7 @@ private:
             auto *item = new QListWidgetItem(QStringLiteral("/%1 %2    %3").arg(command.name, command.args, command.description).simplified(), m_slashList);
             item->setData(Qt::UserRole, command.name);
             item->setData(Qt::UserRole + 1, !command.args.isEmpty() && command.args.startsWith('<'));
+            item->setData(Qt::UserRole + 2, guestNames.contains(command.name, Qt::CaseInsensitive));
         }
         m_slashList->setCurrentRow(0);
         if (m_composer) {
@@ -5498,6 +5867,7 @@ private:
         if (!m_slashList || !m_slashList->currentItem()) return;
         const QString name = m_slashList->currentItem()->data(Qt::UserRole).toString();
         const bool needsArgument = m_slashList->currentItem()->data(Qt::UserRole + 1).toBool();
+        const bool guest = m_slashList->currentItem()->data(Qt::UserRole + 2).toBool();
         hideSlashPopup();
         if (!run || needsArgument) {
             m_editor->setPlainText(QStringLiteral("/") + name + ' ');
@@ -5505,6 +5875,10 @@ private:
             return;
         }
         m_editor->clear();
+        if (guest) {
+            submitGuest(QStringLiteral("/") + name, false);
+            return;
+        }
         // An alias name that reached the popup is not a built-in (issue G8DK); a skill is neither.
         if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
                          [&](const auto &c) { return c.name == name; })) {
@@ -6655,6 +7029,15 @@ private:
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
         qputenv("RELAY_SHELL_EVENT", (m_data + QStringLiteral("/shell/event.py")).toUtf8());
+        // The guest event channel's writer (GT7X, protocol 26.3): the shims a guest's settings
+        // call (relay_core.guest_hook) reach it through this, beside the runtime dir above.
+        qputenv("RELAY_GUEST_EVENT", (m_data + QStringLiteral("/shell/guest-event.py")).toUtf8());
+        // `$RELAY_PYTHON -m relay_core.guest_hook` (26.4) needs the backend importable. The
+        // same directory the worker is spawned from (startWorker) is appended, never prepended:
+        // the user's own PYTHONPATH keeps its order and cwd still wins over both.
+        const QString backendDir = m_data + QStringLiteral("/backend");
+        const QString pythonPath = qEnvironmentVariable("PYTHONPATH");
+        qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QLatin1Char(':') + backendDir).toUtf8());
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
         // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
@@ -6681,6 +7064,23 @@ private:
         }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
+        // The Claude IDE bridge (GT7X, 26.2): the first claude pane starts the sidecar and every
+        // shell after it carries the port, so a `claude` started in this pane finds Relay instead
+        // of no editor at all. Codex has no IDE bridge, so it gets nothing; when the bridge is off
+        // or failed to start, `bridge_env` is empty and both keys are removed.
+        {
+            auto &bridge = relay::guestbridge::Bridge::instance();
+            bridge.setDataRoot(m_data);
+            const int port = bridge.portFor(m_python);
+            const QJsonObject env = relay::guestbridge::bridgeEnv(QStringLiteral("claude"), port);
+            for (auto it = env.constBegin(); it != env.constEnd(); ++it) {
+                if (it.value().toString().isEmpty()) qunsetenv(it.key().toUtf8().constData());
+                else qputenv(it.key().toUtf8().constData(), it.value().toString().toUtf8());
+            }
+        }
+        // Registered now, not at the first prompt: the port is already in this shell's
+        // environment, so a claude started at that prompt must find a routable pane (26.5).
+        registerWithBridge();
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
@@ -6833,7 +7233,7 @@ private:
             // `@path` on its own opens the file (or folder) in a Relay pane.
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
-            if (match.hasMatch()) {
+            if (m_guest.isEmpty() && match.hasMatch()) {
                 const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
                 if (!absolute.isEmpty() && onOpenPath) {
                     m_editor->remember(m_editor->toPlainText().trimmed());
@@ -6853,6 +7253,27 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
+            // `!` remains a terminal line even when the foreground program is a guest. The
+            // key handler has already converted a typed leading bang into shell mode; this arm
+            // covers a pasted spelling, which must not be silently handed to Claude or Codex.
+            if (!m_guest.isEmpty() && m_editor->toPlainText().startsWith(QLatin1Char('!'))) {
+                const QString command = m_editor->toPlainText().mid(1);
+                if (command.trimmed().isEmpty()) {
+                    status(QStringLiteral("Type a terminal command after !."));
+                    return;
+                }
+                m_editor->remember(m_editor->toPlainText());
+                m_editor->clear();
+                submitTerminal(command, false);
+                return;
+            }
+            // Relay's built-ins and aliases above always win. A guest's unknown command is its
+            // own business, though: never let Relay reject a new guest command it has not scanned.
+            if (!m_guest.isEmpty() && m_prefixMode != QStringLiteral("shell")) {
+                submitGuest(m_editor->toPlainText(), true);
+                if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+                return;
+            }
             // A `/command` that is not one of the above never reaches the router: Relay says so
             // itself rather than letting Bash answer with "command not found".
             if (reportUnknownSlashCommand(m_editor->toPlainText())) return;
@@ -7578,7 +7999,14 @@ private:
         m_banner->show();
     }
 
-    void hideBanner() { if (m_banner) m_banner->hide(); m_bannerCallback = nullptr; }
+    void hideBanner() {
+        if (m_banner) m_banner->hide();
+        m_bannerCallback = nullptr;
+        // The guest-diff banner's dismissal is its decision (26.5): once the banner is gone there
+        // is nothing left to answer claude with, so × — or anything else that clears the banner —
+        // rejects the change rather than leaving the tool call waiting forever.
+        settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("dismissed"));
+    }
 
 public:
     // Ctrl+Shift+R: restart whatever stopped in this pane.
@@ -9098,6 +9526,41 @@ private:
     }
 
     bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
+    // Relay's rich composer is the foreground guest's input line. We deliberately keep this out
+    // of `program_input`: that tool is for an LLM acting under a per-turn delegation grant, while
+    // this is the user's own composer text. Ctrl+U clears the TUI line, bracketed paste keeps a
+    // multiline prompt literal, and Escape after a slash selection closes the guest menu before
+    // Enter (otherwise Claude/Codex consumes Enter as menu navigation).
+    bool typeIntoGuest(const QString &guest, const QString &text) {
+        if (!m_backend || guest != m_guest || text.trimmed().isEmpty()) {
+            status(QStringLiteral("Guest input was not sent: %1 is no longer ready.").arg(guestDisplayName(guest)));
+            return false;
+        }
+        m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
+        m_backend->sendText(text, true);
+        if (text.trimmed().startsWith(QLatin1Char('/')))
+            m_backend->sendInput(QByteArrayLiteral("\x1b"));  // dismiss its slash popup before Enter
+        m_backend->sendInput(QByteArrayLiteral("\r"));
+        status(QStringLiteral("Sent to %1.").arg(guestDisplayName(guest)));
+        return true;
+    }
+
+    void submitGuest(const QString &text, bool fromEditor) {
+        if (m_guest.isEmpty()) return;
+        if (fromEditor) {
+            m_editor->remember(text);
+            m_editor->clear();
+            hideAtPopup(); hideSlashPopup(); clearAiGhost();
+        }
+        if (m_entries.isEmpty() && !m_activeValid && !m_guestBusy) {
+            typeIntoGuest(m_guest, text);
+            return;
+        }
+        QueueEntry entry;
+        entry.guest = m_guest;
+        entry.text = text;
+        enqueue(entry);
+    }
 
     void enqueue(QueueEntry entry) {
         // A queued item is edited where it stands now (selectQueueEntry / saveQueueEdit), so nothing
@@ -9107,7 +9570,9 @@ private:
         m_selected = -1;
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
         status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
-                           : QStringLiteral("Queued · the command runs when the terminal is free"));
+                           : !entry.guest.isEmpty()
+                               ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
+                               : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -9153,7 +9618,11 @@ private:
         if (queueBlocked() || m_activeValid || m_entries.isEmpty()) return;
         const QueueEntry head = m_entries.first();
         const quint64 selected = selectedEntryId();
-        if (head.agent) {
+        if (!head.guest.isEmpty()) {
+            if (m_guestBusy || head.guest != m_guest) return;
+            m_entries.removeFirst();
+            if (!typeIntoGuest(head.guest, head.text)) m_entries.prepend(head);
+        } else if (head.agent) {
             if (m_agentBusy || !m_configured) return;
             m_entries.removeFirst();
             startAgentEntry(head, true);
@@ -11377,6 +11846,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
+        // The guest channel is polled on the same tick (26.3), before state.json's own checks
+        // below can return: a guest event must land even in a tick where the shell did not.
+        pollGuestEvent();
         // This runs 12 times a second in every pane, and the file changes a few times per
         // command. shell/event.py replaces it atomically, so a new event is a new inode: one
         // stat() says whether there is anything to read, in place of an open, a read and a JSON
@@ -11397,7 +11869,12 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         const QString stage = event.value(QStringLiteral("event")).toString();
         if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) m_shellPid = reported;
         const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
-        if (newCwd != m_cwd) { m_cwd = newCwd; updatePaths(); changed(); }
+        if (newCwd != m_cwd) {
+            m_cwd = newCwd; updatePaths(); changed();
+            // The bridge routes by the longest workspace/cwd prefix (26.5): a pane that moved must
+            // say so before a request names a place it is no longer in.
+            registerWithBridge();
+        }
         if (stage == QStringLiteral("ready")) {
             m_promptReported = true;
             refreshShellReady();
@@ -11804,7 +12281,9 @@ private:
                   {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
                   {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
                   {"keybindings", Keymap::instance().catalog()}}));
-            updatePaths(); dialog.accept();
+            updatePaths();
+            registerWithBridge();   // the bridge routes by workspace too (26.5)
+            dialog.accept();
         });
         dialog.exec();
     }
@@ -11818,6 +12297,18 @@ private:
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
+    // guest.json as pollShell() last read it (GT7X, 26.3): the same stat/token/sequence dance
+    // as state.json above, on the same tick. Then the guest's live facts and the PreToolUse
+    // question whose answer the waiting shim still needs.
+    bool m_guestSeen = false; ino_t m_guestInode = 0; off_t m_guestSize = 0; timespec m_guestMtime{};
+    QString m_guestSequence, m_guestModel, m_guestQuestionSeq;
+    int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
+    bool m_guestBusy = false;
+    QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
+    // A bridge diff this pane still owes claude an answer to (GT7X, 26.5): where the sidecar is
+    // waiting for the decision, and the file the decision is about.
+    struct GuestDiff { bool pending = false; QString replyPath, file; };
+    GuestDiff m_guestDiff;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;
@@ -12112,6 +12603,9 @@ private:
     bool m_delegated = false;          // the user handed the foreground program to the agent
     QString m_delegatedProgram;
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
+    QFrame *m_guestBar = nullptr;      // the guest's permission question, floating over the terminal
+    QLabel *m_guestBarLabel = nullptr;
+    QLabel *m_guestChip = nullptr;     // the guest's model/context chip in the prompt-box strip
     QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
     int m_agentWrites = 0;             // keystrokes the agent has sent into it
     QFrame *m_programBar = nullptr;    // the floating banner over the terminal

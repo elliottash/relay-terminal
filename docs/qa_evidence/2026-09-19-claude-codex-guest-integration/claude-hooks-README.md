@@ -32,20 +32,20 @@ proves the permission question and that the chip is gone; the strip pass proves 
 
 ## What each picture is evidence of
 
-`claude-hooks-01-statusline-chip.png` — the statusline shim run as the installer writes it
+`implementer-claude-hooks-01-statusline-chip.png` — the statusline shim run as the installer writes it
 (`python -m relay_core.guest_hook statusline` with Claude's statusline JSON on stdin). It forwards
 the model and context share through the channel and prints its one passthrough line, logged as
 `'Claude Sonnet 4.5 · workspace'`, so Claude's own statusline is unchanged. The strip then reads
 `Claude Sonnet` and `42%`: the chip is the model and the share, fed by the shim.
 
-`claude-hooks-02-permission-question.png` — a held `PreToolUse` hook (`RELAY_GUEST_PERMISSION_TIMEOUT`
+`implementer-claude-hooks-02-permission-question.png` — a held `PreToolUse` hook (`RELAY_GUEST_PERMISSION_TIMEOUT`
 90 s) asking about `rm -rf build/ && cmake -S . -B build`. The terminal reads `wants to run Bash` and
 `rm -rf build`: the pane asked the user rather than answering the hook itself. The harness finds the
 bar's `Deny` button in tesseract's TSV — the button glyphs come back with stray punctuation
 (`[(Deny]`), so a box is matched on a substring — and clicks 28 px to its left, which is the middle
 of `Allow` (`buildUi`'s `questionRow` puts Allow then Deny with 8 px between them).
 
-`claude-hooks-03-answered.png` — the click landed: the bar is gone (the screen no longer says
+`implementer-claude-hooks-03-answered.png` — the click landed: the bar is gone (the screen no longer says
 `wants to run`), the pane wrote
 `{"decision":"allow","sequence":"9f4f2c38-…","token":"c67a68c3-…"}` to `guest-answer.json`, and the
 held hook returned
@@ -54,12 +54,12 @@ held hook returned
 pane's answer reaches Claude through the hook's contract, and a hook that is never answered times
 out printing nothing — it is never auto-approved.
 
-`claude-hooks-04-context-warn.png` — a share past the warn line (`94%`, model `Claude Opus 4.6`)
+`implementer-claude-hooks-04-context-warn.png` — a share past the warn line (`94%`, model `Claude Opus 4.6`)
 written through the helper rather than the shim, so the envelope and the poll are exercised on their
 own, plus a `state` event moving the busy field. The strip reads `Claude Opus` and `94%`, and the
 chip carries its `warn` property at or above 90%.
 
-`claude-hooks-05-guest-gone.png` — the stand-in guest is killed, and the chip goes with it: the
+`implementer-claude-hooks-05-guest-gone.png` — the stand-in guest is killed, and the chip goes with it: the
 screen says `workspace` and no longer `Claude Opus` or `94%`, because the pane's program poll sees
 the foreground program is no longer a guest and clears the guest state.
 

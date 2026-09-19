@@ -42,6 +42,7 @@
 #include "ClosedStack.h"
 #include "ClosedList.h"
 #include "RuntimeDirs.h"
+#include "AppPaths.h"       // dataRoot(): where the shipped backend (and the guest installers) live
 #include "Voice.h"
 #include "Aliases.h"
 #include "OutputLinks.h"
@@ -87,6 +88,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -396,7 +398,12 @@ public:
     // stopBoardWorkers() again (closeEvent has usually run already, and it is idempotent): a
     // window destroyed without being closed must still not leave Switchboard workers behind, and
     // its board panes are about to be destroyed with it.
-    ~RelayWindow() override { qApp->removeEventFilter(this); stopBoardWorkers(); }
+    ~RelayWindow() override {
+        qApp->removeEventFilter(this);
+        m_guestClaude.kill();   // a settings read still in flight must not outlive the window
+        m_guestCodex.kill();
+        stopBoardWorkers();
+    }
 
     // Build a tab from a saved tab. Returns false if no pane could be created. The tab is either
     // a bare layout node or the {"project", "node"} wrapper an attached tab saves as (#JN7X).
@@ -1157,6 +1164,9 @@ private:
         view->onSectionShown = [guard](const QString &sectionId) {
             auto *w = windowOf(guard);
             if (w && sectionId == relay::LocalModelsSettings::sectionId()) w->localModels().refresh();
+            // Guests reads the real settings files when its page comes to the front, so the rows
+            // can never claim an install the file does not carry.
+            else if (w && sectionId == QStringLiteral("guests")) w->guestSectionShown();
         };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
@@ -1301,6 +1311,217 @@ private:
         return m_localModels;
     }
     relay::LocalModelsSettings m_localModels;
+
+    // ----- Settings › Guests (protocol 26.4): the installers' front end -------------------------
+    //
+    // Two thin command lines, one JSON object each on stdout: relay_core.guest_install for the
+    // Claude Code settings (project and, behind its own explicit opt-in, global),
+    // relay_core.guest_codex for ~/.codex/config.toml. The rows here never guess at the files:
+    // the section's arrival re-reads status, every apply answers with the installer's own JSON,
+    // and the notice names the file that was written — including the cases where what the user
+    // wrote themselves was kept because it is theirs (their statusline, their notify). Choices
+    // persist under guests/* like any option, but the file is the truth the rows draw from.
+    QString guestProjectDir() const {
+        // The tab's attached project, else the active pane's live directory — where a new pane in
+        // this tab would start, and so whose .claude/settings.json its Claude Code would read.
+        if (const QString attached = tabProject(m_tabs->currentWidget()); !attached.isEmpty())
+            return attached;
+        return activeCwd();
+    }
+
+    void guestSectionShown() {
+        if (!guestProjectDir().isEmpty()) guestClaudeStatus();
+        guestCodexStatus();
+    }
+
+    void guestClaudeApply(bool on, bool global) {
+        m_guestClaudeAction = on ? QStringLiteral("on") : QStringLiteral("off");
+        m_guestClaudeGlobal = global;
+        QStringList arguments;
+        if (global) arguments << QStringLiteral("--global") << QStringLiteral("--global-opt-in");
+        else arguments << QStringLiteral("--project") << guestProjectDir();
+        arguments << (on ? QStringLiteral("--on") : QStringLiteral("--off"));
+        guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"), arguments);
+    }
+
+    void guestClaudeStatus() {
+        m_guestClaudeAction = QStringLiteral("status");
+        guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"),
+                     {QStringLiteral("--project"), guestProjectDir(), QStringLiteral("--status")});
+    }
+
+    void guestCodexApply(bool on) {
+        m_guestCodexAction = on ? QStringLiteral("on") : QStringLiteral("off");
+        guestToolRun(&m_guestCodex, &m_guestCodexOut, QStringLiteral("relay_core.guest_codex"),
+                     {on ? QStringLiteral("--enable") : QStringLiteral("--disable")});
+    }
+
+    void guestCodexStatus() {
+        m_guestCodexAction = QStringLiteral("status");
+        guestToolRun(&m_guestCodex, &m_guestCodexOut, QStringLiteral("relay_core.guest_codex"),
+                     {QStringLiteral("--settings-state")});
+    }
+
+    void ensureGuestTools() {
+        if (m_guestToolsConnected) return;
+        m_guestToolsConnected = true;
+        auto drain = [](QProcess *tool, QByteArray *buffer) {
+            QObject::connect(tool, &QProcess::readyReadStandardOutput, tool, [tool, buffer] {
+                *buffer += tool->readAllStandardOutput();
+                if (buffer->size() > 8 * 1024 * 1024) {
+                    tool->kill();
+                    buffer->clear();
+                }
+            });
+            // Stderr is never part of the protocol, but it must be read or a full pipe stalls the
+            // tool; what it holds (a warning, a traceback) is dropped rather than shown.
+            QObject::connect(tool, &QProcess::readyReadStandardError, tool,
+                             [tool] { tool->readAllStandardError(); });
+        };
+        drain(&m_guestClaude, &m_guestClaudeOut);
+        drain(&m_guestCodex, &m_guestCodexOut);
+        connect(&m_guestClaude, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+            m_guestClaudeAction.clear();
+            notice(QStringLiteral("The Claude Code settings tool failed to start."), 6000);
+        });
+        connect(&m_guestCodex, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+            m_guestCodexAction.clear();
+            notice(QStringLiteral("The codex settings tool failed to start."), 6000);
+        });
+        connect(&m_guestClaude, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
+                [this](int, QProcess::ExitStatus) { guestClaudeDone(); });
+        connect(&m_guestCodex, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
+                [this](int code, QProcess::ExitStatus) { guestCodexDone(code); });
+    }
+
+    bool guestToolRun(QProcess *tool, QByteArray *buffer, const QString &module, const QStringList &arguments) {
+        ensureGuestTools();
+        if (tool->state() != QProcess::NotRunning) {
+            notice(QStringLiteral("Still working on the last Guests change."), 4000);
+            return false;
+        }
+        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        if (python.isEmpty()) {
+            notice(QStringLiteral("Guests needs python3 on this machine's PATH."), 6000);
+            return false;
+        }
+        QString backend;
+        try {
+            backend = dataRoot() + QStringLiteral("/backend");
+        } catch (const std::exception &error) {
+            notice(QString::fromUtf8(error.what()), 6000);
+            return false;
+        }
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        // APPENDED, never prepended (protocol 26.4): the user's own PYTHONPATH — a venv, another
+        // checkout — keeps its place in front, so the shipped backend is a fallback, not a hijack.
+        const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
+        environment.insert(QStringLiteral("PYTHONPATH"),
+                           existing.isEmpty() ? backend : existing + QDir::listSeparator() + backend);
+        tool->setProcessEnvironment(environment);
+        buffer->clear();
+        // `-S` like every helper Relay runs, `-u` so the one JSON line is flushed as written.
+        tool->start(python, QStringList{QStringLiteral("-S"), QStringLiteral("-u"),
+                                        QStringLiteral("-m"), module} + arguments);
+        return true;
+    }
+
+    // The first line of stdout, as JSON. Anything after it — a warning, the tail of a traceback —
+    // is not part of the protocol and is ignored rather than parsed around.
+    static QJsonObject guestJson(const QByteArray &output) {
+        const int end = output.indexOf('\n');
+        const QJsonDocument document = QJsonDocument::fromJson(
+            (end < 0 ? output : output.left(end)).trimmed());
+        return document.object();
+    }
+
+    void guestClaudeDone() {
+        const QJsonObject result = guestJson(m_guestClaudeOut);
+        const QString action = m_guestClaudeAction;
+        const bool global = m_guestClaudeGlobal;
+        m_guestClaudeAction.clear();
+        if (action == QStringLiteral("status")) {
+            if (result.value(QStringLiteral("ok")).toBool()) {
+                m_guestClaudeKnown = true;
+                m_guestClaudeInstalled = result.value(QStringLiteral("installed")).toBool();
+                refreshSettingsPanes();
+            }
+            return;   // a failed read leaves the rows at their stored choice; the next try re-reads
+        }
+        const QString key = global ? QStringLiteral("guests/global_install")
+                                   : QStringLiteral("guests/project_install");
+        const QString path = result.value(QStringLiteral("path")).toString();
+        if (!result.value(QStringLiteral("ok")).toBool()) {
+            const QString error = result.value(QStringLiteral("error")).toString();
+            notice(error.isEmpty() ? QStringLiteral("The Claude Code settings change failed.") : error, 8000);
+            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });
+            return;
+        }
+        // `ok` means the writes happened, so the cache takes the choice — `installed` is not read
+        // here: the installer's --on answer carries a list of the entries it added, while --status
+        // carries the bool of the same name. The project row's truth is re-read from the file right
+        // after; the global row drew from its own stored choice all along.
+        if (!global) {
+            m_guestClaudeKnown = true;
+            m_guestClaudeInstalled = action == QStringLiteral("on");
+        }
+        QSettings().setValue(key, action == QStringLiteral("on"));
+        if (action == QStringLiteral("on")) {
+            QString text = QStringLiteral("Guest hooks installed in %1.").arg(path);
+            // The installer kept the user's own statusline: say so, or the missing context chip
+            // reads as the install having failed.
+            if (result.value(QStringLiteral("statusline")).toString() == QStringLiteral("kept"))
+                text += QStringLiteral(" Your own statusline command was kept, so the context chip has nothing to show.");
+            notice(text, 8000);
+        } else if (result.value(QStringLiteral("changed")).toBool()) {
+            notice(QStringLiteral("Relay's guest entries removed from %1.").arg(path), 8000);
+        } else {
+            notice(QStringLiteral("Relay's guest entries were not in %1.").arg(path), 8000);
+        }
+        refreshSettingsPanes();
+        if (!global)
+            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });   // the file has the last word
+    }
+
+    void guestCodexDone(int code) {
+        const QJsonObject result = guestJson(m_guestCodexOut);
+        const QString action = m_guestCodexAction;
+        m_guestCodexAction.clear();
+        if (action == QStringLiteral("status")) {
+            if (result.value(QStringLiteral("ok")).toBool()) {
+                m_guestCodexKnown = true;
+                m_guestCodexEnabled = result.value(QStringLiteral("enabled")).toBool();
+                refreshSettingsPanes();
+            }
+            return;
+        }
+        const QString path = result.value(QStringLiteral("path")).toString();
+        // Exit 3 is the conflict (§26.6): the user's own notify is theirs. The message is the
+        // notice in full, nothing is stored, and the toggle goes back to what the file says.
+        if (code == 3 || !result.value(QStringLiteral("ok")).toBool()) {
+            const QString error = result.value(QStringLiteral("error")).toString();
+            notice(error.isEmpty() ? QStringLiteral("The codex settings change failed.") : error, 8000);
+            refreshSettingsPanes();
+            QTimer::singleShot(0, this, [this] { guestCodexStatus(); });
+            return;
+        }
+        m_guestCodexKnown = true;
+        m_guestCodexEnabled = result.value(QStringLiteral("enabled")).toBool();
+        QSettings().setValue(QStringLiteral("guests/codex_notify"), action == QStringLiteral("on"));
+        notice(action == QStringLiteral("on")
+                   ? QStringLiteral("Codex turn notifications on: a marked notify entry in %1.").arg(path)
+                   : QStringLiteral("Codex turn notifications off."),
+               8000);
+        refreshSettingsPanes();
+    }
+
+    bool m_guestToolsConnected = false;
+    QProcess m_guestClaude, m_guestCodex;
+    QByteArray m_guestClaudeOut, m_guestCodexOut;
+    QString m_guestClaudeAction, m_guestCodexAction;   // status | on | off: what the running call was
+    bool m_guestClaudeGlobal = false;
+    bool m_guestClaudeKnown = false, m_guestClaudeInstalled = false;
+    bool m_guestCodexKnown = false, m_guestCodexEnabled = false;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -1982,6 +2203,77 @@ private:
                                   QStringLiteral("Load project instruction files automatically"),
                                   QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);
         sections << privacy;
+
+        // Guests (protocol 26.4): what the two installers do, as rows. No row declares a reset:
+        // off is what Relay ships and off is idempotent, so the page needs no button that says
+        // so — and a reset must not reach into files the installer owns.
+        relay::SettingsSection guestSection;
+        guestSection.id = QStringLiteral("guests");
+        guestSection.title = QStringLiteral("Guests");
+        guestSection.blurb = QStringLiteral(
+            "Claude Code and Codex running in Relay's panes reach Relay through marked entries in "
+            "their own settings files. Everything Relay writes is marked, and comes out again "
+            "when its row is turned off; an entry you wrote yourself is never replaced — Relay "
+            "says so and leaves it alone.");
+        {
+            if (guestProjectDir().isEmpty()) {
+                relay::SettingRow row;
+                row.kind = relay::SettingRow::Info;
+                row.id = QStringLiteral("info:guests/project");
+                row.label = QStringLiteral("Open a project folder first: the Claude Code entries "
+                                           "are written into that project's .claude/settings.json.");
+                guestSection.rows << row;
+            } else {
+                relay::SettingRow row;
+                row.kind = relay::SettingRow::Toggle;
+                row.id = QStringLiteral("option:guests/project_install");
+                row.label = QStringLiteral("Claude Code in this project");
+                row.detail = QStringLiteral("Marked hook and statusline entries in this project's "
+                                            ".claude/settings.json: events and the context chip");
+                row.aliases = QStringLiteral("claude code hooks guest settings json install project");
+                row.checked = m_guestClaudeKnown ? m_guestClaudeInstalled
+                    : QSettings().value(QStringLiteral("guests/project_install"), false).toBool();
+                row.onToggle = [this](bool on) { guestClaudeApply(on, false); };
+                guestSection.rows << row;
+            }
+        }
+        {
+            relay::SettingRow row;
+            row.kind = relay::SettingRow::Toggle;
+            row.id = QStringLiteral("option:guests/global_install");
+            row.label = QStringLiteral("Also in ~/.claude/settings.json");
+            row.detail = QStringLiteral("A second, explicit opt-in: the same marked entries in your "
+                                        "global Claude settings, for Claude Code run outside Relay");
+            row.aliases = QStringLiteral("global claude home user settings json opt in everywhere");
+            row.checked = QSettings().value(QStringLiteral("guests/global_install"), false).toBool();
+            row.onToggle = [this](bool on) {
+                // §26.3: the global file is an opt-in on top of the project install, never instead
+                // of it. Refused here — nothing stored, so the row redraws unchecked on its own.
+                const bool project = m_guestClaudeKnown ? m_guestClaudeInstalled
+                    : QSettings().value(QStringLiteral("guests/project_install"), false).toBool();
+                if (!project) {
+                    notice(QStringLiteral("Turn on “Claude Code in this project” first: the global "
+                                          "entries only ever add to the project ones."), 6000);
+                    return;
+                }
+                guestClaudeApply(on, true);
+            };
+            guestSection.rows << row;
+        }
+        {
+            relay::SettingRow row;
+            row.kind = relay::SettingRow::Toggle;
+            row.id = QStringLiteral("option:guests/codex_notify");
+            row.label = QStringLiteral("Codex notifications");
+            row.detail = QStringLiteral("A marked notify entry in ~/.codex/config.toml, so a "
+                                        "finished Codex turn reaches Relay's notification centre");
+            row.aliases = QStringLiteral("codex notify config toml turn finished alert guest");
+            row.checked = m_guestCodexKnown ? m_guestCodexEnabled
+                : QSettings().value(QStringLiteral("guests/codex_notify"), false).toBool();
+            row.onToggle = [this](bool on) { guestCodexApply(on); };
+            guestSection.rows << row;
+        }
+        sections << guestSection;
 
         relay::SettingsSection shortcuts;
         shortcuts.id = QStringLiteral("keyboard");

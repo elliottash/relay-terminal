@@ -43,21 +43,21 @@ button; the row filter's height bound keeps them out.
 
 ## What each picture is evidence of
 
-`claude-bridge-01-opendiff-banner.png` — the first `openDiff` on screen: the banner reads
+`implementer-claude-bridge-01-opendiff-banner.png` — the first `openDiff` on screen: the banner reads
 `claude proposes changes to haiku.txt`, the diff pane beside the terminal shows
 `claude's haiku +1 -1` with `-the ink dries slowly / +the ink dries fast`, and the call is
 blocked while it waits. The tool call has not returned yet at this point — the harness clicks
 Save mid-call, which is the point of the picture: the click *is* the reply.
 
-`claude-bridge-02-saved.png` — Save was clicked and the call returned `FILE_SAVED`; the toast
+`implementer-claude-bridge-02-saved.png` — Save was clicked and the call returned `FILE_SAVED`; the toast
 reads `Saved claude` and the banner is gone. The file on disk now reads `the ink dries fast` —
 written by the sidecar, and only after the click, which is the ordering §26.5 promises: the
 guest's proposal never touches disk before the user answers.
 
-`claude-bridge-03-second-diff.png` — a second `openDiff` on the same file (`the page stays
+`implementer-claude-bridge-03-second-diff.png` — a second `openDiff` on the same file (`the page stays
 blank`), banner back, call blocked again. The harness clicks the banner's × this time.
 
-`claude-bridge-04-rejected.png` — the × was clicked and the call returned `DIFF_REJECTED`; the
+`implementer-claude-bridge-04-rejected.png` — the × was clicked and the call returned `DIFF_REJECTED`; the
 toast reads `Kept the file` and the file on disk still reads `the ink dries fast`. A refused
 proposal changes nothing.
 

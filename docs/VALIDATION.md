@@ -256,6 +256,8 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-18-terminal-and-agent-status-icons-with-notificatio.md`
 - `2026-09-18-waiting-for-jobs.md`
 - `2026-09-18-waiting-for-subagents.md`
+- `2026-09-19-claude-codex-guest-integration.md`
+- `2026-09-19-the-open-task-list-under-the-prompt.md`
 
 - `2026-09-17-agent-delegate-and-take-over.md`
 - `2026-09-17-agent-output-while-program-runs.md`
