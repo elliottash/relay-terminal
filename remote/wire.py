@@ -309,6 +309,8 @@ WITHHELD_EVENTS: dict[str, str] = {
     # A todo handed to a subagent from the task list: the answer to the desktop's own click. The
     # phone sees the result in `todos` and `subagent_started`.
     "todo_subagent": "reply to the desktop's own request",
+    # A board made in a repo: the workspace path is a local file path (Switchboard).
+    "board_created": "desktop-local administration; carries a local file path",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",
