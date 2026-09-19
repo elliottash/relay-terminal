@@ -41,6 +41,7 @@ Palette palette() {
     p.text = QColor(0xe6, 0xe8, 0xec);
     p.muted = QColor(0x8b, 0x91, 0x9c);
     p.code = QColor(0x3e, 0xc5, 0xf0);
+    p.link = QColor(0x12, 0xa4, 0x57);
     p.add = QColor(0x7e, 0xc8, 0x8c);
     p.remove = QColor(0xe0, 0x6c, 0x75);
     p.addBg = QColor(0x1a, 0x28, 0x1d);
@@ -389,7 +390,8 @@ private slots:
     // ---- reasoning as a fold (foldForMarkdown) --------------------------------------------------
 
     // A thinking fold's markdown keeps its shape — markers dropped, rows split at newlines — and
-    // its styles become spans: prose muted (reasoning is chrome), bold kept, code in the code ink.
+    // its styles become spans: prose muted (reasoning is chrome), bold kept, inline code bold in the
+    // same muted ink (the terminal shows it bold and plain too, since 2026-09-19).
     void markdownReasoningKeepsItsShapeAndMutesItsProse() {
         const QVector<FoldLine> rows = foldForMarkdown(
             QStringLiteral("Plain **bold** and `code`\n"), palette(), {});
@@ -399,7 +401,8 @@ private slots:
                 QVERIFY(span.bold);
                 QCOMPARE(span.fg, palette().muted);
             } else if (span.text.contains(QStringLiteral("code"))) {
-                QCOMPARE(span.fg, palette().code);
+                QVERIFY(span.bold);
+                QCOMPARE(span.fg, palette().muted);
             } else {
                 QCOMPARE(span.fg, palette().muted);
             }
@@ -418,7 +421,7 @@ private slots:
             if (span.text == QStringLiteral("docs")) {
                 sawLink = true;
                 QVERIFY(span.underline);
-                QCOMPARE(span.fg, palette().code);
+                QCOMPARE(span.fg, palette().link);   // the link ink, not the code ink (2026-09-19)
             }
         }
         QVERIFY(sawLink);

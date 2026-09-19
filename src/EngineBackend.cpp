@@ -25,6 +25,10 @@ void EngineBackend::applySettings()
 {
     if (TerminalView *v = view())
         v->setCopyOnSelect(QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool());
+    // Paths and URLs in program output wear the link colour at rest, not only under the pointer
+    // (owner, 2026-09-19). On by default; Options › Terminal turns it off.
+    if (TerminalView *v = view())
+        v->setLinksColouredAtRest(QSettings().value(QStringLiteral("terminal/colour_links"), true).toBool());
 }
 
 // Font, spacing and cursor defaults come from data/theme/terminal.conf; colour comes from the
@@ -67,6 +71,9 @@ void EngineBackend::applyThemeColors()
         colors.foreground = spec.terminalForeground;
     colors.cursor = spec.terminalCursor.isValid() ? spec.terminalCursor : colors.foreground;
     colors.cursorText = colors.background;
+    // The one colour that means "you can open this" (src/Theme.h, Link): the hover underline, the
+    // fold rows' links, OSC 8 hyperlinks and, at rest, every path and URL the output holds.
+    colors.link = theme::Link;
     // The engine numbers the 16 ANSI colours 0-7 then the bright eight, as the theme file does.
     if (spec.ansi.size() == 16)
         for (int i = 0; i < 16; ++i)

@@ -73,6 +73,9 @@ tool = "#63492b"
 # purpose, one is chip chrome and one is grid content, and they are never read against each
 # other. If this pair still has to work harder, the next lever is a tinted chip behind it
 # (`@shellSoft` / `@agentSoft` already exist in src/Theme.cpp), not more chroma.
+# "You can open this" (owner, 2026-09-19: "dark green, like Warp"). A dark pine: dE 26 from the
+# success green, 29 from ANSI 2, 5.5:1 on the case beige, the darkest ground it is read on.
+link = "#1e4a44"
 shell = "#0049a9"
 agent = "#7500c3"
 
@@ -83,7 +86,7 @@ command = "#0049a9"
 unknown = "#931c17"
 flag = "#684800"
 string = "#135427"
-path = "#0f5f5a"
+path = "#1e4a44"
 operator = "#5a554a"
 variable = "#7500c3"
 agent = "#7500c3"

@@ -36,7 +36,12 @@ const QStringList &optionalUi() {
         // It used to *be* `warning`, which made amber mean both "this pane is a tool" and "this is
         // waiting on you" — the second of which must never be missed (owner, 2026-09-19). Derived
         // from the theme's own amber when the file is silent, not inherited: see brassFrom().
-        QStringLiteral("tool")};
+        QStringLiteral("tool"),
+        // "You can open this": a path, a folder, a URL, a card reference — in the terminal grid,
+        // the composer, the fold rows and the chrome alike (owner, 2026-09-19: "clickable things
+        // need to be understood from colors", then "dark green, like Warp"). Derived from the
+        // theme's own dark green (ANSI 2) when the file is silent: see linkFrom().
+        QStringLiteral("link")};
     return names;
 }
 
@@ -107,6 +112,11 @@ double relativeLuminance(const QColor &c) {
     return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue());
 }
 
+double contrastRatio(const QColor &a, const QColor &b) {
+    const double la = relativeLuminance(a), lb = relativeLuminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
 // The Actions pane's red-orange for a theme file that does not name one. This is the one `[ui]`
 // token that is not simply inherited from the fallback theme: an orange picked for Relay Dark's
 // near-black chrome is under 2:1 on a light theme's paper, and the Actions band would be the one
@@ -128,6 +138,35 @@ QColor brassFrom(const QColor &amber) {
         if (std::abs(relativeLuminance(tried) - want) < std::abs(relativeLuminance(best) - want)) best = tried;
     }
     return best;
+}
+
+// The link green for a theme file that does not name one: the theme's own ANSI 2 (the dark green
+// of every palette), walked towards whichever pole raises contrast until it
+// clears 4.5:1 on every ground the app reads it on — the window, the text surface, the raised
+// face, the terminal — so a silent user theme still gets a link colour a person can read.
+QColor linkFrom(const QColor &green, const QList<QColor> &grounds) {
+    const QColor &blue = green;   // the seed
+    const auto clears = [&grounds](const QColor &c) {
+        for (const QColor &g : grounds) if (contrastRatio(c, g) < 4.5) return false;
+        return true;
+    };
+    if (clears(blue)) return blue;
+    // Which pole helps: the one the *darkest-to-read* ground is further from.
+    double best = 0; QColor pole = Qt::white;
+    for (const QColor &g : grounds) {
+        for (const QColor &p : {QColor(Qt::white), QColor(Qt::black)}) {
+            const double r = contrastRatio(p, g);
+            if (r > best) { best = r; pole = p; }
+        }
+    }
+    QColor out = blue;
+    for (int step = 1; step <= 40; ++step) {
+        const double w = step / 40.0;
+        out = QColor(int(pole.red() * w + blue.red() * (1 - w)), int(pole.green() * w + blue.green() * (1 - w)),
+                     int(pole.blue() * w + blue.blue() * (1 - w)));
+        if (clears(out)) return out;
+    }
+    return out;
 }
 
 QColor redOrangeFrom(const QColor &red) {
@@ -246,6 +285,7 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("error"), QColor(0xe0, 0x6c, 0x75)},
             {QStringLiteral("action"), QColor(0xe5, 0x84, 0x4f)},
             {QStringLiteral("tool"), QColor(0xc8, 0xa4, 0x5c)},
+            {QStringLiteral("link"), QColor(0x12, 0xa4, 0x57)},
             {QStringLiteral("shell"), QColor(0x3e, 0xc5, 0xf0)},
             {QStringLiteral("agent"), QColor(0xb4, 0x8e, 0xf7)},
         };
@@ -254,7 +294,7 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("unknown"), QColor(0xf0, 0x71, 0x78)},
             {QStringLiteral("flag"), QColor(0xe5, 0xc0, 0x7b)},
             {QStringLiteral("string"), QColor(0x7e, 0xc8, 0x8c)},
-            {QStringLiteral("path"), QColor(0x66, 0xd0, 0xc0)},
+            {QStringLiteral("path"), QColor(0x12, 0xa4, 0x57)},   // = link: a path you type is one you can open
             {QStringLiteral("operator"), QColor(0x80, 0x87, 0x96)},
             {QStringLiteral("variable"), QColor(0xb4, 0x8e, 0xf7)},
             {QStringLiteral("agent"), QColor(0xb4, 0x8e, 0xf7)},
@@ -325,6 +365,13 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         const auto amber = spec.ui.constFind(QStringLiteral("warning"));
         if (!named && amber != spec.ui.constEnd()) spec.ui.insert(QStringLiteral("tool"), brassFrom(*amber));
     }
+    // `ui.link` is derived from this theme's own ANSI 2 (linkFrom) — but only once the terminal
+    // ground is known, so it is done below, after [terminal] is read.
+    bool linkNamed = false;
+    {
+        const QString raw = scalar(QStringLiteral("ui.link"));
+        if (!raw.isEmpty()) parseColor(raw, &linkNamed);
+    }
 
     const auto readOne = [&](const QString &key, const QColor &fallbackColor) {
         const QString raw = scalar(key);
@@ -356,6 +403,17 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         problems << QStringLiteral("terminal.palette needs 16 entries, found %1").arg(palette.size());
     }
     if (spec.ansi.size() != 16) spec.ansi = fallback.ansi;
+
+    // `ui.link` for a file that named none: this theme's own dark green, ANSI 2, moved until it
+    // reads on every ground a link is painted on (linkFrom). Never Relay Dark's: a green picked for
+    // a near-black window is under 3:1 on paper.
+    if (!linkNamed) {
+        QList<QColor> grounds{spec.uiColor(QStringLiteral("background")), spec.uiColor(QStringLiteral("surface")),
+                              spec.uiColor(QStringLiteral("surface_raised")), spec.terminalBackground};
+        if (spec.terminalBackgroundEnd.isValid()) grounds << spec.terminalBackgroundEnd;
+        grounds.removeAll(QColor());
+        spec.ui.insert(QStringLiteral("link"), linkFrom(spec.ansi.value(2, QColor(0x12, 0xa4, 0x57)), grounds));
+    }
 
     // Intense foreground/background default to a step away from the base pair, which is what
     // Konsole's own schemes do; a theme may pin them.

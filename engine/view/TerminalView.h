@@ -11,6 +11,7 @@
 
 #include <QElapsedTimer>
 #include <QFont>
+#include <QHash>
 #include <QRawFont>
 #include <QTimer>
 #include <QWidget>
@@ -148,6 +149,14 @@ public:
     // A plain left click opens a link; Ctrl+click always does. Hosts that use the first
     // click of an inactive pane to move the focus disarm it until the pane is active.
     void setPlainClickOpensLinks(bool on) { m_plainClickOpens = on; }
+    // Every path, URL and card reference that resolves wears ColorScheme::link at rest, not only
+    // under the pointer (owner, 2026-09-19: "clickable things need to be understood from colors").
+    // Only a cell whose foreground is plain — the default, or an achromatic colour: white, bright
+    // white, a grey, the host's muted ink — is recoloured. A chromatic colour a program chose (`git
+    // status` red, `ls` blue) already says something and is left alone. Never on the alternate
+    // screen, which a full-screen program owns. On by default.
+    void setLinksColouredAtRest(bool on);
+    bool linksColouredAtRest() const { return m_linksAtRest; }
 
     // Step through every link in the scrollback and on the screen: -1 towards older
     // output, +1 towards newer, 0 re-reads the current one. The link is scrolled into
@@ -340,6 +349,10 @@ private:
     };
     void collectLinks();
     void showWalkLink(const WalkLink &walk);
+    // The columns of one frame row that lie inside a link that resolves: *cols is sized to the
+    // row and set where the link colour applies. Scans are cached per logical line and directory
+    // (m_restLinks), so an unchanged screen costs no probe.
+    void restLinkColumns(int frameRow, std::vector<char> *cols);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -424,6 +437,12 @@ private:
     int m_hoverCellRow = -2;   // the cell the hover was computed for, so a move inside
     int m_hoverCellCol = -2;   // one cell costs nothing
     bool m_plainClickOpens = true;
+    // Links at rest: the cache maps "<directory>\n<logical line>" to the [start, end] character
+    // spans links::scan found. Dropped when the probe's answers change, after a few seconds (a file
+    // the output named may have been created since), and when it grows past a bound.
+    bool m_linksAtRest = true;
+    QHash<QString, QVector<QPair<int, int>>> m_restLinks;
+    QElapsedTimer m_restLinksAge;
     Link m_pressedLink;        // the link a plain left press landed on
     QString m_pressedFold;     // the fold anchor a plain left press landed on
     int m_pressedRow = -1;

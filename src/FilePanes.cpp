@@ -1036,7 +1036,8 @@ bool FilePreview::openRemote(const QString &url) {
     m_textView->clear();
     m_textView->document()->setModified(false);
     m_stack->setCurrentWidget(m_textView);
-    m_hostChip->setText(ref.host);
+    // The ⇄ the pane header's remote chip carries, so the two chips read as one mark.
+    m_hostChip->setText(QStringLiteral("⇄ ") + ref.host);
     m_hostChip->setToolTip(QStringLiteral("This file is on %1 · Relay reads and writes it over the ssh connection this pane already has").arg(ref.host));
     m_hostChip->show();
     // The info page's "Open externally" would hand a remote path to this machine's applications.

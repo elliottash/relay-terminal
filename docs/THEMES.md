@@ -78,6 +78,11 @@ The 59 graded pairs per theme:
   practice). ANSI 8 is **UI**: it is the colour programs pick *in order to* be dim, and forcing it
   to 4.5:1 would make it indistinguishable from ANSI 7.
 - `border_strong` on `background` — **UI**
+- `link` on `background`, `surface`, `surface_raised` and the terminal ground (both ends of a
+  shaded one) — **AA**; and `link` against `shell`, `agent`, `error`, `warning`, `success` —
+  and against ANSI 2 and 10 — **distinct**, with its hue held to 135–180° (a green). Added
+  2026-09-19 with the token (`ARCHITECTURE.md` § 14, "Green means you can open it"); `[syntax]
+  path` equals it in every shipped theme.
 
 A theme may shade the grid instead of painting it flat: `[terminal] background_end` is the colour
 the ground fades to at the bottom of the pane, `background` stays the colour at the top, and the

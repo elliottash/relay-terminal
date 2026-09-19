@@ -49,6 +49,13 @@ inline QColor Action{0xe5, 0x84, 0x4f};
 // waiting on you", and only the second may ever be missed. A theme file that omits `[ui] tool`
 // gets one dulled out of its own amber (src/ThemeFile.cpp, brassFrom).
 inline QColor Tool{0xc8, 0xa4, 0x5c};
+// "You can open this": a path, a folder, a URL or a card reference, wherever one is shown — the
+// terminal grid (engine ColorScheme::link), the composer's path token, a fold's "open x.py" row,
+// the agent's Markdown links (indexed: the theme's ANSI 2, which `[ui] link` defaults to) and
+// QPalette::Link in the chrome. Owner, 2026-09-19: "clickable things need to be understood from
+// colors", then "dark green, like Warp". As dark a green as 4.5:1 allows in each theme, and
+// measured clear of the success green and the destination pair (tests/theme_test.cpp).
+inline QColor Link{0x12, 0xa4, 0x57};
 // The two input destinations: the mode chip, the caret and the prefix chips.
 inline QColor Shell{0x3e, 0xc5, 0xf0};
 inline QColor Agent{0xb4, 0x8e, 0xf7};
@@ -58,7 +65,7 @@ inline QColor SyntaxCommand{0x3e, 0xc5, 0xf0};
 inline QColor SyntaxUnknown{0xf0, 0x71, 0x78};
 inline QColor SyntaxFlag{0xe5, 0xc0, 0x7b};
 inline QColor SyntaxString{0x7e, 0xc8, 0x8c};
-inline QColor SyntaxPath{0x66, 0xd0, 0xc0};
+inline QColor SyntaxPath{0x12, 0xa4, 0x57};   // = Link unless a theme says otherwise
 inline QColor SyntaxOperator{0x80, 0x87, 0x96};
 inline QColor SyntaxVariable{0xb4, 0x8e, 0xf7};
 inline QColor SyntaxAgent{0xb4, 0x8e, 0xf7};

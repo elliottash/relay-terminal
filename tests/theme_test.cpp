@@ -364,7 +364,7 @@ private Q_SLOTS:
                 {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")}};
             QList<std::tuple<QString, QColor, QString, QColor>> pairs;
             for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error",
-                                   "action", "tool"})
+                                   "action", "tool", "link"})
                 for (const auto &ground : grounds)
                     pairs.append({QString::fromLatin1(fg), ui(fg), QString::fromLatin1(ground.first), ground.second});
             QList<QColor> terminal{spec.terminalBackground};
@@ -484,6 +484,84 @@ private Q_SLOTS:
             QVERIFY2(d >= 10.0, qPrintable(QStringLiteral("%1: tool %2 vs warning %3 is dE %4 < 10")
                                                .arg(it.key(), tool.name(), warning.name()).arg(d, 0, 'f', 1)));
         }
+    }
+
+    // Owner, 2026-09-19: "clickable things need to be understood from colors". `[ui] link` is the
+    // one colour that means "you can open this" — a path in program output, the composer's path
+    // token, a fold's "open x.py", a Markdown link, QPalette::Link — so it has to be a green (the
+    // owner's "dark green, like Warp"), legible on every ground a link is read on including the
+    // terminal's, and a different colour from `success` (a link is a thing you can open, not a
+    // thing that finished) and from both destinations (a link is not a place your typing goes).
+    void theLinkGreenIsOneColourAndClearOfSuccessAndTheDestinationPair() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(!files.isEmpty());
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+            const QColor link = ui("link");
+            QVERIFY2(link.isValid(), qPrintable(it.key()));
+            const int hue = link.toHsl().hslHue();
+            QVERIFY2(hue >= 135 && hue <= 180, qPrintable(QStringLiteral("%1: link %2 is hue %3, not a green")
+                                                             .arg(it.key(), link.name()).arg(hue)));
+            // And not the palette's own greens either, which programs paint `ls -F` executables and
+            // diff additions in: ANSI 2 and 10 are the colours a link would otherwise be mistaken for.
+            for (int i : {2, 10}) {
+                const double d = deltaE(link, spec.ansi.value(i));
+                QVERIFY2(d >= 20.0, qPrintable(QStringLiteral("%1: link %2 vs ANSI %3 %4 is dE %5 < 20")
+                                                   .arg(it.key(), link.name()).arg(i).arg(spec.ansi.value(i).name()).arg(d, 0, 'f', 1)));
+            }
+            for (const auto &[what, other] : QList<QPair<QString, QColor>>{{QStringLiteral("shell"), ui("shell")},
+                                                                         {QStringLiteral("agent"), ui("agent")},
+                                                                         {QStringLiteral("error"), ui("error")},
+                                                                         {QStringLiteral("warning"), ui("warning")},
+                                                                         {QStringLiteral("success"), ui("success")}}) {
+                const double d = deltaE(link, other);
+                QVERIFY2(d >= 20.0, qPrintable(QStringLiteral("%1: link %2 vs %3 %4 is dE %5 < 20")
+                                                   .arg(it.key(), link.name(), what, other.name()).arg(d, 0, 'f', 1)));
+            }
+            // Legible on the terminal ground too — that is where most links are — at both ends of a
+            // shaded one. (The window grounds are covered by everyShippedThemeKeepsItsTextLegible.)
+            QList<QColor> grounds{spec.terminalBackground};
+            if (spec.terminalBackgroundEnd.isValid()) grounds << spec.terminalBackgroundEnd;
+            for (const QColor &ground : grounds) {
+                const double r = contrast(link, ground);
+                QVERIFY2(r >= 4.5, qPrintable(QStringLiteral("%1: link %2 on the terminal %3 is %4:1")
+                                                  .arg(it.key(), link.name(), ground.name()).arg(r, 0, 'f', 2)));
+            }
+            // The composer's path token is the same colour: a path you type is one you can open.
+            QCOMPARE(spec.syntaxColor(QStringLiteral("path")).name(), link.name());
+        }
+    }
+
+    // A theme that says nothing about `[ui] link` gets its own dark green (ANSI 2) — moved until
+    // it reads on every ground when the palette's green is too dim for the window — never Relay
+    // Dark's, which is under 3:1 on paper.
+    void aThemeThatNamesNoLinkColourGetsOneFromItsOwnGreen() {
+        const QString head = QStringLiteral(
+            "[theme]\nname = \"Silent\"\nvariant = \"dark\"\n"
+            "[ui]\nbackground = \"#101014\"\nsurface = \"#181820\"\nsurface_raised = \"#20202a\"\n"
+            "border = \"#2a2a34\"\nborder_strong = \"#4a4a58\"\ntext = \"#e8e8ee\"\n"
+            "text_muted = \"#9a9aa6\"\naccent = \"#4ab8e0\"\naccent_text = \"#04161e\"\n");
+        QString error;
+        // No [terminal]: the palette is Relay Dark's, whose ANSI 2 already reads on this ground.
+        const ThemeSpec inherited = parseTheme(head, QStringLiteral("silent"), builtinDark(), &error);
+        QCOMPARE(inherited.uiColor(QStringLiteral("link")).name(), inherited.ansi.value(2).name());
+        // A palette whose green is a dim forest: the link is lifted off it until it clears 4.5:1 on
+        // every ground, and is still a green.
+        const ThemeSpec dim = parseTheme(head + QStringLiteral(
+            "[terminal]\nbackground = \"#101014\"\nforeground = \"#e8e8ee\"\npalette = [\n"
+            "  \"#000000\", \"#cc0000\", \"#0b4d2a\", \"#c4a000\", \"#3465a4\", \"#75507b\", \"#06989a\", \"#d3d7cf\",\n"
+            "  \"#555753\", \"#ef2929\", \"#8ae234\", \"#fce94f\", \"#729fcf\", \"#ad7fa8\", \"#34e2e2\", \"#eeeeec\",\n]\n"),
+            QStringLiteral("silent-dim"), builtinDark(), &error);
+        const QColor link = dim.uiColor(QStringLiteral("link"));
+        QVERIFY(link != QColor(0x0b, 0x4d, 0x2a));
+        QVERIFY2(link != QColor(0x12, 0xa4, 0x57), "inherited Relay Dark's green instead of deriving one");
+        for (const char *ground : {"background", "surface", "surface_raised"}) {
+            const double r = contrast(link, dim.uiColor(QString::fromLatin1(ground)));
+            QVERIFY2(r >= 4.5, qPrintable(QStringLiteral("%1 on %2 is %3:1").arg(link.name(), QString::fromLatin1(ground)).arg(r, 0, 'f', 2)));
+        }
+        const int hue = link.toHsl().hslHue();
+        QVERIFY2(hue >= 135 && hue <= 180, qPrintable(QStringLiteral("derived link %1 is hue %2").arg(link.name()).arg(hue)));
     }
 
     // A theme that says nothing about `[ui] tool` gets one dulled out of its *own* amber, never

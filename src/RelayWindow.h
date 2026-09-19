@@ -1967,6 +1967,13 @@ private:
         // (src/CopyOnSelect.h): renaming it would turn the setting off for everyone who had it on.
         terminal.rows << toggleRow(QStringLiteral("terminal/copy_on_select"), QStringLiteral("Copy on select"),
                                    QStringLiteral("Highlighting text copies it, in the terminal and in read-only panes"), false);
+        // Owner, 2026-09-19: "clickable things need to be understood from colors" — and "make the
+        // 'add color in program output' an option that is on by default".
+        terminal.rows << toggleRow(QStringLiteral("terminal/colour_links"),
+                                   QStringLiteral("Colour paths and links in output"),
+                                   QStringLiteral("A file, folder, URL or #card Relay can open is green at rest, not only under "
+                                                  "the pointer; a colour a program chose stays"),
+                                   true, [this](bool) { for (Pane *pane : allPanes()) pane->applyTerminalSettings(); });
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);

@@ -36,10 +36,17 @@ public:
         QString heading = QStringLiteral("1;35");       // magenta, the agent's end of the palette
         QString marker = QStringLiteral("35");
         QString quote = QStringLiteral("3;2;97");       // italic, faint: quieter by proportion
-        QString inlineCode = QStringLiteral("33");
+        // Bold, no hue (was amber, ANSI 33, until 2026-09-19). Two reasons: amber is the "waiting
+        // on you" colour and had a second job here; and a filename in backticks — the commonest
+        // openable thing in a reply — has to be able to take the link blue at rest, which the
+        // view paints only over plain ink (TerminalView::setLinksColouredAtRest). Bold says code.
+        QString inlineCode = QStringLiteral("1;97");
         QString codeBlock = QStringLiteral("36");
         QString dim = QStringLiteral("2;97");
-        QString link = QStringLiteral("4;34");
+        // Underlined ANSI 2 — the palette's dark green, which is what `[ui] link` defaults to, so
+        // a link in the agent's prose is the green a path in program output and a fold's "open
+        // x.py" wear (owner, 2026-09-19: "dark green, like Warp").
+        QString link = QStringLiteral("4;32");
         // The three labelled bolds the system prompt teaches — **Done:**, **Need:**, **Problem:**
         // — so a reply's main point is findable at a glance in the scrollback (card #CVHT). Since
         // card #4E13 they speak the same language as the pane states and the "Relaying…" line:

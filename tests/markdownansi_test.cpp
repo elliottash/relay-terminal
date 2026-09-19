@@ -42,7 +42,7 @@ private slots:
         QVERIFY(out.contains(QStringLiteral(";1m")));
         QVERIFY(out.contains(QStringLiteral(";3m")));
         QVERIFY(out.contains(QStringLiteral(";9m")));
-        QVERIFY(out.contains(QStringLiteral("33m")));   // `code`, the palette's default
+        QVERIFY(out.contains(QStringLiteral("1;97m"))); // `code`: bold, no hue (the palette's default since 2026-09-19)
     }
 
     // Card #CVHT: the three labelled bolds the system prompt teaches are coloured by their first

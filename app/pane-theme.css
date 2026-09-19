@@ -37,6 +37,9 @@
   --rt-shell: #45c8ee;
   --rt-agent-soft: rgba(171, 151, 247, 0.22);
   --rt-agent: #ab97f7;
+  --rt-link: #1aa85e;
+  --rt-remote-fill: #45272c;
+  --rt-remote-line: #b65961;
   --rt-token-accent: #c07a4a;
   --rt-token-accent-text: #1a0f08;
   --rt-token-action: #e56a30;
@@ -45,6 +48,7 @@
   --rt-token-border: #3a2822;
   --rt-token-border-strong: #666f7a;
   --rt-token-error: #e06c75;
+  --rt-token-link: #1aa85e;
   --rt-token-shell: #45c8ee;
   --rt-token-success: #7ec88c;
   --rt-token-surface: #15161a;
@@ -53,7 +57,7 @@
   --rt-token-syntax-command: #45c8ee;
   --rt-token-syntax-flag: #e5c07b;
   --rt-token-syntax-operator: #9a938a;
-  --rt-token-syntax-path: #66d0c0;
+  --rt-token-syntax-path: #1aa85e;
   --rt-token-syntax-string: #7ec88c;
   --rt-token-syntax-token: #45c8ee;
   --rt-token-syntax-unknown: #f07178;
@@ -118,6 +122,9 @@
   --rt-shell: #3ec5f0;
   --rt-agent-soft: rgba(180, 142, 247, 0.22);
   --rt-agent: #b48ef7;
+  --rt-link: #12a457;
+  --rt-remote-fill: #45292e;
+  --rt-remote-line: #b65a62;
   --rt-token-accent: #3ec5f0;
   --rt-token-accent-text: #061a22;
   --rt-token-action: #e5844f;
@@ -126,6 +133,7 @@
   --rt-token-border: #2a2e37;
   --rt-token-border-strong: #4a5260;
   --rt-token-error: #e06c75;
+  --rt-token-link: #12a457;
   --rt-token-shell: #3ec5f0;
   --rt-token-success: #7ec88c;
   --rt-token-surface: #16181d;
@@ -134,7 +142,7 @@
   --rt-token-syntax-command: #3ec5f0;
   --rt-token-syntax-flag: #e5c07b;
   --rt-token-syntax-operator: #808796;
-  --rt-token-syntax-path: #66d0c0;
+  --rt-token-syntax-path: #12a457;
   --rt-token-syntax-string: #7ec88c;
   --rt-token-syntax-token: #3ec5f0;
   --rt-token-syntax-unknown: #f07178;
@@ -199,6 +207,9 @@
   --rt-shell: #006ab1;
   --rt-agent-soft: rgba(124, 58, 237, 0.22);
   --rt-agent: #7c3aed;
+  --rt-link: #1a5548;
+  --rt-remote-fill: #ecc4ca;
+  --rt-remote-line: #cc5161;
   --rt-token-accent: #006ab1;
   --rt-token-accent-text: #ffffff;
   --rt-token-action: #a8450c;
@@ -207,6 +218,7 @@
   --rt-token-border: #d3d7e0;
   --rt-token-border-strong: #98a0b0;
   --rt-token-error: #c0273a;
+  --rt-token-link: #1a5548;
   --rt-token-shell: #006ab1;
   --rt-token-success: #1e763b;
   --rt-token-surface: #f2f3f7;
@@ -215,7 +227,7 @@
   --rt-token-syntax-command: #006ab1;
   --rt-token-syntax-flag: #8a5d00;
   --rt-token-syntax-operator: #616977;
-  --rt-token-syntax-path: #0f6f68;
+  --rt-token-syntax-path: #1a5548;
   --rt-token-syntax-string: #1e763b;
   --rt-token-syntax-token: #006ab1;
   --rt-token-syntax-unknown: #c0273a;

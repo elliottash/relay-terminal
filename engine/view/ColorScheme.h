@@ -19,7 +19,9 @@ struct ColorScheme {
     QColor searchMatch{0x6b, 0x5a, 0x1e};
     QColor searchCurrent{0xd0, 0x9a, 0x2a};
     QColor searchText{0x10, 0x10, 0x10};
-    QColor link{0x6c, 0xb6, 0xff};
+    // "You can open this": the hover underline, OSC 8 and fold links, and (setLinksColouredAtRest)
+    // every path or URL in the output. The host sets it from its theme's `[ui] link`.
+    QColor link{0x12, 0xa4, 0x57};
     // Folds (#TK9C): the tint behind an unfolded block and the rule down its
     // left edge. Invalid (the default) = mixed from background and foreground,
     // so a host that knows nothing about folds still gets a readable block.

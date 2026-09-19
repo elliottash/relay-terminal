@@ -661,6 +661,40 @@ private slots:
         QCOMPARE(t.links, QStringList{QStringLiteral("https://relay.test/report")});
     }
 
+    // A path in the output that resolves wears the link colour at rest — in the default ink and in
+    // a plain one like the bright white the agent's prose is written in; a chromatic colour the
+    // program chose is never overridden; the option turns it all off (owner, 2026-09-19).
+    void aPathInTheOutputWearsTheLinkColourAtRest()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        // A short name: the screen is 50 columns and a path that wraps is two rows.
+        QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/lk-XXXXXX"));
+        QVERIFY(dir.isValid());
+        t.backend->resizeTerminal(12, 100);
+        const QString file = dir.filePath(QStringLiteral("notes.txt"));
+        { QFile f(file); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("x"); }
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.link = QColor(0x12, 0x34, 0xab); // a colour nothing else on the screen has
+        t.view->setColorScheme(scheme);
+        const int ch = t.view->cellHeight();
+        // Row 0: the path in the default foreground. Row 1: the same path painted red by the
+        // program. Row 2: in bright white (SGR 97), the agent's prose ink.
+        t.backend->writeToDisplay(("see " + file + "\r\n").toUtf8());
+        t.backend->writeToDisplay(("\x1b[31m" + file + "\x1b[0m\r\n").toUtf8());
+        t.backend->writeToDisplay(("\x1b[97m" + file + "\x1b[0m\r\n").toUtf8());
+        QVERIFY(t.waitScreen(QStringLiteral("notes.txt")));
+        QImage img = t.grab();
+        QVERIFY2(rowHasColor(img, 0, ch, scheme.link), "a resolving path is not in the link colour");
+        QVERIFY2(!rowHasColor(img, 1, ch, scheme.link), "the program's own red was overridden");
+        QVERIFY(rowHasColor(img, 1, ch, QColor::fromRgb(scheme.palette[1])));
+        QVERIFY2(rowHasColor(img, 2, ch, scheme.link), "a path in plain bright-white ink is not in the link colour");
+        t.view->setLinksColouredAtRest(false);
+        img = t.grab();
+        QVERIFY2(!rowHasColor(img, 0, ch, scheme.link), "the option is off but the path is still coloured");
+        QVERIFY(!rowHasColor(img, 2, ch, scheme.link));
+    }
+
     // ---- find, with the open folds in the sequence (#TK9C)
 
     void findFindsTextOnlyAnOpenFoldHas()

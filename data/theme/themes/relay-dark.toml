@@ -38,6 +38,10 @@ action = "#e5844f"
 # above it: a material the Switchboard's band is made of, not a flag. 7.01:1 on the darkest ground.
 tool = "#c8a45c"
 # The two input destinations; the mode chip, the caret and the prefix chips take these.
+# "You can open this" (owner, 2026-09-19: "dark green, like Warp"): a path, a URL, a card reference,
+# in the grid and the chrome alike. As dark a green as 4.5:1 allows on the raised face (5.08:1);
+# dE 24 from the success green and 25 from ANSI 2, so "open" and "done" stay two colours.
+link = "#12a457"
 shell = "#3ec5f0"
 agent = "#b48ef7"
 
@@ -46,7 +50,7 @@ command = "#3ec5f0"
 unknown = "#f07178"
 flag = "#e5c07b"
 string = "#7ec88c"
-path = "#66d0c0"
+path = "#12a457"
 operator = "#808796"
 variable = "#b48ef7"
 agent = "#b48ef7"

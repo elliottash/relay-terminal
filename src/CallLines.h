@@ -163,6 +163,7 @@ struct Palette {
     QColor text;                 // the default; invalid = the terminal's own foreground
     QColor muted;                // headings, hunk headers, the last row
     QColor code;                 // a command line
+    QColor link;                 // a Markdown link: the theme's link green; invalid = code
     QColor add, remove;          // diff foregrounds
     QColor addBg, removeBg;      // diff backgrounds, already blended into the surface
     QColor error;
@@ -190,7 +191,8 @@ QVector<FoldLine> foldForNote(const QString &text, const Palette &palette);
 
 // Markdown (agent reasoning) as fold rows: rendered by the streaming renderer the terminal's prose
 // uses (MarkdownAnsi), then its ANSI mapped onto the fold's palette — prose muted (it is chrome
-// around the reply), code and links in the code colour, headings plain text, **Problem:** red.
+// around the reply), code blocks in the code colour, links in the link colour, inline code bold
+// (as the terminal shows it), headings plain text, **Problem:** red.
 // Empty input comes back empty; the caller decides what a fold with nothing to show says. Beyond
 // `maxLines` rows the *earliest* lines go, with a note saying how many: the tail is where the
 // reasoning ended.

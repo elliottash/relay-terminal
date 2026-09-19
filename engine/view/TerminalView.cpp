@@ -684,13 +684,32 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         return batches.back();
     };
     const bool hoverRow = row == m_hoverRow;
+    // Links at rest (setLinksColouredAtRest): the columns of this row inside a path, URL or card
+    // reference that resolves. Empty when the option is off, on the alternate screen, or when the
+    // row holds none.
+    std::vector<char> restLink;
+    if (m_linksAtRest && !m_frame.altScreen)
+        restLinkColumns(realRow - m_frame.viewportTop, &restLink);
+    const auto highlighted = [&line](int col) {
+        for (const Line::Highlight &h : line.highlights)
+            if (col >= h.start && col <= h.end) return true;
+        return false;
+    };
     std::u32string cps;
     for (int col = 0; col < cols; ++col) {
         const Cell &c = line.cells[size_t(col)];
         if (c.ch == kWideTail)
             continue;
         const int w = c.width == 2 ? 2 : 1;
-        const CellColors cc = colorsFor(col);
+        CellColors cc = colorsFor(col);
+        // The link colour, on a cell whose ink is plain — the default foreground or any achromatic
+        // one (the agent's prose is bright white, a tool line is the host's grey) — and that
+        // nothing else claims: a find match keeps its ink, a chromatic colour a program chose keeps
+        // its meaning. HSV saturation under 0.3 is "plain": every theme's text and greys measure
+        // under 0.25, every ANSI 1–6 and 9–14 over 0.45.
+        if (col < int(restLink.size()) && restLink[size_t(col)] && !(c.attrs & AttrReverse) && !highlighted(col)
+            && (CellColor::kind(c.fg) == CellColor::Default || cc.fg.hsvSaturationF() < 0.3))
+            cc.fg = m_scheme.link;
         const int x = m_padding + col * m_cw;
         const int variant = ((c.attrs & AttrBold) ? 1 : 0) | ((c.attrs & AttrItalic) ? 2 : 0);
 
@@ -1493,6 +1512,9 @@ void TerminalView::linkProbeUpdated()
     // the walk's list so the next move or scan asks again. A walk the user is in the middle of
     // keeps its place — answers arrive while they are stepping through it.
     m_hoverCellRow = m_hoverCellCol = -2;
+    m_restLinks.clear();
+    m_forceFull = true;
+    update();
     if (!m_linkCursor.active())
         endLinkWalk();
     // And read the cell the pointer is already on again, so a path the host has just vouched for
@@ -1508,6 +1530,30 @@ struct LogicalRow {
     QString text;
     std::vector<std::pair<int, int>> cellOf;
 };
+
+// The logical line frame row `row` belongs to — its soft-wrapped rows joined — and, for each
+// character of it, the (frame row, column) it came from. Long URLs and paths wrap at the edge.
+void logicalRowAt(const ViewportFrame &frame, int row, LogicalRow *out)
+{
+    int firstRow = row, lastRow = row;
+    while (firstRow > 0 && frame.lines[size_t(firstRow)].continuation)
+        --firstRow;
+    while (lastRow + 1 < int(frame.lines.size()) && frame.lines[size_t(lastRow + 1)].continuation)
+        ++lastRow;
+    for (int r = firstRow; r <= lastRow; ++r) {
+        const Line &rowLine = frame.lines[size_t(r)];
+        const int n = r < lastRow ? frame.columns : int(rowLine.cells.size());
+        for (int i = 0; i < n; ++i) {
+            const Cell cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : Cell();
+            if (cell.ch == kWideTail)
+                continue;
+            const QString text = rowLine.cellText(cell);
+            for (int k = 0; k < text.size(); ++k)
+                out->cellOf.push_back({r, i});
+            out->text += text;
+        }
+    }
+}
 } // namespace
 
 bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
@@ -1564,25 +1610,8 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
 
     // Plain text, joined across the soft-wrapped rows of the viewport (long URLs and
     // paths wrap at the terminal edge).
-    int firstRow = row, lastRow = row;
-    while (firstRow > 0 && m_frame.lines[size_t(firstRow)].continuation)
-        --firstRow;
-    while (lastRow + 1 < int(m_frame.lines.size()) && m_frame.lines[size_t(lastRow + 1)].continuation)
-        ++lastRow;
     LogicalRow logical;
-    for (int r = firstRow; r <= lastRow; ++r) {
-        const Line &rowLine = m_frame.lines[size_t(r)];
-        const int n = r < lastRow ? m_frame.columns : int(rowLine.cells.size());
-        for (int i = 0; i < n; ++i) {
-            const Cell cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : Cell();
-            if (cell.ch == kWideTail)
-                continue;
-            const QString text = rowLine.cellText(cell);
-            for (int k = 0; k < text.size(); ++k)
-                logical.cellOf.push_back({r, i});
-            logical.text += text;
-        }
-    }
+    logicalRowAt(m_frame, row, &logical);
     int idx = -1;
     for (int i = 0; i < int(logical.cellOf.size()); ++i) {
         if (logical.cellOf[size_t(i)].first == row && logical.cellOf[size_t(i)].second == c.col) {
@@ -1612,6 +1641,63 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         return true;
     }
     return false;
+}
+
+void TerminalView::setLinksColouredAtRest(bool on)
+{
+    if (m_linksAtRest == on)
+        return;
+    m_linksAtRest = on;
+    m_restLinks.clear();
+    m_forceFull = true;
+    update();
+}
+
+void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
+{
+    cols->clear();
+    if (frameRow < 0 || frameRow >= int(m_frame.lines.size()))
+        return;
+    const Line &line = m_frame.lines[size_t(frameRow)];
+    if (line.cells.empty())
+        return;
+    LogicalRow logical;
+    logicalRowAt(m_frame, frameRow, &logical);
+    if (logical.text.trimmed().isEmpty())
+        return;
+    // Cheap first: nothing that could be a link, nothing to scan. (Scanning is what probes the
+    // filesystem; this is what keeps a wall of prose free.)
+    if (!logical.text.contains(QLatin1Char('/')) && !logical.text.contains(QLatin1Char('.'))
+        && !logical.text.contains(QLatin1Char('#')) && !logical.text.contains(QLatin1Char('~')))
+        return;
+    if (m_restLinks.size() > 4096 || (m_restLinksAge.isValid() && m_restLinksAge.elapsed() > 5000))
+        m_restLinks.clear();
+    if (m_restLinks.isEmpty())
+        m_restLinksAge.start();
+    const QString cwd = currentDirectory();
+    const QString key = cwd + QLatin1Char('\n') + logical.text;
+    auto it = m_restLinks.constFind(key);
+    if (it == m_restLinks.constEnd()) {
+        QVector<QPair<int, int>> spans;
+        for (const links::Found &found : links::scan(logical.text, cwd, QDir::homePath(),
+                                                     m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup))
+            spans.append({found.candidate.start, found.candidate.start + found.candidate.length - 1});
+        it = m_restLinks.insert(key, spans);
+    }
+    if (it->isEmpty())
+        return;
+    cols->assign(line.cells.size(), 0);
+    for (const QPair<int, int> &span : *it) {
+        for (int i = span.first; i <= span.second && i < int(logical.cellOf.size()); ++i) {
+            const auto &[r, col] = logical.cellOf[size_t(i)];
+            if (r != frameRow || col < 0 || col >= int(cols->size()))
+                continue;
+            (*cols)[size_t(col)] = 1;
+            // A wide character's tail cell too, so the run has no gap.
+            if (col + 1 < int(line.cells.size()) && line.cells[size_t(col + 1)].ch == kWideTail)
+                (*cols)[size_t(col + 1)] = 1;
+        }
+    }
 }
 
 TerminalView::Link TerminalView::linkAtPoint(const QPoint &pos)

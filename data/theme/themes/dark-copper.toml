@@ -51,6 +51,10 @@ action = "#e56a30"
 # you. The switchboard metal from [board] below — this theme's brass is copper, straight off the
 # reference. dE 23.7 from the amber, which is what keeps a band clear of a flag.
 tool = "#c08556"
+# "You can open this" (owner, 2026-09-19: "dark green, like Warp"). As dark a green as 4.5:1
+# allows on the lit top of a metal face (4.97:1); dE 22 from the success green and 23 from ANSI 2,
+# so "open" and "done" stay two colours. The composer's `path` below is the same colour.
+link = "#1aa85e"
 shell = "#45c8ee"
 # About 8 degrees bluer than Relay Dark's #b48ef7: on a copper-chromed ground the eye adapts
 # warm and a red-leaning violet drifts toward brown. Moving it away from red keeps it clear of
@@ -62,7 +66,7 @@ command = "#45c8ee"
 unknown = "#f07178"
 flag = "#e5c07b"
 string = "#7ec88c"
-path = "#66d0c0"
+path = "#1aa85e"
 operator = "#9a938a"
 variable = "#ab97f7"
 agent = "#ab97f7"

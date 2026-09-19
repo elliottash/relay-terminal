@@ -2114,6 +2114,7 @@ There are three channels, and one meaning per colour:
 | `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, diff removals, the ssh band |
 | `action` (red-orange) | the Actions pane | its band, glyph and title-bar button |
 | `tool` (brass) | this pane is a tool | the Switchboard's band and its neighbours' |
+| `link` (dark green) | **you can open this** | a path, folder, URL or `#card` in program output (at rest, since 2026-09-19), the hover underline and the keyboard walk, a fold's "open x.py" row, OSC 8 hyperlinks, the agent's Markdown links (ANSI 2), the composer's path token, `QPalette::Link` |
 
 **Amber has one job.** Until 2026-09-19 it also drew a tool pane's header band, the `!` terminal
 prefix chip and a Switchboard cleanup *while it ran* — none of which is waiting on anybody — so the
@@ -2127,6 +2128,32 @@ palette is a separate language — a shell flag is amber there and means nothing
 `004a74f` on 2026-09-17, hours before `b473d45` defined `shell`/`agent` as the destination pair, and
 nothing reconciled them. Fixed 2026-09-19 — they are destinations, so they wear the destination
 pair like the mode chip, the caret and the syntax.
+
+**Green means you can open it** (owner, 2026-09-19: "clickable things need to be understood from
+colors", then "dark green, like Warp"). Before, a path in the output was plain until the pointer
+found it, a filename in the agent's prose was amber (inline code), the composer painted one teal, a
+fold row painted one in the engine's private blue, and the Sessions page painted a URL in the accent
+— five colours for one fact. `[ui] link` is that fact's colour: a dark green, as dark as 4.5:1
+allows on each theme's grounds (on a dark theme that is a mid green; a true forest green cannot
+reach 4.5:1 on charcoal), held ΔE ≥ 20 from `success` and from ANSI 2 and 10 so "you can open it"
+and "it finished" stay two colours. The engine's `ColorScheme::link` is set from it, so the hover
+underline, the walk and every OSC 8 or fold link agree; `[syntax] path` is the same value in every
+shipped theme; the Markdown renderer's link is `4;32` (ANSI 2, which `[ui] link` defaults to when a theme is silent —
+and its inline code is bold with no hue, where it was amber: a filename in backticks is the commonest
+openable thing in a reply, and amber both hid that and gave the "waiting on you" colour a second job —
+derived by `linkFrom()` and lifted until it clears 4.5:1 on every ground, never inherited). In
+program output the colour is painted **at rest** on every path, URL and card reference that
+resolves (`TerminalView::setLinksColouredAtRest`, Options › Terminal › "Colour paths and links in
+output", on by default). Two limits, both deliberate: only a cell whose ink is *plain* — the default
+foreground or an achromatic one, which is what the agent's bright-white prose and a tool line's grey
+are — is recoloured, so `git status` red and `ls` blue, which already say something, are left alone;
+and never on the alternate screen, which a full-screen program owns. The colour is a fourth channel here as
+everywhere: hover still underlines, and the walk still selects.
+
+**A hostname is one mark.** The pane header's ⇄ chip and the file preview's host chip are the same
+chip since 2026-09-19 — the error hue's fill and near-solid line, the text colour for the name —
+so "this is on another machine" reads the same whether it is your typing or a file that lives
+there. The preview chip used to be the accent, which in Dark Copper is copper and means nothing.
 
 **Colour is never the only channel.** Every pane state has its own silhouette (ring, the Relay mark,
 a chevron, a tick, a filled disc with a cut cross, a diamond with an exclamation), so the state reads

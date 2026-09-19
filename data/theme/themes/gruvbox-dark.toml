@@ -32,6 +32,10 @@ action = "#fe8019"
 # you. Gruvbox's own dim yellow (palette 3) against its bright yellow (palette 11, the amber above):
 # the pair the palette already ships, doing the job it was designed for.
 tool = "#d79921"
+# "You can open this" (owner, 2026-09-19: "dark green, like Warp"). Gruvbox's greens are olives
+# (dE 0 from success), and its raised face is light, so the darkest green that still reads on it
+# at 4.5:1 is this one: dE 47 from the olive, 40 from the grey-teal shell.
+link = "#21ba73"
 shell = "#8cab9f"
 agent = "#d791a4"
 
@@ -40,7 +44,7 @@ command = "#8cab9f"
 unknown = "#fc7f70"
 flag = "#fabd2f"
 string = "#b8bb26"
-path = "#8ec07c"
+path = "#21ba73"
 operator = "#ada296"
 variable = "#d791a4"
 agent = "#d791a4"

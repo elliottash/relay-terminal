@@ -172,6 +172,11 @@ CONTRACT = [
     ("error", "background", "AA", "an error dot on a notification row"),
     ("border_strong", "background", "UI", "the focused pane's outline"),
     ("border", "background", "deco", "a hairline rule"),
+    # `link` (2026-09-19): "you can open this" — a path in the output, a fold row, a Markdown link.
+    ("link", "background", "AA", "a link in the chrome (Sessions page, notifications)"),
+    ("link", "surface", "AA", "the composer's path token, idle"),
+    ("link", "surface_raised", "AA", "the composer's path token, focused"),
+    ("link", "term.bg", "AA", "a path or URL in program output, at rest"),
 ]
 SYNTAX = ["command", "unknown", "flag", "string", "path", "operator", "variable", "agent", "token"]
 for _s in SYNTAX:
@@ -194,6 +199,7 @@ CONTRACT.append(("ansi8", "term.bg", "UI", "ANSI 8, the dim colour"))
 # Relay's visual language), so it is not checked. shell vs agent is: the
 # destination pair must stay two colours even when a theme greys it down.
 DISTINCT = [
+    ("link", "shell"), ("link", "agent"), ("link", "error"), ("link", "warning"), ("link", "success"),
     ("accent", "warning"), ("accent", "error"),
     ("border_strong", "warning"), ("border_strong", "error"),
     ("surface_raised", "warning"), ("border", "error"),

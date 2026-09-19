@@ -262,6 +262,8 @@ void adoptTokens(const ThemeSpec &spec) {
     Action = ui("action", Action);
     // Always present too: parseTheme() dulls one out of the theme's own amber when it is silent.
     Tool = ui("tool", Tool);
+    // Always present as well: parseTheme() derives one from the theme's own ANSI 12 when silent.
+    Link = ui("link", Link);
     Shell = ui("shell", Accent);
     Agent = ui("agent", Agent);
 
@@ -272,7 +274,7 @@ void adoptTokens(const ThemeSpec &spec) {
     SyntaxUnknown = syntax("unknown", Error);
     SyntaxFlag = syntax("flag", Warning);
     SyntaxString = syntax("string", Success);
-    SyntaxPath = syntax("path", SyntaxPath);
+    SyntaxPath = syntax("path", Link);
     SyntaxOperator = syntax("operator", TextMuted);
     SyntaxVariable = syntax("variable", Agent);
     SyntaxAgent = syntax("agent", Agent);
@@ -295,7 +297,7 @@ void applyPalette(QApplication &app, const ThemeSpec &spec) {
     p.setColor(QPalette::ToolTipText, Text);
     p.setColor(QPalette::Highlight, spec.uiColor(QStringLiteral("selection"), Accent.darker(160)));
     p.setColor(QPalette::HighlightedText, Qt::white);
-    p.setColor(QPalette::Link, Accent);
+    p.setColor(QPalette::Link, Link);
     p.setColor(QPalette::Light, Border.lighter(130));
     p.setColor(QPalette::Midlight, Border);
     p.setColor(QPalette::Mid, Border);
@@ -581,9 +583,12 @@ QTabWidget > QTabBar::tab:selected, QTabBar#settingsTabs::tab:selected { color: 
 QWidget#fileExplorer, QWidget#filePreview { background: @bg; }
 QLabel#fileExplorerPath, QLabel#filePreviewTitle { color: @text; font-weight: 600; padding: 2px 4px; }
 QLabel#filePreviewNotice { color: @muted; background: @surface; border: 1px solid @border; border-radius: 6px; padding: 4px 8px; }
-/* The host chip on a file that lives on another machine (#S5SH): accent on accentSoft, the pair
-   already used for a pressed toolbar button, so it reads as "not this machine" at a glance. */
-QLabel#filePreviewHost { color: @accent; background: @accentSoft; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; }
+/* The host chip on a file that lives on another machine (#S5SH): the same chip the pane header
+   wears when a terminal is logged into a host (PaneChrome::PaneHeaderChip, panestatus::remoteStyle)
+   — the error hue's fill and near-solid line, the text colour for the name — so "not this machine"
+   is one look wherever a hostname appears, never the accent. Blended here exactly as remoteStyle
+   blends it: fill mix(error, background, 0.26), line mix(error, background, 0.8). */
+QLabel#filePreviewHost { color: @text; background: @remoteFill; border: 1px solid @remoteLine; border-radius: 4px; padding: 1px 6px; font-weight: 600; font-size: 9pt; }
 QTreeView#fileExplorerView { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }
 QTreeView#fileExplorerView::item { padding: 3px 2px; }
 QTreeView#fileExplorerView::item:selected { background: @raised; color: @text; }
@@ -690,6 +695,9 @@ QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
         {QStringLiteral("@error"), hex(Error)}, {QStringLiteral("@caution"), hex(caution)},
         {QStringLiteral("@shellSoft"), rgba(withAlpha(Shell, 56))}, {QStringLiteral("@shell"), hex(Shell)},
         {QStringLiteral("@agentSoft"), rgba(withAlpha(Agent, 56))}, {QStringLiteral("@agent"), hex(Agent)},
+        {QStringLiteral("@link"), hex(Link)},
+        {QStringLiteral("@remoteFill"), hex(blend(Error, Background, 0.26))},
+        {QStringLiteral("@remoteLine"), hex(blend(Error, Background, 0.8))},
         {QStringLiteral("@mono"), mono},
         {QStringLiteral("@icons"), themeDataDir() + QStringLiteral("/icons")}};
     // Per-theme chrome switches ([flags] in the theme file). A theme that sets neither gets the

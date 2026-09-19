@@ -411,6 +411,10 @@ void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &
                     else if (n == 2) span.dim = true;
                     else if (n == 3) span.italic = true;
                     else if (n == 4) span.underline = true;
+                    // A link is underlined ANSI 2 (MarkdownAnsi::Palette::link, "4;32"): the link
+                    // ink. Bare 32 is **Done:**, which stays muted like the rest of the prose.
+                    else if (n == 32 && span.underline)
+                        span.fg = palette.link.isValid() ? palette.link : palette.code;
                     else if ((n >= 30 && n <= 37) || n == 39 || (n >= 90 && n <= 97))
                         span.fg = markdownFg(n, palette);
                     // 9 (crossed out) and the rest: a fold row cannot say them

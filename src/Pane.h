@@ -46,6 +46,7 @@
 #include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
+#include "EngineBackend.h"     // applyTerminalSettings(): Options › Terminal reaches the engine view in place
 #include "WindowState.h"
 #include "RuntimeDirs.h"
 #include "RemoteShare.h"
@@ -1868,6 +1869,9 @@ public:
     // Only the active pane opens a link on a plain click; in any other pane the first click
     // moves the focus and Ctrl+click still follows the link.
     void setLinkClicksArmed(bool armed) { if (m_backend) m_backend->setPlainClickOpensLinks(armed); }
+    // Options › Terminal changed something the engine view reads once (links at rest, copy on
+    // select): read it again, in place.
+    void applyTerminalSettings() { if (auto *engine = dynamic_cast<relay::EngineBackend *>(m_backend)) engine->applySettings(); }
     int findInTerminal(const QString &text, bool backwards) { return m_backend ? m_backend->find(text, backwards) : 0; }
     // Clearing behind Readline's back (write \x1b[2J to the display, then ask for a redraw)
     // leaves the shell one line out of step: Readline still believes its prompt is where it drew
@@ -4037,6 +4041,7 @@ private:
         palette.text = t::Text;
         palette.muted = t::TextMuted;
         palette.code = t::SyntaxCommand;
+        palette.link = t::Link;
         palette.add = t::Success;
         palette.remove = t::Error;
         palette.error = t::SyntaxUnknown;
