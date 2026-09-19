@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-221 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+220 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (133)
+## Features (132)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -27,14 +27,11 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
-| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | ready |  |  | [11](threads/G9VE.md) |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 | [1](threads/97EG.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
-| `#YMSR` | [A subagent badge in the pane header](features/2026-09-19-a-subagent-badge-in-the-pane-header.md) | in-progress | agent |  | [1](threads/YMSR.md) |
 | `#6DQ8` | [Calibrate isolation memory limits to system RAM and expose them in Options](features/2026-09-19-calibrate-isolation-memory-limits-to-system-ram.md) | in-progress |  |  | [5](threads/6DQ8.md) |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
 | `#3AZG` | [Cut a new GitHub release with the /connect (join) work so the laptop can install it](features/2026-09-19-cut-a-new-github-release-with-the-connect-join-w.md) | in-progress |  |  | [1](threads/3AZG.md) |
-| `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | in-progress |  |  | [1](threads/JM2M.md) |
 | `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
 | `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
@@ -68,6 +65,7 @@
 | `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | agent |  |  |
 | `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | agent |  |  |
 | `#NK66` | [Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window](features/needs_qa_llm/2026-09-17-model-settings.md) | needs-qa-llm | agent |  |  |
+| `#YMSR` | [A subagent badge in the pane header](features/needs_qa_llm/2026-09-19-a-subagent-badge-in-the-pane-header.md) | needs-qa-llm | agent |  | [1](threads/YMSR.md) |
 | `#TKS9` | [The open task list under the prompt](features/needs_qa_llm/2026-09-19-the-open-task-list-under-the-prompt.md) | needs-qa-llm | agent |  |  |
 | `#VH4B` | [Fix and re-run invalid or failing commands in terminal mode](features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md) | needs-qa-llm | agent |  |  |
 | `#FR72` | [Ghost-text command suggestions from history](features/needs_qa_llm/2026-09-17-history-suggestions.md) | needs-qa-llm | agent |  |  |
@@ -131,16 +129,17 @@
 | `#Q7Y9` | [Chord: Ctrl+Alt+Left/Right then Ctrl+Alt+Down docks the pane beneath that neighbor](features/needs_qa_llm/2026-09-19-chord-ctrl-alt-left-right-then-ctrl-alt-down-doc.md) | needs-qa-llm |  | 3/4 | [14](threads/Q7Y9.md) |
 | `#VMZP` | [Retry transient provider refusals (429, 5xx) in the transport](features/needs_qa_llm/2026-09-19-retry-transient-provider-refusals-429-5xx-in-the.md) | needs-qa-llm |  | 6/6 | [8](threads/VMZP.md) |
 | `#4E13` | [Say "relaying…" while an agent turn runs, not "working"](features/needs_qa_llm/2026-09-18-say-relaying-while-an-agent-turn-runs-not-workin.md) | needs-qa-llm | agent | 6/6 | [6](threads/4E13.md) |
-| `#GT7X` | [Claude Code + Codex guest integration (translator first, harness second)](features/2026-09-19-claude-codex-guest-integration.md) | needs-qa-llm | agent | 7/8 | [4](threads/GT7X.md) |
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
 | `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
 | `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |
+| `#GT7X` | [Claude Code + Codex guest integration (translator first, harness second)](features/needs_qa_llm/2026-09-19-claude-codex-guest-integration.md) | needs-qa-llm | agent | 7/8 | [4](threads/GT7X.md) |
 | `#HDA9` | [/update: download and install the latest release, then restart](features/needs_qa_llm/2026-09-19-update-download-and-install-the-latest-release-t.md) | needs-qa-llm |  |  | [5](threads/HDA9.md) |
 | `#Z0VG` | [Plan-mode turns run on the main model pushed to max reasoning (the "planning" role)](features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md) | needs-qa-llm | agent |  | [2](threads/Z0VG.md) |
 | `#D03W` | [Per-pane CPU and memory meters in the header, tab and session manager](features/needs_qa_llm/2026-09-19-per-pane-cpu-and-memory-meters-in-the-header-tab.md) | needs-qa-llm |  |  | [7](threads/D03W.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
+| `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 
 ## Bugs (86)
 
@@ -150,9 +149,9 @@
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
 | `#EC58` | ["The details of this call is not available in this call any more" bug.](changes/2026-09-19-the-details-of-this-call-is-not-available-in-thi.md) | inbox |  |  | [7](threads/EC58.md) |
-| `#GMSC` | [Missing tests/paneusage_test.cpp breaks cmake generate for the whole tree](changes/2026-09-19-missing-tests-paneusage-test-cpp-breaks-cmake-ge.md) | inbox |  |  | [1](threads/GMSC.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
+| `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | ready | agent | 0/5 |  |
 | `#ZYRB` | [Onboarding: instructions dialog still shows when no instruction files exist — silently init default relay.md instead](changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md) | in-progress |  |  | [3](threads/ZYRB.md) |
 | `#Y4RX` | [Pane isolation leaks: tmux and Chrome self-scope into app.slice, outside any pane cap](changes/2026-09-19-pane-isolation-leaks-tmux-and-chrome-self-scope.md) | in-progress |  |  | [4](threads/Y4RX.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  |  |
@@ -231,7 +230,7 @@
 | `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
 | `#6GX9` | [A conversation that is still in its first turn is never saved, so the sessions list and full-text search cannot see it](changes/needs_qa_llm/2026-09-19-a-conversation-that-is-still-in-its-first-turn-i.md) | needs-qa-llm |  |  | [5](threads/6GX9.md) |
 | `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
-| `#4OSN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | open | agent | 0/5 |  |
+| `#GMSC` | [Missing tests/paneusage_test.cpp breaks cmake generate for the whole tree](changes/done/2026-09-19-missing-tests-paneusage-test-cpp-breaks-cmake-ge.md) | done |  |  | [1](threads/GMSC.md) |
 
 ## Planning (2)
 

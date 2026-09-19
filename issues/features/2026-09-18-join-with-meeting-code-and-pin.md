@@ -119,9 +119,9 @@ QA hook: `RELAY_REMOTE_CODE_FILE` names a file the GUI writes `BQRT 4829` to, be
 
 ## Tasks
 
-- [x] CPace in Python and in the browser, both against the draft's test vectors (`remote/cpace.py`, `app/cpace.js`)
-- [x] Rendezvous routes, the code room handler and the sidecar message (`rendezvous/server.py`, `remote/meetcode.py`, `remote/host.py`, `remote/gui_host.py`)
-- [x] Join page: meeting code and PIN form, the code phase, then the existing knock (`app/guest.js`)
-- [x] Share window: "Make a code", the code and PIN shown large, countdown, used/burned states (`src/RemoteShare.cpp`)
-- [x] Protocol doc (§10.7, with a sentence in §10.2 and the audit kinds in §10.6): a §10 subsection for this
-- [ ] Live run: laptop (sphinxpad) joins a desktop pane by code and PIN in Chrome
+- [x] CPace in Python and in the browser, both against the draft's test vectors (`remote/cpace.py`, `app/cpace.js`) <!-- t:d2 -->
+- [x] Rendezvous routes, the code room handler and the sidecar message (`rendezvous/server.py`, `remote/meetcode.py`, `remote/host.py`, `remote/gui_host.py`) <!-- t:xx -->
+- [x] Join page: meeting code and PIN form, the code phase, then the existing knock (`app/guest.js`) <!-- t:db -->
+- [x] Share window: "Make a code", the code and PIN shown large, countdown, used/burned states (`src/RemoteShare.cpp`) <!-- t:z9 -->
+- [x] Protocol doc (§10.7, with a sentence in §10.2 and the audit kinds in §10.6): a §10 subsection for this <!-- t:m2 -->
+- [ ] Live run: laptop (sphinxpad) joins a desktop pane by code and PIN in Chrome <!-- t:ge -->

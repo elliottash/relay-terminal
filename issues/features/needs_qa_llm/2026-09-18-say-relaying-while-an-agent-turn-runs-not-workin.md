@@ -70,12 +70,12 @@ Most of the machinery already exists; this card restyles and relocates it rather
 
 ## Tasks
 
-- [x] bold "Relaying…" row directly above the prompt: violet for agent turns with the live action ("Relaying reading src/Pane.h… · 12 s · Esc stops"), "thinking" between calls, "waiting for N subagents…" when blocked, blue "Relaying <program>…" for terminal work; replaces the old under-prompt turn clock
-- [x] `paintRelayMark` in `src/PaneChrome.h`; the three live header states draw the relay mark with a two-step scale blink on the 600 ms clock; news states keep their shapes
-- [x] labelled bolds recoloured: done `1;32` green, need `1;33` amber, problem stays `1;31` red (`src/MarkdownAnsi.h`), amending #CVHT's colours (cross-linked, its text untouched)
-- [x] visual-language comments in `src/PaneStatus.h`; `docs/ARCHITECTURE.md` records the language
-- [x] tests updated: `tests/markdownansi_test.cpp` (SGR expectations), `tests/panestatus_test.cpp` (blink steps), `tests/pulsepaint_test.cpp` (relay-mark pixels)
-- [x] implementer evidence: `docs/qa_evidence/2026-09-19-relaying-status-language/`
+- [x] bold "Relaying…" row directly above the prompt: violet for agent turns with the live action ("Relaying reading src/Pane.h… · 12 s · Esc stops"), "thinking" between calls, "waiting for N subagents…" when blocked, blue "Relaying <program>…" for terminal work; replaces the old under-prompt turn clock <!-- t:y7 -->
+- [x] `paintRelayMark` in `src/PaneChrome.h`; the three live header states draw the relay mark with a two-step scale blink on the 600 ms clock; news states keep their shapes <!-- t:jk -->
+- [x] labelled bolds recoloured: done `1;32` green, need `1;33` amber, problem stays `1;31` red (`src/MarkdownAnsi.h`), amending #CVHT's colours (cross-linked, its text untouched) <!-- t:nj -->
+- [x] visual-language comments in `src/PaneStatus.h`; `docs/ARCHITECTURE.md` records the language <!-- t:dm -->
+- [x] tests updated: `tests/markdownansi_test.cpp` (SGR expectations), `tests/panestatus_test.cpp` (blink steps), `tests/pulsepaint_test.cpp` (relay-mark pixels) <!-- t:ks -->
+- [x] implementer evidence: `docs/qa_evidence/2026-09-19-relaying-status-language/` <!-- t:4p -->
 
 ## Implementation
 

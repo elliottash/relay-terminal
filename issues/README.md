@@ -47,7 +47,8 @@ work that has not shipped. Never delete an issue; append rather than rewrite.
 
 ## Header fields
 
-**Status** (`open`, `in-progress`, or a state above), **Component** (`agent`, `worker`, `router`,
+**Status** (`inbox`, `ready`, `in-progress`, or a state above; `open` is the pre-board
+spelling and `relay-board.py` reads it as `ready`, but a new card must not use it), **Component** (`agent`, `worker`, `router`,
 `gui`, `shell-integration`, `providers`, `theme`), **Milestone** (`0.1-preview`, `desktop-alpha`,
 `cross-platform`), **Workstream** (`agent`, `routing`, `terminal`, `providers`), **Acceptance
 evidence**, **Assignee**, **Source**. Record who implemented a change, including the model, so QA

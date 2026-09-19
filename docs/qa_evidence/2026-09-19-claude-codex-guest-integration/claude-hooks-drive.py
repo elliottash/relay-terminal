@@ -335,7 +335,7 @@ def main() -> int:
         result = shim(pane, environment, "statusline", stdin=json.dumps(statusline))
         log(f"the statusline shim printed {result.stdout.strip()!r}")
         time.sleep(3)
-        chip = output / "claude-hooks-01-statusline-chip.png"
+        chip = output / "implementer-claude-hooks-01-statusline-chip.png"
         screenshot(chip)
         report("01-statusline-chip", strip_text(chip, STRIP_ROWS), ["Claude Sonnet", "42%"])
 
@@ -355,7 +355,7 @@ def main() -> int:
                                     env=dict(pane_env(pane, environment),
                                              RELAY_GUEST_PERMISSION_TIMEOUT="90"))
             time.sleep(2.5)
-            question = output / "claude-hooks-02-permission-question.png"
+            question = output / "implementer-claude-hooks-02-permission-question.png"
             report("02-permission-question", screenshot(question),
                    ["wants to run Bash", "rm -rf build"])
 
@@ -380,7 +380,7 @@ def main() -> int:
                 # purpose: what the held hook prints below is the real proof.
                 answered = True
             time.sleep(1.0)
-            answered_pic = output / "claude-hooks-03-answered.png"
+            answered_pic = output / "implementer-claude-hooks-03-answered.png"
             screenshot(answered_pic)
             report("03-answered", ocr(answered_pic), [], forbid=["wants to run"])
             if not answered:
@@ -409,16 +409,16 @@ def main() -> int:
                                                        RELAY_GUEST_PERMISSION_TIMEOUT="90")))
             time.sleep(1.5)
         time.sleep(2)
-        queued_pic = output / "claude-hooks-06-two-questions-queued.png"
+        queued_pic = output / "implementer-claude-hooks-06-two-questions-queued.png"
         report("06-two-questions-queued", screenshot(queued_pic), ["1 of 2", "git push"])
         press(window, "y")          # the bar has the keyboard: Y allows the one on screen
         time.sleep(2)
-        second_pic = output / "claude-hooks-07-second-question.png"
+        second_pic = output / "implementer-claude-hooks-07-second-question.png"
         report("07-second-question", screenshot(second_pic), ["rm -rf /tmp/relay-qa-two"],
                forbid=["git push"])
         press(window, "n")          # ...and N denies the next
         time.sleep(2)
-        report("08-queue-empty", screenshot(output / "claude-hooks-08-queue-empty.png"), [],
+        report("08-queue-empty", screenshot(output / "implementer-claude-hooks-08-queue-empty.png"), [],
                forbid=["wants to run"])
         for index, held_two in enumerate(holds):
             try:
@@ -433,7 +433,7 @@ def main() -> int:
         time.sleep(1.5)
         spool_event(pane, "state", {"busy": True})
         time.sleep(2)
-        warn = output / "claude-hooks-04-context-warn.png"
+        warn = output / "implementer-claude-hooks-04-context-warn.png"
         screenshot(warn)
         report("04-context-warn", strip_text(warn, STRIP_ROWS), ["Claude Opus", "94%"])
 
@@ -441,7 +441,7 @@ def main() -> int:
         #    foreground program is no longer a guest (setGuest("")).
         os.kill(guest_pid, 15)
         time.sleep(4)
-        report("05-guest-gone", screenshot(output / "claude-hooks-05-guest-gone.png"),
+        report("05-guest-gone", screenshot(output / "implementer-claude-hooks-05-guest-gone.png"),
                ["workspace"], forbid=["Claude Opus", "94%"])
     finally:
         process.terminate()

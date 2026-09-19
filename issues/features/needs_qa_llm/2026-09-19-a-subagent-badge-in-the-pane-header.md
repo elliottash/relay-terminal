@@ -1,7 +1,7 @@
 ---
 id: YMSR
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature]
 component: [gui]
 milestone: desktop-alpha

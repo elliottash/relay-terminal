@@ -56,16 +56,16 @@ Implementer's reading (Claude Opus 5, 2026-09-18), to be confirmed or overruled 
 
 ## Tasks
 
-- [x] `relay::panestatus::Waiting`, `waitingSubject`, `isWaiting`, `waitingLine`, `waitingLines` —
+- [x] `relay::panestatus::Waiting`, `waitingSubject`, `isWaiting`, `waitingLine`, `waitingLines` — <!-- t:9d -->
       the rule and the wording, pure and unit-tested (`src/PaneStatus.{h,cpp}`).
-- [x] Removed `SubagentModel::waitingLine` / `waitingLines`; `hasLiveForeground()` stays, since it is
+- [x] Removed `SubagentModel::waitingLine` / `waitingLines`; `hasLiveForeground()` stays, since it is <!-- t:1z -->
       about the rows.
-- [x] `Pane::waitingFacts()` and `refreshBackgroundWait()` (was `refreshSubagentWait`), the
+- [x] `Pane::waitingFacts()` and `refreshBackgroundWait()` (was `refreshSubagentWait`), the <!-- t:md -->
       `command_output` hooks in `tool_started` / `tool_result` (`m_jobWaitCall`), the
       `JobsModel::onChanged` refresh, the turn clock's wording (`src/Pane.h`).
-- [x] Tests: `panestatus_test.cpp::whatThePaneIsWaitingFor` (covers both kinds, the mixed line, the
+- [x] Tests: `panestatus_test.cpp::whatThePaneIsWaitingFor` (covers both kinds, the mixed line, the <!-- t:8y -->
       phases and the rungs); `subagents_test.cpp::foregroundSubagentsAreTrackedForTheWaitLine` stays.
-- [x] Docs: `docs/ARCHITECTURE.md` (the turn-clock paragraph, rewritten for both kinds and the new
+- [x] Docs: `docs/ARCHITECTURE.md` (the turn-clock paragraph, rewritten for both kinds and the new <!-- t:zs -->
       home of the rule), `docs/AGENT-SESSIONS-PROTOCOL.md` ("Commands as jobs", how the GUI derives
       it, and why a foreground `run_command` is not a wait).
 

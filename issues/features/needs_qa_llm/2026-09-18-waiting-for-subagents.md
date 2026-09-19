@@ -57,14 +57,14 @@ Implementer's reading (Claude Opus 5, 2026-09-18), to be confirmed or overruled 
 
 ## Tasks
 
-- [x] `SubagentModel::waitingLine` / `waitingLines` / `hasLiveForeground` — the rule and the wording,
+- [x] `SubagentModel::waitingLine` / `waitingLines` / `hasLiveForeground` — the rule and the wording, <!-- t:5g -->
       pure and unit-tested (`src/SubagentsPanel.{h,cpp}`).
-- [x] `Pane::refreshSubagentWait` and the `m_waitCall` / `m_waitDots` state; the `agent_wait` hooks in
+- [x] `Pane::refreshSubagentWait` and the `m_waitCall` / `m_waitDots` state; the `agent_wait` hooks in <!-- t:bb -->
       `tool_started` / `tool_result`; the turn clock's wording; the `updateGhost` and
       `SubagentModel::onChanged` refreshes (`src/Pane.h`).
-- [x] Tests: `subagents_test.cpp::waitingForSubagentsLine`,
+- [x] Tests: `subagents_test.cpp::waitingForSubagentsLine`, <!-- t:c4 -->
       `subagents_test.cpp::foregroundSubagentsAreTrackedForTheWaitLine`.
-- [x] Docs: `docs/ARCHITECTURE.md` (the turn-clock paragraph), `docs/AGENT-SESSIONS-PROTOCOL.md`
+- [x] Docs: `docs/ARCHITECTURE.md` (the turn-clock paragraph), `docs/AGENT-SESSIONS-PROTOCOL.md` <!-- t:ma -->
       section 8 (how the GUI derives "blocked", since no event was added).
 
 ## Where it is

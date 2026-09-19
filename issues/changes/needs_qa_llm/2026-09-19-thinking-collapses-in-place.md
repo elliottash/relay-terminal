@@ -37,14 +37,14 @@ agent messages to be brighter white for example."
   user interaction always wins.
 - A setting offers show-and-collapse (default), always show, never show.
 ## Tasks
-- [x] Thinking streams expanded by default (capped height, internal scroll) instead of 2-line compact
-- [x] On `thinking_done`: collapse in place to one-line header "Thought · N s ⌄ · model" (unless user toggled while
+- [x] Thinking streams expanded by default (capped height, internal scroll) instead of 2-line compact <!-- t:rh -->
+- [x] On `thinking_done`: collapse in place to one-line header "Thought · N s ⌄ · model" (unless user toggled while <!-- t:rf -->
       streaming); header reopens the text
-- [x] `user_toggled_while_streaming` flag on ▴/×; interaction disables auto-collapse
-- [x] Thinking text through MarkdownAnsi (muted note ink) instead of plain QPlainTextEdit
-- [x] Three-way setting replacing `agent/show_thinking` bool: show-and-collapse (default) / always / never
-- [x] Agent prose ink brighter (higher-contrast white); spacing/breathing-room pass per plan
-- [x] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence
+- [x] `user_toggled_while_streaming` flag on ▴/×; interaction disables auto-collapse <!-- t:sk -->
+- [x] Thinking text through MarkdownAnsi (muted note ink) instead of plain QPlainTextEdit <!-- t:eb -->
+- [x] Three-way setting replacing `agent/show_thinking` bool: show-and-collapse (default) / always / never <!-- t:gb -->
+- [x] Agent prose ink brighter (higher-contrast white); spacing/breathing-room pass per plan <!-- t:xs -->
+- [x] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:qe -->
 
 ## Decisions
 - 2026-09-19, owner: learn from Warp's look (space, contrast, boxes) without copying it; combined plan covers thinking

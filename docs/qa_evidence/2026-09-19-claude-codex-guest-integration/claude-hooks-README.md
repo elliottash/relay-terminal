@@ -32,13 +32,13 @@ and the terminal say, so the run's own output is the evidence's verification.
 
 ## What each picture is evidence of
 
-`claude-hooks-01-statusline-chip.png` — the statusline shim run as the installer writes it
+`implementer-claude-hooks-01-statusline-chip.png` — the statusline shim run as the installer writes it
 (`guest_hook.py statusline --relay-guest` with Claude's statusline JSON on stdin). It forwards the
 model and context share through the channel and prints its one passthrough line, logged as
 `'Claude Sonnet 4.5 · workspace'`, so Claude's own statusline is unchanged. The strip then reads
 `Claude Sonnet` and `42%`: the chip is the model and the share, fed by the shim.
 
-`claude-hooks-02-permission-question.png` — a held `PermissionRequest` hook
+`implementer-claude-hooks-02-permission-question.png` — a held `PermissionRequest` hook
 (`RELAY_GUEST_PERMISSION_TIMEOUT` 90 s) asking about `rm -rf build/ && cmake -S . -B build`. This
 is the hook Claude Code fires only when it is really about to ask the user; `PreToolUse`, which
 fires before every tool call including the auto-allowed ones, is no longer installed. The terminal
@@ -48,7 +48,7 @@ back with stray punctuation (`[(Deny]`), so a box is matched on a substring — 
 its left, which is the middle of `Allow` (`buildUi`'s `questionRow` puts Allow then Deny with 8 px
 between them).
 
-`claude-hooks-03-answered.png` — the click landed: the bar is gone (the screen no longer says
+`implementer-claude-hooks-03-answered.png` — the click landed: the bar is gone (the screen no longer says
 `wants to run`), the pane wrote its answer to `guest-answers/<question>.json`, the shim read it and
 deleted it (the directory listing logged right after is empty, which is the point — no tool input
 and no decision is left lying in the runtime dir), and the held hook returned
@@ -61,7 +61,9 @@ and no decision is left lying in the runtime dir), and the held hook returned
 `permissionDecision`. That is the round trip the section is about; a hook that is never answered
 times out printing nothing, so it is never auto-approved.
 
-`claude-hooks-06-two-questions-queued.png`, `07-second-question.png`, `08-queue-empty.png` — two
+`implementer-claude-hooks-06-two-questions-queued.png`,
+`implementer-claude-hooks-07-second-question.png`,
+`implementer-claude-hooks-08-queue-empty.png` — two
 `PermissionRequest` hooks held open at the same time. The spool keeps both (the single `guest.json`
 slot it replaced would have lost the first), and the bar reads `1 of 2 · … git push --force`. Then
 the keyboard: `Y` allows the one on screen and the second takes its place (`rm -rf /tmp/relay-qa-two`,
@@ -69,7 +71,7 @@ and `git push` is gone), `N` denies that one and the bar goes. The two held hook
 `"behavior": "allow"` and `"behavior": "deny"` in that order — so the answers went to the questions
 they belonged to, and both were given without touching the mouse.
 
-`claude-hooks-04-context-warn.png` — a share past the warn line (`94%`, model `Claude Opus 4.6`)
+`implementer-claude-hooks-04-context-warn.png` — a share past the warn line (`94%`, model `Claude Opus 4.6`)
 written straight onto the spool rather than through the shim, so the envelope and the poll are
 exercised on their own, plus a `state` event moving the busy field. The strip reads `Claude Opus`
 and `94%`, and the chip carries its `warn` property at or above 90%.

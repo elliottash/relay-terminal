@@ -211,9 +211,10 @@ def main() -> int:
             return 1
         log(f"a process called `claude` is in the foreground (pid {guest_pid})")
 
-        # The pane's own classification must publish the slash catalog: guest.json appears within
-        # a few seconds of the stand-in reaching the foreground (250 ms poll + python scan + 80 ms
-        # channel poll). No manual emit — evidence must come from Relay's own chain.
+        # The pane's own classification must publish the slash catalog: a `slash` event appears on
+        # the pane's `guest-events/` spool within a few seconds of the stand-in reaching the
+        # foreground (250 ms poll + python scan + 80 ms channel poll). No manual emit — evidence
+        # must come from Relay's own chain.
         pane = None
         for _ in range(20):
             directories = pane_runtime_dirs(environment)
@@ -225,15 +226,27 @@ def main() -> int:
             log("no pane runtime directory appeared")
             return 1
         log(f"pane runtime {pane}")
+        # The channel is a spool directory since the review of 51587e3, not the single `guest.json`
+        # slot this used to stat: `guest-events/<time_ns>-<pid>-<counter>.json`, one file per event,
+        # and the pane *deletes* each file as soon as it has handled it. So catching an event in
+        # flight is luck, not a test — the spool is drained in well under the 80 ms poll. What is
+        # asserted here is that the pane made the spool at all; that the catalog really arrived is
+        # asserted by the badged `/` rows in step 1, which is Relay's own chain end to end.
+        spool = pane / "guest-events"
         for i in range(15):
-            guest_json = pane / "guest.json"
-            if guest_json.exists():
-                log(f"guest.json at +{i}s: {guest_json.read_text(encoding='utf-8')[:240]}")
+            if spool.is_dir():
+                log(f"guest-events/ at +{i}s")
+                caught = sorted(spool.glob("*.json"))
+                if caught:
+                    log(f"caught in flight: {caught[0].name} "
+                        f"{caught[0].read_text(encoding='utf-8')[:240]}")
+                else:
+                    log("spool empty — the pane had already drained it (expected)")
                 break
             time.sleep(1)
         else:
-            log("no guest.json within 15 s of the stand-in — classification or the pane's own "
-                "scan never published")
+            log("no guest-events/ spool within 15 s of the stand-in — the pane never started its "
+                "guest channel")
             return 1
 
         # 1. The `/` popup with the guest active: the guest's own commands open the list, badged

@@ -37,22 +37,22 @@ Owner, 2026-09-18, asked in the session:
 
 ## Tasks
 
-- [x] Wrapper: `ssh()`/`mosh()` add connection sharing in Relay pane shells (`shell/integration.bash`)
-- [x] Remote integration script, typed once per login (`shell/remote-integration.sh`)
-- [x] Engine keeps OSC 7's host; a remote `cd` no longer moves the local cwd (`TerminalBackend::onCwdHostChanged`, `cursorPosition`)
-- [x] Pane: remote session model from `ssh -G`, remote prompt detection (`Pane::beginLogin`, `updateLoginPrompt`; rules in `src/RemoteSession.h`, `tests/remotesession_test.cpp`)
-- [x] Prompt box types commands into the remote shell; router `remote` flag (`Pane::typeIntoLogin`)
-  - [x] Router half: `route {remote: {host}}` decides shell vs agent by shape, never "not found" locally; `remote_host` on the decision (`backend/relay_core/router.py`, protocol section 24.1)
-- [x] Remote password prompts mask the prompt box
-- [x] Agent reply prints into the terminal at a remote prompt (`Pane::inlineReady`)
-- [x] Agent context `remote_session`; `run_command` `host` over the shared connection (`backend/relay_core/remote_session.py`, protocol section 24.2–24.3; sent by `Pane::loginContext`)
-- [x] Connect to host (palette, from `~/.ssh/config`), split on the same host
-- [x] Options › Terminal › SSH sessions: auto / ask / off
-- [x] Clickable paths in a remote pane do not open local files (a toast names the host; URLs still open)
-- [x] A clicked path opens the host's file, editable, and Ctrl+S saves it back over the same
+- [x] Wrapper: `ssh()`/`mosh()` add connection sharing in Relay pane shells (`shell/integration.bash`) <!-- t:7e -->
+- [x] Remote integration script, typed once per login (`shell/remote-integration.sh`) <!-- t:pr -->
+- [x] Engine keeps OSC 7's host; a remote `cd` no longer moves the local cwd (`TerminalBackend::onCwdHostChanged`, `cursorPosition`) <!-- t:s9 -->
+- [x] Pane: remote session model from `ssh -G`, remote prompt detection (`Pane::beginLogin`, `updateLoginPrompt`; rules in `src/RemoteSession.h`, `tests/remotesession_test.cpp`) <!-- t:dn -->
+- [x] Prompt box types commands into the remote shell; router `remote` flag (`Pane::typeIntoLogin`) <!-- t:ph -->
+  - [x] Router half: `route {remote: {host}}` decides shell vs agent by shape, never "not found" locally; `remote_host` on the decision (`backend/relay_core/router.py`, protocol section 24.1) <!-- t:eg -->
+- [x] Remote password prompts mask the prompt box <!-- t:dp -->
+- [x] Agent reply prints into the terminal at a remote prompt (`Pane::inlineReady`) <!-- t:mq -->
+- [x] Agent context `remote_session`; `run_command` `host` over the shared connection (`backend/relay_core/remote_session.py`, protocol section 24.2–24.3; sent by `Pane::loginContext`) <!-- t:yn -->
+- [x] Connect to host (palette, from `~/.ssh/config`), split on the same host <!-- t:np -->
+- [x] Options › Terminal › SSH sessions: auto / ask / off <!-- t:6m -->
+- [x] Clickable paths in a remote pane do not open local files (a toast names the host; URLs still open) <!-- t:w7 -->
+- [x] A clicked path opens the host's file, editable, and Ctrl+S saves it back over the same <!-- t:x8 -->
       connection; the engine's link probe answers from the host (`src/RemoteFiles.{h,cpp}`,
       `tests/remotefiles_test.cpp`, `TerminalBackend::setLinkProbe`, docs/SSH-AND-MOSH.md § 9)
-- [x] The file tools take `host` too: read, list, write and edit files on the host over the same connection, content on ssh's stdin, temp+`mv`, mode preserved, inside the remote home or the shell's directory (`backend/relay_core/remote_files.py`, `tools.py`; protocol section 24.4; `tests/test_ssh_remote.py`)
+- [x] The file tools take `host` too: read, list, write and edit files on the host over the same connection, content on ssh's stdin, temp+`mv`, mode preserved, inside the remote home or the shell's directory (`backend/relay_core/remote_files.py`, `tools.py`; protocol section 24.4; `tests/test_ssh_remote.py`) <!-- t:4a -->
 
 Design: [`docs/SSH-AND-MOSH.md`](../../docs/SSH-AND-MOSH.md).
 

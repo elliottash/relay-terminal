@@ -15,12 +15,12 @@ links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-provider-
 add retries when there are provider errors, eg 429. look at how claude code does that for example
 
 ## Tasks
-- [x] Read the retry policy out of the installed Claude Code binary (Anthropic SDK transport): 408/409/429/5xx, Retry-After first, else 0.5→8 s jittered backoff.
-- [x] Implement it in `ChatProvider._open` (the one path every model call takes), emitting `provider_retry {reason: "http"}` + `status` per wait and a `provider_http_retry` log line.
-- [x] `HostedChatProvider`: refusal body read once and shared between the retry decision and the failure text; `rate_limited` waited to its `resets_at`, `quota_exhausted` never waited out.
-- [x] Local model servers excluded from the generic policy (loading 503 wait unchanged).
-- [x] Tests: 9 new in `tests/test_provider.py`, hosted rate-limit/quota cases in `tests/test_hosted.py`, updated the superseded hosted-503 test.
-- [x] Docs: `docs/AGENT-SESSIONS-PROTOCOL.md` §15.2, `docs/ARCHITECTURE.md` Provider transport.
+- [x] Read the retry policy out of the installed Claude Code binary (Anthropic SDK transport): 408/409/429/5xx, Retry-After first, else 0.5→8 s jittered backoff. <!-- t:sj -->
+- [x] Implement it in `ChatProvider._open` (the one path every model call takes), emitting `provider_retry {reason: "http"}` + `status` per wait and a `provider_http_retry` log line. <!-- t:9q -->
+- [x] `HostedChatProvider`: refusal body read once and shared between the retry decision and the failure text; `rate_limited` waited to its `resets_at`, `quota_exhausted` never waited out. <!-- t:yy -->
+- [x] Local model servers excluded from the generic policy (loading 503 wait unchanged). <!-- t:7a -->
+- [x] Tests: 9 new in `tests/test_provider.py`, hosted rate-limit/quota cases in `tests/test_hosted.py`, updated the superseded hosted-503 test. <!-- t:f4 -->
+- [x] Docs: `docs/AGENT-SESSIONS-PROTOCOL.md` §15.2, `docs/ARCHITECTURE.md` Provider transport. <!-- t:nb -->
 
 ## QA checklist
 Evidence: `docs/qa_evidence/2026-09-19-provider-http-retries/` (implementer notes + backend test log; 79 provider/hosted/local-transport tests pass).

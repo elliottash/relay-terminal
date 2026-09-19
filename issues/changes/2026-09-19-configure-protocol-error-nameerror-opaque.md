@@ -1,13 +1,13 @@
 ---
-id: 4OSN
+id: 40SN
 type: work
-status: open
+status: ready
 labels: [bug]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: agent
 assignee: agent
-rank: zzzz110
+rank: zzzz111
 created: '2026-09-19'
 acceptance: a pane whose configure dies on an unexpected worker exception shows the exception's own message (e.g. "name 'os' is not defined"), recovers without being closed once the backend file is repaired, and a test covers the reporting and the recovery
 source: 'conversation, 2026-09-19: "im getting this bug, protocol error (nameerror) when im trying to work in a new pane"'
@@ -53,16 +53,16 @@ openrouter presets), and every backend module compiles. Nothing is left to fix i
 
 ## Tasks
 
-- [ ] `worker.py`: include `str(exc)` in the `error` event for unexpected exception types whose
+- [ ] `worker.py`: include `str(exc)` in the `error` event for unexpected exception types whose <!-- t:t9 -->
       messages are code, not prompts (`NameError`, `AttributeError`, `TypeError`, `ImportError`),
       keeping the redaction for `ValueError`/`OSError`/`KeystoreError`; keep `worker.log` as the full
       record
-- [ ] `src/Pane.h`: on a configure error of that unexpected kind, surface the message in the status
+- [ ] `src/Pane.h`: on a configure error of that unexpected kind, surface the message in the status <!-- t:bh -->
       line (attributed, like the #308N suggestion line) instead of the bare "Protocol error (…)"
-- [ ] `src/Pane.h`: after a configure failure of that kind, restart the pane's worker (or restart
+- [ ] `src/Pane.h`: after a configure failure of that kind, restart the pane's worker (or restart <!-- t:ph -->
       after N consecutive configure failures) so a repaired tree is picked up without closing the pane
-- [ ] `docs/AGENT-SESSIONS-PROTOCOL.md`: document the error-event shape for unexpected exceptions
-- [ ] Test: a worker whose configure path raises `NameError` reports the message (not the redacted
+- [ ] `docs/AGENT-SESSIONS-PROTOCOL.md`: document the error-event shape for unexpected exceptions <!-- t:7t -->
+- [ ] Test: a worker whose configure path raises `NameError` reports the message (not the redacted <!-- t:0h -->
       line) and the pane retries configure in a fresh worker process, which then succeeds
 
 ## Decisions

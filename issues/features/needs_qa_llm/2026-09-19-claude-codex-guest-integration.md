@@ -28,14 +28,14 @@ special translator from the relay prompt into the claude code input and back."
 "great, update the plan as needed and execute"
 
 ## Tasks
-- [x] Foundation: guest registry, foreground detection of claude/codex, pane guest state
-- [x] Claude IDE bridge (WebSocket MCP `ide` server, `~/.claude/ide` lock file, 12 tools, openDiff → Relay diff view)
-- [x] Claude hooks + statusline shim (notifications, pane states, context/model chips)
-- [x] Codex Tier B: ~~daemon co-attach spike~~ → marked settings + rollout tail (spike declined: the tail covers Tier B; daemon stays Tier A)
-- [x] Composer translator + slash registry (guest autocomplete, TUI-state-aware injection)
-- [x] Sessions pane: claude + codex conv_index sources, resume/fork, unified search
-- [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence
-- [x] ~~Tier A headless harness adapters (codex app-server first, then claude stream-json)~~ — deferred by owner, kept as later optional phase
+- [x] Foundation: guest registry, foreground detection of claude/codex, pane guest state <!-- t:t7 -->
+- [x] Claude IDE bridge (WebSocket MCP `ide` server, `~/.claude/ide` lock file, 12 tools, openDiff → Relay diff view) <!-- t:cc -->
+- [x] Claude hooks + statusline shim (notifications, pane states, context/model chips) <!-- t:gw -->
+- [x] Codex Tier B: ~~daemon co-attach spike~~ → marked settings + rollout tail (spike declined: the tail covers Tier B; daemon stays Tier A) <!-- t:yz -->
+- [x] Composer translator + slash registry (guest autocomplete, TUI-state-aware injection) <!-- t:sy -->
+- [x] Sessions pane: claude + codex conv_index sources, resume/fork, unified search <!-- t:2f -->
+- [ ] Validation: scripts/test.sh + ctest + Xvfb live run; QA evidence <!-- t:bt -->
+- [x] ~~Tier A headless harness adapters (codex app-server first, then claude stream-json)~~ — deferred by owner, kept as later optional phase <!-- t:x2 -->
 
 ## Decisions
 - 2026-09-19, owner: translator-in-pane first ("i dont need a headless protocol… a special translator from the relay
@@ -91,8 +91,8 @@ write-up is `docs/ARCHITECTURE.md` section 11a.
 - `backend/relay_core/guest.py` — the registry: `GuestSpec`s, `classify_command`, `detect_installations`,
   `bridge_env`. Mirrored in C++ where the pane classifies its foreground process (one rule, two languages).
 - `shell/guest-event.py` — the one channel writer (§26.3): every guest phase reaches its pane through the
-  `{"token", "sequence", "event", "guest", "data"}` envelope, whole-file atomic replace of `guest.json` in the
-  pane's runtime dir, no-op without `RELAY_GUEST_EVENT`.
+  `{"token", "sequence", "event", "guest", "data"}` envelope, one file per event in the pane's
+  `guest-events/` spool (`mkstemp` + `os.replace`), no-op without `RELAY_GUEST_EVENT`.
 - `backend/relay_core/guest_hook.py` + `guest_install.py` — the claude hook/statusline shim and its marked,
   additive installer for `.claude/settings.json` (`--relay-guest` marker; off removes exactly the marked entries;
   a user's own statusline is kept). PreToolUse is a Relay question on the pane, never auto-approved.

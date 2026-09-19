@@ -94,12 +94,12 @@ which is deliberately links-only; and the settings pane's labels, which are not 
 
 ## Tasks
 
-- [x] `src/CopyOnSelect.h`: the setting, the selection reader, the filter and `installCopyOnSelect()`
-- [x] Installed on all 16 read-only surfaces above
-- [x] The two ad-hoc sites in `src/Pane.h` folded in (reasoning bubble) or documented as staying (terminal)
-- [x] Settings-pane wording and search terms; the QSettings key left alone
-- [x] `tests/copyonselect_test.cpp` (15 cases) and its ctest target
-- [x] `docs/ARCHITECTURE.md` § 4 "Copy on highlight" and the source map
+- [x] `src/CopyOnSelect.h`: the setting, the selection reader, the filter and `installCopyOnSelect()` <!-- t:cc -->
+- [x] Installed on all 16 read-only surfaces above <!-- t:yg -->
+- [x] The two ad-hoc sites in `src/Pane.h` folded in (reasoning bubble) or documented as staying (terminal) <!-- t:4c -->
+- [x] Settings-pane wording and search terms; the QSettings key left alone <!-- t:mp -->
+- [x] `tests/copyonselect_test.cpp` (15 cases) and its ctest target <!-- t:n3 -->
+- [x] `docs/ARCHITECTURE.md` § 4 "Copy on highlight" and the source map <!-- t:ne -->
 
 ## Findings
 

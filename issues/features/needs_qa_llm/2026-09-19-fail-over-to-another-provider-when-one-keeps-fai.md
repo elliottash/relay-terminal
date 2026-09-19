@@ -20,11 +20,11 @@ for model retries, if a model doesnt work, try another provider after 3 tries or
 - Toggle in Options › Models ("Fall over to a working provider", on by default); subagents and side calls do not fail over.
 
 ## Tasks
-- [x] `RoleResolver.failover_candidates`: same-tier model on every other keyed preset, then Relay Free; never unkeyed, local, or already tried.
-- [x] `Agent._model_call` wrapper: after transport + stall retries, `_begin_failover` swaps provider/config/preset for the rest of the turn; `_end_failover` restores before the terminal event; truncation never moves.
-- [x] `failover` agent option (default on) + Options › Models toggle, applied to a running pane at once.
-- [x] Events/log: `provider_retry {reason: "failover", from_model, to_model}` + `status` + `provider_failover` log line.
-- [x] Tests (11 new), protocol §12.1/§15.2.2, architecture doc.
+- [x] `RoleResolver.failover_candidates`: same-tier model on every other keyed preset, then Relay Free; never unkeyed, local, or already tried. <!-- t:hd -->
+- [x] `Agent._model_call` wrapper: after transport + stall retries, `_begin_failover` swaps provider/config/preset for the rest of the turn; `_end_failover` restores before the terminal event; truncation never moves. <!-- t:pz -->
+- [x] `failover` agent option (default on) + Options › Models toggle, applied to a running pane at once. <!-- t:cw -->
+- [x] Events/log: `provider_retry {reason: "failover", from_model, to_model}` + `status` + `provider_failover` log line. <!-- t:5m -->
+- [x] Tests (11 new), protocol §12.1/§15.2.2, architecture doc. <!-- t:6t -->
 
 ## QA checklist
 Evidence: `docs/qa_evidence/2026-09-19-provider-failover/` (implementer notes, backend test log, build log).

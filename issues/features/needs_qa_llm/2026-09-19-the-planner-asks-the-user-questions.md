@@ -98,17 +98,17 @@ choice or multi-select, a recommendation, an explanation under each option, keyb
 
 ## Tasks
 
-- [x] `backend/relay_core/questions.py`: the tool, its validation and the blocking round trip
-- [x] plan-mode prompt tells the planner to ask before it writes the plan
-- [x] worker and protocol: `question` / `question_answer`, documented in `docs/AGENT-SESSIONS-PROTOCOL.md` section 27
-- [x] the pane draws the card in amber and answers it; keyboard first (numbers, `0` to skip, own words)
-- [x] pane state goes `NeedsYou` while a question is open, so a background tab says so
-- [x] the turn clock says "waiting for your answer" rather than "thinking" while the card is up
-- [x] `question` / `question_closed` classified as forwarded in `remote/wire.py`, and a line from a
+- [x] `backend/relay_core/questions.py`: the tool, its validation and the blocking round trip <!-- t:ta -->
+- [x] plan-mode prompt tells the planner to ask before it writes the plan <!-- t:xc -->
+- [x] worker and protocol: `question` / `question_answer`, documented in `docs/AGENT-SESSIONS-PROTOCOL.md` section 27 <!-- t:qb -->
+- [x] the pane draws the card in amber and answers it; keyboard first (numbers, `0` to skip, own words) <!-- t:0x -->
+- [x] pane state goes `NeedsYou` while a question is open, so a background tab says so <!-- t:r0 -->
+- [x] the turn clock says "waiting for your answer" rather than "thinking" while the card is up <!-- t:yr -->
+- [x] `question` / `question_closed` classified as forwarded in `remote/wire.py`, and a line from a <!-- t:7p -->
       paired phone answers the card
-- [x] a shortcut hint on the slow path: typing an option out in full → "Next time: just type 2"
-- [x] tests: `tests/test_questions.py` (19), `tests/panestatus_test.cpp`, `tests/test_tool_labels.py`
-- [x] implementer evidence: `docs/qa_evidence/2026-09-19-the-planner-asks-questions/`
+- [x] a shortcut hint on the slow path: typing an option out in full → "Next time: just type 2" <!-- t:h2 -->
+- [x] tests: `tests/test_questions.py` (19), `tests/panestatus_test.cpp`, `tests/test_tool_labels.py` <!-- t:jy -->
+- [x] implementer evidence: `docs/qa_evidence/2026-09-19-the-planner-asks-questions/` <!-- t:dm -->
 
 ## Implementation
 
