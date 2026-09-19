@@ -539,7 +539,7 @@ QToolButton#popupTextButton:disabled { color: @disabled; }
 QToolButton#newTabButton, QToolButton#tabCloseButton { background: transparent; border: none; padding: 0; }
 QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }
 /* The project chip on an attached tab (#916B): the project's name, one click detaches. */
-QToolButton#tabProjectChip { color: @muted; background: @surface; border: 1px solid @border; border-radius: 8px; padding: 0 6px; margin: 0 4px 0 2px; font-size: 8.5pt; }
+QToolButton#tabProjectChip { color: @muted; background: @surface; border: 1px solid @border; border-radius: 8px; padding: 0 6px; margin: 0 4px 0 2px; font-size: 9pt; }
 QToolButton#tabProjectChip:hover { color: @text; border-color: @accentBorder; }
 QToolButton#tabDetachButton:hover { color: @accent; }
 /* Composer prefix chip (! terminal, * agent). It is a destination, so it wears the destination
