@@ -4189,17 +4189,42 @@ public:
     //
     // The left box itself: one per tab, made by whichever of the two callers gets there first.
     // A QTabBar side slot holds one widget, and this tab has two things to put there.
+    //
+    // Both callers go from here straight to `box->layout()`, so what this returns must have one.
+    // The slot cannot simply be trusted to hold ours: QTabBar owns a side widget and deleteLater()s
+    // it when its tab is removed, and `tabButton()` hands back whatever raw pointer it holds — so a
+    // box on its way out, or any widget this window did not put there, would arrive as a null
+    // layout() and the `->addWidget()` after it would run on a null `this`. That is the crash a
+    // sibling session caught under gdb on 2026-09-19 (QLayout::parentWidget() ← QLayout::addWidget
+    // ← syncTabProjectChip ← updateTitles): what the frames show is the dereference, not what
+    // emptied the slot, so this makes the dereference safe whatever did. m_tabLeftBoxes answers
+    // "is that pointer still one of mine" without touching it — a QPointer to a destroyed widget
+    // is null, and a stale pointer from the bar matches nothing.
     QWidget *tabLeftBox(int index) {
         QTabBar *bar = m_tabs->tabBar();
-        if (QWidget *box = bar->tabButton(index, QTabBar::LeftSide)) return box;
+        QWidget *existing = bar->tabButton(index, QTabBar::LeftSide);
+        if (existing && isLiveTabLeftBox(existing) && existing->layout()) return existing;
         auto *box = new QWidget(bar);
         box->setObjectName(QStringLiteral("tabLeftBox"));
         auto *row = new QHBoxLayout(box);
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(2);
+        m_tabLeftBoxes.append(QPointer<QWidget>(box));
         bar->setTabButton(index, QTabBar::LeftSide, box);
         return box;
     }
+    // Our own boxes, as guards. Sweeping the dead ones here keeps the list the length of the tab
+    // bar rather than of the session.
+    bool isLiveTabLeftBox(const QWidget *candidate) {
+        bool live = false;
+        for (auto it = m_tabLeftBoxes.begin(); it != m_tabLeftBoxes.end();) {
+            if (it->isNull()) { it = m_tabLeftBoxes.erase(it); continue; }
+            if (it->data() == candidate) live = true;
+            ++it;
+        }
+        return live;
+    }
+    QList<QPointer<QWidget>> m_tabLeftBoxes;   // declared here, beside its only two users
     // A child came or went: the tab's width is cached from the box's size hint, and the one way
     // to have QTabBar read it again is to set the slot afresh. The bar moves a side widget but
     // never resizes it, so the box takes its own hint here — after the children's visibility is
@@ -5991,7 +6016,7 @@ private:
                     hint(QStringLiteral("tab.detach.mouse"), keys.isEmpty() ? QStringLiteral("Tip: “Move tab to new window” is in the palette; bind a key in keybindings.json")
                                                                           : relay::ShortcutHints::nextTime(keys, QStringLiteral("move tab to new window")));
                 });
-                static_cast<QHBoxLayout *>(box->layout())->insertWidget(0, detach);
+                if (auto *row = qobject_cast<QHBoxLayout *>(box->layout())) row->insertWidget(0, detach);
                 detach->show();
                 relayoutTabLeftBox(i);
             }
