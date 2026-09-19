@@ -13,7 +13,10 @@
 #include <QPointer>
 #include <QRect>
 #include <QSize>
+#include <QString>
 #include <Qt>
+
+#include <optional>
 
 class QSplitter;
 class QWidget;
@@ -94,5 +97,23 @@ private:
     bool m_armed = false;
     qint64 m_since = 0;
 };
+
+// ----- "move left/right, then ↓ docks it beneath that neighbour" (card #Q7Y9) ------------------
+//
+// The chord has no window of its own: it borrows PlacementWindow's two-second clock. These are
+// the two decisions in it that are worth deciding without a window (tests/panelayout_test.cpp).
+
+// The move that carries `pane` toward `anchor` when the two sit side by side: Right when the
+// anchor lies to the pane's right, Left when it lies to its left, nothing when they overlap.
+// A pane dropped beneath the anchor it sat to the RIGHT of is docked there by Move-left; naming
+// Move-right, which takes it further away, is what the drag hint used to do.
+std::optional<Direction> moveToward(const QRect &pane, const QRect &anchor);
+
+// True when a key press should leave the chord's window armed: a modifier held down on its own,
+// or a key the keymap binds to one of the chord's own actions (`actionId`, empty when the key is
+// bound to nothing). Everything else closes it — including Ctrl+C, Ctrl+D and Ctrl+L, which are
+// shell keys and not "the first half of a shortcut", so a stale chord can never turn a much
+// later Move-down into a dock.
+bool chordKeyKeepsWindow(int key, const QString &actionId);
 
 }  // namespace relay::panes

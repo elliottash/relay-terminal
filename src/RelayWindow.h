@@ -361,6 +361,10 @@ public:
             refreshSettingsPanes();
         });
         connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
+            // A tab change of any kind — the keys, a click on the tab bar, the scroll wheel over
+            // it — closes the chord's window (#Q7Y9). Otherwise the Move-down that follows would
+            // restack two panes in a tab nobody is looking at, and focus one of them.
+            endBeneathDock();
             QWidget *page = m_tabs->currentWidget();
             if (!page) return;
             QWidget *leaf = m_lastActive.value(page);
@@ -749,18 +753,20 @@ protected:
             }
             if (response.action == Placement::Action::Dismiss) endPlacement();
         }
-        // The chord's window (#Q7Y9): a bare key or a click closes it. Keys with Ctrl, Alt or
-        // Meta held do not — the Move-down key passes through here on its way to the shortcut
-        // that runs it, and other shortcuts close the window through runActionNow.
+        // The chord's window (#Q7Y9) stays open only for the keys that are part of the chord:
+        // a modifier held on its own, and whatever the keymap binds to Move-left/right/down —
+        // the Move-down key passes through here on its way to the shortcut that runs it. Every
+        // other key closes it, Ctrl+C, Ctrl+D and Ctrl+L included: those are the shell's keys,
+        // and treating any modified key as "half a shortcut" left the window armed while the
+        // user typed on, so a Move-down minutes later docked a pane out of the blue.
+        // A click or a scroll closes it too (the wheel over the tab bar changes tab).
         if (m_beneath.armed(m_beneathClock.elapsed())
-            && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
+            && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress
+                || event->type() == QEvent::Wheel)
             && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
             const auto *pressed = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
-            const bool modifierOnly = pressed && (pressed->key() == Qt::Key_Control || pressed->key() == Qt::Key_Shift
-                                                  || pressed->key() == Qt::Key_Alt || pressed->key() == Qt::Key_Meta
-                                                  || pressed->key() == Qt::Key_AltGr);
-            const bool modified = pressed && (pressed->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
-            if (!modifierOnly && !modified) endBeneathDock();
+            if (!pressed || !relay::panes::chordKeyKeepsWindow(pressed->key(), Keymap::instance().match(pressed)))
+                endBeneathDock();
         }
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
@@ -4180,6 +4186,9 @@ private:
     // The new pane already exists and is running; an arrow only moves it, through the same code
     // Ctrl+Alt+arrow uses, so its shell, agent and scrollback are never restarted.
     void armPlacement(QWidget *pane, QWidget *anchor) {
+        // Only one of the two windows may be open: this one owns the toast below, and the chord's
+        // cancel must never delete a label this one is still showing (#Q7Y9).
+        endBeneathDock();
         // Re-installing moves this filter to the front of the application's list, so the arrow is
         // seen here before the new pane's prompt box can treat it as cursor movement.
         qApp->installEventFilter(this);
@@ -4201,8 +4210,9 @@ private:
         m_placementHint = nullptr;
     }
 
-    // The chord (#Q7Y9) and the placement window (#78BN) share this one transient toast:
-    // arming either ends the other, so one label is enough, and whoever armed last owns it.
+    // The placement window's one transient label (#78BN), owned by it alone: endPlacement()
+    // deletes it. The chord (#Q7Y9) teaches itself through the hint registry instead, so nothing
+    // else can delete this one while the arrows are still live.
     void showPaneToast(QWidget *pane, const QString &text) {
         delete m_placementHint.data();
         m_placementHint = new QLabel(text, this);
@@ -4252,24 +4262,32 @@ private:
     // is a plain move again; any other action, key or click closes the window without consuming
     // anything, so nothing typed is ever swallowed.
     void armBeneathDock(QWidget *pane, QWidget *anchor) {
+        // The two windows are exclusive, and the placement one owns the transient label.
+        endPlacement();
         // Re-installing the filter moves it to the front of the application's list again.
         qApp->installEventFilter(this);
         m_beneathClock.start();
         m_beneath.arm(0);
         m_beneathPane = pane;
         m_beneathAnchor = anchor;
+        // The teaching line goes through the hint registry like every other shortcut hint
+        // (WARP.md, "Shortcut hints"), under its own id: it stops after the registry's limit and
+        // the "Shortcut hints" setting turns it off. The window is armed either way, so a user
+        // who has learned the chord keeps it without being told about it every single move.
+        // It names the two seconds rather than saying "now", because a hint queues behind any
+        // toast already up and may reach the screen after this window has closed.
         const QString down = Keymap::instance().shortcutText(QStringLiteral("pane.moveDown"));
-        if (!down.isEmpty()) showPaneToast(pane, QStringLiteral("%1 docks it beneath").arg(down));
+        if (!down.isEmpty())
+            hint(QStringLiteral("pane.dockBeneath.chord"),
+                 QStringLiteral("%1 within two seconds docks it beneath").arg(down));
         m_beneathTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
     }
 
     void endBeneathDock() {
-        const bool open = m_beneath.armed(m_beneathClock.elapsed());
         m_beneathTimer.stop();
         m_beneath.cancel();
         m_beneathPane = nullptr;
         m_beneathAnchor = nullptr;
-        if (open) { delete m_placementHint.data(); m_placementHint = nullptr; }   // its own toast
     }
 
     // The second half of the chord: dock the pane beneath the neighbor it moved toward. The same
@@ -4279,10 +4297,25 @@ private:
         if (!m_beneath.armed(m_beneathClock.elapsed())) { endBeneathDock(); return false; }
         QPointer<QWidget> pane(m_beneathPane), anchor(m_beneathAnchor);
         endBeneathDock();
-        if (!pane || !anchor || !pageOf(pane) || pageOf(pane) != pageOf(anchor)) return false;
-        if (!takeLeaf(pane) || !anchor || !pane) return false;
-        insertBeside(anchor, pane, Qt::Vertical, false);   // beneath the anchor, not above it
-        setActiveLeaf(pane); focusLeaf(pane);
+        QWidget *page = pane ? pageOf(pane) : nullptr;
+        // Everything is checked BEFORE the pane is detached: takeLeaf leaves it parentless, so a
+        // refusal after it would drop the pane out of the window and the caller would then run a
+        // plain Move-down on a widget that is in no layout at all. The page must also be the tab
+        // on screen — a tab change between the two keys makes this an ordinary Move-down again.
+        if (!pane || !anchor || !page || page != pageOf(anchor) || page != m_tabs->currentWidget()) return false;
+        if (!takeLeaf(pane)) return false;
+        // Past here the pane is detached, so it is always put back somewhere and the answer is
+        // always yes. The anchor is in the same page and cannot be the tab's last leaf, so
+        // takeLeaf cannot have taken it away; if it ever does, any remaining leaf is a home, and
+        // a tab of its own is the last resort.
+        QWidget *home = anchor.data();
+        if (!home) {
+            const auto leaves = leavesIn(m_tabs->currentWidget());
+            home = leaves.isEmpty() ? nullptr : leaves.first();
+        }
+        if (home) insertBeside(home, pane, Qt::Vertical, false);   // beneath the anchor, not above it
+        else adoptLeafAsTab(pane);
+        if (pane) { setActiveLeaf(pane); focusLeaf(pane); }
         updateTitles();
         return true;
     }
@@ -5035,9 +5068,14 @@ private:
             QWidget *page = pageOf(anchor);
             const QRect a(anchor->mapTo(page, QPoint(0, 0)), anchor->size());
             const QRect d(dragged->mapTo(page, QPoint(0, 0)), dragged->size());
-            if (d.right() <= a.left()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveLeft"));
-            if (d.left() >= a.right()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveRight"));
-            return QString();
+            // The chord starts with the move that takes the pane TOWARD the anchor: dragged from
+            // the anchor's right, it is Move-left then Move-down. Naming the side the pane came
+            // from instead sent the user the opposite way (#Q7Y9 review).
+            const std::optional<relay::panes::Direction> toward = relay::panes::moveToward(d, a);
+            if (!toward) return QString();
+            return Keymap::instance().shortcutText(*toward == relay::panes::Direction::Left
+                                                       ? QStringLiteral("pane.moveLeft")
+                                                       : QStringLiteral("pane.moveRight"));
         }();
         if (target.second == Edge::TabBar) {
             RelayWindow *w = windowOf(target.first);

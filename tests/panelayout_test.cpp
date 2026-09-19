@@ -304,6 +304,40 @@ private Q_SLOTS:
         QVERIFY(!window.armed(0));
         QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 10).action), int(PlacementWindow::Action::None));
     }
+
+    // ----- "move left/right, then the Move-down key docks it beneath" (card #Q7Y9) ------------
+
+    // The hint after a drag, and the chord itself, name the move that takes the pane TOWARD the
+    // anchor. The first version named the side the pane came from, so a pane dropped beneath the
+    // one on its left was taught "Move-right then Move-down", which moves it away.
+    void chordNamesTheMoveTowardTheAnchor() {
+        const QRect anchor(0, 0, 100, 200);
+        const QRect onItsRight(100, 0, 100, 200);
+        const QRect onItsLeft(-100, 0, 100, 200);
+        QVERIFY(moveToward(onItsRight, anchor).has_value());
+        QCOMPARE(int(*moveToward(onItsRight, anchor)), int(Direction::Left));
+        QVERIFY(moveToward(onItsLeft, anchor).has_value());
+        QCOMPARE(int(*moveToward(onItsLeft, anchor)), int(Direction::Right));
+        // Already stacked, or overlapping: neither move describes it.
+        QVERIFY(!moveToward(QRect(0, 200, 100, 200), anchor).has_value());
+        QVERIFY(!moveToward(QRect(50, 0, 100, 200), anchor).has_value());
+    }
+
+    // The chord's window survives its own keys and nothing else.
+    void chordWindowSurvivesOnlyItsOwnKeys() {
+        for (int key : {int(Qt::Key_Control), int(Qt::Key_Shift), int(Qt::Key_Alt), int(Qt::Key_Meta), int(Qt::Key_AltGr)})
+            QVERIFY(chordKeyKeepsWindow(key, QString()));
+        for (const char *id : {"pane.moveLeft", "pane.moveRight", "pane.moveDown"})
+            QVERIFY(chordKeyKeepsWindow(Qt::Key_Down, QString::fromLatin1(id)));
+        // Shell keys with a modifier held are not "half a shortcut": they close the window, so a
+        // Move-down typed much later is a plain move again.
+        QVERIFY(!chordKeyKeepsWindow(Qt::Key_C, QString()));
+        QVERIFY(!chordKeyKeepsWindow(Qt::Key_L, QString()));
+        QVERIFY(!chordKeyKeepsWindow(Qt::Key_A, QString()));
+        // Another shortcut closes it as well.
+        QVERIFY(!chordKeyKeepsWindow(Qt::Key_T, QStringLiteral("tab.new")));
+        QVERIFY(!chordKeyKeepsWindow(Qt::Key_Up, QStringLiteral("pane.moveUp")));
+    }
 };
 
 QTEST_MAIN(PaneLayoutTests)

@@ -176,12 +176,16 @@ Layout rules:
   near side, so repeating keeps moving it. A left/right move opens the twin of #78BN's placement
   window (#Q7Y9): for two seconds the Move-down *action* — Ctrl+Alt+Down by default, whatever the
   user bound — docks the pane beneath the neighbor it moved toward instead of moving it down
-  (`armBeneathDock` / `dockBeneathNeighbor`; any other action, bare key or click closes the
-  window without consuming anything). Dragging a pane onto another's bottom edge hints that
-  chord (`pane.dockBeneath`).
+  (`armBeneathDock` / `dockBeneathNeighbor`; the window closes without consuming anything on any
+  other action, on any key the keymap does not bind to one of the three moves — Ctrl+C and Ctrl+L
+  at the shell included — and on a click, a scroll or a tab change, and it only ever acts on the
+  tab that is on screen). Dragging a pane onto another's bottom edge hints that chord
+  (`pane.dockBeneath`), naming the move that takes the pane toward its drop anchor; the chord's
+  own arming line is a registry hint (`pane.dockBeneath.chord`), so it stops after a few showings.
 - **Layout rules** live in `src/PaneLayout.{h,cpp}` (library `relay-panes`, tests
   `tests/panelayout_test.cpp`): `neighborIndex()` (which pane is on that side, used by focus and
-  by moves), `swapInSplitter()` and `dropEdge()`. `swapInSplitter()` is one
+  by moves), `swapInSplitter()`, `dropEdge()`, and the chord's two decisions `moveToward()` (which
+  move takes a pane toward its neighbour) and `chordKeyKeepsWindow()`. `swapInSplitter()` is one
   `QSplitter::insertWidget` call in either direction, because that call **moves** a child the
   splitter already owns and numbers the index as if it had been taken out first — "finishing" a
   move toward the end with a second insert of the neighbour puts both back where they started,

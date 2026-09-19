@@ -111,6 +111,20 @@ QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane) {
     return splitters;
 }
 
+std::optional<Direction> moveToward(const QRect &pane, const QRect &anchor) {
+    if (pane.right() <= anchor.left()) return Direction::Right;   // the anchor is on its right
+    if (pane.left() >= anchor.right()) return Direction::Left;
+    return std::nullopt;                                          // one above the other already
+}
+
+bool chordKeyKeepsWindow(int key, const QString &actionId) {
+    if (key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta
+        || key == Qt::Key_AltGr || key == Qt::Key_unknown || key == 0)
+        return true;
+    return actionId == QLatin1String("pane.moveLeft") || actionId == QLatin1String("pane.moveRight")
+           || actionId == QLatin1String("pane.moveDown");
+}
+
 void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes) {
     for (int i = 0; i < splitters.size() && i < sizes.size(); ++i) {
         QSplitter *splitter = splitters.at(i);

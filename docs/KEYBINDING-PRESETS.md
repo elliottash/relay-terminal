@@ -167,7 +167,10 @@ program binds; the JSON is what Relay ships.
 neighbor it moved toward (default keys: Ctrl+Alt+Left then Ctrl+Alt+Down, and Ctrl+Alt+Right then
 Ctrl+Alt+Down). No new action and no new key: the second key is the ordinary Move-down, so the
 chord follows whatever the preset binds to the three move actions, and Move-down on its own keeps
-moving the pane down.
+moving the pane down. That also means a preset can leave the chord out of reach: **the Warp preset
+binds none of `pane.moveLeft` / `pane.moveRight` / `pane.moveDown`** (Warp gives Ctrl+Alt+arrow to
+`pane.focus*` instead), so under it there is no chord until those actions are bound by hand — the
+drag onto a pane's bottom edge, and Actions, are the ways to dock a pane beneath another there.
 
 ## 5. Collisions, pass-through and desktop grabs
 
