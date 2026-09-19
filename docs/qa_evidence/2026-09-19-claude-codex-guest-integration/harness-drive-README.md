@@ -21,7 +21,8 @@ back to the Tier B TUI launch, and stopped on Claude Code's workspace-trust dial
 | 04 | `implementer-harness-04-shell.png` | `echo relay-shell-still-mine` with Ctrl+Shift+Enter runs in the pane's own shell: there is no TUI to pipe it into | OCR |
 
 Result of the recorded run: **all checks passed** (`harness-drive-run.log`, last line). One Claude
-Code turn spent.
+Code turn spent. The transcript of that turn is filed by claude under
+`~/.claude/projects/<slug of the temp workspace>/`, as any headless session's would be.
 
 ## Codex, the same route (2026-09-19)
 
@@ -38,8 +39,8 @@ one Codex turn spent on the owner's ChatGPT plan.
 
 This is the run that had never been made: until now Codex's half of Tier A was covered only by
 transcripts replayed through a fake process. The two guests take the same code path, and it
-behaves the same on both. The transcript of that turn is filed by claude under
-`~/.claude/projects/<slug of the temp workspace>/`, as any headless session's would be.
+behaves the same on both. Codex files its own rollout under `~/.codex/sessions/YYYY/MM/DD/`, which
+is where the Sessions list reads it from.
 
 Not covered here: a tool-using turn in a live pane (the recorded fixtures hold one for each
 guest), and a guest approval reaching the question card (bypass is the default posture, so none is
