@@ -6134,9 +6134,10 @@ private:
         return relay::usage::tabSuffix(tabUsageSample(page));
     }
 
-    // A tab's tooltip: the pane titles, where the tab's last active pane is, and the usage line
-    // that says which of the label's two bare numbers is which (issue #D03W) and what the memory
-    // figure is a sum of. Off with the same setting as the suffix.
+    // A tab's tooltip: the pane titles, where the tab's last active pane is, and the usage line,
+    // which says what the memory figure is a sum of and names the processes behind the number.
+    // It no longer has to say which of the label's numbers is which: since #6BGA the label spells
+    // that out itself, in the same words. Off with the same setting as the suffix.
     QString tabTooltipText(QWidget *page, const QStringList &titles) const {
         const auto leaves = leavesIn(page);
         QWidget *leaf = m_lastActive.value(page);
@@ -6147,9 +6148,9 @@ private:
             if (summed.valid) {
                 // Which processes the tab's number is made of, the busiest first — the panes'
                 // breakdowns merged, so this names the tab's busiest processes rather than each
-                // pane's. The label itself stays the two bare percentages.
+                // pane's. The label itself stays the sum alone.
                 const QString breakdown = relay::usage::processBreakdown(summed);
-                usageLine = QStringLiteral("CPU / memory of this tab's panes: ")
+                usageLine = QStringLiteral("This tab's panes: ")
                             + relay::usage::describe(summed) + QStringLiteral("\n")
                             + (breakdown.isEmpty() ? QString() : breakdown + QStringLiteral("\n"))
                             + relay::usage::memoryNote();
