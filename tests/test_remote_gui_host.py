@@ -13,7 +13,8 @@ import unittest
 from pathlib import Path
 
 from remote import client as client_mod
-from remote import gui_host, host as host_mod, identity as identity_mod, wire
+from remote import gui_host, host as host_mod, identity as identity_mod, \
+    notify as notify_mod, wire
 from rendezvous.server import Store, build
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
@@ -144,6 +145,83 @@ class ComposeTests(unittest.TestCase):
                 client, _ = await harness.paired_client()
                 await client.send({"t": "agent_stop", "pane": "p1"})
                 await harness.settle("agent_stop")
+                await client.close()
+        run(main())
+
+
+class PaneStatusTests(unittest.TestCase):
+    """A GUI pane's `status` is the whole of what section 9's status triggers have to work with.
+
+    `remote/notify.py` fires `waiting_input` and `failed` off a change in a pane item's status,
+    and the only thing that ever sets that field for a GUI pane is the `pane` line this sidecar
+    receives — which is why `Pane::shareStatus()` in src/Pane.h has to be able to say those two
+    words at all (#W5N2's live drive found it could not).
+    """
+
+    async def watch(self, harness):
+        """A paired device that asked for every kind, and the bodies the notifier decided on."""
+        client, record = await harness.paired_client()
+        harness.devices.set_push(record.device_id, {
+            "endpoint": "https://push.example/one", "p256dh": "x", "auth": "y",
+            "seal": "z", "kinds": list(notify_mod.KINDS)})
+        sent: list[dict] = []
+
+        async def deliver(body):
+            sent.append(body)
+
+        harness.host.notifier.deliver = deliver
+        harness.host.window_active(False)      # the presence rule: you are not at the desktop
+        return client, sent
+
+    def pane_line(self, status: str) -> dict:
+        return {"id": "p1", "title": "relay-terminal", "cwd": "/home/elliott", "rows": 24,
+                "cols": 80, "status": status}
+
+    def test_a_pane_line_saying_waiting_input_is_a_notification(self):
+        async def main():
+            async with Harness() as harness:
+                client, sent = await self.watch(harness)
+                harness.source.set_pane(self.pane_line("running"))
+                harness.source.set_pane(self.pane_line("waiting_input"))
+                await asyncio.sleep(0.1)
+                self.assertEqual([body["kind"] for body in sent], ["waiting_input"])
+                self.assertEqual(sent[0]["title"], "Waiting for you")
+                self.assertEqual(sent[0]["body"], "Pane 1 is waiting for input")
+                # Section 9: no command text, no cwd, no title a program can set.
+                self.assertNotIn("relay-terminal", str(sent[0]))
+                self.assertNotIn("/home/elliott", str(sent[0]))
+                # And the phone is told the same word in its pane list.
+                for _ in range(10):
+                    panes = await client.expect("panes", timeout=10)
+                    item = next(row for row in panes["items"] if row["id"] == "p1")
+                    if item["status"] == "waiting_input":
+                        break
+                self.assertEqual(item["status"], "waiting_input")
+                await client.close()
+        run(main())
+
+    def test_a_pane_line_saying_failed_is_a_notification_too(self):
+        async def main():
+            async with Harness() as harness:
+                client, sent = await self.watch(harness)
+                harness.source.set_pane(self.pane_line("running"))
+                harness.source.set_pane(self.pane_line("failed"))
+                await asyncio.sleep(0.1)
+                self.assertEqual([body["kind"] for body in sent], ["failed"])
+                self.assertEqual(sent[0]["title"], "That turn failed")
+                await client.close()
+        run(main())
+
+    def test_the_same_status_twice_is_one_notification(self):
+        """The GUI republishes a pane line about once a second; only a change is news."""
+        async def main():
+            async with Harness() as harness:
+                client, sent = await self.watch(harness)
+                harness.source.set_pane(self.pane_line("running"))
+                harness.source.set_pane(self.pane_line("waiting_input"))
+                harness.source.set_pane(self.pane_line("waiting_input"))
+                await asyncio.sleep(0.1)
+                self.assertEqual(len(sent), 1)
                 await client.close()
         run(main())
 

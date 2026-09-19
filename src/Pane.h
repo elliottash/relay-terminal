@@ -3765,10 +3765,26 @@ public:
         notify(title, body, kind);
     }
 
-    // The pane status a phone sees: the same vocabulary as the protocol's pane list.
+    // The pane status a phone sees: the same vocabulary as the protocol's pane list
+    // (docs/REMOTE-PROTOCOL.md section 6.3 — `idle | running | waiting_input | password |
+    // failed`). It is the **only** source of a pane's status on the sidecar line, so two of
+    // remote/notify.py's five notification triggers — `waiting_input` and `failed` — could never
+    // fire from a GUI pane while this answered with three of the six words (#W5N2's live drive).
+    //
+    // The facts are the ones the pane's own status glyph is decided from (src/PaneStatus.h,
+    // #XM0T), so the phone's chip and the desktop's glyph cannot disagree about what the pane is
+    // doing: `programAsking` is a foreground program blocked reading the tty or a question read
+    // off the screen (`apt`'s `[Y/n]`), and `handoffWaiting` is a command the agent left in the
+    // prompt box and is waiting on. Both are "this pane is waiting for the person".
     QString shareStatus() const {
         if (m_secretMode) return QStringLiteral("password");
-        if (processBusy()) return QStringLiteral("running");
+        const relay::panestatus::Facts facts = statusFacts();
+        if (facts.programAsking || facts.handoffWaiting) return QStringLiteral("waiting_input");
+        if (facts.processBusy || facts.agentBusy) return QStringLiteral("running");
+        // The last turn failed and nothing has happened since. Cleared when the pane is used
+        // again (a new turn, a command), so a phone is told about a failure once rather than
+        // wearing it for the rest of the session.
+        if (m_shareFailed) return QStringLiteral("failed");
         return QStringLiteral("idle");
     }
 
@@ -6647,6 +6663,7 @@ private:
         } else if (type == QStringLiteral("agent_started")) {
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
+            m_shareFailed = false;      // the pane is in use again; the last failure is history
             startTurnClock();
             m_currentItem = event.value(QStringLiteral("id")).toString();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
@@ -6685,6 +6702,10 @@ private:
             // Status glyphs (#XM0T): the window reads these to show done / failed / needs you
             // until the user has looked at the pane.
             ++m_finishSerial; m_lastOutcome = outcome;
+            // What a phone is told (shareStatus, protocol 6.3) and what rings it
+            // (remote/notify.py's `failed` trigger). "cancelled" is the user stopping their own
+            // turn, which is not news to them.
+            m_shareFailed = outcome == QStringLiteral("error");
             // "Asked" also covers a command the agent left in the prompt box and waits on.
             m_lastAsked = outcome == QStringLiteral("done")
                           && (relay::panestatus::endsWithQuestion(m_turnText) || (m_handoffOffered && m_handoffPrefill));
@@ -8480,6 +8501,7 @@ private:
     }
 
     void submitTerminal(const QString &text, bool watch, bool natural = false, bool handoff = false) {
+        m_shareFailed = false;          // the pane is in use again (shareStatus, protocol 6.3)
         if (m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
             m_handoffNext = handoff;
             if (!runInTerminal(text, watch, 0, natural)) m_handoffNext = false;
@@ -10858,6 +10880,9 @@ private:
     bool m_handoffOffered = false, m_lastAsked = false;
     quint64 m_finishSerial = 0;
     QString m_lastOutcome;
+    // The last agent turn ended in an error and nothing has happened in the pane since: the
+    // `failed` of the protocol's pane status (shareStatus), and remote/notify.py's trigger.
+    bool m_shareFailed = false;
     bool m_captureForAgent = false, m_remoteSubmit = false;
     int m_handoffChain = 0;
     // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request
