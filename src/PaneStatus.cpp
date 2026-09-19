@@ -298,6 +298,9 @@ const QList<Kind> &kinds() {
         {QStringLiteral("settings"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("actions"), QStringLiteral("Actions"), QStringLiteral("tools"), Glyph::Actions},
         {QStringLiteral("sessions"), QStringLiteral("Sessions"), QStringLiteral("tools"), Glyph::Sessions},
+        // The project picker (card #916B): which project a tab that has none attaches to. It wears the
+        // Switchboard's jacks because a project is, to Relay, the thing that has a Switchboard.
+        {QStringLiteral("projects"), QStringLiteral("Projects"), QStringLiteral("tools"), Glyph::Switchboard},
         // Multiplayer (#W5N2): who is on the panes you are sharing, and what is waiting for you.
         {QStringLiteral("sharing"), QStringLiteral("Sharing"), QStringLiteral("tools"), Glyph::Phone},
         {QStringLiteral("subagent"), QStringLiteral("Subagent"), QStringLiteral("agents"), Glyph::Subagent},

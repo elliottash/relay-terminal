@@ -505,6 +505,9 @@ public:
     // A yes: attach this pane's tab to `project` with `reason` (projects::kReason*), so the
     // conversation carries on with the card tools (set_board, protocol 19.11).
     std::function<void(const QString &project, const QString &reason)> onProjectAttach;
+    // No project to attach to and none to ask about (~/Downloads): open the project picker (#916B)
+    // beside this pane, holding a `/card` text to file once a project is chosen.
+    std::function<void(const QString &heldCard)> onPickProject;
     // What happened to the question, for the window to remember. `what` is one of "asked" (it is
     // on screen now), "yes", "no" — written to the registry for ever — "not-now", which silences
     // trigger (1) for this Relay session only, and "reconsider", which `/init` sends to clear a
@@ -6987,22 +6990,7 @@ private:
         }
         else if (name == QStringLiteral("card")) {
             if (args.trimmed().isEmpty()) { status(QStringLiteral("Usage: /card <what to remember>")); return; }
-            // An explicit project action: it attaches this tab to the pane's candidate project
-            // when that project has a Switchboard. When it has none, this is trigger (4) of the
-            // init question — and **the card text is held, not lost**: it lands as the first card
-            // the moment the board exists (protocol 19.12). Still nothing is created before a yes.
-            if (QString why; !attachForBoard(relay::projects::kReasonCardCommand, &why)) {
-                if (askProjectInit(relay::projectinit::Trigger::CardCommand, args.trimmed(), &why)) return;
-                status(why.isEmpty() ? QStringLiteral("No Switchboard here.") : why);
-                return;
-            }
-            // Quick add to the Inbox without opening the pane; the text is kept verbatim.
-            send({{QStringLiteral("type"), QStringLiteral("board_create")},
-                  {QStringLiteral("tab"), QStringLiteral("features")},
-                  {QStringLiteral("status"), QStringLiteral("inbox")},
-                  {QStringLiteral("text"), args.trimmed()}});
-            m_cardIndexAsked = false;
-            boardShortcutHint(QStringLiteral("card.slash"));
+            fileCard(args);
         }
         else if (name == QStringLiteral("init")) {
             // Trigger (5): the explicit command. It asks even about a project the user declined
@@ -11915,6 +11903,64 @@ public:
     // tab is attached first (`set_board {project, state: "uninitialized"}`) and `board_init` goes
     // out when that lands, which is also exactly what makes a mid-turn yes take effect at turn end.
     //
+    // `/card <text>`, and the same card filed once the project picker has answered (#916B). An
+    // explicit project action: it attaches this tab to the pane's candidate project when that
+    // project has a Switchboard. When it has none, this is trigger (4) of the init question — and
+    // **the card text is held, not lost**: it lands as the first card the moment the board exists
+    // (protocol 19.12). Still nothing is created before a yes. With no candidate at all
+    // (~/Downloads) the project picker opens instead, holding the text the same way.
+    void fileCard(const QString &args) {
+        if (QString why; !attachForBoard(relay::projects::kReasonCardCommand, &why)) {
+            if (askProjectInit(relay::projectinit::Trigger::CardCommand, args.trimmed(), &why)) return;
+            if (onPickProject && relay::projects::candidateFor(m_cwd).isEmpty()) { onPickProject(args.trimmed()); return; }
+            status(why.isEmpty() ? QStringLiteral("No Switchboard here.") : why);
+            return;
+        }
+        // Quick add to the Inbox without opening the pane; the text is kept verbatim.
+        send({{QStringLiteral("type"), QStringLiteral("board_create")},
+              {QStringLiteral("tab"), QStringLiteral("features")},
+              {QStringLiteral("status"), QStringLiteral("inbox")},
+              {QStringLiteral("text"), args.trimmed()}});
+        m_cardIndexAsked = false;
+        boardShortcutHint(QStringLiteral("card.slash"));
+    }
+
+    // "Initialize new project here" in the project picker (#916B). Choosing that row *is* the
+    // explicit user action the consent rule asks for, so there is no second question and no
+    // probe: the tab attaches to the pane's own directory, and `board_init` follows the attach
+    // exactly as it does after a yes (see askProjectInit) — with `git_init`, so the worker also
+    // runs `git init` there when the directory is not inside a repository yet (protocol 19.12).
+    // A held `/card` is filed once the board exists; otherwise the Switchboard opens, since that
+    // is what was reached for.
+    void initProjectHere(const QString &cardText) {
+        if (m_cwd.isEmpty()) { status(QStringLiteral("No directory to initialize.")); return; }
+        if (m_initStage != InitStage::Idle) { status(QStringLiteral("A project question is already up in this pane.")); return; }
+        const QString project = relay::projects::normalize(m_cwd);
+        if (project.isEmpty()) return;
+        m_initStage = InitStage::Attaching;
+        m_initTrigger = cardText.isEmpty() ? relay::projectinit::Trigger::Switchboard
+                                           : relay::projectinit::Trigger::CardCommand;
+        m_initProject = project;
+        m_initRequestId.clear();
+        m_initCardText = cardText;
+        m_initKinds.clear();
+        m_initProbeId = QStringLiteral("pi-%1-%2").arg(m_token.left(6)).arg(++m_initSeq);
+        m_initGit = true;
+        m_initGitNote.clear();
+        relay::log::info(QStringLiteral("project init here pane=%1 project=%2").arg(m_token.left(8), project));
+        if (onProjectAttach) onProjectAttach(project, QString::fromLatin1(relay::projects::kReasonPicker));
+        // The attach lands as a `board_state`; a pane whose worker is not up yet never gets one,
+        // and the flow must not sit in Attaching for ever with `situation.asking` blocking every
+        // later question.
+        QPointer<Pane> guard(this);
+        const QString waitingFor = m_initProbeId;
+        QTimer::singleShot(10000, this, [guard, waitingFor] {
+            if (!guard || guard->m_initStage != InitStage::Attaching || guard->m_initProbeId != waitingFor) return;
+            guard->status(QStringLiteral("%1 was not initialized: the agent worker did not answer.").arg(guard->m_initProject));
+            guard->resetProjectInit();
+        });
+    }
+
     // Raise the question for `trigger`; `cardText` is a `/card` being held, which lands as the
     // first card on a yes and is never lost. True when a question is on its way.
     bool askProjectInit(relay::projectinit::Trigger trigger, const QString &cardText = QString(),
@@ -12082,8 +12128,10 @@ private:
         const QString state = board.value(QStringLiteral("state")).toString();
         if (m_initStage == InitStage::Attaching && state == QStringLiteral("uninitialized")) {
             m_initStage = InitStage::Creating;
-            send({{QStringLiteral("type"), QStringLiteral("board_init")},
-                  {QStringLiteral("project"), m_initProject}});
+            QJsonObject init{{QStringLiteral("type"), QStringLiteral("board_init")},
+                             {QStringLiteral("project"), m_initProject}};
+            if (m_initGit) init.insert(QStringLiteral("git_init"), true);   // the picker's "here" (#916B)
+            send(init);
             return;
         }
         if (m_initStage != InitStage::Creating || state != QStringLiteral("ready")) return;
@@ -12124,10 +12172,12 @@ private:
     void finishProjectInit(int imported) {
         const QString project = m_initProject;
         const bool openBoard = m_initTrigger == relay::projectinit::Trigger::Switchboard;
+        QString line = relay::projectinit::createdLine(project, imported);
+        if (!m_initGitNote.isEmpty()) line += QStringLiteral(" · ") + m_initGitNote;   // what `git_init` did
         ensureLineStart();
-        printInline(relay::projectinit::createdLine(project, imported) + QLatin1Char('\n'), Ink::Note);
+        printInline(line + QLatin1Char('\n'), Ink::Note);
         closeInline();
-        status(relay::projectinit::createdLine(project, imported));
+        status(line);
         resetProjectInit();
         if (openBoard && onOpenBoard) onOpenBoard();
     }
@@ -12139,6 +12189,8 @@ private:
         m_initCardText.clear();
         m_initProbeId.clear();
         m_initKinds.clear();
+        m_initGit = false;
+        m_initGitNote.clear();
         if (m_initBlock) m_initBlock->hide();
     }
 
@@ -12146,6 +12198,8 @@ private:
     relay::projectinit::Trigger m_initTrigger = relay::projectinit::Trigger::AgentWork;
     QString m_initProject, m_initRequestId, m_initCardText, m_initProbeId;
     QStringList m_initKinds;
+    bool m_initGit = false;         // the picker's "Initialize new project here": `git init` too
+    QString m_initGitNote;          // what the worker said it did about git, for the created line
     int m_initSeq = 0;
     relay::ProjectInitBlock *m_initBlock = nullptr;
 
@@ -12219,6 +12273,7 @@ private:
             // A yes walks forward on this event: the attach has landed (so `board_init` may go), or
             // the board is on disk (so the held card and the ticked imports may go). Mid-turn the
             // worker sends it at turn end, which is exactly when the yes is meant to take effect.
+            if (event.contains(QStringLiteral("git"))) m_initGitNote = event.value(QStringLiteral("git")).toString();
             projectInitBoardState(board);
             // Another project's cards are not this one's: drop the picker index and the work
             // chip's card list, and ask again the next time something needs them.

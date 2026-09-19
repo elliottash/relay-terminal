@@ -139,6 +139,35 @@ def parse_board(block) -> dict:
     return out
 
 
+def git_init_project(project: Path) -> str:
+    """`git init` in `project` unless it is already inside a repository. One line about what happened.
+
+    The check is git's own (`rev-parse --show-toplevel`), so a linked worktree or a submodule counts
+    as "inside a repository" exactly as it does for git. An existing repository is never re-initialised
+    and a parent repository is never touched: the directory simply stays a folder of that checkout.
+    Git missing, or refusing, is reported rather than raised — the board is created either way.
+    """
+    try:
+        inside = B._git(project, "rev-parse", "--show-toplevel")
+    except (OSError, ValueError) as exc:                       # pragma: no cover - git missing
+        return f"git init skipped: {exc}"
+    if inside.returncode == 0:
+        top = inside.stdout.strip()
+        try:
+            same = Path(top).resolve() == Path(project).resolve()
+        except OSError:
+            same = top == str(project)
+        return ("already a git repository" if same
+                else f"inside the git repository at {top}, which was left alone")
+    try:
+        done = B._git(project, "init", "-q")
+    except (OSError, ValueError) as exc:                       # pragma: no cover - git missing
+        return f"git init skipped: {exc}"
+    if done.returncode != 0:
+        return "git init failed: " + (done.stderr.strip().splitlines() or ["unknown error"])[-1]
+    return "git repository initialized"
+
+
 class BoardCommands:
     """`board_*` protocol messages for one worker."""
 
@@ -159,6 +188,8 @@ class BoardCommands:
         self._parked: dict[str, tuple] = {}
         #: The `board_init` being served, so its `board_state` carries the request id.
         self._init_rid = None
+        #: What that `board_init`'s `git_init` did, one line, for the same `board_state`.
+        self._init_git = None
         self.rev = 0
         self._snapshot: dict[str, dict] = {}
         # board_ask state: which card the conversation is seeded from, and the card hash it was
@@ -402,7 +433,10 @@ class BoardCommands:
         # `board_init` answers the message that asked for it; a board created on the way through a
         # write (either half of 19.12) is announced on its own.
         rid, self._init_rid = self._init_rid, None
+        git, self._init_git = self._init_git, None
         event = {"event": "board_state", "board": self.state_block(), "applies": "now"}
+        if git:                                   # what `board_init {git_init: true}` did (19.12)
+            event["git"] = git
         self._send({**event, "id": rid} if rid is not None else event)
 
     # ---- set_board -------------------------------------------------------------
@@ -459,6 +493,9 @@ class BoardCommands:
         named = request.get("dir") or request.get("project")
         if named is not None and not (isinstance(named, str) and named.strip()):
             raise ValueError("board_init project must be a path.")
+        git_init = request.get("git_init", False)
+        if type(git_init) is not bool:
+            raise ValueError("board_init git_init must be true or false.")
         root = (named_board_root(named, self.settings.get("folder")) if named
                 else (self.tools.board.root if self.tools else None))
         if root is None:
@@ -472,11 +509,17 @@ class BoardCommands:
             self._point(self.workspace, settings)
         tools = self._need()
         if not tools.exists():
+            # The project picker's "Initialize new project here" (#916B) asks for a repository as
+            # well: `git init` when the directory is not inside one already, and nothing at all —
+            # not a re-init, not a parent repository's config — when it is. Reported on the
+            # `board_state` that answers `rid`, so the pane can say what happened.
             self._init_rid = rid
+            self._init_git = git_init_project(tools.board.repo) if git_init else None
             try:
                 tools.create_board()      # board_created, then the board_state that answers `rid`
             finally:
                 self._init_rid = None
+                self._init_git = None
             return
         self._send({"event": "board_state", "id": rid, "board": self.state_block(), "applies": "now"})
 

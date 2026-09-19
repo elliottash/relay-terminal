@@ -71,6 +71,14 @@ target_include_directories(relay-projects PUBLIC src)
 target_link_libraries(relay-projects PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-projects PRIVATE -Wall -Wextra -Wpedantic)
 
+# The project picker pane (card #916B): the known projects, fuzzy-filtered, with "Initialize new
+# project here" on top, for a tab that has no project when a Switchboard is reached for. Widgets
+# over relay-projects; the window feeds it and takes its answer, so it is tested offscreen.
+add_library(relay-projectpicker STATIC src/ProjectPicker.cpp src/ProjectPicker.h src/PaneView.h)
+target_include_directories(relay-projectpicker PUBLIC src)
+target_link_libraries(relay-projectpicker PUBLIC relay-projects ${RELAY_QT}::Widgets)
+target_compile_options(relay-projectpicker PRIVATE -Wall -Wextra -Wpedantic)
+
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
 # The two provider modals (API keys, model roles): a static library so the roles dialog's lists can be
 # tested headlessly, exactly like the settings pane below.
@@ -428,7 +436,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -702,6 +710,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-projectinit-tests PRIVATE relay-projects ${RELAY_QT}::Test)
     target_compile_definitions(relay-projectinit-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME projectinit COMMAND relay-projectinit-tests)
+    # The project picker pane: rows, filter order, the default answer, Enter and Esc (card #916B).
+    add_executable(relay-projectpicker-tests tests/projectpicker_test.cpp)
+    target_link_libraries(relay-projectpicker-tests PRIVATE relay-projectpicker ${RELAY_QT}::Test)
+    add_test(NAME projectpicker COMMAND relay-projectpicker-tests)
+    set_tests_properties(projectpicker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # Copy on highlight is header-only (src/CopyOnSelect.h); relay-diffview gives the test one
     # real pane surface that installs it.
     add_executable(relay-copyonselect-tests tests/copyonselect_test.cpp)

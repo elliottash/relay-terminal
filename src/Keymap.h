@@ -243,6 +243,8 @@ private:
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
         add("board.open", "pane", "Switchboard: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
+        // No key of its own: Ctrl+Shift+S opens it by itself in a tab with no project and no candidate (#916B).
+        add("project.pick", "pane", "Projects: attach this tab to a project Relay knows, or initialize one here", {});
         add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",

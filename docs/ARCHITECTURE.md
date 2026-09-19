@@ -299,6 +299,7 @@ property on the leaf widget (the `ToolPane`), read at paint time:
 | `options` (and `settings`, until nothing sets it) | gear (as on the title-bar button), OPTIONS | green (`success`) | tools: brass |
 | `actions` | bolt, ACTIONS | green, shared with Options | tools: brass |
 | `sessions` | list, SESSIONS | the shell blue (`shell`) | tools: brass |
+| `projects` | jacks, PROJECTS (the project picker, #916B) | brass | tools: brass |
 | `sharing` | phone, SHARING | brass | tools: brass |
 | `subagent` | tree, SUBAGENT | violet (`agent`) | agents: violet |
 | `turn` | bubble, AGENT TURN | violet (`agent`) | agents: violet |

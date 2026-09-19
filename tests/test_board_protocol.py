@@ -1577,6 +1577,46 @@ class InitTests(AttachTest):
         events = self.send(type="board_init", id="i2", project=str(project))
         self.assertEqual([e["event"] for e in events], ["board_state"])
 
+    def test_board_init_with_git_init_makes_a_repository_unless_there_is_one(self):
+        """The project picker's "Initialize new project here" (#916B): `git init` when the directory
+        is not inside a repository, and nothing — no re-init, no parent's config touched — when it
+        is. The board is created either way, and the `board_state` says which it was."""
+        project, _, _ = self.uninitialized()
+        events = self.send(type="board_init", id="g1", project=str(project), git_init=True)
+        state = [e for e in events if e["event"] == "board_state"][0]
+        self.assertEqual(state["git"], "git repository initialized")
+        self.assertTrue((project / ".git").is_dir())
+        self.assertTrue((project / B.DEFAULT_BOARD_FOLDER / B.BOARD_CONFIG).is_file())
+        head = (project / ".git" / "HEAD").read_text(encoding="utf-8")
+        config = (project / ".git" / "config").read_text(encoding="utf-8")
+        # A directory inside that repository stays a folder of it: no nested repository, and the
+        # parent's HEAD and config are exactly as git init left them.
+        nested = project / "sub"
+        nested.mkdir()
+        events = self.send(type="board_init", id="g2", project=str(nested), git_init=True)
+        state = [e for e in events if e["event"] == "board_state"][0]
+        self.assertIn("left alone", state["git"])
+        self.assertIn(str(project), state["git"])
+        self.assertFalse((nested / ".git").exists())
+        self.assertEqual((project / ".git" / "HEAD").read_text(encoding="utf-8"), head)
+        self.assertEqual((project / ".git" / "config").read_text(encoding="utf-8"), config)
+        # A repository already: never re-initialised.
+        second = self.project("second")
+        subprocess.run(["git", "init", "-q", str(second)], check=True, capture_output=True)
+        before = sorted(p.name for p in (second / ".git").iterdir())
+        events = self.send(type="board_init", id="g3", project=str(second), git_init=True)
+        state = [e for e in events if e["event"] == "board_state"][0]
+        self.assertEqual(state["git"], "already a git repository")
+        self.assertEqual(sorted(p.name for p in (second / ".git").iterdir()), before)
+        # Without the flag nothing about git happens and the event carries no `git` at all.
+        third = self.project("third")
+        events = self.send(type="board_init", id="g4", project=str(third))
+        state = [e for e in events if e["event"] == "board_state"][0]
+        self.assertNotIn("git", state)
+        self.assertFalse((third / ".git").exists())
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_init", "id": "g5", "project": str(third), "git_init": "yes"})
+
     def test_the_project_tree_is_untouched_until_a_yes(self):
         """The whole read-only surface of the worker, against a byte-for-byte snapshot."""
         project, request, _ = self.uninitialized()
