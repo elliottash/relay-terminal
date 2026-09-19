@@ -6382,7 +6382,7 @@ private:
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
             {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
-            {QStringLiteral("theme"), QStringLiteral("[name]"), QStringLiteral("Theme for this tab: pick from every theme, or name one")},
+            {QStringLiteral("theme"), QStringLiteral("[name]"), QStringLiteral("Theme for this tab and new ones: pick from every theme, or name one")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
         {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Switchboard")},
@@ -6799,7 +6799,7 @@ private:
             QList<relay::agentui::PickerRow> rows;
             for (const auto &t : themes)
                 rows << relay::agentui::PickerRow{{t.name, t.id == relay::theme::activeThemeId() ? QStringLiteral("current") : QString()}, t.description, t.id};
-            const auto result = relay::agentui::pick(this, QStringLiteral("Theme"), QStringLiteral("The theme for this tab. Options › Appearance sets the one Relay opens on."),
+            const auto result = relay::agentui::pick(this, QStringLiteral("Theme"), QStringLiteral("The theme for this tab, and for new tabs unless Options › Appearance says a command changes one tab only."),
                                                      {QStringLiteral("Theme"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
             if (result.row >= 0 && result.row < themes.size()) chooseTheme(themes.at(result.row).id);
         }
