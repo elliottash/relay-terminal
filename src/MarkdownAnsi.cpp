@@ -252,7 +252,9 @@ bool MarkdownAnsi::decideLine(QString &out) {
         }
     }
 
-    if (first == QLatin1Char('|')) {
+    // A table cell's own renderer never starts a table: `|` inside a cell is a character, and a
+    // row that renderTable() has already decided is not a table must not become one again.
+    if (first == QLatin1Char('|') && !m_inlineOnly) {
         if (!complete) return false;
         m_table << line;
         m_pending.remove(0, consumed);
@@ -469,6 +471,14 @@ QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {
     Palette cell = m_palette;
     if (bold) cell.base += QStringLiteral(";1");
     MarkdownAnsi inner(cell);
+    // The cell is inline content, so the inner renderer may not collect a table of its own. It
+    // used to: a single row with no separator line under it — `| like this |`, which an agent
+    // writes by accident all the time — is "not a table after all" here, and renderTable() sent
+    // the row back through renderInline(), whose inner renderer saw a line starting with `|`,
+    // collected it as a table, and called renderTable() again on finish(). Relay died of a stack
+    // overflow in the middle of an answer, twice on 2026-09-19 (16:30:40 and 16:36:18), with
+    // 8 MiB of that cycle on the stack and nothing in the log to say so.
+    inner.m_inlineOnly = true;
     // Two statements, not `feed(text) + finish()`: the order in which `+` evaluates its operands
     // is unspecified, and g++ 15 on x86_64 runs finish() first, which flushes an empty renderer
     // and then feeds text nothing will ever emit. Every numeric table cell came out blank on that

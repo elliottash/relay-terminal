@@ -110,6 +110,24 @@ private slots:
                                      "a    │    1\nlong │  200\nafter\n"));
     }
 
+    // A row that is not a table used to kill the process. renderTable() decided "not a table after
+    // all" and sent the row back through renderInline(); the inner renderer saw a line starting
+    // with `|`, collected it as a table of its own, and called renderTable() again when it
+    // finished — for as long as the stack held (Relay died of this twice on 2026-09-19). One row
+    // with no separator line under it is all it takes, and an agent writes one by accident.
+    void aTableRowThatIsNotATableIsJustALine() {
+        QCOMPARE(plain(render(QStringLiteral("| one row and no separator |\n"))),
+                 QStringLiteral("| one row and no separator |\n"));
+        // Two rows, still no separator: both are lines, in order, and neither recurses.
+        QCOMPARE(plain(render(QStringLiteral("| a | b |\n| c | d |\n"))),
+                 QStringLiteral("| a | b |\n| c | d |\n"));
+        // The same text one character at a time, which is how it actually arrives.
+        QCOMPARE(plain(renderStreamed(QStringLiteral("| one row |\n"))), QStringLiteral("| one row |\n"));
+        // A pipe inside a cell of a real table is a character in that cell, not a nested table.
+        const QString nested = plain(render(QStringLiteral("| a | b |\n|---|---|\n| x | \\| y |\n")));
+        QVERIFY2(nested.contains(QStringLiteral("| y")), qPrintable(nested));
+    }
+
     void streamingMatchesWholeText() {
         const QString md = QStringLiteral(
             "# Plan\n\nWe **fix** the `render` path, see [card](https://x/y).\n\n"

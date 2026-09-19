@@ -92,6 +92,10 @@ private:
     Palette m_palette;
     QString m_pending;
     QStringList m_table;
+    // Set on the inner renderer a table cell (or a row that turned out not to be a table) is drawn
+    // with: inside one, a line beginning with `|` is text, not the start of another table. Without
+    // it the two renderers call each other for ever — see renderInline().
+    bool m_inlineOnly = false;
     bool m_final = false;
     bool m_lineStarted = false;
     Line m_line = Line::Paragraph;
