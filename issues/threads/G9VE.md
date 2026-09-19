@@ -50,3 +50,40 @@ Flash"** — the subagent half is untestable, because `subagents.py` builds its 
 roles resolver, so a subagent never fails over at all (by design, per the card). The pane half is
 covered by `tests/test_failover.py`. Whether subagents should fail over is the owner's call; giving
 them a resolver is a change to `subagents.py`, outside this review's scope.
+
+<!-- relay:entry 20260919T210000Z-fo author=agent kind=note model=claude-fable-5.1 -->
+Four follow-on owner decisions of 2026-09-19 built on main (`e13ddf6`, plus the GUI row and the
+protocol section in a second commit).
+
+**Relay Free is opt-in as a failover target.** The one candidate that is not already the user's own
+provider: another company's terms, a shared allowance. `failover_hosted` (agent option, default
+false) gates it, `failover_candidates` takes `allow_hosted=`, keyed presets of the same tier are
+tried whatever it says, and the value is decided once per turn beside the tier so a hosted spare
+cannot widen the chain on the second move. A pane already on Relay Free passes True. The note names
+it for what it is: "… keeps failing; continuing this turn on Relay's hosted service (Relay Free)."
+
+**Subagents fail over, on the parent's chain.** This is the checklist line the earlier review said
+could not be driven. `subagents.py` built each subagent's `Agent` with no roles resolver, and
+`_begin_failover` refuses every move without one, so no subagent had ever failed over. The factory
+now hands on the pane's resolver, its preset and both switches, read from the pane at spawn so a
+`set_agent_options` reaches a queued subagent. An injected provider is still never replaced. Giving
+the subagent the resolver also lets the compaction summary it makes use the Summaries role, as the
+pane's does — consistent, and worth noting because it is a second effect of the same line.
+
+**A routed step whose provider is down drops back to the pane's own model.** A failover was refused
+while a plan or vision swap was up, so a plan turn on a dead pinned planning model failed outright.
+`_drop_routing` ends the routing, emits `provider_retry {reason: "route_dropped"}` plus a `status`
+(logged `provider_route_dropped`) and finishes the turn on the pane's own model; the ordinary chain
+follows only if that fails too, with the dropped provider already marked as tried. Not gated on the
+`failover` option — a return to the model the pane already has is not a move to someone else's. One
+exception: an image turn is not dropped back when the pane's own model cannot read images, since that
+is why it was routed; the vision failure is reported as before.
+
+**The gateway owns the upstream retries.** A refusal returned after more than one upstream carries
+`retried` in the gateway's error body; `HostedChatProvider` treats it as final. A `rate_limited`
+window the gateway reports is still waited out — that is the gateway's own door, not an upstream's.
+The gateway's retryable set is now `proxy.RETRYABLE_STATUSES`, equal to the client's
+`HTTP_RETRY_STATUSES` (501 and 505 are as final as a 404), with a test asserting the equality since
+the gateway box cannot import `relay_core`. **The gateway must be redeployed for this half to take
+effect** (docs/RELAY-FREE.md, "Operating it"); nothing was deployed from here.
+
