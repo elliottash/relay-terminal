@@ -229,6 +229,21 @@ def signature(preset_id: str | None, model: str | None = "") -> str:
 #: (r = 0.84) and that the gain from a weak judge rises with *dis*similarity (r = −0.85).  So a
 #: same-lineage verifier is not skipped, it is moved behind every other-lineage one: still a second
 #: pair of eyes, just a weaker check.  One row, one reason, so changing it is a one-line edit.
+#:
+#: **The lineage ORDER is a defensible default, not a finding** (second research pass, 2026-09-19,
+#: `research-error-correlation.md` and `research-verifier-rankings.md` beside the first report).
+#: The evidence above is about judging in general; the two datasets that measure *code* review do
+#: not support it.  In "Bigger Isn't Always Better" a union of two same-family reviewers cost the
+#: least accuracy and a cross-lineage union the most, and the reviewer-side profile there looks
+#: rank-1 (Security flat across four vendors, Logic and Architecture monotone in overall strength);
+#: and in Xiang et al. (arXiv 2607.21656), the one published crossed author x reviewer experiment,
+#: same-model review was not the loser and the authors attribute their asymmetry to the capability
+#: gap and to rewrite-versus-repair style rather than to family.  Nobody has published a cell with
+#: Kimi, GLM, MiniMax or DeepSeek reviewing Claude-authored code, so the ordering below is
+#: unmeasured for exactly the pairs Relay uses most.  What does NOT rest on this is the rule that a
+#: different family closes a QA card: that is a process-independence guarantee for the audit trail
+#: and holds whatever the error correlations turn out to be.  Card #T71W carries the pilot that
+#: would settle the order, and what it would cost.
 #: Relay Free has no row: it is a route, not a lab (see `RELAY_FREE_UPSTREAMS`).
 LINEAGE: dict[str, str] = {
     "openai": "openai",          # its own pretraining line; the teacher much of the field distils
