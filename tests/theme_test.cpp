@@ -159,6 +159,8 @@ private Q_SLOTS:
             QCOMPARE(spec.uiColor(token).name(), fallback.uiColor(token).name());
         for (const QString &token : syntaxTokenNames())
             QCOMPARE(spec.syntaxColor(token).name(), fallback.syntaxColor(token).name());
+        for (const QString &token : boardTokenNames())
+            QCOMPARE(spec.boardColor(token).name(), fallback.boardColor(token).name());
         QCOMPARE(spec.ansi, fallback.ansi);
         QCOMPARE(spec.terminalBackground.name(), fallback.terminalBackground.name());
         QCOMPARE(spec.terminalForeground.name(), fallback.terminalForeground.name());
@@ -364,8 +366,11 @@ private Q_SLOTS:
         for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
             const ThemeSpec spec = shipped(it.key());
             const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+            // The board face is a ground like the other three: a Switchboard row's title, its id,
+            // its badges and its status mark are all painted straight onto it (src/BoardPane.cpp).
             const QList<QPair<const char *, QColor>> grounds{
-                {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")}};
+                {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")},
+                {"board.face", spec.boardColor(QStringLiteral("face"))}};
             QList<std::tuple<QString, QColor, QString, QColor>> pairs;
             for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error",
                                    "action", "tool", "link"})
@@ -693,6 +698,148 @@ private Q_SLOTS:
         const ThemeSpec named = parseTheme(QStringLiteral("[theme]\nname = \"Named\"\n[ui]\naction = \"#ff5522\"\n"),
                                            QStringLiteral("named"), builtinDark(), &error);
         QCOMPARE(named.uiColor(QStringLiteral("action")).name(), QStringLiteral("#ff5522"));
+    }
+
+    // --- the Switchboard's materials (owner, 2026-09-19: "yeah build that out") ------------------
+    // `[board]` was dead data until the board widgets were painted from it: three colours that rode
+    // along in ThemeSpec::extra. They are first-class tokens now, every shipped theme names them,
+    // and the rules are the ones docs/SWITCHBOARD-AESTHETIC.md 3.1-3.4 set out. The one that
+    // matters most is measured by everyShippedThemeKeepsItsTextLegible() above, which reads the
+    // face as a fourth ground: a card row's text sits on the board, not on `background`.
+
+    void everyShippedThemeWearsTheBoardMaterials() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(files.size() >= 5);
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const QString id = it.key();
+            const QColor face = spec.boardColor(QStringLiteral("face"));
+            const QColor metal = spec.boardColor(QStringLiteral("metal"));
+            const QColor dim = spec.boardColor(QStringLiteral("metal_dim"));
+            for (const QColor &c : {face, metal, dim}) QVERIFY2(c.isValid(), qPrintable(id));
+            // Every theme names its own: nothing here was computed, so nothing is in `derived`.
+            QVERIFY2(!spec.derived.contains(QStringLiteral("board.face")),
+                     qPrintable(id + QStringLiteral(" leaves [board] to the derivation")));
+            QVERIFY2(spec.flag(QStringLiteral("board_material")),
+                     qPrintable(id + QStringLiteral(" does not say board_material")));
+            // The metal carries text: an engraved label beside a jack is drawn in it.
+            const double onFace = contrast(metal, face);
+            QVERIFY2(onFace >= 4.5, qPrintable(QStringLiteral("%1: metal %2 on face %3 is %4:1, needs 4.5:1")
+                                                   .arg(id, metal.name(), face.name()).arg(onFace, 0, 'f', 2)));
+            // Unlit hardware is a rule you can see and never a flag: visible against the face,
+            // and a long way dimmer than the lit metal (the copper trap, THEMES.md 4.4).
+            const double dimOnFace = contrast(dim, face);
+            QVERIFY2(dimOnFace >= 1.4, qPrintable(QStringLiteral("%1: metal_dim %2 on face %3 is only %4:1")
+                                                      .arg(id, dim.name(), face.name()).arg(dimOnFace, 0, 'f', 2)));
+            QVERIFY2(dimOnFace < onFace * 0.75,
+                     qPrintable(QStringLiteral("%1: metal_dim is %2:1 where the lit metal is %3:1 — not dim enough")
+                                    .arg(id).arg(dimOnFace, 0, 'f', 2).arg(onFace, 0, 'f', 2)));
+            // The board is a different object from the chrome around it, or there is no board.
+            QVERIFY2(face != spec.uiColor(QStringLiteral("background")), qPrintable(id));
+            QVERIFY2(face != spec.uiColor(QStringLiteral("surface")), qPrintable(id));
+            // Structure, never state: the brass may not be mistaken for the amber that means
+            // somebody is waiting on you (the same bar `tool` is held to).
+            QVERIFY2(deltaE(metal, spec.uiColor(QStringLiteral("warning"))) >= 10.0,
+                     qPrintable(QStringLiteral("%1: board metal %2 is dE %3 from the amber")
+                                    .arg(id, metal.name())
+                                    .arg(deltaE(metal, spec.uiColor(QStringLiteral("warning"))), 0, 'f', 1)));
+        }
+    }
+
+    // A user theme names its palette and leaves the board alone. What it gets has to come from its
+    // *own* colours: Relay Dark's bakelite is any dark window's colour again, and its brass is
+    // 2.35:1 on white, so a borrow would hand a light theme an invisible board.
+    void aThemeThatNamesNoBoardMaterialsDerivesThem() {
+        QString error;
+        const ThemeSpec paper = parseTheme(QStringLiteral(
+            "[theme]\nname = \"Paper\"\nvariant = \"light\"\n"
+            "[ui]\nbackground = \"#fdfdfb\"\nsurface = \"#f4f4f0\"\nsurface_raised = \"#e7e7e1\"\n"
+            "border = \"#cfcfc8\"\nborder_strong = \"#8a8a82\"\ntext = \"#141414\"\n"
+            "text_muted = \"#4f4f4a\"\naccent = \"#00558a\"\naccent_text = \"#ffffff\"\n"
+            "warning = \"#7a5200\"\nerror = \"#9a1b1b\"\n"
+            "[board]\nglow = \"#123456\"\n"),
+            QStringLiteral("paper"), builtinDark(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const QColor face = paper.boardColor(QStringLiteral("face"));
+        const QColor metal = paper.boardColor(QStringLiteral("metal"));
+        const QColor dim = paper.boardColor(QStringLiteral("metal_dim"));
+        // Named, not silently absent: the theme's author is told what was decided for them.
+        for (const char *token : {"face", "metal", "metal_dim"})
+            QVERIFY2(paper.derived.contains(QStringLiteral("board.") + QString::fromLatin1(token)),
+                     qPrintable(QStringLiteral("board.%1 is not in derived: %2")
+                                    .arg(QString::fromLatin1(token), paper.derived.join(QStringLiteral(", ")))));
+        QVERIFY(paper.borrowed.filter(QStringLiteral("board.")).isEmpty());
+        // Nothing came from Relay Dark.
+        for (const QString &token : boardTokenNames())
+            QVERIFY2(paper.boardColor(token) != builtinDark().boardColor(token),
+                     qPrintable(QStringLiteral("board.%1 is Relay Dark's %2").arg(token, paper.boardColor(token).name())));
+        // The face is a light theme's face: between its raised chip and its window, and paper.
+        QVERIFY2(contrast(face, QColor(Qt::white)) < 1.6, qPrintable(face.name()));
+        QVERIFY2(face != paper.uiColor(QStringLiteral("surface_raised")), qPrintable(face.name()));
+        // Legible, by the same rules a shipped theme's board is held to.
+        for (const char *token : {"text", "text_muted"}) {
+            const double r = contrast(paper.uiColor(QString::fromLatin1(token)), face);
+            QVERIFY2(r >= 4.5, qPrintable(QStringLiteral("%1 on the derived face is %2:1")
+                                              .arg(QString::fromLatin1(token)).arg(r, 0, 'f', 2)));
+        }
+        QVERIFY2(contrast(metal, face) >= 4.5, qPrintable(QStringLiteral("metal %1 on face %2 is %3:1")
+                                                              .arg(metal.name(), face.name())
+                                                              .arg(contrast(metal, face), 0, 'f', 2)));
+        // The metal is the theme's own brass (`ui.tool`, itself dulled out of its amber), and the
+        // dim metal is that brass half way into the face.
+        QVERIFY2(deltaE(metal, paper.uiColor(QStringLiteral("tool"))) < 10.0,
+                 qPrintable(QStringLiteral("metal %1 is not this theme's brass %2")
+                                .arg(metal.name(), paper.uiColor(QStringLiteral("tool")).name())));
+        QVERIFY2(contrast(dim, face) < contrast(metal, face), qPrintable(dim.name()));
+        // A key inside [board] that is not a material is still kept verbatim, as before.
+        QCOMPARE(paper.extra.value(QStringLiteral("board.glow")), QStringList{QStringLiteral("#123456")});
+        // A theme that does name them keeps exactly what it named.
+        const ThemeSpec named = parseTheme(QStringLiteral(
+            "[theme]\nname = \"Named\"\n[board]\nface = \"#101010\"\nmetal = \"#ddaa44\"\n"),
+            QStringLiteral("named"), builtinDark(), &error);
+        QCOMPARE(named.boardColor(QStringLiteral("face")).name(), QStringLiteral("#101010"));
+        QCOMPARE(named.boardColor(QStringLiteral("metal")).name(), QStringLiteral("#ddaa44"));
+        QVERIFY(named.derived.contains(QStringLiteral("board.metal_dim")));   // the one it left out
+    }
+
+    // The derivation is measured against five real palettes, not only the made-up one above: strip
+    // the [board] table out of each shipped theme and the board it gets has to be as legible as the
+    // one it ships. A theme author who copies a shipped file and deletes what they do not care
+    // about is the common case, and this is the answer they get.
+    void everyShippedThemeCouldDeriveItsBoardMaterials() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(!files.isEmpty());
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            QString text = read(*it);
+            // Drop the [board] table: from its header to the next one.
+            const int start = text.indexOf(QStringLiteral("\n[board]"));
+            QVERIFY2(start >= 0, qPrintable(it.key() + QStringLiteral(" has no [board] table")));
+            const int next = text.indexOf(QStringLiteral("\n["), start + 1);
+            text.remove(start, (next < 0 ? text.size() : next) - start);
+            QString error;
+            const ThemeSpec spec = parseTheme(text, it.key(), builtinDark(), &error);
+            QVERIFY2(error.isEmpty(), qPrintable(it.key() + QStringLiteral(": ") + error));
+            // Derived, not read: the table is gone (a comment elsewhere may still name it).
+            for (const QString &token : boardTokenNames())
+                QVERIFY2(spec.derived.contains(QStringLiteral("board.") + token),
+                         qPrintable(it.key() + QStringLiteral(": board.") + token
+                                    + QStringLiteral(" was not derived")));
+            QStringList missing;
+            QVERIFY2(isComplete(spec, &missing),
+                     qPrintable(it.key() + QStringLiteral(": ") + missing.join(QStringLiteral(", "))));
+            const QColor face = spec.boardColor(QStringLiteral("face"));
+            const QColor metal = spec.boardColor(QStringLiteral("metal"));
+            for (const char *token : {"text", "text_muted", "accent", "shell", "agent", "success",
+                                      "warning", "error", "action", "tool", "link"}) {
+                const double r = contrast(spec.uiColor(QString::fromLatin1(token)), face);
+                QVERIFY2(r >= 4.5, qPrintable(QStringLiteral("%1: %2 on the derived face %3 is %4:1")
+                                                  .arg(it.key(), QString::fromLatin1(token), face.name())
+                                                  .arg(r, 0, 'f', 2)));
+            }
+            QVERIFY2(contrast(metal, face) >= 4.5,
+                     qPrintable(QStringLiteral("%1: derived metal %2 on derived face %3 is %4:1")
+                                    .arg(it.key(), metal.name(), face.name()).arg(contrast(metal, face), 0, 'f', 2)));
+        }
     }
 };
 

@@ -75,3 +75,17 @@ palette = [
   "#3b414b", "#cf222e", "#116329", "#7d4e00", "#0550ae", "#8250df", "#137b7f", "#6e7781",
   "#24292f", "#a40e26", "#0e6027", "#633c01", "#0349b4", "#6639ba", "#0f5d61", "#1f2328",
 ]
+
+[board]
+# The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.3, 3.4). Brass does not survive a
+# light ground — #c8a45c is 2.35:1 on white — so the metal is oxidised rather than inverted: this
+# theme's own bronze, the one its tool bands already wear, at 8.24:1 on the face. The face is a
+# phenolic cream a step deeper than the paper background, so the board reads as a sheet laid on the
+# page rather than as the page; every text token still clears 4.5:1 on it (tightest: success, 4.80).
+face = "#f0ece3"
+metal = "#5a3f1a"
+metal_dim = "#a5967e"
+
+[flags]
+# See relay-dark.toml: `false` paints the board in hairlines instead.
+board_material = true

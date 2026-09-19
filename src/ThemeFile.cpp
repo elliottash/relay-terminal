@@ -140,12 +140,12 @@ QColor brassFrom(const QColor &amber) {
     return best;
 }
 
-// The link green for a theme file that does not name one: the theme's own ANSI 2 (the dark green
-// of every palette), walked towards whichever pole raises contrast until it
-// clears 4.5:1 on every ground the app reads it on — the window, the text surface, the raised
-// face, the terminal — so a silent user theme still gets a link colour a person can read.
-QColor linkFrom(const QColor &green, const QList<QColor> &grounds) {
-    const QColor &blue = green;   // the seed
+// `seed` moved as little as it takes to clear 4.5:1 on every one of `grounds`: it is walked
+// towards whichever pole (white or black) the hardest ground is further from, so the colour keeps
+// its hue and only its lightness gives. Used for a link colour and for the board's metal, both of
+// which are a colour the theme already owns that has to be legible somewhere new.
+QColor legibleOn(const QColor &seed, const QList<QColor> &grounds) {
+    const QColor &blue = seed;
     const auto clears = [&grounds](const QColor &c) {
         for (const QColor &g : grounds) if (contrastRatio(c, g) < 4.5) return false;
         return true;
@@ -167,6 +167,39 @@ QColor linkFrom(const QColor &green, const QList<QColor> &grounds) {
         if (clears(out)) return out;
     }
     return out;
+}
+
+// The link green for a theme file that does not name one: the theme's own ANSI 2 (the dark green of
+// every palette), lifted until it clears 4.5:1 on every ground the app reads it on — the window,
+// the text surface, the raised face, the terminal — so a silent user theme still gets a link colour
+// a person can read.
+QColor linkFrom(const QColor &green, const QList<QColor> &grounds) { return legibleOn(green, grounds); }
+
+// --- the Switchboard's materials, for a theme that names no [board] table ------------------------
+// The board is a physical object in the pane: a face with hardware on it (docs/SWITCHBOARD-AESTHETIC
+// .md 3.4). All three come out of the theme's own chrome, because Relay Dark's bakelite is invisible
+// on paper and its brass is 2.35:1 on white.
+
+// The face: one step from the raised chip face towards the window, so the board reads as a sheet
+// mounted on the chassis rather than as either of them. Both ends already carry this theme's text
+// contrast, so what lies between them does too.
+QColor boardFaceFrom(const QColor &raised, const QColor &background) {
+    if (!raised.isValid()) return background;
+    if (!background.isValid()) return raised;
+    return mix(raised, background, 0.65);
+}
+
+// The hardware: this theme's own brass (`ui.tool` — the metal a tool pane's band is made of),
+// lifted if it does not read on the face, because a jack ring carries the enamel label beside it.
+QColor boardMetalFrom(const QColor &brass, const QColor &face) {
+    if (!brass.isValid()) return face;
+    return face.isValid() ? legibleOn(brass, {face}) : brass;
+}
+
+// Unlit hardware: the same metal half sunk into the face. Structural, never a flag — which is why
+// it is a step of the material and not a step towards the amber.
+QColor boardMetalDimFrom(const QColor &metal, const QColor &face) {
+    return face.isValid() && metal.isValid() ? mix(metal, face, 0.5) : metal;
 }
 
 QColor redOrangeFrom(const QColor &red) {
@@ -191,6 +224,10 @@ QStringList syntaxTokenNames() {
             QStringLiteral("variable"), QStringLiteral("agent"),  QStringLiteral("token")};
 }
 
+QStringList boardTokenNames() {
+    return {QStringLiteral("face"), QStringLiteral("metal"), QStringLiteral("metal_dim")};
+}
+
 QColor ThemeSpec::uiColor(const QString &token, const QColor &fallback) const {
     const auto it = ui.constFind(token);
     return it == ui.constEnd() ? fallback : *it;
@@ -199,6 +236,11 @@ QColor ThemeSpec::uiColor(const QString &token, const QColor &fallback) const {
 QColor ThemeSpec::syntaxColor(const QString &token, const QColor &fallback) const {
     const auto it = syntax.constFind(token);
     return it == syntax.constEnd() ? fallback : *it;
+}
+
+QColor ThemeSpec::boardColor(const QString &token, const QColor &fallback) const {
+    const auto it = board.constFind(token);
+    return it == board.constEnd() ? fallback : *it;
 }
 
 bool ThemeSpec::flag(const QString &name, bool fallback) const {
@@ -300,6 +342,13 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("agent"), QColor(0xb4, 0x8e, 0xf7)},
             {QStringLiteral("token"), QColor(0x3e, 0xc5, 0xf0)},
         };
+        // The Switchboard's materials, as docs/SWITCHBOARD-AESTHETIC.md 3.2 draws them: a bakelite
+        // face, brass hardware, and the same brass unlit. Identical to relay-dark.toml's [board].
+        s.board = {
+            {QStringLiteral("face"), QColor(0x17, 0x14, 0x0f)},
+            {QStringLiteral("metal"), QColor(0xc8, 0xa4, 0x5c)},
+            {QStringLiteral("metal_dim"), QColor(0x6b, 0x56, 0x37)},
+        };
         s.terminalBackground = QColor(15, 17, 21);
         s.terminalForeground = QColor(216, 220, 227);
         s.terminalCursor = QColor(240, 242, 246);
@@ -354,6 +403,7 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     };
     readColors(QStringLiteral("ui"), uiTokenNames(), spec.ui);
     readColors(QStringLiteral("syntax"), syntaxTokenNames(), spec.syntax);
+    readColors(QStringLiteral("board"), boardTokenNames(), spec.board);
 
     // Taken from `fallback` when the file is silent, because there is nothing to compute them
     // from: the nine tokens every theme has to carry, the three meaning colours (a theme's own
@@ -450,6 +500,23 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         spec.ui.insert(QStringLiteral("link"), linkFrom(spec.ansi.value(2, QColor(0x12, 0xa4, 0x57)), grounds));
     }
 
+    // The Switchboard's materials for a theme that named none (docs/SWITCHBOARD-AESTHETIC.md 3.4):
+    // the face out of this theme's own chrome, the metal out of its own brass, the dim metal out of
+    // the two. Never borrowed from Relay Dark — a bakelite mixed for a near-black window is the
+    // window's own colour on paper, and Relay Dark's brass is 2.35:1 on white. Each one that had to
+    // be computed is named in `spec.derived`, so a theme author can see what was decided for them.
+    const auto deriveBoard = [&spec](const QString &token, const QColor &color) {
+        if (spec.board.contains(token) || !color.isValid()) return;
+        spec.board.insert(token, color);
+        spec.derived << QStringLiteral("board.") + token;
+    };
+    deriveBoard(QStringLiteral("face"), boardFaceFrom(spec.uiColor(QStringLiteral("surface_raised")),
+                                                     spec.uiColor(QStringLiteral("background"))));
+    const QColor boardFace = spec.boardColor(QStringLiteral("face"));
+    deriveBoard(QStringLiteral("metal"), boardMetalFrom(spec.uiColor(QStringLiteral("tool")), boardFace));
+    deriveBoard(QStringLiteral("metal_dim"),
+                boardMetalDimFrom(spec.boardColor(QStringLiteral("metal")), boardFace));
+
     // Every composer colour a theme leaves out is one of its *own* ui colours — the mapping
     // src/Theme.cpp's adoptTokens() spells out. Done here, after `link` is settled, because
     // `syntax.path` is the link colour: a path you can type is a path you can open.
@@ -486,7 +553,7 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     // Flags and anything else the reader does not know: kept so a later token or per-theme switch
     // needs no format change.
     static const QRegularExpression known(
-        QStringLiteral("^(theme\\.(name|variant|description)|ui\\.|syntax\\.|terminal\\.)"));
+        QStringLiteral("^(theme\\.(name|variant|description)|ui\\.|syntax\\.|board\\.|terminal\\.)"));
     for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
         if (it.key().startsWith(QLatin1String("flags."))) {
             const QString name = it.key().mid(6);
@@ -499,6 +566,7 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         const bool isKnownColour =
             (key.startsWith(QLatin1String("ui.")) && uiTokenNames().contains(key.mid(3)))
             || (key.startsWith(QLatin1String("syntax.")) && syntaxTokenNames().contains(key.mid(7)))
+            || (key.startsWith(QLatin1String("board.")) && boardTokenNames().contains(key.mid(6)))
             || key.startsWith(QLatin1String("terminal."));
         if (known.match(key).hasMatch() && isKnownColour) continue;
         if (key.startsWith(QLatin1String("theme."))
@@ -519,6 +587,9 @@ bool isComplete(const ThemeSpec &spec, QStringList *missing) {
     for (const QString &name : syntaxTokenNames())
         if (!spec.syntax.contains(name) || !spec.syntax.value(name).isValid())
             gaps << QStringLiteral("syntax.") + name;
+    for (const QString &name : boardTokenNames())
+        if (!spec.board.contains(name) || !spec.board.value(name).isValid())
+            gaps << QStringLiteral("board.") + name;
     if (spec.ansi.size() != 16) gaps << QStringLiteral("terminal.palette");
     if (!spec.terminalBackground.isValid()) gaps << QStringLiteral("terminal.background");
     if (!spec.terminalForeground.isValid()) gaps << QStringLiteral("terminal.foreground");

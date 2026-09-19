@@ -66,3 +66,19 @@ palette = [
   "#1d2027", "#f2777a", "#7dd399", "#ecc476", "#61afef", "#c692e9", "#56c8d8", "#c8cdd6",
   "#636975", "#ff8c8f", "#98e5b0", "#f8d58e", "#81c4ff", "#d8aaf5", "#78ddea", "#f0f2f6",
 ]
+
+[board]
+# The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted by src/BoardPane.cpp:
+# `face` is the board the rows are mounted on, `metal` a lit piece of hardware — a jack ring, the
+# engraved rule under a section name — and `metal_dim` the same hardware unlit. These are the
+# proposal's own three colours: bakelite, brass, and brass sunk into the bakelite. Brass on bakelite
+# is 7.80:1, legible as enamel *text*, which is what makes the label honest rather than a texture.
+face = "#17140f"
+metal = "#c8a45c"
+metal_dim = "#6b5637"
+
+[flags]
+# The board wears its materials. `false` gives the hairline form instead (SWITCHBOARD-AESTHETIC
+# 3.4): the face becomes `surface`, a ring becomes a 1px `border` circle and a lit one the accent.
+# Nothing moves and nothing resizes either way — only fills.
+board_material = true

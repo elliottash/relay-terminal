@@ -31,12 +31,19 @@
 //   cursor = "#f0f2f6"
 //   palette = ["#1d2027", ...]  # 16 entries: the 8 ANSI colours then the 8 bright ones
 //
+//   [board]                     # the Switchboard's materials (see boardTokenNames())
+//   face = "#17140f"            # the board face the pane is painted on
+//   metal = "#c8a45c"           # lit hardware: a jack ring, an engraved rule
+//   metal_dim = "#6b5637"       # the same hardware unlit
+//
 //   [flags]                     # per-theme booleans; unknown ones are kept verbatim
+//   board_material = true       # false paints the board in hairlines instead (SWITCHBOARD 3.4)
 //   some_future_switch = false
 //
 // Unknown tables, keys and flags are preserved in ThemeSpec::extra/flags rather than rejected,
-// so a later theme can carry extra tokens (for example the material tokens proposed in
-// docs/SWITCHBOARD-AESTHETIC.md) without a format change or a reader change.
+// so a later theme can carry extra tokens (for example the `[material]` chrome tokens
+// src/Theme.cpp reads for `[flags] metal` and `[flags] plastic`) without a format change or a
+// reader change.
 #include <QColor>
 #include <QMap>
 #include <QString>
@@ -57,6 +64,9 @@ struct ThemeSpec {
 
     QMap<QString, QColor> ui;      // uiTokenNames()
     QMap<QString, QColor> syntax;  // syntaxTokenNames()
+    // The Switchboard's materials (boardTokenNames(), docs/SWITCHBOARD-AESTHETIC.md 3.4). Always
+    // filled: a theme that names none gets them derived from its own ui tokens, below.
+    QMap<QString, QColor> board;
 
     QColor terminalBackground, terminalForeground, terminalCursor;
     // Optional: the colour the terminal ground fades to at the bottom. Invalid = flat.
@@ -72,10 +82,15 @@ struct ThemeSpec {
     // prints one line naming them when a theme is loaded, because a colour borrowed from a dark
     // theme is very often wrong in a light one.
     QStringList borrowed;
+    // Keys this file did not name and that were worked out from its *own* colours instead
+    // ("board.face", ...). Not a problem the way `borrowed` is — the value belongs to this theme —
+    // but a theme author who wants to pin one has to know which ones were computed for them.
+    QStringList derived;
 
     bool isLight() const { return variant == QLatin1String("light"); }
     QColor uiColor(const QString &token, const QColor &fallback = QColor()) const;
     QColor syntaxColor(const QString &token, const QColor &fallback = QColor()) const;
+    QColor boardColor(const QString &token, const QColor &fallback = QColor()) const;
     // Per-theme booleans, for switches a later theme may want (`board.material`, ...).
     bool flag(const QString &name, bool fallback = false) const;
 };
@@ -84,6 +99,9 @@ struct ThemeSpec {
 QStringList uiTokenNames();
 // The composer's syntax colours (src/ShellHighlighter.cpp).
 QStringList syntaxTokenNames();
+// The Switchboard's materials: `face`, `metal`, `metal_dim` (src/BoardPane.cpp, and the `@board*`
+// tokens in src/Theme.cpp). A theme need not name them; parseTheme() always fills them.
+QStringList boardTokenNames();
 
 // --- reading ------------------------------------------------------------------------------------
 
@@ -101,6 +119,11 @@ QMap<QString, QStringList> parseToml(const QString &text, QString *error = nullp
 // derivation, taken from `fallback` and listed in `spec.borrowed`, so a slightly wrong user theme
 // still renders and its author is told what it inherited. Deriving first is the point: a colour
 // borrowed from Relay Dark need not be legible, or even the right hue, in the theme it lands in.
+//
+// The `[board]` materials are always derived, never borrowed, and land in `spec.derived`: the face
+// is a step from this theme's raised face towards its window, the metal is this theme's own brass
+// (`ui.tool`) lifted until it reads on that face, and the dim metal is that brass half sunk into
+// it. Relay Dark's bakelite and brass would be invisible on a light theme's paper.
 ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fallback, QString *error = nullptr);
 
 // True when every required token and all 16 ANSI colours are present.
