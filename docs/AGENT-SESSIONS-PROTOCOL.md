@@ -4076,15 +4076,20 @@ and `fork`, and `--dangerously-bypass-approvals-and-sandbox` on all three. `--id
 lock file only when exactly one IDE is running — which on a developer's machine is not something to
 bet a launch on.
 
-**Leaving a guest.** A preset or a role picked while a guest is running means the guest has to go
-first, and Relay does not interrupt a working guest unasked. If `guest_busy`, the switch is
-**refused** with a status line — "<Guest> is working — stop its turn first (Esc in the terminal),
-then switch" — and nothing is sent. Otherwise the pane types the guest's own `/exit` into it, and
-when the program poll sees the shell back at its prompt (`setGuest("")`) the chosen model is applied
-(`selectModel`, or the role). Picking the *other* guest is the same sequence: leave, then launch.
-**Open, for the owner:** whether a busy guest should instead be interrupted (Esc) and then left,
-rather than refused. Refusing is what ships, because an interrupt discards work the user cannot see
-from the picker.
+**Leaving a guest.** A preset or a role picked while a guest is running **shifts the pane over at
+once**, the way a native model switch does (owner, 2026-09-19: "a busy guest model change should be
+the same as our relay-native models. just shift over immediately"). From that moment the model box,
+the `/` popup and the prompt box are no longer the guest's (`Pane::guestInFront()` is false), so
+the next line goes to the model that was picked. The guest is not interrupted: idle, it is asked to
+`/exit` there and then; working, its turn in flight finishes — as a native model's request in
+flight does — and it is asked when it goes idle. A continuation that needs the pane's shell
+(picking the *other* TUI guest, a session resumed in this pane) cannot run beside a TUI and waits
+for the program poll to see the shell back (`setGuest("")`). Picking the same guest again before
+it has gone brings the pane back to it. A guest that does not exit within 15 s is said to be still
+in the terminal; the pane has moved on either way. The headless harness of section 29 needs none of
+this: the worker accepts `set_model` mid-turn and the guest turn in flight finishes on its own.
+A guest that leaves with permission questions still open answers each of them **deny** (never
+allow), so no hook shim waits out its timeout on an answer nobody can give (review B6).
 
 ## 27. The agent asks the user a question (v3.3, 2026-09-19; Esc and the remote line, v3.6)
 
