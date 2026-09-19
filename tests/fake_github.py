@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """An in-process GitHub REST v3 stand-in for the Switchboard sync tests (`#GDQN`).
 
 Enough of the API for `relay_core.forge_github`: repositories (including a fork whose issues are

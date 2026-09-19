@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Parse pairing fragments with the browser's own code, driven by tests/test_remote_wire.py.
 // A pairing link is the one piece of input the client gets from the outside world, and the
 // shapes it arrives in depend on whichever QR reader or link handler opened it.

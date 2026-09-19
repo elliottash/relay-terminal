@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Multiplayer, the owner's side (#W5N2, docs/REMOTE-PROTOCOL.md section 10).
 //

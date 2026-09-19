@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Tag-triggered beta release. Tags look like v0.1.0-beta.1 (pre-release) or v0.1.0.
 # Builds a source tarball and one .deb per distribution/architecture, smoke-tests every

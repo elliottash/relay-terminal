@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Join with a meeting code and a PIN (card #97EG): the routes, the code phase and the handoff.
 
 Everything runs over the real rendezvous, the real hub and real sockets, as the other remote tests

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The terminal engine's core selection (--engine-core / RELAY_ENGINE_CORE) and the terminal
 // pane's right-click menu (issue #X2F1).
 #include "TerminalBackends.h"

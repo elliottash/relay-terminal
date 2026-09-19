@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """``tailscale serve``: a real certificate for the phone, and no warning to accept.
 
 `remote/devtls.py` makes a certificate this machine signed itself. It needs nothing, and it costs

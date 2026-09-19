@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Request ledger: every prompt the user sends becomes a durable `R<n>` entry.
 
 The ledger is the source of truth for "what did the user ask" (docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md

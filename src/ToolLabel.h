@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The tool-call `label` (docs/AGENT-SESSIONS-PROTOCOL.md § 23), turned into the one concise line
 // every surface prints. Pure: QtCore only, no widget and no theme, so every rule is tested

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint that drives one turn through every tool-call line.
 
 The concise tool-call lines (#TK9C, protocol section 23) can only be seen with a real turn: a real

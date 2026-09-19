@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Tasks UI state (request ledger + todos): a model fed by the worker's `requests`, `todos`, `request` and
 // `request_audit` events (docs/AGENT-SESSIONS-PROTOCOL.md section 12), plus the text helpers the

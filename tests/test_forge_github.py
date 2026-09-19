@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The GitHub provider: REST shape, pagination, conditional requests, rate limits, credentials.
 
 Everything runs against `tests/fake_github.py` on 127.0.0.1; nothing here reaches api.github.com,

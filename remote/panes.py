@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """What the hub is allowed to know about panes, and a demo source to test against.
 
 ``PaneSource`` is the seam between RRP and Relay itself. The real one will be fed by the GUI, which

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Minimal session todo list maintained by the model through `update_todos`.
 
 Each call replaces the whole list (opencode `todowrite` style). Items may link to request ledger ids

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A real shell, shared to a real browser: the screen stream and take-over end to end.
 
 These run a `relay-screen-bridge` (Relay's own emulator around a PTY), share it through the

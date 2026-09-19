@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Skill management (docs/AGENT-SESSIONS-PROTOCOL.md section 11): list, refine, import, check updates.
 
 * ``skills_list`` reports every skill folder in the search path, including excluded and shadowed ones.

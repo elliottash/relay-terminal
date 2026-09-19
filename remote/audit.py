@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The local-only audit log for remote sharing (docs/REMOTE-PROTOCOL.md section 10).
 
 Everything a phone can do to a shared pane lands here: pairings, joins, role changes, control

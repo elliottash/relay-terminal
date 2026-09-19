@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Reads the label colours back out of a screenshot (card #CVHT).
 
     measure.py implementer-dark.png done=#c692e9,#d8aaf5 need=... problem=... plain=...

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Implementer evidence for card E4TX: edit_file through the real ToolExecutor.
 
 Run from the repository root:

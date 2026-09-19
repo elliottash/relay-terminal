@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Who is driving a shared pane: **one** state (docs/REMOTE-PROTOCOL.md section 10.3).
 
 Before this file there were two: the source's own driver (``TerminalPaneSource`` set

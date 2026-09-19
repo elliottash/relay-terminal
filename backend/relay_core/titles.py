@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model-written session titles and tab labels (issue JRWQ).
 
 The pane header and the tab label show what the pane is *doing*, not where it lives. One cheap

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::queuesubmit: when a submitted agent prompt starts its turn at once, and when it queues
 // (#N8VK).
 //

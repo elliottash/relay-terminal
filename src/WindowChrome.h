@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
 // The window's own title bar, since Relay draws one instead of taking the desktop's: ChromeButton

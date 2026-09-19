@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Read-only measurements of `guest_sessions` against the real claude/codex data.
 
 Records how many sessions exist, how long parsing them takes, what a cold and a warm

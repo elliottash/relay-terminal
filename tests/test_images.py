@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Image context in agent prompts (issue EM1E, docs/AGENT-SESSIONS-PROTOCOL.md section 17).
 
 Everything here runs offline against a recording provider: no API key, no network. The provider

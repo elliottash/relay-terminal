@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`ask_user`: validation, open and multiple-choice questions, the round trip, skipping, Stop.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 27.

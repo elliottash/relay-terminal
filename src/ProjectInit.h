@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // "Initialize a project and create a Switchboard here?" — when it is asked, what it shows, and
 // what a ticked box imports.

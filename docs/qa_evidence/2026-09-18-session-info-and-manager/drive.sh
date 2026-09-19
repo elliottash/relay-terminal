@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Live check of the ⓘ conversation info pane (card #Y63Z) and the session manager pane (card
 # #R6J0), under Xvfb + xdotool, offline:
 #

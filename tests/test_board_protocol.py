@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard worker protocol (docs/AGENT-SESSIONS-PROTOCOL.md section 17) and the
 `board_*` tools' wiring into the agent.
 

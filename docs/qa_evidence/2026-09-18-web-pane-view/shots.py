@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Screenshots of the pane view (app/pane.js) at phone, tablet and laptop sizes.
 
 Serves the repository, drives app/pane-demo.html in headless Chrome over the DevTools protocol

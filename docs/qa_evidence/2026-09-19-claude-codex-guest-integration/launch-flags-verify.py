@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the *real* Claude Code and Codex CLIs and check every flag `guest_launch` relies on (GT7X).
 
 `backend/relay_core/guest_launch.py` builds two command lines out of flags whose behaviour is not

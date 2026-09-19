@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SSH hosts for "Connect to host…" and the command line "Split on the same host" re-runs
 // (card #S5SH, docs/SSH-AND-MOSH.md section 8). Every test writes its own ~/.ssh into a
 // temporary directory; nothing reads the real one.

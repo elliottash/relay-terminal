@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// What the agent internals pane took from the terminal while it was open, so the terminal can be
+// What the Activity pane (#QT8C, named by #4X53) took from the terminal while it was open, so the terminal can be
 // given it back when the pane closes (card #QT8C).
 //
 // The owner's decision: "i did mean that the hidden rows should be reprinted on close". While the

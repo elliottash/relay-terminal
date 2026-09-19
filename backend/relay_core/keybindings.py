@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Keybinding catalog and the agent's set_keybinding tool.
 
 The GUI owns the action registry and sends the catalog (ids, descriptions, current keys)

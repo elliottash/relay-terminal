@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The guest client: what somebody handed an invite link sees (docs/REMOTE-PROTOCOL.md section 10).
 //
 // This is a different session from the owner's phone, not the same one with buttons hidden. A

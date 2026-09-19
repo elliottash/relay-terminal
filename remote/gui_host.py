@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The remote-sharing sidecar the GUI runs: ``python3 -m remote.gui_host``.
 
 Relay's panes live in the GUI process; the Noise sessions, the rendezvous and the web app live

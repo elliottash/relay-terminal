@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A self-signed certificate for development, so a phone can reach the app over https.
 
 WebCrypto is only available in a **secure context**, and a phone on a LAN or tailnet address is not

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Pairing: the QR link, the one-time secret and the rooms that carry them.
 
 Kept on its own because settings sync (`#05J2`) is meant to reuse exactly this machinery rather

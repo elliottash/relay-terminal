@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Which project a pane is in, where that project's Switchboard lives, and which projects Relay
 // knows about.

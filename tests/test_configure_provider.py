@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """How `configure` / `set_model` turn a request into a provider, and what a refused key reads like.
 
 The Switchboard regression (owner, 2026-09-18: "'ask the agent' didnt work. it said provider HTTP

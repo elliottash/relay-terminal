@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The turn pane's tool list and its detail log (src/TurnTranscript.h, protocol § 23).
 #include "TurnTranscript.h"
 

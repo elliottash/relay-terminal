@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model roles: one configurable model per job (docs/AGENT-SESSIONS-PROTOCOL.md section 13).
 
 Every role defaults to "same as the main agent". A role may instead name a built-in preset, or a

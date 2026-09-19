@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The GUI-side rules behind image context (issue EM1E): what counts as an image, how a pasted or
 // captured image is named and written, what a paste or a drop is carrying, the `@` token the
 // composer gets, and the cache sweep. No window, no worker and no provider.

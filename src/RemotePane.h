@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Relay-to-Relay: a pane shared by another desktop, opened in this Relay as the owner's own device.
 //

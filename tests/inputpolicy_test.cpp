@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The rules behind "the prompt box is the only keyboard input": where a submitted line goes,
 // when the pane offers "Take control", what may be kept, and how a password is wiped.
 #include "InputPolicy.h"

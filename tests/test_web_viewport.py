@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The web client fits the part of the screen that is visible, on-screen keyboard or not.
 
 Owner, 2026-09-18, on an iPad: "in portrait mode without on screen keyboard it looks good, but once

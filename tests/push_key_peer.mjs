@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // app/pushkey.js under Node: the phone's half of per-device push origins (section 9).
 //
 // `node tests/push_key_peer.mjs <old vapid, base64url> <new vapid, base64url>` runs the self-heal

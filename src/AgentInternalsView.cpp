@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AgentInternalsView.h"
 
 #include "CopyOnSelect.h"
@@ -85,7 +85,7 @@ AgentInternalsView::AgentInternalsView(QWidget *parent) : QWidget(parent) {
     layout->setContentsMargins(10, 8, 8, 8);
     layout->setSpacing(6);
     auto *header = new QHBoxLayout;
-    m_title = new QLabel(QStringLiteral("✦ Agent internals"));
+    m_title = new QLabel(QStringLiteral("✦ Activity"));
     m_title->setTextFormat(Qt::PlainText);
     m_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     QFont bold = m_title->font();
@@ -114,7 +114,7 @@ AgentInternalsView::AgentInternalsView(QWidget *parent) : QWidget(parent) {
     setHeader();
 }
 
-QString AgentInternalsView::paneTitle() const { return QStringLiteral("Agent internals"); }
+QString AgentInternalsView::paneTitle() const { return QStringLiteral("Activity"); }
 
 void AgentInternalsView::focusView() { m_log->setFocus(Qt::OtherFocusReason); }
 

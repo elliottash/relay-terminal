@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """List names that are defined but never referenced: unused Python imports, and Python and C++
 names that occur exactly once in the whole code base (their own definition).
 

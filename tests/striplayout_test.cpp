@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The strip under the composer (owner, 2026-09-19): "the open task list … underneat the prompt …
 // it shows up to (say) 5 tasks. if there are more than 5, it centers on the marginal task … with
 // subagents on the left and tasks on the right … a subagent with two tasks gets two rows".

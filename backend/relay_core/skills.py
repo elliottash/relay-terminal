@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Index and read Warp-style skills: <dir>/<name>/SKILL.md with YAML frontmatter.
 
 Skills are reusable instructions the user keeps in ~/.warp/skills (and Claude Code's ~/.claude/skills),

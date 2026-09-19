@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Private runtime directories, and the sweep that removes the ones a crash left behind (issue 9JYK).
 //

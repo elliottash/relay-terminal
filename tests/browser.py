@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A very small Chrome DevTools Protocol driver, so tests can run the real web client.
 
 The web app is the part a phone runs, and it is the part that holds the device key. Testing it

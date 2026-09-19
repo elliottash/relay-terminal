@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::input: the rules behind "the prompt box is the only keyboard input" (Warp-style).
 //
 // The Pane owns the state (what the terminal's line discipline says, whether a foreground

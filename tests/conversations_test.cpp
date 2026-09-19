@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pure helpers of the session manager and the find bar (src/Conversations.h), the session manager
 // pane itself, and the ⓘ view's rendering (src/SessionInfo.h).
 #include "Conversations.h"

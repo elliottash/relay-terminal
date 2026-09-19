@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The web view of one Relay pane: what the desktop pane shows under its terminal, drawn from the
 // desktop's `pane_state` message (docs/REMOTE-PROTOCOL.md, "pane_state"; src/PaneState.h).
 //

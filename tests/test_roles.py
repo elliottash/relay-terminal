@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model roles (protocol 13): validation, per-provider defaults, fallbacks and wiring.
 
 Every key lookup here is a dict in the test; nothing reaches the desktop keyring or the network.

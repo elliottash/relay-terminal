@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Rotating diagnostic log for the worker (and anything else in the backend).
 
 Relay used to write only to stderr, which is thrown away when it is started from a desktop

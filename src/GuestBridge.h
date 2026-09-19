@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The Claude IDE bridge, the GUI's end (issue GT7X, protocol 26.5).
 //

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The one place that knows the backend implementation. Kept apart from TerminalBackends.cpp so
 // the core-selection logic can be unit-tested without linking the engine library.
 #include "TerminalBackends.h"

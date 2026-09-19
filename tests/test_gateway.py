@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The Relay Free gateway, end to end in one process: a fake model provider on loopback, the
 real gateway on a real port, and a client that registers, streams and gets refused the way the
 desktop will.

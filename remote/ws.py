@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A small RFC 6455 WebSocket, server and client, on asyncio and the standard library.
 
 The rendezvous exists to be boring, auditable and self-hostable, so it does not pull in a

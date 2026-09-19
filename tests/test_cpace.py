@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """CPACE-X25519-SHA512 (remote/cpace.py and app/cpace.js), card #97EG.
 
 The vectors are draft-irtf-cfrg-cpace-21 appendix B.1, copied verbatim; vectors produced by our own

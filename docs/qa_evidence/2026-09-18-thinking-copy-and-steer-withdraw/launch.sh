@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Relay under Xvfb against fake-provider.py, isolated (HOME, all XDG dirs, TMPDIR), left running
 # for xdotool to drive. Prints the jail and display; stop it by killing this script.
 # Usage: launch.sh <jail dir> [repo root] [build dir]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Can a composer line still reach the shell once the agent worker is gone? (#N8VK follow-on.)
 
 The report (2026-09-19, an agent re-shooting the IDE-bridge evidence): with the pane's banner

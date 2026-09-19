@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Opt-in live scenarios for the request ledger (docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md section 7).
 
 NOT run by ./scripts/test.sh or CI: it calls a real provider with a key from the keyring and costs money.

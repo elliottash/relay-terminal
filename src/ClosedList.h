@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The "Recently closed" list: the last 25 closed panes, tabs and windows (src/ClosedStack.h),
 // newest first, with a filter. It is the session manager pane's second tab (card #R6J0 mounts it

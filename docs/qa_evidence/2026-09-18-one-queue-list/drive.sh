@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Evidence driver for the one queue list (#one-queue-list card), offline: fake-provider.py as a
 # local model (90 s of reasoning, then a 20 s tool call), isolated jail via launch.sh.
 #

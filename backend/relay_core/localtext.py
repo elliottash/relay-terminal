@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """What a local model writes into ``content`` that is not the answer: reasoning tags and tool calls.
 
 A hosted provider separates these before Relay sees them. A local server does it only when it was

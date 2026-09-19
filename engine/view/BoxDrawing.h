@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pixel-exact box drawing and block elements, so TUI borders (tmux, htop,
 // mc) join seamlessly regardless of the font's glyph metrics.
 #pragma once

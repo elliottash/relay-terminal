@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // app/sw.js's push handler, run under Node so the Python seal and the service worker that opens
 // it are checked against each other rather than each against itself — the same arrangement as
 // tests/noise_peer.mjs does for the Noise handshake.

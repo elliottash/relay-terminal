@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Photograph the composer `/` popup's badged guest rows with a guest actually active (GT7X, 26.8).
 
 The composer track's own evidence covered the catalog and the routing with deterministic tests and

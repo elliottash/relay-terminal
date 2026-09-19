@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """scripts/relay-update.py decides, offline, which package a machine takes.
 
 The script talks to GitHub only at run time; everything that decides the outcome —

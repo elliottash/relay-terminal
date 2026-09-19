@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the web client against a pairing URL, for the share-button evidence run.
 
 Used by docs/qa_evidence/2026-09-17-remote-share-button/drive.sh: it stands in for the phone —

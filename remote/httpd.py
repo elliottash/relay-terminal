@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A small asyncio HTTP server: JSON routes, static files and WebSocket upgrades on one port.
 
 One port matters. The web app and the rendezvous socket share an origin, so the app connects to

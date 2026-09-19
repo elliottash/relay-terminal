@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The live end of the theme (src/Theme.cpp): what the running application does with the id in
 // `theme/name`, as opposed to what the reader does with a file (tests/theme_test.cpp).
 //

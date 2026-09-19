@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // app/cpace.js under Node, driven from tests/test_cpace.py.
 //
 // Two jobs. First it checks the browser implementation against the CPACE-X25519-SHA512 vectors

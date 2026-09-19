@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The prompt box's history file (src/PromptHistory.h): what a line looks like on disk, what is
 // worth keeping, and that two Relays appending at once do not lose each other's lines.
 #include <QtTest>

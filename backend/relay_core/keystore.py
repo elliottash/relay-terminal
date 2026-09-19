@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """API-key lookup: environment variable, then the desktop Secret Service keyring.
 
 Keys are stored with ``secret-tool`` (libsecret), which works with GNOME Keyring

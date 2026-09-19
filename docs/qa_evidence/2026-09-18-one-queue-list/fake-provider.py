@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A scripted, streaming OpenAI-compatible server for the one-queue-list runs (copied from
 2026-09-18-thinking-copy-and-steer-withdraw; FAKE_TOOL_SLEEP sets the tool call's length,
 FAKE_REASON_SECONDS the reasoning's).

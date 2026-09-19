@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // "Initialize a project and create a Switchboard here?" (src/ProjectInit.h, protocol 19.12/19.13).
 //
 // The owner's rule of 2026-09-18 is that the board folder appears only after one yes -- and since

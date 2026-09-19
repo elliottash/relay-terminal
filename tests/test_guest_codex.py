@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Codex as a guest: the marked settings writes and the rollout tail (protocol 26.6).
 
 Two promises are held here. The settings half: enabling and then disabling Guests on a

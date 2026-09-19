@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """No-tools model calls used for summaries, recaps, suggestions and instruction synthesis.
 
 These never stream text to the GUI and never offer tools. Transcripts are rendered as plain,

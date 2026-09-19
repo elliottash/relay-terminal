@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The project model behind the per-project Switchboard (src/Projects.h): the candidate project of a
 // terminal directory, the project key that has to match the backend's workspace digest, which board
 // a project's cards go to (and whether the user has to be asked first), and the removable registry

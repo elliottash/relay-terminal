@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Evidence diagnosis for card #V8KT: does each step of the pulse actually change the painted
 // glyph at tab/header size? Paints the real glyphs (relay::chrome::tabIcon for the tab,
 // paintStateGlyph for the 16 px header glyph, exactly as PaneStateGlyph::paintEvent sizes it)

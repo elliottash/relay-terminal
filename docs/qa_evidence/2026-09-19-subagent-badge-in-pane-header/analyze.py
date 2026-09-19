@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Read the subagent-badge screenshots (card #YMSR) and say what is actually in them.
 
     python3 analyze.py            # writes analyze-output.txt beside the frames

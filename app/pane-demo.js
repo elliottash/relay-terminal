@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The page around the pane view (app/pane-demo.html): it loads a fixture, mounts app/pane.js on
 // it, and shows what the view would have sent to the desktop. Nothing here is part of the client;
 // the app mounts the same view from app/app.js and sends through the real transport.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Inspect one region of one capture: quantized colour clusters + upscaled OCR.
 
     python3 inspect_region.py <image> <x> <y> <w> <h> [scale]

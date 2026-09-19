@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Commands the agent left running: a run_command that outlived its call is a job the agent reads or
 // stops later (backend/relay_core/jobs.py). Before this list the user saw such a job only in the

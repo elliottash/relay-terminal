@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The transport against a model server on this machine (ProviderConfig.local), and the proof that
 a hosted provider is treated exactly as before.
 

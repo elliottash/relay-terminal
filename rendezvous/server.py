@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """relay-rendezvous: signaling, a ciphertext-only relay and the device registry.
 
 It routes bytes it cannot read. Every payload it copies is inside a Noise session whose keys were

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`run_in_terminal`: the tool, the pane's ceiling on it, its cap and every refusal.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 22.

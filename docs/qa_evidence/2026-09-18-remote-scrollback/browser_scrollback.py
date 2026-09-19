@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the web client against a real Relay pane and page its scrollback (#W5N2).
 
 Used by docs/qa_evidence/2026-09-18-remote-scrollback/drive.sh: it stands in for the phone —

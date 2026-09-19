@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Noise_IK_25519_AESGCM_SHA256 (docs/REMOTE-PROTOCOL.md section 4).
 
 The cross-implementation half of these tests drives app/noise.js under Node against

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // CPACE-X25519-SHA512 (draft-irtf-cfrg-cpace-21, initiator-responder mode), on WebCrypto alone.
 //
 // The PAKE behind joining a shared pane with a meeting code and a four-digit PIN (card #97EG).

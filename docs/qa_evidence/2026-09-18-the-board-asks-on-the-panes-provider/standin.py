@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A stand-in for two providers on 127.0.0.1, so the whole path runs with no key and no network.
 
 Each path is one provider's OpenAI-compatible endpoint and accepts exactly one bearer token — its

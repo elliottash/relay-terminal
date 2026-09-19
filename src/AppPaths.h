@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
 // Where Relay's data files are (the backend, the shell integration, the scripts it runs) and the

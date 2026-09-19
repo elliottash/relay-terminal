@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The project picker pane (src/ProjectPicker.h, card #916B): the rows it shows, the order a
 // filter puts them in, what Enter does before anything is chosen, and the two answers it gives.
 // Offscreen: the pane knows nothing about tabs, the registry file or the worker.

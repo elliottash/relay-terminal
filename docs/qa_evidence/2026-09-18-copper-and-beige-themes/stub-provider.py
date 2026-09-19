@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Loopback-only OpenAI-compatible endpoint for the website screenshots.
 
 The landing page shows a real agent turn: a real worker, a real run_command, a real write_file

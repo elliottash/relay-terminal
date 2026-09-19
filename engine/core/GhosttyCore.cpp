@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // VtCore over libghostty-vt (MIT, https://github.com/ghostty-org/ghostty).
 //
 // Every libghostty-vt call in Relay lives in this file. The C API is marked

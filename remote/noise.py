@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Noise_IK_25519_AESGCM_SHA256 — the handshake under every RRP/1 session.
 
 Why this suite (docs/REMOTE-PROTOCOL.md section 4): the client is a browser, and WebCrypto offers

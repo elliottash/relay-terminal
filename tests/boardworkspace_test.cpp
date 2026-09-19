@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Which project's Switchboard a pane is looking at (src/BoardWorkspace.h). The Switchboard is
 // per project, so the rule has to answer from the candidate directories it is handed and from
 // nothing else — in particular never from the directory Relay itself was started in, which is

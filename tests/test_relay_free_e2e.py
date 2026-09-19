@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay Free end to end: the desktop's own client against the real gateway in one process.
 
 ``tests/test_hosted.py`` proves the client against a fake gateway and ``tests/test_gateway.py``

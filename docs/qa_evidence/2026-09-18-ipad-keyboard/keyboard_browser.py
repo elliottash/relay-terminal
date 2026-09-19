@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The phone half of the keyboard drive: an iPad-sized browser, paired with a real Relay, with
 Safari's on-screen keyboard reproduced as Safari does it.
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The session manager pane (/resume, /conversations; cards #CCKY, #R6J0) and the Ctrl+F
 // find-in-view bar. Plain Qt, no KDE dependencies; the worker does the searching

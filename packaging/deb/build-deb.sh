@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Build Relay's .deb inside a Debian/Ubuntu container (or a matching clean machine).
 #
 #   build-deb.sh SOURCE_DIR OUT_DIR [VERSION_SUFFIX]

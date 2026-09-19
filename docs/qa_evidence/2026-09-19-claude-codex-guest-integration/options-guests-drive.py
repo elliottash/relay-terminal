@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the Options › Guests section on a live Relay and photograph what it does (GT7X, 26.4).
 
 The section's rows are a front end for two command lines, so this harness drives them the way a

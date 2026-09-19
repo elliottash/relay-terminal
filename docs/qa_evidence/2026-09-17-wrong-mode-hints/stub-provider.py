@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint for the wrong-mode hints check.
 
 The agent-mode hint only fires when the agent's own run_command of the submitted

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Voice transcription (protocol 16): what leaves the machine, what comes back, and what the GUI is
 told when it fails. No audio device and no network are involved — the opener is a fake."""
 import base64

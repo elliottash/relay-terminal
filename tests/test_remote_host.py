@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """End to end: a client pairs through the rendezvous and drives a pane (RRP/1).
 
 Everything runs in one process over real sockets — a real WebSocket, a real Noise session and the

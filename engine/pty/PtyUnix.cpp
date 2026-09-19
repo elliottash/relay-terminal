@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Unix relay::Pty: forkpty + one I/O thread (poll on the master and a wake pipe).
 #include "Pty.h"
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Incremental scanner for the few sequences a core processes internally but
 // Relay needs as ordered events: OSC 133 prompt marks and alternate-screen
 // switches (CSI ? 47/1047/1049 h/l). Cores without such callbacks

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "JobsPanel.h"
 #include "SubagentsPanel.h"   // SubagentModel::formatElapsed: one clock format under the prompt box
 #include "Theme.h"

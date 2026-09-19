@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model servers on this machine: the endpoint registry and the probe (protocol section 28).
 
 A local server is not a preset. Its model id and the window it was started with are not knowable

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Implementer evidence driver for card 3ES1: changing the model while the agent is working.
 # Runs Relay under Xvfb with an isolated HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME,
 # XDG_RUNTIME_DIR and TMPDIR. One multi-step agent turn per case; the model is switched while the

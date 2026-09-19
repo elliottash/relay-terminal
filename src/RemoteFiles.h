@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Files that live on the host a pane is logged into (card #S5SH, docs/SSH-AND-MOSH.md § 9).
 //

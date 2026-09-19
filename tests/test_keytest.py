@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The keys modal's Test button against a provider that says "not now" (protocol 13.8).
 
 The Test button shows a spinner and nothing else: its thread is not cancellable and there is no

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RequestLedger.h"
 
 #include "CallLines.h"   // relay::calllines::taskGlyph: the one status-glyph table

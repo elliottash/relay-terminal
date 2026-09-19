@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // One place that turns a relay::ViewportFrame into the JSON a phone renders.
 //
 // Two callers need it and they must not drift: relay-screen-bridge (a headless PTY, used by

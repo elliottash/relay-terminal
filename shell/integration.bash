@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Passed to bash --noprofile --rcfile ... -i; never edits ~/.bashrc.
 # A clean-shell launch is available for debugging incompatible prompt plugins.
 if [[ ${RELAY_CLEAN_SHELL:-0} != 1 && -f $HOME/.bashrc ]]; then

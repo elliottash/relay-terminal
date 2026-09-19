@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Split src/main.cpp into one header per unit, by moving text and never rewriting it.
 
 This is a one-shot tool, kept for the record. It exists because several sessions had
@@ -363,7 +363,7 @@ def includes_for(name):
     return groups[0] + groups[1] + groups[2]
 
 
-SPDX = "// SPDX-License-Identifier: GPL-3.0-or-later"
+SPDX = "// SPDX-License-Identifier: AGPL-3.0-or-later"
 
 
 # ----- lexing: which characters are code ---------------------------------------------------------

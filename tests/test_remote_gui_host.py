@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The sidecar Relay runs when you share a pane (remote/gui_host.py).
 
 The GUI owns the panes, so everything here is about what crosses the stdio line: screen frames in,

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model servers on this machine: the registry file, the probe, and the worker messages
 (backend/relay_core/localmodels.py, protocol section 28).
 

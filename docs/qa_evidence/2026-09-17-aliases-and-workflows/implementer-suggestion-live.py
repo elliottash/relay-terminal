@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One live check of the agent's alias suggestion (issue G8DK, protocol 20.6).
 
 `./scripts/test.sh` stays offline, so this is the one place the suggestion meets a real model. It

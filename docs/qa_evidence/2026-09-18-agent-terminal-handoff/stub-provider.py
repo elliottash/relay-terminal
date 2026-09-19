@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint that behaves like a model using run_in_terminal.
 
 A prompt "run: <command>" or "fill: <command>" (prefix "slow" to answer after 5 s) is answered with a run_in_terminal tool call in

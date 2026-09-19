@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Reproduce the "sessions search does not full-text the conversation content" report.
 #
 # Runs the current build under Xvfb on an isolated HOME/XDG tree that holds a *copy* of the real

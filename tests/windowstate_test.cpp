@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Saved window layout ("reopen where I left off"): the parts that do not need a window —
 // reading and writing state/windows.json, validating pane trees, clamping geometry onto a
 // screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store

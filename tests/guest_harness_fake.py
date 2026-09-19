@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A scripted `guest_harness.Harness` for tests, so nothing ever starts a real claude or codex.
 
 A real guest turn spends the owner's subscription (protocol 29: "no test starts a real guest"), so

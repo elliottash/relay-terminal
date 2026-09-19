@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The Actions pane and the Options pane: one widget, two modes, a full pane in the splitter layout
 // (never a floating strip). The owner's line between them (2026-09-18): an option persists — it is

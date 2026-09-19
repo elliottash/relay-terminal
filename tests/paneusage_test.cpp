@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // A pane's CPU / memory share (issue #D03W): the arithmetic on Readings a test can make up —
 // percentages over an interval, rounding, when a meter is worth showing, tab-level sums, the
 // label suffixes and the per-process breakdown — plus the tree walk, driven over a /proc this

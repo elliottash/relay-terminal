@@ -417,5 +417,6 @@ releasing, and research notes.
 
 ## License
 
-GPL-3.0-or-later. See `LICENSE`. Qt and, when present, KSyntaxHighlighting are external
-dependencies under their own licenses. No Warp source code is included.
+AGPL-3.0-or-later. See `LICENSE`. The Affero clause is there for the hosted parts: anyone who runs
+a modified Relay gateway or rendezvous as a service for others must publish their changes. Qt and,
+when present, KSyntaxHighlighting are external dependencies under their own licenses.

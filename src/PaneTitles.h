@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Pane titles and tab labels (issue JRWQ). The worker writes a pane's title on a cheap chores-role
 // side call (`session_title`); a tab's label is derived from the titles its panes already have, so

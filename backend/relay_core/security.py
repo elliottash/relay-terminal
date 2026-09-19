@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The Security section's policy, as the worker enforces it (card #3KB7).
 
 Owner, 2026-09-19: "add a security options menu with various secruity options like that, not just

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The Claude IDE bridge's C++ rules (issue GT7X, protocol 26.5): the environment a pane's shell
 // gets, the two answers' vocabulary — and the rule that decides which reply files Relay may write.
 //

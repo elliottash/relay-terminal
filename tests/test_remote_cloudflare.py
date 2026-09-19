@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The public link: a cloudflared quick tunnel (remote/cloudflare.py).
 
 Nothing here opens a real tunnel. A shell script called `cloudflared` goes on PATH and prints what

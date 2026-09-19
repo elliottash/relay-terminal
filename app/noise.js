@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Noise_IK_25519_AESGCM_SHA256, initiator half, on WebCrypto alone.
 //
 // The client is always the initiator: it learned the desktop's static public key from the pairing

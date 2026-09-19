@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Per-turn checkpoints: conversation positions and file pre-images for agent writes.
 
 A checkpoint is recorded when a user turn starts. Before the agent's first write to a path in

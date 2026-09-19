@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The one writer on Relay's guest event channel (GT7X, protocol 26.3).
 
 Every surface that has something to tell a pane about its guest — the hooks and statusline shim

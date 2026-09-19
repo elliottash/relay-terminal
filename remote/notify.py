@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Deciding to send a push, and what it is allowed to say (docs/REMOTE-PROTOCOL.md section 9).
 
 This is the half of notifications that is policy rather than cryptography. ``remote/push.py`` can

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* The web view of a Relay pane (app/pane.js). Layout only: every colour, font and widget style is a
    variable from app/pane-theme.css, which scripts/gen-web-theme.py generates from the desktop's
    src/Theme.cpp, so a theme change reaches the desktop and this view together. --qss-<widget>-*

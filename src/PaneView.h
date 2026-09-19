@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // A view that a ToolPane hosts without knowing its type: the session info view (ⓘ) and the
 // session manager. The pane asks it for its title, hands it focus and tells it how much of its

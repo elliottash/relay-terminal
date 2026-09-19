@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The Switchboard's pure logic: the rows the worker sends, the sections they fall into and the
 // filter language. No widgets here, so it can be tested on its own (tests/boardmodel_test.cpp).

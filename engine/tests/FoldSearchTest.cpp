@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::FoldSearch: finding inside expanded folds and merging those matches
 // with a core's own into one sequence in visual order — without a GUI, without
 // a core. The fake core below steps exactly the way LibVtermCore::searchStep()

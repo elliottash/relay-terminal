@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // "Is the foreground program waiting for me to type something?" decided from the last rows of
 // the screen (src/ScreenPrompt.cpp), against recorded screens in tests/fixtures/screen/.
 #include "ScreenPrompt.h"

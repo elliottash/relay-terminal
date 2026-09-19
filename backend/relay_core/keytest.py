@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The keys modal's Test button: one minimal call per provider (protocol 13.8).
 
 The call sends a two-word prompt with no tools and a tiny output budget, so it costs a handful of

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`relay_core.board_import`: proposing cards from a tracker, and writing the accepted ones.
 
 Every test builds a throwaway project from a fixture tree under `tests/fixtures/trackers/`

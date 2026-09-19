@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
 // relay::usage — what a pane's own processes cost this machine, as CPU and memory percentages.
@@ -6,7 +6,8 @@
 // A terminal pane owns two process trees: the shell its pty spawned (and whatever it is running,
 // an ssh client included) and the pane's agent worker. Summing their /proc counters over the
 // status poll's interval gives the pane's share of the machine, which PaneChrome shows as a small
-// "12% 3%" chip beside the pane's title (issue #D03W) and RelayWindow appends to the tab label.
+// "cpu 12% · mem 3%" chip beside the pane's title (issue #D03W) and RelayWindow appends to the tab
+// label. Every surface prints that one wording (issue #6BGA) — see readingText() below.
 //
 // There is one /proc walk here, walkTrees(), and it is the only one in the program: the usage
 // meter reads it for the counters and Pane::programWaitingForInput() reads it for the pids (the
@@ -180,15 +181,38 @@ bool worthShowing(const Sample &sample);
 // a tab's tooltip names the busiest processes in the tab rather than the busiest per pane.
 Sample combined(const QList<Sample> &samples);
 
-// "  ·  12% / 3%" for a tab label, or "  ·  12% cpu" / "  ·  3% mem" when only one half is worth
-// printing — a bare number would not say which. Empty when there is nothing worth showing.
+// **The** wording of a reading, and the only place it is written (issue #6BGA, owner 2026-09-19:
+// "the cpu / mem bar things are ugly and unintuitive. i think it should be numbers"). Plain words
+// and whole percents: "cpu 12% · mem 3%", or the single half that is worth showing on its own —
+// "cpu 12%", "mem 3%". Empty when neither half is worth showing. `cpuOnly` drops the memory half
+// even when it has something to say: that is the header ladder's last rung
+// (relay::panes::UsageForm::CpuOnly), and the shortened form is the same grammar, not a new one.
+//
+// The pane chip, the tab suffix, the Sessions row's tag and the tooltips' first line all print
+// this, so the reading is learned once and read anywhere.
+QString readingText(const Sample &sample, bool cpuOnly = false);
+
+// The same reading cut into the pieces a painter colours separately: the words in the header's
+// muted ink, each percentage in the ink its own value earns (warning at 60 %, error at 85 %).
+// Joining their texts is exactly readingText(), so the chip cannot drift from the strings.
+struct ReadingPart {
+    QString text;
+    bool value = false;    // true for a percentage, false for a word or the separator
+    double percent = 0.0;  // the value behind a percentage, which picks its ink
+};
+QList<ReadingPart> readingParts(const Sample &sample, bool cpuOnly = false);
+
+// "  ·  cpu 12% · mem 3%" for a tab label: readingText() behind the tab bar's own separator.
+// Empty when there is nothing worth showing.
 QString tabSuffix(const Sample &sample);
 
-// "cpu 12% · mem 3%" — the same reading as a labelled tag for the session manager's rows, where
-// bare numbers would sit next to words. Empty when there is nothing worth showing.
+// readingText() under its old name, for the session manager's rows. Empty when there is nothing
+// worth showing.
 QString liveTag(const Sample &sample);
 
-// "CPU 12% · memory 1.2 GiB (3%)" — the long form for tooltips.
+// "cpu 12% · mem 3% (1.2 GiB)" — the long form for tooltips: the same wording as everywhere else,
+// with the memory figure in bytes added, and both halves printed whether or not they clear the
+// floors, because a tooltip is the place that spells things out.
 QString describe(const Sample &sample);
 
 // How many processes a breakdown names. The chip stays the sum alone; the tooltips owe the
@@ -200,8 +224,8 @@ inline constexpr int kTopProcesses = 5;
 // the first `limit`.
 QList<ProcessUsage> topProcesses(QList<ProcessUsage> rows, int limit = kTopProcesses);
 
-// "cc1plus · 30% cpu · 2% mem" — one breakdown line, in the same whole percents as everything
-// else here.
+// "cc1plus · cpu 30% · mem 2%" — one breakdown line, in the same words and the same whole
+// percents as everything else here.
 QString processLine(const ProcessUsage &row);
 QStringList processLines(const Sample &sample);
 // The lines as one block, empty when no process has anything to say.

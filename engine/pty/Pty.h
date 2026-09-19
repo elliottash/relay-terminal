@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::Pty: pseudo-terminal with its own I/O thread.
 //
 // Unix: forkpty + a reader/writer thread (PtyUnix.cpp).

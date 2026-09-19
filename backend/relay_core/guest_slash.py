@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Slash-command catalogs for guest CLIs (GT7X, protocol 26.8).
 
 The desktop composer owns this registry rather than asking a guest TUI to render its

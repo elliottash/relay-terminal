@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A model server on this machine has no key: configure, the role table, the Test button and the
 `presets` event (card #24XJ).
 

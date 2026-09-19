@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Multiplayer, part two: presence, the keyboard, guest prompts and pause (sections 10.3 to 10.6).
 
 Everything here runs over the real rendezvous, real Noise sessions and the real hub, with two or

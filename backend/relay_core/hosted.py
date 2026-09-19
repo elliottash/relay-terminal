@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay Free: the installation identity and the bearer token for Relay's hosted service.
 
 Relay Free is the ``relay-free`` preset: an included, quota-limited allowance so a fresh install's

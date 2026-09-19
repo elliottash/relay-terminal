@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Two-way sync between Switchboard cards and GitHub issues (`#GDQN`).
 
 Every test works in a temporary board against `tests/fake_github.py` on 127.0.0.1: no model call,

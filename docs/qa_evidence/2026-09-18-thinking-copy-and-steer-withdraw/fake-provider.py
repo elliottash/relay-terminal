@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A scripted, streaming OpenAI-compatible server for the thinking-copy and steer-withdraw runs.
 
 Relay sees it as a local model endpoint, so no key and no credits. With tools in the request:

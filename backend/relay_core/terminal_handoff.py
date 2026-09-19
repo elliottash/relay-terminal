@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`run_in_terminal`: the agent hands a command to the user's *real* interactive shell.
 
 `run_command` is a separate Bash with no terminal, no stdin and no ssh agent, so `ssh -t`, `sudo`

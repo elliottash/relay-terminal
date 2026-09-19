@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Guest agent sessions: the `claude` and `codex` conversation sources (protocol 26.7).
 
 The sessions pane lists guest sessions beside Relay's own. Both guests keep their own

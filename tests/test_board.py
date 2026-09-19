@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard format tests: cards, ids, ranks, task markers, threads, check, migrate."""
 import os
 import shutil

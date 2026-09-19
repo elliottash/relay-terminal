@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`ask_user`: the agent asks the user a question and waits for the answer.
 
 Card #MQ9C. Plan mode had no way to reach the user between "investigate" and `write_plan`, so a

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Subagents UI (Claude Code style): a model fed by the worker's subagent_* events and the
 // running-agents list shown under a pane's composer. See docs/AGENT-SESSIONS-PROTOCOL.md section 8.

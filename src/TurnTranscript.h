@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // One agent turn, opened from the inline "✦ N tool calls" line: a list of tool calls above the
 // turn's transcript.

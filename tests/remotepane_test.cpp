@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Relay-to-Relay (src/RemotePane.h): the screen painter's cell grid from `screen_snapshot` and
 // `screen_diff`, the scrollback column app/screen.js keeps, the key table, and a pane drawn from
 // `pane_state` offering only what each row lists — plus control, compose and the sidecar contract,

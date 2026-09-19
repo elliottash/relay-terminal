@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The "Recently closed" list widget: newest first, the filter, what unfolding a row shows, and the
 // keys. It is fed records and a fake scrollback reader, so no window and no state directory.
 #include "ClosedList.h"

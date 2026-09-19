@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """What Relay can see in a project *before* it is allowed to do anything.
 
 This module answers one question, offline: **if we initialized a Switchboard here, what

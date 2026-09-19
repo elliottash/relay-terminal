@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The whole of #W5N2 driven once, against a real Relay (docs/qa_evidence/…/drive.sh runs this).
 
 Four actors take turns and each waits on the others, so this is one coroutine rather than a shell

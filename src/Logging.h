@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Rotating diagnostics log for the Relay window (issue SQAM).
 //
 // Relay used to write only to stderr, which is thrown away when it is started from a desktop

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::queuenav: what a key does while the prompt box is arrowing through the queue.
 //
 // Pressing Up on an empty prompt box steps into the queue; from there the selected item's text sits

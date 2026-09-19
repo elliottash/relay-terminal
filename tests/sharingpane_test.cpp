@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The multiplayer model behind the Sharing pane (#W5N2, docs/REMOTE-PROTOCOL.md section 10).
 // Everything here is the logic the owner's answers depend on — who is here, what is waiting, whose
 // countdown has run out, what the pane header says — so it is exercised without a hub and without

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // TerminalView / VTermBackend tests on the offscreen platform: rendering,
 // keyboard, mouse selection, links, IME, scrolling, accessibility, key mapping.
 #include "backend/VTermBackend.h"

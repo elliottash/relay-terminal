@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Two-way sync between Switchboard work cards and a forge's issues (card `#GDQN`).
 
 The engine is provider-neutral: it knows cards, threads and the three-way merge, and talks to

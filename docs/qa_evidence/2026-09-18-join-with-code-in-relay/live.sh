@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # /join, live: a real rendezvous and hub (host.py) share two panes as one tab behind a meeting
 # code; Relay, in a jail of its own under Xvfb, types `/join CODE` in its prompt box, then the PIN
 # in the dialog, and is admitted as a guest. Then the host adds a third pane to the tab, which must

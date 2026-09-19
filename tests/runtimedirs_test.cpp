@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Private runtime directories: the owner mark, "is that Relay still running?", and the sweep that
 // removes what a crash left in /tmp — without touching a live Relay's directories, a neighbour's
 // files, or anything in /tmp that is not Relay's (issue 9JYK).

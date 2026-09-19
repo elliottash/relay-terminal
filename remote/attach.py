@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Attach this terminal to a shared pane, so the desktop and the phone drive the same shell.
 
 The pane already exists as a PTY inside ``relay-screen-bridge``; this puts the local terminal in

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Codex as a guest: its marked settings entries and its rollout tail (issue GT7X).
 
 Codex has no IDE bridge (protocol 26.2), so a pane learns about it from two structured

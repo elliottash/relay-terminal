@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """SQLite for the gateway: installations, tokens, quotas, spend and seven days of metadata.
 
 Modelled on ``rendezvous/server.py::Store``. An installation's id is derived here from its public

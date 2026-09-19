@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """CPACE-X25519-SHA512 — the PAKE behind "join with a meeting code and a PIN" (card #97EG).
 
 Why a PAKE: a four-digit PIN is ten thousand guesses, which is nothing offline. Anything that lets

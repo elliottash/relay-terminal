@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Web Push, end to end (docs/REMOTE-PROTOCOL.md section 9).
 
 Four things are worth testing here and each needs a different kind of check:

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """run_command jobs: a command outlives its timeout, is read and stopped by id, and ends with its
 conversation (relay_core/jobs.py)."""
 import os

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Real shells as a ``PaneSource``: one ``relay-screen-bridge`` per shared pane.
 
 Each pane is a shell in a PTY, parsed by Relay's own emulator in the bridge process, arriving here

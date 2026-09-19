@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Ask the running Relay to open a file or folder in a pane, or a relay:// link.
 
 Used by `relay open PATH` in Relay shells and by Konsole's file-link "text editor command"

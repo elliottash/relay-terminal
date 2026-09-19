@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard agent tools: the six `board_*` tools and their guardrails (phase 1).
 
 Design: `docs/SWITCHBOARD-DESIGN.md` sections 6.1-6.3 and the owner decisions in 12

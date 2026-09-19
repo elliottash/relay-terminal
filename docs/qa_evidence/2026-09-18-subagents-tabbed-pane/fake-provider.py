@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A scripted OpenAI-compatible server for card #WD83 (subagents in one tabbed pane): no key, no credits.
 
 Relay sees it as a local model endpoint (local-models.json). Replies:

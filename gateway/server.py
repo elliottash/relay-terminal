@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """relay-gateway: the routes, the admission checks and the one log line per request.
 
 Routes (docs/RELAY-FREE.md):

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Voice transcription (protocol section 16): one recorded clip in, one line of text out.
 
 The GUI records the clip (push-to-talk on the hold key, or the microphone button) and hands the

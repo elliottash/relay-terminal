@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """app/pane-theme.css is generated from the desktop theme, and must not drift from it.
 
 The web view of a pane takes every colour and widget style from app/pane-theme.css, which

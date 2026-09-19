@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::slash: what counts as an attempt at a Relay slash command, and what Relay says when
 // the command does not exist.
 //

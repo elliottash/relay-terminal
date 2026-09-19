@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One pane model, two views: ``pane_state`` and the actions a phone sends back (section 16).
 
 The cleaner and the capability filter on their own first, then the hub over real sockets — a

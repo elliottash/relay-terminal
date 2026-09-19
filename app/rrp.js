@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The RRP/1 client: pairing, the Noise session over a WebSocket, and stored device keys.
 // The UI (app.js) never sees a key or a frame; it sees messages.
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // TerminalSession: threaded parsing, signals on the GUI thread, display injection.
 #include "session/TerminalSession.h"
 

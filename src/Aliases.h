@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Aliases: saved commands and prompts (issue G8DK, docs/AGENT-SESSIONS-PROTOCOL.md section 20).
 //

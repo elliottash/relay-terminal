@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The page is exactly as tall as the part of the screen the reader can see.
 //
 // Owner, 2026-09-18, on an iPad: "it looks good in portrait but not landscape, it goes off screen"

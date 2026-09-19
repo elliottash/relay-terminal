@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pane titles and tab labels (issue JRWQ): tidying a model-written title, the offline "same work"
 // judgement and how a tab label is joined and shortened. The worker side is tested in
 // tests/test_titles.py; the rules here are what the GUI applies before, or without, any model.

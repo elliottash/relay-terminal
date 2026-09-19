@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Context accounting and compaction.
 
 Accounting: the provider's `usage` for the latest response (prompt + completion tokens) plus an

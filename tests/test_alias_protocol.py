@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The worker messages behind aliases (issue G8DK, protocol section 20).
 
 Covers the three ways an alias is run -- the palette, `/name` and a name typed in terminal mode --

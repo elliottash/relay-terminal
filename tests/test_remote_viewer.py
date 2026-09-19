@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay-to-Relay: the laptop's viewer process (remote/viewer.py) against a real desktop hub.
 
 A real rendezvous, a real hub over the GUI's pane source and a real Noise session, as in

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """``cloudflared`` quick tunnel: a public link, for someone who is not on your network.
 
 `remote/devtls.py` serves the app with a certificate this machine signed, which costs a warning on

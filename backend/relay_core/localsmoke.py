@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Five checks that decide whether a model server on this machine can drive the agent.
 
 A probe (``localmodels.probe``) says what is serving and what window it was started with. It cannot

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::TerminalView: QPainter renderer and input for a TerminalSession.
 #pragma once
 

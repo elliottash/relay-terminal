@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Web Push: RFC 8291 payload encryption, the inner seal, and VAPID signing.
 
 Who may read what decides the shape (docs/REMOTE-PROTOCOL.md section 9):

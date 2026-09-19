@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Colour themes (issue 0JA7): one file per theme, in TOML, holding both the 16-colour ANSI
 // terminal palette and the UI tokens the stylesheet is built from.

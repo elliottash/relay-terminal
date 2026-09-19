@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Loopback-only OpenAI-compatible endpoint for the transcript-gap screenshots (#5AWD).
 
     python3 stub-provider.py 8816

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`@file` attachments on `ask`: read at submit time, prepended to the user turn as labelled blocks.
 
 The user picked these files, so they may live outside the workspace. Text is size-capped and

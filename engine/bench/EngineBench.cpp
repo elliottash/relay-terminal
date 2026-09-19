@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay-engine-bench: headless emulator-core throughput through relay::VtCore.
 //
 //   relay-engine-bench [--core NAME] [--size COLSxROWS] [--scrollback N] [--frames] [--repeat N] FILE

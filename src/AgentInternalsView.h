@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The agent internals pane (card #QT8C): the reasoning and the tool calls of one terminal pane,
+// The Activity pane (card #QT8C; named "Activity" by #4X53 -- the class and the pane type keep
+// the "internals" spelling): the reasoning and the tool calls of one terminal pane,
 // interleaved in the order they happened, live, beside the terminal that keeps the answer and the
 // shell.
 //

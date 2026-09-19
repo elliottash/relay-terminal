@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::EngineBackend: relay::TerminalBackend over Relay's own terminal engine
 // (engine/, docs/ENGINE.md). It is relay::VTermBackend plus Relay's look: the font
 // and colours of data/theme/konsole (the same profile KonsolePart panes use) and

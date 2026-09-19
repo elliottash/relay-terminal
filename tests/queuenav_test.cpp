@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Arrowing through the queue while its items are edited in the prompt box: when Up and Down move
 // between queued items and when they belong to the text, and which keys save, cancel, reorder
 // and remove.

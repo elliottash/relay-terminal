@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Implementer evidence: verify a migrated copy of issues/ against the originals.
 
 Usage: verify-migration.py <original issues/> <migrated copy of issues/>

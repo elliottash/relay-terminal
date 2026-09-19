@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Implementer evidence driver for the planning role (issue Z0VG). Runs Relay under Xvfb with an
 # isolated HOME/XDG_CONFIG_HOME/XDG_DATA_HOME/XDG_CACHE_HOME, shows the Plan mode row in the model
 # roles modal, then runs one real plan-mode turn on the stored glm-coding key: the turn swaps to

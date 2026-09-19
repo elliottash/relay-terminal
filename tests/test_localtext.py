@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Reasoning tags and text tool calls in a local model's content (backend/relay_core/localtext.py)."""
 import json
 import unittest

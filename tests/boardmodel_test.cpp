@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The Switchboard pane's pure logic: which section a card falls into, the filter language, the
 // ordering, the row list the one scrolling view draws, and the `#` picker's ranking. No worker,
 // no files, no network.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Card #V8KT: a live pane's marks must not only exist, they must move. This renders the real
 // tab icon and the header glyph (pulsepaint_paint.cpp) at every step of the pulse and fails
 // when a step stops changing the painted pixels.

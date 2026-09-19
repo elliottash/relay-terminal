@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::panestate: one pane, two views (relay-terminal-71, card in
 // issues/features/2026-09-18-remote-pane-state.md).
 //

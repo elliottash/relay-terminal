@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Which emulator core a terminal pane uses.
 //
 // Every pane runs Relay's own engine (relay::EngineBackend over engine/). KonsolePart was the

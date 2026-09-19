@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model servers on this machine: probe one, and keep the list Relay offers in its model dropdown.
 
   relay-local.py probe [URL]            what is serving there, its models and its real window

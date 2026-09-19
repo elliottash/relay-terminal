@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # CPack configuration for Relay's binary packages (.deb today).
 #
 # One .deb is built per target distribution inside that distribution's container, so the Qt ABI

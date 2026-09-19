@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Shared by the two translation units of the pulse test (card #V8KT): declarations here, the
 // painting (which includes PaneChrome.h) in pulsepaint_paint.cpp, the moc'd test class in
 // pulsepaint_test.cpp.

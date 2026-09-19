@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copy on highlight, the shared filter every read-only pane surface installs (src/CopyOnSelect.h).
 #include "CopyOnSelect.h"
 #include "DiffView.h"

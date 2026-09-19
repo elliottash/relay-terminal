@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`relay_core.project_probe`: what Relay can see in a project before it may do anything.
 
 Every test works on a fixture tree under `tests/fixtures/trackers/` or on a temporary

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Colour themes (issue 0JA7): the theme file reader, the token contract every theme has to meet,
 // discovery across the user folder and the packaged one, and the Konsole colour scheme generated
 // from a theme. The live switch (palette, stylesheet, engines) is src/Theme.cpp and is checked

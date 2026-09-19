@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Evidence harness for card #TK9C, package F: the subagent transcript and the turn pane, fed the
 // exact events of docs/AGENT-SESSIONS-PROTOCOL.md § 23 and photographed. No worker and no provider
 // — the surfaces are what is under test, and they take their events straight from this file.

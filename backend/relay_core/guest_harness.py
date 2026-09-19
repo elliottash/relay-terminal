@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tier A: a guest agent as a headless harness the worker drives (GT7X, protocol 29).
 
 Tier B (protocol 26) runs Claude Code or Codex as a TUI in the pane and types into it. Tier A,

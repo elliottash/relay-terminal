@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Multiplayer: invites, knocking, and what a guest can and cannot reach (section 10).
 
 Everything runs over the real rendezvous, a real Noise session and the real hub, exactly as

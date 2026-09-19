@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The GitHub half of the Switchboard ↔ issues sync (card `#GDQN`).
 
 REST v3 over `urllib`, like `relay_core.provider` and `relay_core.hosted`: no new dependency, one

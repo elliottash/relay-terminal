@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Phone evidence for card 3ES1: the real web client (app/), in headless Chrome at a phone's size,
 paired over the real rendezvous and host (the harness tests/test_remote_browser.py uses), fed the
 model events of the gaps-driver.sh runs through the host's forwarding (remote/wire.py allow-list).

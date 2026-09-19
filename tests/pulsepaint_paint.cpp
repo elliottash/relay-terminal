@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The painting half of tests/pulsepaint_test.cpp (card #V8KT, and the subagent badge of card
 // #YMSR). PaneChrome.h lives in this translation unit on purpose: its include chain reaches
 // src/Keymap.h, whose preset table is a raw string literal moc cannot parse (see

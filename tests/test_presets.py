@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Provider presets, the Main/Flash/Lite tier table, and the GUI mirror in src/Pane.h.
 
 Nothing here touches the network or the keyring: the tables are plain data and the mirror check

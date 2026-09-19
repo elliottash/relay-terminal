@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay-vterm-spike: manual/xdotool harness for the Relay terminal engine.
 //
 //   relay-vterm-spike [--core ghostty|libvterm] [--cwd DIR] [--dump FILE] [--size COLSxROWS]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The terminal pane's tool-call lines (#TK9C, docs/AGENT-SESSIONS-PROTOCOL.md § 23): everything
 // about them that is not a byte written into the terminal.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`relay_core.board_turns`: one agent, conversation and scope per card (protocol 19.16).
 
 The pool itself, with neither a model nor a board behind it: `board_protocol`'s use of it is

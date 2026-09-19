@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Shortcut hints, Superhuman-style: when the user takes the slow path (mouse, palette, long
 // prefix) and a faster keyboard path exists, show a short hint. Each hint has a show limit and a

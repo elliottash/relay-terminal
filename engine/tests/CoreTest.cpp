@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Screen-model tests: feed byte sequences into every available VtCore and
 // assert cells, text, modes and events.
 #include "core/VtCore.h"

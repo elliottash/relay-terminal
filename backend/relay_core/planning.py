@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Plan mode (Warp-style): investigate, ask what is genuinely ambiguous (#MQ9C), then write one Markdown plan."""
 from __future__ import annotations
 

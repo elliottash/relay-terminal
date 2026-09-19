@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard file format: cards, tasks, threads, ids, ranks (phase 0).
 
 The board *is* a folder in the project -- `.switchboard/` on a board created from

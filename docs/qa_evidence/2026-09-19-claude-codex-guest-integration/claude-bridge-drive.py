@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the Claude IDE bridge end to end on a live Relay pane and photograph it (GT7X, 26.5).
 
 This harness is claude's side of the IDE integration. Relay is started under Xvfb with the bridge

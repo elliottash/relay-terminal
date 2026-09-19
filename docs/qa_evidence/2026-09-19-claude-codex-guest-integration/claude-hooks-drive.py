@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the guest event channel on a live Relay pane and photograph what it does (GT7X, 26.3).
 
 The channel is a file the pane polls, so this harness is deliberately outside the GUI: it starts

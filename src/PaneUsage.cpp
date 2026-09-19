@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PaneUsage.h"
 
 #include <QDir>
@@ -343,7 +343,9 @@ QList<ProcessUsage> topProcesses(QList<ProcessUsage> rows, int limit)
 
 QString processLine(const ProcessUsage &row)
 {
-    return QStringLiteral("%1 · %2% cpu · %3% mem")
+    // Same word order as readingText(), so a tooltip's first line and the lines under it read
+    // the same way round rather than mirroring each other (issue #6BGA).
+    return QStringLiteral("%1 · cpu %2% · mem %3%")
         .arg(row.name, formatPercent(row.cpuPercent), formatPercent(row.ramPercent));
 }
 
@@ -360,29 +362,63 @@ QString processBreakdown(const Sample &sample)
     return processLines(sample).join(QStringLiteral("\n"));
 }
 
+// The separator between the two halves, and the words in front of each number. Written as the
+// character, not as escaped UTF-8 bytes: QStringLiteral builds a UTF-16 literal out of whatever
+// bytes it is handed, so "\xc2\xb7" came out as the two characters "Â·" and a tab read
+// "src Â· 5% cpu".
+static QString usageSeparator()
+{
+    return QStringLiteral(" · ");
+}
+static QString cpuPiece(const Sample &sample)
+{
+    return QStringLiteral("cpu %1%").arg(formatPercent(sample.cpuPercent));
+}
+static QString memoryPiece(const Sample &sample)
+{
+    return QStringLiteral("mem %1%").arg(formatPercent(sample.ramPercent));
+}
+
+QList<ReadingPart> readingParts(const Sample &sample, bool cpuOnly)
+{
+    // A half with nothing to say is left out entirely rather than printed as "0%": an idle
+    // pane's agent worker used to hold the chip open reading "0% / 1%".
+    const bool cpu = showsCpu(sample), memory = showsMemory(sample) && !cpuOnly;
+    QList<ReadingPart> out;
+    if (!cpu && !memory) return out;
+    // The word is the header's muted ink whatever the reading is; only the number warns.
+    if (cpu) {
+        out << ReadingPart{QStringLiteral("cpu "), false, 0.0};
+        out << ReadingPart{formatPercent(sample.cpuPercent) + QStringLiteral("%"), true,
+                           sample.cpuPercent};
+    }
+    if (cpu && memory) out << ReadingPart{usageSeparator(), false, 0.0};
+    if (memory) {
+        out << ReadingPart{QStringLiteral("mem "), false, 0.0};
+        out << ReadingPart{formatPercent(sample.ramPercent) + QStringLiteral("%"), true,
+                           sample.ramPercent};
+    }
+    return out;
+}
+
+QString readingText(const Sample &sample, bool cpuOnly)
+{
+    QString out;
+    for (const ReadingPart &part : readingParts(sample, cpuOnly)) out += part.text;
+    return out;
+}
+
 QString tabSuffix(const Sample &sample)
 {
-    const bool cpu = showsCpu(sample), memory = showsMemory(sample);
-    if (!cpu && !memory) return {};
-    // The separator is written as the character, not as escaped UTF-8 bytes:
-    // QStringLiteral builds a UTF-16 literal out of whatever bytes it is handed, so
-    // "\xc2\xb7" came out as the two characters "Â·" and a tab read "src Â· 5% cpu".
-    const QString lead = QStringLiteral("  ·  ");
-    if (cpu && memory)
-        return lead + QStringLiteral("%1% / %2%")
-                          .arg(formatPercent(sample.cpuPercent), formatPercent(sample.ramPercent));
-    // One number alone does not say which it is, so it is named. The pair does not need naming:
-    // it is always CPU then memory, and the tab's tooltip spells it out.
-    return cpu ? lead + QStringLiteral("%1% cpu").arg(formatPercent(sample.cpuPercent))
-               : lead + QStringLiteral("%1% mem").arg(formatPercent(sample.ramPercent));
+    const QString reading = readingText(sample);
+    if (reading.isEmpty()) return {};
+    // The tab bar's own separator convention, which every other thing on a tab label uses.
+    return QStringLiteral("  ·  ") + reading;
 }
 
 QString liveTag(const Sample &sample)
 {
-    QStringList parts;
-    if (showsCpu(sample)) parts << QStringLiteral("cpu %1%").arg(formatPercent(sample.cpuPercent));
-    if (showsMemory(sample)) parts << QStringLiteral("mem %1%").arg(formatPercent(sample.ramPercent));
-    return parts.join(QStringLiteral(" · "));
+    return readingText(sample);
 }
 
 QString describe(const Sample &sample)
@@ -391,8 +427,11 @@ QString describe(const Sample &sample)
     const double gib = double(sample.ramBytes) / (1024.0 * 1024.0 * 1024.0);
     const QString memory = gib >= 1.0 ? QStringLiteral("%1 GiB").arg(gib, 0, 'f', 1)
                                       : QStringLiteral("%1 MiB").arg(sample.ramBytes / (1024 * 1024));
-    return QStringLiteral("CPU %1% · memory %2 (%3%)")
-        .arg(formatPercent(sample.cpuPercent), memory, formatPercent(sample.ramPercent));
+    // The same wording as the chip and the label, with the byte figure the tooltip owes on top.
+    // Both halves print here even when they do not clear the floors the chip is held to: a
+    // tooltip is asked for, and the reader who asked wants the number rather than a gap.
+    return cpuPiece(sample) + usageSeparator() + memoryPiece(sample)
+           + QStringLiteral(" (%1)").arg(memory);
 }
 
 QString memoryNote()

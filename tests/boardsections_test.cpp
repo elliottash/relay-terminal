@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The section editor behind the gear at the end of the Switchboard's section checkboxes: the four
 // things it offers (add, remove, merge, rename), what it refuses, and the one `board_sections`
 // message it produces. `SectionPlan` holds no widgets, so none of this needs the pane.

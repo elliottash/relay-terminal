@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The desktop end of RRP/1: one hub, many phones.
 
 The hub keeps one outbound WebSocket to the rendezvous and runs an independent Noise session per

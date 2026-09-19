@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The real web client, in a real browser, against the real rendezvous and host.
 
 This is the check that the thing a phone runs actually works: WebCrypto's X25519 and AES-GCM, a

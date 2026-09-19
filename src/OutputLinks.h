@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::links: which parts of terminal output are files, folders, URLs and Switchboard card
 // references, what they resolve to, and the keyboard cursor that steps through them.
 //

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Join with a meeting code and a PIN (card #97EG): the desktop's half of the code phase.
 
 The owner tells a friend two short things, ``BQRT`` and ``4829``. The **code** is public: the

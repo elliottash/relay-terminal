@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One agent per card, so several cards can be planned at once (protocol 19.16).
 
 Until 2026-09-19 the whole Switchboard had **one** turn: the worker's single `TurnSupervisor`,

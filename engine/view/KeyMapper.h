@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Qt key events -> engine-neutral relay::KeyInput. The VtCore encodes KeyInput
 // into bytes for the current terminal modes (cursor/keypad application mode,
 // kitty keyboard protocol with libghostty-vt, ...).

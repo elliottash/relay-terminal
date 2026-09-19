@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay-screen-bridge: one shell in a PTY, driven by Relay's own emulator, streamed as screen
 // state on stdout.
 //

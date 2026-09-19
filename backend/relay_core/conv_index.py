@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Full-text index of conversations and Relay-run terminal commands (protocol section 14).
 
 An SQLite FTS5 database beside the session files:

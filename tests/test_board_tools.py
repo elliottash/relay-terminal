@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard agent tools: the six `board_*` tools, their refusals and their guardrails.
 
 Every test works in a temporary board; nothing here reads the repository's own `issues/` tree,

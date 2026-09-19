@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* The demo page around the pane view (app/pane-demo.html). Only the page chrome is here. */
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }

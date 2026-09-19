@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The `@` file picker's index: every file the composer may attach in one directory, plus the set
 // git calls changed (which the picker ranks higher).

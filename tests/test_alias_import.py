@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Importing Warp workflows and shell aliases (issue G8DK, protocol section 20).
 
 Offline, and nothing imported is ever executed: the tests read fixtures out of temporary

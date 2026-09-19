@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Enough of a service worker to make the app installable, which is what iOS requires before it
 // will deliver Web Push, and to receive those pushes. It deliberately does not cache: a stale
 // copy of a client that holds cryptographic keys is not something to keep around.

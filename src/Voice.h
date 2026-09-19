@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Voice transcription (issue NY7Z, protocol section 16): hold the voice key (Right Alt by default)
 // or press the microphone chip, speak, and the transcript is inserted into the composer.

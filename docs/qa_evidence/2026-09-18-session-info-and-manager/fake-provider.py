@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A scripted OpenAI-compatible server for the ⓘ and session-manager runs (cards #Y63Z, #R6J0):
 no key, no credits, loopback only. Relay sees it as a local model endpoint.
 

@@ -6,7 +6,7 @@ Date: 2026-09-17. Inputs for the owner discussion. Related issues:
 `2026-09-17-terminal-only-tui-relay.md`. Background: `docs/CONTROL-AND-FILE-PANES-RESEARCH.md`.
 
 Relay today: loads `kf6/parts/konsolepart`, falling back to KF5 (`src/main.cpp`); this machine has
-Konsole 23.08.5 (KF5). Relay is GPL-3.0, which is compatible with everything below.
+Konsole 23.08.5 (KF5). Relay is AGPL-3.0, which is compatible with everything below.
 
 ## A. Konsole fork vs Relay-owned terminal engine
 
@@ -45,7 +45,7 @@ Patches needed (all small in lines, but they touch private classes):
 | Aspect | Evidence |
 |---|---|
 | Build deps (master) | Qt 6.5+, KF 6.6+: Bookmarks, Config, ConfigWidgets, CoreAddons, Crash, GuiAddons, I18n, IconThemes, KIO, NewStuff, Notifications, NotifyConfig, Parts, Service, TextWidgets, WidgetsAddons, WindowSystem, XmlGui; Pty on Unix; DBusAddons, GlobalAccel with D-Bus ([CMakeLists.txt](https://invent.kde.org/utilities/konsole/-/raw/master/CMakeLists.txt)) |
-| License | GPL-2.0-or-later (SPDX headers in `src/`); combined work under Relay's GPL-3.0 is fine |
+| License | GPL-2.0-or-later (SPDX headers in `src/`); combined work under Relay's AGPL-3.0 is fine |
 | Cadence | Ships with KDE Gear three times a year (April, August, December) plus bugfix point releases ([schedules](https://community.kde.org/Schedules)); a fork rebases 3x/year |
 | KF5 to KF6 | Konsole moved to Qt6/KF6 at 24.02; distros on 23.08 (Ubuntu 24.04, this machine) have only KF5; a fork must pick KF6 and bundle it (Flatpak KDE runtime) |
 | Platforms | Linux (and BSD). macOS/Windows builds are experimental Craft nightlies; KPty is Unix-only |

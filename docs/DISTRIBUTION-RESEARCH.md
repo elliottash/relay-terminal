@@ -9,7 +9,7 @@ Relay facts that drive the choices (`CMakeLists.txt`, `docs/ARCHITECTURE.md`, `k
   Bash. Optional: KSyntaxHighlighting, QtPdf. Keys via env var or `secret-tool` (libsecret).
 - CMake hard-fails on non-Linux when `RELAY_BUILD_APP=ON`. The app reads `/proc/self/exe` and
   `/proc/<pid>/fd/0` / `/proc/<pid>/stat`. Bash integration uses private files (rcfile, event,
-  input) that shell and frontend must both see. GPL-3.0; README says "no telemetry".
+  input) that shell and frontend must both see. AGPL-3.0; README says "no telemetry".
 
 ## 1. Linux beta packaging
 
@@ -196,7 +196,7 @@ query) before any port; KonsolePart stays the Linux default. Composer/router/bac
     account, no Relay server, no telemetry. Only state these while they remain true, and say
     what *is* sent (prompts, tool output, file contents the agent reads) to the chosen provider.
   - Beta warning (agent tools run without per-action approval); install/build steps, known
-    limits (Bash/Linux-only), changelog, issues link, GPL-3.0 licence, source link.
+    limits (Bash/Linux-only), changelog, issues link, AGPL-3.0 licence, source link.
 - **Release automation (GitHub Actions + Releases):**
   - Trigger on `push: tags: ['v*']`. Matrix jobs in containers: `ubuntu:24.04` (Qt5/KF5),
     `ubuntu:26.04`, `debian:13` (Qt6/KF6); each runs `ctest`, builds `.deb`, uploads artifact.

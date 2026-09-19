@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Live transcript of one subagent: the subagent_transcript snapshot, then streamed deltas, tool
 // calls and outputs (subagent_event payloads), with a small input that sends agent_message.

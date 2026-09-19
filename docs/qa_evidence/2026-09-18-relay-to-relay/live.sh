@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Relay-to-Relay, live: Relay A shares a pane; Relay B, with a HOME and XDG dirs of its own, opens
 # it through "Open a shared pane…", pairs (the two codes are screenshotted side by side), draws the
 # terminal and the queue, takes the keyboard and types a command that runs on A, loses the keyboard

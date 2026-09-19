@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Per-card agents for the Switchboard tests (protocol 19.16), with no model behind them.
 
 A card turn now runs on its own `Agent` on its own thread (`relay_core.board_turns`), so the

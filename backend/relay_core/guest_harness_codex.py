@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tier A: Codex as a headless harness, over `codex app-server` (GT7X, protocol 29).
 
 `codex app-server` speaks JSON-RPC 2.0 over newline-delimited JSON on stdin/stdout (the default

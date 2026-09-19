@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The GUI-side rules behind aliases (issue G8DK): turning an alias's template into composer fields,
 // walking them with Tab, and deciding whether a line the user typed names an alias. The store, the
 // file format and the shell-safe substitution live in the worker and are tested in

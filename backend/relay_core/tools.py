@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Small tool surface. Tools run without a per-action user confirmation.
 
 Workspace checks protect the file tools from accidental path escape. They are NOT

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`type_into_program`: the agent types into the program in the user's *visible* terminal pane.
 
 The worker cannot reach a terminal. The pane owns it, so this tool is a round trip: the worker

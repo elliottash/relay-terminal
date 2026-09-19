@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // A push subscription is made under one rendezvous's VAPID key, and the desktop sends each
 // device's pushes through the rendezvous that device subscribed through (docs/REMOTE-PROTOCOL.md
 // section 9). When this phone reaches its desktop through a rendezvous whose key is not the one

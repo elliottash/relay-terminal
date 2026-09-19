@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Evidence driver, offline (fake-provider.py as a local model, isolated jail via launch.sh).
 #
 #   case "copy":     while the reasoning streams, drag-select part of it, wait while more arrives,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Rotating diagnostics log (issue SQAM): location, permissions, level filtering, rotation and
 // redaction. Uses a private XDG_DATA_HOME, so it never touches the real profile.
 #include "Logging.h"

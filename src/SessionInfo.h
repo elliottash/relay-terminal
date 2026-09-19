@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Conversation info (ⓘ, /status; card #Y63Z): what a pane's agent session is — model and provider,
 // context, tokens and cost, the session file, times, turns, instructions — and its traceable

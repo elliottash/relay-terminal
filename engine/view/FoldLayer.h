@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::FoldLayer: the GUI-free half of the terminal's fold layer.
 //
 // Relay prints each agent tool call into the terminal grid as one concise line

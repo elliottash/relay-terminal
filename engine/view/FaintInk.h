@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Faint ink: what SGR 2 and a fold's dim rows are drawn in (#TK9C, #LG7T).
 //

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The label parser every surface shares (src/ToolLabel.h, docs/AGENT-SESSIONS-PROTOCOL.md § 23).
 #include "ToolLabel.h"
 

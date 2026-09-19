@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay-to-Relay: the process a laptop's Relay runs to open a pane another Relay shares.
 
 It runs in one of two modes, chosen on the command line and never switched while it runs:

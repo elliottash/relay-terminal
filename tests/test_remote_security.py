@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The security review of the four things P0's review did not cover (#W5N2).
 
 Web Push, password entry from a phone, voice from a phone and multiplayer all landed after the

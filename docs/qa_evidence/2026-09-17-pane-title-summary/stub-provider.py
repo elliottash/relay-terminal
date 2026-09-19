@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint for the pane-title QA run (issue JRWQ).
 
 The run needs real agent turns and real side calls (real worker, real autosave, real cadence)

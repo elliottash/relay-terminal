@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // The roles modal picks a *provider*, so its lists name companies ("Kimi", "Z.AI (GLM)") and offer
 // only providers whose key is actually stored. Owner, 2026-09-18: "in model roles, it shouldn't show

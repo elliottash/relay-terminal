@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Subagent definitions from every tool's agent directories, mapped to one common model.
 
 Formats (verified 2026-09-17 against each project's docs or source):

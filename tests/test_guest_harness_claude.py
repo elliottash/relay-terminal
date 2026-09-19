@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The Claude Code harness adapter (Tier A, protocol 29), replayed against recorded transcripts.
 
 Nothing here starts the real `claude`. `tests/fixtures/guest_harness_claude/*.jsonl` are real

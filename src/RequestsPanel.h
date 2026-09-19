@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The task list opened from a pane's "Tasks" chip, /tasks (/requests, /todos), Ctrl+Shift+K or the
 // palette. It shows the model's todos for the current task list, with a folded "Earlier" row for

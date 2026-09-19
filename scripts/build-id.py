@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Number a build of the Relay app: the date, the hour, then .01, .02, … for each build that hour.
 
     build-id.py <directory the binary is in> [--now YYYY-MM-DDTHH]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // What a pane is and what it is doing, for the chrome around it. Pure rules, no widgets: the
 // painting is in src/PaneChrome.h, the polling and the tab icons in src/RelayWindow.h.

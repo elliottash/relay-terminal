@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::TerminalSession: one terminal = one VtCore + one Pty, thread-safe.
 //
 // PTY output is parsed on the Pty's I/O thread (not the GUI thread) under the

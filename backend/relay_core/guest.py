@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Guest agent registry: Claude Code and Codex running inside a Relay pane (issue GT7X).
 
 A "guest" is an agent CLI the user starts in a pane's shell, exactly as they would in any

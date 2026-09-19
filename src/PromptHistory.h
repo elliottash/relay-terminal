@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The prompt box's history, kept across restarts (owner report, 2026-09-18: "conversation history
 // isnt persisting on exit and re-open. i cant do up arrows to see what i did before").

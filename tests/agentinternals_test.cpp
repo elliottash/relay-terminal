@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// The agent internals pane's log (src/AgentInternalsView.h, card #QT8C): a rule per turn, a
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The Activity pane's log (src/AgentInternalsView.h, card #QT8C): a rule per turn, a
 // reasoning block rewritten in place while it streams, one row per tool call that a click folds
 // open, and a run of reads merged into one row.
 #include "AgentInternalsView.h"

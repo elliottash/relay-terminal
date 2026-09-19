@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pane types, pane states and remote sessions (cards #SPBN and #XM0T): the urgency order a tab
 // uses, how a pane's facts become one state, the ssh/mosh/telnet destination, and that every
 // tint keeps its glyph and its label legible in every shipped theme.

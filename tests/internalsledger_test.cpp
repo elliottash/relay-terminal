@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// The reprint rules of the agent internals pane (card #QT8C), proven without a window: what the
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The reprint rules of the Activity pane (card #QT8C), proven without a window: what the
 // pane took is handed back in order, grouped per turn, once, and bounded at the fifty turns the
 // worker still has detail for.
 #include "InternalsLedger.h"

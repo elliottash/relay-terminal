@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Turn a client's chat-completion request into the one the gateway will send upstream.
 
 The rule is an allow-list, not a deny-list: exactly the fields Relay's own transport sends are

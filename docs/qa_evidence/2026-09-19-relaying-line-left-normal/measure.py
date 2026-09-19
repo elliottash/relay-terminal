@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Measure the #HQ2B captures: is the "Relaying…" line on the prompt text's left edge, in every
 state, in the normal weight, and does it elide from the middle in a narrow pane?
 

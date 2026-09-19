@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Evidence driver for toasts-and-turn-clock, offline: the streaming fake local model and the
 # isolated jail of ../2026-09-18-thinking-copy-and-steer-withdraw (launch.sh, fake-provider.py).
 #

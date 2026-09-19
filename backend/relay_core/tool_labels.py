@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One concise line per tool call, and the detail behind it.
 
 Owner, 2026-09-18 (card #TK9C): "agent tool calls are too detailed. rather than seeing a mini

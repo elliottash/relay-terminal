@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Joining with a meeting code and a PIN (card #97EG): the browser's half of the code phase.
 //
 // A friend is told two short things — `BQRT` and `4829` — instead of being sent a long link. The

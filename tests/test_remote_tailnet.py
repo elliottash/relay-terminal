@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """`tailscale serve`: the warning-free address the share dialog offers (remote/tailnet.py).
 
 Nothing here talks to a real tailscale daemon. A shell script called `tailscale` goes on PATH and

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Which actions stop and ask before they happen (card #K2FV).
 
 Owner, 2026-09-19: "i think we need to add ask back for the unapproved risky things that

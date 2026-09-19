@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay Free's client half (protocol 13.9): identity, token cache, the hosted transport, the worker.
 
 A fake gateway on loopback stands in for ``gateway/``: it runs the real challenge/proof check

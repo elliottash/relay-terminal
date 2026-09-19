@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The hosted address (remote/gui_host.py): links through relay-terminal.ai instead of this machine.
 
 The sidecar runs its own rendezvous, and the LAN, tailnet and cloudflare addresses are all routes to

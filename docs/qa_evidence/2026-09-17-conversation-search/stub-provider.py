@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint for the live QA run.
 
 The conversation-search QA needs real agent turns (real worker, real autosave, real indexing) but

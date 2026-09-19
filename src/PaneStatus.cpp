@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PaneStatus.h"
 
 #include <QDateTime>
@@ -293,7 +293,7 @@ const QList<Kind> &kinds() {
     static const QList<Kind> list{
         // The live reasoning and tool calls of one terminal pane (card #QT8C): an agent surface, so
         // the violet and the turn pane's bubble.
-        {QStringLiteral("internals"), QStringLiteral("Agent internals"), QStringLiteral("agents"), Glyph::Turn},
+        {QStringLiteral("internals"), QStringLiteral("Activity"), QStringLiteral("agents"), Glyph::Turn},
         {QStringLiteral("board"), QStringLiteral("Switchboard"), QStringLiteral("tools"), Glyph::Switchboard},
         // The Settings pane splits into Options and Actions (2026-09-18); "settings" is styled as
         // Options until nothing sets it any more.

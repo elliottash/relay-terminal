@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later
+/* SPDX-License-Identifier: AGPL-3.0-or-later
    A stand-in for ssh in the screenshots (there is no sshd to log in to under Xvfb). Like ssh it
    stays in the terminal's foreground process group and relays a session on a pty of its own
    (script(1) here), so Relay reads exactly what it would read for a real one: the foreground

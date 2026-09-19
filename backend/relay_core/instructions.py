@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Instruction files from other coding tools: scan, load into the system prompt, synthesize.
 
 Conventions follow docs/INTAKE-CLARIFICATION-RESEARCH.md section 6. Project files are looked for in

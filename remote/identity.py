@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The desktop's long-term identity and the devices it has paired with.
 
 Two deliberate departures from ``backend/relay_core/keystore.py``, which stores API keys:

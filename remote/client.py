@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A client half in Python: what the web app does, in a form tests and scripts can drive.
 
 The browser client (``app/``) is the real one. This exists so the host can be exercised end to end

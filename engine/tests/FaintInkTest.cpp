@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // view/FaintInk.h: the colour SGR 2 and a fold's dim rows are drawn in (#LG7T, #TK9C).
 // The rule is one sentence — as faint as it can be while it still reaches 4.5:1 on the background
 // it is drawn on, and never fainter than the host's own ink — so the cases here are the ways that

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Pane movement: which pane Alt+arrow focuses and Ctrl+Alt+arrow moves past, what the splitter
 // order is afterwards, and which edge a dragged pane is dropped on.
 //

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard command line: check the card format, regenerate the index, migrate.
 
 For collaborators without the Relay GUI, for CI and for pre-commit hooks.

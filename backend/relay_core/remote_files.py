@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The agent's file tools on the host the user's terminal is logged into (card #S5SH).
 
 `run_command` already takes `host` and runs over the user's own ssh connection

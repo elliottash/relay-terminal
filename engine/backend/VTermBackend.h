@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::VTermBackend: TerminalBackend over Relay's own engine
 // (TerminalSession + TerminalView, libghostty-vt or libvterm core).
 #pragma once

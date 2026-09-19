@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Guests: invites, knocking, and the people this desktop is not owned by.
 
 docs/REMOTE-PROTOCOL.md section 10. An invite is a bare unguessable link; a guest who knocks with

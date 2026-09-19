@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """``python3 -m remote.cli`` — run remote access from the terminal, before the GUI has a button.
 
 This is the harness the phone actually talks to today: it starts a rendezvous, serves the web app,

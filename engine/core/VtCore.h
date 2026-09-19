@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::VtCore: the swappable emulator core behind Relay's terminal engine.
 //
 // Everything the session, the view and the tests need from a VT emulator goes

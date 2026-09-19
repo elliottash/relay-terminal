@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """RRP/1 messages: the allow-lists, capabilities and per-stream sequencing.
 
 The rule the rest of the code leans on is that **everything is denied unless it is named here**.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Cross-provider QA (card #T71W): the signature a card carries, and who should verify it.
 
 Three jobs, all pure except the two probes at the bottom:

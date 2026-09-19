@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The Switchboard pane: one scrolling list of every open card, in a collapsible section per
 // status, with drag and drop, quick add, a filter box and a card detail view with the body, the

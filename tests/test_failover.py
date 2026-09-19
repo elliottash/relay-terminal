@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Failover (card #G9VE): a turn whose provider keeps failing continues on another one.
 
 Everything here is offline: the pane's provider is a stub that fails the way the test wants,

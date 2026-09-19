@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Emulator-neutral cell, line and input types shared by every VtCore
 // implementation, the session, the view and the tests.
 #pragma once

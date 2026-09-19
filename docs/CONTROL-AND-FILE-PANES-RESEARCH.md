@@ -124,7 +124,7 @@ Installed here as KF5/23.08 plugins: `dolphinpart`, `katepart`, `gvpart` (Gwenvi
 | Konsole | Nightly installers listed ([apps.kde.org](https://apps.kde.org/konsole/)) | Nightlies; buildable with Craft ([blog](https://clehaxze.tw/gemlog/2023/03-30-install-konsole-on-macos.gmi)) | GPL-2.0+ |
 
 Craft builds these and packages APPX/DMG ([Craft wiki](https://community.kde.org/Craft)). Homebrew casks:
-not documented by KDE. Licensing: Relay is GPL-3.0, so GPL-2.0+ and LGPL parts are compatible. Relay's
+not documented by KDE. Licensing: Relay is AGPL-3.0, so GPL-2.0+ and LGPL parts are compatible. Relay's
 bundles must then ship source for everything. Distributing plugins "as parts" on macOS/Windows means shipping
 KF runtimes, KIO and the parts themselves in-bundle. How to embed each part on those platforms: not documented.
 

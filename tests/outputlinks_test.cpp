@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Clickable paths (#YZTK), card references (Switchboard design section 5) and the keyboard walk
 // over them (#GWXM): which spans of a line of terminal output are links, what they resolve to
 // against a pane's working directory and card index, and how the keyboard cursor moves over the

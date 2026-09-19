@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Send an invite link by email, through AWS SES.
 
 An invite link is a secret (section 10.2): 128 bits in the fragment, one use over a public link,

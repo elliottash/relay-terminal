@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Windows relay::Pty over ConPTY. NOT IMPLEMENTED YET: start() fails with an
 // explanatory error so the rest of the engine can be compiled and tested on
 // Windows.

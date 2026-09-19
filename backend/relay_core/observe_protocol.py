@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Worker handlers for protocol section 11: routing assist, stored tool outputs and turn transcripts,
 the commands the agent left running (jobs), and skill management (docs/AGENT-SESSIONS-PROTOCOL.md).
 

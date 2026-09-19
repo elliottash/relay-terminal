@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Loopback-only OpenAI-compatible endpoint, so the screenshots need no API key.
 
     python3 stub-provider.py 8791

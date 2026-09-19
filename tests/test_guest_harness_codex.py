@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tier A: the Codex harness adapter, replayed against recorded `codex app-server` transcripts.
 
 Nothing here starts a real codex. The fixtures under `tests/fixtures/guest_harness_codex/` are

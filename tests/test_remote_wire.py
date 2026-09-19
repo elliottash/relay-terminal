@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The allow-lists, framing and sequencing rules (docs/REMOTE-PROTOCOL.md sections 3, 6 and 7).
 
 The first test is the one that matters: it reads the event names the worker actually emits out of

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The client half of the RRP handshake, driven from tests/test_remote_noise.py so the browser
 // implementation (app/noise.js) and the desktop one (remote/noise.py) are checked against each
 // other rather than each against itself. Reads one JSON command per line on stdin, writes one

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay-engine-tests: runs every engine test object. Extra arguments are
 // passed to QTest (e.g. `relay-engine-tests -maxwarnings 0`).
 #include <QApplication>

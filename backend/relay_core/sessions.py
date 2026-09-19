@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Session persistence: one JSON file per conversation plus a small metadata file for listing.
 
 Layout under session_dir (0700):

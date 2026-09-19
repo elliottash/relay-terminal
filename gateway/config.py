@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The gateway's configuration: roles, upstreams, prices, quotas and ceilings, from one JSON file.
 
 JSON rather than YAML because nothing in Relay's Python is pip-installed; a config the operator

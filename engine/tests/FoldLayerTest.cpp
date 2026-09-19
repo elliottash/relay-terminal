@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::FoldLayer: the fold layer's maths without a GUI — wrapping, the
 // visual-row <-> real-row mapping, anchoring, trimming and ordering.
 #include "view/FoldLayer.h"

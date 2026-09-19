@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Cheap no-tools calls: next shell command, next prompt, session recaps, and alias proposals."""
 from __future__ import annotations
 

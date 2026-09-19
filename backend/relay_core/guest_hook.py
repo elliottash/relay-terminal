@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The Claude Code guest shim: hooks and the statusline over Relay's guest event channel (GT7X).
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 26.4. The installer (relay_core.guest_install)

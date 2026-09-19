@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The sharing side of the live /join drive: a real rendezvous and hub on loopback, two demo panes
 shared as one tab, and a meeting code for the tab. Knocks are admitted automatically (the owner's
 click is not what is under test here). Once somebody is in, a third pane is added to the tab after

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::panestate: the v1 `pane_state` message a phone draws (docs/REMOTE-PROTOCOL.md section 16),
 // the actions each queue row offers, the desktop-minted ids, and the coalescing publisher.
 #include "PaneState.h"

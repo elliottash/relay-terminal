@@ -335,7 +335,7 @@ changed in the design above, and the owner decisions that came out of it.
 |---|---|---|
 | Screen diffs come from `VtCore::updateFrame` dirty rows | `updateFrame` **consumes** the dirty state (`engine/core/VtCore.h`, pinned by `engine/tests/CoreTest.cpp`), and `engine/view/TerminalView.cpp` is its only caller. A second consumer would steal dirty rows and stop the local view repainting | `RemoteHub` taps the `ViewportFrame` the view already built. No core change, and the phone is guaranteed to see what the desktop sees |
 | `history_get` returns pages of styled lines | There is no styled history read. `VtCore::historyText(maxLines)` is plain text, and `scrollViewportToRow` is stateful and shared, so a phone paging back would drag the desktop user's viewport | P2 adds a const `VtCore::historyLines(from, count, out)` to **both** cores (libvterm and ghostty) with tests. P2 grows to ≈4–5 weeks |
-| libdatachannel licence "(verify licence fit)" | MPL-2.0 §3.3 permits distributing a larger work under the GPL; Relay is GPL-3.0-or-later | Resolved, no constraint |
+| libdatachannel licence "(verify licence fit)" | MPL-2.0 §3.3 permits distributing a larger work under the GPL; Relay is AGPL-3.0-or-later | Resolved, no constraint |
 | Voice needs a phone-side transcription path | `backend/relay_core/voice.py` already takes a **path**, accepts `.webm`, and treats the clip as untrusted data with an anti-injection system prompt | P1 writes the received blob into the pane's 0700 runtime dir and reuses that path |
 | `--engine=vterm` | `--engine=relay` is the flag; `--engine=vterm` is a documented alias (`docs/ENGINE.md`) | Written as `--engine=relay` |
 

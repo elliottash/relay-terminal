@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Commands the agent runs, as jobs that can outlive the tool call that started them.
 
 run_command used to kill a command at its timeout. A build that needed three minutes then failed

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // When a submitted agent prompt starts its turn at once and when it queues (#N8VK). The rule is
 // the pane's, extracted so it can be held to its promise without a shell or a worker: an agent
 // prompt contends with the agent alone, so nothing the terminal is doing — or has queued for it —

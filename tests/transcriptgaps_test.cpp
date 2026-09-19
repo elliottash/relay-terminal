@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The blank-line rule between transcript blocks (#5AWD): src/TranscriptGaps.h.
 #include <QtTest>
 

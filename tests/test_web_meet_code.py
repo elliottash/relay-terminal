@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Joining a shared pane with a meeting code and a PIN: the browser's half (card #97EG).
 
 Owner, 2026-09-18: "4 letter meeting code, 4 number pin code" — a friend types `BQRT` and `4829`

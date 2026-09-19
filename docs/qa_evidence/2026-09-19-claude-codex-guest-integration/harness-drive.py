@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tier A end to end: pick Claude Code in a live Relay pane and watch one real turn (GT7X, §29).
 
 This is the one harness run that is *not* a replay: it starts the built `relay` under Xvfb with

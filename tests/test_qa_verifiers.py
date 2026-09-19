@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Cross-provider QA (card #T71W): the signature, the family table, the lineage and the ranking.
 
 Every test here is pure: availability is passed in, so nothing reads PATH, the keyring or the

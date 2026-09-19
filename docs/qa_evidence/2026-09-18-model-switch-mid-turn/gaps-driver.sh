@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Evidence driver for card 3ES1's three gaps, offline: Relay under Xvfb with an isolated HOME,
 # XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME, XDG_RUNTIME_DIR and TMPDIR, against
 # fake-provider.py registered as three local model endpoints (no key, no credits):

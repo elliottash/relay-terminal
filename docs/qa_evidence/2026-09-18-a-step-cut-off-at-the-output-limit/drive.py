@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Card #G5MK evidence: drive a real Agent and a real ChatProvider against a mock SSE endpoint
 that reaches the output limit, and print what the pane would see.
 

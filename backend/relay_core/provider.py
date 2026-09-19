@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """OpenAI-compatible chat-completions transport with streamed tool-call assembly."""
 from __future__ import annotations
 

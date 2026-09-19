@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // SSH and mosh sessions in a terminal pane (card #S5SH, docs/SSH-AND-MOSH.md). Pure rules, no
 // widgets and no processes: the pane runs `ssh -G` and types the bootstrap; this file decides

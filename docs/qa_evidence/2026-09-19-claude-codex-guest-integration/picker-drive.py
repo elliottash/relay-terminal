@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Drive the model picker's guest rows on a live Relay pane and photograph what happens (GT7X, 26.9).
 
 The picker route is the front door now (owner, 2026-09-19): "Claude Code" is a row in the pane's

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // The terminal pane's tool-call lines (src/CallLines.h, card #TK9C): the anchor URI, the row and
 // how far it may be cut, the rewrite-or-new-row state machine, and a fold's rows. Everything the
 // pane decides before it writes a byte, tested without a terminal.

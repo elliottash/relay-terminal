@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* Dark Copper's own values (data/theme/themes/dark-copper.toml [ui]), because it is the theme every
    build starts on (owner, 2026-09-18: "use dark copper by default on all builds") and this shell
    surrounds a pane drawn in it (app/pane-theme.css). tests/test_web_theme.py holds the two together. */

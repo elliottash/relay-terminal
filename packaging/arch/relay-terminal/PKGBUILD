@@ -1,5 +1,5 @@
 # Maintainer: Elliott Ash <e at elliottash dot com>
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AAGPL-3.0-or-later
 #
 # Named relay-terminal: "relay" is too generic on the AUR, and other packages (for example
 # sentry-relay) ship a /usr/bin/relay. Updating: set _tag, bump pkgver to match
@@ -13,7 +13,7 @@ pkgrel=1
 pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents"
 arch=('x86_64' 'aarch64')
 url="https://github.com/elliottash/relay-terminal"
-license=('GPL-3.0-or-later')
+license=('AGPL-3.0-or-later')
 depends=('syntax-highlighting' 'qt6-base' 'python' 'python-cryptography' 'bash'
          'gcc-libs' 'glibc' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja')

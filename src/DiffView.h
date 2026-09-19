@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Unified diffs from the agent's file tools: the parser that the concise tool-call notification
 // and the diff pane share, and the read-only viewer that shows one.

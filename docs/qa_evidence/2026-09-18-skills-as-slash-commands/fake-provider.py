@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """An OpenAI-compatible stand-in for the skills-as-/commands run: no key, no credits.
 
 Logs every tool-carrying request's last user message in full, one JSON line each, so the run can

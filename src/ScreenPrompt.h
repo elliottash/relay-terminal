@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::screen: "is the foreground program waiting for me to type something?", decided from the
 // last rows of the terminal screen.
 //

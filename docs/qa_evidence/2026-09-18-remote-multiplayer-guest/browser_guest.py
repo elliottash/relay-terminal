@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Walk a guest through every state of the multiplayer client and photograph each one (#W5N2).
 
 One headless Chrome at phone width (390×844), one real rendezvous and one real hub, from the join

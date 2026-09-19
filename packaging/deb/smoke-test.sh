@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Install a Relay .deb on a clean Debian/Ubuntu system (container) and check that it starts.
 #
 #   smoke-test.sh PATH/TO/relay_*.deb

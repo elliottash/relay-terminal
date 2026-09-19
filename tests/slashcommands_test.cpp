@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // An unknown slash command is Relay's to answer, not the shell's: which lines are an attempt at
 // a command, which are paths the shell keeps, and what the unknown-command line says.
 #include "SlashCommands.h"

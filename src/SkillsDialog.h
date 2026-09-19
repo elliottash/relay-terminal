@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Skills manager: lists the skills the agent can load, toggles exclusions, refines copies and
 // imports skills from a git repository after review (protocol section 11). Non-modal; it talks

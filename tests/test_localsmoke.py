@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The five smoke checks (`relay-local.py smoke`), against scripted servers.
 
 Each server here is one of the ways a local endpoint really fails: a conforming one, one whose

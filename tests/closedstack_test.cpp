@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Recently closed panes, tabs and windows: the parts that do not need a window — the record and
 // its JSON, state/closed.json, the cap, the scrollback ids the layout's prune must spare, and the
 // words a list shows.

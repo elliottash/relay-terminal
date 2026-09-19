@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Update an apt-installed Relay from its GitHub releases.
 
 Run by /update (RelayWindow::updateApp) and on its own:

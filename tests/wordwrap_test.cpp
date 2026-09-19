@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Relay's own text in the terminal breaks between words, never inside one.
 #include "MarkdownAnsi.h"
 #include "WordWrap.h"

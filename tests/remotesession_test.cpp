@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SSH and mosh sessions (card #S5SH): which `ssh -G` arguments describe the running login, what
 // the dump says, and that the typed bootstrap line decodes, with a row count that fits.
 #include "RemoteSession.h"

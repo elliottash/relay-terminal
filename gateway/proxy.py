@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """One upstream call: open it with failover, then pump its stream to the client.
 
 The transport is ``urllib.request`` in a plain thread, the pattern of ``backend/relay_core/

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """A loopback-only OpenAI-compatible endpoint that makes one noisy tool call.
 
 Collapsed tool output (SWITCHBOARD-DESIGN.md 4.3) can only be seen with a real turn: a real worker,

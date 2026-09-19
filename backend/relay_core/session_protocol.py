@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Worker protocol handlers for sessions, model/effort, context, checkpoints, plan mode,
 instructions, recaps, suggestions, pane titles and aliases (docs/AGENT-SESSIONS-PROTOCOL.md
 sections 1-7, 9, 10, 17, 18, 20).

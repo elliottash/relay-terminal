@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Subagents: isolated agent conversations that run as threads inside the pane's worker.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 8. Design: docs/AGENT-FEATURES-RESEARCH.md design C.

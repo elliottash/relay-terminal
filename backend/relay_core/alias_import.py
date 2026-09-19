@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Importing Warp workflows and shell aliases as Relay aliases (issue G8DK).
 
 Everything here is **reading**.  A Warp workflow and a line of somebody's `.bashrc` are untrusted

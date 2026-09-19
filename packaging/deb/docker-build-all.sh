@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Local equivalent of the release workflow: build each .deb in a container with the
 # repository mounted read-only, then install and smoke-test it in a fresh container.
 #

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """The phone half of live.sh: pair, open the shared pane, and act on it through the pane view.
 
 Everything here goes through the real client (app/app.js mounting app/pane.js) against the real

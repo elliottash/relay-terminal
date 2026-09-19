@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Relay's Claude Code settings entries, and the retired installer that once wrote them (GT7X).
 
 **Retired as a setup path, 2026-09-19** (owner: "no per-project setup"). Until then, Options ›

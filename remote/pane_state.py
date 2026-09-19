@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """``pane_state``: a desktop pane as a paired phone draws it (docs/REMOTE-PROTOCOL.md section 16).
 
 The phone, tablet or laptop browser is a thin view of one desktop pane. The GUI builds the state

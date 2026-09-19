@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Settings › Local models (card #24XJ): the rows that add, check and remove a model server running
 // on this machine. It is a section of the Options pane, not a dialog of its own — the owner's line

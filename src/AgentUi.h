@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Dialogs for agent sessions: a filterable picker (rewind checkpoints, saved sessions) and the
 // first-run instructions dialog. Plain Qt, no KDE dependencies.

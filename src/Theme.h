@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Relay's live design tokens, the application stylesheet built from them, and the engine
 // colour schemes generated from the same theme file.
