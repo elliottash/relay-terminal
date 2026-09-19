@@ -128,6 +128,7 @@ private slots:
     void closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn();
     void plansAndMemoriesKeepTheirOwnStatuses();
     void rankOrdersASectionAndDoneIsNewestFirst();
+    void timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip();
     void theFilterLanguageMatchesEveryTerm();
     void theFilterHidesEmptySectionsAndUnfoldsTheRest();
     void searchRanksOpenCardsAndExactIdsFirst();
@@ -146,6 +147,7 @@ private slots:
     void upAndDownWalkTheCardsAcrossSectionBreaks();
     void theViewRendersOneListFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
+    void theSortMenuOrdersTheListAndReordersOnlyOnManual();
     void arrowsFoldASectionAndTheFoldIsSaved();
     void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
     void theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack();
@@ -154,6 +156,7 @@ private slots:
     void aChangeRefillsTheListInPlace();
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
+    void theThinkingTraceRunsInTheCardsThread();
     void quickAddNamesTheSectionItAddsTo();
     void aCleanupPreviewsFirstAndItsEventsNeverReachACardThread();
     void applyingAPreviewRunsTheCleanupForReal();
@@ -289,6 +292,59 @@ void BoardModelTests::rankOrdersASectionAndDoneIsNewestFirst()
     for (const Card &card : model.cards(relay::board::doneSection()))
         closed << card.id;
     QCOMPARE(closed, (QStringList{"NEW1", "OLD1"}));
+}
+
+void BoardModelTests::timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip()
+{
+    Model model;
+    model.setConfig(config());
+    QJsonObject a = row("AAA1", "ready", "features", "a"), b = row("BBB2", "ready", "features", "b"),
+                c = row("CCC3", "ready", "features", "c");
+    a.insert(QStringLiteral("created"), QStringLiteral("2026-09-01"));
+    b.insert(QStringLiteral("created"), QStringLiteral("2026-09-10"));
+    c.insert(QStringLiteral("created"), QStringLiteral("2026-09-05"));
+    // `updated` is the file's mtime; an older worker sends none, and that card falls back to its
+    // `created` (which sorts before that day's timestamps, so the two spellings mix).
+    b.insert(QStringLiteral("updated"), QStringLiteral("2026-09-12T08:00:00Z"));
+    c.insert(QStringLiteral("updated"), QStringLiteral("2026-09-11T08:00:00Z"));
+    model.reset(rows({a, b, c}));
+
+    const auto ids = [&model](relay::board::Sort sort) {
+        model.setSort(sort);
+        QStringList out;
+        for (const Card &card : model.cards(QStringLiteral("ready")))
+            out << card.id;
+        return out;
+    };
+    QCOMPARE(ids(relay::board::Sort::Manual), (QStringList{"AAA1", "BBB2", "CCC3"}));
+    QCOMPARE(ids(relay::board::Sort::NewestFirst), (QStringList{"BBB2", "CCC3", "AAA1"}));
+    QCOMPARE(ids(relay::board::Sort::OldestFirst), (QStringList{"AAA1", "CCC3", "BBB2"}));
+    QCOMPARE(ids(relay::board::Sort::RecentlyUpdated), (QStringList{"BBB2", "CCC3", "AAA1"}));
+
+    // Done is newest first under Manual, as it always was, and follows the chosen sort otherwise.
+    QJsonObject older = row("OLD1", "done", "features", "a"), newer = row("NEW1", "done", "features", "z");
+    older.insert(QStringLiteral("created"), QStringLiteral("2026-01-01"));
+    newer.insert(QStringLiteral("created"), QStringLiteral("2026-09-17"));
+    Model closed;
+    closed.setConfig(config());
+    closed.reset(rows({older, newer}));
+    const auto closedIds = [&closed](relay::board::Sort sort) {
+        closed.setSort(sort);
+        QStringList out;
+        for (const Card &card : closed.cards(relay::board::doneSection()))
+            out << card.id;
+        return out;
+    };
+    QCOMPARE(closedIds(relay::board::Sort::Manual), (QStringList{"NEW1", "OLD1"}));
+    QCOMPARE(closedIds(relay::board::Sort::OldestFirst), (QStringList{"OLD1", "NEW1"}));
+
+    // The layout node's ids round-trip, and anything unknown reads as Manual.
+    const QList<relay::board::Sort> sorts{relay::board::Sort::Manual, relay::board::Sort::NewestFirst,
+                                          relay::board::Sort::OldestFirst,
+                                          relay::board::Sort::RecentlyUpdated};
+    for (relay::board::Sort sort : sorts)
+        QCOMPARE(relay::board::sortFromId(relay::board::sortId(sort)), sort);
+    QCOMPARE(relay::board::sortFromId(QStringLiteral("nonsense")), relay::board::Sort::Manual);
 }
 
 void BoardModelTests::theFilterLanguageMatchesEveryTerm()
@@ -713,6 +769,46 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
     QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_open"));
 }
 
+void BoardModelTests::theSortMenuOrdersTheListAndReordersOnlyOnManual()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QJsonObject a = row("AAA1", "ready", "features", "a"), z = row("ZZZ9", "ready", "features", "z");
+    a.insert(QStringLiteral("created"), QStringLiteral("2026-09-01"));
+    z.insert(QStringLiteral("created"), QStringLiteral("2026-09-10"));
+    view.handleEvent(opened({a, z}));
+    view.setCollapsedSections(QJsonArray{});   // unfold: the cards themselves are on the list
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"AAA1", "ZZZ9"}));
+
+    // The toolbar button names what is on, and a saved pane's id puts the same sort back.
+    auto *sort = view.findChild<QToolButton *>(QStringLiteral("boardSort"));
+    QVERIFY(sort != nullptr);
+    QVERIFY(sort->text().contains(QStringLiteral("Manual")));
+    view.setSortOrder(QStringLiteral("newest"));
+    QCOMPARE(view.sortOrder(), QStringLiteral("newest"));
+    QVERIFY(sort->text().contains(QStringLiteral("Newest first")));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"ZZZ9", "AAA1"}));
+
+    // A time sort takes the manual reorder off: Alt+Shift+↑ is refused with a notice and nothing
+    // is sent (a rank nobody can see is a rank nobody can write).
+    view.selectCard(QStringLiteral("AAA1"));
+    QTest::keyPress(listOf(view), Qt::Key_Up, Qt::AltModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.size(), 0);
+    QVERIFY(view.notice().contains(QStringLiteral("sorted")));
+
+    // Back on Manual the same key writes the rank again.
+    view.setSortOrder(QStringLiteral("manual"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"AAA1", "ZZZ9"}));
+    QTest::keyPress(listOf(view), Qt::Key_Down, Qt::AltModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("AAA1"));
+}
+
 void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -1031,6 +1127,82 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
     QVERIFY(!error->isHidden());
     QVERIFY(error->text().contains(QStringLiteral("Configure a provider first.")));
     QVERIFY(view.notice().isEmpty());   // on the card, not over the board
+}
+
+// #9K5H: a Discuss or Plan turn's reasoning streams in the card's thread — the same words the
+// terminal's fold uses — and is sealed where a thread entry lands under it, so a question the
+// agent asks mid-turn reads after the thinking it came from. It is a live view: never written
+// to the card file, gone when the card is left and back when it is reopened while the turn runs.
+void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    const auto cardArrived = [](const QString &id) {
+        return QJsonObject{{"event", "board_card"}, {"card_id", id}, {"title", id + QStringLiteral(" card")},
+                           {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
+                           {"thread", QJsonArray{}}, {"thread_total", 0}};
+    };
+    view.handleEvent(cardArrived(QStringLiteral("K7Q2")));
+    auto *doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(doc);
+    const auto text = [doc] { return doc->toPlainText(); };
+
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QVERIFY(reply);
+    reply->setPlainText(QStringLiteral("Plan the trace."));
+    QTest::keyClick(reply, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+
+    // The trace streams under the turn's own header, before any answer.
+    view.handleEvent(QJsonObject{{"event", "thinking_delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                                 {"text", QStringLiteral("The card asks for the trace in the thread.\n")}});
+    QTest::qWait(120);   // the render is coalesced on the 40 ms timer
+    QVERIFY(text().contains(QStringLiteral("\u2726 thinking\u2026")));
+    QVERIFY(text().contains(QStringLiteral("The card asks for the trace in the thread.")));
+
+    // The block settles to the fold's own words, with its seconds.
+    view.handleEvent(QJsonObject{{"event", "thinking_done"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                                 {"elapsed_ms", 4200}});
+    QTest::qWait(120);
+    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
+    QVERIFY(!text().contains(QStringLiteral("thinking\u2026")));
+
+    // A question the agent asks mid-turn lands *after* the thinking it came from, and the trace
+    // stays sealed above it rather than following the turn to the bottom of the thread.
+    view.handleEvent(QJsonObject{{"event", "board_thread_appended"}, {"card_id", "K7Q2"},
+                                 {"entry_id", "20260919T210001Z-aa"}, {"author", "agent"},
+                                 {"kind", "question"},
+                                 {"text", QStringLiteral("1. Should the trace reach the file?")}});
+    QVERIFY(text().contains(QStringLiteral("Should the trace reach the file?")));
+    QVERIFY(text().indexOf(QStringLiteral("\u2726 thought for 4 s"))
+            < text().indexOf(QStringLiteral("Should the trace reach the file?")));
+
+    // The answer streams under the trace, and leaving the card and coming back finds both.
+    view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                                 {"text", QStringLiteral("The plan: render it in the thread.")}});
+    QTest::qWait(120);
+    view.handleEvent(cardArrived(QStringLiteral("M3XJ")));   // another card, no turn on it
+    QVERIFY(!text().contains(QStringLiteral("\u2726 thought for 4 s")));
+    QVERIFY(!text().contains(QStringLiteral("The plan: render it in the thread.")));
+    auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
+    QVERIFY(strip && strip->isHidden());
+    view.handleEvent(cardArrived(QStringLiteral("K7Q2")));
+    QVERIFY(strip && !strip->isHidden());
+    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
+    QVERIFY(text().contains(QStringLiteral("The plan: render it in the thread.")));
+
+    // The answer lands as the thread's own entry and the turn ends; the sealed trace stays.
+    view.handleEvent(QJsonObject{{"event", "board_thread_appended"}, {"card_id", "K7Q2"},
+                                 {"entry_id", "20260919T210002Z-bb"}, {"author", "agent"},
+                                 {"kind", "comment"},
+                                 {"text", QStringLiteral("The plan: render it in the thread.")}});
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"}});
+    QVERIFY(strip && strip->isHidden());
+    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
+    QVERIFY(text().indexOf(QStringLiteral("\u2726 thought for 4 s"))
+            < text().lastIndexOf(QStringLiteral("The plan: render it in the thread.")));
 }
 
 // ---- the whole-board cleanup (protocol 19.9) -----------------------------------------------
@@ -1574,7 +1746,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     // While it runs, the strip over the box says which turn it is and carries the one control
     // that ends it; the buttons that would start another turn wait.
     QVERIFY(!strip->isHidden());
-    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is discussing…"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · discussing…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop discussing"));
     QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
@@ -1589,7 +1761,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
     QVERIFY(!sent.last().contains("text"));
     QVERIFY(!strip->isHidden());
-    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop planning"));
     QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     stop->click();
@@ -1676,7 +1848,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
     view.cardAction(QStringLiteral("plan"));
     QCOMPARE(sent.last().value("card").toString(), QStringLiteral("M3XJ"));
-    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
 
     // #K7Q2 finishing does not end the turn on the card being shown.
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "plan"}});
@@ -1694,7 +1866,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
                                  {"text", "Looking at the header."}});
     view.handleEvent(card("M3XJ", "M3XJ card", "another issue", "h2"));
     QVERIFY(!strip->isHidden());
-    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
     QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 2/256"));
 
     // A fourth card refused while three run says which cards are working, and keeps the text.

@@ -1356,6 +1356,26 @@ class BoardTools:
     def _tab_of(self, card: B.Card) -> str:
         return B.tab_of(self.board, card)
 
+    def _updated_at(self, card: B.Card) -> str | None:
+        """When this card last changed on disk: the card file's mtime, or its thread file's if
+        that is later (protocol 19.2 ``updated``, 2026-09-19). A git checkout moves mtimes too —
+        this says "recently touched", not "recently written by a person", which is what the
+        pane's Recently updated sort wants."""
+        newest = None
+        paths = [card.path] if card.path else []
+        if card.id:
+            paths.append(self.board.thread_path(card.id, card.private))
+        for path in paths:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or mtime > newest:
+                newest = mtime
+        if newest is None:
+            return None
+        return datetime.fromtimestamp(newest, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def _row(self, card: B.Card, thread_counts: dict[str, int]) -> dict:
         # The full row of protocol 19.2. `created`, the task counts and `milestone` were promised
         # there but never sent, so the pane's age and `☑ done/total` badges had nothing to draw
@@ -1368,6 +1388,7 @@ class BoardTools:
                 "path": str(card.path.relative_to(self.board.repo)) if card.path else None,
                 "thread_entries": thread_counts.get(card.id or "", 0),
                 "created": str(card.front.get("created") or ""),
+                "updated": self._updated_at(card),
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
                 "implemented_by": card.front.get("implemented_by"),

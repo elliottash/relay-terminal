@@ -378,6 +378,23 @@ private slots:
                  (QStringList{QStringLiteral("(opened in a diff pane)")}));
     }
 
+    // #WXT6: a small diff folds under its row collapsed, and the fold is answered from the diff
+    // the surface already holds — the same rows a `detail` section of style "diff" would give.
+    void aStoredDiffFoldsWithoutAWorker() {
+        const QString diff = QStringLiteral("--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n");
+        FoldOptions options;
+        options.openInPane = QStringLiteral("relay://open-call/p/t/c1");
+        options.openPath = QStringLiteral("/w/x.py");
+        const QVector<FoldLine> rows = foldForDiff(diff, palette(), options);
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("@@ -1,2 +1,2 @@"), QStringLiteral(" keep"),
+                                             QStringLiteral("-old"), QStringLiteral("+new"),
+                                             QStringLiteral("open in pane  ·  open x.py")}));
+        QCOMPARE(rows.at(2).spans.first().fg, palette().remove);
+        QCOMPARE(rows.at(2).spans.first().bg, palette().removeBg);
+        QCOMPARE(rows.at(3).spans.first().fg, palette().add);
+        QCOMPARE(rows.at(3).spans.first().bg, palette().addBg);
+    }
+
     void escapesNeverReachTheGrid() {
         QCOMPARE(stripAnsi(QStringLiteral("\x1b[31mred\x1b[0m done")), QStringLiteral("red done"));
         QCOMPARE(stripAnsi(QStringLiteral("a\x1b]0;title\x07"

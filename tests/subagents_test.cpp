@@ -365,10 +365,15 @@ private slots:
                               "'stats':['+1 −1'],'ok':true,'path':'x.py','inline_diff':true,'open':{'type':'fold'}}}}"));
         QCOMPARE(view.toolCallCount(), 2);
         QCOMPARE(view.toolLines().last(), QStringLiteral("▸ edited x.py · +1 −1"));
+        // #WXT6: a small diff stays behind the row's click too — nothing auto-expands.
+        QVERIFY(!view.plainText().contains(QStringLiteral("-old = 1")));
+        QVERIFY(!view.plainText().contains(QStringLiteral("@@")));
+        view.toggleToolCall(1);
+        QCOMPARE(view.toolLines().last(), QStringLiteral("▾ edited x.py · +1 −1"));
         const QString text = view.plainText();
         QVERIFY(text.contains(QStringLiteral("-old = 1")));
         QVERIFY(text.contains(QStringLiteral("+new = 1")));
-        QVERIFY(!text.contains(QStringLiteral("@@")));      // the hunk headers stay behind the fold
+        QVERIFY(text.contains(QStringLiteral("@@ -1,2 +1,2 @@")));   // the fold shows the hunk headers
     }
 
     void aBigDiffGoesToTheHostRatherThanTheLog() {
