@@ -234,6 +234,16 @@ target_include_directories(relay-panestate PUBLIC src)
 target_link_libraries(relay-panestate PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-panestate PRIVATE -Wall -Wextra -Wpedantic)
 
+# The opt-in cap on the programs that leave their pane (card #Y4RX): tmux and Chrome move
+# themselves into their own systemd scope under app.slice, so per-pane limits never see them. The
+# drop-in files this writes (and removes) are the owner's opt-in mitigation, and are machine-wide
+# for those two programs. QtCore only, so the install/remove logic is tested headless against a
+# temporary config root.
+add_library(relay-escapees STATIC src/EscapeeCaps.cpp src/EscapeeCaps.h)
+target_include_directories(relay-escapees PUBLIC src)
+target_link_libraries(relay-escapees PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-escapees PRIVATE -Wall -Wextra -Wpedantic)
+
 # Pane movement: which pane is the neighbour in a direction, how two panes swap inside their
 # splitter, and which edge a dropped pane lands on. Plain Qt widgets, no terminal.
 add_library(relay-panes STATIC src/PaneLayout.cpp src/PaneLayout.h)
@@ -415,7 +425,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects)
+    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
@@ -542,6 +552,9 @@ if(BUILD_TESTING)
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
     add_test(NAME panestate COMMAND relay-panestate-tests)
+    add_executable(relay-escapees-tests tests/escapeecaps_test.cpp)
+    target_link_libraries(relay-escapees-tests PRIVATE relay-escapees ${RELAY_QT}::Test)
+    add_test(NAME escapees COMMAND relay-escapees-tests)
     add_executable(relay-panes-tests tests/panelayout_test.cpp)
     target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
     add_test(NAME panes COMMAND relay-panes-tests)

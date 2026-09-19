@@ -32,6 +32,7 @@
 #include "TurnTranscript.h"
 #include "SettingsPane.h"
 #include "Isolation.h"        // the per-pane memory limits this page edits
+#include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
 #include "LocalModelsSettings.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -1944,6 +1945,13 @@ private:
                                               current, QStringLiteral("auto"), [](const QString &value) {
                 if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
                 else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
+                // Card #Y4RX: the escapee cap below is this same limit, so rewrite its drop-ins.
+                if (QSettings().value(QStringLiteral("isolation/cap_escapees"), false).toBool()) {
+                    escapees::install(escapees::userConfigRoot(),
+                                      {isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
+                                       isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault())});
+                    escapees::reload();
+                }
             });
             row.aliases = QStringLiteral("oom memory isolation worker limit kill");
             terminal.rows << row;
@@ -1963,6 +1971,51 @@ private:
                 else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
             });
             row.aliases = QStringLiteral("oom memory isolation shell limit kill");
+            terminal.rows << row;
+        }
+        // The hole per-pane limits cannot close, and the owner's opt-in mitigation (card #Y4RX).
+        // A child may ask the user's systemd for a transient scope of its own over D-Bus; the scope
+        // it gets is a sibling of the pane's, not a child, so nothing Relay does from inside the
+        // pane's scope contains it. tmux and Chrome both do exactly that.
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:escapee_scopes");
+            info.label = QStringLiteral("Two programs get out from under these limits. tmux moves its server into "
+                                        "tmux-spawn-<uuid>.scope and Chrome puts each app instance in "
+                                        "app-com.google.Chrome-<pid>.scope, both directly under app.slice: a program "
+                                        "may ask systemd for a scope of its own, and Relay cannot contain that from "
+                                        "the pane's. Their memory counts against no pane's limit, and an out-of-memory "
+                                        "kill in app.slice can land on any program there, not only the pane that "
+                                        "started it.");
+            terminal.rows << info;
+        }
+        {
+            const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
+            const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+            relay::SettingRow row = toggleRow(QStringLiteral("isolation/cap_escapees"),
+                                              QStringLiteral("Cap programs that leave their pane (tmux, Chrome)"),
+                                              QStringLiteral("Off by default. Writes systemd user drop-ins that cap those two at "
+                                                             "%1 of memory and %2 of swap — machine-wide for them, not per pane: "
+                                                             "every tmux server and Chrome app scope on this machine, whether "
+                                                             "Relay started it or not").arg(cap, swap),
+                                              false, [this](bool on) {
+                // Read now, not when the row was built: the limit above may have changed since.
+                const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
+                const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+                const QString root = escapees::userConfigRoot();
+                QStringList skipped;
+                const QStringList touched = on ? escapees::install(root, {cap, swap}, &skipped)
+                                               : escapees::removeAll(root, &skipped);
+                const bool reloaded = (touched.isEmpty() && skipped.isEmpty()) || escapees::reload();
+                QString said = on ? QStringLiteral("Capped tmux and Chrome at %1 (%2 drop-in(s) written)").arg(cap).arg(touched.size())
+                                  : QStringLiteral("Removed Relay's tmux and Chrome caps (%1 file(s))").arg(touched.size());
+                if (!skipped.isEmpty())
+                    said += QStringLiteral("; left alone, not written by Relay: ") + skipped.join(QStringLiteral(", "));
+                if (!reloaded) said += QStringLiteral("; `systemctl --user daemon-reload` failed, so it takes effect at your next login");
+                statusBar()->showMessage(said + QStringLiteral("."), 8000);
+            });
+            row.aliases = QStringLiteral("tmux chrome browser scope app.slice oom escape dropin systemd cap");
             terminal.rows << row;
         }
         // SSH sessions (#S5SH, docs/SSH-AND-MOSH.md): the wrapper is set up when a pane's shell

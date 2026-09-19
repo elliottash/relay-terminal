@@ -2139,6 +2139,37 @@ panel that returns to the prompt, JetBrains' and VS Code's action list kept apar
 fall back to defaults. Without a systemd user manager, panes start unisolated and the status
 bar says so once.
 
+**Programs that leave their pane, and what can be done about it (card #Y4RX, 2026-09-19).** Two
+programs are not in any pane's scope, however the pane started them: **tmux** moves its server into
+`tmux-spawn-<uuid>.scope` and **Chrome** puts each app instance in
+`app-com.google.Chrome-<pid>.scope`, both directly under `app.slice`. A child can ask the user's
+systemd for a transient scope of its own over D-Bus, and the scope it gets is a *sibling* of the
+pane's rather than a child, so nothing Relay does from inside the pane's scope contains it. The
+consequences are plain and are not fixed: the memory those programs use counts against no pane's
+limit, and an out-of-memory kill in `app.slice` can land on any process there — including one
+another pane depends on, which is the cross-pane blast radius per-pane isolation exists to prevent.
+Both were seen on 2026-09-19, with two `app.slice`-level OOM kills beside the two properly
+pane-scoped ones.
+
+What Relay offers is an opt-in mitigation, **off by default**: Options › Terminal › "Cap programs
+that leave their pane (tmux, Chrome)" writes systemd user drop-ins on the two unit-name *prefixes* —
+`~/.config/systemd/user/tmux-spawn-.scope.d/relay.conf` and
+`~/.config/systemd/user/app-com.google.Chrome-.scope.d/relay.conf` — setting `MemoryMax=` and
+`MemorySwapMax=` to the same values a pane's agent gets (`isolation/agent_memory_max`,
+`isolation/agent_swap_max`, so "Auto" is the RAM-derived default), then runs `systemctl --user
+daemon-reload`. A truncated-prefix drop-in is systemd's own documented mechanism: `man systemd.unit`
+specifies that for a dashed unit name `foo-bar-baz.service` the directories `foo-bar-.service.d/`
+and `foo-.service.d/` are searched too, which is why one file covers every uuid and every pid.
+Verified on this machine (systemd 255) against a throwaway `systemd-run --user --scope
+--unit=tmux-spawn-…` scope: it reported the drop-in's `MemoryMax` and named the file in
+`DropInPaths`. **The cap is machine-wide for those two programs, not per pane** — the unit name is
+all systemd gives us to match on, and nothing in it says which pane, or whether Relay was involved,
+so a tmux the user starts outside Relay is capped too. Turning the option off removes exactly the
+files Relay wrote: each carries a `# relay-managed: cap-escapees` marker line, a file without it is
+never written over or deleted (it is reported in the status bar instead), and the `.d` directory
+goes only if Relay's file was all that was in it. `src/EscapeeCaps.{h,cpp}`, tested headless against
+a temporary config root (`tests/escapeecaps_test.cpp`).
+
 Detection, once a second: an increase in the shell scope's `memory.events` `oom_kill` shows
 "A command in this pane was stopped because it ran out of memory"; a dead shell PID or
 `Result=oom-kill` shows a banner with Restart shell (Ctrl+Shift+R), which replaces the terminal
@@ -2477,6 +2508,7 @@ of the platform and of the engine itself.
 | `src/AppPaths.h` | `dataRoot()` (where the backend, shell and scripts are) and `relayFuzzyScore()` (how the palette and the `@` picker rank rows), plus the `RELAY_VERSION` / `RELAY_DATA_DIR` / `RELAY_SOURCE_DIR` fallbacks |
 | `src/Keymap.h` | every window-level shortcut as a named action: defaults, `keybindings.json` overrides, the presets, and the reload (section 12) |
 | `src/Isolation.h` | per-pane systemd scopes: whether they are available, the memory limits, and what systemd says killed one (section 2) |
+| `src/EscapeeCaps.{h,cpp}` | the opt-in, off-by-default cap on tmux and Chrome, which scope themselves out of their pane: the prefix drop-ins Relay writes and removes (section 13) |
 | `src/CopyOnSelect.h` | copy on highlight: the one `terminal/copy_on_select` reading and the event filter every read-only text surface installs (section 4, "Copy on highlight"). Header-only, because those surfaces are spread across a dozen libraries |
 | `src/Pane.h` | `Pane` — the terminal pane: its backend, Bash bridge, composer, queue, agent worker and conversation — and `QueueRowDelegate`, which draws the queue rows. `Pane` never names a window; it calls up through `std::function` callbacks |
 | `src/PaneChrome.h` | `ToolPane` (explorer, preview, plan, transcript, Switchboard, settings) and `PaneChrome`, the button row and drag grip in a pane's corner |
