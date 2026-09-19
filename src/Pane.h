@@ -3819,10 +3819,13 @@ private:
             m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail
             // "never" keeps the buffer (the turn pane still shows it) but draws nothing.
             if (thinkingDisplay() != QLatin1String("never")) thinkingDelta(turn);
+            pushThinkingToTurnPane(turn);   // a turn pane open on this turn follows the stream
             return true;
         }
         if (type == QStringLiteral("thinking_done")) {
             const qint64 ms = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
+            // The block is whole now: an open turn pane gets all of it, whatever was drawn here.
+            pushThinkingToTurnPane(event.value(QStringLiteral("turn_id")).toString(), true);
             // A stream that stopped mid-reasoning reports {elapsed_ms: 0, chars: 0}: the fold still
             // gets what arrived, and its row says the stream stopped rather than lying with a time.
             if (!m_thinkingAnchor.isEmpty()) { finishThinkingFold(ms); return true; }
@@ -3976,7 +3979,7 @@ private:
         // A turn pane opened on this turn — "open in pane" is what the capped fold points at — is
         // the surface holding the whole block, so it follows the stream at the same four frames a
         // second rather than freezing at whatever had arrived when it was opened.
-        pushThinkingToTurnPane(uri);
+        pushThinkingToTurnPane(turnOfFold(uri));
         // The reader may have folded it away since the last flush. setFoldContent() opens what it
         // sets, so a folded fold is left alone: pushing content would reopen it over their click.
         if (m_thinkingFoldOpen && !m_backend->foldExpanded(uri)) {
@@ -3989,11 +3992,21 @@ private:
 
     // The whole of this turn's reasoning into an open turn pane, if one is open on it. The fold in
     // the grid is capped; the pane its "open in pane" link goes to is where the rest lives, so it
-    // is kept current while the block streams and once more when it ends (#K48R).
-    void pushThinkingToTurnPane(const QString &uri) {
+    // is kept current while the block streams and once more, forced, when it ends (#K48R). Called
+    // from the delta too, so a mode with no fold at all (`never`, a backend without folds) keeps an
+    // open pane current as well — there the ✦ line's link is the only way to the reasoning. Re-
+    // rendering the pane's log costs more than a delta does, so it is held to the fold's own 4 Hz.
+    void pushThinkingToTurnPane(const QString &turn, bool force = false) {
+        if (turn.isEmpty()) return;
+        const auto view = m_turnViews.value(turn);
+        if (!view) return;
+        if (!force && m_thinkingPushAt.isValid() && m_thinkingPushAt.elapsed() < 250) return;
+        m_thinkingPushAt.restart();
+        view->setThinking(m_turnThinking.value(turn));
+    }
+    QString turnOfFold(const QString &uri) const {
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
-        if (!ref.valid) return;
-        if (auto view = m_turnViews.value(ref.turn)) view->setThinking(m_turnThinking.value(ref.turn));
+        return ref.valid ? ref.turn : QString();
     }
 
     // How wide the fold's rows are wrapped: the grid less the block indent, which is what
@@ -4039,7 +4052,6 @@ private:
         m_lastThinkingAnchor = uri;   // Alt+R reopens this one until the next block replaces it
         m_thinkingFlushPending = false;   // a queued flush would resurrect a cleared anchor
         if (!m_backend || uri.isEmpty()) return;
-        pushThinkingToTurnPane(uri);   // the whole block, where the capped fold's link points
         const bool openNow = m_backend->foldExpanded(uri);
         if (openNow != m_thinkingFoldOpen) m_thinkingUserToggled = true;   // the reader clicked since
         setFold(uri, thinkingFoldLines(uri, false));
@@ -13955,6 +13967,7 @@ private:
     QString m_thinkingAnchor, m_lastThinkingAnchor;
     bool m_thinkingFoldOpen = false, m_thinkingUserToggled = false, m_thinkingFlushPending = false;
     QHash<QString, int> m_thinkingBlocks;
+    QElapsedTimer m_thinkingPushAt;   // last push of the reasoning into an open turn pane (#K48R)
     bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
