@@ -524,6 +524,7 @@ class Host:
         self.socket: ws.WebSocket | None = None
         self.token: str | None = None
         self.rendezvous: str | None = None
+        self._rehomed = False
         self._tasks: set[asyncio.Task] = set()
         self._running = False
         self.devices.on_revoke(self._device_changed)
@@ -545,22 +546,52 @@ class Host:
 
     async def register(self, rendezvous_base: str) -> str:
         """Prove we hold the identity key, then take a bearer token."""
-        self.rendezvous = rendezvous_base.rstrip("/")
-        body = await self._post("/v1/challenge", {})
+        base = rendezvous_base.rstrip("/")
+        self.token = await self._register_at(base)
+        self.rendezvous = base
+        return self.identity.desktop_id
+
+    async def _register_at(self, base: str) -> str:
+        """Challenge and register at ``base``; the token. Changes nothing on the hub, so a
+        rendezvous that refuses leaves the one already in use untouched (see ``rehome``)."""
+        body = await self._post("/v1/challenge", {}, base=base)
         shared = noise.dh(self.identity.private, base64.b64decode(body["ephemeral_public"]))
         proof = hmac.new(shared, body["challenge"].encode(), sha256).hexdigest()
         reply = await self._post("/v1/register", {
             "static_pubkey": base64.b64encode(self.identity.public).decode(),
-            "challenge": body["challenge"], "proof": proof})
-        self.token = reply["token"]
+            "challenge": body["challenge"], "proof": proof}, base=base)
         if reply["desktop_id"] != self.identity.desktop_id:
             raise wire.WireError("internal", "the rendezvous derived a different desktop id.")
-        return reply["desktop_id"]
+        return reply["token"]
 
-    async def _post(self, path: str, payload: dict) -> dict:
+    async def rehome(self, rendezvous_base: str) -> None:
+        """Move this one hub to another rendezvous: register there, then reconnect the socket.
+
+        The sidecar's hosted address (remote/gui_host.py) uses this to go from the rendezvous it
+        runs itself to the public one and back. Registration comes first, so a rendezvous that is
+        down or refuses leaves everything as it was. Rooms, invites' rooms and meeting codes live
+        at the rendezvous that minted them; a live code is ended as ``expired`` before the move,
+        and burned at the old rendezvous with the old token, so nobody is left holding a code
+        that resolves to a room this hub no longer listens on.
+        """
+        base = rendezvous_base.rstrip("/")
+        if base == self.rendezvous:
+            return
+        token = await self._register_at(base)
+        for record in [record for record in self.codes.records.values()
+                       if record.state == meetcode.LIVE]:
+            await self.codes.expire(record)
+        self.rendezvous, self.token = base, token
+        # Drop the socket; `serve` reconnects at once, to `socket_url()`, which is now the new one.
+        self._rehomed = True
+        if self.socket is not None:
+            with contextlib.suppress(Exception):
+                await self.socket.close()
+
+    async def _post(self, path: str, payload: dict, *, base: str | None = None) -> dict:
         import urllib.error
         import urllib.request
-        url = f"{self.rendezvous}{path}"
+        url = f"{base or self.rendezvous}{path}"
 
         def go() -> dict:
             request = urllib.request.Request(
@@ -589,7 +620,13 @@ class Host:
         delay = 1.0
         while self._running:
             try:
-                self.socket = await ws.connect(self.socket_url())
+                url = self.socket_url()
+                self.socket = await ws.connect(url)
+                if url != self.socket_url():
+                    # ``rehome`` moved the hub while this was connecting to the old rendezvous.
+                    await self.socket.close()
+                    continue
+                self._rehomed = False
                 log.info("connected to the rendezvous as %s", self.identity.desktop_id[:8])
                 delay = 1.0
                 await self._read_socket()
@@ -602,6 +639,9 @@ class Host:
                 self.channels.clear()
             if not self._running:
                 break
+            if self._rehomed:              # moved on purpose (``rehome``): no back-off
+                self._rehomed = False
+                continue
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30.0)
 

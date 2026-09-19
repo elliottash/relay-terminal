@@ -30,6 +30,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -811,7 +812,9 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_address->setToolTip(QStringLiteral(
         "The address your phone will open. The tailnet name comes first when tailscale can serve "
         "it: a real certificate, no warning to accept, and it works from anywhere the phone is "
-        "signed in to your tailnet. Use the network address when the phone is on the same Wi-Fi."));
+        "signed in to your tailnet. relay-terminal.ai works from anywhere with no warning; the "
+        "links go through it instead of this machine. Use the network address when the phone is "
+        "on the same Wi-Fi."));
     connect(m_address, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
         const QString address = m_address->itemData(index).toString();
         if (!address.isEmpty()) RemoteShare::instance().useAddress(address);
@@ -1463,13 +1466,21 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
     // so it goes under the picker rather than into it.
     m_address->blockSignals(true);
     m_address->clear();
-    QString reason;
+    // Each unavailable entry says why in its own sentence. Only the tailnet one gets the
+    // "No warning-free tailnet address" prefix: the hosted (relay-terminal.ai) and cloudflare
+    // entries carry sentences that already name what they are about.
+    QStringList reasons;
     bool publicLink = false;
     for (const QJsonValue &value : addresses) {
         const QJsonObject entry = value.toObject();
         if (entry.contains(QStringLiteral("available"))
             && !entry.value(QStringLiteral("available")).toBool()) {
-            if (reason.isEmpty()) reason = entry.value(QStringLiteral("reason")).toString();
+            const QString why = entry.value(QStringLiteral("reason")).toString();
+            if (why.isEmpty()) continue;
+            const QString entryKind = entry.value(QStringLiteral("kind")).toString();
+            reasons << (entryKind == QLatin1String("tailscale")
+                            ? QStringLiteral("No warning-free tailnet address: %1").arg(why)
+                            : why);
             continue;
         }
         const QString address = entry.value(QStringLiteral("value")).toString();
@@ -1482,7 +1493,8 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
         m_address->addItem(label, address);
         if (entry.value(QStringLiteral("current")).toBool()) {
             m_address->setCurrentIndex(m_address->count() - 1);
-            publicLink = entry.value(QStringLiteral("kind")).toString() == QLatin1String("cloudflare");
+            const QString current = entry.value(QStringLiteral("kind")).toString();
+            publicLink = current == QLatin1String("cloudflare") || current == QLatin1String("hosted");
         }
     }
     m_address->setVisible(m_address->count() > 1);
@@ -1501,10 +1513,8 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
     } else if (m_inviteNote->text().startsWith(QLatin1String("Over a public link"))) {
         m_inviteNote->clear();
     }
-    m_addressNote->setText(reason.isEmpty()
-                               ? QString()
-                               : QStringLiteral("No warning-free tailnet address: %1").arg(reason));
-    m_addressNote->setVisible(!reason.isEmpty());
+    m_addressNote->setText(reasons.join(QLatin1Char('\n')));
+    m_addressNote->setVisible(!reasons.isEmpty());
     fit();
 }
 

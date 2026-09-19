@@ -574,6 +574,21 @@ Rate limits: 20 pairing rooms/hour and 600 push sends/hour per desktop; concurre
 per device. In P2, `/v1/ice` defaults guests to **relay-only** candidates: direct ICE would reveal
 the host's address to everyone holding an invite link. The owner's own devices may go peer to peer.
 
+**The hosted address.** The desktop's sidecar (`remote/gui_host.py`) runs its own in-memory
+rendezvous, and the LAN, tailnet and cloudflare addresses in the share dialog are all routes to that
+one server. The fourth entry, kind `hosted` and value `relay-terminal.ai`, is a *different*
+rendezvous: the public one at `RELAY_HOSTED_RENDEZVOUS` (default `https://join.relay-terminal.ai`),
+which serves the same routes and web app. It is offered when `GET /v1/health` answers within three
+seconds, and otherwise listed with `available:false` and a one-sentence `reason`. Choosing it (the
+ordinary `{"t":"address","value":"relay-terminal.ai"}` line) moves the **one** hub: it registers
+there with the same challenge and proof of possession, its socket reconnects there, and the app
+base of every new pairing, invite and code link becomes that origin. Choosing any other address
+moves it back to the local rendezvous. Rooms, invite rooms and meeting codes live at the rendezvous
+that minted them, so a switch ends each live code as `expired` (its invite burns, and the code is
+burned at the old rendezvous with the old token), and channels on the old socket close; older
+invite links work again only if their rendezvous is chosen again. Nothing about the protocol
+changes: the hosted server sees what any rendezvous sees, which is ciphertext.
+
 ## 9. Notifications
 
 The desktop decides; the rendezvous only forwards. Triggers, all off-by-default-configurable:

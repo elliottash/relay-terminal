@@ -17,7 +17,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
     {"t":"address","value":"192.168.1.9"}                    serve the QR on another address;
                                           the value may also be the tailnet name from the
-                                          `addresses` list, which publishes with `tailscale serve`
+                                          `addresses` list, which publishes with `tailscale serve`,
+                                          or "relay-terminal.ai", which moves the hub to the
+                                          hosted rendezvous (RELAY_HOSTED_RENDEZVOUS)
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
     {"t":"password_entry","device":"...","allow":true}   per-device switch (section 6.7)
     {"t":"window_active","active":true}   Relay's own window is (or is not) the focused one:
@@ -61,7 +63,10 @@ the GUI never links a crypto library and this process never touches a widget.
                    "current":false}, ...]}
                                           Best first. The `tailscale` entry is always there: with
                                           `available:false` and a one-sentence `reason` when this
-                                          machine cannot serve a real certificate
+                                          machine cannot serve a real certificate. The `hosted`
+                                          entry (value "relay-terminal.ai") is always second, with
+                                          `available:false` and a reason when /v1/health did not
+                                          answer
     {"t":"pairing","url":"...","qr":[[0,1,...],...],"expires":N}
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
@@ -85,7 +90,9 @@ the GUI never links a crypto library and this process never touches a widget.
                                               PIN was confirmed; their knock follows), "burned"
                                               (three failures, `code_revoke`, or replaced by a
                                               newer code for the pane; its invite burned too) or
-                                              "expired" (unused; its invite burned too)
+                                              "expired" (unused, or the address moved to another
+                                              rendezvous, where it never existed; its invite
+                                              burned too)
     {"t":"knock","participant":"<id>","name":"alice","platform":"Chrome","code":"12345",
      "fingerprint":"AB12 CD34 EF56","peer":"192.0.2.7","role":"viewer","pane":"p1",
      "panes":["p1"],"invite":"<id>"}                        someone at the door; answer with
@@ -117,6 +124,7 @@ import base64
 import contextlib
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -143,6 +151,32 @@ KNOCK_TIMEOUT = guests_mod.KNOCK_TIMEOUT
 # A scrollback page is a read of memory the GUI already holds, on its own thread, so this is a
 # wedged-GUI timeout and not a work budget. The phone is holding a scroll gesture open on it.
 HISTORY_TIMEOUT = 15.0
+
+# The public rendezvous (docs/REMOTE-PROTOCOL.md section 8): the fourth address. The sidecar's own
+# rendezvous is what the LAN, tailnet and cloudflare addresses all reach; this one is a different
+# server, so choosing it moves the hub's registration and socket there. Tests point it at a second
+# local rendezvous.
+HOSTED_DEFAULT = "https://join.relay-terminal.ai"
+# The health probe is on the share dialog's path, so it is short and never on the event loop.
+HOSTED_PROBE_TIMEOUT = 3.0
+
+
+def hosted_origin() -> str:
+    return (os.environ.get("RELAY_HOSTED_RENDEZVOUS") or HOSTED_DEFAULT).strip().rstrip("/")
+
+
+def probe_hosted(origin: str, timeout: float = HOSTED_PROBE_TIMEOUT) -> str:
+    """``GET <origin>/v1/health``: "" when it answers, else one sentence saying it does not."""
+    import urllib.request
+    from urllib.parse import urlsplit
+    name = urlsplit(origin).netloc or origin
+    try:
+        with urllib.request.urlopen(f"{origin}/v1/health", timeout=timeout) as response:
+            if response.status == 200 and json.loads(response.read()).get("ok"):
+                return ""
+    except Exception as error:                     # refused, timed out, TLS, not JSON: all "no"
+        log.info("hosted rendezvous %s: %s", origin, error)
+    return f"{name} did not answer from this machine, so links cannot go through it right now."
 
 
 class GuiPaneSource(panes_mod.PaneSource):
@@ -469,6 +503,13 @@ class Sidecar:
         # A public link (cloudflared quick tunnel): the third address, for someone who is on
         # neither the network nor the tailnet. Mutually exclusive with the tailnet one.
         self.served_by_cloudflare = False
+        # The hosted rendezvous (HOSTED_DEFAULT): the fourth address. Unlike the other three it is
+        # not a route to this process's rendezvous but another rendezvous, so `served_by_hosted`
+        # means the hub is registered *there*. `hosted_reason` is the probe's answer, "" when it
+        # answered; `local` is this process's own rendezvous, where the hub goes back to.
+        self.served_by_hosted = False
+        self.hosted_reason = "not checked yet."
+        self.local = ""
         # Guests already emailed about, so a reconnection is not a second mail (see
         # _notify_new_joiners).
         self._notified: set[str] = set()
@@ -645,6 +686,7 @@ class Sidecar:
         self.server = build(self.store, static_root=APP_DIR)
         await self.server.start("127.0.0.1", int(message.get("port") or 0))
         local = f"http://127.0.0.1:{self.server.port}"
+        self.local = local
 
         self.note = ""
         self.base = local
@@ -652,10 +694,13 @@ class Sidecar:
         self.tls_port = 0
         self.served_by_tailscale = False
         self.served_by_cloudflare = False
+        self.served_by_hosted = False
         # Detection is two `tailscale` calls, so it happens off the loop: a wedged CLI must not
-        # hold the share button down.
+        # hold the share button down. The hosted probe is one short GET, run alongside it.
         self.desktop_name = str(message.get("name") or "")
-        self.found = await asyncio.to_thread(tailnet_mod.probe)
+        self.found, self.hosted_reason = await asyncio.gather(
+            asyncio.to_thread(tailnet_mod.probe),
+            asyncio.to_thread(probe_hosted, hosted_origin()))
         if message.get("tls", True):
             # One listener on every interface; which address goes in the QR is a separate choice,
             # because only the person knows whether the phone is on the Wi-Fi or on the tailnet.
@@ -708,6 +753,21 @@ class Sidecar:
     # The picker sends a value back, and a quick tunnel has no name until it is running, so this
     # stands for "the public link" in both directions.
     CLOUDFLARE_VALUE = "cloudflare"
+    HOSTED_WHERE = "works from anywhere, no certificate warning"
+    # What the picker sends back for the hosted entry, whatever origin it stands for.
+    HOSTED_VALUE = "relay-terminal.ai"
+
+    def hosted_entry(self) -> dict:
+        """The hosted rendezvous, available when its health probe answered."""
+        origin = hosted_origin()
+        from urllib.parse import urlsplit
+        shown = (self.HOSTED_VALUE if origin == HOSTED_DEFAULT
+                 else urlsplit(origin).netloc or origin)
+        available = not self.hosted_reason
+        return {"value": self.HOSTED_VALUE, "kind": "hosted", "available": available,
+                "where": self.HOSTED_WHERE, "reason": self.hosted_reason,
+                "label": f"{shown} — {self.HOSTED_WHERE}" if available else "",
+                "current": self.served_by_hosted}
 
     def address_list(self) -> list[dict]:
         """What the share dialog offers, best first.
@@ -727,6 +787,9 @@ class Sidecar:
             entries = [{"value": "", "kind": "tailscale", "available": False,
                         "where": self.TAILNET_WHERE, "reason": self.found.reason,
                         "label": "", "current": False}]
+        # Second: as warning-free as the tailnet name and reachable by anyone, but it is a server
+        # somebody else runs, so it is a choice rather than the default.
+        entries.append(self.hosted_entry())
         if not self.tls_port:
             return entries
         entries.extend(
@@ -812,16 +875,81 @@ class Sidecar:
         await asyncio.to_thread(tailnet_mod.unpublish)
         self.served_by_tailscale = False
 
+    async def use_hosted(self) -> bool:
+        """Move the hub to the hosted rendezvous and point every new link at its origin.
+
+        The one hub re-registers there (challenge, then proof of possession) and its socket
+        reconnects there; `Host.rehome` ends any live meeting code first, because its code and
+        room exist only at the rendezvous that minted it. Nothing is published from this machine,
+        so a tailnet route or a tunnel in front of the local rendezvous comes down.
+        """
+        if self.host is None:
+            return False
+        origin = hosted_origin()
+        self.hosted_reason = await asyncio.to_thread(probe_hosted, origin)
+        if self.hosted_reason:
+            return False
+        try:
+            await self.host.rehome(origin)
+        except Exception as error:
+            log.info("registering at %s failed: %s", origin, error)
+            self.hosted_reason = ("relay-terminal.ai answered but would not register this desktop, "
+                                  "so links cannot go through it right now.")
+            return False
+        await self.drop_tailnet()
+        await self.drop_cloudflare()
+        self.served_by_hosted = True
+        self.address = self.HOSTED_VALUE
+        self.base = origin
+        self.note = ("Links go through relay-terminal.ai, which carries only ciphertext it cannot "
+                     "read; anyone with a link can reach the door, and you admit each person.")
+        await self._wait_for_socket()
+        return True
+
+    async def drop_hosted(self) -> None:
+        """Back to this process's own rendezvous. The links follow whichever address is chosen
+        next; until then they fall back to this machine's own address."""
+        if not self.served_by_hosted or self.host is None:
+            return
+        try:
+            await self.host.rehome(self.local)
+        except Exception as error:          # our own server, on loopback: not expected
+            log.exception("going back to the local rendezvous failed")
+            self.emit({"t": "error", "message": f"could not leave relay-terminal.ai: {error}"})
+            return
+        self.served_by_hosted = False
+        if self.tls_port:
+            self.address = devtls.preferred_address()
+            self.base = f"https://{self.address}:{self.tls_port}"
+            self.note = self.self_signed_note()
+        else:
+            self.address, self.base, self.note = "", self.local, ""
+        await self._wait_for_socket()
+
+    async def _wait_for_socket(self, seconds: float = 2.0) -> None:
+        """Give a moved hub a moment to attach, so a link shown next already has a desktop."""
+        for _ in range(int(seconds / 0.02)):
+            if self.host is None or self.host.socket is not None:
+                return
+            await asyncio.sleep(0.02)
+
     async def set_address(self, address: str) -> None:
         """Point the pairing link at another of this machine's addresses."""
         if self.server is None:
             return
+        if address in (self.HOSTED_VALUE, hosted_origin()):
+            if not self.served_by_hosted:
+                await self.use_hosted()
+            self.announce()
+            return
         if address == self.CLOUDFLARE_VALUE:
+            await self.drop_hosted()
             if not self.served_by_cloudflare:
                 await self.use_cloudflare()
             self.announce()
             return
         if address and address == self.found.name:
+            await self.drop_hosted()
             await self.drop_cloudflare()
             if not self.served_by_tailscale:
                 await self.use_tailnet()
@@ -829,6 +957,7 @@ class Sidecar:
             return
         if not self.tls_port or address not in devtls.local_addresses():
             return
+        await self.drop_hosted()
         await self.drop_tailnet()
         await self.drop_cloudflare()
         self.address = address
@@ -893,7 +1022,7 @@ class Sidecar:
         reply = {"t": "invite", "id": invite.invite_id, "url": url, "qr": qr_matrix(url),
                  "role": invite.role, "panes": invite.panes, "uses": invite.uses_left,
                  "expires": invite.seconds_left()}
-        if self.served_by_cloudflare:
+        if self.served_by_cloudflare or self.served_by_hosted:   # both reach anyone
             reply["note"] = ("Over a public link, anyone this link is forwarded to can knock. "
                              "You admit each person by hand.")
         self.emit(reply)
