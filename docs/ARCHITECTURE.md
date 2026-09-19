@@ -1041,6 +1041,12 @@ engine writes them into its parser.
   own 24-bit color (`Ink`: user prompt, agent text, tool line, tool output, diff add/remove,
   error, note). A diff's add/remove lines also carry their fill as a 24-bit background — the
   theme's green/red with pure black or white on it, whichever reads (`theme::contrastInk`).
+- **Every inline block is wrapped in an OSC 8 run `relay://prose/<pane>/<block>`** (#R2WQ) and
+  its logical lines — the rendered text before the word wrapper, styles as spans — are handed to
+  the engine with the width they were printed at, so the view re-wraps them when the pane is
+  resized instead of leaving the printed break points frozen into the scrollback. At the print
+  width nothing changes: the layer stands aside and the printed rows show. The run is never a
+  link. See `docs/ENGINE.md`, "Prose blocks".
 - `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
   are pending, the prompt is not redrawn between turns.
 - Tool calls print one line each; see "Tool-call lines" below.

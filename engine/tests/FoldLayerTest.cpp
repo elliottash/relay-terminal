@@ -3,6 +3,7 @@
 // visual-row <-> real-row mapping, anchoring, trimming and ordering, and the
 // prose blocks that replace their own rows on a resize (#R2WQ).
 #include "view/FoldLayer.h"
+#include "view/ProseSpans.h"
 
 #include "core/CellTypes.h"
 
@@ -402,8 +403,9 @@ private slots:
         QVERIFY(f.active());
         QCOMPARE(f.fold(uri)->height(), 1);
         QCOMPARE(f.visualTotal(100), 99);
-        QCOMPARE(f.at(4).fold, false);       // a taller block: rows below move up
-        QCOMPARE(f.at(4).realRow, 6);
+        QVERIFY(f.at(4).fold);               // the block's one row, where the two were
+        QCOMPARE(f.at(4).foldRow, 0);
+        QCOMPARE(f.at(5).realRow, 6);        // everything below moves up a row
     }
 
     void proseWrapsWithTheSharedRuleAndHangs()
@@ -411,7 +413,7 @@ private slots:
         FoldLayer f;
         f.setGeometry(48, 3);
         const QString uri = QStringLiteral("relay://prose/p/2");
-        f.setProse(uri, lines({QStringLiteral("• one two three four five six seven eight")}), 80);
+        f.setProse(uri, lines({QStringLiteral("• one two three four five six seven eight nine ten eleven twelve")}), 80);
         f.setAnchor(uri, 0, 2);
         QVERIFY(f.active());
         const FoldLayer::Fold *fold = f.fold(uri);
@@ -461,15 +463,17 @@ private slots:
         f.setAnchor(QStringLiteral("call"), 6, 6);
         // At 80 the call fold still inserts; the prose block stands aside.
         QCOMPARE(f.visualTotal(20), 22);
-        // At 48 the prose block takes its two rows over: one painted row.
+        // At 48 the prose block takes its two rows over: one painted row, and
+        // the call fold still inserts its two.
         f.setGeometry(48, 3);
         QCOMPARE(f.fold(prose)->height(), 1);
-        QCOMPARE(f.visualTotal(20), 19);
+        QCOMPARE(f.visualTotal(20), 21);     // 20 - 2 hidden + 1 prose + 2 call
         QVERIFY(f.at(2).fold);               // the prose block
         QCOMPARE(f.at(2).foldIndex, f.indexOf(prose));
         QCOMPARE(f.at(3).realRow, 4);        // the row after the hidden span
-        QVERIFY(f.at(7).fold);               // the call fold's rows, under row 6
-        QCOMPARE(f.at(9).realRow, 7);
+        QVERIFY(f.at(6).fold);               // the call fold's rows, under row 6
+        QVERIFY(f.at(7).fold);
+        QCOMPARE(f.at(8).realRow, 7);
         // Round trip for every row that is not hidden.
         for (int r = 0; r < 20; ++r) {
             if (f.rowHidden(r))
@@ -494,6 +498,87 @@ private slots:
         QCOMPARE(f.rowStartCol(0, 0), 0);
         // ... and prose is not offered to the host as an open fold.
         QVERIFY(!f.expandedUris().contains(QStringLiteral("relay://prose/p/5")));
+    }
+
+    // ---- the pane's ANSI -> FoldLine conversion (#R2WQ): what the pane hands
+    // the view is the text before the wrapper, with its styles as spans.
+
+    void proseSpansKeepTheRenderedStyles()
+    {
+        ProseCollector c;
+        c.feed(QStringLiteral("plain \x1b[1mbold\x1b[0m tail\n"));
+        c.feed(QStringLiteral("\x1b[1;35m## heading\x1b[0m\n"));
+        const QVector<FoldLine> out = c.take();
+        QCOMPARE(out.size(), 2);
+        QCOMPARE(out[0].text(), QStringLiteral("plain bold tail"));
+        QCOMPARE(out[0].spans.size(), 3);
+        QCOMPARE(out[0].spans[1].text, QStringLiteral("bold"));
+        QVERIFY(out[0].spans[1].bold);
+        QCOMPARE(out[0].spans[1].sgr, QStringLiteral("1"));
+        QVERIFY(!out[0].spans[0].bold);
+        QVERIFY(out[0].spans[0].sgr.isEmpty());
+        QCOMPARE(out[1].spans.first().sgr, QStringLiteral("1;35"));
+        QVERIFY(out[1].spans.first().bold);
+        // The SGR is what the fold layer resolves against the theme.
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/x"), out, 40);
+        const FoldLayer::Fold *fold = f.fold(QStringLiteral("relay://prose/x"));
+        QCOMPARE(fold->cells[1].back().fgPacked, CellColor::indexed(5));   // magenta
+    }
+
+    void proseSpansSurviveArbitraryChunkBoundaries()
+    {
+        const QString rendered = QStringLiteral(
+            "one two \x1b[2;97mthree\x1b[0m four\n\x1b[3;36m- a quoted bullet\x1b[0m\n");
+        ProseCollector whole;
+        whole.feed(rendered);
+        for (int cut : {1, 5, 13, 27, 40, int(rendered.size()) - 1}) {
+            ProseCollector streamed;
+            streamed.feed(rendered.left(cut));
+            streamed.feed(rendered.mid(cut));
+            const QVector<FoldLine> a = whole.take(), b = streamed.take();
+            QCOMPARE(b.size(), a.size());
+            for (int i = 0; i < a.size(); ++i) {
+                QCOMPARE(b[i].text(), a[i].text());
+                QCOMPARE(b[i].spans.size(), a[i].spans.size());
+                for (int s = 0; s < a[i].spans.size(); ++s)
+                    QCOMPARE(b[i].spans[s].sgr, a[i].spans[s].sgr);
+            }
+        }
+    }
+
+    void proseSpansDropTrailingEmptyLinesAndKeepInteriorOnes()
+    {
+        ProseCollector a;
+        a.feed(QStringLiteral("reply\n"));
+        QCOMPARE(a.take().size(), 1);
+        ProseCollector b;
+        b.feed(QStringLiteral("para one\n\npara two\n\n"));
+        const QVector<FoldLine> lines = b.take();
+        QCOMPARE(lines.size(), 3);   // the trailing blank is not the block's
+        QCOMPARE(lines[1].text(), QString());
+        ProseCollector c;
+        c.feed(QString());
+        QVERIFY(c.take().isEmpty());
+        // A line of blanks is a span of spaces: it stays.
+        ProseCollector d;
+        d.feed(QStringLiteral("x\n  \ny\n"));
+        QCOMPARE(d.take().size(), 3);
+        // take() does not reset: the pane replaces the collector when a new
+        // block opens (openProse assigns a fresh one).
+    }
+
+    void proseSpansSkipOscAndOtherSequences()
+    {
+        // The role mark the pane writes per row, and an OSC 8 run, are zero
+        // width to the collector, exactly as they are to the terminal.
+        ProseCollector c;
+        c.feed(QStringLiteral("\x1b]7772;shell\x1b\\\x1b[1ma line the user typed\x1b[0m\n"));
+        const QVector<FoldLine> lines = c.take();
+        QCOMPARE(lines.size(), 1);
+        QCOMPARE(lines[0].text(), QStringLiteral("a line the user typed"));
+        QVERIFY(lines[0].spans.first().bold);
     }
 };
 

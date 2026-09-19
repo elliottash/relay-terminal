@@ -72,6 +72,7 @@ set(RELAY_ENGINE_SOURCES
     view/BoxDrawing.h view/BoxDrawing.cpp
     view/FoldLayer.h view/FoldLayer.cpp
     view/FoldSearch.h view/FoldSearch.cpp
+    view/ProseSpans.h
     view/KeyMapper.h view/KeyMapper.cpp
     view/TerminalView.h view/TerminalView.cpp
     backend/VTermBackend.h backend/VTermBackend.cpp

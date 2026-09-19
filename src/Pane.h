@@ -65,6 +65,7 @@
 #include "Aliases.h"
 #include "MarkdownAnsi.h"
 #include "WordWrap.h"
+#include "view/ProseSpans.h"   // #R2WQ: prose blocks, ANSI -> FoldLine spans
 #include "TranscriptGaps.h" // a blank line between blocks of different kinds (#5AWD)
 #include "OutputLinks.h"
 #include "SlashCommands.h"
@@ -11335,114 +11336,6 @@ private:
     // The engine's fold layer hides the run's real rows and paints its own wrap; at the print
     // width it stands aside, so a pane that is never resized is byte-identical.
 
-    // One block's logical lines, collected from the ANSI the pane renders (MarkdownAnsi, the inks'
-    // own SGR) as it streams. The style of a run is kept both as flags and as the SGR parameters
-    // that set it; the view resolves the SGR against the theme when it paints, so a re-wrapped
-    // block follows a theme switch exactly as the grid's own rows do.
-    struct ProseCollector {
-        QVector<relay::FoldLine> lines;
-        relay::FoldLine line;         // the line being built
-        relay::FoldSpan open;         // the span being built (style set when it opened)
-        bool bold = false, italic = false, underline = false, faint = false;
-        int fg = -1;                  // -1 = the default ink; else an ANSI index
-        enum class Scan { Ground, Esc, Csi, Osc, OscEsc } scan = Scan::Ground;
-        QString csi;
-
-        QString currentSgr() const {
-            QStringList p;
-            if (bold) p << QStringLiteral("1");
-            if (faint) p << QStringLiteral("2");
-            if (italic) p << QStringLiteral("3");
-            if (underline) p << QStringLiteral("4");
-            if (fg >= 0) {
-                if (fg < 8) p << QString::number(30 + fg);
-                else if (fg < 16) p << QString::number(90 + fg - 8);
-                else p << QStringLiteral("38;5;") + QString::number(fg);
-            }
-            return p.join(QLatin1Char(';'));
-        }
-        void closeSpan() {
-            if (!open.text.isEmpty()) line.spans << open;
-            open = relay::FoldSpan{};
-        }
-        void applySgr(const QString &params) {
-            const QStringList ps = params.split(QLatin1Char(';'), Qt::SkipEmptyParts);
-            for (int i = 0; i < ps.size(); ++i) {
-                const int p = ps.at(i).toInt();
-                if (p == 0) { bold = italic = underline = faint = false; fg = -1; }
-                else if (p == 1) bold = true;
-                else if (p == 2) faint = true;
-                else if (p == 3) italic = true;
-                else if (p == 4 || p == 21) underline = true;
-                else if (p == 22) { bold = faint = false; }
-                else if (p == 23) italic = false;
-                else if (p == 24) underline = false;
-                else if (p == 39) fg = -1;
-                else if (p >= 30 && p <= 37) fg = p - 30;
-                else if (p >= 90 && p <= 97) fg = p - 90 + 8;
-                else if (p == 38 && i + 1 < ps.size()) {
-                    const int mode = ps.at(i + 1).toInt();
-                    if (mode == 5 && i + 2 < ps.size()) { fg = ps.at(i + 2).toInt(); i += 2; }
-                    else if (mode == 2) i += 4;   // a truecolour: no theme index to follow
-                }
-            }
-            closeSpan();   // the style change ends the span in progress
-        }
-        void feed(const QString &rendered) {
-            for (const QChar ch : rendered) {
-                switch (scan) {
-                case Scan::Ground:
-                    if (ch == QChar(0x1b)) { scan = Scan::Esc; continue; }
-                    if (ch == QLatin1Char('\n')) {
-                        closeSpan();
-                        lines << line;
-                        line = relay::FoldLine{};
-                        continue;
-                    }
-                    if (open.text.isEmpty()) {
-                        open.sgr = currentSgr();
-                        open.bold = bold; open.italic = italic;
-                        open.underline = underline; open.dim = faint;
-                    }
-                    open.text += ch;
-                    continue;
-                case Scan::Esc:
-                    if (ch == QLatin1Char('[')) { scan = Scan::Csi; csi.clear(); continue; }
-                    if (ch == QLatin1Char(']')) { scan = Scan::Osc; continue; }
-                    scan = Scan::Ground;   // a two-character escape: nothing to keep
-                    continue;
-                case Scan::Csi: {
-                    const ushort u = ch.unicode();
-                    if (u >= 0x40 && u <= 0x7e) {
-                        applySgr(csi);
-                        scan = Scan::Ground;
-                        continue;
-                    }
-                    csi += ch;   // parameters and intermediates until the final byte
-                    continue;
-                }
-                case Scan::Osc:
-                    if (ch == QChar(0x07)) { scan = Scan::Ground; continue; }
-                    if (ch == QChar(0x1b)) { scan = Scan::OscEsc; continue; }
-                    continue;
-                case Scan::OscEsc:
-                    scan = Scan::Ground;   // ST: the OSC is over
-                    continue;
-                }
-            }
-        }
-        QVector<relay::FoldLine> take() {
-            closeSpan();
-            if (!line.spans.isEmpty()) lines << line;
-            // Trailing newlines open fresh grid rows that carry no cells of the
-            // block's OSC 8 run, so they are not the block's: an empty last line
-            // (a '\n' with nothing after it) is dropped, whoever prints next
-            // owns that row. An empty line with something after it stays.
-            while (!lines.isEmpty() && lines.last().spans.isEmpty()) lines.removeLast();
-            return lines;
-        }
-    };
-
     // The open block's URI (empty = none), its ink, the width it was printed at and its collected
     // lines. A block opens on the first visible chunk of one ink and closes when another ink
     // prints, an anchored row is drawn, or the inline region ends -- the same boundaries that
@@ -11451,7 +11344,7 @@ private:
     Ink m_proseInk = Ink::Note;
     int m_prosePrintColumns = 0;
     int m_proseSeq = 0;
-    ProseCollector m_prose;
+    relay::ProseCollector m_prose;
 
     static bool proseVisible(const QString &rendered) {
         for (const QChar c : rendered)
@@ -11464,7 +11357,7 @@ private:
                      + QString::number(++m_proseSeq);
         m_proseInk = ink;
         m_prosePrintColumns = m_backend ? m_backend->columns() : 0;
-        m_prose = ProseCollector{};
+        m_prose = relay::ProseCollector{};
         return QByteArray("\x1b]8;;") + m_proseUri.toUtf8() + QByteArray("\x1b\\");
     }
 
@@ -11497,7 +11390,13 @@ private:
     // open), and collects the chunk's rendered text, pre-wrapper, into the open block.
     QByteArray proseStart(Ink ink, const QString &rendered) {
         QByteArray out;
-        if (!m_proseUri.isEmpty() && ink != m_proseInk) out += closeProseRun();
+        if (!m_proseUri.isEmpty() && ink != m_proseInk) {
+            // The wrapper may still be holding the block's last word. It belongs
+            // inside the run: flush it to the stream before the OSC 8 close, the
+            // same order closeInline and the anchored-row writers use.
+            out += terminalLines(m_wrap.flush());
+            out += closeProseRun();
+        }
         if (m_proseUri.isEmpty() && proseVisible(rendered)) out += openProse(ink);
         if (!m_proseUri.isEmpty()) m_prose.feed(rendered);
         return out;

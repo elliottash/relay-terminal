@@ -156,7 +156,7 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Links | `stepLink(delta, Link*, index*, count*)`, `endLinkWalk()`, `linkWalkActive()`, `setPlainClickOpensLinks(on)` — the keyboard walk over every file, folder and URL in the screen and the scrollback (`Ctrl+Shift+L`) |
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
-| Folds | `setFoldPrefix()`, `setFoldContent(uri, lines)`, `setFoldExpanded()`, `foldExpanded()`, `removeFold()`, `clearFolds()`, `expandedFolds()`, `toggleFold(uri)`, callback `onFoldRequested(uri)` — the detail of one agent tool call or one reasoning block, unfolded inside the grid (see **Folds** below) |
+| Folds | `setFoldPrefix()`, `setFoldContent(uri, lines)`, `setFoldExpanded()`, `foldExpanded()`, `removeFold()`, `clearFolds()`, `expandedFolds()`, `toggleFold(uri)`, callback `onFoldRequested(uri)` — the detail of one agent tool call or one reasoning block, unfolded inside the grid (see **Folds** below) — and `setProseBlock(uri, lines, printColumns)`, the pane's own prose re-wrapped on a resize (#R2WQ) |
 
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
 Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk,
@@ -172,6 +172,36 @@ a `close` each time. See ARCHITECTURE.md §6.
 Relay prints each agent tool call into the terminal grid as one concise line wrapped in an OSC 8
 hyperlink (`relay://call/<pane>/<turn>/<call>`, issue #TK9C). Clicking that line unfolds the call's
 detail **in place, underneath it, inside the terminal**, and clicking again folds it away.
+
+### Prose blocks: the pane's own lines re-wrap on a resize (#R2WQ)
+
+Agent prose, a line the user typed, every inline block the pane prints, is *also* an OSC 8 run —
+`relay://prose/<pane>/<block>` — covering exactly the block's rows. The pane wraps those bytes
+with `relay::WordWrap` exactly as before, and hands the same text *before* the wrapper — as
+`FoldLine` spans (`engine/view/ProseSpans.h` collects them from the rendered ANSI, styles kept as
+SGR so the theme still resolves them) — to `TerminalBackend::setProseBlock()` with the width it
+was printed at.
+
+A prose block is a **replacement fold**: while the pane is *not* at that width, the layer hides
+the run's real rows and paints its own wrap of the logical lines, through the same
+`relay::wrap::rows()` break rule the streaming wrapper's output shows (below). At the print width
+the layer stands aside entirely — same rows, same bytes, same cost — so a pane that is never
+resized is unchanged. Replacement rows are painted as grid rows (`paintProseRow`), not as fold
+blocks: no tint, no rule, column 0, inks resolved from the theme at paint time, and a user line's
+OSC 7772 role band carried on the `FoldLine`. A `relay://prose/` URI is never a link — no hover,
+no cursor, no click; `TerminalView::linkAt()` steps over it so the text behaves like ordinary
+output. A block whose anchor was trimmed out of the scrollback has no run and stays frozen at the
+width it was printed, exactly as before.
+
+### One break rule
+
+Where a row may end is decided once, in `relay::wrap` (`src/WordWrap.h`): break before a word that
+would cross the edge; a continuation row hangs past the line's marker or leading spaces (dropped
+past half the row); a word wider than a row breaks at the edge; a space that would cross the edge
+is dropped. `WordWrap` streams it into the grid; `FoldLayer::layout()` and `wrapFoldLines()` lay
+out whole lines with the same rule — which is what makes a re-wrapped block show exactly the rows
+the wrapper would have printed, and stops expanded tool-call detail breaking mid-word as a side
+effect (`tests/wordwrap_test.cpp` asserts the two forms agree).
 
 ### Why it is a view layer
 
@@ -303,8 +333,8 @@ the turn.
 `… N earlier lines`, and the **first 18** of a settled fold opened by hand, over a muted
 `… N more lines · open in pane`. A grid fold has no scroll view of its own, so the cap is the
 height. The count is of the rows the view will paint, not of the lines handed over: the content is
-wrapped first, by `relay::wrapFoldLines()` (`engine/TerminalBackend.h` — the same hard wrap at
-`columns - kFoldIndent` that `FoldLayer::layout()` does, asserted against the layer in
+wrapped first, by `relay::wrapFoldLines()` (`engine/TerminalBackend.h` — the same word-aware
+break at `columns - kFoldIndent` that `FoldLayer::layout()` does, asserted against the layer in
 `engine/tests/FoldLayerTest.cpp`), so one 5 000-character paragraph is 60 rows at 100 columns and
 is cut like any other. `FoldOptions::wrapCells` and `FoldOptions::tail` carry the two decisions
 into `calllines`.

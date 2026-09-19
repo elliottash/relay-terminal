@@ -5,9 +5,11 @@
 #include "session/TerminalSession.h"
 #include "view/KeyMapper.h"
 #include "view/TerminalView.h"
+#include "WordWrap.h"
 
 #include <QAccessible>
 #include <QFontDatabase>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QUrl>
@@ -107,6 +109,61 @@ int countNonBackground(const QImage &img, const QRect &r, const QColor &bg)
             if (img.pixelColor(x, y) != bg)
                 ++n;
     return n;
+}
+
+// ---- prose re-wrap (#R2WQ) ----
+//
+// The rows the pane prints for one block of its own text, and the rows the view
+// must lay out for the same block at any other width: WordWrap's bytes, with
+// the terminal's own autowrap applied to the words it leaves whole. SGR runs
+// take no width; a cursor-forward indent is the blank cells it leaves.
+QString shownProse(const QString &rendered)
+{
+    static const QRegularExpression sgr(QStringLiteral("\\x1b\\[[0-9;]*m"));
+    static const QRegularExpression forward(QStringLiteral("\\x1b\\[(\\d+)C"));
+    QString text = QString(rendered).remove(sgr);
+    for (auto m = forward.match(text); m.hasMatch(); m = forward.match(text))
+        text.replace(m.capturedStart(), m.capturedLength(), QString(m.captured(1).toInt(), QLatin1Char(' ')));
+    return text;
+}
+
+QStringList proseRows(const QString &rendered, int columns)
+{
+    relay::WordWrap w;
+    w.setColumns(columns);
+    QStringList out;
+    QStringList byteRows = shownProse(w.feed(rendered) + w.flush()).split(QLatin1Char('\n'));
+    if (!byteRows.isEmpty() && byteRows.last().isEmpty())
+        byteRows.removeLast();
+    for (const QString &row : byteRows) {
+        QString line;
+        int used = 0;
+        for (const QChar c : row) {
+            const int width = relay::WordWrap::cellWidth(c.unicode());
+            if (used > 0 && used + width > columns) {
+                out << line;
+                line.clear();
+                used = 0;
+            }
+            line += c;
+            used += width;
+        }
+        out << line;
+    }
+    return out;
+}
+
+QVector<FoldLine> proseLines(const QStringList &texts)
+{
+    QVector<FoldLine> out;
+    for (const QString &t : texts) {
+        FoldSpan s;
+        s.text = t;
+        FoldLine l;
+        l.spans << s;
+        out << l;
+    }
+    return out;
 }
 
 } // namespace
@@ -997,6 +1054,104 @@ private slots:
         QKeyEvent f12(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier);
         QApplication::sendEvent(t.view, &f12);
         QVERIFY(!f12.isAccepted());
+    }
+
+    // #R2WQ: a reply printed at one pane width still reads as wrapped prose
+    // after the pane is made narrower and wider again — no row ends mid-word,
+    // no row is stranded at the old width, bullets still hang under their
+    // text. The block is what the pane prints: pre-wrapped by the streaming
+    // wrapper at 80, wrapped in an OSC 8 prose run, its logical lines handed
+    // to the engine beside the bytes.
+    void proseReflowsOnResize()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(20, 80);
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        for (int i = 0; i < 3; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        QTest::qWait(80);
+
+        const QString para = QStringLiteral(
+            "This reply carries a stretch of inline code, enough words to wrap at eighty columns, "
+            "and a long word like RELAY_ENGINE_WITH_GHOSTTY that not every width can keep whole.");
+        const QString bullet = QStringLiteral(
+            "- a bullet whose words run past the edge of the pane at both of the widths tried here");
+        const QString rendered = QStringLiteral("\x1b[1m") + para.left(9)
+            + QStringLiteral("\x1b[0m") + para.mid(9) + QStringLiteral("\n")
+            + bullet + QStringLiteral("\n");
+        relay::WordWrap w;
+        w.setColumns(80);
+        QByteArray bytes = QByteArrayLiteral("\x1b]8;;relay://prose/t/1\x1b\\");
+        bytes += QString(w.feed(rendered) + w.flush()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")).toUtf8();
+        bytes += QByteArrayLiteral("\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(bytes);
+        // The block's logical lines, as the pane hands them over: the same
+        // text before the wrapper, the bold run kept as a span.
+        QVector<FoldLine> lines;
+        {
+            FoldLine first;
+            FoldSpan bold;
+            bold.text = para.left(9);
+            bold.bold = true;
+            bold.sgr = QStringLiteral("1");
+            FoldSpan rest;
+            rest.text = para.mid(9);
+            first.spans << bold << rest;
+            lines << first << proseLines({bullet});
+        }
+        t.backend->setProseBlock(QStringLiteral("relay://prose/t/1"), lines, 80);
+
+        // What the wrapper would have printed at a width, right-trimmed the way
+        // the grid trims its rows.
+        const QString plain = para + QLatin1Char('\n') + bullet + QLatin1Char('\n');
+        auto expectedAt = [&plain](int columns) {
+            QStringList rows = proseRows(plain, columns);
+            for (QString &row : rows)
+                while (row.endsWith(QLatin1Char(' ')))
+                    row.chop(1);
+            return rows;
+        };
+        auto blockRows = [&t](int count) {
+            QStringList rows = t.view->visibleRowsText().mid(3, count);
+            for (QString &row : rows)
+                while (row.endsWith(QLatin1Char(' ')))
+                    row.chop(1);
+            return rows;
+        };
+        auto waitRows = [&blockRows, &expectedAt](int columns) {
+            const QStringList want = expectedAt(columns);
+            QElapsedTimer since;
+            since.start();
+            while (since.elapsed() < 4000) {
+                if (blockRows(want.size()) == want)
+                    return true;
+                QTest::qWait(50);
+            }
+            return blockRows(want.size()) == want;
+        };
+
+        // At the print width the layer stands aside: the printed rows show.
+        QVERIFY2(waitRows(80), "rows at 80 are the wrapper's own");
+        // Narrower: the block re-wraps between words, bullets hang.
+        t.backend->resizeTerminal(20, 48);
+        QVERIFY2(waitRows(48), "rows at 48 are what the wrapper would print at 48");
+        const QStringList narrow = expectedAt(48);
+        for (const QString &row : narrow.mid(2)) {
+            if (row.startsWith(QLatin1String("  ")))
+                QVERIFY2(row.startsWith(QLatin1String("  ")) && !row.trimmed().startsWith(QLatin1Char(' ')),
+                         "bullet rows hang past the marker, not spaces in the cells");
+        }
+        // Wider than printed: the block re-flows to the wider measure.
+        t.backend->resizeTerminal(20, 96);
+        QVERIFY2(waitRows(96), "rows at 96 are what the wrapper would print at 96");
+        // And back: byte-identical to what was printed.
+        t.backend->resizeTerminal(20, 80);
+        QVERIFY2(waitRows(80), "rows return to the printed ones at 80");
+        // The prose run is not a link: the URI never shows, and the row's text
+        // is not clickable.
+        QVERIFY(t.view->visibleRowsText().filter(QStringLiteral("relay://prose")).isEmpty());
+        QVERIFY(t.view->linkAtPoint(QPoint(2 + 10 * t.view->cellWidth(), 2 + 3 * t.view->cellHeight())).target.isEmpty());
     }
 };
 
