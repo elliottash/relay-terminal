@@ -1411,7 +1411,7 @@ def cmd_commit(args, log):
                 verified = cxx
 
         new = build_commit(repo, tip, entries, message, tree=tree)
-        touched = [line for line in git_out(repo, "diff", "--name-only", tip, new).splitlines()
+        touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only", tip, new).splitlines()
                    if line]
         if sorted(touched) != sorted(entries):
             raise Fail("name gate failed: the commit would touch %s but this session's paths "
@@ -1651,7 +1651,7 @@ def cmd_repair(args, log):
     if not paths:
         raise Fail("nothing to repair")
 
-    changed = set(git_out(repo, "diff", "--name-only", parent, sha).splitlines())
+    changed = set(git_out(repo, "diff", "--no-renames", "--name-only", parent, sha).splitlines())
     for path in paths:
         if path not in changed:
             log("warning: %s is not one of the paths %s changed" % (path, sha[:12]))
@@ -1718,7 +1718,7 @@ def cmd_repair(args, log):
                 (hash_blob(repo, content), mode, False)
 
         new = build_commit(repo, tip, entries, message)
-        touched = [line for line in git_out(repo, "diff", "--name-only", tip, new).splitlines()
+        touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only", tip, new).splitlines()
                    if line]
         if sorted(touched) != sorted(entries):
             raise Fail("name gate failed: the repair would touch %s but you asked for %s. "

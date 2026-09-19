@@ -232,6 +232,22 @@ class LandingHunks(LandCase):
         self.land("commit", "mine", "-m", "the tool")
         self.assertEqual(self.tip_text("scripts/tool.py"), "one\ntwo\n")
 
+    def test_a_moved_file_lands_in_one_commit(self):
+        # Moving a card is a delete plus an add with the same bytes; git's rename detection used
+        # to collapse the pair into one name, and the name gate then refused its own landing.
+        old, new = self.repo / "f.txt", self.repo / "moved" / "f.txt"
+        self.land("begin", "mine", "f.txt", "moved/f.txt")
+        text = old.read_text()
+        new.parent.mkdir(parents=True, exist_ok=True)
+        write(new, text)
+        old.unlink()
+        self.land("commit", "mine", "-m", "move it")
+        self.assertEqual(self.tip_text("moved/f.txt"), text)
+        names = subprocess.run(["git", "ls-tree", "-r", "--name-only", "main"], cwd=self.repo,
+                               capture_output=True, text=True, check=True).stdout.split()
+        self.assertNotIn("f.txt", names)
+        self.assertIn("moved/f.txt", names)
+
     def test_a_path_without_begin_is_refused_until_whole(self):
         edit_line(self.repo / "f.txt", 3, "UNCLAIMED")
         out = self.land("commit", "mine", "-m", "x", "--paths", "f.txt", expect=1)
