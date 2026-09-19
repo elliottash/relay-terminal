@@ -1,0 +1,11 @@
+phone shows code 14804
+pane view mounted
+ipad-portrait: 820x1180, keyboard 398px -> visible 782px (scrolled 292.09375): all inside
+ipad-portrait-tall-keyboard: 820x1180, keyboard 520px -> visible 660px (scrolled 414.09375): all inside
+ipad-mini-portrait: 744x1133, keyboard 430px -> visible 703px (scrolled 324.09375): all inside
+ipad-pro-11-portrait: 834x1194, keyboard 520px -> visible 674px (scrolled 414.09375): all inside
+ipad-landscape: 1180x820, keyboard 460px -> visible 360px (scrolled 354.09375): all inside
+ipad-pro-11-landscape: 1194x834, keyboard 480px -> visible 354px (scrolled 374.09375): all inside
+iphone-portrait: 390x844, keyboard 336px -> visible 508px (scrolled 139.625): all inside
+iphone-landscape: 844x390, keyboard 205px -> visible 185px (scrolled 117.09375): all inside
+console problems: []

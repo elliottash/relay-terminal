@@ -125,7 +125,12 @@ async def main(url: str, out: Path) -> int:
             after = json.loads(await browser.evaluate(f"JSON.stringify(({MEASURE})({json.dumps([s for s, _ in MUST_SEE])}))"))
             shot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (out / f"implementer-{name}-keyboard-up.png").write_bytes(base64.b64decode(shot["data"]))
-            bad = [(s, where) for (s, where, _, _) in after if where != "inside"]
+            # Under 260 px visible the client sets `tiny-viewport`, and the thread bar steps aside
+            # on purpose so the prompt box and send fit (#KBFT, d14a4b4). The bar is then not
+            # required; everything else still is.
+            tiny = await browser.evaluate("document.documentElement.classList.contains('tiny-viewport')")
+            bad = [(s, where) for (s, where, _, _) in after
+                   if where != "inside" and not (tiny and s == "#thread-bar" and where == "not drawn")]
             failures += bool(bad)
             print(f"{name}: {width}x{height}, keyboard {keyboard}px -> visible {geometry['visible']}px "
                   f"(scrolled {geometry['offset']}): "
