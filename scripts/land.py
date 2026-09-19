@@ -185,16 +185,14 @@ def hash_blob(repo, data):
 def work_bytes(repo, path):
     """The working copy of `path` as bytes, or None when it is absent."""
     full = Path(repo) / path
-    try:
-        info = full.lstat()
-    except (OSError, ValueError):
-        return None
     if os.path.islink(full):
         return os.readlink(full).encode("utf-8")
     if not os.path.isfile(full):
         return None
-    del info
-    return full.read_bytes()
+    try:
+        return full.read_bytes()
+    except OSError:
+        return None
 
 
 def work_mode(repo, path, fallback="100644"):
@@ -504,7 +502,7 @@ class Conflict(Exception):
         self.paths = paths
 
 
-def plan_path(repo, root, session, path, record, tip, whole, log):
+def plan_path(repo, root, session, path, record, tip, whole):
     """Decide the bytes to commit for one path. Returns (content, mode) or None to skip.
 
     content is None for a deletion. Raises Conflict for that one path.
@@ -553,9 +551,7 @@ def plan_path(repo, root, session, path, record, tip, whole, log):
         raise Conflict([path])
     if merged == tip_data:
         return None
-    mode = work_mode(repo, path, tip_entry[0])
-    del log
-    return merged, mode
+    return merged, work_mode(repo, path, tip_entry[0])
 
 
 def build_commit(repo, tip, entries, message):
@@ -639,7 +635,7 @@ def cmd_commit(args, log):
             record = claimed.get(path, {"existed": False, "tracked_at_begin": False})
             try:
                 outcome = plan_path(repo, root, args.session, path, record, tip,
-                                    path in whole, log)
+                                    path in whole)
             except Conflict as clash:
                 conflicts.extend(clash.paths)
                 continue
