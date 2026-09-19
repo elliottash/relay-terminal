@@ -19,6 +19,7 @@ reopens the file when another process has rotated it.
 """
 from __future__ import annotations
 
+import faulthandler
 import logging
 import os
 import re
@@ -150,6 +151,47 @@ class _SharedRotatingHandler(RotatingFileHandler):
                     pass
 
 
+# The file faulthandler writes into, kept open for the life of the process: it writes from the
+# signal handler, to a file descriptor, and a closed one would be the last thing it ever did.
+_faults_handle = None
+
+
+def enable_fault_reports(component: str = "worker") -> Path | None:
+    """A fatal signal in this process leaves a Python traceback behind. Returns the file, or None.
+
+    Nothing else catches one. A segfault never reaches the logging module, and the GUI reads the
+    worker's stderr and throws it away on purpose (no provider error bodies in the log), so a
+    worker that dies this way leaves nothing at all — which is what about 1,200 processes a day on
+    this machine do: signal 11 against `backend/worker.py` in /var/log/apport.log, not one line in
+    worker.log, and `worker_exit ... crashed=0` in the GUI's. faulthandler writes every thread's
+    Python stack straight to the descriptor from the handler itself, which is the one thing that
+    still works at that point.
+
+    Its own file rather than worker.log: the rotating handler would move the file out from under a
+    descriptor that can no longer be reopened, and a raw traceback is not a log line. Rotated at a
+    megabyte, which is hundreds of reports.
+    """
+    global _faults_handle
+    if _faults_handle is not None:
+        return Path(_faults_handle.name)
+    try:
+        directory = log_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{component}-faults.log"
+        if path.exists() and path.stat().st_size > 1024 * 1024:
+            path.replace(directory / f"{component}-faults.log.1")
+        handle = open(path, "a", buffering=1, encoding="utf-8", errors="replace")
+        try:
+            os.chmod(path, FILE_MODE)
+        except OSError:
+            pass
+        faulthandler.enable(file=handle, all_threads=True)
+        _faults_handle = handle
+        return path
+    except (OSError, ValueError, RuntimeError):
+        return None   # diagnostics are never the reason a worker fails to start
+
+
 def configure(component: str = "worker", *, pane: str | None = None, level: str | None = None) -> logging.Logger:
     """Install the rotating handler for this process. Safe to call more than once.
 
@@ -187,6 +229,8 @@ def configure(component: str = "worker", *, pane: str | None = None, level: str 
         handler = _SharedRotatingHandler(directory / f"{component}.log")
         handler.setFormatter(_Formatter("%(asctime)s %(levelname)s %(name)s pane=%(pane)s %(message)s"))
         logger.addHandler(handler)
+        # Same directory, same choice: logging off means no files, this one included.
+        enable_fault_reports(component)
     except OSError as exc:
         # A read-only or missing data directory must never stop a turn.
         print(f"relay: no log file ({type(exc).__name__})", file=sys.stderr)

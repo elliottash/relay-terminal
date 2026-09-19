@@ -43,6 +43,34 @@ class LogFileTests(unittest.TestCase):
     def text(self, name='worker.log'):
         return (self.dir / name).read_text(encoding='utf-8')
 
+    def test_a_fatal_signal_leaves_a_python_traceback(self):
+        """A worker that dies of SIGSEGV writes its stacks to worker-faults.log.
+
+        Nothing else sees one: the signal never reaches the logging module, and the GUI discards
+        the worker's stderr deliberately. Run in a child, because this one really does crash.
+        """
+        child = """
+import ctypes, sys
+sys.path.insert(0, {backend!r})
+from relay_core import logs
+logs.configure('worker', level='info')
+ctypes.CDLL(None).prctl(4, 0)     # PR_SET_DUMPABLE=0: no core, no crash report to the machine
+ctypes.string_at(0)               # and now a real segmentation fault
+""".format(backend=str(ROOT / 'backend'))
+        environment = dict(os.environ, XDG_DATA_HOME=self.temp.name)
+        done = subprocess.run([sys.executable, '-c', child], env=environment,
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, -11, done.stderr)   # still dies of the signal
+        report = (self.dir / 'worker-faults.log').read_text(encoding='utf-8')
+        self.assertIn('Fatal Python error', report)
+        self.assertIn('Segmentation fault', report)
+        self.assertIn('Current thread', report)               # with the Python stack that was on it
+        self.assertEqual(stat.S_IMODE((self.dir / 'worker-faults.log').stat().st_mode), 0o600)
+
+    def test_fault_reports_are_off_when_logging_is_off(self):
+        logs.configure('worker', level='off')
+        self.assertFalse((self.dir / 'worker-faults.log').exists())
+
     def test_location_permissions_and_format(self):
         log = logs.configure('worker', pane='pane-1', level='info')
         logs.event(log, 'turn_start', session='s1', turn='t1', model='glm-5.3', host='api.z.ai')
