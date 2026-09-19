@@ -1259,6 +1259,17 @@ private:
     // a restart. A verb ("Reload themes", "Reset shortcut hints", "Open the log folder") is an
     // action and lives in rootItems(); a button row is for opening the editor of something that
     // persists (API keys, Model roles, Instructions, Skills, keybindings.json).
+    //
+    // Every row that stands for a value also says what that value is when Relay ships, in
+    // relay::SettingRow::reset, and the end of settingsSections() turns those into one "Reset to
+    // defaults" row per page. The helpers below set it, so a row built by one is covered the day it
+    // is added; a row written out by hand sets its own, and a row that stands for a thing rather
+    // than a value (buttonRow, an Info line, a saved local server) leaves it empty on purpose.
+    //
+    // A reset forgets the key rather than writing the fallback into it: that is what a fresh
+    // install looks like, so every reader of the key — several read it directly, with fallbacks of
+    // their own — ends up exactly where it starts on a new machine. What the row does besides
+    // storing runs too, because the default has to be in effect and not merely stored.
 
     relay::SettingRow toggleRow(const QString &key, const QString &label, const QString &detail,
                                 bool fallback, std::function<void(bool)> extra = {}) {
@@ -1271,6 +1282,11 @@ private:
         row.onToggle = [this, key, extra](bool on) {
             QSettings().setValue(key, on);
             if (extra) extra(on);
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
+        row.reset = [this, key, fallback, extra] {
+            QSettings().remove(key);
+            if (extra) extra(fallback);
             if (m_active) m_active->agentOptionsChanged(key);
         };
         return row;
@@ -1291,6 +1307,10 @@ private:
             QSettings().setValue(key, value);
             if (m_active) m_active->agentOptionsChanged(key);
         };
+        row.reset = [this, key] {
+            QSettings().remove(key);
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
         return row;
     }
 
@@ -1307,6 +1327,14 @@ private:
             if (write) write(value);
             else if (value.isEmpty()) QSettings().remove(key);
             else QSettings().setValue(key, value);
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
+        // An empty box is what these rows mean by "unset", so the writer is handed one: it is the
+        // writer that knows about the sibling keys (skills/exclude beside skills/exclude_text).
+        // The key itself goes afterwards, because a writer may have stored the empty string in it.
+        row.reset = [this, key, write] {
+            if (write) write(QString());
+            QSettings().remove(key);
             if (m_active) m_active->agentOptionsChanged(key);
         };
         return row;
@@ -1329,6 +1357,7 @@ private:
             if (hosts.isEmpty()) QSettings().remove(key);
             else QSettings().setValue(key, hosts);
         };
+        row.reset = [key] { QSettings().remove(key); };   // ships empty: no host is on either list
         return row;
     }
 
@@ -1352,9 +1381,16 @@ private:
         return row;
     }
 
+    // `current` is what the value is now, `fallback` what it is when Relay ships — and the row is
+    // put back to it by choosing it, because a choice row's writer is the thing that applies it
+    // (setActiveTheme, log::setLevel, Keymap::setPreset) and not merely a QSettings line. The
+    // parameter has no default on purpose: a choice row added later cannot forget to say. Pass an
+    // empty string for a row whose default is derived rather than fixed (the voice key, which
+    // follows the keyboard layout) and give it a `reset` of its own.
     relay::SettingRow choiceRow(const QString &id, const QString &label, const QString &detail,
                                 const QStringList &values, const QStringList &labels,
-                                const QString &current, std::function<void(const QString &)> choose) {
+                                const QString &current, const QString &fallback,
+                                std::function<void(const QString &)> choose) {
         relay::SettingRow row;
         row.kind = relay::SettingRow::Choice;
         row.id = id;
@@ -1364,6 +1400,8 @@ private:
         row.optionLabels = labels;
         row.current = current;
         row.onChoose = std::move(choose);
+        if (!fallback.isEmpty())
+            row.reset = [fn = row.onChoose, fallback] { if (fn) fn(fallback); };
         return row;
     }
 
@@ -1388,6 +1426,7 @@ private:
             desktop.aliases = QStringLiteral("notify alerts popup bell toast");
             desktop.checked = relay::NotificationCenter::desktopEnabled();
             desktop.onToggle = [](bool on) { relay::NotificationCenter::setDesktopEnabled(on); };
+            desktop.reset = [] { relay::NotificationCenter::setDesktopEnabled(true); };   // on when Relay ships
             general.rows << desktop;
         }
         {
@@ -1398,6 +1437,9 @@ private:
             hints.detail = QStringLiteral("A brief tip when you do something the slow way and a key exists");
             hints.checked = relay::ShortcutHints::instance().enabled();
             hints.onToggle = [](bool on) { relay::ShortcutHints::instance().setEnabled(on); };
+            // On when Relay ships. How often each hint has been shown is not a setting and is not
+            // touched here; Actions › Reset shortcut hints is what forgets those counts.
+            hints.reset = [] { relay::ShortcutHints::instance().setEnabled(true); };
             general.rows << hints;
         }
         general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
@@ -1427,6 +1469,12 @@ private:
                 notice(on ? QStringLiteral("Relay will reopen this window set on start.")
                                            : QStringLiteral("Relay will open one new window on start."), 6000);
             };
+            // The same two effects as the toggle, without its notice: the reset has one of its own.
+            reopen.reset = [this] {
+                QSettings().remove(QStringLiteral("windows/restore"));
+                if (WindowManager::restoreEnabled()) m_manager->scheduleSave();
+                else m_manager->forgetSavedLayout(false);
+            };
             general.rows << reopen;
         }
         // Diagnostics (issue SQAM): how much is logged persists, so it is an option; opening the log
@@ -1444,7 +1492,8 @@ private:
                                                 about + (current == QStringLiteral("verbose")
                                                              ? QStringLiteral(" · prompts are written to the log file")
                                                              : QStringLiteral(" · agent workers pick it up when they restart")),
-                                                ids, labels, current, [](const QString &id) { relay::log::setLevel(id); });
+                                                ids, labels, current, QStringLiteral("info"),
+                                                [](const QString &id) { relay::log::setLevel(id); });
             level.aliases = QStringLiteral("log logs diagnostics debug verbose troubleshoot");
             general.rows << level;
         }
@@ -1467,7 +1516,8 @@ private:
             appearance.rows << choiceRow(QStringLiteral("option:theme"), QStringLiteral("Theme"),
                                          QStringLiteral("Applies at once: the app, the terminal palette and the "
                                                         "prompt box's colours"),
-                                         ids, labels, relay::theme::activeThemeId(), [this](const QString &id) {
+                                         ids, labels, relay::theme::activeThemeId(),
+                                         QStringLiteral("relay-dark"), [this](const QString &id) {
                 if (!relay::theme::setActiveTheme(id)) {
                     notice(QStringLiteral("That theme could not be read."), 6000);
                     return;
@@ -1483,6 +1533,7 @@ private:
                                                   relay::panestatus::colourModeIds(), relay::panestatus::colourModeLabels(),
                                                   relay::panestatus::colourModeId(relay::panestatus::colourModeFrom(
                                                       QSettings().value(QStringLiteral("appearance/pane_colours")).toString())),
+                                                  relay::panestatus::colourModeId(relay::panestatus::ColourMode::ByType),
                                                   [](const QString &id) {
                 QSettings().setValue(QStringLiteral("appearance/pane_colours"), id);
                 PaneChrome::refreshAll();
@@ -1518,7 +1569,8 @@ private:
             models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
                                      QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane")
                                          + (note.isEmpty() ? QString() : QStringLiteral(" · ") + note),
-                                     offered, offered, Pane::nearestEffort(offered, effort), [this](const QString &value) {
+                                     offered, offered, Pane::nearestEffort(offered, effort),
+                                     QStringLiteral("high"), [this](const QString &value) {
                 QSettings().setValue(QStringLiteral("agent/effort"), value);
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
             });
@@ -1553,12 +1605,14 @@ private:
                                        {QStringLiteral("agent"), QStringLiteral("human")},
                                        {QStringLiteral("The prompt box keeps the keyboard"),
                                         QStringLiteral("Relay takes control for you")},
-                                       current, [](const QString &value) {
+                                       current, QStringLiteral("agent"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("control/default"), value);
             });
         }
+        // The key stays `terminal/copy_on_select` although the behaviour is no longer terminal-only
+        // (src/CopyOnSelect.h): renaming it would turn the setting off for everyone who had it on.
         terminal.rows << toggleRow(QStringLiteral("terminal/copy_on_select"), QStringLiteral("Copy on select"),
-                                   QStringLiteral("Selecting terminal text copies it"), false);
+                                   QStringLiteral("Highlighting text copies it, in the terminal and in read-only panes"), false);
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
@@ -1572,7 +1626,7 @@ private:
                                               {QStringLiteral("auto"), QStringLiteral("ask"), QStringLiteral("off")},
                                               {QStringLiteral("Enhance automatically"), QStringLiteral("Ask for each host"),
                                                QStringLiteral("Off — plain ssh")},
-                                              current, [](const QString &value) {
+                                              current, QStringLiteral("auto"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("ssh/enhance"), value);
             });
             row.aliases = QStringLiteral("mosh remote host wrapper controlmaster enhance");
@@ -1607,7 +1661,7 @@ private:
                                     QStringLiteral("Ctrl+I cycles auto → terminal → agent; ! and * override one line"),
                                     {QStringLiteral("auto"), QStringLiteral("shell"), QStringLiteral("agent")},
                                     {QStringLiteral("Auto"), QStringLiteral("Terminal"), QStringLiteral("Agent")},
-                                    current, [](const QString &value) {
+                                    current, QStringLiteral("auto"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("input/default"), value);
             });
         }
@@ -1623,7 +1677,7 @@ private:
                                     {QStringLiteral("The agent runs it or puts it in the prompt box"),
                                      QStringLiteral("Always in the prompt box, for you to run"),
                                      QStringLiteral("Off")},
-                                    current, [](const QString &value) {
+                                    current, QStringLiteral("agent"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("agent/terminal_handoff"), value);
             });
         }
@@ -1692,12 +1746,20 @@ private:
         {
             QStringList ids = relay::voice::holdKeys(), labels;
             for (const QString &id : ids) labels << relay::voice::holdKeyLabel(id);
-            voice.rows << choiceRow(QStringLiteral("option:voice_hold_key"), QStringLiteral("Voice key"),
+            // No fixed default: the key Relay starts on is read off the keyboard layout the first
+            // time (Pane::voiceHoldKey), so putting it back means forgetting what was stored and
+            // letting it be derived again — on this machine's layout, which may have changed.
+            relay::SettingRow hold = choiceRow(QStringLiteral("option:voice_hold_key"), QStringLiteral("Voice key"),
                                     QStringLiteral("Held down while you speak; released, it transcribes"),
-                                    ids, labels, Pane::voiceHoldKey(), [this](const QString &value) {
+                                    ids, labels, Pane::voiceHoldKey(), QString(), [this](const QString &value) {
                 QSettings().setValue(QStringLiteral("voice/hold_key"), value);
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/hold_key"));
             });
+            hold.reset = [this] {
+                QSettings().remove(QStringLiteral("voice/hold_key"));
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/hold_key"));
+            };
+            voice.rows << hold;
         }
         voice.rows << numberRow(QStringLiteral("voice/max_seconds"), QStringLiteral("Longest recording"),
                                 QStringLiteral("Recording stops by itself after this many seconds"),
@@ -1721,6 +1783,7 @@ private:
         voice.rows << headingRow(QStringLiteral("Model"));
         {
             // The three that were live-tested (issue NY7Z); the ids match backend/relay_core/voice.py.
+            // The first is the one Relay ships on, here and in Pane::voiceModel().
             const QStringList ids{QStringLiteral("google/gemini-3.5-flash-lite"), QStringLiteral("google/gemini-3.8-flash"),
                                   QStringLiteral("openai/whisper-1")};
             const QStringList labels{QStringLiteral("Gemini 3.5 Flash-Lite — fastest, ~$0.00006 a clip"),
@@ -1728,7 +1791,7 @@ private:
                                      QStringLiteral("Whisper — transcription endpoint, ~$0.0003 a clip")};
             voice.rows << choiceRow(QStringLiteral("option:voice_model"), QStringLiteral("Transcription model"),
                                     QStringLiteral("Runs on OpenRouter with your OpenRouter key"),
-                                    ids, labels, Pane::voiceModel(), [](const QString &value) {
+                                    ids, labels, Pane::voiceModel(), ids.constFirst(), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("voice/model"), value);
             });
         }
@@ -1783,7 +1846,7 @@ private:
                                         Keymap::instance().hasOverrides()
                                             ? QStringLiteral("Your custom overrides stay on top")
                                             : QStringLiteral("Starting point for every shortcut"),
-                                        values, labels, presetId,
+                                        values, labels, presetId, QStringLiteral("relay"),
                                         [](const QString &id) { Keymap::instance().setPreset(id); });
         }
         {
@@ -1794,7 +1857,7 @@ private:
                                         {QStringLiteral("Ctrl+Shift and F-keys only"),
                                          QStringLiteral("All shortcuts act"),
                                          QStringLiteral("Programs get every key")},
-                                        programKeys,
+                                        programKeys, QStringLiteral("shift-only"),
                                         [](const QString &value) { Keymap::instance().setProgramKeys(value); });
         }
         // Like API keys and Instructions, this opens the editor of something that persists, so it
@@ -1820,6 +1883,26 @@ private:
             shortcuts.rows << mouse;
         }
         sections << shortcuts;
+
+        // Last on every page: a way to put that page back to what Relay ships with (owner,
+        // 2026-09-18). It is built from each section's own rows, so it reaches exactly the options
+        // you are looking at and nothing on another tab, and a page where nothing declares a
+        // default — Local models, whose rows are the servers you saved — gets no button at all.
+        for (relay::SettingsSection &section : sections) {
+            relay::SettingRow reset = relay::resetRow(section, [this, title = section.title](int count) {
+                // Queued: this runs from the button's own click, and refreshing the panes rebuilds
+                // the row the button sits in.
+                QTimer::singleShot(0, this, [this, title, count] {
+                    notice(QStringLiteral("%1: %2 %3 back to Relay's defaults.")
+                               .arg(title).arg(count)
+                               .arg(count == 1 ? QStringLiteral("option is") : QStringLiteral("options are")), 6000);
+                    // The theme, the log level and the keymap are already in effect; the other open
+                    // Options panes are still drawing the values that have just gone.
+                    refreshSettingsPanes();
+                });
+            });
+            if (!reset.id.isEmpty()) section.rows << reset;
+        }
         return sections;
     }
 
@@ -2284,7 +2367,7 @@ private:
             {QStringLiteral("instruction"), QStringLiteral("rules claude.md agents.md warp.md gemini memory relay.md onboarding")},
             {QStringLiteral("skill"), QStringLiteral("abilities tools refine import skills library")},
             {QStringLiteral("alias"), QStringLiteral("workflow workflows macro snippet saved command saved prompt template shortcut warp")},
-            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy")},
+            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy primary mouse terminal pane info panes transcript preview diff board")},
             {QStringLiteral("shortcut preset"), QStringLiteral("keymap keybindings hotkeys warp vscode konsole preset")},
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
             {QStringLiteral("suggest"), QStringLiteral("autocomplete ghost ai suggestions next command prompt")},

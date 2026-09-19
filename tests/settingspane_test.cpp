@@ -49,6 +49,7 @@ QList<SettingsSection> catalog(State *state) {
         row.label = QStringLiteral("Show thinking"); row.detail = QStringLiteral("Stream reasoning above the prompt");
         row.checked = state->thinking;
         row.onToggle = [state](bool on) { state->thinking = on; };
+        row.reset = [state] { state->thinking = true; };
         general.rows << row;
     }
     {
@@ -57,6 +58,7 @@ QList<SettingsSection> catalog(State *state) {
         row.label = QStringLiteral("Step limit per turn"); row.detail = QStringLiteral("Model calls");
         row.number = state->steps; row.minimum = 1; row.maximum = 500;
         row.onNumber = [state](int value) { state->steps = value; };
+        row.reset = [state] { state->steps = 50; };
         general.rows << row;
     }
     sections << general;
@@ -72,6 +74,7 @@ QList<SettingsSection> catalog(State *state) {
         row.optionLabels = QStringList{QStringLiteral("Relay Dark"), QStringLiteral("Relay Light")};
         row.current = state->theme;
         row.onChoose = [state](const QString &id) { state->theme = id; };
+        row.reset = [state] { state->theme = QStringLiteral("dark"); };
         appearance.rows << row;
     }
     sections << appearance;
@@ -89,6 +92,7 @@ QList<SettingsSection> catalog(State *state) {
         row.aliases = QStringLiteral("planning spec design");
         row.text = state->plans;
         row.onText = [state](const QString &value) { state->plans = value; };
+        row.reset = [state] { state->plans.clear(); };
         agent.rows << row;
         SettingRow button;
         button.kind = SettingRow::Button; button.id = QStringLiteral("agent.instructions");
@@ -106,12 +110,27 @@ QList<SettingsSection> catalog(State *state) {
     keyboard.id = QStringLiteral("keyboard");
     keyboard.title = QStringLiteral("Keyboard");
     {
+        // No `reset`: this stands in for a page where nothing has a default, which is a page with
+        // no reset button (the real one is Local models, whose rows are the servers you saved).
         SettingRow row;
         row.kind = SettingRow::Toggle; row.id = QStringLiteral("option:hints");
         row.label = QStringLiteral("Shortcut hints"); row.detail = QStringLiteral("A brief tip");
         keyboard.rows << row;
     }
     sections << keyboard;
+    return sections;
+}
+
+// What the end of RelayWindow::settingsSections() does: every page that has something to put back
+// gets its own button, last on the page. `answer` stands in for the confirmation, which cannot be
+// clicked headless, and `count` receives what the reset reported it had put back.
+QList<SettingsSection> catalogWithResets(State *state, bool answer = true, int *count = nullptr) {
+    QList<SettingsSection> sections = catalog(state);
+    for (SettingsSection &section : sections) {
+        SettingRow reset = relay::resetRow(section, [count](int put) { if (count) *count = put; },
+                                           [answer](const QString &) { return answer; });
+        if (!reset.id.isEmpty()) section.rows << reset;
+    }
     return sections;
 }
 
@@ -537,6 +556,122 @@ private slots:
         QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("reset"), QStringLiteral("Reasoning effort › low")), 0);
         QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("theme"), QStringLiteral("Cards, threads, plans and project memory")), 0);
         QVERIFY(SettingsPane::fuzzyScore(QStringLiteral("nwpn"), QStringLiteral("New pane to the right")) > 0);
+    }
+
+    // ----- Reset to defaults (owner, 2026-09-18) -------------------------------------------------
+
+    void eachPageWithADefaultGetsOneResetRow() {
+        State state;
+        const QList<SettingsSection> sections = catalogWithResets(&state);
+        const SettingRow row = rowById(sections.at(0), QStringLiteral("reset:general"));
+        QVERIFY(!row.id.isEmpty());
+        QCOMPARE(row.kind, SettingRow::Button);
+        QCOMPARE(row.label, QStringLiteral("Reset to defaults"));
+        QCOMPARE(row.buttonText, QStringLiteral("Reset…"));
+        // It counts the rows it can put back, not the rows on the page.
+        QVERIFY2(row.detail.startsWith(QStringLiteral("Puts the 2 options on this page")), qPrintable(row.detail));
+        QCOMPARE(sections.at(0).rows.constLast().id, QStringLiteral("reset:general"));   // last, under what it undoes
+        QVERIFY(hasRow(sections.at(1), QStringLiteral("reset:appearance")));
+        // Agent: the text row only — its button and its info line stand for things, not values.
+        const SettingRow one = rowById(sections.at(2), QStringLiteral("reset:agent"));
+        QVERIFY2(one.detail.startsWith(QStringLiteral("Puts the one option on this page")), qPrintable(one.detail));
+        // Keyboard declares no default anywhere, so it has no button at all.
+        QVERIFY(!hasRow(sections.at(3), QStringLiteral("reset:keyboard")));
+        for (const SettingsSection &section : sections)
+            QVERIFY(!rowById(section, QStringLiteral("reset:") + section.id).reset);   // never resets itself
+    }
+
+    void aResetPutsEveryKindOfRowBackAndTouchesNoOtherPage() {
+        State state;
+        state.thinking = false;
+        state.steps = 75;
+        state.theme = QStringLiteral("light");
+        state.plans = QStringLiteral("/tmp/plans");
+        int count = 0;
+        const QList<SettingsSection> sections = catalogWithResets(&state, true, &count);
+        rowById(sections.at(0), QStringLiteral("reset:general")).run();
+        QCOMPARE(state.thinking, true);                     // Toggle
+        QCOMPARE(state.steps, 50);                          // Number
+        QCOMPARE(count, 2);                                 // what the notice says
+        QCOMPARE(state.theme, QStringLiteral("light"));     // Appearance is another page
+        QCOMPARE(state.plans, QStringLiteral("/tmp/plans"));
+        rowById(sections.at(1), QStringLiteral("reset:appearance")).run();
+        QCOMPARE(state.theme, QStringLiteral("dark"));      // Choice
+        QCOMPARE(count, 1);
+        rowById(sections.at(2), QStringLiteral("reset:agent")).run();
+        QVERIFY(state.plans.isEmpty());                     // Text
+        QCOMPARE(state.buttonRuns, 0);                      // the Instructions button was never pressed
+        QCOMPARE(state.ran, QStringList());                 // and no action ran
+    }
+
+    void theConfirmationNamesThePageAndCancelChangesNothing() {
+        State state;
+        state.thinking = false;
+        QStringList asked;
+        SettingsSection general = catalog(&state).constFirst();
+        const SettingRow row = relay::resetRow(general, {}, [&asked](const QString &title) {
+            asked << title;
+            return false;
+        });
+        row.run();
+        QCOMPARE(asked, QStringList{QStringLiteral("General")});   // the page, by the name on its tab
+        QCOMPARE(state.thinking, false);
+        // Answered no, so `after` never ran either: nothing is announced and no pane is redrawn.
+        int count = -1;
+        const QList<SettingsSection> sections = catalogWithResets(&state, false, &count);
+        rowById(sections.constFirst(), QStringLiteral("reset:general")).run();
+        QCOMPARE(state.thinking, false);
+        QCOMPARE(count, -1);
+    }
+
+    void theResetRowIsReachableByKeyboardAndBySearch() {
+        State state;
+        state.thinking = false;
+        state.theme = QStringLiteral("light");
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalogWithResets(&state); },
+                          [&] { return actions(&state); });
+        pane.show();
+        pane.showTab(QStringLiteral("general"));
+        QCOMPARE(pane.visibleRowIds().constLast(), QStringLiteral("reset:general"));
+        pane.showTab(QStringLiteral("keyboard"));
+        for (const QString &id : pane.visibleRowIds())
+            QVERIFY2(!id.startsWith(QStringLiteral("reset:")), qPrintable(id));
+        pane.setSearch(QStringLiteral("reset defaults"));
+        const QStringList found = pane.visibleRowIds();
+        QVERIFY2(found.contains(QStringLiteral("reset:general")), qPrintable(found.join(QLatin1Char(' '))));
+        QVERIFY(found.contains(QStringLiteral("reset:appearance")));
+        pane.setSearch(QString());
+        pane.showTab(QStringLiteral("general"));
+        pane.focusSearch();
+        auto *search = pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"));
+        press(search, Qt::Key_Up);      // nothing highlighted yet: the last row on the page
+        QCOMPARE(pane.visibleRowIds().value(pane.currentRow()), QStringLiteral("reset:general"));
+        press(search, Qt::Key_Return);
+        QCOMPARE(state.thinking, true);
+        QCOMPARE(state.theme, QStringLiteral("light"));   // still another page's business
+        QTest::qWait(30);                                 // the rebuild the button asks for
+        QCOMPARE(pane.currentTab(), QStringLiteral("general"));
+    }
+
+    // The defaults themselves and the wiring live in RelayWindow::settingsSections(), which needs a
+    // whole window to run; read it as text, the way localModelsComeRightAfterModels() does.
+    void everyRowHelperDeclaresADefault() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        QVERIFY2(text.contains(QStringLiteral("relay::resetRow(section")),
+                 "settingsSections() no longer gives its pages a reset row");
+        for (const QString &helper : {QStringLiteral("toggleRow"), QStringLiteral("numberRow"),
+                                      QStringLiteral("textRow"), QStringLiteral("hostListRow"),
+                                      QStringLiteral("choiceRow"), QStringLiteral("buttonRow")}) {
+            const int start = text.indexOf(QStringLiteral("relay::SettingRow ") + helper + QLatin1Char('('));
+            QVERIFY2(start > 0, qPrintable(helper));
+            const int end = text.indexOf(QStringLiteral("return row;"), start);
+            QVERIFY(end > start);
+            const bool declares = text.mid(start, end - start).contains(QStringLiteral("row.reset"));
+            // buttonRow builds a row that stands for a thing rather than a value: it must not.
+            QVERIFY2(declares == (helper != QStringLiteral("buttonRow")), qPrintable(helper));
+        }
     }
 
     // ----- Settings › Local models (card #24XJ) -------------------------------------------------

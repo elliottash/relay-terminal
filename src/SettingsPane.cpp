@@ -11,6 +11,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollArea>
@@ -67,7 +68,57 @@ QLabel *keyCap(const QString &text) {
 constexpr int kRecentRows = 6;
 constexpr int kMaxResults = 60;
 
+// A reset cannot be undone, so it is the one thing in this pane that asks first. The page is named
+// in the question and on the button itself, because the same row sits on nearly every page and the
+// one you meant is the one you were looking at. Cancel is the default button, so Enter on the
+// dialog — the key that opened it — cannot be the key that throws the page away.
+bool askBeforeReset(const QString &sectionTitle) {
+    QMessageBox box(QApplication::activeWindow());
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Reset %1").arg(sectionTitle));
+    box.setText(QStringLiteral("Reset the %1 options to what Relay ships with?").arg(sectionTitle));
+    box.setInformativeText(QStringLiteral("Only this page changes. It cannot be undone."));
+    QPushButton *reset = box.addButton(QStringLiteral("Reset %1").arg(sectionTitle), QMessageBox::AcceptRole);
+    QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.setEscapeButton(cancel);
+    box.exec();
+    return box.clickedButton() == reset;
+}
+
 }  // namespace
+
+// ----- reset to defaults ---------------------------------------------------------------------------
+
+// One button per page, and it knows nothing about settings keys: it holds the resets of the rows it
+// was built from, so it covers exactly what is on that page and a row added to the page later is
+// covered the day it declares its default. Nothing else here reads QSettings on its behalf.
+SettingRow resetRow(const SettingsSection &section, std::function<void(int count)> after,
+                    std::function<bool(const QString &sectionTitle)> ask) {
+    QList<std::function<void()>> resets;
+    for (const SettingRow &row : section.rows)
+        if (row.reset) resets << row.reset;
+    if (resets.isEmpty()) return {};        // nothing on this page has a default: no button
+    SettingRow row;
+    row.kind = SettingRow::Button;
+    row.id = QStringLiteral("reset:") + section.id;
+    row.label = QStringLiteral("Reset to defaults");
+    row.detail = (resets.size() == 1 ? QStringLiteral("Puts the one option on this page")
+                                     : QStringLiteral("Puts the %1 options on this page").arg(resets.size()))
+                 // What it leaves alone is worth saying, because those are what a reset button is
+                 // feared for: the Keyboard page puts the preset back but never your own bindings,
+                 // and no page here can reach a key or a saved server, which are not values.
+                 + QStringLiteral(" back to what Relay ships with, at once. No other page changes, and your "
+                                  "API keys, saved servers and custom shortcuts are left alone");
+    row.aliases = QStringLiteral("reset defaults factory restore revert undo original fresh start over");
+    row.buttonText = QStringLiteral("Reset…");
+    row.run = [resets, title = section.title, after = std::move(after), ask = std::move(ask)] {
+        if (!(ask ? ask(title) : askBeforeReset(title))) return;
+        for (const std::function<void()> &reset : resets) reset();
+        if (after) after(int(resets.size()));
+    };
+    return row;
+}
 
 // ----- construction ------------------------------------------------------------------------------
 

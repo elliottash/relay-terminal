@@ -75,12 +75,29 @@ struct SettingRow {
     // gets the index pressed; Enter on the row presses the first.
     QStringList buttonTexts;
     std::function<void(int index)> onButton;
+    // What this row is when Relay ships, put back into effect — not only forgotten, because the
+    // theme, the log level and the keymap are on screen and would otherwise stay until the next
+    // start. Setting it is what puts the row under its page's "Reset to defaults" button, so the
+    // row helpers set it for every row they build and a row written out by hand sets its own. A
+    // row that stands for a thing rather than a value — a button, a saved server, an info line —
+    // leaves it empty and is never touched by a reset.
+    std::function<void()> reset;
 };
 
 struct SettingsSection {
     QString id, title, blurb;
     QList<SettingRow> rows;
 };
+
+// The "Reset to defaults" row of one page (owner, 2026-09-18: "a reset to defaults button on
+// options pages"). It is built from the section itself, so it can only reach the rows on that page
+// — it is per page, never one button that resets the app — and a section where nothing declares a
+// default (Local models, whose rows are saved servers) gets an empty row back and no button at all.
+// `after` is told how many rows were put back, for the notice and for redrawing the other open
+// panes; `ask` answers the confirmation and exists for tests, since a QMessageBox cannot be clicked
+// headless. Append the result to the section's rows: last on the page, under everything it undoes.
+SettingRow resetRow(const SettingsSection &section, std::function<void(int count)> after,
+                    std::function<bool(const QString &sectionTitle)> ask = {});
 
 // A runnable action, or a submenu of them. `checked` marks the current choice; `stayOpen` says
 // running it changes state the pane should show at once rather than closing. `typed` lets a
