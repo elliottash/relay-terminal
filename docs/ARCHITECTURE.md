@@ -173,7 +173,12 @@ Layout rules:
 - **Keyboard moves** (`pane.moveLeft/Right/Up/Down`, default Ctrl+Alt+arrows, unbound in the
   Warp preset where those keys focus panes): the neighbor is found like focus movement; adjacent
   siblings in a splitter of that orientation swap, otherwise the pane docks on the neighbor's
-  near side, so repeating keeps moving it.
+  near side, so repeating keeps moving it. A left/right move opens the twin of #78BN's placement
+  window (#Q7Y9): for two seconds the Move-down *action* — Ctrl+Alt+Down by default, whatever the
+  user bound — docks the pane beneath the neighbor it moved toward instead of moving it down
+  (`armBeneathDock` / `dockBeneathNeighbor`; any other action, bare key or click closes the
+  window without consuming anything). Dragging a pane onto another's bottom edge hints that
+  chord (`pane.dockBeneath`).
 - **Layout rules** live in `src/PaneLayout.{h,cpp}` (library `relay-panes`, tests
   `tests/panelayout_test.cpp`): `neighborIndex()` (which pane is on that side, used by focus and
   by moves), `swapInSplitter()` and `dropEdge()`. `swapInSplitter()` is one

@@ -162,6 +162,13 @@ default key in any preset** and `pane.splitLeft` / `pane.splitUp` have none eith
 action, so they can still be bound here or run from the palette. The rows above record what each
 program binds; the JSON is what Relay ships.
 
+**Since card #Q7Y9:** moving and placing share the same trick. A `pane.moveLeft` or
+`pane.moveRight` followed by `pane.moveDown` **within two seconds** docks the pane beneath the
+neighbor it moved toward (default keys: Ctrl+Alt+Left then Ctrl+Alt+Down, and Ctrl+Alt+Right then
+Ctrl+Alt+Down). No new action and no new key: the second key is the ordinary Move-down, so the
+chord follows whatever the preset binds to the three move actions, and Move-down on its own keeps
+moving the pane down.
+
 ## 5. Collisions, pass-through and desktop grabs
 
 **Collisions resolved (no preset has a duplicate key):**
