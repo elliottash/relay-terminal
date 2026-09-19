@@ -41,8 +41,11 @@ make it where i can push a pane beneath the one to the left by doing ctrl + alt 
 - `ctest` on a full build of the working tree: 53/54 passed; the one failure
   (`backend-and-bash`) is in another session's uncommitted backend edits (test_roles.py,
   test_sessions.py, remote/wire.py), none of which this feature touches. A full ctest re-run on
-  the commit's scratch tree was skipped at the owner's request (2026-09-19); the commit adds
-  docs, this card and evidence only — the code itself landed earlier in 68f9a41.
+  the commit's scratch tree was skipped at the owner's request (2026-09-19).
+- Where the code landed: an unrelated session's sweep first carried it to the
+  `feature/guest-agents` branch (68f9a41); the #Q7Y9 follow-up commit lands these same hunks on
+  `main`, built from main's own content (the working tree here is checked out on that branch,
+  2026-09-19).
 
 ## QA checklist
 - [ ] Two panes side by side, focus the right one: Ctrl+Alt+Left then Ctrl+Alt+Down (within 2 s)

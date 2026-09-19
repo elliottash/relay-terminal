@@ -280,7 +280,9 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   survives a restart. Hovering a
   pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag
   the grip onto another pane's edge (a drop zone shows) to move the pane there, or onto a tab bar
-  to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane (in the Warp preset these
+  to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane, and Ctrl+Alt+Left or
+  Ctrl+Alt+Right followed by Ctrl+Alt+Down within two seconds docks the pane beneath the neighbor
+  it moved toward (in the Warp preset these
   keys focus panes, so moving is unbound there; GNOME and KDE may take Ctrl+Alt+arrows for
   workspaces). "+" after the tabs opens a tab; hovering a tab shows ⧉ (also in its right-click
   menu) to move it to a new window. Moved panes keep their shell, agent and conversation.

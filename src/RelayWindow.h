@@ -300,6 +300,9 @@ public:
         // the hint away, whether or not an arrow arrived.
         m_placementTimer.setSingleShot(true);
         connect(&m_placementTimer, &QTimer::timeout, this, [this] { endPlacement(); });
+        // "Move left/right, then ↓ docks it beneath" (#Q7Y9): the twin window, same shape.
+        m_beneathTimer.setSingleShot(true);
+        connect(&m_beneathTimer, &QTimer::timeout, this, [this] { endBeneathDock(); });
         // Pane state glyphs and tab icons (#XM0T), and the remote-session header (#SPBN).
         connect(&m_statusTimer, &QTimer::timeout, this, [this] { refreshPaneStatus(); });
         m_statusTimer.start(kStatusPollMs);
@@ -745,6 +748,19 @@ protected:
             }
             if (response.action == Placement::Action::Dismiss) endPlacement();
         }
+        // The chord's window (#Q7Y9): a bare key or a click closes it. Keys with Ctrl, Alt or
+        // Meta held do not — the Move-down key passes through here on its way to the shortcut
+        // that runs it, and other shortcuts close the window through runActionNow.
+        if (m_beneath.armed(m_beneathClock.elapsed())
+            && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
+            && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
+            const auto *pressed = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
+            const bool modifierOnly = pressed && (pressed->key() == Qt::Key_Control || pressed->key() == Qt::Key_Shift
+                                                  || pressed->key() == Qt::Key_Alt || pressed->key() == Qt::Key_Meta
+                                                  || pressed->key() == Qt::Key_AltGr);
+            const bool modified = pressed && (pressed->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
+            if (!modifierOnly && !modified) endBeneathDock();
+        }
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
@@ -929,6 +945,9 @@ private:
 
     void runActionNow(const QString &id) {
         Pane *pane = m_active;
+        // "Move left/right, then ↓ docks it beneath" (#Q7Y9): only Move-down may land inside the
+        // chord's window; any other action closes it, so a stale chord never grabs a later one.
+        if (id != QStringLiteral("pane.moveDown")) endBeneathDock();
         if (id == QStringLiteral("window.new")) m_manager->newWindowAt(activeCwd());
         else if (id == QStringLiteral("window.next")) m_manager->cycle(this, 1);
         else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
@@ -962,7 +981,9 @@ private:
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.moveUp")) moveActive(relay::panes::Direction::Up);
-        else if (id == QStringLiteral("pane.moveDown")) moveActive(relay::panes::Direction::Down);
+        // Inside the chord's window, Move-down docks the pane beneath the neighbor it moved
+        // toward (#Q7Y9); otherwise it moves the pane down as it always did.
+        else if (id == QStringLiteral("pane.moveDown")) { if (!dockBeneathNeighbor()) moveActive(relay::panes::Direction::Down); }
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
@@ -2297,10 +2318,10 @@ private:
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         items << actionItem(panes, QStringLiteral("Move tab to new window"), QStringLiteral("Keeps its panes running"), QStringLiteral("tab.moveToNewWindow"));
-        items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Or drag the ⠿ grip onto another pane's edge"), QStringLiteral("pane.moveLeft"));
-        items << actionItem(panes, QStringLiteral("Move pane right"), QString(), QStringLiteral("pane.moveRight"));
+        items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Then ↓ docks it beneath · or drag the ⠿ grip"), QStringLiteral("pane.moveLeft"));
+        items << actionItem(panes, QStringLiteral("Move pane right"), QStringLiteral("Then ↓ docks it beneath"), QStringLiteral("pane.moveRight"));
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
-        items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
+        items << actionItem(panes, QStringLiteral("Move pane down"), QStringLiteral("Straight after a left/right move, beneath that neighbor"), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
         items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("The last 25 closed panes, tabs and windows, in the Sessions pane"), QStringLiteral("closed.list"));
         // Any of the last 25, newest first (src/ClosedStack.h). Searching the actions finds them by
@@ -4153,7 +4174,7 @@ private:
         m_placement.arm(0);
         m_placementPane = pane;
         m_placementAnchor = anchor;
-        showPlacementHint(pane);
+        showPaneToast(pane, QStringLiteral("← ↑ ↓ to place"));
         // One timer, restarted on every arming, so the hint can never outlive its window.
         m_placementTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
     }
@@ -4167,9 +4188,11 @@ private:
         m_placementHint = nullptr;
     }
 
-    void showPlacementHint(QWidget *pane) {
+    // The chord (#Q7Y9) and the placement window (#78BN) share this one transient toast:
+    // arming either ends the other, so one label is enough, and whoever armed last owns it.
+    void showPaneToast(QWidget *pane, const QString &text) {
         delete m_placementHint.data();
-        m_placementHint = new QLabel(QStringLiteral("← ↑ ↓ to place"), this);
+        m_placementHint = new QLabel(text, this);
         m_placementHint->setObjectName(QStringLiteral("toast"));
         m_placementHint->setAttribute(Qt::WA_TransparentForMouseEvents);
         m_placementHint->ensurePolished();
@@ -4205,6 +4228,50 @@ private:
         }
         setActiveLeaf(pane); focusLeaf(pane);
         updateTitles();
+    }
+
+    // ----- "move left/right, then ↓ docks it beneath that neighbor" (#Q7Y9) ----------------------
+    //
+    // The twin of the placement window above: there the second key is a bare arrow, here it is
+    // the Move-down action, so the chord follows whatever keys move panes for this user — by
+    // default Ctrl+Alt+Left then Ctrl+Alt+Down docks the pane beneath the neighbor on its left,
+    // and Ctrl+Alt+Right then Ctrl+Alt+Down beneath the one on its right. After two seconds it
+    // is a plain move again; any other action, key or click closes the window without consuming
+    // anything, so nothing typed is ever swallowed.
+    void armBeneathDock(QWidget *pane, QWidget *anchor) {
+        // Re-installing the filter moves it to the front of the application's list again.
+        qApp->installEventFilter(this);
+        m_beneathClock.start();
+        m_beneath.arm(0);
+        m_beneathPane = pane;
+        m_beneathAnchor = anchor;
+        const QString down = Keymap::instance().shortcutText(QStringLiteral("pane.moveDown"));
+        if (!down.isEmpty()) showPaneToast(pane, QStringLiteral("%1 docks it beneath").arg(down));
+        m_beneathTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
+    }
+
+    void endBeneathDock() {
+        const bool open = m_beneath.armed(m_beneathClock.elapsed());
+        m_beneathTimer.stop();
+        m_beneath.cancel();
+        m_beneathPane = nullptr;
+        m_beneathAnchor = nullptr;
+        if (open) { delete m_placementHint.data(); m_placementHint = nullptr; }   // its own toast
+    }
+
+    // The second half of the chord: dock the pane beneath the neighbor it moved toward. The same
+    // takeLeaf + insertBeside pair every other keyboard move uses, so the shell, the agent and
+    // the scrollback all travel with the pane.
+    bool dockBeneathNeighbor() {
+        if (!m_beneath.armed(m_beneathClock.elapsed())) { endBeneathDock(); return false; }
+        QPointer<QWidget> pane(m_beneathPane), anchor(m_beneathAnchor);
+        endBeneathDock();
+        if (!pane || !anchor || !pageOf(pane) || pageOf(pane) != pageOf(anchor)) return false;
+        if (!takeLeaf(pane) || !anchor || !pane) return false;
+        insertBeside(anchor, pane, Qt::Vertical, false);   // beneath the anchor, not above it
+        setActiveLeaf(pane); focusLeaf(pane);
+        updateTitles();
+        return true;
     }
 
     void navigate(relay::panes::Direction direction) {
@@ -4847,8 +4914,21 @@ private:
     void dragPaneEnd(QWidget *dragged, const QPoint &global, bool drop) {
         if (m_dropZone) { m_dropZone->hide(); m_dropZone->deleteLater(); m_dropZone = nullptr; }
         if (!drop || !dragged) return;
+        bool taughtBeneath = false;
         const auto target = dropTarget(dragged, global);
         if (target.second == Edge::None) return;
+        // Which side of its drop anchor the pane came from (#Q7Y9): known only here, before
+        // takeLeaf unhooks it. A drop that docks it beneath is the slow path of the chord.
+        const QString sideKey = [&] {
+            QWidget *anchor = target.first;
+            if (target.second != Edge::Bottom || !anchor || !dragged || pageOf(anchor) != pageOf(dragged)) return QString();
+            QWidget *page = pageOf(anchor);
+            const QRect a(anchor->mapTo(page, QPoint(0, 0)), anchor->size());
+            const QRect d(dragged->mapTo(page, QPoint(0, 0)), dragged->size());
+            if (d.right() <= a.left()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveLeft"));
+            if (d.left() >= a.right()) return Keymap::instance().shortcutText(QStringLiteral("pane.moveRight"));
+            return QString();
+        }();
         if (target.second == Edge::TabBar) {
             RelayWindow *w = windowOf(target.first);
             if (w == this && leavesIn(pageOf(dragged)).size() <= 1) return;   // already its own tab here
@@ -4863,9 +4943,20 @@ private:
             w->m_tabs->setCurrentWidget(w->pageOf(dragged));
             w->setActiveLeaf(dragged); focusLeaf(dragged);
             if (w != this) { w->raise(); w->activateWindow(); }
+            // The chord teaches itself the one time it is the faster path: dragged from beside
+            // the anchor and dropped on its bottom edge.
+            if (target.second == Edge::Bottom && !sideKey.isEmpty() && w == windowOf(dragged)) {
+                const QString down = Keymap::instance().shortcutText(QStringLiteral("pane.moveDown"));
+                if (!down.isEmpty()) {
+                    w->hint(QStringLiteral("pane.dockBeneath"),
+                            relay::ShortcutHints::nextTime(QStringLiteral("%1 then %2").arg(sideKey, down),
+                                                           QStringLiteral("dock it beneath")));
+                    taughtBeneath = true;
+                }
+            }
         }
         const QString move = Keymap::instance().shortcutText(QStringLiteral("pane.moveLeft"));
-        if (!move.isEmpty())
+        if (!move.isEmpty() && !taughtBeneath)
             if (auto *w = windowOf(dragged))
                 w->hint(QStringLiteral("pane.drag"), QStringLiteral("Next time: %1 and the other arrows move the focused pane").arg(move));
     }
@@ -4978,6 +5069,7 @@ private:
     // Keyboard move: swap with the neighbor in that direction when they share a splitter,
     // otherwise dock on the neighbor's near side. Repeating keeps moving the pane that way.
     void moveActive(relay::panes::Direction direction) {
+        endBeneathDock();   // a fresh move starts the chord over (#Q7Y9)
         QWidget *current = m_activeLeaf;
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
@@ -4997,6 +5089,9 @@ private:
         }
         setActiveLeaf(current); focusLeaf(current);
         updateTitles();
+        // A left/right move opens the two-second window in which the Move-down key docks the
+        // pane beneath the neighbor it just moved toward (#Q7Y9): Ctrl+Alt+Left, Ctrl+Alt+Down.
+        if (orientation == Qt::Horizontal) armBeneathDock(current, neighbor);
     }
 
     QWidget *neighborOf(QWidget *current, relay::panes::Direction direction) const {
@@ -5225,6 +5320,11 @@ private:
     relay::panes::PlacementWindow m_placement;
     QElapsedTimer m_placementClock;
     QTimer m_placementTimer;
+    // "Move left/right, then ↓ docks it beneath" (#Q7Y9): the same shape for the chord's window.
+    relay::panes::PlacementWindow m_beneath;
+    QElapsedTimer m_beneathClock;
+    QTimer m_beneathTimer;
+    QPointer<QWidget> m_beneathPane, m_beneathAnchor;
     // Pane state glyphs and tab icons (#XM0T): the poll, and each tab's last icon so it is only
     // repainted when what it shows changes.
     QTimer m_statusTimer;

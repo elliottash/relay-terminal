@@ -34,5 +34,6 @@ geometry (`stty size`, rows then columns) before and after each chord.
 `ctest` on a full build of the working tree: 53/54 passed; the `backend-and-bash` failures are in
 another session's uncommitted backend edits (`test_roles.py`, `test_sessions.py`,
 `remote/wire.py`) and none of this feature's files are among them. A full ctest re-run on the
-commit's own scratch tree was skipped at the owner's request (2026-09-19); that commit adds docs,
-the card and this evidence only — the feature code itself landed earlier in 68f9a41.
+commit's own scratch tree was skipped at the owner's request (2026-09-19). Where the code lives:
+another session's commit sweep first carried it to the `feature/guest-agents` branch (68f9a41);
+it lands on main in the #Q7Y9 follow-up commit, built as main's own content plus these hunks.
