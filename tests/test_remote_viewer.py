@@ -554,6 +554,9 @@ class GuestTests(unittest.TestCase):
                                                  if m.get("pane") == "pane-1"], "a snapshot")
                     await harness.until(lambda: [m for m in harness.messages("control")
                                                  if m.get("pane") == "pane-1"], "control")
+                    # Opening a pane asks for nothing a guest is refused: no pane_state_get,
+                    # so no "a guest never gets that" error on every pane (live drive, 2026-09-18).
+                    self.assertEqual([m for m in harness.messages("error")], [])
                     await harness.viewer.handle({"t": "send", "message": {
                         "t": "compose", "pane": "pane-1", "text": "hello from the laptop"}})
                     await harness.until(lambda: harness.messages("prompt_pending"),

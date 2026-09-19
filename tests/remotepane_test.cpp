@@ -662,6 +662,31 @@ for raw in sys.stdin:
         QCOMPARE(pane.noteText(), QStringLiteral("Ana ended your access."));
     }
 
+    // The live drive (docs/qa_evidence/2026-09-18-join-with-code-in-relay) typed the PIN and
+    // pressed Enter, and nothing happened: the one way everybody finishes a form has to join.
+    void joinDialogEnterInThePinJoins()
+    {
+        QTemporaryDir dir;
+        const QString log = dir.filePath(QStringLiteral("in.jsonl"));
+        qputenv("RELAY_REMOTE_VIEWER", writeGuestViewer(dir, log).toLocal8Bit());
+        auto *dialog = new JoinDialog(QStringLiteral("BQRT"), [](RemotePane *, bool) {});
+        QPointer<JoinDialog> alive(dialog);
+        dialog->show();
+        QVERIFY(QTest::qWaitForWindowActive(dialog));
+        auto *pin = dialog->findChild<QLineEdit *>(QStringLiteral("joinPin"));
+        QTRY_VERIFY(pin->hasFocus());
+        QTest::keyClicks(pin, QStringLiteral("4829"));
+        QTest::keyClick(pin, Qt::Key_Return);
+        QTRY_COMPARE(dialog->findChild<QLabel *>(QStringLiteral("joinCheckCode"))->text(), QStringLiteral("12345"));
+        // Still waiting: the Enter that joined must not also press the button it hands focus to.
+        QTest::qWait(300);
+        QVERIFY(dialog->findChild<QLabel *>(QStringLiteral("joinWait"))->isVisible());
+        QVERIFY(!pin->isVisible());
+        delete alive.data();
+        RemoteViewer::guest().stop();   // the next test starts its own fake viewer
+        QTRY_VERIFY(!RemoteViewer::guest().running());
+    }
+
     void joinDialogJoinsAndFollowsTheScope()
     {
         QTemporaryDir dir;

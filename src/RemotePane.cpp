@@ -2628,10 +2628,11 @@ JoinDialog::JoinDialog(const QString &code, Place place, QWidget *parent) : QDia
             // Four letters in: on to the PIN, as a code read out is typed in one go.
             if (m_code->text().size() == 4 && m_pin->text().isEmpty()) m_pin->setFocus();
         });
-        for (QLineEdit *edit : {m_code, m_pin, m_name, m_server}) {
+        // Enter in any field presses Join through the dialog's default button, and only that way:
+        // wiring returnPressed as well joined, moved the focus to Cancel, and the same key then
+        // reached the dialog and pressed Cancel (the live drive of 2026-09-18 caught it).
+        for (QLineEdit *edit : {m_code, m_pin, m_name, m_server})
             connect(edit, &QLineEdit::textChanged, this, &JoinDialog::updateJoinButton);
-            connect(edit, &QLineEdit::returnPressed, this, &JoinDialog::join);
-        }
         connect(m_join, &QPushButton::clicked, this, &JoinDialog::join);
     }
     m_pages->addWidget(m_formPage);
@@ -2657,6 +2658,8 @@ JoinDialog::JoinDialog(const QString &code, Place place, QWidget *parent) : QDia
         auto *row = new QHBoxLayout;
         m_cancel = new QPushButton(QStringLiteral("Cancel"));
         m_cancel->setObjectName(QStringLiteral("joinCancel"));
+        // Never the button Enter presses: a stray Enter while waiting must not withdraw the knock.
+        m_cancel->setAutoDefault(false);
         row->addStretch(1);
         row->addWidget(m_cancel);
         v->addLayout(row);

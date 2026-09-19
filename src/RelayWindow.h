@@ -3022,10 +3022,19 @@ public:
             if (!self) { delete view; return; }
             auto *tool = new ToolPane(ToolPane::Kind::Info, view, view, self->activeCwd());
             tool->setProperty("paneType", QStringLiteral("shared"));
-            tool->setProperty("paneLabel", QStringLiteral("Shared pane"));
+            // The band names the pane it shows, not just its kind: a joined tab holds several.
+            const auto label = [view] {
+                const QString title = view->paneTitle();
+                return title.isEmpty() ? QStringLiteral("Shared pane") : title;
+            };
+            tool->setProperty("paneLabel", label());
             relay::theme::polishWindow(tool);
             QPointer<ToolPane> guard(tool);
-            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            view->onTitleChanged = [guard, label] {
+                if (!guard) return;
+                guard->setProperty("paneLabel", label());
+                if (auto *w = windowOf(guard)) w->updateTitles();
+            };
             RelayWindow *w = (!first && *last) ? windowOf(last->data()) : nullptr;
             if (w) {
                 w->insertBeside(last->data(), tool, Qt::Horizontal, false);
@@ -3051,10 +3060,19 @@ public:
             if (!self || !self->m_activeLeaf) { delete view; return; }
             auto *tool = new ToolPane(ToolPane::Kind::Info, view, view, self->activeCwd());
             tool->setProperty("paneType", QStringLiteral("shared"));
-            tool->setProperty("paneLabel", QStringLiteral("Shared pane"));
+            // The band names the pane it shows, not just its kind: a joined tab holds several.
+            const auto label = [view] {
+                const QString title = view->paneTitle();
+                return title.isEmpty() ? QStringLiteral("Shared pane") : title;
+            };
+            tool->setProperty("paneLabel", label());
             relay::theme::polishWindow(tool);
             QPointer<ToolPane> guard(tool);
-            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            view->onTitleChanged = [guard, label] {
+                if (!guard) return;
+                guard->setProperty("paneLabel", label());
+                if (auto *w = windowOf(guard)) w->updateTitles();
+            };
             self->insertBeside(self->m_activeLeaf, tool, self->m_activeLeaf->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
             self->setActiveLeaf(tool);
             focusLeaf(tool);

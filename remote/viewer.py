@@ -22,7 +22,8 @@ ignore.
   Qt → viewer (both modes)
     {"t":"connect"}                 reconnect with the stored record, if any (in guest mode, only
                                     one that has not expired; otherwise `status unjoined`)
-    {"t":"open","pane":"<id>"}      pane_focus, then pane_state_get; kept across reconnects
+    {"t":"open","pane":"<id>"}      pane_focus, then pane_state_get (a guest: pane_focus only);
+                                    kept across reconnects
     {"t":"close","pane":"<id>"}     pane_blur
     {"t":"send","message":{…}}      one client → desktop wire message. Refused here when its type
                                     is not in wire.CLIENT_TYPES, is in wire.NEVER_FROM_CLIENT, or
@@ -990,7 +991,10 @@ class Viewer:
 
     async def _focus(self, pane: str) -> None:
         await self._send({"t": "pane_focus", "pane": pane})
-        await self._send({"t": "pane_state_get", "pane": pane})
+        # A guest never receives pane_state (section 10.1): asking only earns a refusal, which
+        # the pane then shows as an error (the live /join drive of 2026-09-18 caught it).
+        if not self.guest:
+            await self._send({"t": "pane_state_get", "pane": pane})
 
     async def _close_client(self, client: client_mod.Client | None) -> None:
         if client is None:
