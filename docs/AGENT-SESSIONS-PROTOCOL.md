@@ -2359,6 +2359,84 @@ All six events of 19.13 and 19.14 are desktop-only in `remote/wire.py`: they car
 paths and answer the desktop's own dialogs, and the card changes a phone cares about arrive in the
 `board_changed` that follows.
 
+### 19.15 Cross-provider QA: the signature and the verifier (v3.2, 2026-09-19)
+
+Card `#T71W`. Two work-card fields and one read-only block. `backend/relay_core/qa_verifiers.py`
+is the whole of it: the signature, the family table, the lineage groups, the ranked verifier list
+and this machine's availability probe. The GUI computes none of it.
+
+**The signature.** `provider/model`, lower case, where `provider` is the *model's vendor*, never
+the aggregator that routed to it: OpenRouter serving `deepseek/deepseek-v4.1-flash` signs
+`deepseek/deepseek-v4.1-flash`, a guest CLI signs `openai/codex` or `anthropic/claude-code`, a
+local endpoint signs `local/<model>`, and Relay Free signs the route it was asked for,
+`relay-free/relay-main`. Free text in parentheses after the slug is allowed and ignored, so the
+older hand-typed `Claude Opus 5 (pane 2)` still reads as `anthropic`.
+
+The **worker writes it**, from its own preset and model (`ToolContext.preset`/`.model`, set each
+turn by `Agent.sign_board`): `board_move_card` stamps `implemented_by` when a card enters
+`in-progress` or a QA lane, and `verified_by` when it leaves a QA lane to `done`. The agent's own
+`implemented_by` argument is accepted only when the worker has no signature at all — a guest CLI
+writing through the bridge — and is otherwise overwritten, because a typed provider name is a
+guess and the worker's is not. Both fields are ordinary work-card front matter
+(`docs/SWITCHBOARD-FORMAT.md` 2.2) and both appear on every board row; the same-family refusal on
+closing a QA card is unchanged, except that it now reads the family through this table.
+
+**Relay Free is not a family.** The gateway routes each role to somebody else's model, so
+`family("relay-free/relay-main")` answers with the upstream's family (`glm` today,
+`RELAY_FREE_UPSTREAMS` in `qa_verifiers.py`, read off `gateway/gateway.example.json`). A card
+written on Relay Free cannot be closed by the model behind it, and a GLM card is not offered
+Relay Free as its verifier.
+
+**The `qa` block.** `board_card_get`'s `board_card` event and the agent's `board_read` carry it on
+every work card that has an `implemented_by`; nothing else does, and it is **not** on a board row —
+it costs a PATH and keyring probe per card, and a board has hundreds of rows.
+
+```json
+"qa": {"implemented_by": "anthropic/claude-opus-5", "implementer_family": "anthropic",
+       "recommended": {"family": "openai", "label": "Codex", "runner": "guest:codex",
+                       "model": "codex", "available": "installed", "same_lineage": false,
+                       "why": "first available verifier outside the implementer's lineage (anthropic)"},
+       "alternates": [{"family": "glm", "label": "GLM-5.3", "runner": "preset:glm-coding",
+                       "model": "glm-5.3", "available": "key", "same_lineage": false,
+                       "why": "next in the ranking and available here (key)"}],
+       "skipped": [{"family": "anthropic", "label": "Claude", "why": "implemented this card"}],
+       "unavailable": [{"family": "kimi", "label": "Kimi", "why": "no key"}],
+       "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5", "agrees": true}],
+       "note": "…only when the recommendation is same-lineage or local…",
+       "verified_by": "glm/glm-5.3", "verifier_family": "glm"}
+```
+
+`recommended` is `null` when this machine can run no independent verifier at all — say so rather
+than naming one that cannot be opened. `runner` is `guest:<id>` (on PATH) or `preset:<id>` (a
+stored key, or a hosted/local row); `available` is why it is runnable (`installed`, `key`,
+`included, no key`, `on this machine`) and `model` is what that runner would actually run, from
+`presets.TIER_DEFAULTS[<preset>]["main"]`. `note` and `verified_by`/`verifier_family` are present
+only when they have something to say. `commits` reads the `Implemented-By:` trailer of each hash in
+`links.commits` and of `git log --grep '#ID' -n 50`; `agrees` is `null` when either side is
+unknown, and a `false` is the thing worth showing — a commit signed by a family the card does not
+claim.
+
+**The order.** `VERIFIER_RANK` is the owner's capability order — openai, anthropic, glm, kimi,
+deepseek, gemini, minimax, relay-free, local — and `LINEAGE` groups the families that share
+training data. The rules, applied in this order: the implementer's own family is skipped outright;
+every other lineage comes first in rank order; the implementer's own lineage follows, still offered
+and saying why; a local endpoint is always last, because a model small enough to serve here is
+below the capability floor for judging code; anything with no runner on this machine is
+`unavailable` with what is missing named (`"codex not on PATH, no openai key"`). Both tables are
+data with a reason per row, from
+`docs/qa_evidence/2026-09-19-cross-provider-qa/research-cross-model-qa.md`: reorder them and the
+recommendation reorders.
+
+**Availability** is the worker's: `shutil.which` over the guest registry's binary names
+(`relay_core.guest`, never a hard-coded list and never a `--version` subprocess, which a hung CLI
+would stall), `keystore.available()` for the stored keys (so `RELAY_KEYRING=off` means "no keys",
+which is what a test run wants), the hosted row for Relay Free, and `localmodels.catalog()`.
+Cached for a minute, because the key probe shells out once per preset.
+
+**Without Relay:** `scripts/relay-board.py verifier <ID> [--json]` prints the same recommendation
+from the same function — *"Verify #K7Q2 with Codex (installed) · then GLM-5.3 (key) · skipped
+Claude: implemented this card · unavailable Kimi: no key"* — with this machine's availability.
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`

@@ -17,9 +17,11 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    card rather than burying the questions in the terminal.
 4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
    their own words in quotation marks, and into the card's `## Decisions` section.
-5. **Work.** When you start: `board_move_card` to `in-progress` with `assignee: agent` and
-   `implemented_by` set to your model. When it lands: move to `needs-qa-llm` with the evidence path
-   and a `## QA checklist` section in the body, in the same commit as the change.
+5. **Work.** When you start: `board_move_card` to `in-progress` with `assignee: agent`. When it
+   lands: move to `needs-qa-llm` with the evidence path and a `## QA checklist` section in the body,
+   in the same commit as the change. Relay stamps `implemented_by` with your provider/model itself,
+   and `verified_by` on whoever closes the card, so never type either; QA is run by the model the
+   card's `qa` recommendation names, which is never your own family.
 6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
 7. **Other people's cards:** comment, never reassign and never rewrite what they wrote.

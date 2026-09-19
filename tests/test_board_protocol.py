@@ -23,6 +23,7 @@ from relay_core import board_tools as T
 from relay_core import forge_github as GH
 from relay_core import forge_sync as F
 from relay_core import project_probe as PP
+from relay_core import qa_verifiers as QA
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
 
@@ -229,6 +230,31 @@ class WriteTests(ProtocolTest):
                            patch={"fields": {"labels": ["voice"]}})
         self.assertTrue([e for e in update if e["event"] == "board_written"])
 
+    def test_a_card_detail_carries_the_qa_recommendation_computed_on_this_machine(self):
+        # Protocol 19.15: the same `qa` block the agent's `board_read` returns, because it *is* that
+        # read. Availability is fixed here so the test says nothing about the machine it runs on.
+        card_id = self.make_card()
+        self.commands.tools.context.preset = "anthropic"
+        self.commands.tools.context.model = "claude-opus-5"
+        self.send(type="board_move", card=card_id, status="needs-qa-llm", reason="landed",
+                  evidence="docs/qa_evidence/x/")
+        here = {"installed_guests": {"codex"}, "keys": {"glm-coding": True}, "hosted_ok": True,
+                "local_models": ()}
+        with unittest.mock.patch.object(QA, "availability", lambda *a, **k: dict(here)):
+            detail = [e for e in self.send(type="board_card_get", id="q1", card=card_id)
+                      if e["event"] == "board_card"][0]
+        self.assertEqual(detail["front"]["implemented_by"], "anthropic/claude-opus-5")
+        block = detail["qa"]
+        self.assertEqual(block["implementer_family"], "anthropic")
+        self.assertEqual(block["recommended"]["runner"], "guest:codex")
+        self.assertEqual([s["family"] for s in block["skipped"]], ["anthropic"])
+        self.assertIn("commits", block)
+        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
+        row = [r for r in board["cards"] if r["id"] == card_id][0]
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
+        self.assertIn("verified_by", row)
+        self.assertNotIn("qa", row)                # the rows stay light; the block is per card
+
     def test_undo_restores_and_reports_the_change(self):
         card_id = self.make_card()
         written = [e for e in self.send(type="board_move", card=card_id, status="ready",
@@ -416,11 +442,23 @@ class AgentWiringTests(unittest.TestCase):
         tools.creates_this_turn = 4
         agent.board.context.model = None
         # ask() would call the provider; exercise just the per-turn bookkeeping it does first.
-        agent.board.context.model = agent.config.model
+        agent.sign_board()
         agent.board.begin_turn("t-7")
         self.assertEqual(tools.creates_this_turn, 0)
         self.assertEqual(tools.context.turn_id, "t-7")
         self.assertEqual(tools.context.model, "test-model")
+
+    def test_the_board_context_learns_the_panes_preset_so_a_card_can_be_signed(self):
+        # Card #T71W: the model alone cannot say who wrote a card — `deepseek-v4.1-flash` through
+        # OpenRouter and the same model served locally are different things to QA.
+        tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
+        config = ProviderConfig("https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash",
+                                "k", {}, 1024)
+        agent = Agent(config, str(self.repo), lambda event: None, provider=object(),
+                      board=tools, session_dir=str(self.repo / ".sessions"), preset_id="openrouter")
+        agent.sign_board()
+        self.assertEqual(tools.context.preset, "openrouter")
+        self.assertEqual(tools.context.signature(), "deepseek/deepseek-v4.1-flash")
 
 
 class ThreadSafetyTests(ProtocolTest):

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import board as B
+from . import qa_verifiers as QA
 from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
@@ -209,7 +210,8 @@ TOOL_SPECS = [
     spec("board_move_card",
          "Move a card to another status (column), another tab (category) or another position. `reason` is "
          "required and goes into the thread. Moving into needs-qa-llm or needs-qa-human requires an "
-         "evidence path and an implemented_by model. Closing a card that is in a QA lane requires a "
+         "evidence path. Relay stamps `implemented_by` and `verified_by` with the pane's own "
+         "provider/model, so you do not type them. Closing a card that is in a QA lane requires a "
          "verdict section in the body, and the model closing it must not be the family that implemented it.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
@@ -218,7 +220,10 @@ TOOL_SPECS = [
           "after": {"type": "string", "description": "Id of the card this one should sit after in the column."},
           "reason": {"type": "string", "description": "Why, in one line. Recorded in the thread."},
           "evidence": {"type": "string", "description": "Evidence path, e.g. docs/qa_evidence/2026-09-17-slug/."},
-          "implemented_by": {"type": "string", "description": "Model that implemented the change, when the card does not name one."}},
+          "implemented_by": {"type": "string",
+                             "description": "Only when Relay cannot know it (a guest CLI writing "
+                                            "through the bridge): the model that implemented the "
+                                            "change. Relay's own stamp wins."}},
          ["id", "reason"]),
     spec("board_comment",
          "Append one entry to a card's thread: a note, a question for the user, a decision they made, "
@@ -304,19 +309,17 @@ def normalize_id(value, what: str = "id") -> str:
 
 
 def model_family(model: str | None) -> str:
-    """The vendor-ish family of a model string, for the QA independence rule.
+    """The vendor family of a model string, for the QA independence rule.
 
-    `anthropic/claude-opus-5` -> `anthropic`; `Claude Opus 5 (pane 2)` -> `claude`;
-    `gpt-5-codex` -> `gpt`.  Deliberately coarse: it only has to tell two different
-    providers apart, and an unknown string never blocks a move on its own.
+    One line since card #T71W: `relay_core.qa_verifiers.family` is the single table, so the
+    signature form and the free-text form of the same model land on the same family
+    (`anthropic/claude-opus-5` and `Claude Opus 5 (pane 2)` are both `anthropic`) and an
+    aggregator's route is read as the model's vendor (`openrouter/deepseek-…` is `deepseek`).
+    Before that this split on the slash and took the first word, so `Claude Opus 5` was
+    `claude` and `anthropic/claude-opus-5` was `anthropic` — two names for one lab, and the
+    independence rule let each close what the other wrote.
     """
-    if not isinstance(model, str) or not model.strip():
-        return ""
-    text = model.strip().lower()
-    if "/" in text:
-        return text.split("/", 1)[0]
-    word = _WORD_RE.search(text)
-    return word.group(0) if word else ""
+    return QA.family(model)
 
 
 def _words(text: str) -> set[str]:
@@ -789,12 +792,24 @@ class WriteRecord:
 
 @dataclass
 class ToolContext:
-    """Who is writing, for the thread entries and the activity events."""
+    """Who is writing, for the thread entries and the activity events.
+
+    `preset` and `model` together are what the worker knows about *itself*, and `signature()`
+    turns them into the canonical `provider/model` a card records as its `implemented_by` or
+    `verified_by` (card #T71W).  Both are set per turn by the agent (`Agent.ask`); a guest
+    writing through the bridge sets neither, and then the agent's own `implemented_by`
+    argument is what the card gets.
+    """
     actor: str = "agent"
     model: str | None = None
+    preset: str | None = None
     pane: str | None = None
     turn_id: str | None = None
     session_id: str | None = None
+
+    def signature(self) -> str:
+        """This worker's own `provider/model`, or "" when it cannot know it."""
+        return QA.signature(self.preset, self.model)
 
     def attrs(self) -> dict:
         out = {}
@@ -1311,6 +1326,9 @@ class BoardTools:
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
                 "implemented_by": card.front.get("implemented_by"),
+                # Who closed it out of the QA lane (#T71W). The row stays light on purpose: the
+                # `qa` recommendation is computed per card in `board_read`, not for every row.
+                "verified_by": card.front.get("verified_by"),
                 "tasks_total": len(tasks),
                 "tasks_done": sum(1 for task in tasks if task.done)}
 
@@ -1385,7 +1403,9 @@ class BoardTools:
         entries = self.board.thread(card_id, card.private)
         entries.sort(key=lambda e: e.entry_id)
         tail = entries[len(entries) - count:] if count else []
-        return {"id": card.id, "hash": B.file_hash(card.path), "type": card.type,
+        qa = self._qa_block(card)
+        return {**({"qa": qa} if qa else {}),
+                "id": card.id, "hash": B.file_hash(card.path), "type": card.type,
                 "tab": self._tab_of(card), "status": card.status,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "front": dict(card.front), "title": card.title, "body": card.body[:MAX_TEXT],
@@ -1404,6 +1424,29 @@ class BoardTools:
                 "thread_total": len(entries),
                 "thread": [{"entry_id": e.entry_id, "author": e.author, "kind": e.kind,
                             "attrs": dict(e.attrs), "text": e.text} for e in tail]}
+
+    def _qa_block(self, card: B.Card) -> dict | None:
+        """The `qa` object of protocol 19.15: who should verify this card, and what its commits say.
+
+        Only on a work card that names an implementer — with nothing to be independent *of* there is
+        nothing to recommend. Availability is this machine's (`qa_verifiers.availability`, cached a
+        minute because it shells out per stored key), never the GUI's, and the commit trailers are
+        read from `links.commits` plus `git log --grep '#ID'`. Advisory throughout: a missing git, a
+        bad hash or an unreadable keyring answers with fewer rows, never an error.
+        """
+        if card.type != "work":
+            return None
+        implementer = str(card.front.get("implemented_by") or "").strip()
+        if not implementer:
+            return None
+        block = QA.recommend_here(implementer)
+        block["commits"] = QA.card_commits(self.board.repo, card.id or "",
+                                           card.front.get("links"), implementer)
+        verified = str(card.front.get("verified_by") or "").strip()
+        if verified:
+            block["verified_by"] = verified
+            block["verifier_family"] = QA.family(verified)
+        return block
 
     # ---- writes ---------------------------------------------------------------
     def _record(self, action: str, card: B.Card, summary: str, before: bytes | None,
@@ -1651,19 +1694,29 @@ class BoardTools:
                     else self._category_for_tab(tab))
 
         evidence = args.get("evidence")
+        # Card #T71W: the worker knows its own preset and model, so the signature is stamped, never
+        # typed. It wins over the agent's `implemented_by` argument, which stays for the one case
+        # the worker cannot know — a guest CLI writing through the bridge.
+        mine = self.context.signature()
+        stamped = ""
+        if mine and (status == "in-progress"
+                     or (status in QA_STATUSES and old_status not in QA_STATUSES)):
+            stamped = mine
+            card.set("implemented_by", mine)
         if status in QA_STATUSES and old_status not in QA_STATUSES:
             if not isinstance(evidence, str) or not evidence.strip():
                 raise BoardToolError(
                     "Moving a card into a QA lane needs `evidence`: the path of the evidence folder "
                     "(docs/qa_evidence/<date>-<slug>/) recorded with the change.",
                     code="board_refused", requires="evidence")
-            implemented_by = args.get("implemented_by") or card.front.get("implemented_by")
+            implemented_by = stamped or args.get("implemented_by") or card.front.get("implemented_by")
             if not implemented_by:
                 raise BoardToolError(
                     "Moving a card into a QA lane needs `implemented_by`: the model that implemented "
                     "it, so QA can be run by a different one.",
                     code="board_refused", requires="implemented_by")
             card.set("implemented_by", implemented_by)
+        verified = ""
         if old_status in QA_STATUSES and status in ("done", "dropped"):
             if not any(h.lower() in ("verdict", "qa verdict", "qa result", "resolution")
                        for h in section_headings(card.body)):
@@ -1671,13 +1724,17 @@ class BoardTools:
                     "A card in a QA lane is closed with a verdict: add a `## Verdict` (or "
                     "`## Resolution`) section to the body first, then move it.",
                     code="board_refused", requires="verdict")
-            mine = model_family(self.context.model)
+            closer = model_family(mine or self.context.model)
             theirs = model_family(card.front.get("implemented_by"))
-            if mine and theirs and mine == theirs:
+            if closer and theirs and closer == theirs:
                 raise BoardToolError(
                     f"QA independence: {card.front.get('implemented_by')} implemented this card, and "
-                    f"you are the same model family ({mine}). A different model has to close it.",
+                    f"you are the same model family ({closer}). A different model has to close it.",
                     code="board_refused", requires="independent_model")
+            # Who passed it, in the same canonical form as `implemented_by`.
+            if status == "done" and mine:
+                verified = mine
+                card.set("verified_by", mine)
 
         if args.get("evidence"):
             links = dict(card.front.get("links") or {})
@@ -1686,7 +1743,7 @@ class BoardTools:
                 paths.append(evidence)
             links["evidence"] = paths
             card.set("links", links)
-        if args.get("implemented_by"):
+        if args.get("implemented_by") and not stamped:
             card.set("implemented_by", args["implemented_by"])
 
         card.set("status", status)
@@ -1715,6 +1772,10 @@ class BoardTools:
         line = f"- ✦ {self.context.actor} moved this card · {summary} · {reason}"
         if args.get("evidence"):
             line += f" · evidence {evidence}"
+        if stamped:
+            line += f" · implemented_by {stamped}"
+        if verified:
+            line += f" · verified_by {verified}"
         self._append(card, line, kind="event")
         write_id = self._record("move", card, summary, before_bytes, size, moved_from)
         return {"id": card.id, "status": status, "tab": tab, "rank": card.rank,

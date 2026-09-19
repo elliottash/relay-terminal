@@ -1,0 +1,77 @@
+{
+  "implemented_by": "anthropic/claude-opus-5",
+  "implementer_family": "anthropic",
+  "recommended": {
+    "family": "openai",
+    "label": "Codex",
+    "runner": "guest:codex",
+    "model": "codex",
+    "available": "installed",
+    "same_lineage": false,
+    "why": "first available verifier outside the implementer's lineage (anthropic)"
+  },
+  "alternates": [
+    {
+      "family": "glm",
+      "label": "GLM-5.3",
+      "runner": "preset:glm-coding",
+      "model": "glm-5.3",
+      "available": "key",
+      "same_lineage": false,
+      "why": "next in the ranking and available here (key)"
+    },
+    {
+      "family": "deepseek",
+      "label": "DeepSeek V4.1",
+      "runner": "preset:openrouter",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "available": "key",
+      "same_lineage": false,
+      "why": "next in the ranking and available here (key)"
+    },
+    {
+      "family": "glm",
+      "label": "Relay Free (GLM-5.3 Flash)",
+      "runner": "preset:relay-free",
+      "model": "relay-main",
+      "available": "included, no key",
+      "same_lineage": false,
+      "via": "relay-free",
+      "why": "next in the ranking and available here (included, no key)"
+    },
+    {
+      "family": "local",
+      "label": "Bonsai 2 27B",
+      "runner": "preset:local:bonsai",
+      "model": "bonsai-2-27b",
+      "available": "on this machine",
+      "same_lineage": false,
+      "why": "offered last: a model small enough to serve here is below the capability floor for judging code (Crupi et al. 2025, CodeJudgeBench)"
+    }
+  ],
+  "skipped": [
+    {
+      "family": "anthropic",
+      "label": "Claude",
+      "why": "implemented this card"
+    }
+  ],
+  "unavailable": [
+    {
+      "family": "kimi",
+      "label": "Kimi",
+      "why": "no key"
+    },
+    {
+      "family": "gemini",
+      "label": "Gemini",
+      "why": "no key"
+    },
+    {
+      "family": "minimax",
+      "label": "MiniMax",
+      "why": "no key"
+    }
+  ],
+  "commits": []
+}

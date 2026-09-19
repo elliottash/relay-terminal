@@ -650,6 +650,9 @@ class BoardCommands:
             row["milestone"] = card.front.get("milestone")
             row["component"] = card.front.get("component")
             row["implemented_by"] = card.front.get("implemented_by")
+            # The signatures travel on every row; the `qa` recommendation does not — it is per card
+            # and costs a PATH and keyring probe, so it rides on `board_card_get` (19.15) instead.
+            row["verified_by"] = card.front.get("verified_by")
             tasks = card.tasks()
             row["tasks_done"] = sum(1 for t in tasks if t.done)
             row["tasks_total"] = len(tasks)

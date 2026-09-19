@@ -1,0 +1,61 @@
+# ./scripts/test.sh — full backend + Bash/PTY suite, 2026-09-19, after #T71W's backend half
+# (tail; the whole run is 3040 tests. RELAY_KEYRING=off and an isolated XDG_DATA_HOME are set by the script.)
+
+test_the_board_context_learns_the_panes_preset_so_a_card_can_be_signed (test_board_protocol.AgentWiringTests.test_the_board_context_learns_the_panes_preset_so_a_card_can_be_signed) ... ok
+test_a_card_detail_carries_the_qa_recommendation_computed_on_this_machine (test_board_protocol.WriteTests.test_a_card_detail_carries_the_qa_recommendation_computed_on_this_machine) ... ok
+test_a_card_with_no_implementer_carries_no_recommendation_at_all (test_board_tools.SignatureTests.test_a_card_with_no_implementer_carries_no_recommendation_at_all) ... ok
+test_a_guest_writing_through_the_bridge_still_names_itself (test_board_tools.SignatureTests.test_a_guest_writing_through_the_bridge_still_names_itself) ... ok
+test_board_read_names_the_verifier_for_a_card_that_has_an_implementer (test_board_tools.SignatureTests.test_board_read_names_the_verifier_for_a_card_that_has_an_implementer) ... ok
+test_closing_a_qa_card_stamps_verified_by_with_the_closers_signature (test_board_tools.SignatureTests.test_closing_a_qa_card_stamps_verified_by_with_the_closers_signature) ... ok
+test_relay_free_is_judged_by_the_gateways_upstream_not_by_the_gateway (test_board_tools.SignatureTests.test_relay_free_is_judged_by_the_gateways_upstream_not_by_the_gateway) ... ok
+test_starting_work_stamps_the_panes_own_signature_nobody_types_it (test_board_tools.SignatureTests.test_starting_work_stamps_the_panes_own_signature_nobody_types_it) ... ok
+test_the_row_carries_both_signatures_but_not_the_recommendation (test_board_tools.SignatureTests.test_the_row_carries_both_signatures_but_not_the_recommendation) ... ok
+test_the_worker_stamp_wins_over_what_the_agent_typed (test_board_tools.SignatureTests.test_the_worker_stamp_wins_over_what_the_agent_typed) ... ok
+test_recommend_here_is_recommend_with_this_machines_availability (test_qa_verifiers.AvailabilityTests.test_recommend_here_is_recommend_with_this_machines_availability) ... ok
+test_the_probe_answers_the_four_keys_and_only_known_guests (test_qa_verifiers.AvailabilityTests.test_the_probe_answers_the_four_keys_and_only_known_guests) ... ok
+test_a_missing_repo_a_bad_hash_and_no_card_are_answers_not_exceptions (test_qa_verifiers.CommitTrailerTests.test_a_missing_repo_a_bad_hash_and_no_card_are_answers_not_exceptions) ... ok
+test_a_trailer_that_matches_the_card_agrees_and_one_that_does_not_says_so (test_qa_verifiers.CommitTrailerTests.test_a_trailer_that_matches_the_card_agrees_and_one_that_does_not_says_so) ... ok
+test_the_commits_of_a_card_are_found_by_its_id (test_qa_verifiers.CommitTrailerTests.test_the_commits_of_a_card_are_found_by_its_id) ... ok
+test_an_aggregator_is_read_through_to_the_model (test_qa_verifiers.FamilyTests.test_an_aggregator_is_read_through_to_the_model) ... ok
+test_nothing_and_an_unknown_model_never_raise (test_qa_verifiers.FamilyTests.test_nothing_and_an_unknown_model_never_raise) ... ok
+test_relay_free_is_the_family_of_the_gateways_upstream_for_the_role (test_qa_verifiers.FamilyTests.test_relay_free_is_the_family_of_the_gateways_upstream_for_the_role) ... ok
+test_the_coding_plans_are_their_vendors (test_qa_verifiers.FamilyTests.test_the_coding_plans_are_their_vendors) ... ok
+test_the_o_series_the_codex_cli_and_gpt_are_all_openai (test_qa_verifiers.FamilyTests.test_the_o_series_the_codex_cli_and_gpt_are_all_openai) ... ok
+test_the_signature_and_the_legacy_free_text_land_on_one_family (test_qa_verifiers.FamilyTests.test_the_signature_and_the_legacy_free_text_land_on_one_family) ... ok
+test_an_unknown_family_has_no_lineage_and_is_therefore_its_own (test_qa_verifiers.LineageTests.test_an_unknown_family_has_no_lineage_and_is_therefore_its_own) ... ok
+test_every_ranked_family_has_a_lineage (test_qa_verifiers.LineageTests.test_every_ranked_family_has_a_lineage) ... ok
+test_the_chinese_open_weight_models_share_one_lineage (test_qa_verifiers.LineageTests.test_the_chinese_open_weight_models_share_one_lineage) ... ok
+test_the_three_western_labs_are_each_their_own (test_qa_verifiers.LineageTests.test_the_three_western_labs_are_each_their_own) ... ok
+test_a_glm_card_is_not_verified_by_relay_free_which_is_glm_today (test_qa_verifiers.RecommendTests.test_a_glm_card_is_not_verified_by_relay_free_which_is_glm_today) ... ok
+test_a_local_endpoint_is_offered_last_and_carries_its_own_note (test_qa_verifiers.RecommendTests.test_a_local_endpoint_is_offered_last_and_carries_its_own_note) ... ok
+test_a_same_lineage_recommendation_says_so_and_carries_a_note (test_qa_verifiers.RecommendTests.test_a_same_lineage_recommendation_says_so_and_carries_a_note) ... ok
+test_an_unavailable_family_says_what_is_missing (test_qa_verifiers.RecommendTests.test_an_unavailable_family_says_what_is_missing) ... ok
+test_an_unknown_implementer_takes_the_top_of_the_ranking_and_says_why (test_qa_verifiers.RecommendTests.test_an_unknown_implementer_takes_the_top_of_the_ranking_and_says_why) ... ok
+test_claude_gets_codex_first (test_qa_verifiers.RecommendTests.test_claude_gets_codex_first) ... ok
+test_codex_falls_to_glm_when_claude_is_not_there_and_then_to_kimi (test_qa_verifiers.RecommendTests.test_codex_falls_to_glm_when_claude_is_not_there_and_then_to_kimi) ... ok
+test_codex_gets_claude_when_the_cli_is_installed (test_qa_verifiers.RecommendTests.test_codex_gets_claude_when_the_cli_is_installed) ... ok
+test_each_runner_carries_the_model_it_would_actually_run (test_qa_verifiers.RecommendTests.test_each_runner_carries_the_model_it_would_actually_run) ... ok
+test_glm_gets_a_different_lineage_first_and_its_own_lineage_last (test_qa_verifiers.RecommendTests.test_glm_gets_a_different_lineage_first_and_its_own_lineage_last) ... ok
+test_nothing_at_all_available_recommends_nobody_rather_than_guessing (test_qa_verifiers.RecommendTests.test_nothing_at_all_available_recommends_nobody_rather_than_guessing) ... ok
+test_relay_free_is_the_floor_when_nothing_else_is_installed_or_keyed (test_qa_verifiers.RecommendTests.test_relay_free_is_the_floor_when_nothing_else_is_installed_or_keyed) ... ok
+test_the_legacy_free_text_implementer_is_skipped_just_as_the_signature_is (test_qa_verifiers.RecommendTests.test_the_legacy_free_text_implementer_is_skipped_just_as_the_signature_is) ... ok
+test_the_summary_line_reads_as_one_sentence (test_qa_verifiers.RecommendTests.test_the_summary_line_reads_as_one_sentence) ... ok
+test_a_guest_signs_its_harness_because_its_model_is_not_observable (test_qa_verifiers.SignatureTests.test_a_guest_signs_its_harness_because_its_model_is_not_observable) ... ok
+test_each_preset_signs_with_its_own_vendor (test_qa_verifiers.SignatureTests.test_each_preset_signs_with_its_own_vendor) ... ok
+test_every_shipped_preset_and_tier_produces_a_signature_with_a_known_family (test_qa_verifiers.SignatureTests.test_every_shipped_preset_and_tier_produces_a_signature_with_a_known_family) ... ok
+test_no_preset_and_no_model_is_no_signature (test_qa_verifiers.SignatureTests.test_no_preset_and_no_model_is_no_signature) ... ok
+test_relay_free_signs_the_route_and_a_local_endpoint_signs_the_machine (test_qa_verifiers.SignatureTests.test_relay_free_signs_the_route_and_a_local_endpoint_signs_the_machine) ... ok
+test_the_vendor_is_the_model_not_the_aggregator (test_qa_verifiers.SignatureTests.test_the_vendor_is_the_model_not_the_aggregator) ... ok
+
+----------------------------------------------------------------------
+Ran 3040 tests in 323.034s
+
+OK
+$ PYTHONPATH=backend RELAY_KEYRING=off python3 scripts/relay-board.py check
+warning: features/needs_qa_llm/2026-09-19-claude-codex-guest-integration.md: task_missing_marker: 1 item(s) have no <!-- t:id --> marker
+228 card(s) checked: 0 error(s), 1 warning(s)
+
+$ PYTHONPATH=backend RELAY_KEYRING=off python3 scripts/relay-board.py verifier T71W
+Verify #T71W with Codex (installed) · then Relay Free (GLM-5.3 Flash) (included, no key) · Bonsai 2 27B (on this machine) · skipped Claude: implemented this card · unavailable GLM: no key · unavailable Kimi: no key · and 3 more unavailable
+  commit d1d96b7: anthropic/claude-opus-5 (subagent) (agrees)
+  commit eba4fed: — (no trailer)

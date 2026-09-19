@@ -106,12 +106,21 @@ Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `pr
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
-| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `label_count`, `label_output`, `codebook` | `inbox`, `discussing`, `ready`, `in-progress`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
+| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `label_count`, `label_output`, `codebook` | `inbox`, `discussing`, `ready`, `in-progress`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `plan` | `approved_by`, `goal` | `draft`, `approved`, `executing`, `done`, `dropped` | `planning/`, `planning/done/` |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
 - `ready` is what the old tracker called `open`; `dropped` cards live in `done/` beside `done` ones.
+- `implemented_by` and `verified_by` are **signatures, not free text**, and Relay writes them: the
+  worker stamps `provider/model` from its own preset and model when a card enters `in-progress` or a
+  QA lane, and again when it leaves a QA lane to `done` (card `#T71W`, protocol section 19.15). The
+  provider segment is the *model's* vendor, never the aggregator that routed to it, so a card served
+  `deepseek/deepseek-v4.1-flash` through OpenRouter reads `deepseek/deepseek-v4.1-flash`, a guest CLI
+  reads `openai/codex` or `anthropic/claude-code`, and a local endpoint reads `local/<model>`. Free
+  text in parentheses is allowed and ignored (`anthropic/claude-opus-5 (pane 2)`), which is how the
+  hand-typed values written before 2026-09-19 keep working. The pair is what the QA independence rule
+  reads, and what `relay-board.py verifier <ID>` answers from.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching

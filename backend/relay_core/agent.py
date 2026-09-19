@@ -581,6 +581,19 @@ class Agent:
         self.effort = effort
         return applied
 
+    def sign_board(self) -> None:
+        """Tell the Switchboard which model this pane is, so it can sign what it writes.
+
+        The preset as well as the model: only the preset tells `deepseek-v4.1-flash` served by
+        OpenRouter from the same model served locally, and the signature a card records has to
+        name the vendor (card #T71W, `qa_verifiers.signature`). Called at the top of every turn,
+        because the model can change between turns.
+        """
+        if self.board is None:
+            return
+        self.board.context.model = self.config.model
+        self.board.context.preset = self.preset.id if self.preset is not None else None
+
     def set_model(self, config: ProviderConfig, preset_id: str | None = None,
                   context_window: int | None = None, provider=None) -> None:
         """Swap the provider between turns, keeping the conversation."""
@@ -1145,7 +1158,7 @@ class Agent:
         self._turn_ctx = ctx
         if self.board is not None:
             # Switchboard write budgets are per turn (design 6.3).
-            self.board.context.model = self.config.model
+            self.sign_board()
             self.board.context.session_id = self.session_id
             self.board.begin_turn(turn_id)
         # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".

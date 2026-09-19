@@ -526,6 +526,31 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   set is a `needs-labels` card with a codebook; "good enough to default on" is `needs-review` (skill rules 3–4).
   Results (sample sizes, policy, model ids) go to `docs/qa_evidence/<date>-board-evals/`; this repo dogfoods `auto`.
 
+### 6.5 Cross-provider QA: the signature and the verifier (card #T71W, 2026-09-19)
+
+The QA lane has always asked for a *different* model; it never said which, and it believed whatever
+the agent typed into `implemented_by`. Three changes, all in
+`backend/relay_core/qa_verifiers.py`:
+
+- **The signature is written, not typed.** The worker knows its own preset and model, so it stamps
+  `implemented_by` on entering `in-progress` or a QA lane and `verified_by` on closing out of one,
+  as `provider/model` where the provider is the *model's* vendor (`deepseek/deepseek-v4.1-flash`,
+  not `openrouter/…`; `openai/codex` for the guest CLI). The agent's own argument survives only for
+  a guest writing through the bridge, which is the one case the worker cannot know.
+- **The card names its verifier.** One ranked table (the owner's order: codex → claude → glm → kimi
+  → deepseek → gemini → minimax → relay-free → local) and one lineage table. The implementer's
+  family is skipped; a family in its lineage is moved behind every other lineage but still offered,
+  because a second pair of eyes from the same training data is worth less, not nothing; a local
+  model is offered last; anything with no CLI on PATH and no stored key is reported as unavailable
+  with what is missing. The reasons come from the research report under
+  `docs/qa_evidence/2026-09-19-cross-provider-qa/`, and both tables are data with a comment per row.
+- **Relay Free is a route, not a lab.** Its family is the gateway's upstream for the role in use, so
+  a GLM card is never handed back to GLM through the gateway without anyone noticing.
+
+Availability is always the worker's (PATH, keyring, local endpoints) — the GUI is told, never asked
+— and the same function answers `board_read`, `board_card_get` and
+`scripts/relay-board.py verifier <ID>`, so a collaborator without the GUI gets the same answer.
+
 ## 7. Detecting and converting non-compliant notes
 
 `board_scan` runs on Board open, on watcher changes and on demand (`board.convert`); findings show as a banner ("7

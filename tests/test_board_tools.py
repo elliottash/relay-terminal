@@ -7,10 +7,12 @@ calls a model or touches the network or the keyring.
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from relay_core import board as B
 from relay_core import board_tools as T
+from relay_core import qa_verifiers as QA
 
 CONFIG = """\
 version: 1
@@ -88,10 +90,16 @@ class SpecTests(unittest.TestCase):
             self.assertIn(phrase, text)
 
     def test_model_family_tells_providers_apart(self):
+        # Since #T71W the signature form and the free-text form of one model are one family: this
+        # asserted "claude" for the free text and "anthropic" for the signature, which is exactly
+        # the hole the independence rule fell through — each could close what the other wrote.
         self.assertEqual(T.model_family("anthropic/claude-opus-5"), "anthropic")
-        self.assertEqual(T.model_family("Claude Opus 5 (pane 2)"), "claude")
+        self.assertEqual(T.model_family("Claude Opus 5 (pane 2)"),
+                         T.model_family("anthropic/claude-opus-5"))
         self.assertEqual(T.model_family(None), "")
         self.assertNotEqual(T.model_family("openai/gpt-5"), T.model_family("anthropic/claude-opus-5"))
+        # The aggregator is read through to the model it routes to.
+        self.assertEqual(T.model_family("openrouter/deepseek-v4.1-flash"), "deepseek")
 
 
 # --------------------------------------------------------------------- list and read
@@ -507,6 +515,9 @@ class MoveTests(BoardToolsTest):
             "board_move_card", {"id": self.card_id, "status": "ready"})["error"])
 
     def test_a_qa_lane_needs_evidence_and_an_implementer(self):
+        # A worker that cannot name itself (a guest writing through the bridge): only then is the
+        # agent's own `implemented_by` argument asked for, and only then can it be missing.
+        self.tools.context.model = self.tools.context.preset = None
         without = self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
                                                      "reason": "landed"})
         self.assertEqual(without["requires"], "evidence")
@@ -521,13 +532,19 @@ class MoveTests(BoardToolsTest):
         self.assertNotIn("error", ok)
         card = self.board.card_by_id(self.card_id)
         self.assertEqual(card.path.parent, self.root / "features" / "needs_qa_llm")
+        self.assertEqual(card.front["implemented_by"], "anthropic/claude-opus-5")
         self.assertIn("docs/qa_evidence/2026-09-17-voice/", card.front["links"]["evidence"])
         self.assertIn("evidence docs/qa_evidence", self.thread_text(self.card_id))
 
     def _into_qa(self, implementer):
+        """Land the card in the QA lane as `implementer` would: the worker stamps its own
+        signature now (#T71W), so the pane that lands it *is* the implementer."""
+        was = self.tools.context.model
+        self.tools.context.model = implementer
         self.tools.run("board_move_card", {
             "id": self.card_id, "status": "needs-qa-llm", "reason": "landed",
-            "evidence": "docs/qa_evidence/x/", "implemented_by": implementer})
+            "evidence": "docs/qa_evidence/x/"})
+        self.tools.context.model = was
 
     def test_closing_a_qa_card_needs_a_verdict_section(self):
         self._into_qa("openai/gpt-5")
@@ -572,6 +589,109 @@ class MoveTests(BoardToolsTest):
         result = self.tools.run("board_move_card", {"id": self.card_id, "before": other,
                                                     "reason": "nope"})
         self.assertIn("not a card in the", result["error"])
+
+
+# ------------------------------------------------------- the QA signature and the verifier
+
+class SignatureTests(BoardToolsTest):
+    """Card #T71W: the worker stamps who implemented and who verified, and `board_read` says who
+    should verify next. The recommendation is computed with a fixed availability, so these tests
+    say nothing about the machine they run on."""
+
+    HERE = {"installed_guests": {"codex"}, "keys": {"glm-coding": True}, "hosted_ok": True,
+            "local_models": ()}
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+        patch = unittest.mock.patch.object(QA, "availability", lambda *a, **k: dict(self.HERE))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def sign(self, preset, model):
+        self.tools.context.preset, self.tools.context.model = preset, model
+
+    def test_starting_work_stamps_the_panes_own_signature_nobody_types_it(self):
+        self.sign("openrouter", "deepseek/deepseek-v4.1-flash")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
+                                           "reason": "starting"})
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.front["implemented_by"], "deepseek/deepseek-v4.1-flash")
+        self.assertIn("implemented_by deepseek/deepseek-v4.1-flash", self.thread_text(self.card_id))
+
+    def test_the_worker_stamp_wins_over_what_the_agent_typed(self):
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {
+            "id": self.card_id, "status": "needs-qa-llm", "reason": "landed",
+            "evidence": "docs/qa_evidence/x/", "implemented_by": "a friendly robot"})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
+                         "anthropic/claude-opus-5")
+
+    def test_a_guest_writing_through_the_bridge_still_names_itself(self):
+        self.sign(None, None)
+        self.tools.run("board_move_card", {
+            "id": self.card_id, "status": "needs-qa-llm", "reason": "landed",
+            "evidence": "docs/qa_evidence/x/", "implemented_by": "openai/codex"})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"], "openai/codex")
+
+    def test_closing_a_qa_card_stamps_verified_by_with_the_closers_signature(self):
+        self.sign("openai", "gpt-6-astra")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        self.sign("glm-coding", "glm-5.3")
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                             "append_section": {"heading": "Verdict", "text": "pass"}})
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                    "reason": "verified"})
+        self.assertNotIn("error", result)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.front["implemented_by"], "openai/gpt-6-astra")
+        self.assertEqual(card.front["verified_by"], "glm/glm-5.3")
+        self.assertIn("verified_by glm/glm-5.3", self.thread_text(self.card_id))
+        self.assertIn("verified_by", B.FIELD_ORDER)          # and it survives a rewrite of the file
+        self.assertEqual(self.board.check(), [])
+
+    def test_relay_free_is_judged_by_the_gateways_upstream_not_by_the_gateway(self):
+        # A card written on Relay Free (GLM-5.3 Flash today) may not be closed by GLM.
+        self.sign("relay-free", "relay-main")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
+                         "relay-free/relay-main")
+        self.sign("glm-coding", "glm-5.3")
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                             "append_section": {"heading": "Verdict", "text": "pass"}})
+        refused = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                     "reason": "verified"})
+        self.assertEqual(refused["requires"], "independent_model")
+
+    def test_board_read_names_the_verifier_for_a_card_that_has_an_implementer(self):
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        block = self.tools.run("board_read", {"id": self.card_id})["qa"]
+        self.assertEqual(block["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(block["implementer_family"], "anthropic")
+        self.assertEqual(block["recommended"]["runner"], "guest:codex")
+        self.assertEqual(block["recommended"]["model"], "codex")
+        self.assertEqual([a["runner"] for a in block["alternates"]][0], "preset:glm-coding")
+        self.assertEqual([s["family"] for s in block["skipped"]], ["anthropic"])
+        self.assertTrue(block["unavailable"])
+        self.assertEqual(block["commits"], [])               # a temporary board is not a git repo
+
+    def test_a_card_with_no_implementer_carries_no_recommendation_at_all(self):
+        self.assertNotIn("qa", self.tools.run("board_read", {"id": self.card_id}))
+
+    def test_the_row_carries_both_signatures_but_not_the_recommendation(self):
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
+                                           "reason": "starting"})
+        row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == self.card_id)
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
+        self.assertIsNone(row["verified_by"])
+        self.assertNotIn("qa", row)
 
 
 # ------------------------------------------------------------------------ comment

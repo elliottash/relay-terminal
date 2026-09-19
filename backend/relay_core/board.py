@@ -197,8 +197,11 @@ BOARD_INDEX = "BOARD.md"
 
 COMMON_FIELDS = ("id", "type", "status", "rank", "created", "labels", "assignee", "private",
                  "links", "aliases", "source", "blocked_by", "parent", "waiting_on")
+#: `verified_by` is the signature of the model that closed the card out of a QA lane, stamped by
+#: the worker exactly as `implemented_by` is (card #T71W): the pair is the audit trail for the QA
+#: independence rule, and the reason a closed card can still be asked "who checked this?".
 WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemented_by",
-               "label_count", "label_output", "codebook")
+               "verified_by", "label_count", "label_output", "codebook")
 PLAN_FIELDS = ("approved_by", "goal")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author")
@@ -217,8 +220,8 @@ ALLOWED_FIELDS = {
 #: Emission order; anything else follows, sorted, so a new key is never dropped.
 FIELD_ORDER = ("id", "type", "status", "name", "description", "kind", "topic", "scope",
                "private", "labels", "component", "milestone", "workstream", "assignee",
-               "implemented_by", "waiting_on", "parent", "blocked_by", "aliases", "paths",
-               "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
+               "implemented_by", "verified_by", "waiting_on", "parent", "blocked_by", "aliases",
+               "paths", "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
                "label_count", "label_output", "codebook", "shell", "rank", "created",
                "acceptance", "source", "links")
 

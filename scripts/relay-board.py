@@ -8,6 +8,7 @@ Never calls a model and never uses the network.
   relay-board.py check [--fix] [--json] [--strict]
   relay-board.py index [--stdout] [--private]
   relay-board.py migrate [--apply]
+  relay-board.py verifier <ID> [--json]
 """
 import argparse
 import json
@@ -17,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from relay_core import board as board_mod
+from relay_core import qa_verifiers as qa
 
 
 def default_board_dir() -> Path:
@@ -89,6 +91,36 @@ def cmd_migrate(args, board: board_mod.Board) -> int:
     return 1 if report.skipped else 0
 
 
+def cmd_verifier(args, board: board_mod.Board) -> int:
+    """Who should verify a card, from this machine's guests, keys and local endpoints.
+
+    The same function the worker and the card detail use (`relay_core.qa_verifiers.recommend`), so
+    a collaborator without the GUI gets the same answer the Switchboard would give.
+    """
+    card_id = str(args.id).strip().lstrip('#').upper()
+    card = board.card_by_id(card_id)
+    if card is None:
+        print(f"no card #{card_id} on this board", file=sys.stderr)
+        return 2
+    implementer = str(card.front.get('implemented_by') or '')
+    result = qa.recommend_here(implementer)
+    result['commits'] = qa.card_commits(board.repo, card_id, card.front.get('links'), implementer)
+    if card.front.get('verified_by'):
+        result['verified_by'] = str(card.front['verified_by'])
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if result.get('recommended') else 1
+    if not implementer:
+        print(f"#{card_id} names no implemented_by, so any verifier is independent.")
+    print(qa.summary_line(result, card_id))
+    if result.get('note'):
+        print(result['note'])
+    for commit in result['commits']:
+        agrees = 'agrees' if commit['agrees'] else 'DISAGREES' if commit['agrees'] is False else 'no trailer'
+        print(f"  commit {commit['hash']}: {commit['trailer'] or '—'} ({agrees})")
+    return 0 if result.get('recommended') else 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -111,6 +143,11 @@ def main(argv=None) -> int:
     migrate = sub.add_parser('migrate', help='convert a pre-board card tree to cards')
     migrate.add_argument('--apply', action='store_true', help='write the changes (default: dry run)')
     migrate.set_defaults(func=cmd_migrate)
+
+    verifier = sub.add_parser('verifier', help='who should QA a card, given what is installed here')
+    verifier.add_argument('id', help='the card id, e.g. K7Q2')
+    verifier.add_argument('--json', action='store_true')
+    verifier.set_defaults(func=cmd_verifier)
 
     args = parser.parse_args(argv)
     issues = args.issues or default_board_dir()
