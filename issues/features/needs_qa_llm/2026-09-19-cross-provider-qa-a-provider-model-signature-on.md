@@ -1,7 +1,7 @@
 ---
 id: T71W
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature, switchboard, qa]
 component: [worker, gui]
 milestone: beta
@@ -12,7 +12,7 @@ rank: zzzzzzy
 created: '2026-09-19'
 acceptance: a card that lands in the QA lane carries a canonical provider/model signature set by the worker, not typed; its commits carry the same signature as a trailer; the card shows one recommended verifier chosen from a ranked list that skips the implementer's family and anything not installed or keyed; Verify opens a pane on that verifier with the QA brief; and a same-family close is still refused
 source: 'owner, in the terminal, 2026-09-19 (pasted brief), plus mid-turn: "i''d like your input on this feature as well, and do research to see if this exists in other harnesses/systems"'
-links: {plans: [], commits: [], evidence: [], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
+links: {plans: [], commits: [eba4fed, d1d96b7, 2906807, a738b5e, 940438c, 83f2a1f, bc785fc, '0144880'], evidence: [docs/qa_evidence/2026-09-19-cross-provider-qa/], related: [GT7X, KDK9, XS6Q, VZ69], github: null}
 ---
 # Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier
 
@@ -195,15 +195,15 @@ escaped-defect rates, so that log would be the first evidence).
   from the same function, with availability from this machine.
 
 ## Tasks
-- [ ] `qa_verifiers.py`: signature, family (vendor of the model, not the aggregator), lineage, `VERIFIER_RANK`, `recommend()`; `model_family` delegates to it; tests <!-- t:a1 -->
-- [ ] The worker stamps `implemented_by` from its own config on in-progress and on entering a QA lane; `verified_by` field, stamped on close; format doc and `check` <!-- t:a2 -->
-- [ ] `qa` block on `board_card_get` / `board_read`, with availability from the worker and the commit trailers of `links.commits`; protocol §19 <!-- t:a3 -->
-- [ ] `relay-board.py verifier <ID>` <!-- t:a4 -->
+- [x] `qa_verifiers.py`: signature, family (vendor of the model, not the aggregator), lineage, `VERIFIER_RANK`, `recommend()`; `model_family` delegates to it; tests <!-- t:a1 -->
+- [x] The worker stamps `implemented_by` from its own config on in-progress and on entering a QA lane; `verified_by` field, stamped on close; format doc and `check` <!-- t:a2 -->
+- [x] `qa` block on `board_card_get` / `board_read`, with availability from the worker and the commit trailers of `links.commits`; protocol §19 <!-- t:a3 -->
+- [x] `relay-board.py verifier <ID>` <!-- t:a4 -->
 - [x] Execute brief asks for the `Implemented-By:` trailer; new `verifyTask` brief with `Verified-By:` <!-- t:b1 -->
 - [x] Card detail: the recommendation line and **Verify (v)**; opens a guest or a preset pane with the brief; hint `board.verify`; Qt test <!-- t:b2 -->
-- [ ] Research report filed under `docs/qa_evidence/2026-09-19-cross-provider-qa/` and its lineage groups written into `VERIFIER_RANK` <!-- t:c1 s=in-progress -->
-- [ ] A derived **Verified** section (done + `verified_by`), the guest's exact model in the signature, and no Relay Free verifier (owner's answers, 2026-09-19) <!-- t:d1 -->
-- [ ] Land in `needs-qa-llm` with evidence and a `## QA checklist` <!-- t:c2 -->
+- [x] Research report filed under `docs/qa_evidence/2026-09-19-cross-provider-qa/` and its lineage groups written into `VERIFIER_RANK` <!-- t:c1 -->
+- [x] A derived **Verified** section (done + `verified_by`), the guest's exact model in the signature, and no Relay Free verifier (owner's answers, 2026-09-19) <!-- t:d1 -->
+- [x] Land in `needs-qa-llm` with evidence and a `## QA checklist` <!-- t:c2 -->
 
 ## Decisions
 - 2026-09-19, owner: "where you skip yourself and otherwise pick the best one available; so for codex, you get claude if its installed, otherwise glm (if installed), etc."
@@ -214,3 +214,42 @@ escaped-defect rates, so that log would be the first evidence).
 - 2026-09-19, owner: "i would say, relay free is never used for verifying -- so verifying is not available on the free plan." Relay Free leaves the verifier table; it still resolves through its upstream (GLM today) when it is the *implementer*; a Relay Free closer is refused.
 - 2026-09-19, owner, on a guest's signature: "lets try to record the model used." The form becomes `<vendor>/<model> via claude-code` (or `via codex`), falling back to `anthropic/claude-code` / `openai/codex` when the model cannot be observed.
 - 2026-09-19, owner: "so we need a Verified section in the switchboard?" Yes: a section derived from `verified_by` (status `done` with a verifier named), between Needs QA and Done. No new status, folder or migration; a card reaches it only by a QA close.
+
+## What landed (2026-09-19)
+
+| Commit | What |
+|---|---|
+| `2906807` | `backend/relay_core/qa_verifiers.py` (signature, family, lineage, `VERIFIER_RANK`, `recommend`), the worker's stamp on `implemented_by`, `verified_by`, the `qa` block on `board_card_get` / `board_read`, `relay-board.py verifier`, protocol §19.15 and the format doc |
+| `a738b5e`, `83f2a1f` | Relay Free never verifies and cannot close a QA card; a guest signs `<vendor>/<model> via claude-code` from the model its harness reports |
+| `d1d96b7` | the verify line, **Verify (v)**, `verifyTask`, the `Implemented-By:` bullet in the Execute brief, a pane on the recommended runner |
+| `940438c` | the derived **Verified** section, signature labels, the amber note |
+| `0144880` | the line takes the worker's `available` word, so a local model does not read "(key)" |
+
+Implemented by Claude Opus 5 subagents (backend and GUI), orchestrated and reviewed by Claude
+Fable 5.1 in Claude Code; research by a third Opus agent. Tests at landing: `tests/test_qa_verifiers.py`
+39, `test_board_tools.py` 135, `test_board_protocol.py` 113, Qt `board` suite 54 + 1 slot extended;
+full `ctest` 56/57 and Python 3045/3046, the one failure being another session's uncommitted
+`todos.py` rename (#SHE3), not this card.
+
+**Left, and why it is not done here.** A guest launched in the terminal and writing through the
+bridge (Tier B) has no model the worker can see, so its `implemented_by` is what the brief asks it to
+type. The smallest hook is for the guest bridge to put the model id (Claude Code's `SessionStart` /
+statusline `model.id`, Codex's `session-configured`) into the pane's `program_state` and for the
+worker to pass it to `qa_verifiers.guest_signature`; those files belong to the #GT7X session.
+`BOARD.md` has no "verified by" column: the index groups by folder and the Done tab is a filter,
+so there is no Done table to put it in.
+
+## QA checklist
+
+For a verifier outside the Anthropic family (on this machine `relay-board.py verifier T71W` names
+Codex). Evidence under `docs/qa_evidence/2026-09-19-cross-provider-qa/`, files prefixed `qa-`.
+
+- [ ] `PYTHONPATH=backend python3 -m unittest tests.test_qa_verifiers tests.test_board_tools tests.test_board_protocol` passes, and `ctest --test-dir build -R '^board$'` passes.
+- [ ] `scripts/relay-board.py verifier T71W` recommends a non-Anthropic verifier, lists Claude as skipped with "implemented this card", lists Relay Free as unavailable with "verifying is not available on Relay Free", and prints each commit's `Implemented-By:` trailer with agrees / no trailer. `--json` matches the shape in protocol §19.15.
+- [ ] `recommend()` by hand, with availability passed in: implementer `openai/codex` gets Claude when `claude` is installed, else GLM when keyed, else Kimi, else DeepSeek; implementer `glm/glm-5.3` gets Codex or Claude first and Kimi / DeepSeek last with `same_lineage: true` and a `note`; implementer `relay-free/relay-main` is treated as GLM; nothing available gives `recommended: null` and the Relay Free note.
+- [ ] Family mapping: `openrouter` + `deepseek/deepseek-v4.1-flash` signs as DeepSeek, not OpenRouter; `Claude Opus 5 (pane 2)` and `anthropic/claude-opus-5` are one family; `anthropic/claude-opus-5 via claude-code` parses.
+- [ ] In a scratch board: a pane agent moving a card to `in-progress` gets `implemented_by` stamped from the worker's preset and model whatever it typed; closing from a QA lane with a different family stamps `verified_by`; the same family is refused (`independent_model`); a `relay-free/...` closer is refused.
+- [ ] Live under Xvfb (isolated `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `TMPDIR` under a short path, `RELAY_KEYRING=off`): a `needs-qa-llm` card shows the verify line and **Verify (v)**; `v` and the click open a pane beside the board on the recommended runner with the brief (a guest gets it as its first prompt); the thread gets one progress comment and the card does not move; the hint shows once.
+- [ ] A `done` card with `verified_by` sits in **Verified** with a `✓ <verifier>` badge, one without stays in Done, and a drag or `Alt+Shift+→` into Verified is refused with the sentence in design §4.11.
+- [ ] With no keys and no guest CLI on PATH the line is the amber Relay Free note, Verify is disabled and its tooltip says why.
+- [ ] The docs say what the code does: `docs/SWITCHBOARD-FORMAT.md` (`verified_by`), protocol §19.15, design §4.10 and §4.11, and the ranking table's row comments cite the research report.
