@@ -376,7 +376,7 @@ otherwise (`client_state {visible}`), and agent deltas coalesced at 50 ms.
 
 | Type | Requires | Body |
 |---|---|---|
-| `compose` | `agent` | `{pane, text, when: "now"\|"queue"}`. **(security)** A remote `compose` is **always** routed to the agent. `agent: false` — the composer's shell route — requires `full`. Relay's router honours a `/shell ` prefix and a shell mode, so an `agent` device could otherwise run `curl … \| sh` with no agent in the loop, no take-over and no control token, while the pane's `control` still read `human` |
+| `compose` | `agent` | `{pane, text, when: "now"\|"queue"\|"steer"}`. `steer` aims the line at the running turn's next tool call, as the desktop's own composer does, and is the owner's own devices' at `agent` and above; a guest's prompt waits for the owner to admit it and can never be a steer (`not_permitted`, section 10.4). **(security)** A remote `compose` is **always** routed to the agent. `agent: false` — the composer's shell route — requires `full`. Relay's router honours a `/shell ` prefix and a shell mode, so an `agent` device could otherwise run `curl … \| sh` with no agent in the loop, no take-over and no control token, while the pane's `control` still read `human` |
 | `agent_stop`, `queue_remove`, `set_mode`, `recap_request` | `agent` | `{pane, ...}` |
 | `plan_execute` | `agent` | `{pane, plan_id}`. **(security)** Never a path. `plan_id` must be one the desktop minted in a `plan_written` event, resolved against the hub's own table. `planning.read_plan` accepts any absolute path, so a path from the wire would read `~/.aws/credentials` into a prompt, into the session file, and back out to the phone in the transcript |
 | `voice` | `agent` | `{pane, id, format, data}` — base64 audio, at most what fits one frame. **(security)** The filename and extension are **desktop-generated** (`<uuid>.webm`, mode 0600, unlinked after the reply); `id` and `format` are checked against fixed alphabets and never used as path components, because `voice.read_clip` picks its handling from the extension and its own docstring says it is not written against a hostile caller. The model is desktop configuration, never from the wire. The reply is `transcribed {id, text}`, for the user to edit before sending |
@@ -1336,9 +1336,15 @@ Neither is visible at one message per second. A 20 fps screen stream finds them 
 ## 16. One pane model, two views: `pane_state`
 
 The desktop pane is the model. It publishes what it already shows, and every client — the phone,
-a tablet, the laptop browser, and in time another Relay — draws that. The client formats nothing:
-every label, hint and model name in the message was written by the desktop, so a pane feature
-reaches every screen without being built twice. Owner, 2026-09-18: the client is "a remote
+a tablet, the laptop browser, and in time another Relay — draws that. The client formats nothing of
+the pane's own work: every label, hint, clock and model name it shows was written by the desktop and
+is drawn as it arrived, so a pane feature reaches every screen without being built twice. What a
+client does write is the words on its own controls, which the Qt pane has no equivalent of: a
+phone's action sheet and send menu, "New conversation", the QUEUE heading, the accessibility labels,
+its own keyboard hints (`app/pane.js` `ACTION_WORDS` and `SEND_WHEN`; `src/RemotePane.cpp` has its
+own set). This paragraph used to say the client writes none of the pane's words, which was never
+true of those; owner, 2026-09-19: publishing them would still leave each client a fallback copy, so
+the claim went rather than the strings (#0VT4). Owner, 2026-09-18: the client is "a remote
 control, it doesn't have to be identical to the computer app", but "it acts and feels like the
 terminal".
 
@@ -1357,6 +1363,7 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
  "model":{"label":"fake · local","choices":[{"id":"m1","label":"Kimi K2 · Main","current":false}]},
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
+ "theme":"relay-dark",
  "allowance":{"label":"Free · 73% left","percent_left":73,"warn":false,"detail":"182,400 of 250,000 tokens today · resets at 02:00"},
  "sessions":{"rows":[{"id":"s1","title":"…","when":"14:02","current":true,"running":false}],
              "can_new":true,"can_open":true}}
@@ -1370,6 +1377,14 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
   a key). The desktop writes every word of it — `label`, `warn` (read off `percent_left`, warning
   at 10 % and below) and `detail`, which a view shows as the chip's title — so it holds no secret
   and offers nothing to press: every level sees it, and no client type exists for it.
+- **`theme` is the desktop's own theme id** (`dark-copper`, `relay-dark`, `relay-light`, …), so the
+  pane on the phone is the colour the pane on the desktop is (owner, 2026-09-19). The desktop
+  republishes when its theme changes. It is an id and nothing else — lowercase letters, digits and
+  hyphens, 40 characters at most — because the view writes it straight into the pane's
+  `data-theme`; `app/pane-theme.css` carries a generated block per shipped theme, and an id it has
+  no block for (a theme of the person's own) leaves the view on the theme it is already showing.
+  Absent when the desktop names none. Every level sees it: it is how the pane looks, there is
+  nothing to press and nothing in an id to leak.
 - **A row's `actions` are the whole truth about it.** The client offers those and nothing else; the
   pane checks the row still offers the action when the answer arrives, because the client was
   necessarily looking at an older state.
@@ -1408,7 +1423,7 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
-| `compose` | `{pane,text,when,msg_id?,agent?,origin_name?}` | `when` is `now` or `queue`; the text is 1–32,000 characters. `msg_id` is the client's own dedup id (`app/pane.js` mints 72 random bits), so a retried send is not two prompts. `agent: false` asks the desktop to route the line the way its own composer does, shell included, and is refused for anything but a `full` device and for every guest — a client only sends it when the state offered it a composer mode other than `agent`. `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
+| `compose` | `{pane,text,when,msg_id?,agent?,origin_name?}` | `when` is `now`, `queue` or `steer` — a steer is delivered inside the running turn at its next tool call, and both clients fall back to it when the row they meant to edit has gone. Steering needs `agent` and above (the owner's rule for a paired device, 2026-09-19) and is refused for a guest, whose prompt waits for the owner and so can never be aimed at the turn running now. The text is 1–32,000 characters. `msg_id` is the client's own dedup id (`app/pane.js` mints 72 random bits), so a retried send is not two prompts. `agent: false` asks the desktop to route the line the way its own composer does, shell included, and is refused for anything but a `full` device and for every guest — a client only sends it when the state offered it a composer mode other than `agent`. `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
 
 Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and
 have no type here at all (section 6.6, `NEVER_FROM_CLIENT`).
