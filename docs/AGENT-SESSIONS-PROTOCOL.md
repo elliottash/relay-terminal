@@ -4387,7 +4387,7 @@ want to answer wants to move past the question, not end the work they are being 
 **Stop, while a card is up, is the `agent.stop` action** — Actions › Stop agent, or the shortcut the
 user bound to it, since Relay ships `agent.stop` unbound and Esc was the only key that reached it.
 The card's last footer line says which of the two applies, read live from the Keymap, and so does
-the "Relaying waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
+the "Relaying – waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
 can no longer promise. There is deliberately no second Esc that stops: on the last question a second
 Esc is an ordinary Esc in an idle pane. Stop still takes the card away with the turn
 (`question_closed`).

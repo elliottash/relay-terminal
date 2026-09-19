@@ -348,8 +348,8 @@ in that colour (`liveMarker`: the agent's violet whenever agent work — a turn 
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
 and takes the one across. The same word sits bold above the prompt box (`Pane::PaneBusyLine`, card
-#4E13): "Relaying <action>… · N s · Esc stops" in the agent's violet while a turn runs — the action
-a gerund of the live tool call, or what the pane waits for — and "Relaying <program>…" in the
+#4E13): "Relaying – <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
+action a gerund of the live tool call, or what the pane waits for — and "Relaying – <program>…" in the
 terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
 flash time of 0, the same one that stills the caret and the waiting dots — draws every live mark at
 rest, and the news states (done, failed, needs you) never move: they pull the eye by being news.
@@ -615,13 +615,14 @@ waiting behind other toasts costs none of its showings. Idle tips work the same 
 (`nextIdleTip()` picks, the pane records on display, and only into a pane with no toast up).
 Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
 own time if shorter), identical consecutive toasts collapse. The agent turn clock is state, not a
-toast: while a turn runs, the bold line above the prompt box says "Relaying <action>… · 48 s · Esc
-stops" in the agent's violet, right-aligned (`Pane::PaneBusyLine`, card #4E13) — the action a
-gerund of the live tool call ("thinking", "reading src/Pane.h") — and a program that owns the
-terminal gets the same line in the terminal's blue, "Relaying <program>…". **Waiting on
+toast: while a turn runs, the line above the prompt box says "Relaying – <action>… · 48 s · Esc
+stops" in the agent's violet, left-aligned with the prompt text and in the normal weight
+(`Pane::PaneBusyLine`, cards #4E13, #HQ2B; the spaced en dash after the verb is #RR0G) — the
+action a gerund of the live tool call ("thinking", "reading src/Pane.h") — and a program that owns
+the terminal gets the same line in the terminal's blue, "Relaying – <program>…". **Waiting on
 background work** (cards #V7QD and #KP4M): when the pane's main ("orchestrator") agent is blocked
 on the subagents or the jobs it started, the prompt box's own placeholder says so — "waiting for
-2 subagents, 1 job . . .", the dots growing every 600 ms — and the busy line says "Relaying
+2 subagents, 1 job . . .", the dots growing every 600 ms — and the busy line says "Relaying –
 waiting for 2 subagents… · 48 s · Esc stops" instead of "thinking". `relay::panestatus::waitingLines`
 (`src/PaneStatus.{h,cpp}`, beside the pane states, because it belongs to neither model) holds the
 rule: a kind counts when some of it is live *and*

@@ -1,0 +1,12 @@
+2026-09-19T19:25:51.554Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.15H.07 pid=3904570 level=info
+2026-09-19T19:25:51.603Z INFO relay.gui worker_start pane=fbeb01f5 workspace_set=1
+2026-09-19T19:25:51.695Z INFO relay.gui event type=ready pane=fbeb01f5
+2026-09-19T19:25:51.728Z INFO relay.gui event type=configured pane=fbeb01f5 model=stub
+2026-09-19T19:26:00.345Z INFO relay.gui event type=agent_started pane=fbeb01f5 turn_id=1325c3d95b9f43af91aee5c21731f727
+2026-09-19T19:26:04.375Z INFO relay.gui event type=turn_summary pane=fbeb01f5 turn_id=1325c3d95b9f43af91aee5c21731f727 outcome=done ms=4031
+2026-09-19T19:26:04.378Z INFO relay.gui event type=agent_finished pane=fbeb01f5 outcome=done
+2026-09-19T19:26:04.385Z INFO relay.gui event type=agent_started pane=fbeb01f5 turn_id=a928e687d46c4569a3bff4a3f736a287
+2026-09-19T19:26:12.799Z INFO relay.gui gui_quit reason=signal
+2026-09-19T19:26:12.808Z INFO relay.gui event type=turn_summary pane=fbeb01f5 turn_id=a928e687d46c4569a3bff4a3f736a287 outcome=cancelled ms=8424
+2026-09-19T19:26:12.809Z INFO relay.gui event type=agent_finished pane=fbeb01f5 outcome=cancelled
+2026-09-19T19:26:12.844Z ERROR relay.gui worker_exit pane=fbeb01f5 code=0 crashed=0

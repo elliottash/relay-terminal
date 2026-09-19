@@ -243,16 +243,19 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 
 }  // namespace relay::ask
 
-// The "Relaying…" line above the prompt box (cards #4E13, #HQ2B): one verb, the colour saying whose
-// work it is — the agent's violet while a turn runs or subagents it started still work, the
-// terminal's blue while a program runs, amber when the turn is blocked on your answer (#MQ9C).
+// The "Relaying – …" line above the prompt box (cards #4E13, #HQ2B, #RR0G): one verb, the colour
+// saying whose work it is — the agent's violet while a turn runs or subagents it started still
+// work, the terminal's blue while a program runs, amber when the turn is blocked on your answer
+// (#MQ9C). A spaced en dash stands between the verb and what is being done (owner, 2026-09-19:
+// 'add a " -- " after "Relaying"'), in every spelling the line has: "Relaying – thinking… · 5 s ·
+// step 1/256 · Esc stops", "Relaying – waiting for 1 subagent…", "Relaying – sleep…".
 // Left-aligned with the prompt text and in the normal weight, the caption Warp and Claude carry
 // above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
 // more like how warp . claude does it. and not in bold."): the row belongs to the box under it,
 // so it starts where that box's own text starts, and it speaks quietly while the prompt is the
 // loud thing. Painted rather than a QLabel for the same reason the header's state word is
 // (PaneStateWord, src/PaneChrome.h): the colour follows the state, and the theme can change under
-// it. Elided from the middle so a long action ("Relaying reading src/deep/path…") never pushes
+// it. Elided from the middle so a long action ("Relaying – reading src/deep/path…") never pushes
 // the composer wide, and Ignored like the prompt box itself so a narrow pane clips it instead
 // (#G152).
 class PaneBusyLine final : public QWidget {
@@ -3334,11 +3337,11 @@ private:
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
-        // The "Relaying…" line (cards #4E13, #HQ2B), the first row of the composer frame so native
-        // mode hides it with the prompt box: agent work in the agent's violet, saying what it is
-        // doing right now ("Relaying reading src/Pane.h… · 12 s · Esc stops"), a terminal program
-        // in the terminal's blue ("Relaying sleep…"), left-aligned with the prompt text and in the
-        // normal weight above the prompt. The turn clock lived in the strip under the box until
+        // The "Relaying – …" line (cards #4E13, #HQ2B, #RR0G), the first row of the composer frame
+        // so native mode hides it with the prompt box: agent work in the agent's violet, saying what
+        // it is doing right now ("Relaying – reading src/Pane.h… · 12 s · Esc stops"), a terminal
+        // program in the terminal's blue ("Relaying – sleep…"), left-aligned with the prompt text
+        // and in the normal weight above the prompt. The turn clock lived in the strip under the box until
         // #4E13; it moved up here and was restyled into this line — one place, one verb, the
         // colour saying whose work it is.
         m_busyLine = new PaneBusyLine(composer);
@@ -9807,7 +9810,7 @@ private:
                           : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
     }
 
-    // "Relaying reading src/Pane.h… · 48 s · Esc stops", above the prompt box (m_busyLine,
+    // "Relaying – reading src/Pane.h… · 48 s · Esc stops", above the prompt box (m_busyLine,
     // card #4E13), so a silent turn is never indistinguishable from a hung one. Not a toast: a
     // clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
@@ -9859,7 +9862,7 @@ private:
         // While a card is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
         // offers the key that is actually live and the tooltip says where Stop went.
         const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
-        const QString label = QStringLiteral("Relaying %1… · %2 s%3 · %4")
+        const QString label = QStringLiteral("Relaying – %1… · %2 s%3 · %4")
                                   .arg(what)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
@@ -9887,7 +9890,7 @@ private:
         if (wait.subagents > 0) {
             const QString subject = relay::panestatus::waitingSubject(wait);
             m_busyLine->setBusy(relay::panestatus::State::Subagents,
-                                QStringLiteral("Relaying waiting for %1…").arg(subject),
+                                QStringLiteral("Relaying – waiting for %1…").arg(subject),
                                 QStringLiteral("%1 started by this pane's agent still running. The agents list under "
                                                 "the composer shows them; the header's relay mark blinks until they end.")
                                     .arg(subject.isEmpty() ? QStringLiteral("Background work") : subject));
@@ -9897,7 +9900,7 @@ private:
             const QString program = foregroundProgramName();
             const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
             m_busyLine->setBusy(relay::panestatus::State::Running,
-                                QStringLiteral("Relaying %1…").arg(who),
+                                QStringLiteral("Relaying – %1…").arg(who),
                                 QStringLiteral("%1 owns this terminal; prompts queue until it exits.")
                                     .arg(program.isEmpty() ? QStringLiteral("This program") : program));
             return;
@@ -13896,7 +13899,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
 
     void refreshStatusStrip() {
         if (m_interruptButton) m_interruptButton->setVisible(processBusy());
-        // The terminal's blue "Relaying <program>…" line rides the shell poll, which is what
+        // The terminal's blue "Relaying – <program>…" line rides the shell poll, which is what
         // notices a program start and end; a turn's violet line keeps its own one-second clock.
         if (!m_agentBusy) refreshBusyLine();
     }
@@ -14730,13 +14733,13 @@ private:
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;
     QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;
-    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the "Relaying…" line
+    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the "Relaying – …" line
     // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
-    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying…" line above the prompt (#4E13, #HQ2B)
+    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying – …" line above the prompt (#4E13, #HQ2B, #RR0G)
     // "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.
