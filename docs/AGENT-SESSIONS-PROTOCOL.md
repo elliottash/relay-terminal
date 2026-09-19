@@ -2531,6 +2531,60 @@ once per preset.
 from the same function — *"Verify #K7Q2 with Codex (installed) · then GLM-5.3 (key) · skipped
 Claude: implemented this card · unavailable Kimi: no key"* — with this machine's availability.
 
+### 19.17 Hiding and showing a board's folder (v3.4, 2026-09-19)
+
+Owner, 2026-09-19: new boards are created in `.switchboard/` from now on, so the cards do not
+clutter the project's root listing and a ripgrep-based agent — which skips hidden folders by
+default — stops matching every card on every code search (`docs/SWITCHBOARD-FORMAT.md` §1).
+Reading stays tolerant in both directions: `board.BOARD_FOLDERS` is `.switchboard`, `switchboard`,
+`issues`, newest first, and the first of those that has a `board.yaml` is the board
+(`relay::projects::boardFolders()` on the GUI side, same order, pinned to this file by
+`tests/projects_test.cpp::theBoardFoldersAreOneOrderedList`). **Nothing moves by itself** — a board
+made before this decision keeps the folder it has until a user asks otherwise, which is this
+message.
+
+`board_folder {hidden}` → `board_folder_changed`. Renames the *current* board's folder, in place,
+through `board.rename_board_folder()` (`backend/relay_core/board_protocol.py::_folder`):
+
+```jsonc
+// GUI -> worker
+{"type": "board_folder", "id": 51, "hidden": true}
+// worker -> GUI
+{"event": "board_folder_changed", "id": 51, "board": { … state_block() … },
+ "old": "switchboard", "new": ".switchboard", "root": "/home/e/src/widgetworks/.switchboard",
+ "hidden": true, "method": "git mv", "files": [".gitattributes"],
+ "summary": "switchboard/ is now .switchboard/ (hidden, git mv)"}
+```
+
+`hidden` is required and boolean: `true` hides (`.switchboard/`), `false` shows (`switchboard/`).
+A turn must not be running — a card turn holds paths under the old folder and the pane's watcher is
+on it — so this is refused with `board_busy` exactly as a cleanup or an import is (19.16). Refused,
+with `error` and nothing changed, when: the board is already that way round; the board is
+`issues/`, the original spelling, which whole repositories name in their own instructions, scripts
+and hooks — Relay never renames it, and a project that wants the new spelling moves it by hand;
+the target folder already exists; or a card under the folder has uncommitted text, staged or not
+(`git mv` could carry it, but the file would change path underneath a diff the user is reading —
+committing first makes the move one clean rename; a folder that was only *moved* before, never
+edited, is not "uncommitted" by this rule).
+
+**How it moves.** `git mv` inside a checkout where the folder is tracked, a plain `Path.rename`
+otherwise (an uncommitted board, or no git at all). Either way `.gitattributes`' union-merge line
+(`docs/SWITCHBOARD-FORMAT.md` §3) is rewritten from the old name to the new one and reported in
+`files`; nothing else about the board's bytes changes, because a rename is the one thing this
+message does. Afterwards the worker re-points itself at the new root (`_point`, as `set_board`
+does, 19.11), so the tools, the agent's tools and the GUI move together and no message in flight
+still names the old path.
+
+**The one caller.** A board action, not a setting: "Hide this board's folder" / "Show this board's
+folder" (whichever the current folder is not), offered wherever the Switchboard's own actions are
+— never automatic, and never offered on an `issues/` board, which the message would refuse anyway.
+The **"Hidden Switchboard folder" option** (`board/hidden_folder` in `QSettings`,
+`relay::projects::hiddenBoardFolder()`, default **on**) is a different, narrower thing: it decides
+only what a board created from now on is called (`new_board_folder()` / `newBoardFolder()`) and
+never touches a board that already exists. Turning it off does not send `board_folder`, and sending
+`board_folder` does not change the option.
+
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
