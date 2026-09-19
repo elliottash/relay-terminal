@@ -1,0 +1,4 @@
+2026-09-19T20:13:46.089Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.16H.02 pid=290918 level=info
+2026-09-19T20:13:46.168Z INFO relay.gui worker_start pane=650a96c9 workspace_set=1
+2026-09-19T20:13:46.271Z INFO relay.gui event type=ready pane=650a96c9
+2026-09-19T20:13:46.313Z INFO relay.gui event type=configured pane=650a96c9 model=stub

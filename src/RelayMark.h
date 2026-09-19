@@ -16,6 +16,7 @@
 #include <QVector>
 
 #include <algorithm>
+#include <cmath>       // std::lround, for the disc's blend
 
 namespace relay::chrome {
 

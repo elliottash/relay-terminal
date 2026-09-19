@@ -1111,7 +1111,8 @@ the stored reply `tool_output {stored: true, …}` share a name; the GUI branche
 
 **The Activity pane** (card #QT8C; named "Activity" by #4X53, which left every identifier — the
 action `agent.internalsPane`, the pane type `internals`, the classes, the layout node — spelled
-"internals"; Alt+Shift+R, the palette's "Activity", or the reasoning fold's "open in pane"). One `ToolPane(Kind::Internals)` per
+"internals"; Alt+Shift+R, the palette's "Activity", the relay-mark button on the "Relaying – …"
+line, or the reasoning fold's "open in pane"). One `ToolPane(Kind::Internals)` per
 terminal pane, inserted beside it like the turn and diff panes, hosting `relay::AgentInternalsView`
 (`src/AgentInternalsView.*`): a scrolling log of the pane's reasoning and tool calls, live and in
 order — a muted rule per turn carrying the request's first line, each reasoning block as
@@ -1138,7 +1139,17 @@ keeps at most the last 50 turns (the worker's own detail bound), older ones coll
 starts a fresh inline anchor for what follows. Closing the owner takes the pane along with nothing
 reprinted (the `destroyed` connection's context is the owner). The pane is saved in the layout as
 `{"internals": {cwd, owner}}` and restored beside the pane whose scrollback id it names, empty
-until the next event.
+until the next event. **The button that opens it** (#4X53, owner: "add a circled purple relay
+icon next to relaying") is painted by `PaneBusyLine` itself at the left of the "Relaying – …"
+line, before the word: `relay::chrome::paintCircledRelayMark` (`src/RelayMark.h` — the same
+drawing the header's live state glyph and the tab icons use, moved out of `PaneChrome.h` so
+`Pane.h` can reach it), in the ink `panestatus::stateText` gives the line, so it is violet for
+an agent turn, blue while a program runs and amber when the turn is blocked on a question. It
+is there exactly while the line is, it takes the row's left edge (the prompt text's, #HQ2B)
+and moves the word right by its width and a gap, and a click calls `openInternalsPane(…,
+fromMouse: true)` — the same path the action takes, so a second click brings the open pane
+forward, and the `internals.open` hint teaches Alt+Shift+R. The pane header's state glyph is
+not a button: the owner chose the line only.
 
 **`relay://` links.** A click inside a pane is handled in-process (`Pane::openOutputTarget`).
 A `relay://` link opened anywhere else — a browser, an editor, a file manager — reaches the

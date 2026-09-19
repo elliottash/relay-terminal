@@ -32,6 +32,7 @@
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
+#include "RelayMark.h"      // the app's own mark: the button on the "Relaying – …" line (#4X53)
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
@@ -125,6 +126,8 @@
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QToolButton>
+#include <QToolTip>
+#include <QHelpEvent>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -258,12 +261,32 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 // it. Elided from the middle so a long action ("Relaying – reading src/deep/path…") never pushes
 // the composer wide, and Ignored like the prompt box itself so a narrow pane clips it instead
 // (#G152).
+//
+// At its left is the app's own mark on a circle (#4X53, owner: "add a circled purple relay icon
+// next to relaying … it opens the agent internals pane"), painted in the line's own ink, so the
+// button says whose work you would be looking into: violet for an agent turn, the terminal's blue
+// while a program runs, amber when the turn is blocked on your answer. It is on screen exactly
+// while the line is, which is when there is something to look into. Clicking it opens this pane's
+// Activity pane through `onOpenActivity`, the same call the keymap action and the palette make.
+// The mark is `relay::chrome::paintCircledRelayMark` (src/RelayMark.h), which draws the ring and
+// then the very `paintRelayMark` the pane header's live glyph and the tab icons use — never a
+// second asset.
+//
+// The word moves right by the button's width and a gap rather than the button sitting in the
+// gutter beside it: the gutter is the prompt box's own text inset (8 px with the shipped theme),
+// narrower than the mark, so a button in it would overhang the text's left edge. The row's left
+// edge is still the prompt text's (#HQ2B) — the button takes it, and the caption follows.
 class PaneBusyLine final : public QWidget {
 public:
+    // Open this pane's Activity pane. Unset until the composer wires it, and with none the button
+    // is not painted at all: a PaneBusyLine with nowhere to go shows no way to go there.
+    std::function<void()> onOpenActivity;
+
     explicit PaneBusyLine(QWidget *parent) : QWidget(parent) {
         setObjectName(QStringLiteral("paneBusyLine"));
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         setMinimumWidth(1);   // a narrow pane clips the line rather than growing for it
+        setMouseTracking(true);   // the button lights under the pointer, with no button held
         hide();
     }
     // The prompt box this row captions, so its left edge can sit on the prompt *text's* edge
@@ -286,7 +309,8 @@ public:
         hide();
     }
     QSize sizeHint() const override {
-        return {leftInset() + QFontMetrics(font()).horizontalAdvance(m_text) + 2, 18};
+        return {textLeft() + QFontMetrics(font()).horizontalAdvance(m_text) + 2,
+                std::max(18, buttonSize() + 2)};
     }
 protected:
     void paintEvent(QPaintEvent *) override {
@@ -299,13 +323,81 @@ protected:
                                           relay::theme::Tool};
         QPainter p(this);
         // A word is text: the state's own ink, lifted to at least 4.5:1 on the pane's ground
-        // (panestatus::stateText), so the line reads in every shipped theme.
-        p.setPen(relay::panestatus::stateText(m_state, relay::theme::Background, t));
-        p.drawText(rect().adjusted(leftInset(), 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter,
+        // (panestatus::stateText), so the line reads in every shipped theme. The button is in the
+        // same ink, so the two read as one row and the mark says whose work it is (#4X53).
+        const QColor ink = relay::panestatus::stateText(m_state, relay::theme::Background, t);
+        if (hasButton())
+            relay::chrome::paintCircledRelayMark(p, buttonRect(), ink, relay::theme::Background,
+                                                 m_hover, m_pressed);
+        p.setPen(ink);
+        const int left = textLeft();
+        p.drawText(rect().adjusted(left, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter,
                    QFontMetrics(font()).elidedText(m_text, Qt::ElideMiddle,
-                                                    std::max(1, width() - leftInset() - 2)));
+                                                    std::max(1, width() - left - 2)));
+    }
+    // The button is a painted rectangle, not a child widget, so the row stays one thing to lay
+    // out and to elide; these four give it the behaviour a button has.
+    void mouseMoveEvent(QMouseEvent *event) override {
+        const bool over = overButton(event);
+        if (over != m_hover) {
+            m_hover = over;
+            setCursor(over ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            update();
+        }
+        QWidget::mouseMoveEvent(event);
+    }
+    void leaveEvent(QEvent *event) override {
+        if (m_hover || m_pressed) { m_hover = m_pressed = false; unsetCursor(); update(); }
+        QWidget::leaveEvent(event);
+    }
+    void mousePressEvent(QMouseEvent *event) override {
+        if (event->button() == Qt::LeftButton && overButton(event)) {
+            m_pressed = true; update(); event->accept(); return;
+        }
+        QWidget::mousePressEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent *event) override {
+        if (m_pressed) {
+            m_pressed = false;
+            update();
+            // Released off the button is a cancelled press, as it is on any button.
+            if (event->button() == Qt::LeftButton && overButton(event) && onOpenActivity) onOpenActivity();
+            event->accept();
+            return;
+        }
+        QWidget::mouseReleaseEvent(event);
+    }
+    // Over the button the tip says what the button does and the key that does it too, read live
+    // from the keymap so a rebound Alt+Shift+R is what it names; elsewhere the row's own tip
+    // (setBusy) stands.
+    bool event(QEvent *happening) override {
+        if (happening->type() == QEvent::ToolTip && hasButton()) {
+            auto *help = static_cast<QHelpEvent *>(happening);
+            if (buttonRect().contains(QPointF(help->pos()))) {
+                const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.internalsPane"));
+                QToolTip::showText(help->globalPos(),
+                                   key.isEmpty() ? QStringLiteral("Open Activity")
+                                                 : QStringLiteral("Open Activity  (%1)").arg(key), this);
+                happening->accept();
+                return true;
+            }
+        }
+        return QWidget::event(happening);
     }
 private:
+    bool hasButton() const { return bool(onOpenActivity); }
+    bool overButton(const QMouseEvent *event) const {
+        return hasButton() && buttonRect().contains(QPointF(event->pos()));
+    }
+    // About the line's text height, so the row keeps the height it had: the mark is the size of
+    // the word beside it, not a decoration over it.
+    int buttonSize() const { return std::clamp(QFontMetrics(font()).height(), 12, 17); }
+    // The button, then a gap the width of a space: where the caption starts.
+    int textLeft() const { return leftInset() + (hasButton() ? buttonSize() + 5 : 0); }
+    QRectF buttonRect() const {
+        const qreal size = buttonSize();
+        return {qreal(leftInset()), (height() - size) / 2.0, size, size};
+    }
     // Where the prompt text starts inside its editor: the stylesheet's padding moves the viewport
     // in, the document's margin moves the text in from that (measured, not assumed: 4 + 4 px with
     // the shipped theme). Zero with no editor set, so a bare PaneBusyLine still paints.
@@ -315,6 +407,7 @@ private:
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     QString m_text;
     const QPlainTextEdit *m_prompt = nullptr;
+    bool m_hover = false, m_pressed = false;
 };
 
 // A combo box that hugs the *current* row's text (owner, 2026-09-19: "shrink the model selector
@@ -552,7 +645,7 @@ public:
     std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
-    std::function<void()> onOpenInternals;   // the agent internals pane beside this one (#QT8C)
+    std::function<void()> onOpenInternals;   // the Activity pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
     // The window's id for the tab this pane is in, and how many terminals it holds, so the share
@@ -2046,7 +2139,7 @@ public:
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
                 return;
             }
-            // The reasoning fold's "open in pane": the internals pane, on that turn's block (#QT8C).
+            // The reasoning fold's "open in pane": the Activity pane, on that turn's block (#QT8C).
             if (url.host() == QStringLiteral("internals") && parts.size() == 2) {
                 openInternalsPane(QUrl::fromPercentEncoding(parts.at(1).toUtf8()), fromMouse);
                 return;
@@ -3347,6 +3440,10 @@ private:
         // colour saying whose work it is.
         m_busyLine = new PaneBusyLine(composer);
         m_busyLine->setPromptEditor(m_editor);   // the row's left edge is the prompt text's (#HQ2B)
+        // The relay mark at its left opens this pane's Activity pane (#4X53) — the same call the
+        // keymap action and the palette make, so a second click brings the open one forward.
+        // `fromMouse` is what teaches the key the first time (the `internals.open` hint).
+        m_busyLine->onOpenActivity = [this] { openInternalsPane(QString(), true); };
         composerLayout->addWidget(m_busyLine);
         composerLayout->addLayout(inputRow);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
@@ -3938,7 +4035,7 @@ private:
             if (buffer.size() < 200000) buffer += event.value(QStringLiteral("text")).toString();
             m_paneState.changed();   // pane_state (relay-terminal-71): the reasoning tail
             // "never" keeps the buffer (the turn pane still shows it) but draws nothing. With the
-            // internals pane open the block goes there and nothing is drawn here (#QT8C).
+            // Activity pane open the block goes there and nothing is drawn here (#QT8C).
             if (m_internals) internalsThinking(turn, false, 0);
             else if (thinkingDisplay() != QLatin1String("never")) thinkingDelta(turn);
             pushThinkingToTurnPane(turn);   // a turn pane open on this turn follows the stream
@@ -3998,7 +4095,7 @@ private:
         // is the request id: a `fold-` reply fills a fold in the terminal and opens no pane at all.
         if (type == QStringLiteral("tool_output") && event.value(QStringLiteral("stored")).toBool()) {
             if (handleFoldReply(event)) return true;
-            if (handleInternalsReply(event)) return true;   // a row in the internals pane asked (#QT8C)
+            if (handleInternalsReply(event)) return true;   // a row in the Activity pane asked (#QT8C)
             const QString turn = m_turnOutputRequests.take(event.value(QStringLiteral("id")).toString());
             if (!turn.isEmpty()) {
                 if (auto view = m_turnViews.value(turn)) { view->setToolOutput(event); return true; }
@@ -4156,7 +4253,7 @@ private:
         relay::calllines::FoldOptions options;
         options.maxLines = tail ? relay::calllines::kThinkingStreamRows : relay::calllines::kThinkingDoneRows;
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
-        // "open in pane" is the internals pane (#QT8C), which shows this turn's whole reasoning
+        // "open in pane" is the Activity pane (#QT8C), which shows this turn's whole reasoning
         // and follows the stream; the turn pane stays what the ✦ N tool calls line opens.
         if (ref.valid)
             options.openInPane = QStringLiteral("relay://internals/%1/%2")
@@ -4217,7 +4314,7 @@ private:
         writeTerminal(out);
     }
 
-    // ----- the agent internals pane (card #QT8C) ------------------------------------------------
+    // ----- the Activity pane (card #QT8C, named by #4X53) ---------------------------------------
     //
     // A ToolPane beside this one (RelayWindow::openInternalsPane) holds the reasoning and the tool
     // calls, live, interleaved as they happen. While it is attached this pane prints neither: the
@@ -4245,7 +4342,7 @@ public:
             view->note(QStringLiteral("Reasoning display is off (Options › General) · this pane shows the tool calls only"));
         if (!m_thinkingAnchor.isEmpty()) {
             const relay::calllines::Ref ref = relay::calllines::parseUri(m_thinkingAnchor);
-            finishThinkingFold(0, QStringLiteral("✦ thinking moved to the internals pane"));
+            finishThinkingFold(0, QStringLiteral("✦ thinking moved to the Activity pane"));
             if (ref.valid) {
                 internalsBeginTurn(ref.turn);    // the rule first, the block under it
                 m_internalsBlockKey = ref.call;
@@ -4270,7 +4367,7 @@ public:
         else m_internalsReprintPending = true;   // flushInline() prints them when the screen is back
     }
 
-    // Open (or bring forward) this pane's internals pane. `turn` is the reasoning fold's "open in
+    // Open (or bring forward) this pane's Activity pane. `turn` is the reasoning fold's "open in
     // pane" link: the view is put on that turn's block, seeded with the turn's whole reasoning when
     // the block streamed before the pane existed, so the link always lands on something.
     void openInternalsPane(const QString &turn = QString(), bool fromMouse = false) {
@@ -4285,7 +4382,7 @@ public:
             const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.internalsPane"));
             if (!key.isEmpty())
                 hint(QStringLiteral("internals.open"),
-                     relay::ShortcutHints::nextTime(key, QStringLiteral("opens the agent internals pane")));
+                     relay::ShortcutHints::nextTime(key, QStringLiteral("opens the Activity pane")));
         }
     }
 
@@ -4434,7 +4531,7 @@ private:
         endCallRun();
         ensureLineStart();
         if (dropped > 0)
-            printInline(QStringLiteral("… %1 earlier turn%2 went to the internals pane\n")
+            printInline(QStringLiteral("… %1 earlier turn%2 went to the Activity pane\n")
                             .arg(dropped).arg(dropped == 1 ? QString() : QStringLiteral("s")), Ink::Note);
         for (const relay::internals::HiddenTurn &turn : turns) {
             const QString request = turn.request.section(QLatin1Char('\n'), 0, 0).trimmed().left(120);
@@ -4452,7 +4549,7 @@ private:
     }
 
     // One settled, collapsed row with its anchor, the way drawCallRow draws a finished row: the
-    // reprinted rows of the internals pane, in the ink each would have had live. (Ink is defined
+    // reprinted rows of the Activity pane, in the ink each would have had live. (Ink is defined
     // further down the class; a parameter type needs it declared first.)
     enum class Ink;
     void printAnchoredRow(const QString &anchor, const QString &title, const QString &rest, Ink ink) {
@@ -8834,7 +8931,7 @@ private:
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
             const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
             m_fixAwaitingAgent = prompt.fix;
-            m_currentRequest = prompt.text;   // the internals pane names the turn by it (#QT8C)
+            m_currentRequest = prompt.text;   // the Activity pane names the turn by it (#QT8C)
             // Wrong-mode hints: the shell command this turn was submitted with, if any, so a
             // failing run_command of the same text can suggest the terminal (see tool_result).
             m_turnShellPrompt = prompt.shellText;
@@ -8905,7 +9002,7 @@ private:
             const QString text = event.value(QStringLiteral("text")).toString();
             m_toolLines += text.count('\n');
             m_toolPartialLine = !text.isEmpty() && !text.endsWith('\n');
-            if (m_internals) internalsToolOutput(text);   // the row lives in the internals pane (#QT8C)
+            if (m_internals) internalsToolOutput(text);   // the row lives in the Activity pane (#QT8C)
             else if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
             else if (!m_liveCall.isEmpty() && shellIdleAtPrompt()) {
                 // The running row counts what the command has printed. Throttled to about ten
@@ -11221,7 +11318,7 @@ private:
     }
 
     void flushInline() {
-        // The internals pane closed while a program owned the screen: its rows waited for this.
+        // The Activity pane closed while a program owned the screen: its rows waited for this.
         if (m_internalsReprintPending && inlineReady()) reprintHiddenRows();
         if (m_inlinePending.isEmpty() || !inlineReady()) return;
         const auto pending = m_inlinePending;
@@ -14585,7 +14682,7 @@ private:
     bool m_thinkingFoldOpen = false, m_thinkingUserToggled = false, m_thinkingFlushPending = false;
     QHash<QString, int> m_thinkingBlocks;
     QElapsedTimer m_thinkingPushAt;   // last push of the reasoning into an open turn pane (#K48R)
-    // The agent internals pane (#QT8C): the view while one is open, and the rows it took.
+    // The Activity pane (#QT8C): the view while one is open, and the rows it took.
     QPointer<relay::AgentInternalsView> m_internals;
     relay::internals::Ledger m_internalsLedger;
     QString m_internalsTurn, m_internalsBlockKey, m_internalsBlockTurn, m_internalsFirstCall, m_currentRequest;

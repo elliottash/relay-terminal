@@ -27,7 +27,6 @@
 | `#V2HM` | [Let the agent fill in a password without ever seeing it](features/2026-09-19-let-the-agent-fill-in-a-password-without-seeing-i.md) | ready | agent | 0/9 |  |
 | `#K2FV` | [Ask before the risky things — off by default, and chosen on the first launch](features/2026-09-19-ask-before-the-risky-things-opt-in.md) | ready | agent | 0/10 |  |
 | `#4QM4` | [Measure the author x reviewer matrix: for Claude-made bugs, is Kimi or GLM the better reviewer?](features/2026-09-19-measure-the-author-x-reviewer-matrix-for-claude.md) | ready |  | 0/9 | [2](threads/4QM4.md) |
-| `#4X53` | [The internals pane is called "Activity", and a relay-icon button on the Relaying line opens it](features/2026-09-19-activity-pane-name-and-relaying-line-button.md) | ready | agent | 0/5 |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | in-progress |  |  |  |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 | [1](threads/97EG.md) |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 11/11 |  |
@@ -146,6 +145,7 @@
 | `#QG60` | [put shortcuts in parentheses in switchboard](features/needs_qa_llm/2026-09-19-put-shortcuts-in-parentheses-in-switchboard.md) | needs-qa-llm | agent |  | [14](threads/QG60.md) |
 | `#T71W` | [Cross-provider QA: a provider/model signature on every completion and commit, and the Switchboard names the verifier](features/needs_qa_llm/2026-09-19-cross-provider-qa-a-provider-model-signature-on.md) | needs-qa-llm | agent | 9/9 | [9](threads/T71W.md) |
 | `#QT8C` | [An agent internals pane: watch the thinking and the tool calls beside the terminal](features/needs_qa_llm/2026-09-19-agent-internals-pane.md) | needs-qa-llm | agent |  |  |
+| `#4X53` | [The internals pane is called "Activity", and a relay-icon button on the Relaying line opens it](features/needs_qa_llm/2026-09-19-activity-pane-name-and-relaying-line-button.md) | needs-qa-llm | agent | 5/5 |  |
 | `#5AWD` | [helpful line breaks in the terminal](features/needs_qa_llm/2026-09-19-helpful-line-breaks-in-the-terminal.md) | needs-qa-llm | agent |  | [12](threads/5AWD.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
