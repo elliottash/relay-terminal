@@ -8,6 +8,7 @@ things worth pinning are the ones a public address makes expensive to get wrong 
 `https://<name>.trycloudflare.com` is ever taken for a tunnel, the URL never reaches a log, one
 tunnel exists at a time, and `unpublish()` kills the child it started and nobody else's.
 """
+import asyncio
 import os
 import subprocess
 import tempfile
@@ -133,11 +134,12 @@ class TunnelTests(unittest.TestCase):
         self.assertIsNone(other.poll(), "killed a process this module never started")
 
 
-class InviteClampTests(unittest.IsolatedAsyncioTestCase):
-    """One link admits one person while the address is a public one (section 10.2).
+class PublicLinkInviteTests(unittest.IsolatedAsyncioTestCase):
+    """A public link admits as many people as the owner asked for (section 10.2).
 
-    The sidecar clamps rather than the dialog alone, because the dialog is not the only thing that
-    can ask: the clamp has to hold for whatever sends `invite_create`.
+    A one-use clamp lived here for an hour on 2026-09-18 and the owner chose against it: he wants
+    to send one link to a group. What is pinned instead is that the number he picks is the number
+    he gets, wherever the app is served from, and that the warning beside it is true.
     """
 
     class FakeInvite:
@@ -155,7 +157,7 @@ class InviteClampTests(unittest.IsolatedAsyncioTestCase):
 
         async def invite_create(self, panes, role, *, expires_in, uses):
             self.asked.append(uses)
-            return InviteClampTests.FakeInvite(uses), "https://example.test/join#i=secret"
+            return PublicLinkInviteTests.FakeInvite(uses), "https://example.test/join#i=secret"
 
     async def sidecar(self, *, tunnel: bool):
         from remote import gui_host
@@ -166,13 +168,15 @@ class InviteClampTests(unittest.IsolatedAsyncioTestCase):
         side.served_by_cloudflare = tunnel
         return side
 
-    async def test_a_public_link_admits_one_person_however_many_were_asked_for(self):
+    async def test_a_public_link_admits_as_many_as_were_asked_for(self):
         side = await self.sidecar(tunnel=True)
         await side.invite_create({"pane": "p1", "role": "viewer", "uses": 20})
-        self.assertEqual(side.host.asked, [1], "the hub was asked for more than one admission")
+        self.assertEqual(side.host.asked, [20], "the owner's number is the number")
         reply = [m for m in side.out if m["t"] == "invite"][-1]
-        self.assertEqual(reply["uses"], 1)
-        self.assertEqual(reply["note"], "Over a public link, one link admits one person.")
+        self.assertEqual(reply["uses"], 20)
+        # The warning says what is true of a public link, and nothing that is not.
+        self.assertEqual(reply["note"], "Over a public link, anyone this link is forwarded to can "
+                                        "knock. You admit each person by hand.")
 
     async def test_on_the_lan_the_number_asked_for_is_the_number_given(self):
         side = await self.sidecar(tunnel=False)
@@ -182,12 +186,87 @@ class InviteClampTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply["uses"], 5)
         self.assertNotIn("note", reply, "nothing to explain when nothing was clamped")
 
-    async def test_switching_back_from_the_tunnel_lifts_the_clamp(self):
+    async def test_the_address_does_not_change_how_many_a_link_admits(self):
         side = await self.sidecar(tunnel=True)
         await side.invite_create({"pane": "p1", "role": "viewer", "uses": 4})
         side.served_by_cloudflare = False          # the owner picked the LAN address again
         await side.invite_create({"pane": "p1", "role": "viewer", "uses": 4})
-        self.assertEqual(side.host.asked, [1, 4])
+        self.assertEqual(side.host.asked, [4, 4], "the tunnel is not a different set of rules")
+
+
+class JoinNotificationTests(unittest.IsolatedAsyncioTestCase):
+    """The owner is emailed when somebody joins (owner, 2026-09-18).
+
+    A link that admits several people is only comfortable if the owner hears about each one, so
+    this is the other half of lifting the clamp: once per person, never on a reconnection.
+    """
+
+    class Guest:
+        def __init__(self, pid, name, role="viewer", panes=("p1",)):
+            self.participant_id, self.name, self.role, self.panes = pid, name, role, list(panes)
+            # The rest of what report_participants puts on the wire; the notification only reads
+            # the name, the pane and the role.
+            self.platform, self.invite, self.fingerprint, self.expires = "Chrome", "inv1", "ab:cd", 0.0
+
+    class FakeGuests:
+        def __init__(self, guests):
+            self._guests = guests
+
+        def live(self):
+            return self._guests
+
+        def live_invites(self):
+            return []
+
+    class FakeHost:
+        def __init__(self, guests):
+            self.guests = JoinNotificationTests.FakeGuests(guests)
+            self.channels = {}
+
+        def control_holder(self, pane):
+            return ""
+
+    async def sidecar(self, guests):
+        from remote import gui_host
+        side = gui_host.Sidecar()
+        side.out = []
+        side.emit = side.out.append
+        side.host = self.FakeHost(guests)
+        side.desktop_name = "spark"
+        return side
+
+    async def test_each_guest_is_announced_once(self):
+        from remote import gui_host
+        sent = []
+
+        async def drain():
+            await asyncio.sleep(0.05)   # the mail goes out on a task, not inline
+
+        alice = self.Guest("g1", "alice")
+        side = await self.sidecar([alice])
+        with mock.patch.object(gui_host.email_mod, "notify_joined",
+                               side_effect=lambda name, **kw: sent.append((name, kw)) or (True, "")):
+            side.report_participants()
+            await drain()
+            side.report_participants()          # she is still there; not a second mail
+            await drain()
+            side.host.guests._guests.append(self.Guest("g2", "bo", role="editor"))
+            side.report_participants()
+            await drain()
+        self.assertEqual([name for name, _ in sent], ["alice", "bo"])
+        self.assertEqual(sent[1][1]["role"], "editor")
+        self.assertEqual(sent[0][1]["pane"], "p1")
+        self.assertEqual(sent[0][1]["desktop"], "spark")
+
+    async def test_a_send_that_fails_is_not_an_error_on_screen(self):
+        from remote import gui_host
+        side = await self.sidecar([self.Guest("g1", "alice")])
+        with mock.patch.object(gui_host.email_mod, "notify_joined",
+                               side_effect=RuntimeError("SES is down")):
+            side.report_participants()
+            await asyncio.sleep(0.05)
+        self.assertEqual([m for m in side.out if m.get("t") == "error"], [],
+                         "a mail that did not send is not a dialog")
 
 
 if __name__ == "__main__":

@@ -131,6 +131,40 @@ def body(url: str, *, role_sentence: str, expiry: str, pane: str, sender_name: s
     return subject, text
 
 
+def notify_joined(name: str, *, pane: str, role: str, desktop: str = "") -> tuple[bool, str]:
+    """Tell the owner that somebody just joined a shared pane.
+
+    The owner admits every guest by hand, so this is not a permission — it is the record. It
+    matters when a link has several uses: the first person is admitted in front of him, the fourth
+    may arrive while he is somewhere else, and "who is on my terminal" should not be a question he
+    has to go and look up. `notify` in ``~/.config/relay/email.json`` is the address; without one
+    this does nothing and says so, and nothing is retried.
+    """
+    stored = _stored()
+    to = (os.environ.get("RELAY_NOTIFY_TO") or stored.get("notify") or "").strip()
+    if not to:
+        return False, "No address to notify: add \"notify\" to " + str(CONFIG)
+    mailer = configured()
+    if not mailer.ready:
+        return False, mailer.reason
+    who = name.strip() or "Somebody"
+    where = pane.strip() or "a pane"
+    can = "type in it" if role == "editor" else "watch it"
+    subject = f"{who} joined {where}"
+    text = (f"{who} joined {where}{' on ' + desktop if desktop else ''} and can {can}.\n\n"
+            "You admitted them, so this is a record rather than a request. To end it: the Sharing "
+            "pane removes one person, or stops sharing the pane altogether.\n")
+    try:
+        _client(mailer).send_email(
+            FromEmailAddress=mailer.sender,
+            Destination={"ToAddresses": [to]},
+            Content={"Simple": {"Subject": {"Data": subject, "Charset": "UTF-8"},
+                                "Body": {"Text": {"Data": text, "Charset": "UTF-8"}}}})
+    except Exception as error:                      # noqa: BLE001
+        return False, _explain(error, mailer, to)
+    return True, f"Told {to} that {who} joined."
+
+
 def send(to: str, url: str, *, role_sentence: str, expiry: str, pane: str,
          sender_name: str = "") -> tuple[bool, str]:
     """Send one invitation. Returns (sent, a sentence for the dialog).
