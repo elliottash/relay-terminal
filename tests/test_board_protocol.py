@@ -1270,6 +1270,65 @@ class SetBoardTests(AttachTest):
         self.assertEqual(T.find_board_root(deep), inner / "issues")
 
 
+class SectionMessageTests(AttachTest):
+    """`board_sections` (19.17): the gear beside the section checkboxes, over the agent's tool.
+
+    Add, remove, merge and rename are one message because they are one rewrite of `board.yaml`,
+    and none of them touches a card: a section is a view of the statuses.
+    """
+
+    def point(self):
+        project = self.project("sections", "switchboard")
+        self.commands.configure(str(project), {"board": {"dir": str(project / "switchboard"),
+                                                         "project": str(project)}})
+        return project
+
+    def send_sections(self, **kw):
+        events = self.send(type="board_sections", id="s1", **kw)
+        errors = [e for e in events if e["event"] == "error"]
+        self.assertEqual(errors, [], errors)
+        return [e for e in events if e["event"] == "board_written"][0]
+
+    def test_merging_two_sections_is_one_write_and_the_panes_are_told(self):
+        project = self.point()
+        written = self.send_sections(
+            columns=["inbox", "discussing", "ready", "in-progress", "needs-qa", "done"],
+            column_statuses={"needs-qa": ["needs-qa-llm", "needs-qa-human", "needs-review",
+                                          "needs-labels", "needs-ab"]},
+            column_titles={"needs-qa": "Checks"})
+        self.assertEqual(written["kind"], "board_sections")
+        config = B.Board(project / "switchboard", project).config()
+        self.assertNotIn("waiting", config["columns"])
+        self.assertEqual(config["column_titles"], {"needs-qa": "Checks"})
+        # Every pane on this board redraws from the file that was written, so the config the
+        # GUI is handed carries the merge and the new name.
+        block = self.commands._config()
+        self.assertEqual(block["column_titles"], {"needs-qa": "Checks"})
+        self.assertIn("needs-review", block["column_statuses"]["needs-qa"])
+        self.assertNotIn("waiting", block["column_statuses"])
+
+    def test_the_config_travels_with_every_change_not_only_the_open(self):
+        self.point()
+        self.send_sections(column_titles={"ready": "Up next"})
+        changed = [e for e in self.send(type="board_refresh", id="r1")
+                   if e["event"] in ("board_changed", "board")]
+        self.assertTrue(changed)
+        self.assertEqual(changed[-1]["config"]["column_titles"], {"ready": "Up next"})
+
+    def test_a_section_the_board_invented_needs_its_statuses(self):
+        self.point()
+        events = self.send(type="board_sections", id="s1", columns=["triage", "ready", "done"])
+        self.assertEqual([e["event"] for e in events if e["event"] == "error"], ["error"])
+        errors = [e for e in events if e["event"] == "error"][0]
+        self.assertIn("triage", errors["text"])
+
+    def test_the_message_needs_something_to_change(self):
+        self.point()
+        with self.assertRaises(ValueError) as caught:
+            self.commands.dispatch({"type": "board_sections", "id": "s1"})
+        self.assertIn("columns", str(caught.exception))
+
+
 class FolderMessageTests(AttachTest):
     """`board_folder {hidden}` (19.15): the one message that renames an existing board's folder."""
 

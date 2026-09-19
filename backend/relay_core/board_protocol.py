@@ -33,7 +33,7 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_comment", "board_undo", "board_ask", "board_cancel", "board_check",
-         "board_cleanup", "board_init", "board_init_answer", "board_folder",
+         "board_cleanup", "board_init", "board_init_answer", "board_folder", "board_sections",
          # Initializing a project and importing what is already in it (19.13,
          # docs/PROJECT-INIT-AND-IMPORT.md section 8).
          "project_probe", "board_import_propose", "board_import_apply",
@@ -514,6 +514,37 @@ class BoardCommands:
                     "old": move.old, "new": move.new, "root": move.root, "hidden": move.hidden,
                     "method": move.method, "files": list(move.files), "summary": move.summary()})
 
+    # ---- the section list, from the gear beside the section checkboxes ---------
+    def _sections(self, request: dict, rid) -> None:
+        """`board_sections {columns, column_statuses, column_titles}`: rewrite the section list.
+
+        The same tool the Switchboard agent calls (`board_sections`), so the gear, a cleanup run
+        and a person editing `board.yaml` by hand all go through one validator and one writer,
+        and the edit lands in the write log where `board_undo` can take it back.  No card is
+        touched: sections are a view of the statuses, which is why this is a config write and
+        not a move.
+        """
+        tools = self._need_ready()
+        args = {k: request[k] for k in ("columns", "column_statuses", "column_titles", "tabs")
+                if request.get(k) is not None}
+        if not args:
+            raise ValueError("board_sections needs columns, column_statuses or column_titles.")
+        args["reason"] = str(request.get("reason") or "edited in the Switchboard")[:200]
+        tools.context.actor = str(request.get("author") or "owner")[:64]
+        try:
+            result = tools.run("board_sections", args, by_owner=True)
+        finally:
+            tools.context.actor = "owner"
+        if result.get("error"):
+            self.emit({"event": "error", "id": rid, "text": result["error"],
+                       "code": result.get("code")})
+            return
+        # `board_state` carries the config block, so every pane on this board redraws its
+        # sections from the file that was just written rather than from what the gear sent.
+        self._send({"event": "board_written", **result, "id": rid, "kind": "board_sections",
+                    "board": self.state_block()})
+        self.emit(self._changed(result.get("write_id")))
+
     def handles(self, kind: str) -> bool:
         return kind in TYPES
 
@@ -791,11 +822,20 @@ class BoardCommands:
     def _config(self) -> dict:
         tools = self._need()
         config = tools.board.config()
+        columns = [str(c) for c in (config.get("columns") or B.DEFAULT_CONFIG.get("columns") or [])]
+        # This board's own sections, not the defaults: a merged or invented section exists only in
+        # `column_statuses:`, and a renamed one only in `column_titles:`, so a GUI sent the bare
+        # defaults would draw the section list of a board nobody has.
         return {"tabs": tools.board.tabs(),
-                "columns": [str(c) for c in (config.get("columns") or B.DEFAULT_CONFIG.get("columns") or [])],
+                "columns": columns,
                 "autonomy": tools.autonomy,
                 "statuses": {t: list(B.STATUS_FOLDER[t]) for t in B.CARD_TYPES},
-                "column_statuses": COLUMN_STATUSES,
+                "column_statuses": {c: B.column_statuses_of(config, c) for c in columns},
+                # Every renamed section, not only the configured ones: a section that exists
+                # because a card has that status (a plan's Draft, Deferred) is renamed the same way.
+                "column_titles": {str(k): str(v) for k, v in (config.get("column_titles") or {}).items()
+                                  if isinstance(v, str) and v.strip()},
+                "all_statuses": list(B.ALL_STATUSES),
                 "labels": sorted({str(l) for row in self._snapshot.values() for l in row.get("labels") or []})}
 
     def _changed(self, write_id: str | None = None) -> dict:
@@ -805,8 +845,12 @@ class BoardCommands:
         removed = [cid for cid in self._snapshot if cid not in rows]
         self._snapshot = rows
         self.rev += 1
+        # The config travels with every change, not only with the full `board` event: the gear
+        # rewrites the section list without touching a card, and a pane that only ever learned
+        # the sections at open would keep drawing the old ones until it was reopened.
         event = self._tag({"event": "board_changed", "rev": self.rev, "upserts": upserts,
-                           "removed": removed, "problems": self._problems()})
+                           "removed": removed, "problems": self._problems(),
+                           "config": self._config()})
         if write_id:
             event["write_id"] = write_id
         return event
@@ -866,6 +910,8 @@ class BoardCommands:
             self._init_answer(request, rid)
         elif kind == "board_folder":
             self._folder(request, rid)
+        elif kind == "board_sections":
+            self._sections(request, rid)
         elif kind == "project_probe":
             self._project_probe(request, rid)
         elif kind == "board_import_propose":
@@ -1197,17 +1243,11 @@ def cleanup_prompt(tools: BoardTools, scope: str | None = None, note: str | None
                      + ["--- end of the board ---"])
 
 
-#: Which statuses each configurable column collects (design 3, "Tabs and columns").
-COLUMN_STATUSES = {
-    "inbox": ["inbox"], "discussing": ["discussing"], "ready": ["ready"],
-    "in-progress": ["in-progress"],
-    "waiting": ["needs-review", "needs-labels", "needs-ab"],
-    "needs-qa": ["needs-qa-llm", "needs-qa-human"],
-    "done": ["done", "dropped"], "deferred": ["deferred"],
-    # plan and memory columns
-    "draft": ["draft"], "approved": ["approved"], "executing": ["executing"],
-    "active": ["active"], "retired": ["retired"],
-}
+#: Which statuses each configurable column collects by default (design 3, "Tabs and columns").
+#: It lives in `board` beside `COLUMN_IDS` because the section editor validates against it and
+#: the agent's `board_sections` tool writes what overrides it; this name is kept because the
+#: protocol tests and the GUI's config block have always read it here.
+COLUMN_STATUSES = B.COLUMN_STATUSES
 
 
 def _title_from(text) -> str:

@@ -1977,6 +1977,50 @@ MERGE_BODY_CAP = 8000
 COLUMN_IDS = ("inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa",
               "deferred", "done", "draft", "approved", "executing", "active", "retired")
 
+#: Which statuses each of those columns collects when `board.yaml` does not say (design 3,
+#: "Tabs and columns").  A board that merges two sections, or invents one, overrides this per
+#: column in `column_statuses:`; `column_statuses_of()` is the one reader of both.
+COLUMN_STATUSES = {
+    "inbox": ["inbox"], "discussing": ["discussing"], "ready": ["ready"],
+    "in-progress": ["in-progress"],
+    "waiting": ["needs-review", "needs-labels", "needs-ab"],
+    "needs-qa": ["needs-qa-llm", "needs-qa-human"],
+    "done": ["done", "dropped"], "deferred": ["deferred"],
+    # plan and memory columns
+    "draft": ["draft"], "approved": ["approved"], "executing": ["executing"],
+    "active": ["active"], "retired": ["retired"],
+}
+
+#: Every status a card of any type may carry: what a section is allowed to collect.
+ALL_STATUSES = tuple(dict.fromkeys(s for folders in STATUS_FOLDER.values() for s in folders))
+
+
+def column_statuses_of(config: dict, column: str) -> list[str]:
+    """Which statuses `column` collects on a board configured this way.
+
+    `column_statuses:` in `board.yaml` first — that is how a board merges two sections into one
+    or invents a section of its own — then the default map, and finally the column id read as a
+    status of its own, which is what makes `columns: [inbox, ready]` mean what it looks like.
+    """
+    configured = (config or {}).get("column_statuses") or {}
+    listed = configured.get(column) if isinstance(configured, dict) else None
+    if isinstance(listed, list) and listed:
+        return [str(s) for s in listed]
+    return list(COLUMN_STATUSES.get(column) or [column])
+
+
+def column_title_of(config: dict, column: str) -> str | None:
+    """The name this board gives `column`, or None to let the reader use its own wording.
+
+    A section is renamed for the people reading it, never by moving cards: `column_titles:` is a
+    display name over a column id that stays exactly what it was.
+    """
+    titles = (config or {}).get("column_titles") or {}
+    if not isinstance(titles, dict):
+        return None
+    title = titles.get(column)
+    return str(title) if isinstance(title, str) and title.strip() else None
+
 _HEADING_LINE_RE = re.compile(r"^(#{1,5})[ \t]+", re.M)
 
 
@@ -2271,7 +2315,8 @@ def _relative_link(from_path: Path, to_path: Path) -> str:
     return os.path.relpath(str(to_path), str(Path(from_path).parent))
 
 
-CONFIG_KEY_ORDER = ("version", "tabs", "columns", "column_statuses", "labels", "agent", "memory")
+CONFIG_KEY_ORDER = ("version", "tabs", "columns", "column_statuses", "column_titles", "labels",
+                    "agent", "memory")
 CONFIG_HEADER = "# Switchboard configuration. Format: docs/SWITCHBOARD-FORMAT.md\n"
 
 _FLOW_UNSAFE_RE = re.compile(r"[,:\[\]{}]")

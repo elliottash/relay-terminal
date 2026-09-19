@@ -1113,6 +1113,86 @@ class CleanupToolTests(BoardToolsTest):
         self.assertEqual(result["code"], "board_refused")
         self.assertIn("someday", result["error"])
 
+    # ---- add, remove, merge, rename: the four the gear offers (#VZ69 follow-on) ----
+
+    def test_two_sections_merge_into_one_that_collects_both(self):
+        """Merge = one section with both sets of statuses, the other left out of columns."""
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "columns": ["inbox", "discussing", "ready", "in-progress", "needs-qa", "done"],
+            "column_statuses": {"needs-qa": ["needs-qa-llm", "needs-qa-human", "needs-review",
+                                             "needs-labels", "needs-ab"]},
+            "column_titles": {"needs-qa": "Checks"},
+            "reason": "one lane for everything that is waiting on a check"})
+        self.assertNotIn("error", result, result)
+        config = self.board.config()
+        self.assertNotIn("waiting", config["columns"])
+        self.assertEqual(B.column_statuses_of(config, "needs-qa"),
+                         ["needs-qa-llm", "needs-qa-human", "needs-review", "needs-labels", "needs-ab"])
+        self.assertEqual(B.column_title_of(config, "needs-qa"), "Checks")
+        # It reads back: a board.yaml the board cannot parse is never written.
+        self.assertEqual(B.Board(self.root, self.repo).config()["column_titles"], {"needs-qa": "Checks"})
+
+    def test_a_section_of_the_boards_own_needs_statuses_of_its_own(self):
+        self.tools.begin_cleanup("c-1")
+        refused = self.tools.run("board_sections", {"columns": ["inbox", "triage"], "reason": "x"})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertIn("triage", refused["error"])
+        # With statuses it is a section like any other, and the id is free-form.
+        self.tools.begin_cleanup("c-2")
+        result = self.tools.run("board_sections", {
+            "columns": ["triage", "ready", "in-progress", "needs-qa", "done"],
+            "column_statuses": {"triage": ["inbox", "discussing"]},
+            "column_titles": {"triage": "Triage"}, "reason": "one lane before it is agreed"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(B.column_statuses_of(self.board.config(), "triage"), ["inbox", "discussing"])
+
+    def test_one_status_belongs_to_one_section(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "columns": ["inbox", "triage", "ready", "done"],
+            "column_statuses": {"triage": ["inbox", "discussing"]},
+            "reason": "x"})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertIn("inbox", result["error"])
+        self.assertNotIn("triage", self.board.config().get("columns") or [])
+
+    def test_a_section_cannot_collect_a_status_that_does_not_exist(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "columns": ["inbox", "someday", "done"],
+            "column_statuses": {"someday": ["maybe-later"]}, "reason": "x"})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertIn("maybe-later", result["error"])
+
+    def test_renaming_a_section_moves_no_card_and_an_empty_name_puts_it_back(self):
+        card_id = self.create(status="ready")
+        path = next(c.path for c in self.board.cards() if c.id == card_id)
+        before = path.read_bytes()
+        self.tools.begin_cleanup("c-1")
+        self.tools.run("board_sections", {"column_titles": {"ready": "Up next"}, "reason": "clearer"})
+        self.assertEqual(B.column_title_of(self.board.config(), "ready"), "Up next")
+        self.assertEqual(path.read_bytes(), before)            # the card is untouched
+        self.tools.begin_cleanup("c-2")
+        self.tools.run("board_sections", {"column_titles": {}, "reason": "back to the default"})
+        self.assertIsNone(B.column_title_of(self.board.config(), "ready"))
+
+    def test_a_section_name_is_one_short_line(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections",
+                                {"column_titles": {"ready": "x" * 60}, "reason": "x"})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertIn("40", result["error"])
+
+    def test_dropping_a_section_is_undoable_like_any_other_write(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "columns": ["inbox", "ready", "in-progress", "needs-qa", "done"], "reason": "fewer lanes"})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("waiting", self.board.config()["columns"])
+        self.tools.undo(result["write_id"])
+        self.assertIn("waiting", self.board.config()["columns"])
+
 
 class CleanupLogTests(BoardToolsTest):
     """A cleanup is only as reviewable as its changelog."""

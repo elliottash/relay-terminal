@@ -278,12 +278,23 @@ CLEANUP_TOOL_SPECS = [
          ["id", "parts", "reason"]),
     spec("board_sections",
          "Change the board's own structure in the board's board.yaml: which sections (columns) the one "
-         "list is divided into and in what order, and which category folders (tabs) a card's file "
-         "can live in. Dropping a column does not hide its cards — a status no column collects gets "
-         "a section of its own — but a tab whose folder still holds cards cannot be dropped. Use "
-         "this sparingly: it changes the board for everyone.",
+         "list is divided into and in what order, what each of them collects, what they are called, "
+         "and which category folders (tabs) a card's file can live in. Add, remove, merge and rename "
+         "a section are all this one call. No card moves and no status changes: dropping a section "
+         "does not hide its cards — a status no section collects gets a section of its own — but a "
+         "tab whose folder still holds cards cannot be dropped. Use this sparingly: it changes the "
+         "board for everyone.",
          {"columns": {"type": "array", "items": {"type": "string"},
-                      "description": f"The whole ordered column list, from: {', '.join(B.COLUMN_IDS)}."},
+                      "description": f"The whole ordered section list, from: {', '.join(B.COLUMN_IDS)}, "
+                                     "or an id of your own that column_statuses gives statuses to."},
+          "column_statuses": {"type": "object",
+                              "description": "Which statuses each section collects, e.g. "
+                                             "{\"needs-qa\": [\"needs-qa-llm\", \"needs-qa-human\"]}. "
+                                             "Merging two sections is one section with both sets, the "
+                                             "other left out of columns. One status, one section."},
+          "column_titles": {"type": "object",
+                            "description": "What a section is called, over an id that does not change, "
+                                           "e.g. {\"ready\": \"Up next\"}. \"\" puts the name back."},
           "tabs": {"type": "array", "description": "The whole tab list, each {id, folder} or {id, filter}.",
                    "items": {"type": "object", "properties": {
                        "id": {"type": "string"}, "folder": {"type": "string"},
@@ -297,6 +308,11 @@ CLEANUP_TOOL_SPECS = [
 #: is what `handles` answers to, since a cleanup call still arrives through the same dispatch.
 TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
 CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
+
+#: Cleanup-only tools the owner may also reach directly, through a control in the GUI rather than
+#: through a model: the section editor behind the gear on the Switchboard's list of sections. The
+#: fence is on the agent's autonomy, and this is the owner asking for it by hand.
+OWNER_TOOLS = ("board_sections",)
 ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
 WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment",
                "board_merge_cards", "board_split_card", "board_sections")
@@ -1246,13 +1262,21 @@ class BoardTools:
                 bits.append(f"{key}: {str(args[key])[:120]}")
         return f"SWITCHBOARD {head}\n\n" + ("\n".join(bits) or "(no arguments)")
 
-    def run(self, name: str, args: dict) -> dict:
+    def run(self, name: str, args: dict, *, by_owner: bool = False) -> dict:
+        """Run one Switchboard tool.  `by_owner` is the GUI acting for the person at the keyboard.
+
+        The cleanup-only tools are fenced off because an *agent* must not restructure the board
+        in the middle of an ordinary turn — not because the structure is off limits.  The owner
+        editing the section list in the gear is the case the fence was never about, so
+        `OWNER_TOOLS` names the ones a direct request may reach, and only when it says so.
+        """
         if not self.handles(name):
             raise BoardToolError(f"unknown Switchboard tool {name!r}")
         if not isinstance(args, dict):
             raise BoardToolError("Tool arguments must be an object.")
         try:
-            if name in CLEANUP_TOOL_NAMES and self.cleanup is None:
+            if (name in CLEANUP_TOOL_NAMES and self.cleanup is None
+                    and not (by_owner and name in OWNER_TOOLS)):
                 raise BoardToolError(f"{name} is only available during a Switchboard cleanup.",
                                      code="board_refused")
             self._check_card_scope(name, args)
@@ -1957,32 +1981,88 @@ class BoardTools:
                 "write_id": write_id, "summary": summary}
 
     def _sections(self, args: dict) -> dict:
-        """`board_sections`: the board's own columns and category folders (protocol 19.9)."""
-        allowed = {"columns", "tabs", "reason"}
+        """`board_sections`: the board's own columns and category folders (protocol 19.9).
+
+        The four things a person can do to the section list — add, remove, merge, rename — are
+        all this one call, because they are all one rewrite of `board.yaml`: `columns` is the
+        ordered list (add and remove), `column_statuses` says what each one collects (merge), and
+        `column_titles` is the name over an id that does not change (rename).  **No card moves
+        and no status changes**, whichever of them you do: a section is a view of the statuses,
+        so a card that was in a dropped section comes back in a section of its own rather than
+        disappearing (`B.column_statuses_of`, and `Model::sections()` on the GUI side).
+        """
+        allowed = {"columns", "column_statuses", "column_titles", "tabs", "reason"}
         if set(args) - allowed:
             raise BoardToolError(f"board_sections takes {', '.join(sorted(allowed))}.")
         reason = _one_line(args.get("reason"), "reason", MAX_REASON)
-        if args.get("columns") is None and args.get("tabs") is None:
-            raise BoardToolError("board_sections takes columns, tabs, or both.")
+        if all(args.get(k) is None for k in ("columns", "column_statuses", "column_titles", "tabs")):
+            raise BoardToolError("board_sections takes columns, column_statuses, column_titles, "
+                                 "tabs, or any of them together.")
         config = self.board.config()
         before_bytes = (self.board.config_path.read_bytes()
                         if self.board.config_path.exists() else b"")
         changes: list[str] = []
 
+        # The statuses first: `columns` is checked against them, so a section invented in this
+        # same call is a known section by the time the list is read.
+        statuses = config.get("column_statuses") if isinstance(config.get("column_statuses"), dict) else {}
+        statuses = {str(k): [str(s) for s in v] for k, v in statuses.items() if isinstance(v, list)}
+        if args.get("column_statuses") is not None:
+            statuses = _column_statuses(args.get("column_statuses"))
+
         if args.get("columns") is not None:
             columns = _string_list(args.get("columns"), "columns")
             if not columns:
                 raise BoardToolError("columns must name at least one section.")
-            unknown = [c for c in columns if c not in B.COLUMN_IDS]
+            # An id outside the known list is allowed only when this board says what it collects:
+            # that is what makes an invented section possible without making a typo silent.
+            unknown = [c for c in columns if c not in B.COLUMN_IDS and not statuses.get(c)]
             if unknown:
-                raise BoardToolError(f"unknown column(s) {', '.join(unknown)}; the board's sections "
-                                     f"come from: {', '.join(B.COLUMN_IDS)}.")
+                raise BoardToolError(
+                    f"unknown section(s) {', '.join(unknown)}: either name one of "
+                    f"{', '.join(B.COLUMN_IDS)}, or give it statuses of its own in column_statuses.")
+            bad = [c for c in columns if not _SECTION_ID_RE.fullmatch(c)]
+            if bad:
+                raise BoardToolError(f"section id {bad[0]!r} must be lower-case letters, digits, - and _.")
             if len(set(columns)) != len(columns):
                 raise BoardToolError("columns lists the same section twice.")
             if list(config.get("columns") or []) != columns:
                 changes.append(f"columns: {', '.join(str(c) for c in config.get('columns') or [])} "
                                f"→ {', '.join(columns)}")
                 config["columns"] = columns
+
+        if args.get("column_statuses") is not None:
+            listed = [str(c) for c in (config.get("columns") or [])]
+            stray = sorted(set(statuses) - set(listed))
+            if stray:
+                raise BoardToolError(f"column_statuses names {', '.join(stray)}, which is not a "
+                                     "section in columns. Add it to columns in the same call.")
+            # One status, one section. Two sections collecting it would draw the same card twice,
+            # and a drop on either would be a move to whichever the list happened to read first.
+            seen: dict[str, str] = {}
+            for column in listed:
+                for status in B.column_statuses_of({**config, "column_statuses": statuses}, column):
+                    if status in seen:
+                        raise BoardToolError(f"both {seen[status]} and {column} collect "
+                                             f"{status!r}; a status belongs to one section.")
+                    seen[status] = column
+            if statuses != (config.get("column_statuses") or {}):
+                changes.append("column_statuses: " + ("; ".join(
+                    f"{c} = {', '.join(statuses[c])}" for c in sorted(statuses)) or "cleared"))
+                if statuses:
+                    config["column_statuses"] = statuses
+                else:
+                    config.pop("column_statuses", None)
+
+        if args.get("column_titles") is not None:
+            titles = _column_titles(args.get("column_titles"))
+            if titles != (config.get("column_titles") or {}):
+                changes.append("column_titles: " + ("; ".join(
+                    f"{c} → {titles[c]}" for c in sorted(titles)) or "cleared"))
+                if titles:
+                    config["column_titles"] = titles
+                else:
+                    config.pop("column_titles", None)
 
         if args.get("tabs") is not None:
             tabs = args.get("tabs")
@@ -2135,6 +2215,58 @@ def _text(value, what: str, maximum: int) -> str:
     if len(value) > maximum:
         raise BoardToolError(f"{what} must be at most {maximum} characters.")
     return value.replace("\r\n", "\n").rstrip()
+
+
+#: A section id: the same shape as a tab id, because both name a thing in `board.yaml`.
+_SECTION_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]*")
+MAX_SECTIONS = 20
+MAX_SECTION_TITLE = 40
+
+
+def _column_statuses(value) -> dict[str, list[str]]:
+    """`{section: [status, ...]}`, checked: known statuses, no empty section, nothing invented.
+
+    Merging two sections is writing one of them with both sets of statuses and dropping the
+    other from `columns`, so this is the one place that decides what a section may collect.
+    """
+    if not isinstance(value, dict):
+        raise BoardToolError("column_statuses must be an object of section -> statuses.")
+    if len(value) > MAX_SECTIONS:
+        raise BoardToolError(f"column_statuses takes at most {MAX_SECTIONS} sections.")
+    out: dict[str, list[str]] = {}
+    for key, listed in value.items():
+        column = _one_line(key, "a column_statuses key", 40).lower()
+        if not _SECTION_ID_RE.fullmatch(column):
+            raise BoardToolError(f"section id {column!r} must be lower-case letters, digits, - and _.")
+        statuses = _string_list(listed, f"column_statuses[{column}]")
+        if not statuses:
+            raise BoardToolError(f"section {column!r} must collect at least one status; to take a "
+                                 "section away, leave it out of columns instead.")
+        unknown = [s for s in statuses if s not in B.ALL_STATUSES]
+        if unknown:
+            raise BoardToolError(f"unknown status(es) {', '.join(unknown)} in section {column!r}; "
+                                 f"a section collects from: {', '.join(B.ALL_STATUSES)}.")
+        if len(set(statuses)) != len(statuses):
+            raise BoardToolError(f"section {column!r} lists the same status twice.")
+        out[column] = statuses
+    return out
+
+
+def _column_titles(value) -> dict[str, str]:
+    """`{section: "Name"}`: what the sections are called, over ids that do not change."""
+    if not isinstance(value, dict):
+        raise BoardToolError("column_titles must be an object of section -> name.")
+    if len(value) > MAX_SECTIONS:
+        raise BoardToolError(f"column_titles takes at most {MAX_SECTIONS} sections.")
+    out: dict[str, str] = {}
+    for key, title in value.items():
+        column = _one_line(key, "a column_titles key", 40).lower()
+        if not _SECTION_ID_RE.fullmatch(column):
+            raise BoardToolError(f"section id {column!r} must be lower-case letters, digits, - and _.")
+        if isinstance(title, str) and not title.strip():
+            continue          # cleared: the section goes back to the name Relay gives it
+        out[column] = _one_line(title, f"the name of section {column!r}", MAX_SECTION_TITLE)
+    return out
 
 
 def _string_list(value, what: str) -> list[str]:
