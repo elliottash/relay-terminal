@@ -58,13 +58,11 @@ _counter = 0   # two events written in the same nanosecond still sort in the ord
 def events_dir() -> Path | None:
     """Where this pane's spool is, or None when there is no pane around this process.
 
-    `RELAY_GUEST_EVENT` is the directory. It named this script in the first cut of 26.3, so a
-    value that still points at a `.py` is read as "the old export" and the directory is derived
-    from `RELAY_RUNTIME_DIR` instead — the two conventions have to coexist while the guest phases
-    land separately.
+    `RELAY_GUEST_EVENT` is the spool directory; `RELAY_RUNTIME_DIR` is the fallback, and the
+    spool is `guest-events/` inside it.
     """
     exported = os.environ.get("RELAY_GUEST_EVENT", "")
-    if exported and not exported.endswith(".py"):
+    if exported:
         return Path(exported)
     runtime = os.environ.get("RELAY_RUNTIME_DIR", "")
     return Path(runtime) / EVENTS_DIR_NAME if runtime else None

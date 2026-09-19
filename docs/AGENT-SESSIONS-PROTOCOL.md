@@ -3461,7 +3461,8 @@ editor side of the IDE integration - WebSocket MCP (JSON-RPC 2.0: `initialize`, 
 `tools/call`), the twelve tools of the published protocol; `getDiagnostics` answers empty
 (Relay has no LSP source - documented, not faked). `openDiff` opens Relay's diff view and the
 tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJECTED`).
-A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
+A request is matched to the pane the calling claude runs in (the peer walk below), with the
+workspace/cwd prefix as the fallback; unmatched requests are logged and dropped. Whether the
 server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
 
 **The path rule.** A file the bridge writes is always a file inside the pane that is showing the
@@ -3475,14 +3476,32 @@ what gets written, so checking only the routing path is checking the wrong one.
 
 **Which pane a request belongs to.** Every pane registers, because the port is in its shell's
 environment before a claude could be started in it, so two panes open on one project is ordinary
-and only one of them may have a guest. The router ranks a candidate by, in order: the length of
-the workspace/cwd prefix that matched, whether that pane has a guest in its foreground right now
-(the registration's `guest` field, 26.1), and the registration's mtime. The middle term is what
-keeps a diff off the terminal beside the one the user is working in — without it the tie went to
-whichever registration was rewritten last, which is a shell that changed directory. **Two claudes
-in one project cannot be told apart** from the paths a request names: the newest registration wins
-and the diff may open beside the wrong one. The connection carries no pane identity (upstream's
-handshake has none), so closing that needs a peer-socket-to-pid walk, which is not built.
+and only one of them may have a guest.
+
+*First, who asked.* Upstream's handshake carries no pane identity, but the accepted socket carries
+a peer address and port, and on Linux that names the process. The sidecar walks it **once, when the
+connection is accepted**: `/proc/net/tcp` (and `tcp6`) from that local address to the socket's
+inode, `/proc/*/fd` from the inode to the pid, then `/proc/<pid>/stat` up the ancestry. The first
+registered pane **shell pid** the ancestry meets is the pane — nearest first, so a claude under a
+wrapper, or under a shell inside the pane, still belongs to the pane that owns the terminal. Every
+pane therefore registers `shell_pid` (the process at the far end of its pty; every process in the
+pane descends from it), 0 until its shell exists. `openDiff`, `openFile` and `close_tab` route this
+way; `closeAllDiffTabs` stays per connection, because "all" means all of this client's.
+This is what tells **two claudes in one project** apart, which nothing about the paths a request
+names ever could.
+
+*Then, failing that, where.* A hardened `/proc` (hidepid), a non-Linux host, a pane that has not
+reported its shell pid yet or a claude that did not come straight down a loopback socket all fail
+the walk, and the router falls back to the ranking it always had: the length of the workspace/cwd
+prefix that matched, then whether that pane has a guest in its foreground right now (the
+registration's `guest` field, 26.1), then the registration's mtime. Two claudes in one project
+that fail the walk are still indistinguishable here, and the newest registration wins. Which of
+the two paths decided is logged on every routed request (`routed tool=… pane=… by=peer|ranking`),
+together with the walk's own result (`peer_walk …`).
+
+The path rule is checked against **that** pane and no other — containment in its own workspace or
+cwd, not "does this pane win the ranking for this path", which would refuse every file in the
+project two panes share.
 
 **The pane's environment.** `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION`
 (`guest.bridge_env`, `relay::guestbridge::bridgeEnvKeys()`) are set with `qputenv`, which writes
@@ -3497,15 +3516,27 @@ spawn, registration, answers); the sidecar prints one ready line on stdout
 (`{"ready": true, "port": N, "lock": path}`) and the port comes from there. The bridge is off by
 default (`guests/claude_bridge`, Options › Guests); a failed start is never retried — a pane works
 without the bridge. Every claude pane registers itself as one JSON file in the run's state dir
-(`{token, runtime_dir, helper, python, workspace, cwd}`), rewritten when the cwd or workspace
-moves and removed when the claude exits or the pane closes; the sidecar routes by the longest
-workspace/cwd prefix of the paths a request names, newest file breaking a tie.
+(`{token, runtime_dir, helper, workspace, cwd, guest, shell_pid}`), rewritten when any of those
+change — the cwd or the workspace moving, a guest arriving, the shell naming its pid — and removed
+when the claude exits or the pane closes. `remote/` and `backend/` both go on the sidecar's
+`PYTHONPATH`, because its WebSocket is `remote/ws.py`.
 
-**The lock's lifetime.** Stale locks (whose pid is gone) are swept at startup; then the listener
-binds, and only then is the lock written — a lock advertises a port and a live `authToken`, so
-there is no lock before there is a port and `0.lock` is never a file that exists. It is removed on
-three paths: `atexit`, registered the moment the lock is written; SIGTERM/SIGINT; and the GUI's
-own death via `PR_SET_PDEATHSIG`. A SIGKILLed run leaves a lock that the next run's sweep takes.
+**The lock's lifetime.** Stale locks are swept at startup; then the listener binds, and only then
+is the lock written — a lock advertises a port and a live `authToken`, so there is no lock before
+there is a port and `0.lock` is never a file that exists. It is removed on three paths: `atexit`,
+registered the moment the lock is written; SIGTERM/SIGINT; and the GUI's own death via
+`PR_SET_PDEATHSIG`. A SIGKILLed run leaves a lock that the next run's sweep takes.
+
+**Stale means the port refuses, not that the pid is gone.** A lock claims one thing — "an editor
+is listening here" — so that is what the sweep asks: it connects to `<port>` on loopback with a
+short timeout (`LOCK_PROBE_SECONDS`). A port that **answers** is a live IDE, ours or another
+editor's, and its lock is never removed however wrong its pid looks. A port that **refuses** is
+gone, and its lock goes with it. Judging by `os.kill(pid, 0)` alone called a dead editor live as
+soon as the pid was recycled — within hours of a crash — and every claude started in that project
+afterwards dialled a port nobody was listening on and hung. Only a probe that cannot tell (a
+timeout, a host that will not let us connect at all) leaves the pid to decide, and then together
+with the pid's start time, which the lock records as `pidStartTime` when it is written
+(`/proc/<pid>/stat` field 22), so a recycled pid cannot resurrect a dead lock.
 
 **Nothing blocks the connection.** A pending `openDiff` is settled by its own task, so the read
 loop keeps serving while a decision is on screen: `tools/list` is answered, a ping gets its pong,
@@ -3519,20 +3550,25 @@ diff also ends by itself when its pane closes, when its connection drops, at shu
 the user is still reading, nor hold one open for an extra hour). Every one of those answers `DIFF_REJECTED`:
 a guest told no is recoverable, a guest blocked forever is not.
 
-**The socket itself.** Loopback, one auth token in `x-claude-code-ide-authorization`, compared
-with `hmac.compare_digest`. A connection that does not finish its HTTP head within
-`HANDSHAKE_SECONDS` (10) is dropped. Client frames must be masked (RFC 6455 §5.1) or the
-connection is failed with close code 1002, as it is for the frames `remote/ws.py` also refuses: a
-reserved bit set with no extension negotiated, a control frame that is fragmented or longer than
-125 bytes, a continuation frame with nothing to continue, a second data frame inside a fragmented
-message, and an unknown opcode. The two frame layers remain separate code — `remote/ws.py` is not
-importable from the sidecar, which runs with only `backend/` on its path — and only `accept_key`
-is shared. A frame, and a reassembled fragmented message, is
-capped at `MAX_MESSAGE_BYTES` (4 MiB) and refused with 1009 *before* the announced bytes are read.
-Every `KEEPALIVE_SECONDS` (30) the sidecar pings each live connection, so an idle claude — and
-anything keeping state between the two — knows the bridge is alive. The accept-key helper is
-`remote/ws.py`'s when that package is importable and three equivalent lines when it is not; the
-rest of the frame layer is local because the sidecar runs with only `backend/` on its path.
+**The socket itself is `remote/ws.py`.** There is one RFC 6455 implementation in this tree and the
+bridge uses it: the handshake and accept key, the frame reader and writer, the masking rules and
+the close codes are `remote/ws.py`'s, with the data root on the sidecar's `PYTHONPATH` (and a
+`sys.path` shim for a launcher that forgot). What is the bridge's own, and stays in
+`guest_bridge.py`, is the doorman: loopback only; one auth token in
+`x-claude-code-ide-authorization`, compared with `hmac.compare_digest` on bytes (a non-ASCII header
+is a 401, not a `TypeError`); a `400` for anything that is not a WebSocket upgrade; a connection
+that does not finish its HTTP head within `HANDSHAKE_SECONDS` (10) dropped; and the translation of
+a fault into what claude is told. `remote/ws.py` *raises* — a server decides the close code — so
+`WebSocketError` carries one: **1009** for a frame or a reassembled message over this connection's
+cap, **1002** for every other protocol fault (a client frame that is not masked, a reserved bit
+set with no extension negotiated, a control frame fragmented or longer than 125 bytes, a
+continuation with nothing to continue, a second data frame inside a fragmented message, an unknown
+opcode), and 1007 for a text frame that is not UTF-8. The cap is per connection: `MAX_FRAME`
+(2 MiB) stays the default every remote session uses, and `accept()` takes `max_frame`, which the
+bridge sets to `MAX_MESSAGE_BYTES` (4 MiB) because an `openDiff` carries a whole file. It is still
+refused *before* the announced bytes are read. Every `KEEPALIVE_SECONDS` (30) the sidecar pings
+each live connection, so an idle claude — and anything keeping state between the two — knows the
+bridge is alive.
 
 **The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface and
 the lock file, and it is the only side that can answer claude — including `getDiagnostics`
@@ -3545,19 +3581,23 @@ the twelve tools ask for was answered sidecar-side already. The `bridge` event a
 the shared channel plumbing (26.3): `pollGuestEvent` → `handleGuestEvent`, whose `bridge`
 branch calls the pane's `guestBridgeEvent`.
 
-**The channel's writer.** `shell/guest-event.py` (26.3) is the only writer, for the bridge as
-for the shim: the sidecar calls it as `guest-event.py bridge claude` with the event's data on
-stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
-the §26.3 envelope and drops it on the pane's spool as its own file. A helper that is missing, fails, or
-has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
-`DIFF_REJECTED` — never a second writer beside the channel's own. The helper says which happened
-with its **exit code**: 0 when it wrote the event *or* when there is no pane around it at all (the
-no-op invariant above), 1 when a pane was named and the write failed. It returned 0 either way
-until this was fixed, so a spool that could not be written read as a delivered event and left the
-guest blocked on a decision no pane would ever show. It is run with a minimal
-environment — `PATH`, `HOME`, `PYTHONPATH`, the locale and `RELAY_RUNTIME_DIR` /
-`RELAY_SESSION_TOKEN` / `RELAY_PYTHON` — not the sidecar's own, which inherits the GUI's
-provider keys.
+**The channel's writer, in-process.** `shell/guest-event.py` (26.3) is the only writer, for the
+bridge as for the shim, and the sidecar **imports** it — `importlib` by path, honouring
+`RELAY_GUEST_WRITER`, exactly as `relay_core.guest_hook` loads it — and calls
+`write_event("bridge", "claude", data, directory=…, token=…)`. It does not spawn it. The rule the
+owner chose is that **nothing blocks the connection**, and a `subprocess.run` with a ten-second
+timeout sitting on the event loop broke it for every claude on the sidecar at once: no
+`tools/list`, no pong, and not the client's own `close_tab`, for as long as an interpreter took to
+start. The pane's environment contract is unchanged and is what the two arguments say:
+`RELAY_GUEST_EVENT` is the spool directory (`guest-events/` under the pane's runtime dir) and
+`RELAY_SESSION_TOKEN` is the token the envelope carries — named per call, because one sidecar
+serves every pane, and because the sidecar's own environment is the GUI's, provider keys and all,
+which no longer goes anywhere near the writer. A writer that is missing, will not import, has no
+`write_event`, raises, or returns no sequence is a **failed emit**: the event is not sent, and
+`openDiff` answers `DIFF_REJECTED` — never a second writer beside the channel's own. `openFile`
+says so too, as an `isError` result naming the file; answering "Opened file" for an event that was
+never written told the guest something it could check and find untrue. The write itself stays on
+the loop: the writer caps an envelope at 256 KiB, so it is one small `os.replace`.
 
 ### 26.6 Codex attach
 

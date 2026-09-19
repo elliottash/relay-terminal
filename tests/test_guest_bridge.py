@@ -10,12 +10,15 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from relay_core import guest_bridge
 
@@ -33,17 +36,18 @@ def make_state(root: str) -> str:
 
 
 def register_pane(state: str, workspace: str, cwd: str | None = None, helper: str | None = None,
-                  runtime: str | None = None, guest: str = "claude") -> tuple[str, str]:
-    """One pane registration, the file the GUI writes: token, runtime dir, helper, workspace.
-    The default helper is the real shell/guest-event.py, exactly as the GUI registers it — the
-    channel's writer is the contract these tests exercise, not a stand-in for it."""
+                  runtime: str | None = None, guest: str = "claude",
+                  shell_pid: int = 0) -> tuple[str, str]:
+    """One pane registration, the file the GUI writes: token, runtime dir, helper, workspace and
+    the pane shell's pid. The default helper is the real shell/guest-event.py, exactly as the GUI
+    registers it — the channel's writer is the contract these tests exercise, not a stand-in."""
     runtime = runtime or tempfile.mkdtemp(dir=state, prefix="runtime-")
     token = secrets.token_hex(8)
     guest_bridge.write_json_atomic(os.path.join(state, "panes", f"{token}.json"),
                                    {"token": token, "runtime_dir": runtime,
                                     "helper": str(HELPER) if helper is None else helper,
-                                    "python": sys.executable, "workspace": workspace,
-                                    "cwd": cwd or workspace, "guest": guest})
+                                    "workspace": workspace, "cwd": cwd or workspace,
+                                    "guest": guest, "shell_pid": shell_pid})
     return token, runtime
 
 
@@ -114,7 +118,8 @@ class LockFileLifecycle(unittest.TestCase):
             self.assertEqual(os.path.join(root, "41234.lock"), lock.path)
             payload = guest_bridge.read_json(lock.path)
             self.assertEqual({"pid": os.getpid(), "ideName": "relay", "transport": "ws",
-                              "workspaceFolders": ["/a", "/b"], "authToken": "ab" * 16}, payload)
+                              "workspaceFolders": ["/a", "/b"], "authToken": "ab" * 16,
+                              "pidStartTime": guest_bridge.pid_start_time(os.getpid())}, payload)
             lock.remove()
             self.assertFalse(os.path.exists(lock.path))
             lock.remove()   # removing what is gone is not an error
@@ -144,19 +149,73 @@ class SweepStaleLocks(unittest.TestCase):
                 json.dump(payload, stream)
         return path
 
-    def test_dead_ide_is_swept_live_ide_is_kept(self):
-        dead = self._lock(1, {"pid": 0x7FFFFFFE, "ideName": "VS Code"})
-        live = self._lock(2, {"pid": os.getpid(), "ideName": "relay"})
-        junk = self._lock(3, "not json at all")
-        nolock = self._lock(4, {"pid": 0x7FFFFFFE})
-        os.rename(nolock, os.path.join(self.root, "4.json"))
-        removed = guest_bridge.sweep_stale_locks(self.root)
-        self.assertEqual([dead, junk], sorted(removed))
+    def _listener(self) -> int:
+        """A real socket on a real loopback port, closed when the test ends."""
+        listening = socket.socket()
+        listening.bind(("127.0.0.1", 0))
+        listening.listen(1)
+        self.addCleanup(listening.close)
+        return listening.getsockname()[1]
+
+    @staticmethod
+    def _closed_port() -> int:
+        """A port nothing is listening on: bound, read, and released again."""
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    def test_a_port_that_answers_keeps_its_lock_however_wrong_the_pid_looks(self):
+        """The bug this replaced: after a crash the pid is recycled and a dead lock looked alive.
+        The reverse matters just as much — a *live* editor whose pid we cannot recognise must not
+        have its lock taken away, because the port is the only thing a lock really claims."""
+        live = self._lock(self._listener(), {"pid": 0x7FFFFFFE, "ideName": "VS Code"})
+        self.assertEqual([], guest_bridge.sweep_stale_locks(self.root))
         self.assertTrue(os.path.exists(live))
-        self.assertTrue(os.path.exists(os.path.join(self.root, "4.json")))   # not a lock file
+
+    def test_a_port_that_refuses_is_swept_even_when_its_pid_is_alive(self):
+        """The recycled pid: this process is alive and named in the lock, and nothing at all is
+        listening on the port claude would dial."""
+        dead = self._lock(self._closed_port(), {"pid": os.getpid(), "ideName": "relay"})
+        self.assertEqual([dead], guest_bridge.sweep_stale_locks(self.root))
+        self.assertFalse(os.path.exists(dead))
+
+    def test_junk_and_unportlike_names(self):
+        junk = self._lock(self._closed_port(), "not json at all")
+        nolock = self._lock(4242, {"pid": 0x7FFFFFFE})
+        os.rename(nolock, os.path.join(self.root, "4242.json"))
+        removed = guest_bridge.sweep_stale_locks(self.root)
+        self.assertEqual([junk], removed)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "4242.json")))   # not a lock file
+
+    def test_an_unanswerable_probe_falls_back_to_the_pid_and_its_start_time(self):
+        """A probe that cannot tell (a timeout, a host that will not let us connect) leaves the
+        pid to decide — and the pid alone is not enough, because it is recycled."""
+        live = self._lock(1, {"pid": os.getpid(),
+                              "pidStartTime": guest_bridge.pid_start_time(os.getpid())})
+        recycled = self._lock(2, {"pid": os.getpid(), "pidStartTime": 1})
+        gone = self._lock(3, {"pid": 0x7FFFFFFE})
+        old = self._lock(4, {"pid": os.getpid()})   # written before the field existed
+        removed = guest_bridge.sweep_stale_locks(self.root, probe=lambda port: None)
+        self.assertEqual(sorted([gone, recycled]), sorted(removed))
+        self.assertTrue(os.path.exists(live) and os.path.exists(old))
+
+    def test_the_lock_records_the_pid_start_time_it_is_judged_by(self):
+        lock = guest_bridge.LockFile(directory=self.root, port=45001, pid=os.getpid(),
+                                     token="t" * 32)
+        self.assertTrue(lock.write(["/work"]))
+        self.assertEqual(guest_bridge.pid_start_time(os.getpid()),
+                         guest_bridge.read_json(lock.path)["pidStartTime"])
+
+    def test_port_answers_says_yes_no_and_nothing(self):
+        self.assertIs(True, guest_bridge.port_answers(self._listener()))
+        self.assertIs(False, guest_bridge.port_answers(self._closed_port()))
+        self.assertIs(False, guest_bridge.port_answers(0))
+        self.assertIs(False, guest_bridge.port_answers("nonsense"))
 
     def test_keep_pid_is_spared_even_when_it_looks_dead(self):
-        path = self._lock(7, {"pid": 0x7FFFFFFE})
+        path = self._lock(self._closed_port(), {"pid": 0x7FFFFFFE})
         self.assertEqual([], guest_bridge.sweep_stale_locks(self.root, keep_pid=0x7FFFFFFE))
         self.assertTrue(os.path.exists(path))
 
@@ -197,7 +256,7 @@ class Registrations(unittest.TestCase):
 class PaneRouting(unittest.TestCase):
     def _pane(self, token: str, workspace: str, cwd: str, seen: float, guest: str = ""):
         return guest_bridge.PaneRegistration(token=token, runtime_dir="/tmp", helper="",
-                                             python=sys.executable, workspace=workspace, cwd=cwd,
+                                             workspace=workspace, cwd=cwd,
                                              guest=guest, seen=seen)
 
     def test_longest_prefix_wins(self):
@@ -233,8 +292,9 @@ class PaneRouting(unittest.TestCase):
         self.assertEqual("inner", guest_bridge.pane_for_path(panes, "/work/sub/x.py").token)
 
     def test_two_panes_with_the_same_guest_still_fall_back_to_the_mtime(self):
-        """Two claudes in one project cannot be told apart from the paths they name; the newest
-        registration is the tie-break, and that is a documented limitation (26.5), not a rule."""
+        """Two claudes in one project cannot be told apart *from the paths they name*; the newest
+        registration is this function's tie-break. Which one really asked is answered by the peer
+        walk (`pane_for_peer`), and this ranking is only what happens when that fails."""
         panes = {"first": self._pane("first", "/work", "/work", 1.0, guest="claude"),
                  "second": self._pane("second", "/work", "/work", 2.0, guest="claude")}
         self.assertEqual("second", guest_bridge.pane_for_path(panes, "/work/x.py").token)
@@ -250,6 +310,170 @@ class PaneRouting(unittest.TestCase):
         self.assertIsNone(guest_bridge.pane_for_path(panes, ""))
 
 
+# ----- which claude is on the connection (26.5) ---------------------------------------------------
+
+
+def fake_proc(root: str) -> str:
+    """A `/proc` of our own. The real one cannot be made to hold a pretend claude, so the walk
+    takes its root as an argument and this builds the three things it reads: `net/tcp`, a pid's
+    `fd/` full of socket links, and a `stat` naming the parent."""
+    os.makedirs(os.path.join(root, "net"), exist_ok=True)
+    with open(os.path.join(root, "net", "tcp"), "w", encoding="utf-8") as stream:
+        stream.write("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when "
+                     "retrnsmt   uid  timeout inode\n")
+    return root
+
+
+def fake_socket_row(root: str, port: int, inode: int, host_hex: str = "0100007F",
+                    name: str = "tcp") -> None:
+    """One row of /proc/net/tcp: this local address and port, owned by this inode."""
+    path = os.path.join(root, "net", name)
+    header = ("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when "
+              "retrnsmt   uid  timeout inode\n")
+    rows = open(path, encoding="utf-8").read() if os.path.exists(path) else header
+    rows += ("   0: %s:%04X 0100007F:1F90 01 00000000:00000000 00:00000000 00000000 "
+             " 1000        0 %d 1 0000000000000000 20 4 30 10 -1\n" % (host_hex, port, inode))
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write(rows)
+
+
+def fake_process(root: str, pid: int, parent: int, inodes=(), start_time: int = 42) -> None:
+    """One process: its `stat` (state, parent, start time) and the sockets it holds open."""
+    os.makedirs(os.path.join(root, str(pid), "fd"), exist_ok=True)
+    fields = ["S", str(parent)] + ["0"] * 17 + [str(start_time)]
+    with open(os.path.join(root, str(pid), "stat"), "w", encoding="utf-8") as stream:
+        stream.write("%d (claude) %s\n" % (pid, " ".join(fields)))
+    for index, inode in enumerate(inodes):
+        link = os.path.join(root, str(pid), "fd", str(index + 3))
+        if not os.path.lexists(link):
+            os.symlink("socket:[%d]" % inode, link)
+
+
+class PeerIdentification(unittest.TestCase):
+    """The walk that tells two claudes in one project apart: peer address -> socket inode -> pid
+    -> ancestry -> a registered pane shell."""
+
+    def setUp(self):
+        self.root = fake_proc(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def test_a_hit_walks_the_socket_to_its_process(self):
+        fake_socket_row(self.root, 51000, inode=900100)
+        fake_process(self.root, 4242, parent=1, inodes=[900100])
+        self.assertEqual(900100, guest_bridge.socket_inode("127.0.0.1", 51000, self.root))
+        self.assertEqual(4242, guest_bridge.pid_for_inode(900100, self.root))
+        self.assertEqual([4242], guest_bridge.peer_ancestry("127.0.0.1", 51000, self.root))
+
+    def test_an_ancestor_two_levels_up_is_found(self):
+        """claude under a wrapper under the pane's shell: the pane is still the shell's."""
+        fake_socket_row(self.root, 51001, inode=900200)
+        fake_process(self.root, 500, parent=1)              # the pane's shell
+        fake_process(self.root, 600, parent=500)            # something it started
+        fake_process(self.root, 700, parent=600, inodes=[900200])   # claude
+        self.assertEqual([700, 600, 500],
+                         guest_bridge.peer_ancestry("127.0.0.1", 51001, self.root))
+        panes = {"p": guest_bridge.PaneRegistration(token="p", runtime_dir="/tmp", helper="",
+                                                    workspace="/work", cwd="/work", shell_pid=500)}
+        self.assertEqual("p", guest_bridge.pane_for_peer(
+            panes, guest_bridge.peer_ancestry("127.0.0.1", 51001, self.root)).token)
+
+    def test_the_nearest_pane_shell_wins(self):
+        """A pane shell started from another pane's shell (a nested relay, an ssh back in): the
+        claude belongs to the one it is closest to."""
+        fake_socket_row(self.root, 51002, inode=900300)
+        fake_process(self.root, 100, parent=1)
+        fake_process(self.root, 200, parent=100)
+        fake_process(self.root, 300, parent=200, inodes=[900300])
+        panes = {
+            "far": guest_bridge.PaneRegistration(token="far", runtime_dir="/tmp", helper="",
+                                                 workspace="/w", cwd="/w", shell_pid=100),
+            "near": guest_bridge.PaneRegistration(token="near", runtime_dir="/tmp", helper="",
+                                                  workspace="/w", cwd="/w", shell_pid=200)}
+        self.assertEqual("near", guest_bridge.pane_for_peer(
+            panes, guest_bridge.peer_ancestry("127.0.0.1", 51002, self.root)).token)
+
+    def test_a_miss_is_an_empty_walk_not_a_guess(self):
+        fake_socket_row(self.root, 51003, inode=900400)     # a socket nobody in this /proc holds
+        self.assertEqual([], guest_bridge.peer_ancestry("127.0.0.1", 51003, self.root))
+        self.assertIsNone(guest_bridge.socket_inode("127.0.0.1", 51999, self.root))
+        self.assertEqual([], guest_bridge.peer_ancestry("127.0.0.1", 51999, self.root))
+        self.assertIsNone(guest_bridge.pane_for_peer({}, [1, 2, 3]))
+
+    def test_a_proc_that_cannot_be_read_is_a_miss(self):
+        """hidepid, a non-Linux host, a chroot: the walk fails and the router falls back."""
+        self.assertEqual([], guest_bridge.peer_ancestry(
+            "127.0.0.1", 51000, os.path.join(self.root, "nowhere")))
+
+    def test_an_ipv4_mapped_v6_peer_is_the_same_address(self):
+        """A v6 listener reports a v4 loopback peer as ::ffff:127.0.0.1, and /proc/net/tcp6 spells
+        it out in full. Both sides normalise to the v4 address."""
+        fake_socket_row(self.root, 51004, inode=900500,
+                        host_hex="0000000000000000FFFF00000100007F", name="tcp6")
+        fake_process(self.root, 808, parent=1, inodes=[900500])
+        self.assertEqual([808], guest_bridge.peer_ancestry("::ffff:127.0.0.1", 51004, self.root))
+
+    def test_a_cycle_in_the_ancestry_terminates(self):
+        fake_process(self.root, 11, parent=12)
+        fake_process(self.root, 12, parent=11)
+        self.assertEqual([11, 12], guest_bridge.process_ancestry(11, self.root))
+
+    def test_the_start_time_comes_out_of_stat(self):
+        fake_process(self.root, 77, parent=1, start_time=987654)
+        self.assertEqual(987654, guest_bridge.pid_start_time(77, self.root))
+        self.assertIsNone(guest_bridge.pid_start_time(78, self.root))
+        self.assertEqual(1, guest_bridge.parent_pid(77, self.root))
+
+
+class RoutingByPeer(unittest.TestCase):
+    """The router, end to end: two panes on one project, and only the peer walk can say which."""
+
+    def setUp(self):
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.bridge, self.state, _ = make_bridge(self.root)
+        self.workspace = os.path.join(self.root, "project")
+        os.makedirs(self.workspace, exist_ok=True)
+        # Two panes, same project, both with a claude: indistinguishable from any path.
+        self.first, self.first_runtime = register_pane(self.state, self.workspace, shell_pid=5001)
+        self.second, self.second_runtime = register_pane(self.state, self.workspace, shell_pid=5002)
+        os.utime(os.path.join(self.state, "panes", f"{self.second}.json"), (2e9, 2e9))
+        self.bridge.refresh_registrations()
+
+    def _connection(self, *ancestry):
+        return types.SimpleNamespace(peer_ancestry=tuple(ancestry))
+
+    def test_the_identified_pane_wins_over_the_ranking(self):
+        target = os.path.join(self.workspace, "x.py")
+        self.bridge.connection = self._connection(9001, 5001)
+        self.assertEqual(self.first, self.bridge.route("openFile", target).token)
+        self.bridge.connection = self._connection(9002, 5002)
+        self.assertEqual(self.second, self.bridge.route("openFile", target).token)
+
+    def test_a_failed_walk_falls_back_to_the_ranking(self):
+        target = os.path.join(self.workspace, "x.py")
+        self.bridge.connection = self._connection()
+        self.assertEqual(self.second, self.bridge.route("openFile", target).token,
+                         "the newest registration, as before")
+
+    def test_an_unregistered_ancestry_falls_back_too(self):
+        self.bridge.connection = self._connection(1, 2, 3)
+        self.assertEqual(self.second,
+                         self.bridge.route("openFile", os.path.join(self.workspace, "x.py")).token)
+
+    def test_the_diff_goes_to_the_identified_panes_own_spool(self):
+        """The whole point: the diff opens beside the terminal the claude is running in, and the
+        path rule still admits it although the other pane matches the path just as well."""
+        target = os.path.join(self.workspace, "x.py")
+        Path(target).write_text("old\n")
+        self.bridge.dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                              "params": {"name": "openFile", "arguments": {"filePath": target}}},
+                             connection=self._connection(5001))
+        self.assertEqual([], spool_events(self.second_runtime))
+        self.assertEqual(target, read_guest_json(self.first_runtime)["data"]["filePath"])
+        self.assertEqual(target, guest_bridge.resolve_in_pane(self.bridge.panes, self.first, target))
+        self.assertEqual(target, guest_bridge.resolve_in_pane(self.bridge.panes, self.second, target))
+
+
 class ResolveInPane(unittest.TestCase):
     """The path rule: a path the bridge may write is one that resolves inside the pane that owns
     the request. Everything else — another pane's file, `..`, a symlink out — is None."""
@@ -262,7 +486,7 @@ class ResolveInPane(unittest.TestCase):
         os.makedirs(self.workspace)
         os.makedirs(self.outside)
         self.panes = {"a": guest_bridge.PaneRegistration(
-            token="a", runtime_dir="/tmp", helper="", python=sys.executable,
+            token="a", runtime_dir="/tmp", helper="",
             workspace=self.workspace, cwd=self.workspace, seen=1.0)}
 
     def test_a_path_inside_the_pane_resolves(self):
@@ -286,7 +510,7 @@ class ResolveInPane(unittest.TestCase):
         other = os.path.join(self.root, "other")
         os.makedirs(other)
         self.panes["b"] = guest_bridge.PaneRegistration(
-            token="b", runtime_dir="/tmp", helper="", python=sys.executable,
+            token="b", runtime_dir="/tmp", helper="",
             workspace=other, cwd=other, seen=1.0)
         self.assertIsNone(guest_bridge.resolve_in_pane(self.panes, "a", os.path.join(other, "x")))
         self.assertEqual(os.path.join(other, "x"),
@@ -435,6 +659,24 @@ class Tools(unittest.TestCase):
         self.assertEqual(target, event["data"]["filePath"])
         self.assertTrue(event["sequence"])
 
+    def test_open_file_that_cannot_reach_its_pane_says_so(self):
+        """`openDiff` has always refused out loud when its emit failed; `openFile` answered
+        "Opened file" and left the guest believing a thing it could check and find untrue."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        bridge, state, _ = make_bridge(root)
+        workspace = os.path.join(root, "project")
+        os.makedirs(workspace, exist_ok=True)
+        target = os.path.join(workspace, "x.py")
+        Path(target).write_text("x\n")
+        register_pane(state, workspace, helper=os.path.join(root, "gone.py"))
+        bridge.refresh_registrations()
+        reply = bridge.dispatch({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                                 "params": {"name": "openFile",
+                                            "arguments": {"filePath": target}}})[0]
+        self.assertTrue(reply["result"]["isError"])
+        self.assertIn("could not open", reply["result"]["content"][0]["text"])
+
     def test_open_file_outside_every_pane_is_an_error(self):
         reply = self._call("openFile", {"filePath": "/somewhere/else/x.py"})
         self.assertTrue(reply["result"]["isError"])
@@ -472,13 +714,58 @@ class EventChannel(unittest.TestCase):
         self.assertEqual("openFile", event["data"]["tool"])
         self.assertEqual("/x", event["data"]["filePath"])
 
-    def test_a_failing_helper_is_a_failed_emit(self):
-        """No second writer exists: a helper that fails means the event is simply not sent."""
-        helper = os.path.join(self.root, "guest-event.py")
+    def test_emit_starts_no_process(self):
+        """The writer is imported, not spawned (26.5, the owner's rule that nothing blocks the
+        connection): `emit` used to be a `subprocess.run` with a ten-second timeout sitting on the
+        event loop, so every claude on this sidecar stopped while an interpreter started."""
+        _, runtime = register_pane(self.state, self.workspace)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        with mock.patch("subprocess.Popen", side_effect=AssertionError("emit spawned a process")):
+            self.assertTrue(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertEqual("/x", read_guest_json(runtime)["data"]["filePath"])
+        self.assertFalse(hasattr(guest_bridge, "subprocess"),
+                         "the sidecar has no reason left to start a child")
+
+    def test_a_writer_that_cannot_write_is_a_failed_emit(self):
+        """No second writer exists: a write that fails means the event is simply not sent."""
+        helper = os.path.join(self.root, "refuses.py")
+        Path(helper).write_text("def write_event(*args, **kwargs):\n    return None\n")
+        _, runtime = register_pane(self.state, self.workspace, helper=helper)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertEqual([], spool_events(runtime))
+
+    def test_a_writer_that_raises_is_a_failed_emit_not_a_crash(self):
+        helper = os.path.join(self.root, "raises.py")
+        Path(helper).write_text("def write_event(*args, **kwargs):\n    raise RuntimeError('no')\n")
+        _, runtime = register_pane(self.state, self.workspace, helper=helper)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertEqual([], spool_events(runtime))
+
+    def test_a_helper_that_is_not_the_writer_at_all_is_a_failed_emit(self):
+        """A file that imports but has no `write_event` — an old export, a truncated install —
+        is no writer, and loading it must not run anything of the caller's."""
+        helper = os.path.join(self.root, "exits.py")
         Path(helper).write_text("import sys; sys.exit(3)\n")
         _, runtime = register_pane(self.state, self.workspace, helper=helper)
         self.bridge.refresh_registrations()
         pane = next(iter(self.bridge.panes.values()))
+        self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        self.assertEqual([], spool_events(runtime))
+
+    def test_the_writer_can_be_pointed_elsewhere(self):
+        """`RELAY_GUEST_WRITER` overrides the registration, as it does for the hooks shim."""
+        helper = os.path.join(self.root, "elsewhere.py")
+        Path(helper).write_text("def write_event(*a, **k):\n    return None\n")
+        _, runtime = register_pane(self.state, self.workspace)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        os.environ["RELAY_GUEST_WRITER"] = helper
+        self.addCleanup(os.environ.pop, "RELAY_GUEST_WRITER", None)
         self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
         self.assertEqual([], spool_events(runtime))
 
@@ -496,33 +783,24 @@ class EventChannel(unittest.TestCase):
         os.rmdir(runtime)
         self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
 
-    def test_the_helper_gets_a_minimal_environment(self):
-        """The sidecar inherits the GUI's whole environment, provider keys included. The helper
-        that runs once per bridge event gets six variables and no more."""
-        helper = os.path.join(self.root, "guest-event.py")
-        Path(helper).write_text(
-            "import json, os, sys, time\n"
-            "event = json.load(sys.stdin)\n"
-            "event['env'] = dict(os.environ)\n"
-            "spool = os.path.join(os.environ['RELAY_RUNTIME_DIR'], 'guest-events')\n"
-            "os.makedirs(spool, exist_ok=True)\n"
-            "path = os.path.join(spool, '%020d.json' % time.time_ns())\n"
-            "open(path + '.tmp', 'w').write(json.dumps(event))\n"
-            "os.replace(path + '.tmp', path)\n")
+    def test_the_write_goes_where_the_pane_says_and_carries_its_token(self):
+        """The pane's environment contract as arguments: `RELAY_GUEST_EVENT`'s spool directory is
+        `guest-events/` under the pane's runtime dir, and `RELAY_SESSION_TOKEN` is the token the
+        envelope carries. The sidecar serves every pane, so it names both per call and never
+        hands the GUI's own environment — provider keys and all — to the writer."""
+        helper = os.path.join(self.root, "records.py")
+        Path(helper).write_text("SEEN = []\n"
+                                "def write_event(event, guest='', data=None, sequence=None,\n"
+                                "                directory=None, token=None):\n"
+                                "    SEEN.append((event, guest, data, str(directory), token))\n"
+                                "    return 'seq'\n")
         token, runtime = register_pane(self.state, self.workspace, helper=helper)
         self.bridge.refresh_registrations()
         pane = next(iter(self.bridge.panes.values()))
-        os.environ["RELAY_TEST_SECRET_KEY"] = "sk-do-not-leak"
-        self.addCleanup(os.environ.pop, "RELAY_TEST_SECRET_KEY", None)
         self.assertTrue(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
-        environment = read_guest_json(runtime)["env"]
-        self.assertNotIn("RELAY_TEST_SECRET_KEY", environment)
-        self.assertEqual(runtime, environment["RELAY_RUNTIME_DIR"])
-        self.assertEqual(token, environment["RELAY_SESSION_TOKEN"])
-        self.assertEqual(sys.executable, environment["RELAY_PYTHON"])
-        self.assertLessEqual(set(environment),
-                             set(guest_bridge.HELPER_ENV_PASSTHROUGH)
-                             | {"RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN", "RELAY_PYTHON"})
+        writer = guest_bridge.spool_writer(helper)
+        self.assertEqual([("bridge", "claude", {"filePath": "/x", "tool": "openFile"},
+                           os.path.join(runtime, "guest-events"), token)], writer.SEEN)
 
     def test_the_lock_tracks_the_registered_folders(self):
         self.bridge.lock.write([])
@@ -581,6 +859,29 @@ class OpenDiff(unittest.IsolatedAsyncioTestCase):
         guest_bridge.write_json_atomic(reply_path, {"outcome": guest_bridge.DIFF_REJECTED})
         self.bridge.check_replies()
         self.assertEqual(guest_bridge.DIFF_REJECTED, deferred.pending.future.result())
+
+    async def test_a_diff_whose_event_cannot_be_written_is_rejected_at_once(self):
+        """A failed write is a diff nobody will ever be shown, so the guest is told no rather
+        than left blocked on a decision that cannot be asked for."""
+        root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        bridge, state, _ = make_bridge(root)
+        workspace = os.path.join(root, "project")
+        os.makedirs(workspace, exist_ok=True)
+        target = os.path.join(workspace, "x.py")
+        Path(target).write_text("old\n")
+        helper = os.path.join(root, "refuses.py")
+        Path(helper).write_text("def write_event(*a, **k):\n    return None\n")
+        _, runtime = register_pane(state, workspace, helper=helper)
+        bridge.refresh_registrations()
+        reply = bridge.dispatch({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                                 "params": {"name": "openDiff", "arguments": {
+                                     "old_file_path": target, "new_file_path": target,
+                                     "new_file_contents": "new\n"}}})[0]
+        self.assertEqual(guest_bridge.DIFF_REJECTED, reply["result"]["content"][0]["text"])
+        self.assertEqual({}, bridge.pending)
+        self.assertEqual([], spool_events(runtime))
+        self.assertEqual("old\n", Path(target).read_text())
 
     async def test_an_unmatched_diff_is_rejected_at_once(self):
         reply = self._call({"old_file_path": "/elsewhere/x.py", "new_file_path": "/elsewhere/x.py",
@@ -991,11 +1292,14 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1009, struct.unpack(">H", body[:2])[0])
 
     async def test_fragments_cannot_add_up_past_the_cap(self):
+        # The cap is this connection's, fixed when it was accepted (remote.ws takes it as
+        # `max_frame`), so the patched value needs a connection opened after it.
         self._patch("MAX_MESSAGE_BYTES", 256)
-        self.writer.write(client_frame(b"a" * 200, opcode=0x1, fin=False))
-        self.writer.write(client_frame(b"b" * 200, opcode=0x0))
-        await self.writer.drain()
-        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        reader, writer = await self._connect()
+        writer.write(client_frame(b"a" * 200, opcode=0x1, fin=False))
+        writer.write(client_frame(b"b" * 200, opcode=0x0))
+        await writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(reader), 5.0)
         self.assertEqual(0x8, opcode)
         self.assertEqual(1009, struct.unpack(">H", body[:2])[0])
 
@@ -1114,13 +1418,21 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
 
 class AcceptKey(unittest.TestCase):
     def test_the_accept_key_matches_rfc_6455(self):
-        """Whichever implementation is in use — remote/ws.py's when the tree's `remote` package
-        is importable, the local three lines when only backend/ is on the path."""
+        """`remote/ws.py`'s, like every other frame rule the bridge uses (26.5)."""
         self.assertEqual("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
                          guest_bridge.websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="))
 
     def test_the_cap_is_a_sane_size(self):
         self.assertEqual(4 * 1024 * 1024, guest_bridge.MAX_MESSAGE_BYTES)
+
+    def test_the_frame_layer_is_the_shared_one(self):
+        """The bridge kept its own reader and writer until this; the conformance tests above now
+        run against `remote/ws.py`, and the remote sessions keep their own 2 MiB default."""
+        from remote import ws
+        self.assertIs(ws.accept_key, guest_bridge.websocket_accept)
+        self.assertEqual(2 * 1024 * 1024, ws.MAX_FRAME)
+        self.assertEqual(1009, ws.WebSocketError("too big", code=1009).code)
+        self.assertEqual(1002, ws.WebSocketError("bad frame").code)
 
 
 # ----- the sidecar as a process: ready line, lock, SIGTERM ----------------------------------------
@@ -1152,8 +1464,14 @@ class ProcessLifecycle(unittest.TestCase):
             os.makedirs(lock_dir)
             stale = os.path.join(lock_dir, "1.lock")
             Path(stale).write_text(json.dumps({"pid": 0x7FFFFFFE, "ideName": "VS Code"}))
-            live = os.path.join(lock_dir, "2.lock")
-            Path(live).write_text(json.dumps({"pid": os.getpid(), "ideName": "Neovim"}))
+            # A live editor is one that answers on the port its lock names (26.5): the pid in the
+            # lock is deliberately a dead one, because the port is what decides.
+            listening = socket.socket()
+            listening.bind(("127.0.0.1", 0))
+            listening.listen(1)
+            self.addCleanup(listening.close)
+            live = os.path.join(lock_dir, f"{listening.getsockname()[1]}.lock")
+            Path(live).write_text(json.dumps({"pid": 0x7FFFFFFE, "ideName": "Neovim"}))
             register_pane(state, os.path.join(root, "project"))
 
             process = self._start(state, lock_dir)

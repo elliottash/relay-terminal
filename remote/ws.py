@@ -21,6 +21,9 @@ from hashlib import sha1
 from urllib.parse import urlsplit
 
 GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+# The default cap on a frame, and on a reassembled fragmented message. It is a default and not a
+# law: a connection can be given its own `max_frame` (the Claude IDE bridge allows 4 MiB, because
+# an openDiff carries a whole file), and everything RRP speaks keeps this one.
 MAX_FRAME = 1 << 21          # 2 MiB: RRP frames are capped at 1 MiB plus overhead
 MAX_HEADERS = 64 * 1024
 # What Relay calls itself on the wire, as the backend does (backend/relay_core/provider.py). Not
@@ -32,7 +35,13 @@ OP_CONT, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG = 0x0, 0x1, 0x2, 0x8, 0x
 
 
 class WebSocketError(Exception):
-    pass
+    """A protocol fault. `code` is the RFC 6455 close code a server should fail the connection
+    with — 1002 for a protocol error, 1009 for a message that is too big — so a caller that has
+    to answer the peer does not have to read the message text to know which."""
+
+    def __init__(self, message: str = "", code: int = 1002):
+        super().__init__(message)
+        self.code = code
 
 
 class ConnectionClosed(WebSocketError):
@@ -101,13 +110,14 @@ class WebSocket:
     """One connection. Not safe for concurrent senders; use ``send`` from a single task."""
 
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
-                 mask: bool, request: Request | None = None):
+                 mask: bool, request: Request | None = None, max_frame: int = MAX_FRAME):
         self._reader = reader
         self._writer = writer
         self._mask = mask                  # clients mask, servers must not
         self._closed = False
         self._lock = asyncio.Lock()
         self.request = request
+        self.max_frame = max_frame         # this connection's cap; MAX_FRAME unless asked
 
     @property
     def closed(self) -> bool:
@@ -150,8 +160,8 @@ class WebSocket:
             else:
                 raise WebSocketError(f"unknown opcode {opcode:#x}.")
             chunks.append(payload)
-            if sum(len(c) for c in chunks) > MAX_FRAME:
-                raise WebSocketError("message too large.")
+            if sum(len(c) for c in chunks) > self.max_frame:
+                raise WebSocketError("message too large.", code=1009)
             if fin:
                 data = b"".join(chunks)
                 return data.decode("utf-8") if kind == OP_TEXT else data
@@ -175,8 +185,8 @@ class WebSocket:
             length = struct.unpack("!H", await self._read_exactly(2))[0]
         elif length == 127:
             length = struct.unpack("!Q", await self._read_exactly(8))[0]
-        if length > MAX_FRAME:
-            raise WebSocketError(f"frame of {length} bytes exceeds the limit.")
+        if length > self.max_frame:
+            raise WebSocketError(f"frame of {length} bytes exceeds the limit.", code=1009)
         if opcode >= 0x8:
             if not fin or length > 125:
                 raise WebSocketError("a control frame must be short and unfragmented.")
@@ -248,7 +258,7 @@ class WebSocket:
 # ---- server side ---------------------------------------------------------------------------
 
 async def accept(request: Request, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                 subprotocol: str | None = None) -> WebSocket:
+                 subprotocol: str | None = None, max_frame: int = MAX_FRAME) -> WebSocket:
     """Complete the upgrade for a request that ``wants_upgrade``."""
     key = request.header("sec-websocket-key")
     if not key or request.header("sec-websocket-version") != "13":
@@ -259,7 +269,7 @@ async def accept(request: Request, reader: asyncio.StreamReader, writer: asyncio
         lines.append(f"Sec-WebSocket-Protocol: {subprotocol}")
     writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())
     await writer.drain()
-    return WebSocket(reader, writer, mask=False, request=request)
+    return WebSocket(reader, writer, mask=False, request=request, max_frame=max_frame)
 
 
 # ---- client side ---------------------------------------------------------------------------

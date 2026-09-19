@@ -91,15 +91,44 @@ The pictures above still stand; the code under them changed in five places, all 
   continuation and an unknown opcode (1002), as `remote/ws.py` does;
 * a non-ASCII auth header is a 401 rather than a TypeError and a dropped socket.
 
+## The four owner decisions of 2026-09-19 (third pass)
+
+The pictures above still stand. Four things under them changed, and each is unit-tested in
+`tests/test_guest_bridge.py` rather than re-shot, because none of them is visible in a screenshot:
+
+* **Two claudes in one project are told apart.** The sidecar identifies the process on the other
+  end of each connection — peer address and port → `/proc/net/tcp` → socket inode → `/proc/*/fd`
+  → pid → ancestry → a registered pane shell pid, which panes now register. `openDiff`, `openFile`
+  and `close_tab` route by that pane; `closeAllDiffTabs` stays per connection. When the walk cannot
+  be made (hidepid, not Linux, a shell that has not named its pid yet) the old ranking decides, and
+  the log says which did (`routed … by=peer` / `by=ranking`). The walk takes its `/proc` root as an
+  argument, and the tests build one: a hit, a miss, an ancestor two levels up, a v4-mapped v6 peer.
+* **The spool write is in-process.** `Bridge.emit` imports `shell/guest-event.py` the way
+  `relay_core.guest_hook` does and calls `write_event()`; it used to `subprocess.run` it with a
+  ten-second timeout **on the event loop**, so a slow interpreter start stopped every claude on the
+  sidecar. A failed write is still a failed emit: `openDiff` answers `DIFF_REJECTED` and `openFile`
+  now answers an error instead of claiming it opened the file.
+* **The WebSocket is `remote/ws.py`.** The duplicated frame reader and writer are gone; the
+  conformance cases above (unmasked → 1002, oversized → 1009, reserved bits, fragmented control
+  frames, unknown opcode, handshake timeout) now run against the shared implementation. ws took a
+  per-connection `max_frame` (the remote sessions keep its 2 MiB default, the bridge asks for 4 MiB)
+  and its `WebSocketError` a close code; the auth-header check stays on the bridge side of the
+  handshake.
+* **A lock is stale when its port refuses, not when its pid is gone.** After a crash the pid is
+  recycled and the old test called a dead editor live, so claude kept dialling a dead port forever.
+  The sweep connects to the port on loopback; a port that answers keeps its lock however wrong the
+  pid looks, and a port that refuses loses it. The lock records `pidStartTime` for the one case the
+  probe cannot answer. Tests use a real listening socket and a real closed port.
+
 ## Not covered here
 
-The envelope, the tool set, lock-file lifecycle, stale-lock sweeping, pane routing, the path
-rule for what the sidecar will write, and the read loop's non-blocking settles (`close_tab`
-withdrawing a diff, the 30-minute expiry) are unit-tested instead
-(`tests/test_guest_bridge.py`, 93 tests), since they are about files and sockets rather than
-pixels. A real Claude Code on the other end of the
-socket remains for integration with upstream's client. Two claudes sharing one sidecar is served
-— `closeAllDiffTabs` and a dropped connection touch only their own diffs — but **two claudes in
-one project cannot be routed apart**: a request names paths, both panes match them, and the
-connection carries no pane identity. The newest registration wins and the diff can open beside the
-wrong pane; closing that needs a peer-socket-to-pid walk that is not built (26.5).
+The envelope, the tool set, lock-file lifecycle, stale-lock sweeping, peer identification, pane
+routing, the path rule for what the sidecar will write, and the read loop's non-blocking settles
+(`close_tab` withdrawing a diff, the 30-minute expiry) are unit-tested instead
+(`tests/test_guest_bridge.py`, 117 tests), since they are about files, sockets and `/proc` rather
+than pixels. A real Claude Code on the other end of the socket remains for integration with
+upstream's client. Two claudes sharing one sidecar is served: `closeAllDiffTabs` and a dropped
+connection touch only their own diffs, and two claudes **in one project** are now routed apart by
+the peer walk — what is left uncovered there is the fallback, a host where that walk cannot be made
+at all, where the newest registration still wins and the diff can open beside the wrong pane
+(26.5).

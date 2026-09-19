@@ -13,11 +13,14 @@
 //     whose IDE is gone, and prints one ready line on stdout; that line is where the port comes
 //     from. Nothing is started until a pane needs it, and nothing is retried after a failure: a
 //     pane works fine without the bridge, and a GUI that retried every 80 ms poll would not.
-//   * **Say where the panes are.** The sidecar routes a request to a pane by the longest
-//     workspace/cwd prefix of the paths it names, so it needs each claude pane's token, runtime
-//     dir, workspace and cwd (`registerPane`). A registration is a small JSON file in the run's
-//     own state directory under /tmp, written atomically; the sidecar polls that directory. A pane
-//     that closes, or whose claude exits, is unregistered.
+//   * **Say where the panes are, and who they are.** The sidecar routes a request to the pane the
+//     calling claude is *running in*: it walks the connection's peer socket to a pid and that pid's
+//     ancestry to a pane shell, which is why a registration carries the pane's shell pid as well as
+//     its token, runtime dir, workspace and cwd (`registerPane`). The longest workspace/cwd prefix
+//     of the paths a request names is the fallback for when that walk cannot be made. A
+//     registration is a small JSON file in the run's own state directory under /tmp, written
+//     atomically; the sidecar polls that directory. A pane that closes, or whose claude exits, is
+//     unregistered.
 //   * **Answer a diff.** `openDiff` blocks inside the guest until the user decides. The pane shows
 //     the diff and calls `answerDiff` with FILE_SAVED or DIFF_REJECTED; on FILE_SAVED the *sidecar*
 //     writes the file, so the GUI never writes a user file from a bridge event (26.5). The reply
@@ -134,22 +137,25 @@ public:
     bool running() const { return m_process.state() == QProcess::Running && m_port > 0; }
 
     // One pane, as the sidecar's router sees it. Written whenever the token, runtime dir,
-    // workspace or cwd it names changes; the sidecar reads the directory, so a rewrite is what
-    // tells it a pane moved — and a write that would say exactly what the last one said is
-    // skipped, so a caller may ask on every cwd change. False means "not registered" (the bridge
-    // is off, or failed), which the caller retries rather than remembering.
+    // workspace, cwd, guest or shell pid it names changes; the sidecar reads the directory, so a
+    // rewrite is what tells it a pane moved — and a write that would say exactly what the last one
+    // said is skipped, so a caller may ask on every cwd change. False means "not registered" (the
+    // bridge is off, or failed), which the caller retries rather than remembering.
     bool registerPane(const QString &token, const QString &runtimeDir, const QString &workspace,
-                      const QString &cwd, const QString &python, const QString &guest) {
+                      const QString &cwd, const QString &guest, int shellPid) {
         if (!running() || token.isEmpty() || runtimeDir.isEmpty()) return false;
         const QJsonObject payload{
             {QStringLiteral("token"), token},
             {QStringLiteral("runtime_dir"), runtimeDir},
-            // The hooks phase's helper, which becomes the channel's only writer once it exists;
-            // the sidecar checks for the file itself (26.5).
+            // The hooks phase's helper, which is the channel's only writer; the sidecar imports it
+            // and writes the pane's event itself (26.5).
             {QStringLiteral("helper"), m_data + QStringLiteral("/shell/guest-event.py")},
-            {QStringLiteral("python"), python},
             {QStringLiteral("workspace"), workspace},
             {QStringLiteral("cwd"), cwd},
+            // The pane's shell: every process in the pane descends from it, so a claude that
+            // connects can be walked back to this pane and no other (26.5). 0 until the shell has
+            // started, which is what "route by the paths instead" looks like to the sidecar.
+            {QStringLiteral("shell_pid"), shellPid},
             // Which guest is in this pane's foreground right now, or "". Two panes open on one
             // project are ordinary — every pane registers, because the port is in its shell's
             // environment before a claude could be started there — and the one with a claude in it
@@ -253,12 +259,13 @@ private:
             QStringLiteral("--relay-version"), QString::fromLatin1(RELAY_VERSION)};
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         // The sidecar is `relay_core.guest_bridge`, which lives in the tree's backend/ (or the
-        // install's copy of it); the pane's own RELAY_DATA_DIR is what names that root.
+        // install's copy of it); the pane's own RELAY_DATA_DIR is what names that root. The data
+        // root itself goes on the path too, because the sidecar's WebSocket *is* `remote/ws.py`
+        // (26.5) and `remote/` sits beside `backend/` in the tree and in the install.
+        const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
         environment.insert(QStringLiteral("PYTHONPATH"),
-                           m_data + QStringLiteral("/backend")
-                               + (environment.value(QStringLiteral("PYTHONPATH")).isEmpty()
-                                      ? QString()
-                                      : QLatin1Char(':') + environment.value(QStringLiteral("PYTHONPATH"))));
+                           m_data + QStringLiteral("/backend") + QLatin1Char(':') + m_data
+                               + (existing.isEmpty() ? QString() : QLatin1Char(':') + existing));
         environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
         m_process.setProcessEnvironment(environment);
         m_process.setProgram(interpreter);

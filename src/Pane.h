@@ -1248,7 +1248,13 @@ private:
         if (!relay::guestbridge::enabled()) return;
         auto &bridge = relay::guestbridge::Bridge::instance();
         bridge.setDataRoot(m_data);
-        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_python, m_guest);
+        // The shell pid is how the sidecar tells two claudes in one project apart: it walks the
+        // connecting process's ancestry up to a registered pane shell (26.5). `shellPid()` is the
+        // process on the other end of the pty, so everything started in this pane descends from
+        // it; `m_shellPid` is the last one seen, for the window where the backend is being
+        // replaced. 0 is honest — the sidecar falls back to routing by path.
+        const int shell = shellPid() > 0 ? shellPid() : m_shellPid;
+        bridge.registerPane(m_token, m_runtime.path(), m_workspace, m_cwd, m_guest, shell);
     }
 
     void unregisterFromBridge() {
@@ -7671,6 +7677,10 @@ private:
         }
         if (!started) throw std::runtime_error("The pane's shell could not be started.");
         m_oomKills = -1;
+        // Again, now that there is a shell pid to register: the first registration above happened
+        // before the backend existed, and the sidecar routes a claude by the pid ancestry that
+        // leads back to this shell (26.5).
+        registerWithBridge();
     }
 
     void send(const QJsonObject &object) {
@@ -12420,7 +12430,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (sequence.isEmpty() || sequence == m_shellSequence) return;
         m_shellSequence = sequence; m_seenShell = true;
         const QString stage = event.value(QStringLiteral("event")).toString();
-        if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) m_shellPid = reported;
+        if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) {
+            const bool fresh = m_shellPid != reported;
+            m_shellPid = reported;
+            // The shell naming itself is the last thing the bridge's router needs (26.5); a pane
+            // that registered before its shell existed says so now, before the prompt a claude
+            // could be started at.
+            if (fresh) registerWithBridge();
+        }
         const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
         if (newCwd != m_cwd) {
             m_cwd = newCwd; updatePaths(); changed();

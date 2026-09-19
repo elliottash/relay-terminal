@@ -12,22 +12,23 @@ is what a claude started anywhere else in that shell reads to find the same serv
 Shape of the thing, one process:
 
 * **Lifecycle** — `python -m relay_core.guest_bridge serve --state-dir DIR`. It sweeps stale
-  locks (a lock whose pid is gone), binds 127.0.0.1 on an ephemeral port, and only then writes
+  locks (a lock whose *port* refuses a connection), binds 127.0.0.1 on an ephemeral port, and only then writes
   its own lock — a lock names a port, so there is no lock before there is a port, and `0.lock`
   is never a file that exists. It prints one ready line on stdout (`{"ready": true, "port": N,
   "lock": path}`); the GUI reads that line and stops waiting. Logs go to stderr, one line each.
   `atexit`, SIGTERM/SIGINT and the GUI's death (PR_SET_PDEATHSIG) each remove the lock, so a
   crashed run leaves nothing behind but a lock the next run's sweep removes.
 * **Panes** — the GUI registers each pane as `<state-dir>/panes/<token>.json`: token, runtime
-  dir, the shell/guest-event.py helper path, python, workspace and cwd. The sidecar polls that
-  directory (a pane's cwd moves; its registration is rewritten). A registration whose runtime
-  dir has vanished is a closed pane and is dropped.
+  dir, the shell/guest-event.py helper path, workspace, cwd, the foreground guest and the pane
+  shell's pid. The sidecar polls that directory (a pane's cwd moves; its registration is
+  rewritten). A registration whose runtime dir has vanished is a closed pane and is dropped.
 * **The channel out** — everything the sidecar learns reaches its pane the one way protocol
   26.3 allows: a `bridge` event dropped on the pane's event spool (`guest-events/` under its
-  runtime dir). The writer is the hooks phase's `shell/guest-event.py`, called as
-  `guest-event.py bridge claude` with the event's data on stdin and
-  `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment — the same single writer the shim's own events use, so the pane reads one file
-  one way, and the §26.3 envelope (token, fresh sequence, event, guest) is built in one place.
+  runtime dir). The writer is the hooks phase's `shell/guest-event.py`, **imported** and called
+  as `write_event("bridge", "claude", data, directory=…, token=…)` — the same single writer the
+  shim's own events use, so the pane reads one file one way and the §26.3 envelope (token, fresh
+  sequence, event, guest) is built in one place. Imported and not spawned because nothing may
+  block the connection: an interpreter start per event stopped every claude on this sidecar.
 * **Blocking tools** — `openDiff` carries `old_file_path`, `new_file_path`,
   `new_file_contents`; the sidecar computes the unified diff (difflib, `a/`-`b/` headers, the
   same shape `tools.py` writes) and puts it in the event beside a `reply` path. The pane shows
@@ -36,8 +37,11 @@ Shape of the thing, one process:
   `new_file_contents` to `new_file_path`, so the GUI never writes a user file — or
   `DIFF_REJECTED`, which is also what an unmatched or abandoned request answers, because a
   guest left hanging is worse than a guest told no.
-* **Routing, and the path rule** — a request is matched to a pane by the longest workspace/cwd
-  prefix of the paths it names. Unmatched requests are logged and dropped (protocol 26.5):
+* **Routing, and the path rule** — a request is matched to the pane the calling claude is
+  *running in*: from the peer address of the accepted socket, through `/proc/net/tcp` and
+  `/proc/*/fd` to the pid, up its ancestry to a registered pane shell. When that walk cannot be
+  made the fallback is the longest workspace/cwd prefix of the paths the request names.
+  Unmatched requests are logged and dropped (protocol 26.5):
   openDiff answers `DIFF_REJECTED`, the rest answer a JSON-RPC error, so no call is ever left
   without a reply. *Every* path an openDiff names must resolve — `os.path.realpath`, so `..` and
   symlinks are followed first — inside that one pane, not just the path that chose it, and the
@@ -49,6 +53,9 @@ Shape of the thing, one process:
   `DIFF_TIMEOUT_SECONDS`, when its pane closes, when its connection drops, or at shutdown.
 * **getDiagnostics answers `[]`** — Relay has no LSP source. Documented, not faked.
 
+The frame layer is `remote/ws.py`, the tree's own RFC 6455 implementation, given this
+connection's 4 MiB cap; only the auth header, the handshake deadline and the close codes are here.
+
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 26 (26.2, 26.3, 26.5).
 Card: issues/features/2026-09-19-claude-codex-guest-integration.md (GT7X).
 Upstream shape: coder/claudecode.nvim PROTOCOL.md (the reverse-engineered VS Code contract).
@@ -58,16 +65,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import atexit
-import base64
 import difflib
-import hashlib
+import errno
 import hmac
+import importlib.util
+import ipaddress
 import json
 import os
 import secrets
 import signal
-import struct
-import subprocess
+import socket
 import sys
 import tempfile
 import time
@@ -76,27 +83,35 @@ from dataclasses import dataclass, field
 
 from . import guest
 
+# The RFC 6455 implementation is the tree's one, `remote/ws.py`, not a second copy of the frame
+# rules (26.5). It sits beside `backend/` in the source tree and in the installed share directory;
+# the GUI puts both on the sidecar's PYTHONPATH, and this shim covers a launcher that did not.
+try:
+    from remote import ws as remote_ws          # type: ignore[import-not-found]
+except ImportError:                             # pragma: no cover - exercised by the shim itself
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from remote import ws as remote_ws          # type: ignore[import-not-found]
+
 MCP_PROTOCOL_VERSION = "2025-03-26"   # answered with the client's own when it names one
-WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 AUTH_HEADER = "x-claude-code-ide-authorization"   # upstream's custom WebSocket auth header
 IDE_NAME = "relay"
 # A frame or a reassembled message larger than this is refused *before* the bytes are read, so a
 # peer cannot make the sidecar reserve memory by announcing a size. 4 MiB is far more than any
-# real openDiff: claude sends whole files, and a 4 MiB source file is not one.
+# real openDiff: claude sends whole files, and a 4 MiB source file is not one. It is handed to
+# `remote.ws.accept` as that connection's `max_frame`; the remote sessions keep ws's own 2 MiB.
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 POLL_SECONDS = 0.05                    # registration/reply polling tick; a stat, not a read
 KEEPALIVE_SECONDS = 30.0               # a WebSocket ping, so an idle claude knows we live
 HANDSHAKE_SECONDS = 10.0               # a connection that never sends its HTTP head is dropped
+LOCK_PROBE_SECONDS = 0.25              # how long a stale-lock sweep waits for a port to answer
+PROC_ROOT = "/proc"                    # overridden by the tests, which build a /proc of their own
 # A diff nobody ever answers must not pin a claude for the life of the GUI. Generous on purpose:
 # the user may well leave a proposed change on screen over lunch.
 DIFF_TIMEOUT_SECONDS = 30 * 60.0
 
-try:   # remote/ws.py is this tree's RFC 6455 implementation; accept_key there is pure and
-    # side-effect-free, so the bridge borrows it when the `remote` package is on the path.
-    from remote.ws import accept_key as websocket_accept   # type: ignore[import-not-found]
-except ImportError:   # the sidecar runs with only backend/ on PYTHONPATH: the same three lines.
-    def websocket_accept(key: str) -> str:
-        return base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode()).digest()).decode()
+# One name for the handshake's accept key, for the tests that check it against RFC 6455's own
+# example. It is `remote.ws`'s, like every other frame rule here.
+websocket_accept = remote_ws.accept_key
 
 
 # ----- atomic files ----------------------------------------------------------------------------
@@ -148,6 +163,176 @@ def pid_alive(pid) -> bool:
     return True
 
 
+def pid_start_time(pid, proc_root: str | None = None) -> int | None:
+    """Field 22 of `/proc/<pid>/stat`: the clock ticks after boot at which this pid began.
+
+    A pid on its own says nothing after a crash — Linux hands the number out again within hours —
+    so the lock records this beside it and the sweep compares the two. None when the process is
+    gone or `/proc` will not say."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    try:
+        with open(os.path.join(proc_root or PROC_ROOT, str(pid), "stat"), "r",
+                  encoding="utf-8", errors="replace") as stream:
+            text = stream.read()
+    except OSError:
+        return None
+    # The second field is the executable name in parentheses and may itself contain spaces and
+    # parentheses, so everything is counted from the *last* one.
+    tail = text[text.rfind(")") + 1:].split()
+    try:
+        return int(tail[19])          # stat field 22 = the 20th field after the comm
+    except (IndexError, ValueError):
+        return None
+
+
+def parent_pid(pid, proc_root: str | None = None) -> int | None:
+    """The PPid of `pid` (stat field 4), or None when there is no readable stat."""
+    try:
+        with open(os.path.join(proc_root or PROC_ROOT, str(int(pid)), "stat"), "r",
+                  encoding="utf-8", errors="replace") as stream:
+            text = stream.read()
+    except (OSError, TypeError, ValueError):
+        return None
+    tail = text[text.rfind(")") + 1:].split()
+    try:
+        parent = int(tail[1])         # stat field 4 = the 2nd field after the comm
+    except (IndexError, ValueError):
+        return None
+    return parent if parent > 0 else None
+
+
+def process_ancestry(pid, proc_root: str | None = None, limit: int = 64) -> list[int]:
+    """`pid` and its parents, nearest first. Bounded, and it never repeats a pid: a `/proc` that
+    is being faked, or read while it changes, must not spin here."""
+    chain: list[int] = []
+    seen: set[int] = set()
+    try:
+        current: int | None = int(pid)
+    except (TypeError, ValueError):
+        return chain
+    while current and current > 1 and current not in seen and len(chain) < limit:
+        chain.append(current)
+        seen.add(current)
+        current = parent_pid(current, proc_root)
+    return chain
+
+
+# ----- which claude is on this connection (26.5) ------------------------------------------------
+#
+# Upstream's handshake carries no pane identity, so two claudes in one project could not be told
+# apart: both panes match every path a request names, the ranking below fell back to the newest
+# registration, and a diff opened beside the wrong terminal. The connection does carry one fact,
+# though - the peer's address and port - and on Linux that names the process: `/proc/net/tcp`
+# maps the socket to an inode, `/proc/<pid>/fd` maps the inode back to a pid, and the pid's
+# ancestry walks up to the pane shell the claude was started from. Every pane registers its
+# shell's pid for exactly this walk.
+#
+# Best effort by design. A hardened `/proc` (hidepid=2), a non-Linux host, a claude that reached
+# us through a forwarder, or a socket closed between the accept and the read all fail the walk,
+# and the router falls back to the path ranking. Which of the two decided is logged.
+
+
+def _normalise_ip(text: str) -> str | None:
+    """An address in the one spelling both sides can be compared in: an IPv4-mapped v6 address
+    (`::ffff:127.0.0.1`, which is how a v6 listener sees a v4 loopback peer) is its v4 self."""
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    return str(getattr(address, "ipv4_mapped", None) or address)
+
+
+def _decode_proc_address(field: str) -> tuple[str, int] | None:
+    """One `local_address`/`rem_address` column of /proc/net/tcp{,6}: hex, host-endian per 32-bit
+    word for the address and big-endian for the port."""
+    host_hex, _, port_hex = field.partition(":")
+    try:
+        raw = bytes.fromhex(host_hex)
+        port = int(port_hex, 16)
+    except ValueError:
+        return None
+    if len(raw) == 4:
+        packed, family = raw[::-1], socket.AF_INET
+    elif len(raw) == 16:
+        packed = b"".join(raw[index:index + 4][::-1] for index in range(0, 16, 4))
+        family = socket.AF_INET6
+    else:
+        return None
+    try:
+        host = _normalise_ip(socket.inet_ntop(family, packed))
+    except (OSError, ValueError):
+        return None
+    return (host, port) if host else None
+
+
+def socket_inode(host: str, port: int, proc_root: str | None = None) -> int | None:
+    """The inode of the TCP socket whose *local* end is `host:port` — which, for the address an
+    accepted connection reports as its peer, is the client's own socket."""
+    proc_root = proc_root or PROC_ROOT
+    wanted = _normalise_ip(host or "")
+    if not wanted or not port:
+        return None
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(proc_root, "net", name), "r",
+                      encoding="utf-8", errors="replace") as stream:
+                rows = stream.read().splitlines()
+        except OSError:
+            continue
+        for row in rows[1:]:
+            fields = row.split()
+            if len(fields) < 10:
+                continue
+            if _decode_proc_address(fields[1]) != (wanted, port):
+                continue
+            try:
+                return int(fields[9])
+            except ValueError:
+                continue
+    return None
+
+
+def pid_for_inode(inode: int, proc_root: str | None = None) -> int | None:
+    """The pid holding the socket with this inode. Processes we may not read are skipped, not
+    errors: on a normal desktop the sidecar and the claude are the same user."""
+    proc_root = proc_root or PROC_ROOT
+    target = f"socket:[{inode}]"
+    try:
+        names = os.listdir(proc_root)
+    except OSError:
+        return None
+    for name in names:
+        if not name.isdigit():
+            continue
+        descriptors = os.path.join(proc_root, name, "fd")
+        try:
+            handles = os.listdir(descriptors)
+        except OSError:
+            continue
+        for handle in handles:
+            try:
+                if os.readlink(os.path.join(descriptors, handle)) == target:
+                    return int(name)
+            except OSError:
+                continue
+    return None
+
+
+def peer_ancestry(host: str, port: int, proc_root: str | None = None) -> list[int]:
+    """The pid on the other end of an accepted connection and its parents, nearest first; empty
+    when the walk cannot be made."""
+    inode = socket_inode(host, port, proc_root)
+    if inode is None:
+        return []
+    pid = pid_for_inode(inode, proc_root)
+    if pid is None:
+        return []
+    return process_ancestry(pid, proc_root)
+
+
 # ----- the lock file -----------------------------------------------------------------------------
 
 
@@ -172,8 +357,15 @@ class LockFile:
         unlinks the real port's name — could not clean up. So port 0 writes nothing."""
         if self.port <= 0:
             return False
-        write_json_atomic(self.path, {"pid": self.pid, "workspaceFolders": sorted(set(workspace_folders)),
-                                      "ideName": IDE_NAME, "transport": "ws", "authToken": self.token})
+        payload = {"pid": self.pid, "workspaceFolders": sorted(set(workspace_folders)),
+                   "ideName": IDE_NAME, "transport": "ws", "authToken": self.token}
+        # Relay's own addition to upstream's shape (an unknown key is ignored by the clients that
+        # read this): the pid alone cannot be trusted after a crash, because Linux hands the
+        # number out again. `sweep_stale_locks` compares this with the pid's current start time.
+        started = pid_start_time(self.pid)
+        if started is not None:
+            payload["pidStartTime"] = started
+        write_json_atomic(self.path, payload)
         return True
 
     def remove(self) -> None:
@@ -183,9 +375,63 @@ class LockFile:
             pass
 
 
-def sweep_stale_locks(directory: str, keep_pid: int | None = None) -> list[str]:
-    """Remove `<port>.lock` files whose IDE is gone. A live IDE's lock — ours or another
-    editor's — is never touched; a lock with no readable pid is stale (upstream writes one)."""
+def port_answers(port, timeout: float = LOCK_PROBE_SECONDS, host: str = "127.0.0.1"):
+    """True when something accepts a loopback connection on `port`, False when the port refuses
+    it, None when the answer is not knowable (a timeout, a firewall, no socket to spare).
+
+    A lock file says one thing — "dial this port" — so this is the only question that matters
+    about it. The connection is opened and dropped without a byte written; a bridge (ours or
+    another editor's) reads an empty HTTP head, times out its handshake and forgets it."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return False
+    if not 0 < port < 65536:
+        return False
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(timeout)
+    try:
+        probe.connect((host, port))
+        return True
+    except ConnectionRefusedError:
+        return False
+    except (socket.timeout, TimeoutError):
+        return None
+    except OSError as error:
+        return False if error.errno == errno.ECONNREFUSED else None
+    finally:
+        probe.close()
+
+
+def lock_pid_alive(payload, proc_root: str | None = None) -> bool:
+    """The old test, tightened: the lock's pid exists *and* it is the process that wrote the
+    lock. A lock written before this field existed has only the pid to go on."""
+    if not isinstance(payload, dict):
+        return False
+    pid = payload.get("pid")
+    if not pid_alive(pid):
+        return False
+    recorded = payload.get("pidStartTime")
+    if not isinstance(recorded, int):
+        return True
+    started = pid_start_time(pid, proc_root)
+    return started is None or started == recorded
+
+
+def sweep_stale_locks(directory: str, keep_pid: int | None = None, probe=None,
+                      proc_root: str | None = None) -> list[str]:
+    """Remove `<port>.lock` files whose IDE is not listening any more.
+
+    Liveness is the **port**, not the pid. A lock is an advertisement — "an editor is listening
+    here, with this token" — and after a crash the pid it names is recycled within hours, so
+    `os.kill(pid, 0)` called a dead editor live and left the lock in place for good; every claude
+    started in that project then dialled a port nobody was listening on and hung. So the sweep
+    connects to the port on loopback with a short timeout. A port that **answers** is a live IDE,
+    ours or another editor's, and its lock is never removed however wrong its pid looks. A port
+    that **refuses** is gone, and so is its lock. Only when the probe cannot tell — a timeout, a
+    host that will not let us connect at all — does the pid decide, and then together with the
+    start time the lock recorded, so a recycled pid cannot resurrect a dead lock."""
+    probe = probe or port_answers
     removed = []
     try:
         names = os.listdir(directory)
@@ -199,12 +445,17 @@ def sweep_stale_locks(directory: str, keep_pid: int | None = None) -> list[str]:
         pid = payload.get("pid") if isinstance(payload, dict) else None
         if keep_pid is not None and pid == keep_pid:
             continue
-        if not pid_alive(pid):
-            try:
-                os.unlink(path)
-                removed.append(path)
-            except OSError:
-                pass
+        stem = name[: -len(".lock")]
+        answered = probe(int(stem)) if stem.isdigit() else None
+        if answered is True:
+            continue
+        if answered is None and lock_pid_alive(payload, proc_root):
+            continue
+        try:
+            os.unlink(path)
+            removed.append(path)
+        except OSError:
+            pass
     return removed
 
 
@@ -217,10 +468,10 @@ class PaneRegistration:
     token: str
     runtime_dir: str
     helper: str            # <data>/shell/guest-event.py — the channel's one writer (26.3)
-    python: str            # the interpreter Relay runs (RELAY_PYTHON), for the helper
     workspace: str
     cwd: str
     guest: str = ""        # the guest in the pane's foreground right now: "claude", or "" (26.1)
+    shell_pid: int = 0     # the pane's shell: every process in the pane descends from it (26.5)
     path: str = ""         # the registration file this came from
     seen: float = 0.0
 
@@ -245,11 +496,15 @@ def load_registrations(directory: str) -> dict[str, PaneRegistration]:
         runtime = payload.get("runtime_dir")
         if not isinstance(token, str) or not isinstance(runtime, str) or not os.path.isdir(runtime):
             continue
+        try:
+            shell_pid = int(payload.get("shell_pid") or 0)
+        except (TypeError, ValueError):
+            shell_pid = 0
         panes[token] = PaneRegistration(
             token=token, runtime_dir=runtime,
-            helper=str(payload.get("helper") or ""), python=str(payload.get("python") or sys.executable),
+            helper=str(payload.get("helper") or ""),
             workspace=str(payload.get("workspace") or ""), cwd=str(payload.get("cwd") or ""),
-            guest=str(payload.get("guest") or ""),
+            guest=str(payload.get("guest") or ""), shell_pid=shell_pid,
             path=path, seen=os.stat(path).st_mtime)
     return panes
 
@@ -265,7 +520,9 @@ def pane_for_path(panes: dict[str, PaneRegistration], path: str) -> PaneRegistra
     rewritten last won, which is a shell that changed directory, not a claude. The guest flag comes
     second after the prefix length (a pane *inside* the file's own directory is still the better
     answer) and the registration mtime remains the last resort, for two panes that really are
-    equivalent — two claudes in one project cannot be told apart from the paths alone."""
+    equivalent — two claudes in one project cannot be told apart from the paths alone. That last
+    case is what `pane_for_peer` answers instead when the peer walk succeeds; this ranking is the
+    fallback for when it does not."""
     if not path:
         return None
     target = os.path.realpath(path)
@@ -284,6 +541,30 @@ def pane_for_path(panes: dict[str, PaneRegistration], path: str) -> PaneRegistra
     return best
 
 
+def pane_for_peer(panes: dict[str, PaneRegistration], ancestry) -> PaneRegistration | None:
+    """The pane a claude is *running in*, from the pid ancestry of its socket: the first pane
+    shell the walk meets, nearest first, so a claude started inside a nested shell still lands on
+    the pane that owns the terminal. None when nothing in the ancestry is a registered shell."""
+    by_pid = {pane.shell_pid: pane for pane in panes.values() if pane.shell_pid}
+    for pid in ancestry or ():
+        pane = by_pid.get(pid)
+        if pane is not None:
+            return pane
+    return None
+
+
+def path_in_pane(pane: PaneRegistration, path: str) -> str | None:
+    """`path` resolved, if it lands inside this pane's workspace or cwd; None otherwise."""
+    resolved = os.path.realpath(path)
+    for root in (pane.workspace, pane.cwd):
+        if not root:
+            continue
+        root = os.path.realpath(root)
+        if resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep):
+            return resolved
+    return None
+
+
 def resolve_in_pane(panes: dict[str, PaneRegistration], token: str, path: str) -> str | None:
     """`path` made absolute and symlink-free, but only if it still lands inside the pane `token`
     owns. Otherwise None, and the caller must refuse.
@@ -293,14 +574,15 @@ def resolve_in_pane(panes: dict[str, PaneRegistration], token: str, path: str) -
     the user's project could name `/tmp/…/authorized_keys` as the file to save and the sidecar
     would have written it — outside the workspace, outside the pane, outside anything the user
     agreed to. `realpath` first, because a symlink inside the workspace pointing out of it is the
-    same attack with one more step."""
+    same attack with one more step.
+
+    The question is containment in *this* pane, not "does this pane win the ranking for this
+    path": since the peer walk can route a request to the second of two panes open on one
+    project, asking the ranking here would have refused every path in the project it shares."""
     if not path or not token:
         return None
-    resolved = os.path.realpath(path)
-    owner = pane_for_path(panes, resolved)
-    if owner is None or owner.token != token:
-        return None
-    return resolved
+    pane = panes.get(token)
+    return None if pane is None else path_in_pane(pane, path)
 
 
 def workspace_folders_of(panes: dict[str, PaneRegistration]) -> list[str]:
@@ -563,34 +845,67 @@ class Bridge:
 
     def emit(self, pane: PaneRegistration, tool: str, args: dict, reply_path: str | None = None) -> bool:
         """One `bridge` event onto the pane's event spool, written by `shell/guest-event.py` —
-        the channel's one writer (26.3): the helper builds the §26.3 envelope (token, fresh
-        sequence, event, guest) and drops it into `guest-events/` as its own file; the bridge
-        supplies only the event's data on stdin. A helper that is missing, fails, or has nowhere to write is
-        a failed emit, and the caller tells claude so."""
-        if not (pane.helper and os.path.isfile(pane.helper)):
-            self.log(f"helper_missing tool={tool} helper={pane.helper!r}")
+        the channel's one writer (26.3), **imported**, not spawned: the writer builds the §26.3
+        envelope (token, fresh sequence, event, guest) and drops it into `guest-events/` as its
+        own file, and the bridge supplies the event's data as an argument. A writer that is
+        missing, fails, or has nowhere to write is a failed emit, and the caller tells claude so.
+
+        It used to be a `subprocess.run(...)` with a 10-second timeout on the event loop, which
+        meant every connection stopped — no `tools/list`, no pong, not even the client's own
+        `close_tab` — for as long as an interpreter took to start. The owner's rule for this
+        bridge is that nothing blocks the connection, so the write happens here: the spool file
+        is a few hundred bytes (the writer caps an envelope at 256 KiB and truncates the rest),
+        and an `os.replace` of that size is not something to hand to an executor."""
+        writer = spool_writer(pane.helper)
+        if writer is None:
+            self.log(f"helper_missing tool={tool} helper={spool_writer_path(pane.helper)!r}")
             return False
         if not os.path.isdir(pane.runtime_dir):
             # The runtime dir belongs to the pane; when it is gone the pane is gone, and a quiet
-            # helper exit must not be read as a delivered event. (The registration poll drops
-            # such panes; this catches one that closed inside the tick.)
+            # write into a recreated directory must not be read as a delivered event. (The
+            # registration poll drops such panes; this catches one that closed inside the tick.)
             self.log(f"channel_error tool={tool} runtime_dir={pane.runtime_dir} is gone")
             return False
         data = dict(args)
         data["tool"] = tool
         if reply_path:
             data["reply"] = reply_path
-        environment = helper_environment(pane)
+        # The pane's environment contract, as arguments: `RELAY_GUEST_EVENT` is the spool
+        # directory (`guest-events/` under the pane's runtime dir) and `RELAY_SESSION_TOKEN` is
+        # the token the envelope carries. The sidecar serves every pane, so it names both per
+        # call rather than reading its own environment — which is the GUI's, provider keys and
+        # all, and no longer goes anywhere near this.
+        spool = os.path.join(pane.runtime_dir, getattr(writer, "EVENTS_DIR_NAME", "guest-events"))
         try:
-            run = subprocess.run([pane.python, pane.helper, "bridge", "claude"], input=json.dumps(data),
-                                 capture_output=True, text=True, timeout=10, env=environment)
-        except (OSError, subprocess.SubprocessError) as error:
+            sequence = writer.write_event("bridge", "claude", data, directory=spool,
+                                          token=pane.token)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except BaseException as error:   # the writer promises not to raise; a bug in it is not ours
             self.log(f"helper_error tool={tool} {error!r}")
             return False
-        if run.returncode != 0:
-            self.log(f"helper_failed tool={tool} code={run.returncode} {run.stderr.strip()[:200]}")
+        if not sequence:
+            self.log(f"helper_failed tool={tool} spool={spool}")
             return False
         return True
+
+    def route(self, tool: str, path: str) -> PaneRegistration | None:
+        """Which pane a request belongs to, and why (26.5).
+
+        The peer walk first: the pid on the other end of this connection, up its ancestry, to the
+        shell of one registered pane. That is the only thing that tells two claudes in one project
+        apart, so when it answers it wins outright. When it cannot — no `/proc` to read, a pane
+        that has not reported its shell pid yet, a claude that did not come straight down a
+        loopback socket — the path ranking below decides, as it always did."""
+        pane = pane_for_peer(self.panes, getattr(self.connection, "peer_ancestry", ()))
+        if pane is not None:
+            self.log(f"routed tool={tool} pane={pane.token[:8]} by=peer")
+            return pane
+        pane = pane_for_path(self.panes, path)
+        if pane is None:
+            return None
+        self.log(f"routed tool={tool} pane={pane.token[:8]} by=ranking")
+        return pane
 
     # ----- JSON-RPC --------------------------------------------------------------------------------
 
@@ -671,12 +986,17 @@ class Bridge:
 
     def tool_openFile(self, arguments: dict) -> dict:
         path = str(arguments.get("filePath") or "")
-        pane = pane_for_path(self.panes, path)
+        pane = self.route("openFile", path)
         if pane is None:
             self.log(f"unmatched tool=openFile path={path}")
             return tool_error(f"No Relay pane is open in a folder containing {path}.")
-        self.emit(pane, "openFile", {"filePath": path,
-                                     "makeFrontmost": bool(arguments.get("makeFrontmost", True))})
+        if not self.emit(pane, "openFile", {"filePath": path,
+                                            "makeFrontmost": bool(arguments.get("makeFrontmost", True))}):
+            # An event that was not written is a file that will not open. Saying "Opened file"
+            # anyway told the guest a thing it could check and find untrue, and `openDiff` next
+            # to it has always refused out loud when its emit failed.
+            self.log(f"open_file_dropped path={path}")
+            return tool_error(f"Relay could not open {path}: the pane's event channel is gone.")
         return text_result(f"Opened file: {path}")
 
     def tool_openDiff(self, arguments: dict) -> dict | "Deferred":
@@ -685,7 +1005,7 @@ class Bridge:
         contents = arguments.get("new_file_contents")
         contents = contents if isinstance(contents, str) else ""
         tab_name = str(arguments.get("tab_name") or "")
-        pane = pane_for_path(self.panes, old_path or new_path)
+        pane = self.route("openDiff", old_path or new_path)
         if pane is None:
             # Unmatched is logged and dropped (26.5); openDiff answers DIFF_REJECTED rather than
             # nothing, because a blocking call that never returns hangs the guest.
@@ -758,9 +1078,18 @@ class Bridge:
         # TAB_CLOSED without settling that diff leaves its own openDiff blocked forever on a
         # decision it has just withdrawn. Only this connection's diffs, and only that name.
         tab_name = str(arguments.get("tab_name") or "")
+        # Whose diffs those are: this connection's, and — when the peer walk identified the claude
+        # — only the ones opened in its own pane, so two claudes in one project that happen to
+        # name a tab the same way cannot withdraw each other's decision.
+        pane = pane_for_peer(self.panes, getattr(self.connection, "peer_ancestry", ()))
         for pending in list(self.pending.values()):
-            if tab_name and pending.tab_name == tab_name and pending.connection is self.connection:
-                self.settle(pending, DIFF_REJECTED, f"close_tab {tab_name}")
+            if not tab_name or pending.tab_name != tab_name:
+                continue
+            if pending.connection is not self.connection:
+                continue
+            if pane is not None and pending.pane_token and pending.pane_token != pane.token:
+                continue
+            self.settle(pending, DIFF_REJECTED, f"close_tab {tab_name}")
         return text_result("TAB_CLOSED")   # upstream answers it unconditionally
 
     def tool_closeAllDiffTabs(self, arguments: dict) -> dict:
@@ -778,24 +1107,37 @@ class Bridge:
         return json_result({"success": False, "message": "Relay has no notebook kernel."})
 
 
-HELPER_ENV_PASSTHROUGH = ("PATH", "HOME", "PYTHONPATH", "LANG", "LC_ALL")
+_spool_writers: dict[str, object] = {}
 
 
-def helper_environment(pane: PaneRegistration) -> dict[str, str]:
-    """The environment `shell/guest-event.py` is run with: what a python script needs to start
-    (PATH, HOME, PYTHONPATH, the locale) and the three variables that tell it which pane it is
-    writing for. Nothing else.
+def spool_writer_path(helper: str) -> str:
+    """Which file the channel's writer is. `RELAY_GUEST_WRITER` overrides the pane's own
+    registration, which is how a test points at another checkout — the same override
+    `relay_core.guest_hook` honours."""
+    return os.environ.get("RELAY_GUEST_WRITER") or helper or ""
 
-    The sidecar inherits the GUI's whole environment, provider keys and all; handing that to a
-    child spawned once per bridge event would put every one of them one `os.environ` away from
-    whatever the helper — or anything it execs — decides to do. The helper's job needs six
-    variables, so it gets six."""
-    environment = {name: os.environ[name] for name in HELPER_ENV_PASSTHROUGH if name in os.environ}
-    environment.setdefault("PATH", os.defpath)
-    environment["RELAY_RUNTIME_DIR"] = pane.runtime_dir
-    environment["RELAY_SESSION_TOKEN"] = pane.token
-    environment["RELAY_PYTHON"] = os.environ.get("RELAY_PYTHON") or pane.python
-    return environment
+
+def spool_writer(helper: str):
+    """`shell/guest-event.py` as a module, loaded once per path — the importlib-by-path load
+    `relay_core.guest_hook` already uses, so the spool's naming, atomicity and size cap exist in
+    one file and the bridge does not start an interpreter to reach them. None when there is no
+    such file, or it will not import; the caller reads that as a failed emit."""
+    path = spool_writer_path(helper)
+    if path in _spool_writers:
+        return _spool_writers[path]
+    module = None
+    if path and os.path.isfile(path):
+        try:
+            spec = importlib.util.spec_from_file_location("relay_guest_event", path)
+            candidate = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(candidate)
+            module = candidate if hasattr(candidate, "write_event") else None
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except BaseException:   # SystemExit included: a file that is not the writer is not one
+            module = None
+    _spool_writers[path] = module
+    return module
 
 
 @dataclass
@@ -819,152 +1161,115 @@ def tool_error(message: str) -> dict:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-# ----- WebSocket, RFC 6455 server side --------------------------------------------------------------
+# ----- WebSocket: remote/ws.py, with the bridge's own doorman -------------------------------------
+#
+# The frame layer is `remote/ws.py`, the tree's RFC 6455 implementation, not a second copy of the
+# same rules (26.5). What is left here is the part that is the bridge's and not the rendezvous's:
+# upstream's `x-claude-code-ide-authorization` header, checked before the upgrade is completed;
+# the handshake deadline; the 4 MiB frame cap, which ws takes as a per-connection `max_frame`; and
+# the translation of a protocol fault into the close code claude is sent (1002, or 1009 for a
+# message that is too big) — ws raises, a server decides what to say.
 
 
-class WebSocket:
-    """One claude connection: the HTTP upgrade (with upstream's auth header), then frames.
-    Server-to-client frames are unmasked; client-to-server frames must be masked and are
-    unmasked here. Text frames carry one JSON document each (the MCP-over-WebSocket shape)."""
+class Connection:
+    """One claude on the bridge: its socket, and who is on the other end of it.
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, auth_token: str):
-        self.reader = reader
-        self.writer = writer
-        self.auth_token = auth_token
-        # Frames must not interleave: the read loop answers pings while settle tasks send tool
-        # replies, and two coroutines writing a header each would produce one unreadable frame.
-        self.send_lock = asyncio.Lock()
+    The identity is why this is a class and not the bare `ws.WebSocket`. The peer walk is made
+    once, when the connection is accepted, and the ancestry it returns is what every later
+    request on this connection is routed by; walking `/proc` per tool call would ask the same
+    question of the same unchanging process tree a hundred times."""
 
-    async def handshake(self) -> bool:
-        try:
-            head = await asyncio.wait_for(self.reader.readuntil(b"\r\n\r\n"), HANDSHAKE_SECONDS)
-        except asyncio.TimeoutError:
-            # A connection that opens and then says nothing holds a task and a socket for as long
-            # as the GUI runs. Ten seconds is forever for a loopback handshake.
-            self.writer.close()
-            return False
-        request = head.decode("latin-1", "replace")
-        headers = {}
-        lines = request.split("\r\n")
-        for line in lines[1:]:
-            if ":" in line:
-                key, value = line.split(":", 1)
-                headers[key.strip().lower()] = value.strip()
-        if not lines or not lines[0].startswith("GET ") or "websocket" not in headers.get("upgrade", "").lower():
-            return await self._refuse("400 Bad Request", "expected a websocket upgrade")
-        key = headers.get("sec-websocket-key")
-        if not key:
-            return await self._refuse("400 Bad Request", "missing Sec-WebSocket-Key")
-        presented = headers.get(AUTH_HEADER, "")
-        # Bytes, not str: `compare_digest` on two `str`s raises TypeError unless both are ASCII,
-        # and the presented one is whatever the peer put in the header. A non-ASCII token is a
-        # wrong token and gets the same 401 as an empty one, not a traceback and a dropped socket.
-        if not self.auth_token or not hmac.compare_digest(presented.encode("utf-8", "surrogateescape"),
-                                                         self.auth_token.encode()):
-            return await self._refuse("401 Unauthorized", "bad or missing auth token")
-        accept = websocket_accept(key)
-        self.writer.write(("HTTP/1.1 101 Switching Protocols\r\n"
-                           "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-                           f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
-        await self.writer.drain()
-        return True
+    def __init__(self, socket: remote_ws.WebSocket, peer_ancestry=()):
+        self.socket = socket
+        self.peer_ancestry = tuple(peer_ancestry)
 
-    async def _refuse(self, status: str, why: str) -> bool:
-        body = why.encode()
-        self.writer.write(f"HTTP/1.1 {status}\r\nContent-Length: {len(body)}\r\n"
-                          "Connection: close\r\n\r\n".encode() + body)
-        try:
-            await self.writer.drain()
-        except (ConnectionError, OSError):
-            pass
-        return False
+    @property
+    def peer(self) -> str:
+        return self.socket.peer
 
     async def read_message(self) -> str | None:
-        """One complete text message, or None when the connection ended. Ping is answered and
-        close is echoed here, so the caller only ever sees data and disconnect."""
-        chunks = []
-        size = 0
-        started = False   # a data frame has opened a message that continuation frames extend
-        while True:
-            head = await self.reader.readexactly(2)
-            fin, opcode = head[0] & 0x80, head[0] & 0x0F
-            masked, length = head[1] & 0x80, head[1] & 0x7F
-            if head[0] & 0x70:
-                # RSV1-3 set with no extension negotiated (we offer none, so there is never one).
-                # A permessage-deflate frame read as plain text is garbage JSON at best.
-                await self.close(1002, "reserved bits are set")
-                return None
-            if opcode >= 0x8 and (not fin or length > 125):
-                # RFC 6455 §5.5: a control frame is never fragmented and never longer than 125
-                # bytes. Echoing a 4 MiB "ping" back is a peer's amplifier, not a keepalive.
-                await self.close(1002, "a control frame must be short and unfragmented")
-                return None
-            if opcode in (0x1, 0x2) and started:
-                await self.close(1002, "a new data frame arrived inside a fragmented message")
-                return None
-            if opcode == 0x0 and not started:
-                await self.close(1002, "a continuation frame with nothing to continue")
-                return None
-            if opcode not in (0x0, 0x1, 0x2, 0x8, 0x9, 0xA):
-                await self.close(1002, f"unknown opcode {opcode:#x}")
-                return None
-            if not masked:
-                # RFC 6455 §5.1: a client frame is always masked, and a server that accepts an
-                # unmasked one is the hole the masking rule exists to close (a crafted HTTP form
-                # post read as a frame). Fail the connection, do not try to interpret it.
-                await self.close(1002, "client frames must be masked")
-                return None
-            if length == 126:
-                length = struct.unpack(">H", await self.reader.readexactly(2))[0]
-            elif length == 127:
-                length = struct.unpack(">Q", await self.reader.readexactly(8))[0]
-            # Both checks are before any allocation: the announced length, and what it would make
-            # the reassembled message. A peer cannot reserve memory here by lying about a size.
-            if length > MAX_MESSAGE_BYTES or size + length > MAX_MESSAGE_BYTES:
-                await self.close(1009, "message too large")
-                return None
-            mask = await self.reader.readexactly(4)
-            payload = await self.reader.readexactly(length) if length else b""
-            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-            if opcode == 0x8:   # close: echo and end
-                await self.close(1000)
-                return None
-            if opcode == 0x9:   # ping: answer with a pong of the same payload
-                await self._send_frame(0xA, payload)
-                continue
-            if opcode == 0xA:   # pong
-                continue
-            chunks.append(payload)
-            size += len(payload)
-            started = not fin
-            if fin:
-                return b"".join(chunks).decode("utf-8", "replace")
+        """One complete text message, or None when the connection ended. Pings are answered and a
+        close is handled inside ws, so the caller only ever sees data and disconnect. A protocol
+        fault fails the connection with its own close code, as this layer always did."""
+        try:
+            message = await self.socket.recv()
+        except remote_ws.ConnectionClosed:
+            return None
+        except UnicodeDecodeError:
+            # RFC 6455 §8.1: a text frame that is not valid UTF-8 fails the connection. ws decodes
+            # strictly; this layer used to substitute replacement characters and hand the result
+            # to the JSON parser, which answered "Parse error" to something that was never text.
+            await self.close(1007, "a text frame must be valid UTF-8")
+            return None
+        except remote_ws.WebSocketError as error:
+            await self.close(getattr(error, "code", 1002), str(error))
+            return None
+        return message if isinstance(message, str) else message.decode("utf-8", "replace")
 
     async def send_message(self, text: str) -> None:
-        await self._send_frame(0x1, text.encode("utf-8"))
-
-    async def _send_frame(self, opcode: int, payload: bytes) -> None:
-        header = bytes([0x80 | opcode])
-        length = len(payload)
-        if length < 126:
-            header += bytes([length])
-        elif length < 65536:
-            header += bytes([126]) + struct.pack(">H", length)
-        else:
-            header += bytes([127]) + struct.pack(">Q", length)
-        async with self.send_lock:
-            self.writer.write(header + payload)
-            await self.writer.drain()
+        await self.socket.send(text)
 
     async def ping(self) -> None:
-        await self._send_frame(0x9, b"relay")
+        await self.socket.ping(b"relay")
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         try:
-            await self._send_frame(0x8, struct.pack(">H", code) + reason.encode()[:120])
-        except (ConnectionError, asyncio.CancelledError):
+            await self.socket.close(code, reason)
+        except (remote_ws.WebSocketError, ConnectionError, OSError):
             pass
-        self.writer.close()
+
+
+async def refuse_http(writer: asyncio.StreamWriter, status: str, why: str) -> None:
+    """The one HTTP answer the bridge ever writes: it is an editor, not a web server."""
+    body = why.encode()
+    writer.write(f"HTTP/1.1 {status}\r\nContent-Length: {len(body)}\r\n"
+                 "Connection: close\r\n\r\n".encode() + body)
+    try:
+        await writer.drain()
+    except (ConnectionError, OSError):
+        pass
+    writer.close()
+
+
+async def handshake(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                    auth_token: str) -> remote_ws.WebSocket | None:
+    """Upstream's handshake: an HTTP upgrade carrying `x-claude-code-ide-authorization`. None
+    when the connection was refused, and the refusal has already been written."""
+    peer = writer.get_extra_info("peername") or ()
+    try:
+        request = await asyncio.wait_for(
+            remote_ws.read_request(reader, peer=f"{peer[0]}:{peer[1]}" if len(peer) >= 2 else ""),
+            HANDSHAKE_SECONDS)
+    except asyncio.TimeoutError:
+        # A connection that opens and then says nothing holds a task and a socket for as long as
+        # the GUI runs. Ten seconds is forever for a loopback handshake.
+        writer.close()
+        return None
+    except remote_ws.WebSocketError:
+        await refuse_http(writer, "400 Bad Request", "the request head is too large")
+        return None
+    if request is None:
+        writer.close()
+        return None
+    if request.method != "GET" or not request.wants_upgrade:
+        await refuse_http(writer, "400 Bad Request", "expected a websocket upgrade")
+        return None
+    if not request.header("sec-websocket-key"):
+        await refuse_http(writer, "400 Bad Request", "missing Sec-WebSocket-Key")
+        return None
+    presented = request.header(AUTH_HEADER)
+    # Bytes, not str: `compare_digest` on two `str`s raises TypeError unless both are ASCII, and
+    # the presented one is whatever the peer put in the header. A non-ASCII token is a wrong token
+    # and gets the same 401 as an empty one, not a traceback and a dropped socket.
+    if not auth_token or not hmac.compare_digest(presented.encode("utf-8", "surrogateescape"),
+                                                 auth_token.encode()):
+        await refuse_http(writer, "401 Unauthorized", "bad or missing auth token")
+        return None
+    try:
+        return await remote_ws.accept(request, reader, writer, max_frame=MAX_MESSAGE_BYTES)
+    except remote_ws.WebSocketError as error:
+        await refuse_http(writer, "400 Bad Request", str(error))
+        return None
 
 
 # ----- the server ----------------------------------------------------------------------------------
@@ -978,7 +1283,7 @@ class BridgeServer:
         self.server: asyncio.AbstractServer | None = None
         self._tasks: list[asyncio.Task] = []
         self._panes_stamp = 0.0
-        self.connections: set[WebSocket] = set()
+        self.connections: set[Connection] = set()
         self._last_ping = 0.0
 
     async def start(self) -> int:
@@ -988,12 +1293,14 @@ class BridgeServer:
         return self.server.sockets[0].getsockname()[1]
 
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        socket = WebSocket(reader, writer, self.bridge.lock.token)
         settlers: set[asyncio.Task] = set()
+        socket = None
         try:
-            if not await socket.handshake():
+            accepted = await handshake(reader, writer, self.bridge.lock.token)
+            if accepted is None:
                 writer.close()
                 return
+            socket = Connection(accepted, self.identify(writer))
             self.connections.add(socket)
             await self._serve(socket, settlers)
         except (ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError,
@@ -1008,7 +1315,8 @@ class BridgeServer:
             # The guest is gone: nothing it asked can be answered, so nothing it asked may still
             # write a file. Settle first, then cancel — a settled future makes its task finish on
             # its own and the cancel below is only for the ones that were already sending.
-            self.bridge.abandon_connection(socket)
+            if socket is not None:
+                self.bridge.abandon_connection(socket)
             for task in list(settlers):
                 task.cancel()
             try:
@@ -1016,7 +1324,22 @@ class BridgeServer:
             except OSError:
                 pass
 
-    async def _serve(self, socket: WebSocket, settlers: set[asyncio.Task]) -> None:
+    def identify(self, writer: asyncio.StreamWriter) -> tuple[int, ...]:
+        """The pid ancestry of whoever opened this connection, once, at accept time (26.5). An
+        empty tuple is "the walk did not work here", and the router falls back to the path
+        ranking; either way the decision is logged when a request is routed."""
+        peer = writer.get_extra_info("peername") or ()
+        if len(peer) < 2:
+            return ()
+        try:
+            ancestry = tuple(peer_ancestry(str(peer[0]), int(peer[1])))
+        except OSError as error:                      # a /proc that will not be read
+            self.bridge.log(f"peer_walk_failed {error!r}")
+            return ()
+        self.bridge.log(f"peer_walk peer={peer[0]}:{peer[1]} pids={list(ancestry[:4])}")
+        return ancestry
+
+    async def _serve(self, socket: Connection, settlers: set[asyncio.Task]) -> None:
         while True:
             text = await socket.read_message()
             if text is None:
@@ -1040,7 +1363,7 @@ class BridgeServer:
                 else:
                     await socket.send_message(json.dumps(reply))
 
-    async def _answer_when_settled(self, socket: WebSocket, deferred: Deferred) -> None:
+    async def _answer_when_settled(self, socket: Connection, deferred: Deferred) -> None:
         pending = deferred.pending
         try:
             outcome = await pending.future
