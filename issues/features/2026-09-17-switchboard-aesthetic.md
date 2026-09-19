@@ -11,12 +11,13 @@ rank: zzy
 created: '2026-09-17'
 acceptance: the owner has answered the open questions below and each approved intervention is split into its own card
 source: 'owner, 2026-09-17: how far should the retro telephone-operator switchboard aesthetic go inside the Relay app itself?'
-links: {plans: [], commits: [], evidence: [], related: [0JA7, W5N2], github: null}
+links: {plans: [], commits: [4ff6114, fd4db1c], evidence: [docs/qa_evidence/2026-09-19-switchboard-materials], related: [0JA7, W5N2], github: null}
 ---
 # How far the switchboard aesthetic goes inside the app
 
-Proposal: [`docs/SWITCHBOARD-AESTHETIC.md`](../../docs/SWITCHBOARD-AESTHETIC.md). Design only;
-no code was changed.
+Proposal: [`docs/SWITCHBOARD-AESTHETIC.md`](../../docs/SWITCHBOARD-AESTHETIC.md). Design, except
+for the two parts that are built: the Switchboard's typography (2026-09-17) and the board's
+materials (2026-09-19, below).
 
 ## Summary
 
@@ -51,15 +52,33 @@ Two findings that stand on their own, independent of any of this:
 - `app/style.css` (the remote web client) uses a third palette — `#7aa2f7`, 12px radius — matching
   neither the app nor the site. Worth fixing before adding anything new.
 
+## Decided and built: the board's materials (2026-09-19)
+
+Owner, on review item D7 — the `[board]` table that two themes carried with a comment saying nothing
+painted it: **"yeah build that out"**. Landed in `4ff6114` (the tokens) and `fd4db1c` (the
+painting), evidence in `docs/qa_evidence/2026-09-19-switchboard-materials/`.
+
+- `[board] face / metal / metal_dim` and `[flags] board_material` are first-class theme data, in
+  all five shipped themes, and derived from a theme's own chrome when it names none. That answers
+  **t:b4** for the board (brass is a fourth, non-semantic axis there, measured ΔE 10+ from the
+  amber in every theme) and **t:g5** (a per-theme token, not a global setting: brass that works on
+  charcoal is 2.35:1 on paper, so the choice belongs to the theme).
+- The Switchboard pane is painted on the face; its engraved rules are the hardware, lit only under
+  the pointer; the empty board is intervention 5's unpatched board, one unlit jack per section.
+- Card and thread text are untouched, on `@surface` and `@text` (§2.2).
+
+Still open, and still the owner's: the pane-header jack strip and its lamp (t:a1, t:c7 — the "build
+first" item, and a different surface from this one), the icon (t:d2) and sound (t:f3).
+
 ## Tasks
 
 Open questions for the owner; each answer becomes a decision below, and the approved ones split
 into their own cards.
 
 - [ ] Does the pane header become a jack strip at all, or does the path label stay as it is? <!-- t:a1 -->
-- [ ] Brass as a fourth, non-semantic colour axis — accepted, or is the app's palette already full enough? <!-- t:b4 -->
+- [x] Brass as a fourth, non-semantic colour axis — accepted, or is the app's palette already full enough? <!-- t:b4 -->
 - [ ] Is a busy lamp wanted given the thinking overlay already reports elapsed seconds? <!-- t:c7 -->
 - [ ] App icon: keep the chevron, or try a jack? (a 24/32/48px side-by-side would settle it) <!-- t:d2 -->
-- [ ] Should the Switchboard pane's typography land now, before the rest of this is decided? <!-- t:e9 -->
+- [x] Should the Switchboard pane's typography land now, before the rest of this is decided? <!-- t:e9 -->
 - [ ] Any appetite for sound at all, even opt-in and default off? <!-- t:f3 -->
-- [ ] Should `board.material` be a per-theme token, or one global "plain chrome" setting? <!-- t:g5 -->
+- [x] Should `board.material` be a per-theme token, or one global "plain chrome" setting? <!-- t:g5 -->

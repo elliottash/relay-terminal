@@ -191,7 +191,7 @@ into 0–38°; discounting that, it says three things:
 | `[syntax]` | as Relay Dark, command/token = shell, variable/agent = agent, `path = link`, `operator = #9a938a` | tightest: `path` on the focused composer **5.43**, operator **5.51** (Relay Dark's operator: 4.57) |
 | `[terminal]` | a **shaded** neutral grid: `background #12131a` fading to `background_end #0a0b0e`, fg `#dad4ce`, ANSI as Relay Dark with 5/7/8/13/15 warmed | measured at both ends: fg 12.60 / 13.39, ANSI 8 **3.21** / 3.41 (UI), worst readable entry ANSI 1 6.79 / 7.21 |
 | `[material]` | `metal = true`; light `#2d231e`, mid `#241c18`, dark `#1b1512`, edge `#6d5241`, chassis `#15171c` / `#0b0c0f` | every rule is measured on the lit and shaded ends of a face too; tightest is `action` on the lit top, **4.70** |
-| `[board]` | face `#1a1210`, metal `#c08556`, metal_dim `#6b4a33` | metal on face 5.91 (enamel text) |
+| `[board]` | face `#1a1210`, metal `#c08556`, metal_dim `#6b4a33` | metal on face 5.91 (enamel text); painted since 2026-09-19, §6 |
 
 ### 4.3 The trap: copper between amber and red
 
@@ -273,7 +273,7 @@ in the whole object is the screen.** The reference enforces Relay's own rule 2 f
 | `[bevel]` | light `#f0e4d4`, dark `#8e785d` | two-tone edges (§5.4) |
 | `[material]` | `plastic = true`; light `#e4dac6`, mid `#ded3bf`, dark `#d6cbb4`, edge `#efe7d8`, case `#d6cbb4` / `#cdc0a8` | tightest on a moulded face is `agent`, **4.60** on the case itself |
 | `[flags]` | `bevel = true`, `square = true`, `plastic = true`, `board_material = true` | |
-| `[board]` | face `#e0d6bd`, metal `#63492b` | bronze on cream 5.77; brass oxidised rather than inverted (brass is 2.35:1 on white) |
+| `[board]` | face `#e0d6bd`, metal `#63492b`, metal_dim `#8a7550` | bronze on cream 5.77; brass oxidised rather than inverted (brass is 2.35:1 on white); painted since 2026-09-19, §6 |
 
 ### 5.3 The destination pair, which is the hard part
 
@@ -336,18 +336,69 @@ more light, or `\e[37m` text vanishes on the page. Asserted by `theBeigeTerminal
 
 ---
 
-## 6. The Switchboard materials in each new theme
+## 6. The Switchboard materials, in every theme
 
 `SWITCHBOARD-AESTHETIC.md` defines bakelite, brass, enamel and cord, and one rule — brass is
-structure, never state. Both new themes carry a `[board]` table (face, metal, metal_dim) and a
-`[flags] board_material` switch. **Nothing paints them yet** (the board widgets, card `#8E4Q`, are
-unbuilt); they ride in `ThemeSpec::extra` so the widgets can read them when they exist.
+structure, never state. Since 2026-09-19 (owner, review item D7: "yeah build that out") the board
+**is** painted from theme data, so `[board]` is a first-class table beside `[ui]` and `[syntax]`:
 
-| theme | material | lands as |
-|---|---|---|
-| Dark Copper | copper `#c08556` on `#1a1210` | brass becomes copper, off the reference; 5.91:1, legible as enamel text. The one theme where app chrome and board are the same material, so the polished metal is what separates them — and the "at most two brass circles in a window" guard loses force, because the whole window is warm. Check the board widgets against this theme first. |
-| IBM Beige | bronze `#63492b` on cream `#e0d6bd` | brass does not survive a light ground (2.35:1 on white); it is oxidised, not inverted |
-| incumbents | none | no `[board]` table: the widgets should fall back to the hairline form (`SWITCHBOARD-AESTHETIC.md` §3.4) |
+```toml
+[board]
+face = "#17140f"       # the board the cards are mounted on: the ground of the Switchboard pane
+metal = "#c8a45c"      # lit hardware: the engraved rule under the section the pointer is on
+metal_dim = "#6b5637"  # the same hardware unlit: every other rule, and an empty board's jack rings
+
+[flags]
+board_material = true  # false paints the board in hairlines instead (AESTHETIC 3.4)
+```
+
+The reader is `src/ThemeFile.cpp` (`boardTokenNames()`, `ThemeSpec::board`), the painter
+`src/Theme.cpp`'s `@boardFace` / `@boardMetal` / `@boardMetalDim` and `src/BoardPane.cpp`. Live
+evidence in all four themes: `docs/qa_evidence/2026-09-19-switchboard-materials/`.
+
+### 6.1 What every theme measures
+
+`metal` has to be legible **as text** on the face — that is what makes an enamel label honest
+rather than a texture — and the face is itself a ground a person reads on, so every `[ui]` token
+drawn as text is measured on it beside `background`, `surface` and `surface_raised`.
+
+| theme | face | metal, on the face | metal_dim, on the face | tightest ui token on the face | metal vs `warning` |
+|---|---|---|---|---|---|
+| Dark Copper | `#1a1210` | `#c08556` **5.91** | `#6b4a33` 2.33 | 5.38 (`accent`) | ΔE 23.7 |
+| IBM Beige | `#e0d6bd` | `#63492b` **5.77** | `#8a7550` 3.06 | 5.71 (`agent`) | ΔE 20.1 |
+| Relay Dark | `#17140f` | `#c8a45c` **7.80** | `#6b5637` 2.63 | 5.66 (`link`) | ΔE 10.6 |
+| Relay Light | `#f0ece3` | `#5a3f1a` **8.24** | `#a5967e` 2.45 | **4.80** (`success`) | ΔE 28.4 |
+| Gruvbox Dark | `#1d2021` | `#d79921` **6.61** | `#7a5c21` 2.64 | 6.49 (`action`) | ΔE 15.4 |
+
+Where each value comes from. Dark Copper's copper is straight off the owner's reference, and it is
+the one theme whose app chrome and board are the same material — so the polished metal is what
+separates them, the "at most two brass circles in a window" guard loses force because the whole
+window is warm, and it is the theme to check the board against first. IBM Beige oxidises rather
+than inverts (brass is 2.35:1 on white). Relay Dark takes `SWITCHBOARD-AESTHETIC.md` §3.2's own
+bakelite and brass. Relay Light is a cool theme with a warm board: a phenolic cream one step deeper
+than its paper, and its own bronze `tool` on it. Gruvbox Dark uses gruvbox's own bg0_hard and dim
+yellow rather than anything invented for it.
+
+`metal_dim` is always the metal half sunk into the face (2.3–3.1:1): visible as an engraved rule,
+never bright enough to be read as something lit. Every `metal` is at least ΔE 10 from its theme's
+`warning`, the same bar `[ui] tool` is held to, because amber means one thing.
+
+### 6.2 What a theme that says nothing gets
+
+All three are **derived from the theme's own chrome, never borrowed from Relay Dark** — a bakelite
+mixed for a near-black window is that window's own colour on paper, and Relay Dark's brass is
+2.35:1 on white. The derivations, in `src/ThemeFile.cpp`:
+
+| token | derived as |
+|---|---|
+| `face` | `surface_raised` 65% of the way to `background` — a sheet mounted between the chip face and the chassis. Both ends already carry this theme's text contrast, so what lies between them does too |
+| `metal` | this theme's own brass, `[ui] tool` (itself dulled out of its amber), lifted towards whichever pole helps until it clears 4.5:1 on the face (`legibleOn()`, shared with the link green) |
+| `metal_dim` | that metal mixed half way into the face |
+
+Every key computed this way is listed in `ThemeSpec::derived`, beside `borrowed`. The derivation is
+measured against all five shipped palettes with their `[board]` tables cut out
+(`everyShippedThemeCouldDeriveItsBoardMaterials`), so a theme author who copies a shipped file and
+deletes what they do not care about still gets a board they can read.
 
 ---
 
@@ -379,7 +430,9 @@ is the first theme to use it. The incumbents keep the app's 4–10px radii.
 6. Re-derive `[syntax]` against `surface` *and* `surface_raised`, and the ANSI 16 against the
    terminal ground; invert the ramp on a light ground.
 7. Run `contrast.py check <id>` until it is clean.
-8. Optional: `[flags] bevel` / `square`, `[bevel] light/dark`, `[board]`.
+8. Optional: `[flags] bevel` / `square`, `[bevel] light/dark`. `[board]` is optional too, and
+   silence is a real answer — it is derived from your own chrome (§6.2). Name it when your board
+   should be a different material from your chrome, and measure `metal` on `face` when you do.
 
 ---
 
@@ -397,6 +450,10 @@ All in `tests/theme_test.cpp` (the existing theme test, extended):
 | the destination pair stays two colours (ΔE ≥ 20), shell the cooler | `theDestinationPairStaysTwoColours` |
 | the light terminal inverts the ANSI ramp | `theBeigeTerminalInvertsTheAnsiRamp` |
 | bevel/square flags and bevel colours are read; off for every other theme | `theChromeFlagsAndBevelColoursAreRead` |
+| every shipped theme names its `[board]` materials and says `board_material`; metal reads as text on the face, dim metal is visible but well under it, the face is neither `background` nor `surface`, and the metal stays ΔE 10 from the amber | `everyShippedThemeWearsTheBoardMaterials` |
+| a theme that names no `[board]` table has all three derived from its own chrome, listed in `derived`, never borrowed — and an unknown key inside `[board]` still survives in `extra` | `aThemeThatNamesNoBoardMaterialsDerivesThem` |
+| the derivation holds up on all five shipped palettes with their `[board]` tables removed | `everyShippedThemeCouldDeriveItsBoardMaterials` |
+| the three board tokens follow a live theme switch, `@boardMetalDim` is substituted before `@boardMetal`, and `board_material = false` gives the hairline form | `tests/themeswitch_test.cpp`: `theBoardMaterialsFollowTheTheme`, `aThemeThatRefusesTheMaterialGetsHairlines` |
 | `solarized-dark` stays gone, and the theme a stale setting falls back to is whole | `solarizedDarkIsGone` |
 | a tool band's brass is never the flag's amber (ΔE ≥ 10), in every shipped theme | `theToolBandIsBrassAndNotTheAmberOfAFlag` |
 | `link` is a green (hue 135–180), ΔE ≥ 20 from `success`, both destinations, `error`, `warning` and ANSI 2/10, AA on the terminal ground at both ends, and equal to `[syntax] path` | `theLinkGreenIsOneColourAndClearOfSuccessAndTheDestinationPair` |
@@ -481,5 +538,8 @@ scrollback.
 
 The Switchboard pane opens in every theme but stayed on "Loading the Switchboard…" for the full 15
 seconds in all six (a copied `issues/` tree in a sandbox with no git history), so the board shots
-show only the pane frame and its filter field. The board widgets do not paint the `[board]`
-materials yet anyway (§6).
+show only the pane frame and its filter field, and at that date the board widgets did not paint the
+`[board]` materials at all. Both are fixed: the materials landed 2026-09-19 (§6), and the live board
+in four themes — including the empty board's jack rings — is shot in
+`docs/qa_evidence/2026-09-19-switchboard-materials/`, whose fixture is a real git repo, which is
+what the loading line was waiting for.

@@ -1,6 +1,11 @@
 # The switchboard aesthetic inside Relay (proposal, 2026-09-17)
 
-Card `#8E4Q`. **Design only — nothing here is implemented, no source file was touched.**
+Card `#8E4Q`. **Mostly still a proposal.** Two parts of it are built: the Switchboard's typography
+(intervention 3, 2026-09-17) and, since 2026-09-19, the board's **materials** — the `[board]` theme
+tokens of §3.4, the face and hardware they paint, and the empty board of intervention 5 (owner, on
+review item D7: "yeah build that out"; `docs/qa_evidence/2026-09-19-switchboard-materials/`). Each
+built part carries a note where it is proposed. Everything else here — the pane-header jack strip,
+the lamp, remote pairing, the icon — is still design, and no other source file has been touched.
 Source references updated 2026-09-18, when `src/main.cpp` was split into one header per unit: they
 now name the function and its file, because the original line numbers had already drifted.
 Companions: `docs/SWITCHBOARD-DESIGN.md` (the tracker), `site/index.html` + `site/style.css` (the
@@ -104,6 +109,11 @@ inline const QColor BrassDim{0x6b, 0x56, 0x37};   // unlit ring, idle cord
 inline const QColor Bakelite{0x17, 0x14, 0x0f};   // board face
 ```
 
+**As built (2026-09-19)** these are *variables*, not constants, because a colour picked for
+near-black chrome cannot survive a light theme (§3.3): `relay::theme::BoardMetal`, `BoardMetalDim`
+and `BoardFace`, assigned per theme from its `[board]` table. The three values above are exactly
+what Relay Dark's file names, so the arithmetic in this section still holds for that theme.
+
 Contrast on the dark theme (`#0f1115`): brass **8.0:1**, shell cyan 9.4:1, agent violet 7.3:1,
 `@muted` 6.0:1. Brass on bakelite is 7.8:1. All comfortably past AA; brass is legible as *text*,
 which is what makes the enamel label honest rather than a texture.
@@ -124,7 +134,32 @@ light.** `#3ec5f0` on white is 2.01:1 and `#b48ef7` is 2.58:1 — unreadable as 
 theme needs its own pair; `#0a6183` (6.6:1) and `#5c3f9e` (7.6:1) hold the same hue relationship
 and both pass AAA-for-large. This is true with or without any of this proposal.
 
-### 3.4 Degrading to a plain theme
+### 3.4 The materials as theme data, and degrading to a plain theme
+
+> **Built, 2026-09-19** (owner on review item D7: "yeah build that out"; commits `4ff6114` and
+> `fd4db1c`, evidence in `docs/qa_evidence/2026-09-19-switchboard-materials/`). What this section
+> proposed is now the `[board]` table in every shipped theme, read by `src/ThemeFile.cpp` into
+> `ThemeSpec::board` and adopted into `relay::theme::BoardFace` / `BoardMetal` / `BoardMetalDim`
+> (`src/Theme.h`). The spellings that shipped are `face`, `metal`, `metal_dim` and the flag is
+> `[flags] board_material`, default **true** for every theme rather than for Relay Dark alone —
+> which is safe because a theme that names no `[board]` table has all three *derived from its own
+> chrome* (`docs/THEMES.md` §6) and every derivation is contrast-measured against the same rules as
+> a hand-picked one. Nothing is ever borrowed from Relay Dark here: its bakelite is any dark
+> window's own colour again, and its brass is 2.35:1 on white.
+>
+> **What wears them today.** The board pane's ground is the face — one stylesheet rule on
+> `#boardView`, with the list pane, the header and the card detail transparent so the sheet runs
+> behind the pane unbroken. The engraved rule over each section name and the two rules that frame
+> the list are `metal_dim`, and the rule of the section under the pointer is `metal`, so exactly one
+> piece of hardware in the pane is ever lit. A row's hover band and the drag image are mixed from
+> the face. The empty board (intervention 5) draws one unlit jack per section. Card and thread text
+> stay on `@surface` and `@text`: §2.2 is unchanged, and the face is measured as a text ground in
+> `tests/theme_test.cpp`, exactly like `background` and `surface`.
+>
+> **Not built, deliberately:** the pane-header jack strip and its lamp (interventions 1 and 2, still
+> the "build first" item, and a different surface), remote pairing jacks (4, waiting on `#W5N2`),
+> and the cord — the board has none, and the drag indicator stays the accent because it is live
+> state, not hardware.
 
 Themes ship as data (`#0JA7`). Add a `board` group with three colour tokens (`board.face`,
 `board.metal`, `board.metalDim`) and one boolean `board.material`, default `true` on Relay Dark.
@@ -238,6 +273,13 @@ with any care, and a brand-new pane has no welcome at all.
 Brass rings over enamel column names, all unlit. **Cost:** one `QWidget` in `BoardPane`, ~50 lines,
 or a single SVG plus a label. **Wear risk: none** — it disappears the moment there is a card.
 
+> **Built, 2026-09-19** (`EmptyBoard` in `src/BoardPane.cpp`, ~90 lines including the layout): one
+> jack per *section* — the columns became sections in 2026-09-18's layout — each a `metal_dim` ring
+> with a small dark hole, over its name in enamel type, then the pane's own two lines of words. The
+> names are drawn when they fit and the columns that do not fit are left off rather than elided to
+> stubs; below three columns' room the rings stand alone. It is the widget carrying it disappearing
+> the moment there is a card that lets it past the taste guard in §6.
+
 ### 6. The app icon — a jack, not a chevron · **MAYBE**
 
 Today the icon is a cyan chevron plus a spark node (`data/icons/org.relayterminal.Relay.svg`),
@@ -347,17 +389,20 @@ on the next paint.
 
 ## 7. Files this would touch, if approved
 
+Rows marked **done** landed on 2026-09-19 (`4ff6114`, `fd4db1c`).
+
 | Change | File · line |
 |---|---|
-| Brass/bakelite tokens | `src/Theme.h:11-21` (after `AccentText`) |
-| Jack-strip, lamp, board QSS | `src/Theme.cpp:318` (append before the raw-string close) |
-| Theme token group `board.*`, `board.material` | `src/Theme.cpp:325-334` (the token table) |
+| Brass/bakelite tokens — **done**, as live per-theme variables | `src/Theme.h`, `BoardFace` / `BoardMetal` / `BoardMetalDim` / `BoardMaterial` |
+| Board QSS — **done** (`@boardFace`, `@boardMetal`, `@boardMetalDim`); jack strip and lamp still to come | `src/Theme.cpp`, the Switchboard block and the token table |
+| Theme token group `[board]`, `[flags] board_material` — **done** | `src/ThemeFile.cpp` (`boardTokenNames()`, the derivation), every file in `data/theme/themes/` |
 | Light/plain variants | new, alongside whatever `#0JA7` lands |
 | Pane header → jack strip | `src/Pane.h` (`m_cwdLabel`), new `LineStrip` widget |
 | Destination feeds the strip | `src/Pane.h` (`applyDestinationColor`) |
 | Lamp on/off | `src/Pane.h` (`m_turnClock` start/stop) |
 | Switchboard column/card styling | `src/BoardPane.cpp:732` header, `:155-191` detail (QSS only) |
-| Empty Switchboard | `src/BoardPane.cpp:452-454`, `:785-789` |
+| Switchboard face and hardware — **done** | `src/BoardPane.cpp` `RowDelegate::paintSection`, `paintCard`, `RowList::startDrag` |
+| Empty Switchboard — **done** | `src/BoardPane.cpp`, `EmptyBoard` |
 | Remote device jacks | `src/RelayWindow.h` (`windowChromeRight`), plus `#W5N2` work |
 | Icon (if #6 wins) | `data/icons/org.relayterminal.Relay*.svg`, `packaging/`, `.desktop` |
 | **Not touched, by rule** | `engine/view/TerminalView.cpp`, `src/ShellHighlighter.cpp`, `#composerEditor`, `QTabBar` |

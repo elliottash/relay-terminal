@@ -1,0 +1,9 @@
+binary: /tmp/claude-1000/v-board/build/relay
+binary sha256: 24537c90bb45355d59a32f5b6f3ac7bfb15afd80682f5022d93144b2323b4c76
+fixture: /tmp/claude-1000/v-board-x/proj (7 cards, one per section) and /tmp/claude-1000/v-board-x/emptyproj (a board with no cards)
+
+=== dark-copper ===
+
+=== ibm-beige ===
+
+=== relay-light ===
