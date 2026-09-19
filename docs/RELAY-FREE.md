@@ -74,8 +74,20 @@ service with an individual plan.
 | `GET /v1/quota` | bearer | `{limit, used, resets_at, plan}` |
 | `GET /v1/health` | — | `{ok, roles, open}` |
 
-Errors are `{"error": {"code", "message", "resets_at"}}` with codes `bad_request` (400),
+Errors are `{"error": {"code", "message", "resets_at", "retried"}}` with codes `bad_request` (400),
 `token_expired` (401), `quota_exhausted` and `rate_limited` (429), `free_unavailable` (503).
+
+`retried` is present only when the gateway had already sent this request to more than one upstream
+before giving up, and it is the number of those extra attempts. **The gateway owns the upstream
+retries** (owner, 2026-09-19): the desktop transport retries a hosted 429 or 5xx six times of its
+own, which re-ran the gateway's whole upstream chain each time, so a single refusal was paid for
+twice over. `HostedChatProvider` now treats a refusal carrying `retried` as final and does not wait
+at all; a `rate_limited` window the gateway reports is still waited out, because that is the
+gateway's own door rather than an upstream's. The status set the gateway fails over on is the same
+one the client retries (`proxy.RETRYABLE_STATUSES` == `ChatProvider.HTTP_RETRY_STATUSES`, asserted
+in `tests/test_gateway.py`; the box runs `gateway/` and `remote/` only, so they cannot share a
+module). **This half of the change needs the gateway redeployed** — see "Operating it" below — and
+until then hosted refusals simply retry as they did before.
 
 The gateway accepts exactly `model, messages, tools, tool_choice, temperature, top_p, max_tokens,
 stream, response_format, stream_options` and rebuilds the upstream request from those fields plus

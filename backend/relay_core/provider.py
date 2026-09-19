@@ -1297,9 +1297,16 @@ class HostedChatProvider(ChatProvider):
         ``quota_exhausted`` lifts at midnight, not in seconds, so it is final here and the pane
         gets its sentence at once; ``rate_limited`` carries the moment its window reopens
         (``resets_at``), which is exactly how long to wait. The budget in ``_http_retry_wait``
-        applies to the answer either way."""
+        applies to the answer either way.
+
+        A refusal the gateway marks ``retried`` is final too (owner, 2026-09-19): it already sent
+        this request to every upstream the role has, so the six retries here would re-run that
+        chain a second time — the same 429 or 5xx paid for twice, once on each side of the
+        gateway. The rate-limit window still wins where the gateway reports one, because that is
+        the gateway's own door and not an upstream's."""
         from . import hosted
-        _, code, resets_at = hosted.describe_error(exc.code, self._refusal_body(exc))
+        body = self._refusal_body(exc)
+        _, code, resets_at = hosted.describe_error(exc.code, body)
         if code == "quota_exhausted":
             return None
         wait = super()._http_retry_delay(exc, attempt)
@@ -1307,7 +1314,11 @@ class HostedChatProvider(ChatProvider):
                 and not isinstance(resets_at, bool):
             window = self._clamp_wait(resets_at - time.time())
             if window is not None:
-                wait = window
+                return window
+        if wait is not None and hosted.upstream_retried(body):
+            logs.event(_log, "hosted_retry_owned_by_gateway", model=self.config.model,
+                       host=_host(self.config.base_url), status=exc.code, attempt=attempt)
+            return None
         return wait
 
     def _http_error(self, exc) -> ProviderError:

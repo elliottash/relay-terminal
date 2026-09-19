@@ -6,9 +6,16 @@ provider.py``: redirects are refused (an ``Authorization`` header must never fol
 a host the operator did not configure), the response socket gets a stall timeout once the head is
 in, and bytes are handed to the event loop through an ``asyncio.Queue`` as they arrive.
 
-Failover is decided **before the first byte** only. A 429, a 5xx or a connect timeout from one
-upstream means the next in the role's list is tried; once a byte has reached the client the reply
-is that upstream's, whatever happens next, because a client cannot be handed a second beginning.
+Failover is decided **before the first byte** only. A transient refusal (``RETRYABLE_STATUSES``)
+or a connect timeout from one upstream means the next in the role's list is tried; once a byte has
+reached the client the reply is that upstream's, whatever happens next, because a client cannot be
+handed a second beginning.
+
+**The gateway owns the upstream retries** (owner, 2026-09-19). A refusal it returns after trying
+more than one upstream carries ``error.retried`` (the number of upstreams it tried beyond the
+first), and the desktop's ``HostedChatProvider`` treats such a refusal as final instead of running
+its own six retries over the same chain: 429s and 5xx were being retried twice over, once here and
+once there, so one refused turn could cost a couple of dozen upstream requests.
 
 Usage accounting: every upstream is asked for ``stream_options.include_usage`` and the final
 ``usage`` chunk is what the quota settles on. A provider that sends none is charged from what
@@ -35,6 +42,14 @@ MAX_RESPONSE = 8 * 1024 * 1024       # the client's own limit (provider.MAX_RESP
 MAX_EVENT = 1024 * 1024
 USER_AGENT = "relay-gateway/0.1"
 _DONE = object()
+
+# The upstream statuses worth trying the next upstream for. Deliberately the same set as the
+# desktop transport's ``ChatProvider.HTTP_RETRY_STATUSES`` (protocol 15.2): a status one layer
+# calls transient and the other calls final would mean a refusal is either retried nowhere or
+# retried twice over. The two cannot share a module — the box runs ``gateway/`` and ``remote/``
+# only, never ``backend/`` (gateway/README.md) — so ``tests/test_gateway.py`` asserts they are
+# equal instead. 501 and 505 are as final as a 404; 529 is Anthropic's "overloaded".
+RETRYABLE_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -86,6 +101,7 @@ class Outcome:
         self.provider = ""
         self.model = ""
         self.fallback = 0            # index of the upstream that served, 0 = the first choice
+        self.attempts = 0            # upstreams opened for this request; attempts - 1 were retries
         self.status = 0              # the status the *client* was given
         self.ttft_ms: int | None = None
         self.total_ms = 0
@@ -140,7 +156,7 @@ class Completion:
             if getattr(exc, "fp", None) is not None:
                 hard_close(exc.fp)
             raise UpstreamFailure(f"HTTP {exc.code}", status=exc.code,
-                                  retryable=exc.code == 429 or exc.code >= 500) from None
+                                  retryable=exc.code in RETRYABLE_STATUSES) from None
         except UpstreamFailure:
             raise
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
@@ -161,6 +177,7 @@ class Completion:
             provider = self.config.provider_for(upstream)
             self.outcome.provider, self.outcome.model = provider.name, upstream.model
             self.outcome.fallback = index
+            self.outcome.attempts = index + 1
             try:
                 self.response = await _in_thread(loop, self._connect, upstream)
             except UpstreamFailure as failure:

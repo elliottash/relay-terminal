@@ -7,7 +7,9 @@ Lifecycle and rules:
 * The main agent gets the tools ``agent``, ``agent_message`` and ``agent_wait``. Subagents never do
   (depth 1), and never get ``set_keybinding``.
 * Each subagent has its own ``Agent`` (conversation, provider instance, cancel event) and a
-  ``RestrictedExecutor`` rooted at the same workspace, limited to its definition's tools.
+  ``RestrictedExecutor`` rooted at the same workspace, limited to its definition's tools. It shares
+  the pane's role resolver, so a subagent whose provider keeps failing continues on the next keyed
+  preset of its tier exactly as the pane does (card #G9VE, owner 2026-09-19).
 * At most ``max_concurrent`` (4) run at once; extras wait in status "waiting" for a slot.
 * Foreground ``agent`` calls block the main turn; several in one response run concurrently.
   Stopping the main turn stops its foreground subagents. Background subagents keep running
@@ -113,7 +115,8 @@ class SubagentFactory:
 
     def __init__(self, config: ProviderConfig, workspace: str, *, skills=None, preset_id: str | None = None,
                  key_lookup: Callable[[str], str] | None = None, aliases: dict | None = None,
-                 provider_factory: Callable[[ProviderConfig], object] | None = None, roles=None):
+                 provider_factory: Callable[[ProviderConfig], object] | None = None, roles=None,
+                 main_agent=None):
         self.config = config
         self.workspace = workspace
         self.skills = skills
@@ -126,6 +129,23 @@ class SubagentFactory:
         self.user_aliases = {str(k).lower(): str(v) for k, v in (aliases or {}).items()}
         self.aliases = {**DEFAULT_ALIASES, **self.user_aliases}
         self.provider_factory = provider_factory
+        # The pane's agent, or None outside the worker. A subagent follows the pane's failover
+        # settings (owner, 2026-09-19), read at spawn time so a set_agent_options that arrives
+        # while a subagent is queued reaches it too.
+        self.main_agent = main_agent
+
+    def failover_options(self) -> dict:
+        """The two failover switches a new subagent inherits from the pane (owner, 2026-09-19).
+
+        A subagent is a turn of the pane's work on the pane's providers, so a provider that will
+        not answer must not be the end of it any more than it is for the pane; and Relay Free is
+        the pane's decision there too, not a second one hidden inside a subagent.
+        """
+        main = self.main_agent
+        if main is None:
+            return {}
+        return {"failover": bool(getattr(main, "failover", True)),
+                "failover_hosted": bool(getattr(main, "failover_hosted", False))}
 
     def base(self) -> tuple[ProviderConfig, str | None]:
         """The config a subagent that does not name a model uses: the "subagent" role, else main."""
@@ -176,8 +196,15 @@ class SubagentFactory:
         provider = self.provider_factory(config) if self.provider_factory else None
         skills = self.skills if "load_skill" in definition.tools else None
         steps = min(definition.max_steps, MAX_STEPS)
+        # `roles` and `preset_id` are the parent's chain, handed on so a subagent whose provider
+        # keeps failing continues on the next keyed preset of its own tier exactly as the pane does
+        # (owner, 2026-09-19). Without a resolver `Agent._begin_failover` has no way to know which
+        # presets are keyed and refuses every move, which is why a subagent never failed over.
+        # An injected provider (the tests' factory, a guest harness) is still never replaced:
+        # `Agent._injected_provider` refuses the swap, as it refuses `set_model`'s.
         agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
-                      max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False)
+                      max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
+                      preset_id=preset_id, roles=self.roles, **self.failover_options())
         agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)
         agent.messages[0]["content"] += subagent_prompt(definition, agent_id)
         return agent, config.model, warnings

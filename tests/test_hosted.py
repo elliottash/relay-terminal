@@ -56,6 +56,8 @@ class FakeGateway:
         self.exhausted = False               # answer every chat call 429 quota_exhausted
         self.rate_limited_once = False       # answer the next chat call 429 rate_limited, then behave
         self.always_rate_limited = False     # answer every chat call 429 rate_limited
+        self.unavailable = False             # answer every chat call 503 free_unavailable
+        self.unavailable_retried = 0         # ... marked with this many retries the gateway spent
         self.chat_script: list[str] = []     # "unauthorized"/"rate_limited"/"ok" per call, then the knobs
         self.lock = threading.Lock()
         outer = self
@@ -134,6 +136,8 @@ class FakeGateway:
                         outer.unauthorized_once = False
                         limited = outer.rate_limited_once or outer.always_rate_limited
                         outer.rate_limited_once = False
+                        unavailable = outer.unavailable
+                        retried = outer.unavailable_retried
                         if scripted:
                             refuse, limited = scripted == "unauthorized", scripted == "rate_limited"
                     if refuse or self._bearer() is None:
@@ -145,6 +149,13 @@ class FakeGateway:
                                                           "resets_at": int(time.time())}})
                     if outer.exhausted:
                         return self._refuse(429, "quota_exhausted", "allowance used", self._quota_headers())
+                    if unavailable:
+                        # No upstream answered. `retried` is how many of its own upstreams the
+                        # gateway had already tried, and the client's signal to stop (proxy.py).
+                        error = {"code": "free_unavailable", "message": "no provider answered."}
+                        if retried:
+                            error["retried"] = retried
+                        return self._json(503, {"error": error})
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     for name, value in self._quota_headers():
@@ -165,6 +176,20 @@ class FakeGateway:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+
+
+class Refusal:
+    """The smallest thing ``_http_retry_delay`` needs: a status, no retry headers and a body it can
+    read once. A real ``HTTPError`` would only add urllib plumbing to the same three fields."""
+
+    def __init__(self, status: int, payload: dict):
+        self.code = status
+        self.headers: dict = {}
+        self.fp = object()                  # `_refusal_body` only checks that there is one
+        self._body = json.dumps(payload).encode()
+
+    def read(self, limit=None):
+        return self._body
 
 
 class HostedCase(unittest.TestCase):
@@ -189,6 +214,8 @@ class HostedCase(unittest.TestCase):
         with gateway.lock:
             gateway.unauthorized_once = gateway.always_unauthorized = gateway.exhausted = False
             gateway.rate_limited_once = gateway.always_rate_limited = False
+            gateway.unavailable = False
+            gateway.unavailable_retried = 0
             gateway.chat_script.clear()
             gateway.registrations = gateway.chat_calls = 0
             gateway.tokens.clear()
@@ -379,6 +406,58 @@ class TransportTests(HostedCase):
         self.assertEqual(caught.exception.code, "rate_limited")
         self.assertEqual(self.gateway.chat_calls, 2)      # the 401, the refresh, then no retries
         self.assertLess(time.monotonic() - started, 5.0)
+
+    # ----- the gateway owns its upstream retries (owner, 2026-09-19) --------------------
+    def no_backoff(self):
+        """Keep the six retries but take the waiting out, so the control case is not 24 s long."""
+        for name in ("HTTP_RETRY_BASE_S", "HTTP_RETRY_CEILING_S"):
+            patch = mock.patch.object(HostedChatProvider, name, 0.0)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_a_refusal_the_gateway_already_retried_is_final_here(self):
+        # The gateway tried every upstream the role has before answering; the six retries here would
+        # run that whole chain again, so one refusal was paid for twice over.
+        self.no_backoff()
+        self.gateway.unavailable, self.gateway.unavailable_retried = True, 2
+        with self.assertRaises(ProviderError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.code, "free_unavailable")
+        self.assertEqual(self.gateway.chat_calls, 1)
+
+    def test_a_refusal_it_did_not_retry_is_asked_again_as_before(self):
+        self.no_backoff()
+        self.gateway.unavailable, self.gateway.unavailable_retried = True, 0
+        with self.assertRaises(ProviderError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.code, "free_unavailable")
+        self.assertEqual(self.gateway.chat_calls, 1 + HostedChatProvider.HTTP_RETRY_ATTEMPTS)
+
+    def test_a_rate_limit_window_still_wins_over_the_retried_mark(self):
+        # `rate_limited` is the gateway's own door, not an upstream's: its window is how long to
+        # wait, whatever it says about upstreams it tried.
+        provider = self.provider()
+        window = int(time.time()) + 4
+        rate_limited = Refusal(429, {"error": {"code": "rate_limited", "message": "slow down",
+                                              "resets_at": window, "retried": 1}})
+        self.assertAlmostEqual(provider._http_retry_delay(rate_limited, 1), 4, delta=1.5)
+        # Everything else the gateway marks is final, and the same body without the mark is not.
+        self.assertIsNone(provider._http_retry_delay(
+            Refusal(503, {"error": {"code": "free_unavailable", "message": "none", "retried": 1}}), 1))
+        self.assertGreater(provider._http_retry_delay(
+            Refusal(503, {"error": {"code": "free_unavailable", "message": "none"}}), 1), 0)
+
+    def test_the_mark_is_read_off_the_gateways_own_body_shape(self):
+        for payload, expected in (({"error": {"retried": 2}}, True),
+                                  ({"error": {"retried": 0}}, False),
+                                  ({"error": {"retried": True}}, False),
+                                  ({"error": {"retried": "2"}}, False),
+                                  ({"error": {"code": "free_unavailable"}}, False),
+                                  ({"error": "nope"}, False)):
+            self.assertIs(hosted.upstream_retried(json.dumps(payload).encode()), expected, payload)
+        self.assertFalse(hosted.upstream_retried(b""))
+        self.assertFalse(hosted.upstream_retried(b"<html>not json</html>"))
+        self.assertFalse(hosted.upstream_retried(None))
 
     def test_an_exhausted_allowance_is_a_provider_error_with_its_code_and_reset_time(self):
         self.gateway.exhausted = True

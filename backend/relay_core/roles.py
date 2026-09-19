@@ -491,9 +491,10 @@ class RoleResolver:
         return self._main(role)
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
-    def failover_candidates(self, tier: str, exclude, hosts=()) -> list[Resolved]:
+    def failover_candidates(self, tier: str, exclude, hosts=(), *, allow_hosted: bool = False) -> list[Resolved]:
         """Providers a failing turn may move to: the tier's own model on every other keyed preset,
-        in the catalog's order, and Relay Free last of all (owner, 2026-09-19).
+        in the catalog's order, and Relay Free last of all when the pane may use it (owner,
+        2026-09-19).
 
         The order inside the keyed presets is `PRESETS`' own — there is nothing to rank them by,
         since Relay cannot know which of the user's keys is healthy — and only Relay Free's place
@@ -509,6 +510,13 @@ class RoleResolver:
         a stored key never appears, because a turn must not start spending a key the user did not
         choose, and neither does a local endpoint: it is not a keyed preset, and its answers are the
         deterministic kind a failover would only repeat.
+
+        ``allow_hosted`` is the "Allow Relay Free as a fallback" option (owner, 2026-09-19), and it
+        gates Relay Free alone. Spending a key the user stored on another of their own providers is
+        a move inside what they already set up; sending the conversation to Relay's hosted service
+        instead is not — another company's terms, a shared allowance — so a pane on the user's own
+        key never lands there unless they said it may. A pane already running on Relay Free has
+        nothing left to opt into, and its caller passes True.
         """
         tier = validate_tier(tier)
         skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
@@ -528,7 +536,7 @@ class RoleResolver:
                                    "failover", tier)
             if resolved.source != "fallback":
                 out.append(resolved)
-        if PRESETS[hosted.PRESET_ID].id not in exclude and hosted.available():
+        if allow_hosted and PRESETS[hosted.PRESET_ID].id not in exclude and hosted.available():
             preset = PRESETS[hosted.PRESET_ID]
             model, extra = provider_tier_model(preset.id, tier)
             resolved = self._build("main", preset.id, preset.base_url, model, extra, None,

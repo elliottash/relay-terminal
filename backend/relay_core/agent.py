@@ -124,7 +124,7 @@ def validate_turn_options(request: dict) -> dict:
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{key} must be an integer from {low} to {high}.")
             out[key] = value
-    for key in ("completion_check", "audit_requests", "todo_tool", "failover"):
+    for key in ("completion_check", "audit_requests", "todo_tool", "failover", "failover_hosted"):
         if request.get(key) is not None:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
@@ -317,6 +317,7 @@ class Agent:
                  max_program_writes: int = DEFAULT_MAX_WRITES,
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, failover: bool = True,
+                 failover_hosted: bool = False,
                  roles=None, board=None, security_options: dict | None = None):
         self.emit = emit
         self.cancel_event = threading.Event()
@@ -328,6 +329,13 @@ class Agent:
         self.stall_timeout_s = validate_stall_timeout(stall_timeout_s)
         # Whether a turn whose provider keeps failing may continue on another one (card #G9VE).
         self.failover = failover
+        # Whether Relay Free may be one of those providers (owner, 2026-09-19). Off by default and
+        # separate from `failover`: a pane running on the user's own key has chosen that provider,
+        # and moving its conversation onto Relay's hosted service — a different company's terms,
+        # a shared allowance — is a decision only the user can make. Keyed presets of the same tier
+        # are tried whatever this says; Relay Free is added to the chain only with this on, or for
+        # a pane that is already running on the hosted service and so has nothing left to opt into.
+        self.failover_hosted = failover_hosted
         self._injected_provider = provider is not None
         self.provider = provider or _provider_for(config, self.stall_timeout_s)
         self._apply_stall_timeout()
@@ -355,6 +363,10 @@ class Agent:
         # The failover swap a turn is running under, or None (card #G9VE): the pane's own
         # provider, config and preset, put back when the turn ends.
         self._failover: dict | None = None
+        # Routed models this turn already gave up on (`_drop_routing`), as (preset id, hostname).
+        # A failover started afterwards skips them: the planning or vision provider that just
+        # refused is not a spare worth asking again.
+        self._dropped_routes: list[tuple[str, str]] = []
         # Whether the model call now in flight has streamed any of an answer. Reset before every
         # `complete()`; a call that produced output is never failed over or retried, because the
         # user is already reading what it said (card #G9VE, the rule of 15.2).
@@ -529,7 +541,8 @@ class Agent:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
                 "completion_check": self.completion_check, "audit_requests": self.audit_requests,
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
-                "max_program_writes": self.max_program_writes, "failover": self.failover}
+                "max_program_writes": self.max_program_writes, "failover": self.failover,
+                "failover_hosted": self.failover_hosted}
 
     def _apply_stall_timeout(self) -> None:
         """Push the pane's idle deadline onto the transport (also after a model switch)."""
@@ -1607,9 +1620,13 @@ class Agent:
         Everything the failing provider can do for itself happens inside: the transport's six
         retries of a refused request (card #VMZP), then the stall and truncation retries below.
         Only when it still fails does the turn move — the next keyed preset of the same tier,
-        then Relay Free, each asked once — and `_end_failover` puts the pane's own provider back
-        when the turn ends. A truncated step is a budget problem, not a provider that will not
-        answer, so it is never failed over.
+        then Relay Free where the pane allows it, each asked once — and `_end_failover` puts the
+        pane's own provider back when the turn ends. A truncated step is a budget problem, not a
+        provider that will not answer, so it is never failed over.
+
+        A step running on a *routed* model (plan mode's, or an image turn's vision model) takes one
+        step back before any of that: the routing ends and the rest of the turn runs on the pane's
+        own model (`_drop_routing`). Only if that model fails too does the ordinary chain start.
         """
         while True:
             try:
@@ -1617,6 +1634,8 @@ class Agent:
             except ProviderTruncated:
                 raise
             except ProviderError as exc:
+                if self._drop_routing(exc, record, step):
+                    continue
                 if not self._begin_failover(exc, record, step):
                     raise
 
@@ -1638,12 +1657,80 @@ class Agent:
                 return "flash"
         return "main"
 
+    def _drop_routing(self, exc: Exception, record: dict, step: int) -> bool:
+        """A routed step whose provider will not answer finishes the turn on the pane's own model.
+
+        Plan mode and an image turn each pin a model for the turn (13.11, 17.3), and a failover was
+        refused while either was up: each had made its own choice, and handing the turn to a third
+        provider would undo it. So a plan turn whose pinned planning model's provider was down
+        failed outright, even though the pane's own model was sitting there able to answer (owner,
+        2026-09-19). It now drops back one step instead: the routing ends, a note says so, and the
+        rest of the turn runs on the model the pane is actually set to. Only if that model fails as
+        well does the ordinary chain (`_begin_failover`) start, which is the right order — the
+        user's own model before anyone else's.
+
+        Refused on the same terms as a failover, minus the option: this is not a move to another
+        provider but a return to the one the pane already has, so "Fall over to a working provider"
+        does not gate it. An injected provider is its owner's (a guest harness, a test), a call that
+        has streamed part of an answer would have a second model write under it, and a cancelled
+        turn stays cancelled.
+        """
+        if not (self._vision or self._planning):
+            return False
+        if self._injected_provider or self._produced_output or self.cancel_event.is_set():
+            return False
+        if not isinstance(exc, ProviderError):
+            return False
+        # The innermost swap is the model that just failed (a vision swap nests inside a plan one);
+        # the outermost one remembers the pane's own model, which is where the turn is going.
+        inner = self._vision or self._planning
+        outer = self._planning or self._vision
+        if self._vision and not model_supports_vision(outer["back_to"]):
+            # The pane's own model cannot read the pictures this turn carries — which is why the
+            # turn was routed in the first place (17.3). Dropping back would only hand them to a
+            # model that refuses them, so the vision provider's failure is reported as before.
+            return False
+        kind = "Planning model" if inner is self._planning else "Vision model"
+        failed_name = self._route_names(inner)[0]
+        own_name = self._route_names(outer)[1]
+        # Read off the live config, which is still the routed provider's until the ends below.
+        failed_preset = self.preset.id if self.preset else ""
+        failed_host = _host(self.config.base_url)
+        self._ensure_no_open_response(record["turn_id"], "route_dropped")
+        self._close_thinking(record)
+        # Both ends, innermost first, so the pane is back on its own model before the note claims it.
+        self._end_vision_turn()
+        self._end_plan_turn()
+        # A failover later in this turn must not offer the provider that just refused as a spare.
+        self._dropped_routes.append((failed_preset, failed_host))
+        record["retries"] = record.get("retries", 0) + 1
+        text = f"{kind} {failed_name} is not answering; continuing on {own_name}."
+        logs.event(_log, "provider_route_dropped", level_name="error", session=self.session_id,
+                   turn=record["turn_id"], step=step, routing=kind.split()[0].lower(),
+                   from_model=inner["model"], to_model=self.config.model,
+                   host=_host(self.config.base_url), error=str(exc)[:160])
+        self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "route_dropped",
+                   "attempt": 1, "max_attempts": 1, "from_model": inner["model"],
+                   "to_model": self.config.model,
+                   "to_preset": self.preset.id if self.preset else "", "step": step, "text": text})
+        self.emit({"event": "status", "text": f"{failed_name} failed · continuing on {own_name}"})
+        return True
+
+    def _on_hosted(self) -> bool:
+        """Whether this pane is already running on Relay's hosted service (owner, 2026-09-19).
+
+        Such a pane has nothing left to opt into, so Relay Free stays in its failover chain with
+        the option off: the conversation is already going through the gateway.
+        """
+        return bool(self.config.hosted or (self.preset is not None and self.preset.hosted))
+
     def _begin_failover(self, exc: Exception, record: dict, step: int) -> bool:
         """Move this turn to the next failover provider. False when there is nowhere to go.
 
-        Refused while a vision or plan swap owns the provider (each made its own choice for this
-        turn), with no roles resolver (a subagent or a test agent: it cannot know which providers are
-        keyed), for an injected provider (its owner decides), when the option is off, once this
+        Refused while a vision or plan swap still owns the provider — each made its own choice for
+        this turn, and `_drop_routing` has the first word there instead — with no roles resolver (a
+        test agent: it cannot know which providers are keyed), for an injected provider (its owner
+        decides), when the option is off, once this
         call has streamed part of an answer — the user is reading it, and a second provider would
         write a second answer under it, which is the rule the stall retry follows (15.2) — and on
         cancel: a stopped turn stays stopped.
@@ -1655,24 +1742,35 @@ class Agent:
         if swap is None:
             swap = {"turn_id": record["turn_id"], "provider": self.provider, "config": self.config,
                     "preset": self.preset, "window": self.context.window, "effort": self.effort,
-                    "tried": {self.preset.id} if self.preset else set(), "switches": 0,
+                    # The pane's own preset, plus any routed provider this turn already gave up on
+                    # (`_drop_routing`): a planning or vision model that has just refused is not a
+                    # spare worth asking again under another name.
+                    "tried": ({self.preset.id} if self.preset else set())
+                             | {preset for preset, _ in self._dropped_routes if preset},
+                    "switches": 0,
                     # The tier is the pane's, decided once: by the second move `self.config` is
                     # already a spare provider's, and asking it again would read that provider's
                     # tier table instead - a Flash turn on a provider with no Flash of its own
                     # would answer "main" and finish the turn on a Main model.
                     "tier": self._failover_tier(),
+                    # Whether Relay Free is in the chain, decided once for the same reason as the
+                    # tier: by the second move `self.config` is a spare provider's, and a spare
+                    # that happened to be hosted would answer "yes" for a pane that never opted in.
+                    "allow_hosted": self.failover_hosted or self._on_hosted(),
                     # Hostnames already asked, the pane's own first. `failover_candidates` derives
                     # them from the preset ids it is given, which says nothing about a pane on a
                     # base URL that matches no preset (`self.preset is None`) - and that pane's own
                     # host is exactly the one a failover must not hand the turn back to.
-                    "hosts": {_host(self.config.base_url)},
+                    "hosts": {_host(self.config.base_url)}
+                             | {host for _, host in self._dropped_routes if host},
                     # What the turn's error says if the chain also fails: the model that failed
                     # first, its exception, and the names of the providers tried after it.
                     "from_model": self.config.model, "first_error": exc, "names": []}
         if swap["switches"] >= self.FAILOVER_PROVIDERS:
             return False
         try:
-            candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"])
+            candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"],
+                                                        allow_hosted=swap["allow_hosted"])
         except Exception as bad:                            # a failover must never break the turn
             logs.event(_log, "provider_failover_unavailable", level_name="error",
                        session=self.session_id, turn=record["turn_id"], step=step,
@@ -1705,7 +1803,11 @@ class Agent:
         swap["last_model"], swap["last_preset"] = target.config.model, target.preset_id or ""
         record["retries"] = record.get("retries", 0) + 1
         # Both ends named the same way as the plan and vision notes: model plus preset label.
-        text = f"{from_name} keeps failing; continuing this turn on {to_name}."
+        # Relay Free is said as what it is — Relay's own hosted service, not another of the user's
+        # providers — because that is the one target they had to allow (owner, 2026-09-19).
+        text = (f"{from_name} keeps failing; continuing this turn on Relay's hosted service "
+                f"({to_name})." if target.config.hosted
+                else f"{from_name} keeps failing; continuing this turn on {to_name}.")
         logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
                    step=step, from_model=from_model, from_preset=from_preset,
                    to_model=target.config.model, to_preset=target.preset_id or "",
@@ -2021,6 +2123,7 @@ class Agent:
         self._end_vision_turn()
         self._end_plan_turn()
         self._end_failover()
+        self._dropped_routes = []
         self._forget_images()
         self.emit(self.turn_summary(record))
         self.emit(event)

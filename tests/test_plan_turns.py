@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from relay_core import agent as agent_module                                    # noqa: E402
 from relay_core.agent import Agent                                             # noqa: E402
 from relay_core.presets import PRESETS                                         # noqa: E402
-from relay_core.provider import ProviderConfig                                 # noqa: E402
+from relay_core.provider import ProviderConfig, ProviderError                                 # noqa: E402
 from relay_core.roles import RoleResolver                                      # noqa: E402
 from test_images import RecordingProvider                                      # noqa: E402
 
@@ -39,6 +39,23 @@ class TrackedProvider(RecordingProvider):
     def complete(self, messages, tools, emit, cancel):
         TrackedProvider.served_configs.append(
             (self.config.model, dict(self.config.extra), self.config.base_url))
+        return super().complete(messages, tools, emit, cancel)
+
+
+class RefusingPlanner(TrackedProvider):
+    """The tracking provider, refusing outright for the configs ``refuse`` matches.
+
+    Nothing is streamed before the refusal, which is the only case a turn may be re-routed from
+    (protocol 15.2): a call that has put part of an answer on the screen keeps it.
+    """
+
+    refuse: tuple = ()           # predicates on the ProviderConfig; any match refuses the call
+
+    def complete(self, messages, tools, emit, cancel):
+        if any(matches(self.config) for matches in RefusingPlanner.refuse):
+            TrackedProvider.served_configs.append(
+                (self.config.model, dict(self.config.extra), self.config.base_url))
+            raise ProviderError(f"Provider HTTP 503 for {self.config.model}.")
         return super().complete(messages, tools, emit, cancel)
 
 
@@ -229,6 +246,46 @@ class PlanTurnTests(unittest.TestCase):
         self.assertIn(f"Back to claude-opus-5 ({anthropic})", statuses)
 
     # ----- nothing to swap: no event, no provider change ------------------------------
+    # ----- a planning model whose provider is down (owner, 2026-09-19) -----------------
+    def refusing(self, predicate):
+        RefusingPlanner.refuse = (predicate,)
+        self.addCleanup(setattr, RefusingPlanner, "refuse", ())
+        patch = mock.patch.object(agent_module, "ChatProvider", RefusingPlanner)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_planning_model_that_will_not_answer_hands_the_turn_back_to_the_pane(self):
+        # Protocol 15.2.3: this used to fail the turn outright, with the pane's own model sitting
+        # there able to answer.
+        self.refusing(lambda config: config.model == "glm-5.3")
+        agent = self.plan_agent(roles={"planning": {"preset": "glm", "model": "glm-5.3"}})
+        agent.ask("plan this change")
+        self.assertEqual([config[0] for config in self.served_configs()], ["glm-5.3", "kimi-k3"])
+        self.assertEqual(self.events[-1]["event"], "done")
+        dropped = next(e for e in self.events if e["event"] == "provider_retry")
+        self.assertEqual(dropped["reason"], "route_dropped")
+        self.assertEqual((dropped["from_model"], dropped["to_model"]), ("glm-5.3", "kimi-k3"))
+        self.assertIn("Planning model", dropped["text"])
+        self.assertIn("is not answering", dropped["text"])
+        # The routing really ended: one plan_route_ended, before the note, and the pane is its own.
+        self.assertEqual(self.kinds().count("plan_route_ended"), 1)
+        self.assertLess(self.kinds().index("plan_route_ended"), self.kinds().index("provider_retry"))
+        self.assertEqual(agent.config.extra, {"reasoning_effort": "high"})
+        self.assertEqual(agent.provider.config.model, "kimi-k3")
+        self.assertIsNone(agent._planning)
+
+    def test_the_default_planning_role_drops_its_raised_effort_and_carries_on(self):
+        # The default planning role is the pane's own model at max reasoning — the same provider,
+        # one knob further. When that refuses, the turn continues at the pane's own effort.
+        self.refusing(lambda config: config.extra.get("reasoning_effort") == "max")
+        agent = self.plan_agent()
+        agent.ask("plan this change")
+        self.assertEqual([config[1] for config in self.served_configs()],
+                         [{"reasoning_effort": "max"}, {"reasoning_effort": "high"}])
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertEqual(agent.config.extra, {"reasoning_effort": "high"})
+        self.assertEqual(self.kinds().count("plan_route_ended"), 1)
+
     def test_a_build_turn_emits_no_plan_route(self):
         agent = self.build(KIMI, "kimi")
         agent.ask("do this change")

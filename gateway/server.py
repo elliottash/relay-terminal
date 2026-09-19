@@ -13,7 +13,9 @@ Before a request opens an upstream the checks run in this order: token valid →
 (the spend ceilings) → global concurrency → per-install concurrency → per-install requests per
 minute → per-install daily tokens. Every refusal is JSON with a stable code
 (``quota_exhausted | rate_limited | free_unavailable | token_expired | bad_request``) so the
-desktop can word it, and a database failure fails closed as ``free_unavailable``.
+desktop can word it, and a database failure fails closed as ``free_unavailable``. A refusal that
+came after the gateway had already tried more than one upstream also carries ``error.retried``,
+which tells the desktop's transport not to run its own retries over the same chain (``error()``).
 
 The log is metadata: a hash of the installation id, the role, the provider, the status, timing
 and token counts. Never a message, never a key. ``GATEWAY_DIAGNOSTIC_BODIES=1`` is the one
@@ -49,10 +51,16 @@ EXPIRE_EVERY = 600
 
 
 def error(status: int, code: str, message: str, resets_at: int | None = None,
-          headers: dict[str, str] | None = None) -> httpd.Response:
+          headers: dict[str, str] | None = None, retried: int = 0) -> httpd.Response:
+    """A refusal in the gateway's own shape. ``retried`` says how many upstreams this request was
+    already sent to beyond the first, and is the client's signal that asking again would only
+    repeat the chain (proxy.py, protocol 15.2). It is omitted when the gateway retried nothing, so
+    a refusal the client *should* retry looks exactly as it always did."""
     body = {"error": {"code": code, "message": message}}
     if resets_at is not None:
         body["error"]["resets_at"] = resets_at
+    if retried > 0:
+        body["error"]["retried"] = int(retried)
     response = httpd.Response.json(body, status=status)
     response.headers = headers
     return response
@@ -308,7 +316,8 @@ def build(store: Store, config: Config) -> httpd.Server:
                 log.exception("completions: database failure releasing a reservation")
             log_request(installation.id, role.name, completion.outcome)
             return error(completion.outcome.status, "free_unavailable",
-                         "Relay Free could not reach a model provider; try again shortly.")
+                         "Relay Free could not reach a model provider; try again shortly.",
+                         retried=max(0, completion.outcome.attempts - 1))
 
         async def stream():
             outcome = completion.outcome

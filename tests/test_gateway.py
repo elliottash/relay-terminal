@@ -19,6 +19,7 @@ from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from gateway import config as config_mod
+from gateway import proxy
 from gateway import server as server_mod
 from gateway import validate as validate_mod
 from gateway.store import Store
@@ -501,6 +502,43 @@ class GatewayTests(unittest.TestCase):
         status, _, body = gateway.chat(token)
         self.assertEqual(status, 502)
         self.assertEqual(json.loads(body)["error"]["code"], "free_unavailable")
+
+    def test_a_refusal_says_how_many_upstreams_it_already_tried(self):
+        # Owner, 2026-09-19: the gateway owns the upstream retries, and says so, so the desktop
+        # transport does not run its six over the same chain (protocol 15.2).
+        gateway = self.gateway(main=("fail503", "fail400"))
+        token, _ = gateway.token()
+        status, _, body = gateway.chat(token)
+        self.assertEqual(status, 502)
+        error = json.loads(body)["error"]
+        self.assertEqual(error["code"], "free_unavailable")
+        self.assertEqual(error["retried"], 1)                 # two upstreams asked, one a retry
+        self.assertEqual([r["path"] for r in self.upstream.requests],
+                         ["/fail503/chat/completions", "/fail400/chat/completions"])
+        # One upstream is no retry at all, so the refusal carries no mark and the client may ask
+        # again exactly as it always did.
+        gateway = self.gateway(main=("fail503",))
+        token, _ = gateway.token()
+        status, _, body = gateway.chat(token)
+        self.assertEqual(status, 503)
+        self.assertNotIn("retried", json.loads(body)["error"])
+        # Nor do the gateway's own refusals, whose window the client still waits out.
+        gateway = self.gateway(main=("ok",), requests_per_minute=1)
+        token, _ = gateway.token()
+        self.assertEqual(gateway.chat(token)[0], 200)
+        status, _, body = gateway.chat(token)
+        self.assertEqual((status, json.loads(body)["error"]["code"]), (429, "rate_limited"))
+        self.assertNotIn("retried", json.loads(body)["error"])
+
+    def test_the_retryable_statuses_are_the_ones_the_client_retries(self):
+        """One set, two layers. A status the gateway calls transient and the client calls final
+        would be retried twice over or nowhere at all; they cannot share a module, because the box
+        runs `gateway/` and `remote/` only (gateway/README.md), so this is the seam."""
+        from relay_core.provider import ChatProvider
+        self.assertEqual(set(proxy.RETRYABLE_STATUSES), set(ChatProvider.HTTP_RETRY_STATUSES))
+        self.assertNotIn(501, proxy.RETRYABLE_STATUSES)       # as final as a 404
+        self.assertNotIn(505, proxy.RETRYABLE_STATUSES)
+        self.assertIn(529, proxy.RETRYABLE_STATUSES)          # Anthropic's "overloaded"
 
     def test_redirects_are_not_followed(self):
         gateway = self.gateway(main=("redirect", "ok"))

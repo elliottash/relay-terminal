@@ -194,7 +194,8 @@ def main():
                 agent_catalog = agents_defs.load_catalog(workspace, agents_request.get("dirs"))
                 subagent_factory = SubagentFactory(resolver.main_config, workspace, skills=skill_index,
                                                    preset_id=resolver.main_preset_id, key_lookup=keystore.lookup,
-                                                   aliases=agents_request.get("aliases"), roles=resolver)
+                                                   aliases=agents_request.get("aliases"), roles=resolver,
+                                                   main_agent=agent)
                 if "max_auto_turns" in agents_request:
                     subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)

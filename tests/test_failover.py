@@ -10,10 +10,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from types import SimpleNamespace
+
 from relay_core.agent import Agent, validate_turn_options
+from relay_core.agents_defs import load_catalog
 from relay_core.presets import PRESETS
 from relay_core.provider import ProviderConfig, ProviderError, ProviderStalled, ProviderTruncated
 from relay_core.roles import RoleResolver
+from relay_core.subagents import SubagentFactory
 
 MAIN = PRESETS['glm']
 CONFIG = ProviderConfig(MAIN.base_url, MAIN.model, 'pane-key')
@@ -40,8 +44,9 @@ class Answerer:
         return {'role': 'assistant', 'content': 'from the spare'}
 
 
-def resolver(keys, config=CONFIG, preset_id='glm'):
-    return RoleResolver(config, preset_id, key_lookup=lambda preset_id: keys.get(preset_id, ''))
+def resolver(keys, config=CONFIG, preset_id='glm', roles=None):
+    return RoleResolver(config, preset_id, roles or {},
+                        key_lookup=lambda preset_id: keys.get(preset_id, ''))
 
 
 class Streamer:
@@ -93,7 +98,8 @@ class Recorder:
 class CandidateTests(unittest.TestCase):
     def test_keyed_presets_then_relay_free_in_catalog_order(self):
         with mock.patch('relay_core.hosted.available', return_value=True):
-            found = resolver({'kimi': 'k', 'openai': 'k'}).failover_candidates('main', {'glm'})
+            found = resolver({'kimi': 'k', 'openai': 'k'}).failover_candidates(
+                'main', {'glm'}, allow_hosted=True)
         self.assertEqual([r.preset_id for r in found], ['kimi', 'openai', 'relay-free'])
         self.assertEqual([r.config.model for r in found], ['kimi-k3', 'gpt-6-astra', 'relay-main'])
         self.assertTrue(all(r.config.api_key or r.config.hosted for r in found))
@@ -125,6 +131,17 @@ class CandidateTests(unittest.TestCase):
             found = resolver({'glm': 'k', 'kimi': 'k'}).failover_candidates('main', set(), ())
         self.assertEqual([r.preset_id for r in found], ['kimi', 'glm'])
 
+    def test_relay_free_is_left_out_unless_the_pane_allows_it(self):
+        # Owner, 2026-09-19: every other candidate is a provider the user set up with a key they
+        # stored; Relay's hosted service is not, so it is opt-in.
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            off = resolver({'kimi': 'k'}).failover_candidates('main', {'glm'})
+            on = resolver({'kimi': 'k'}).failover_candidates('main', {'glm'}, allow_hosted=True)
+            alone = resolver({}).failover_candidates('main', {'glm'})
+        self.assertEqual([r.preset_id for r in off], ['kimi'])
+        self.assertEqual([r.preset_id for r in on], ['kimi', 'relay-free'])
+        self.assertEqual(alone, [])          # nothing at all rather than Relay Free by the back door
+
     def test_no_key_no_candidate_and_the_tried_ones_are_not_returned(self):
         with mock.patch('relay_core.hosted.available', return_value=False):
             self.assertEqual(resolver({}).failover_candidates('main', {'glm'}), [])
@@ -143,9 +160,11 @@ class FailoverTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def agent(self, *, provider=None, failover=True, roles=None, config=CONFIG, preset_id='glm'):
+    def agent(self, *, provider=None, failover=True, failover_hosted=False, roles=None,
+              config=CONFIG, preset_id='glm'):
         return Agent(config, self.temp.name, self.events.append, provider=provider,
-                     preset_id=preset_id, failover=failover, roles=roles)
+                     preset_id=preset_id, failover=failover, failover_hosted=failover_hosted,
+                     roles=roles)
 
     def retries(self):
         """The moves, not the closing "back to the pane's own model" note."""
@@ -209,7 +228,8 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.stubs['kimi-k3'].calls, 0)
 
     def test_no_resolver_or_an_injected_provider_never_moves(self):
-        # A subagent or a test agent has no resolver: it cannot know which providers are keyed.
+        # A test agent has no resolver: it cannot know which providers are keyed. (A subagent does
+        # have one since 2026-09-19 — SubagentFailoverTests below.)
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 500.'))
         agent = self.agent(roles=None)
         agent.ask('hello')
@@ -454,7 +474,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs['kimi-k3'] = Refuser(ProviderError('Provider HTTP 503 for kimi-k3.'))
         self.stubs['relay-main'] = Refuser(spent)
         with mock.patch('relay_core.hosted.available', return_value=True):
-            agent = self.agent(roles=resolver({'kimi': 'k'}))
+            agent = self.agent(roles=resolver({'kimi': 'k'}), failover_hosted=True)
             agent.ask('hello')
         failed = self.events[-1]
         self.assertEqual(failed['event'], 'error')
@@ -512,13 +532,265 @@ class FailoverTests(unittest.TestCase):
                             for line in caught.output), caught.output)
 
 
+class RoutedStepTests(unittest.TestCase):
+    """A routed step drops back to the pane's own model before any failover (protocol 15.2.3).
+
+    The plan and vision halves live with their own turn mechanics in tests/test_plan_turns.py and
+    tests/test_images.py; what belongs here is the handover to the chain.
+    """
+
+    PLANNER = {'planning': {'preset': 'openai', 'model': 'gpt-6-astra'}}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.events = []
+        self.stubs = {}
+        patcher = mock.patch('relay_core.agent._provider_for',
+                             side_effect=lambda config, stall: self.stubs[config.model])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def plan_agent(self, keys):
+        agent = Agent(CONFIG, self.temp.name, self.events.append, preset_id='glm',
+                      roles=resolver(keys, roles=self.PLANNER))
+        agent.set_mode('plan')
+        return agent
+
+    def reasons(self):
+        return [e['reason'] for e in self.events if e['event'] == 'provider_retry']
+
+    def test_the_pane_model_is_tried_before_anyone_elses_and_then_the_chain(self):
+        down = ProviderError('Provider HTTP 503.')
+        self.stubs['gpt-6-astra'] = Refuser(down)      # the pinned planning model
+        self.stubs[MAIN.model] = Refuser(down)         # the pane's own, tried next
+        spare = Answerer()
+        self.stubs['kimi-k3'] = spare
+        agent = self.plan_agent({'openai': 'k', 'kimi': 'k'})
+        agent.ask('plan this')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(self.reasons(), ['route_dropped', 'failover', 'failover_ended'])
+        self.assertEqual(spare.calls, 1)
+        self.assertEqual(agent.config.model, MAIN.model)
+        self.assertIsNone(agent._planning)
+        self.assertIsNone(agent._failover)
+
+    def test_the_dropped_provider_is_not_offered_back_as_a_spare(self):
+        # It has just refused; asking it again under the same key is a wasted move, exactly as it
+        # is for two keys on one host.
+        down = ProviderError('Provider HTTP 503 for the planner.')
+        self.stubs['gpt-6-astra'] = Refuser(down)
+        self.stubs[MAIN.model] = Refuser(down)
+        agent = self.plan_agent({'openai': 'k'})       # OpenAI is the only other keyed preset
+        agent.ask('plan this')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.reasons(), ['route_dropped'])
+        self.assertEqual(self.stubs['gpt-6-astra'].calls, 1)
+
+    def test_a_planning_model_that_streamed_an_answer_keeps_the_turn(self):
+        # The same rule as a failover's: that text is on the user's screen.
+        self.stubs['gpt-6-astra'] = Streamer(ProviderError('Provider HTTP 500 mid-stream.'))
+        self.stubs[MAIN.model] = Answerer()
+        agent = self.plan_agent({'openai': 'k', 'kimi': 'k'})
+        agent.ask('plan this')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.reasons(), [])
+        self.assertEqual(self.stubs[MAIN.model].calls, 0)
+
+
+class HostedFallbackTests(unittest.TestCase):
+    """Relay Free is a failover target only where the pane allows it (owner, 2026-09-19)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.events = []
+        self.stubs = {}
+        patcher = mock.patch('relay_core.agent._provider_for',
+                             side_effect=lambda config, stall: self.stubs[config.model])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def agent(self, *, roles=None, config=CONFIG, preset_id='glm', failover_hosted=False):
+        return Agent(config, self.temp.name, self.events.append, preset_id=preset_id,
+                     roles=roles, failover_hosted=failover_hosted)
+
+    def retries(self):
+        return [e for e in self.events if e['event'] == 'provider_retry'
+                and e['reason'] != 'failover_ended']
+
+    def hosted_config(self):
+        return ProviderConfig(PRESETS['relay-free'].base_url, 'relay-main', '', {}, hosted=True)
+
+    def test_a_pane_on_its_own_key_never_lands_on_relay_free_by_default(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['relay-main'] = Answerer()
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            agent = self.agent(roles=resolver({}))
+            agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.retries(), [])
+        self.assertEqual(self.stubs['relay-main'].calls, 0)
+        self.assertFalse(agent.options()['failover_hosted'])
+
+    def test_with_the_option_on_the_turn_continues_on_relays_hosted_service(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        spare = Answerer()
+        self.stubs['relay-main'] = spare
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            agent = self.agent(roles=resolver({}), failover_hosted=True)
+            agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(spare.calls, 1)
+        moved = next(e for e in self.retries() if e['reason'] == 'failover')
+        self.assertEqual((moved['to_model'], moved['to_preset']), ('relay-main', 'relay-free'))
+        # The note says what it is, not just which model: this is the target they had to allow.
+        self.assertIn("continuing this turn on Relay's hosted service", moved['text'])
+        self.assertEqual(agent.config.model, MAIN.model)
+
+    def test_a_keyed_preset_is_still_tried_first_and_named_as_itself(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['kimi-k3'] = Answerer()
+        self.stubs['relay-main'] = Answerer()
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            agent = self.agent(roles=resolver({'kimi': 'k'}), failover_hosted=True)
+            agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(self.stubs['relay-main'].calls, 0)
+        moved = next(e for e in self.retries() if e['reason'] == 'failover')
+        self.assertNotIn('hosted service', moved['text'])
+
+    def allow_hosted_seen(self, *, config=CONFIG, preset_id='glm', failover_hosted=False):
+        """What the agent asked the resolver for, with the chain stubbed out."""
+        self.stubs[config.model] = Refuser(ProviderError('Provider HTTP 503.'))
+        roles = resolver({'kimi': 'k'}, config=config, preset_id=preset_id)
+        seen = []
+
+        def record(tier, exclude, hosts=(), *, allow_hosted=False):
+            seen.append(allow_hosted)
+            return []
+
+        with mock.patch.object(roles, 'failover_candidates', record):
+            agent = self.agent(roles=roles, config=config, preset_id=preset_id,
+                               failover_hosted=failover_hosted)
+            agent.ask('hello')
+        return seen
+
+    def test_the_pane_decides_once_and_a_hosted_pane_has_nothing_to_opt_into(self):
+        self.assertEqual(self.allow_hosted_seen(), [False])
+        self.assertEqual(self.allow_hosted_seen(failover_hosted=True), [True])
+        # A pane already running on Relay Free is already sending this conversation through the
+        # gateway, so the option it would be asked to tick is one it has answered by being there.
+        self.assertEqual(self.allow_hosted_seen(config=self.hosted_config(), preset_id='relay-free'),
+                         [True])
+
+
+class SubagentFailoverTests(unittest.TestCase):
+    """A subagent follows the pane's chain (owner, 2026-09-19).
+
+    `subagents.py` used to build its `Agent` with no roles resolver at all, and `_begin_failover`
+    refuses every move without one — so a subagent whose provider kept failing simply failed, and
+    the card's "a Flash subagent fails over within Flash" line could not be driven.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.events = []
+        self.stubs = {}
+        patcher = mock.patch('relay_core.agent._provider_for',
+                             side_effect=lambda config, stall: self.stubs[config.model])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.catalog = load_catalog(self.temp.name, [])
+
+    def factory(self, keys, *, main=None, provider_factory=None):
+        return SubagentFactory(CONFIG, self.temp.name, preset_id='glm',
+                               key_lookup=lambda preset: keys.get(preset, ''),
+                               roles=resolver(keys), main_agent=main,
+                               provider_factory=provider_factory)
+
+    def subagent(self, factory, model=None):
+        agent, _label, _warnings = factory(self.catalog.get('explore'), model, None,
+                                           self.events.append, 'a1')
+        return agent
+
+    def moves(self):
+        return [e for e in self.events if e['event'] == 'provider_retry' and e['reason'] == 'failover']
+
+    def test_a_subagent_continues_on_the_next_keyed_preset(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        spare = Answerer()
+        self.stubs['kimi-k3'] = spare
+        sub = self.subagent(self.factory({'kimi': 'k'},
+                                         main=SimpleNamespace(failover=True, failover_hosted=False)))
+        sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(spare.calls, 1)
+        self.assertEqual([e['to_model'] for e in self.moves()], ['kimi-k3'])
+
+    def test_a_flash_subagent_fails_over_within_flash(self):
+        self.stubs['glm-5.3-flash'] = Refuser(ProviderError('Provider HTTP 429.'))
+        spare = Answerer()
+        self.stubs['kimi-k2.7-code-highspeed'] = spare
+        sub = self.subagent(self.factory({'kimi': 'k'}), model='flash')
+        self.assertEqual(sub.config.model, 'glm-5.3-flash')
+        sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([e['to_model'] for e in self.moves()], ['kimi-k2.7-code-highspeed'])
+        self.assertEqual(spare.calls, 1)
+
+    def test_it_follows_the_panes_switches_and_not_its_own(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
+        self.stubs['kimi-k3'] = Answerer()
+        self.stubs['relay-main'] = Answerer()
+        off = SimpleNamespace(failover=False, failover_hosted=False)
+        sub = self.subagent(self.factory({'kimi': 'k'}, main=off))
+        self.assertFalse(sub.failover)
+        sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.moves(), [])
+        self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+        # And Relay Free is the pane's decision there too, not a second one hidden in a subagent.
+        self.events.clear()
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
+        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, failover_hosted=False)))
+        self.assertFalse(sub.failover_hosted)
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.stubs['relay-main'].calls, 0)
+        self.events.clear()
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
+        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, failover_hosted=True)))
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(self.stubs['relay-main'].calls, 1)
+
+    def test_an_injected_provider_is_never_replaced(self):
+        # The tests' own provider factory, and a guest harness: its owner decides what serves.
+        injected = Refuser(ProviderError('Provider HTTP 503.'))
+        self.stubs['kimi-k3'] = Answerer()
+        sub = self.subagent(self.factory({'kimi': 'k'},
+                                         main=SimpleNamespace(failover=True, failover_hosted=False),
+                                         provider_factory=lambda config: injected))
+        sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.moves(), [])
+        self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+        self.assertIs(sub.provider, injected)
+
+
 class OptionTests(unittest.TestCase):
     def test_failover_is_a_boolean_turn_option(self):
         self.assertEqual(validate_turn_options({'failover': True}), {'failover': True})
+        self.assertEqual(validate_turn_options({'failover_hosted': True}), {'failover_hosted': True})
         self.assertEqual(validate_turn_options({}), {})
-        for bad in ('yes', 1):
-            with self.assertRaises(ValueError):
-                validate_turn_options({'failover': bad})
+        for key in ('failover', 'failover_hosted'):
+            for bad in ('yes', 1):
+                with self.assertRaises(ValueError):
+                    validate_turn_options({key: bad})
 
     def test_set_options_applies_at_once_and_reports_back(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -528,3 +800,7 @@ class OptionTests(unittest.TestCase):
             self.assertTrue(agent.options()['failover'])         # on until the user says otherwise
             agent.set_options({'failover': False})
             self.assertFalse(agent.options()['failover'])
+            # Relay Free as a fallback is the other way round: off until the user ticks it.
+            self.assertFalse(agent.options()['failover_hosted'])
+            agent.set_options({'failover_hosted': True})
+            self.assertTrue(agent.options()['failover_hosted'])

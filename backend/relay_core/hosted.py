@@ -236,6 +236,24 @@ def describe_error(status: int, body: bytes | None) -> tuple[str, str, int | Non
     return text, code if code in ERROR_CODES else "", resets_at
 
 
+def upstream_retried(body: bytes | None) -> bool:
+    """Whether the gateway already retried this request across its own upstreams (owner, 2026-09-19).
+
+    The gateway fails a request over from one upstream to the next before the first byte, and marks
+    a refusal it returns after more than one attempt with ``error.retried`` (``gateway/proxy.py``).
+    The transport's own retry of a 429 or a 5xx would then re-run that whole chain, so one refused
+    turn cost the retries twice over: the client stops instead and the gateway owns them.
+    """
+    if not body:
+        return False
+    try:
+        error = json.loads(body[:MAX_BODY].decode("utf-8", "replace")).get("error")
+    except (ValueError, AttributeError):
+        return False
+    retried = error.get("retried") if isinstance(error, dict) else None
+    return isinstance(retried, int) and not isinstance(retried, bool) and retried > 0
+
+
 def quota_from_headers(headers) -> dict | None:
     """``{limit, used, resets_at}`` from a response's ``X-Relay-Quota-*`` headers, or None."""
     if headers is None:

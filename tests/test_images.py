@@ -65,6 +65,22 @@ class RecordingProvider:
         return seconds
 
 
+class RefusingProvider(RecordingProvider):
+    """The recording provider, refusing outright for the models named in ``refuse``.
+
+    Nothing is streamed before the refusal, which is the case that may move a turn: a call that has
+    put part of an answer on the screen is never retried or re-routed (protocol 15.2).
+    """
+
+    refuse: frozenset = frozenset()
+
+    def complete(self, messages, tools, emit, cancel):
+        if self.config.model in RefusingProvider.refuse:
+            RecordingProvider.served.append((self.config.model, []))
+            raise transport.ProviderError(f"Provider HTTP 503 for {self.config.model}.")
+        return super().complete(messages, tools, emit, cancel)
+
+
 def resolver(main: ProviderConfig, preset_id: str, roles=None):
     """A RoleResolver with every provider's key present, so nothing falls back for lack of a key."""
     return RoleResolver(main, preset_id, roles or {}, key_lookup=lambda preset: "key")
@@ -308,6 +324,48 @@ class ImageTurnTests(unittest.TestCase):
         agent = self.build(OPENAI, "openai", {"vision": {"preset": "gemini", "model": "gemini-3.1-pro-preview"}})
         agent.ask("what is this?", attachments=self.attachment())
         self.assertEqual(RecordingProvider.served[-1][0], "gemini-3.1-pro-preview")
+
+    # ----- a vision model whose provider is down (owner, 2026-09-19) -------------------
+    def refusing(self, models):
+        RefusingProvider.refuse = frozenset(models)
+        self.addCleanup(setattr, RefusingProvider, "refuse", frozenset())
+        patch = mock.patch.object(agent_module, "ChatProvider", RefusingProvider)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_vision_model_that_will_not_answer_hands_the_turn_back_to_the_pane(self):
+        # Protocol 15.2.3. The pinned vision model refuses before streaming anything; the pane's own
+        # model reads images too, so the turn finishes there instead of failing.
+        self.refusing({"gemini-3.1-pro-preview"})
+        agent = self.build(OPENAI, "openai",
+                           {"vision": {"preset": "gemini", "model": "gemini-3.1-pro-preview"}})
+        agent.ask("what is this?", attachments=self.attachment())
+        self.assertEqual([model for model, _ in RecordingProvider.served],
+                         ["gemini-3.1-pro-preview", "gpt-6-astra"])
+        self.assertEqual(self.events[-1]["event"], "done")
+        dropped = self.event("provider_retry")
+        self.assertEqual(dropped["reason"], "route_dropped")
+        self.assertIn("Vision model", dropped["text"])
+        self.assertIn("is not answering", dropped["text"])
+        self.assertIn("gpt-6-astra", dropped["text"])
+        # The routing is over before the note claims the pane has its own model back.
+        self.assertLess(self.kinds().index("vision_route_ended"),
+                        self.kinds().index("provider_retry"))
+        self.assertEqual(self.kinds().count("vision_route_ended"), 1)
+        self.assertEqual(agent.provider.config.model, "gpt-6-astra")
+        self.assertIsNone(agent._vision)
+
+    def test_a_pane_that_cannot_read_images_keeps_the_vision_failure(self):
+        # Dropping back would only hand the pictures to a model that refuses them, which is why the
+        # turn was routed at all: the vision provider's failure is reported as before.
+        self.refusing({"gpt-6-astra"})
+        agent = self.build(KIMI, "kimi", {"vision": {"preset": "openai", "model": "gpt-6-astra"}})
+        agent.ask("what is this?", attachments=self.attachment())
+        self.assertEqual([model for model, _ in RecordingProvider.served], ["gpt-6-astra"])
+        self.assertEqual(self.events[-1]["event"], "error")
+        self.assertIn("503", self.events[-1]["text"])
+        self.assertIsNone(self.event("provider_retry"))
+        self.assertIsNotNone(self.event("vision_route_ended"))
 
     # ----- a vision model on another vendor gets the history and the window it needs ---
     def test_a_vision_model_on_another_vendor_gets_the_history_in_its_own_dialect(self):
