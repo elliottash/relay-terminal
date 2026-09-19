@@ -10787,6 +10787,10 @@ private:
         }
         const QString id = QStringLiteral("remote-") + QString::number(++m_requestId);
         m_remotePrompts.insert(id, {trimmed, origin, originName.trimmed()});
+        // The author travels with the pending prompt, not in m_remoteAuthor: the router's verdict
+        // comes back later, and anything submitted at the desk in between would otherwise arrive
+        // on the queue wearing the phone's name. takeRemoteRoute sets it again for its own submit.
+        m_remoteAuthor.clear();
         send({{"type", "route"}, {"id", id}, {"text", trimmed}, {"mode", QStringLiteral("auto")},
               {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
     }
