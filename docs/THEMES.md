@@ -3,7 +3,7 @@
 Card `#0JA7`. The theme **system** — the TOML format, the loader, live switching, the generated
 Konsole schemes, the Settings › Appearance picker — is documented in `docs/ARCHITECTURE.md` §14
 and lives in `src/ThemeFile.{h,cpp}` and `src/Theme.{h,cpp}`. This document is the **design**
-side: the rules a theme must follow, how contrast is measured, what the four incumbents measure,
+side: the rules a theme must follow, how contrast is measured, what the three incumbents measure,
 and the two themes the owner asked to audition as candidates for the preferred pair:
 
 > "lets keep the 4 generic themes but add my two themes and see if they are good / distinctive
@@ -60,14 +60,16 @@ the tool replicates rather than guesses.
 | **deco** | none | carries no information alone: the resting hairline `border` |
 | **distinct** | CIELAB ΔE76 ≥ 20 | two colours that must not be mistaken for each other (below) |
 
-The 59 graded pairs per theme:
+The 63 graded pairs per theme:
 
 - `text` and `text_muted` on `background`, `surface` and `surface_raised` — **AA**
 - `accent` on `background` (the route label, the running queue use it as text) — **AA**
 - `accent_text` on `accent` (a primary button) — **AA**
 - `shell`, `agent` on `background` and on `surface_raised` (the mode chip) — **AA**
-- ink on `shell`, `agent`, `warning`, `caution`, `selection` (the prefix, plan and secret chips,
-  selected text) — **AA**
+- ink on `shell`, `agent`, `warning`, `caution`, `selection` — **AA**. The prefix chips are
+  destinations (`! terminal` on the shell fill, `* agent` on the agent fill, since 2026-09-19);
+  the plan chip is the agent fill, the secret chip the caution blend, and `selection` is selected
+  text in every input
 - `success`, `warning`, `error` on `surface_raised` (chips) **and on `background`** (the dot on a
   notification row, which is painted `@bg`) — **AA**
 - every `[syntax]` colour on `surface` (idle composer) **and on `surface_raised`** — the *focused*
@@ -127,26 +129,30 @@ when a theme greys it (§5).
 Not changed — the owner asked for them to stay — but measured with the same contract, because an
 audition needs a baseline.
 
-| theme | failing pairs of 59 | worst pair | notes |
+| theme | failing pairs of 63 | worst pair | notes |
 |---|---|---|---|
 | `relay-dark` | **1** | `border_strong` on `background` **2.40:1** (UI, needs 3) | otherwise clean; tightest AA is `operator` on the focused composer, 4.57 |
-| `relay-light` | **14** | `border_strong` **2.54:1**; `shell`/`command`/`token` on the focused composer **3.85:1** | the destination colour itself fails in the status strip and while typing |
-| `gruvbox-dark` | 17 | ANSI 1 **2.69:1** | faithful to upstream Gruvbox, which is not an AA palette |
-| `solarized-dark` | 42 | ANSI 8 **1.00:1** (it *is* the background) | faithful to upstream Solarized, which is low-contrast by design |
+| `relay-light` | **2** | `border_strong` **2.54:1** (UI); ANSI 7 on the grid **4.40:1** (AA) | its destination colour has since been darkened to `#006ab1` and now clears AA everywhere (4.72 on a chip, 5.12 idle, 5.50 on the ground) |
+| `gruvbox-dark` | 4 | ANSI 1 **2.69:1** | faithful to upstream Gruvbox, which is not an AA palette: ANSI 1, 4, 5 and 9 are the four |
 
-Two cheap fixes worth knowing about, **not applied** (out of scope for an audition):
-`relay-dark` `border_strong = "#5d6675"` takes the focus outline to 3.26:1 and stays grey; and
-`relay-light`'s shell colour needs to be about one stop darker to clear AA on its own chips —
-`#086584` measures 5.45:1 on its `surface_raised` and 5.91:1 on its `surface`. Gruvbox and Solarized fail because they are faithful ports; making them pass would make
-them not Gruvbox and Solarized.
+`solarized-dark` was removed (owner, 2026-09-18): 42 of its pairs failed, ANSI 8 worst at 1.00:1
+because it *is* the background, and lifting them would have made it not Solarized.
+`solarizedDarkIsGone` keeps the id absent, because the fallback a stale setting lands on only
+works while it is.
 
-Full six-way table: `docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast-all-six.md`.
+One cheap fix worth knowing about, **not applied**: `relay-dark` `border_strong = "#5d6675"` takes
+the focus outline to 3.26:1 and stays grey. Gruvbox fails because it is a faithful port; making it
+pass would make it not Gruvbox.
+
+Full six-way table: `docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast-all-six.md`
+— the audition's snapshot, six themes as they stood on 2026-09-18. For the current numbers run
+`contrast.py compare`.
 
 ---
 
 ## 4. Dark Copper
 
-`data/theme/themes/dark-copper.toml`. **59/59 pairs pass. Worst pair 3.32:1 (ANSI 8, UI). Worst
+`data/theme/themes/dark-copper.toml`. **63/63 pairs pass. Worst pair 3.21:1 (ANSI 8, UI). Worst
 AA pair 5.24:1** (`error` on a chip).
 
 ### 4.1 Where it comes from
@@ -169,7 +175,7 @@ into 0–38°; discounting that, it says three things:
 |---|---|---|
 | `background` | `#0e0f12` | cool charcoal |
 | `surface` | `#15161a` | near-neutral: syntax sits on it |
-| `surface_raised` | `#241c18` | copper-tinted; 1.62:1 against the ground |
+| `surface_raised` | `#241c18` | copper-tinted; 1.14:1 against the ground |
 | `border` | `#3a2822` | copper rule; 1.37:1 |
 | `border_strong` | `#666f7a` | **nickel**, the focus ring: **3.76:1** (UI) |
 | `text` / `text_muted` | `#ece6e0` / `#a2968c` | 15.5 / 6.6 on the ground; muted **5.80** on chips |
@@ -179,8 +185,12 @@ into 0–38°; discounting that, it says three things:
 | `shell` | `#45c8ee` | **9.8:1** on the ground, **8.57** on chips |
 | `agent` | `#ab97f7` | **7.76:1** on the ground; about 8° bluer than Relay Dark's violet (below) |
 | `success` / `warning` / `error` | `#7ec88c` / `#e5c07b` / `#e06c75` | **Relay Dark's, unchanged**; error on a chip 5.24 |
-| `[syntax]` | as Relay Dark, command/token = shell, variable/agent = agent, `operator = #9a938a` | tightest: operator on the focused composer **5.51** (Relay Dark: 4.57) |
-| `[terminal]` | ground `#0e0f12`, fg `#dad4ce`, ANSI as Relay Dark with 5/7/8/13/15 warmed | ANSI 8 **3.32** (UI) |
+| `action` | `#e56a30` | vermilion, the Actions band (2026-09-18): 5.87 as text; ΔE **27.1** from the copper accent, 36.6 from red, 47.0 from amber |
+| `tool` | `#c08556` | the tool-pane band (2026-09-19): this theme's own switchboard metal, 6.14 as text, ΔE **23.7** from amber — the band is never a flag |
+| `link` | `#1aa85e` | "you can open this" (2026-09-19): 6.21 on the ground, 5.43 on a chip; ΔE 22.4 from `success`, 23.4 from ANSI 2. `[syntax] path` is the same colour |
+| `[syntax]` | as Relay Dark, command/token = shell, variable/agent = agent, `path = link`, `operator = #9a938a` | tightest: `path` on the focused composer **5.43**, operator **5.51** (Relay Dark's operator: 4.57) |
+| `[terminal]` | a **shaded** neutral grid: `background #12131a` fading to `background_end #0a0b0e`, fg `#dad4ce`, ANSI as Relay Dark with 5/7/8/13/15 warmed | measured at both ends: fg 12.60 / 13.39, ANSI 8 **3.21** / 3.41 (UI), worst readable entry ANSI 1 6.79 / 7.21 |
+| `[material]` | `metal = true`; light `#2d231e`, mid `#241c18`, dark `#1b1512`, edge `#6d5241`, chassis `#15171c` / `#0b0c0f` | every rule is measured on the lit and shaded ends of a face too; tightest is `action` on the lit top, **4.70** |
 | `[board]` | face `#1a1210`, metal `#c08556`, metal_dim `#6b4a33` | metal on face 5.91 (enamel text) |
 
 ### 4.3 The trap: copper between amber and red
@@ -192,7 +202,7 @@ kept apart two ways, both asserted by `copperStaysClearOfAmberAndRed()`:
 | | on the ground | ΔE76 from `warning` | ΔE76 from `error` |
 |---|---|---|---|
 | `border` (copper rule) | **1.37:1** | — | 57.6 |
-| `surface_raised` (copper face) | **1.62:1** | 77.0 | — |
+| `surface_raised` (copper face) | **1.14:1** | 77.0 | — |
 | `accent` (the one bright copper) | 5.59:1 | **28.5** | **31.2** |
 | `error` | 6.00:1 | | |
 | `warning` | 11.10:1 | | |
@@ -220,8 +230,8 @@ all-copper frame, `border_strong = "#8a6448"` measures 3.65:1 on the ground and 
 
 ## 5. IBM Beige
 
-`data/theme/themes/ibm-beige.toml`. **59/59 pairs pass. Worst pair 4.11:1 (`border_strong`, UI).
-Worst AA pair 4.65:1** (`warning` on the ground).
+`data/theme/themes/ibm-beige.toml`. **63/63 pairs pass. Worst pair 4.11:1 (`border_strong`, UI).
+Worst AA pair 4.60:1** (`agent` on the case beige — see §5.3; `warning` there is 4.65).
 
 ### 5.1 Where it comes from
 
@@ -246,20 +256,24 @@ in the whole object is the screen.** The reference enforces Relay's own rule 2 f
 | token | value | measured |
 |---|---|---|
 | `background` | `#cdc0a8` | the case |
-| `surface` | `#f3f2f0` | the screen: 2% saturation. Terminal, idle composer, editors |
+| `surface` | `#f4efe4` | the screen: near-neutral. Terminal, idle composer, editors |
 | `surface_raised` | `#ded3bf` | a raised plastic face: chips, buttons, the focused composer |
 | `border` / `border_strong` | `#9c8d74` / `#655244` | outline **4.11:1** (UI) |
 | `text` / `text_muted` | `#1f1c16` / `#4d463a` | 9.47 on the ground; muted **5.19** (raised from 4.59 for margin: it is the status strip) |
-| `accent` | `#1a3070` | Windows 95 navy: **6.88:1** as text, **11.04** under its label; also `selection` |
+| `accent` / `accent_hover` | `#1a3070` / `#243d85` | Windows 95 navy: **6.88:1** as text, **11.04** under its label, **9.02** under it hovered; also `selection` |
 | `accent_text` | `#f3f2f0` | |
-| `shell` | `#324d5c` | dark grey-blue: **4.98** on the ground, **6.03** on chips |
-| `agent` | `#4f4163` | dark grey-violet: **5.16** on the ground, **6.25** on chips |
+| `shell` | `#0049a9` | **4.63** on the case, 5.61 on chips, 7.25 on the screen (§5.3) |
+| `agent` | `#7500c3` | **4.60** on the case, 5.57 on chips — the tightest pair in the theme (§5.3) |
 | `success` / `warning` / `error` | `#135427` / `#684800` / `#931c17` | **5.03 / 4.65 / 4.84** on the ground |
-| `[syntax]` | command/token = shell, variable/agent = agent, flag/string/unknown = the status colours, `path #0f5f5a`, `operator #5a554a` | all ≥ 5.00 on the focused composer |
-| `[terminal]` | ground `#f3f2f0`, fg `#1f1c16`, cursor `#23211a`, **ramp inverted** | ANSI 7 **8.44**, ANSI 8 **4.96** |
+| `action` | `#803700` | terracotta, the Actions band: **4.75** on the case; ΔE 21.0 from the brick red and 21.2 from the ochre — the tightest separation of any theme, because on paper a deep red, a deep orange and a deep ochre are neighbours |
+| `tool` | `#63492b` | the tool-pane band (2026-09-19): this theme's own bronze, **4.65** on the case, ΔE 20.1 from the ochre |
+| `link` | `#1e4a44` | a dark pine (2026-09-19): **5.52** on the case, 9.04 on the screen; ΔE 26.1 from `success`, 29.3 from ANSI 2 |
+| `[syntax]` | command/token = shell, variable/agent = agent, flag/string/unknown = the status colours, `path = link #1e4a44`, `operator #5a554a` | all ≥ **5.00** on the focused composer (operator is the 5.00) |
+| `[terminal]` | warm paper, **shaded**: `background #f8f4ec` fading to `background_end #efe8da`, fg `#1f1c16`, cursor `#23211a`, **ramp inverted** | at both ends: fg 15.49 / 13.94, ANSI 7 **8.61** / 7.74, ANSI 8 **5.06** / 4.55, worst readable entry ANSI 3 6.18 / 5.56 |
 | `[bevel]` | light `#f0e4d4`, dark `#8e785d` | two-tone edges (§5.4) |
-| `[flags]` | `bevel = true`, `square = true` | |
-| `[board]` | face `#e0d6bd`, metal `#63492b` | brass oxidised to bronze (brass is 2.35:1 on white) |
+| `[material]` | `plastic = true`; light `#e4dac6`, mid `#ded3bf`, dark `#d6cbb4`, edge `#efe7d8`, case `#d6cbb4` / `#cdc0a8` | tightest on a moulded face is `agent`, **4.60** on the case itself |
+| `[flags]` | `bevel = true`, `square = true`, `plastic = true`, `board_material = true` | |
+| `[board]` | face `#e0d6bd`, metal `#63492b` | bronze on cream 5.77; brass oxidised rather than inverted (brass is 2.35:1 on white) |
 
 ### 5.3 The destination pair, which is the hard part
 
@@ -268,15 +282,29 @@ Relay Dark's pair is unusable on any light ground: `#3ec5f0` measures **2.01:1**
 `#0a6183` / `#5c3f9e`, holds on white (6.88 / 7.90) but lands at **3.84 / 4.40** on this beige —
 the ground this theme actually has.
 
-The owner then asked for this theme specifically: **"terminal is dark gray-blue and agent is dark
-gray-violet"** — a slate and a pewter, not a teal and a purple. On warm beige that is the right
-instinct: a saturated pair reads as a modern web app dropped into a 1992 case. But the first cut of
-that idea, `#354a59` / `#4c4460`, measured **ΔE 14.3 apart at identical lightness** (luminance ratio
-1.01:1) — two greys a person would struggle to tell apart. A search over grey-blues and
-grey-violets for the pair closest to the owner's that still clears ΔE 20, AA on both grounds and
-matched lightness found `#324d5c` / `#4f4163`: **ΔE 20.3**, each within ΔE ~3 of the owner's
-colours. ΔE 20 is about the ceiling for a grey pair of matched lightness; this is the pair that
-**only just passes**, and the one to watch.
+The owner first asked for this theme specifically: **"terminal is dark gray-blue and agent is dark
+gray-violet"** — a slate and a pewter, not a teal and a purple, so the pair would sit with the
+plastic. A search for the pair closest to that which still cleared ΔE 20, AA on both grounds and
+matched lightness found `#324d5c` / `#4f4163` (**ΔE 20.3**, the ceiling for a grey pair at matched
+lightness). **It did not survive use** — "too dark and desaturated, I can't tell them apart from
+each other or from regular dark text" (owner, 2026-09-18) — and the measurements agreed: the slate
+was CIELAB chroma 13.3, barely more than the warm grey of `text_muted`, and the pair sat only ΔE 27
+and 33 from the near-black text, which is what the eye was being asked to separate.
+
+**The shipped pair is `#0049a9` / `#7500c3`.** The case beige is the tight ground, so both are
+pinned at L 33 whatever their hue and the only free variable is chroma — which the greys were
+barely spending. A first pass at chroma 31.5 and 82.6 was still "a little hard to pick out"
+(owner); the blue was the reason, because a teal-blue cannot pass chroma 35 at this lightness.
+Turning it to HSV 209 — where a 1990s machine's own blue was, EGA `#0000aa` — doubles it to
+**60.1** at the same L, and the violet reaches **99.8**.
+
+That is the ceiling: both sit at **4.63 / 4.60** on the case beige, and one step more chroma at
+either hue fails AA, which is why `agent` is the theme's tightest pair. They are **ΔE 51.6** apart,
+ΔE 68 and 106 from the near-black text and from the muted text they used to be mistaken for, and
+ΔE 21 and 64 from the Windows 95 navy, which stays the chrome. The shell blue is ΔE 12 from the
+terminal's own ANSI 4: cousins on purpose — one is chip chrome, one is grid content, and they are
+never read against each other. If the pair still has to work harder, the next lever is a tinted
+chip behind it (`@shellSoft` / `@agentSoft` already exist in `src/Theme.cpp`), not more chroma.
 
 ### 5.4 Bevels, not hairlines — the one `src/Theme.cpp` change
 
@@ -298,9 +326,10 @@ unchanged — asserted by `theChromeFlagsAndBevelColoursAreRead()`.
 Every status, syntax and ANSI colour keeps its hue and drops in luminance until it clears 4.5:1 on
 the **darkest** ground it is painted on — which for status colours is the case beige behind a
 notification row, not the lighter chip face (the first cut missed this: warning measured 3.78 there).
-Amber has to become ochre to survive, and it is the tightest pair in the theme at **4.65:1**: this
-is where a light theme is weakest, because a darker amber stops reading as "warning" and starts
-reading as brown.
+Amber has to become ochre to survive, at **4.65:1**, and with the bronze `tool` derived from it at
+4.65 it is the tightest of the meaning colours: this is where a light theme is weakest, because a
+darker amber stops reading as "warning" and starts reading as brown. Only the destination pair
+(§5.3, 4.63 / 4.60) is tighter.
 
 The ANSI ramp **inverts**: 7 and 15 are the darkest entries and "bright" means more contrast, not
 more light, or `\e[37m` text vanishes on the page. Asserted by `theBeigeTerminalInvertsTheAnsiRamp()`.
@@ -360,19 +389,34 @@ All in `tests/theme_test.cpp` (the existing theme test, extended):
 
 | assertion | test |
 |---|---|
-| every shipped theme parses cleanly and is complete (existing — now covers the two new files) | `everyShippedThemeIsComplete` |
-| every text/background pair in Dark Copper and IBM Beige meets its rule | `theAuditionedThemesMeetTheirContrastContract` |
+| every shipped theme parses cleanly and is complete | `everyShippedThemeIsComplete` |
+| every shipped theme carries all 16 ANSI entries and a whole grid; a theme that names a `background_end` means it (it differs from `background`) | `everyShippedThemeCarriesAWholeGrid` |
+| every text/background pair in Dark Copper and IBM Beige meets its rule — on `background`, `surface`, `surface_raised`, on both ends of a material face, and on both ends of a shaded grid | `theAuditionedThemesMeetTheirContrastContract` |
+| in **every** shipped theme, text, muted text and every meaning colour drawn as text (`accent`, `shell`, `agent`, `success`, `warning`, `error`, `action`, `tool`, `link`) clears 4.5:1 on all three grounds, muted text on the terminal's too, and syntax on both composer grounds | `everyShippedThemeKeepsItsTextLegible` |
 | copper is dim where structural and a different colour where bright; meaning colours unchanged | `copperStaysClearOfAmberAndRed` |
 | the destination pair stays two colours (ΔE ≥ 20), shell the cooler | `theDestinationPairStaysTwoColours` |
 | the light terminal inverts the ANSI ramp | `theBeigeTerminalInvertsTheAnsiRamp` |
 | bevel/square flags and bevel colours are read; off for every other theme | `theChromeFlagsAndBevelColoursAreRead` |
+| `solarized-dark` stays gone, and the theme a stale setting falls back to is whole | `solarizedDarkIsGone` |
+| a tool band's brass is never the flag's amber (ΔE ≥ 10), in every shipped theme | `theToolBandIsBrassAndNotTheAmberOfAFlag` |
+| `link` is a green (hue 135–180), ΔE ≥ 20 from `success`, both destinations, `error`, `warning` and ANSI 2/10, AA on the terminal ground at both ends, and equal to `[syntax] path` | `theLinkGreenIsOneColourAndClearOfSuccessAndTheDestinationPair` |
+| a theme that names no `link` gets one from its **own** ANSI 2, lifted until it reads on every ground and still a green | `aThemeThatNamesNoLinkColourGetsOneFromItsOwnGreen` |
+| a theme that names no `tool` gets one from its **own** amber, at that amber's luminance, ΔE ≥ 10 from it | `aThemeThatNamesNoToolColourGetsOneFromItsOwnAmber` |
+| `action` is a red-orange (hue 12–30), ΔE ≥ 20 from `error` and `warning` in every theme, and from Dark Copper's copper accent besides | `actionsAreARedOrangeOfTheirOwn` |
+| a theme that names no `action` gets one from its **own** red, at that red's luminance; a theme that names one keeps it | `aThemeThatNamesNoActionColourGetsOneFromItsOwnRed` |
 
 The ink-on-fill pairs (which need `Theme.cpp`'s `inkOn()`) are measured by the evidence script,
-not the unit test, because the test binary links only the file reader.
+not the unit test, because the test binary links only the file reader. The script grades the
+incumbents as well but only the auditioned two gate its exit code; the unit test asserts the
+whole-theme rules on every shipped file.
 
 ---
 
 ## 10. The audition
+
+**The figures in this section are the audition's, measured on 2026-09-18 against the files as they
+stood then** — before the destination pair was re-cut (§5.3), before the shaded grids, and before
+`action`, `tool` and `link` were tokens. §3, §4 and §5 carry the current numbers.
 
 Evidence: `docs/qa_evidence/2026-09-18-copper-and-beige-themes/`. All six themes, one fresh Relay
 each, 1400×880, the same scene: a coloured `ls`, a failing `make`, an agent turn that runs `make`,
@@ -425,7 +469,8 @@ scrollback.
   Focus outline 4.11 against 2.54.
 - **Only just passes:** `warning` on the case beige, **4.65:1** (ochre is where a light theme is
   weakest — darker amber starts to read as brown); the destination pair's colour difference,
-  **ΔE 20.3** (the owner's grey-blue/grey-violet at matched lightness: ΔE 20 is about the ceiling).
+  **ΔE 20.3** (the owner's grey-blue/grey-violet at matched lightness) — that pair was withdrawn
+  afterwards and the shipped one is ΔE 51.6 apart (§5.3).
 - **Weak:** the agent-text problem (§10.1), shared with Relay Light; the bevels are 2px and read as
   period detail rather than a heavy Win95 look — right for all-day use, but subtle in a thumbnail.
 - **Recommendation: make it the preferred light theme once §10.1 is fixed; until then, keep it as an

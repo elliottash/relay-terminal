@@ -159,9 +159,13 @@ CONTRACT = [
     ("agent", "surface_raised", "AA", "the mode chip reading AGENT"),
     ("shell", "background", "AA", "the shell destination as text"),
     ("agent", "background", "AA", "the agent destination as text; agent prompt echo"),
-    ("on.shell", "shell", "AA", "the agent prefix chip (ink on the shell fill)"),
-    ("on.agent", "agent", "AA", "the plan chip (ink on the agent fill)"),
-    ("on.warning", "warning", "AA", "the shell prefix chip (ink on amber)"),
+    # The prefix chips are destinations again (be81edb, 2026-09-19): `! terminal` wears the shell
+    # fill and `* agent` the agent fill, like the mode chip and the caret. Amber is no longer any
+    # chip's fill -- it means one thing now, "something is waiting on you" -- but `@onWarning` is
+    # still a token a theme's chrome can use, so its ink is still graded.
+    ("on.shell", "shell", "AA", "the `! terminal` prefix chip (ink on the shell fill)"),
+    ("on.agent", "agent", "AA", "the `* agent` prefix chip and the PLAN chip (ink on the agent fill)"),
+    ("on.warning", "warning", "AA", "ink on a filled amber (`@onWarning`)"),
     ("on.caution", "caution", "AA", "the secret chip"),
     ("on.selection", "selection", "AA", "selected text in every input"),
     ("success", "surface_raised", "AA", "the tasks chip, done"),
