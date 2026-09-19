@@ -96,7 +96,7 @@ The pictures above still stand; the code under them changed in five places, all 
 The envelope, the tool set, lock-file lifecycle, stale-lock sweeping, pane routing, the path
 rule for what the sidecar will write, and the read loop's non-blocking settles (`close_tab`
 withdrawing a diff, the 30-minute expiry) are unit-tested instead
-(`tests/test_guest_bridge.py`, 83 tests), since they are about files and sockets rather than
+(`tests/test_guest_bridge.py`, 93 tests), since they are about files and sockets rather than
 pixels. A real Claude Code on the other end of the
 socket remains for integration with upstream's client. Two claudes sharing one sidecar is served
 — `closeAllDiffTabs` and a dropped connection touch only their own diffs — but **two claudes in
