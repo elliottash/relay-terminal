@@ -445,13 +445,22 @@ module before two bare percentages and the tab carried its own `· 12% / 3%`, so
 disagreed about how to say the same thing and neither said which number was which; at that size
 the die's pins and the module's legs read as bars, which is the complaint. A half with nothing
 to say is left out rather than drawn as "0%", and what is left is the same grammar shortened
-(`· cpu 20%`), never a bare number. CPU
+(`· cpu 20%`), never a bare number — on the chip and the Sessions tag; the tab label is the one
+exception (card #MERX). CPU
 speaks from half a percent; memory has to clear 256 MiB *and* half a percent, so an agent worker
 idling on 60 MB leaves the chip off a small machine as well as a large one. A pane using nothing
 shows nothing anywhere: an idle terminal looks exactly as it did before, and the meters are local
-— a remote pane measures the ssh client, not the far machine. What a tab label shows is held
-still until the reading moves three points or a second has passed
-(`relay::usage::labelShouldFollow`), and only the tab whose text moved is relabelled.
+— a remote pane measures the ssh client, not the far machine.
+**The tab label moves on a clock of its own** (card #MERX, owner 2026-09-19: *"for the tab
+headers, always show cpu 00% mem 00% and 01% or 05%, always use 2 digits, so they dont keep on
+widening and narrowing. update only once every ~5 secs or so, using the 5 sec average"*). The
+suffix prints both halves always, each percent two digits wide — `  ·  cpu 07% · mem 00%`, idle
+included, `formatPercent2()` padding the digit — so the label's width never moves and the tab
+bar's layout never shuffles; a tab with no terminal pane takes no suffix at all. The poll still
+pours each summed sample into a `relay::usage::RollingMean` at 2.5 Hz, but once every
+`kTabUpdateMs` (5 s) the label takes the window's mean — the mean of the `kTabWindowMs` (5 s)
+before it, invalid samples left out of the numbers as `combined()` leaves them out of a tab's —
+and between takes the text stands still. Only the tab whose text moved is relabelled.
 `appearance/pane_usage` turns off all four — chip, tab suffix, tab tooltip line and Sessions tag
 — through `relay::usage::metersEnabled()`, which is the one place the key is read; with it off
 `Pane::refreshUsage()` drops the pane's baseline and walks no `/proc` at all, so the setting stops

@@ -1,0 +1,21 @@
+busy    t+ 0.00s  first      - cpu 30%-mem05% = +
+busy    t+ 1.25s  identical  - cpu 30%-mem05% = +
+busy    t+ 2.50s  identical  - cpu 30%-mem05% = +
+busy    t+ 3.75s  identical  - cpu 30%-mem05% = +
+busy    t+ 5.00s  identical  - cpu 30%-mem05% = +
+busy    t+ 6.25s  identical  - cpu 30%-mem05% = +
+busy    t+ 7.50s  identical  - cpu 30%-mem05% = +
+busy    t+ 8.75s  identical  - cpu 30%-mem05% = +
+busy    t+10.00s  identical  - cpu 30%-mem05% = +
+busy    t+11.25s  identical  - cpu 30%-mem05% = +
+halved  t+ 0.00s  first      - cpu 30%-mem05% = +
+halved  t+ 1.25s  CHANGED    - cpu 28%-mem05% = +
+halved  t+ 2.50s  identical  - cpu 28%-mem05% = +
+halved  t+ 3.75s  identical  - cpu 28%-mem05% = +
+halved  t+ 5.00s  CHANGED    - cpu 15%-mem05% x +
+halved  t+ 6.25s  identical  - cpu 15%-mem05% x +
+halved  t+ 7.50s  identical  - cpu 15%-mem05% x +
+halved  t+ 8.75s  identical  - cpu 15%-mem05% x +
+halved  t+10.00s  identical  - cpu 15%-mem05% x +
+halved  t+11.25s  identical  - cpu 15%-mem05% x +
+idle    t+ 0.00s  reading    - cpu00%-mem00% =< +

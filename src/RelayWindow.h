@@ -6267,20 +6267,35 @@ private:
                 }
                 remote = remote || !remoteLine.isEmpty();
             }
-            // The tab label carries the tab's combined usage (issue #D03W). Two things keep
-            // this cheap: the displayed percent is held still unless it moved by a few points
-            // or a second has passed (relay::usage::labelShouldFollow — at 2.5 Hz a wobbling
-            // number is a distraction, and the label's width wobbles with it), and only the one
-            // tab whose text moved is relabelled. It used to call updateTitles(), which re-elides
-            // every tab, rewrites every tooltip and runs syncChrome and the share sync.
+            // The tab label carries the tab's combined usage (issue #D03W) on a clock of its
+            // own (card #MERX, owner 2026-09-19: "update only once every ~5 secs or so, using
+            // the 5 sec average"): every poll pours the summed sample into a 5 s window, and
+            // once every relay::usage::kTabUpdateMs the label takes the window's mean, printed
+            // with both halves always and two digits each — so the label's width never moves
+            // and the tab bar's layout never shuffles, and a number that ticks once every 5 s
+            // is not a flicker. Between takes the text stands still. Only the tab whose text
+            // moved is relabelled. It used to call updateTitles(), which re-elides every tab,
+            // rewrites every tooltip and runs syncChrome and the share sync.
             const relay::usage::Sample summed = relay::usage::combined(usage);
-            const QString usageText = meters ? relay::usage::tabSuffix(summed) : QString();
-            if (m_tabUsageKey.value(page) != usageText
-                && relay::usage::labelShouldFollow(m_tabUsageShown.value(page), summed,
-                                                   m_tabUsageAt.value(page), now)) {
-                m_tabUsageKey.insert(page, usageText);
-                m_tabUsageShown.insert(page, summed);
-                m_tabUsageAt.insert(page, now);
+            const QString previousText = m_tabUsage.value(page).text;
+            QString usageText = previousText;
+            if (meters && terminal) {
+                TabUsageState &state = m_tabUsage[page];
+                state.window.add(summed, now);
+                if (state.labelledAtMs == 0
+                    || now - state.labelledAtMs >= relay::usage::kTabUpdateMs)
+                    usageText = relay::usage::tabSuffix(state.window.average());
+            } else if (!previousText.isEmpty()) {
+                usageText = QString();   // no terminal pane to measure, or the meters are off
+            }
+            if (usageText != previousText) {
+                TabUsageState &state = m_tabUsage[page];
+                if (usageText.isEmpty())
+                    state = TabUsageState{};   // fresh window and fresh clock for panes to come
+                else {
+                    state.text = usageText;
+                    state.labelledAtMs = now;
+                }
                 const QStringList titles = paneTitlesIn(page);
                 m_tabs->setTabText(i, tabLabelText(page, titles));
                 m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
@@ -6296,12 +6311,8 @@ private:
         for (auto it = m_tabMark.begin(); it != m_tabMark.end();)
             it = pages.contains(it.key()) ? std::next(it) : m_tabMark.erase(it);
         applyTabIcons();   // after the pruning, so a closed tab cannot keep the blink armed
-        for (auto it = m_tabUsageKey.begin(); it != m_tabUsageKey.end();)
-            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageKey.erase(it);
-        for (auto it = m_tabUsageShown.begin(); it != m_tabUsageShown.end();)
-            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageShown.erase(it);
-        for (auto it = m_tabUsageAt.begin(); it != m_tabUsageAt.end();)
-            it = pages.contains(it.key()) ? std::next(it) : m_tabUsageAt.erase(it);
+        for (auto it = m_tabUsage.begin(); it != m_tabUsage.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabUsage.erase(it);
         // The session manager shows the same reading as a tag on each open conversation's row
         // (issue #D03W). It never looks at a window itself; like setOpenSessions, this feeds it.
         if (!liveUsage.isEmpty() || m_fedLiveUsage)
@@ -6323,6 +6334,16 @@ private:
         relay::panestatus::State top = relay::panestatus::State::Idle;
         relay::panestatus::State live = relay::panestatus::State::Idle;
         relay::panestatus::TypeStyle type;
+    };
+
+    // The tab label's usage state (issue #D03W, card #MERX): the 5 s window its number is the
+    // mean of, the text that mean is currently spelled as, and when the label last took from
+    // the window (0: never, so the first reading shows at once). The window fills on every
+    // poll; the label only moves once every relay::usage::kTabUpdateMs.
+    struct TabUsageState {
+        relay::usage::RollingMean window;
+        QString text;          // the suffix the tab is labelled with ("" when there is none)
+        qint64 labelledAtMs = 0;
     };
 
     // Draw every tab's icon for the step the wall clock is in now (owner, 2026-09-19: one cadence).
@@ -6373,17 +6394,20 @@ private:
     // The suffix the tab label carries, or nothing while the meters are switched off — the same
     // setting the chip obeys, read in the one place the poll reads it.
     //
-    // It is the reading the tab is *already* labelled with, not a fresh one. The poll decides when
-    // the number may move (relay::usage::labelShouldFollow holds it still unless it shifted by a
-    // few points or a second has passed), and updateTitles() runs for all sorts of other reasons —
-    // a rename, a pane opening or closing, a theme change — so measuring again here put a new
-    // percent on the tab in between and undid the hysteresis. Before the first poll there is
-    // nothing displayed yet, so the live sample seeds the label.
+    // It is the reading the tab is *already* labelled with, not a fresh one. The poll decides
+    // when the number may move (once every relay::usage::kTabUpdateMs, card #MERX), and
+    // updateTitles() runs for all sorts of other reasons — a rename, a pane opening or closing,
+    // a theme change — so measuring again here put a new percent on the tab in between and undid
+    // that clock. Before the first poll there is nothing displayed yet, so the live sample seeds
+    // the label; a tab with no terminal pane has nothing to measure and takes no suffix at all.
     QString tabUsageSuffix(QWidget *page) const {
         if (!relay::usage::metersEnabled()) return {};
-        const auto shown = m_tabUsageKey.constFind(page);
-        if (shown != m_tabUsageKey.constEnd()) return *shown;
-        return relay::usage::tabSuffix(tabUsageSample(page));
+        const auto shown = m_tabUsage.constFind(page);
+        if (shown != m_tabUsage.constEnd() && !shown->text.isEmpty()) return shown->text;
+        for (QWidget *leaf : leavesIn(page))
+            if (dynamic_cast<const Pane *>(leaf))
+                return relay::usage::tabSuffix(tabUsageSample(page));
+        return {};
     }
 
     // A tab's tooltip: the pane titles, where the tab's last active pane is, and the usage line,
@@ -6980,11 +7004,8 @@ private:
     QTimer m_statusTimer;
     QTimer m_pulseTimer;                       // the blink grid's next boundary, for the tab dots
     QHash<QWidget *, QString> m_tabIconKey;
-    bool m_paintingTabSwatches = false;
     QHash<QWidget *, TabMark> m_tabMark;
-    QHash<QWidget *, QString> m_tabUsageKey;   // the usage suffix each tab is labelled with
-    QHash<QWidget *, relay::usage::Sample> m_tabUsageShown;  // ... the reading behind that text
-    QHash<QWidget *, qint64> m_tabUsageAt;     // ... and when it last moved, for the hysteresis
+    QHash<QWidget *, TabUsageState> m_tabUsage;  // each tab's usage window, label text and clock
     bool m_fedLiveUsage = false;               // whether any session tag was pushed last poll
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;

@@ -290,6 +290,11 @@ QString formatPercent(double percent)
     return QString::number(int(std::lround(percent)));
 }
 
+QString formatPercent2(double percent)
+{
+    return formatPercent(percent).rightJustified(2, QLatin1Char('0'));
+}
+
 bool showsCpu(const Sample &sample)
 {
     return sample.valid && sample.cpuPercent >= 0.5;
@@ -410,10 +415,12 @@ QString readingText(const Sample &sample, bool cpuOnly)
 
 QString tabSuffix(const Sample &sample)
 {
-    const QString reading = readingText(sample);
-    if (reading.isEmpty()) return {};
+    // Both halves, always, two digits each (card #MERX): the text's width never moves, so the
+    // tab bar's layout never shuffles. readingText()'s rule — a quiet half is left out — is the
+    // chip's, not the tab's.
     // The tab bar's own separator convention, which every other thing on a tab label uses.
-    return QStringLiteral("  ·  ") + reading;
+    return QStringLiteral("  ·  cpu %1% · mem %2%")
+        .arg(formatPercent2(sample.cpuPercent), formatPercent2(sample.ramPercent));
 }
 
 QString liveTag(const Sample &sample)
@@ -445,13 +452,37 @@ bool metersEnabled()
     return QSettings().value(QStringLiteral("appearance/pane_usage"), true).toBool();
 }
 
-bool labelShouldFollow(const Sample &shown, const Sample &measured, qint64 shownAtMs, qint64 nowMs)
+void RollingMean::add(const Sample &sample, qint64 atMs)
 {
-    if (shownAtMs <= 0) return true;   // nothing on screen yet
-    if (shown.valid != measured.valid) return true;
-    if (std::fabs(measured.cpuPercent - shown.cpuPercent) >= kLabelStep) return true;
-    if (std::fabs(measured.ramPercent - shown.ramPercent) >= kLabelStep) return true;
-    return nowMs - shownAtMs >= kLabelHoldMs;
+    // The window is the kTabWindowMs before the newest entry: whatever is older than that has
+    // had its turn on the label and is dropped, so a stall does not leave a stale reading
+    // steering the average forever.
+    while (!m_entries.isEmpty() && atMs - m_entries.first().atMs > kTabWindowMs)
+        m_entries.removeFirst();
+    // A sample with no reading behind it is kept for the window's length — time is what the
+    // window is measured in — but its numbers are not averaged in (average() skips it): an
+    // unread pane was not using nothing, it was not measured, the same rule combined() keeps.
+    m_entries.append(Entry{sample.valid, atMs, sample.cpuPercent, sample.ramPercent,
+                           sample.ramBytes});
+}
+
+Sample RollingMean::average() const
+{
+    Sample out;
+    int counted = 0;
+    for (const Entry &entry : m_entries) {
+        if (!entry.valid) continue;
+        out.cpuPercent += entry.cpuPercent;
+        out.ramPercent += entry.ramPercent;
+        out.ramBytes += entry.ramBytes;
+        ++counted;
+    }
+    if (counted == 0) return out;   // nothing measured: an invalid Sample, read as 00/00
+    out.valid = true;
+    out.cpuPercent /= counted;
+    out.ramPercent /= counted;
+    out.ramBytes /= counted;
+    return out;
 }
 
 }  // namespace relay::usage

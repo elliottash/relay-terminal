@@ -127,6 +127,21 @@ private Q_SLOTS:
         QCOMPARE(formatPercent(99.9), QStringLiteral("100"));
     }
 
+    // The tab label's percent is two digits wide, always, so the label cannot gain or lose a
+    // column as the number moves (card #MERX) — "00" and "01" included, "100" the only
+    // three-digit reading there is.
+    void tabPercentsAreTwoDigitsWide() {
+        QCOMPARE(formatPercent2(0.0), QStringLiteral("00"));
+        QCOMPARE(formatPercent2(0.4), QStringLiteral("00"));
+        QCOMPARE(formatPercent2(0.5), QStringLiteral("01"));
+        QCOMPARE(formatPercent2(5.4), QStringLiteral("05"));
+        QCOMPARE(formatPercent2(9.6), QStringLiteral("10"));
+        QCOMPARE(formatPercent2(12.4), QStringLiteral("12"));
+        QCOMPARE(formatPercent2(99.4), QStringLiteral("99"));
+        QCOMPARE(formatPercent2(99.6), QStringLiteral("100"));
+        QCOMPARE(formatPercent2(100.0), QStringLiteral("100"));
+    }
+
     void quietPanesShowNothing() {
         const qint64 mib = 1 << 20;
         Sample idle;
@@ -189,18 +204,22 @@ private Q_SLOTS:
         const qint64 gib = qint64(1) << 30;
         Sample idle; idle.valid = true;
         QVERIFY(readingText(idle).isEmpty());
-        QVERIFY(tabSuffix(idle).isEmpty());
-        QVERIFY(tabSuffix(Sample{}).isEmpty());
         QVERIFY(liveTag(idle).isEmpty());
         QVERIFY(liveTag(Sample{}).isEmpty());
         QVERIFY(readingParts(idle).isEmpty());
+        // The tab label is the exception (card #MERX): it prints both halves always, two
+        // digits wide — idle included, and a sample with no reading behind it as well, because
+        // a suffix that appears, disappears and widens shuffles the tab bar's layout.
+        QCOMPARE(tabSuffix(idle), QStringLiteral("  ·  cpu 00% · mem 00%"));
+        QCOMPARE(tabSuffix(Sample{}), QStringLiteral("  ·  cpu 00% · mem 00%"));
 
         Sample busy; busy.valid = true; busy.cpuPercent = 12.4; busy.ramBytes = 2 * gib; busy.ramPercent = 3.4;
         const QString one = QStringLiteral("cpu 12% · mem 3%");
         QCOMPARE(readingText(busy), one);
-        // The chip's string, the tab's suffix and the Sessions row's tag are that one string.
+        // The chip's string and the Sessions row's tag are that one string; the tab's suffix
+        // is the same words in the fixed-width form.
         QCOMPARE(liveTag(busy), one);
-        QCOMPARE(tabSuffix(busy), QStringLiteral("  ·  ") + one);
+        QCOMPARE(tabSuffix(busy), QStringLiteral("  ·  cpu 12% · mem 03%"));
         QVERIFY(describe(busy).startsWith(one));
         // No slash, no bare pair, and nothing that has to be learned before it can be read.
         QVERIFY(!tabSuffix(busy).contains(QLatin1Char('/')));
@@ -211,24 +230,27 @@ private Q_SLOTS:
         QVERIFY(!tabSuffix(busy).contains(QChar(0x00c2)));
         QVERIFY(!liveTag(busy).contains(QChar(0x00c2)));
         QVERIFY(!describe(busy).contains(QChar(0x00c2)));
+        // Every reading the tab can spell is the same width: no number the label can show
+        // gains it a digit-width or costs it one, which is the point of the two digits.
+        QCOMPARE(tabSuffix(busy).size(), tabSuffix(idle).size());
 
         // A half with nothing to say is left out rather than printed as "0%", and what is left
-        // is the same grammar shortened, not a different one.
+        // is the same grammar shortened, not a different one — on the chip and the Sessions
+        // tag. The tab keeps both halves and pads, as above.
         Sample cpuOnly; cpuOnly.valid = true; cpuOnly.cpuPercent = 20.0;
         cpuOnly.ramBytes = 60 << 20; cpuOnly.ramPercent = 0.2;
         QCOMPARE(readingText(cpuOnly), QStringLiteral("cpu 20%"));
-        QCOMPARE(tabSuffix(cpuOnly), QStringLiteral("  ·  cpu 20%"));
+        QCOMPARE(tabSuffix(cpuOnly), QStringLiteral("  ·  cpu 20% · mem 00%"));
         QCOMPARE(liveTag(cpuOnly), QStringLiteral("cpu 20%"));
         Sample memOnly; memOnly.valid = true; memOnly.cpuPercent = 0.1;
         memOnly.ramBytes = 3 * gib; memOnly.ramPercent = 9.4;
         QCOMPARE(readingText(memOnly), QStringLiteral("mem 9%"));
-        QCOMPARE(tabSuffix(memOnly), QStringLiteral("  ·  mem 9%"));
+        QCOMPARE(tabSuffix(memOnly), QStringLiteral("  ·  cpu 00% · mem 09%"));
         QCOMPARE(liveTag(memOnly), QStringLiteral("mem 9%"));
-        // No section anywhere reads "0%": the evidence screenshot's "· 20% / 0%" cannot recur.
-        QVERIFY(!tabSuffix(cpuOnly).contains(QStringLiteral(" 0%")));
-        QVERIFY(!tabSuffix(cpuOnly).contains(QStringLiteral("/")));
+        // No section the chip or the tag prints reads "0%": the evidence screenshot's
+        // "· 20% / 0%" cannot recur there.
+        QVERIFY(!readingText(cpuOnly).contains(QStringLiteral(" 0%")));
         QVERIFY(!liveTag(cpuOnly).contains(QStringLiteral(" 0%")));
-        QVERIFY(!tabSuffix(memOnly).contains(QStringLiteral(" 0%")));
         QVERIFY(!liveTag(memOnly).contains(QStringLiteral(" 0%")));
     }
 
@@ -272,22 +294,47 @@ private Q_SLOTS:
         QCOMPARE(readingParts(cpuOnly).at(1).text, QStringLiteral("20%"));
     }
 
-    void aLabelHoldsStillUntilTheReadingMoves() {
-        // The poll runs at 2.5 Hz; a percent that wobbles by a point four times a second is a
-        // distraction, and on a tab label the text's width wobbles with it (issue #D03W).
-        Sample shown; shown.valid = true; shown.cpuPercent = 12.0; shown.ramPercent = 3.0;
-        Sample nudged = shown; nudged.cpuPercent = 13.0;
-        QVERIFY(!labelShouldFollow(shown, nudged, 1000, 1400));   // one point, 400 ms on: hold
-        QVERIFY(labelShouldFollow(shown, nudged, 1000, 2000));    // ... but not past the hold
-        Sample jumped = shown; jumped.cpuPercent = 40.0;
-        QVERIFY(labelShouldFollow(shown, jumped, 1000, 1040));    // a real move shows at once
-        Sample memJumped = shown; memJumped.ramPercent = 9.0;
-        QVERIFY(labelShouldFollow(shown, memJumped, 1000, 1040)); // either axis
-        // Appearing and disappearing are not wobble.
-        QVERIFY(labelShouldFollow(Sample{}, shown, 1000, 1040));
-        QVERIFY(labelShouldFollow(shown, Sample{}, 1000, 1040));
-        // Nothing shown yet: the first reading is always followed.
-        QVERIFY(labelShouldFollow(shown, nudged, 0, 400));
+    // The tab label's own pace (card #MERX, owner 2026-09-19: "update only once every ~5 secs
+    // or so, using the 5 sec average"). The poll still measures at 2.5 Hz; these are the
+    // numbers that pace is made of — the window the average is taken over, and the fixed-width
+    // text it becomes. The taking of it, once every kTabUpdateMs, is RelayWindow's poll.
+    void theTabAverageComesFromAWindow() {
+        const qint64 poll = 400;   // the status poll's cadence, and so the meter's
+        Sample busy; busy.valid = true; busy.cpuPercent = 12.0; busy.ramPercent = 4.0;
+        busy.ramBytes = 2 << 30;
+        Sample idle; idle.valid = true;   // a quiet poll: real, and zero
+
+        // An empty window has no reading: the label says 00/00 for the window it takes to fill.
+        RollingMean empty;
+        QVERIFY(!empty.average().valid);
+        QCOMPARE(tabSuffix(empty.average()), QStringLiteral("  ·  cpu 00% · mem 00%"));
+
+        // The mean of what the window holds: one sample is that sample, several are averaged.
+        RollingMean window;
+        window.add(busy, 1000);
+        QVERIFY(window.average().valid);
+        QCOMPARE(tabSuffix(window.average()), QStringLiteral("  ·  cpu 12% · mem 04%"));
+        for (int i = 1; i <= 12; ++i) window.add(idle, 1000 + i * poll);
+        // busy is now 4800 ms old: still inside the 5 s window, and counted.
+        QCOMPARE(tabSuffix(window.average()), QStringLiteral("  ·  cpu 01% · mem 00%"));
+        window.add(idle, 1000 + 13 * poll);
+        // One poll later it is past kTabWindowMs and dropped: the average is the idle polls
+        // alone, not an idle reading still nudged by a busy one that has fallen out.
+        QCOMPARE(tabSuffix(window.average()), QStringLiteral("  ·  cpu 00% · mem 00%"));
+        QVERIFY(window.average().valid);
+
+        // A sample with no reading behind it is not a zero: it keeps its place in time but
+        // its numbers are not averaged in, the rule combined() keeps too.
+        RollingMean starting;
+        starting.add(Sample{}, 1000);
+        QVERIFY(!starting.average().valid);
+        starting.add(busy, 1000 + poll);
+        QVERIFY(starting.average().valid);
+        QCOMPARE(tabSuffix(starting.average()), QStringLiteral("  ·  cpu 12% · mem 04%"));
+
+        // clear() empties the window for whatever comes next.
+        starting.clear();
+        QVERIFY(!starting.average().valid);
     }
 
     void describesTheLongForm() {

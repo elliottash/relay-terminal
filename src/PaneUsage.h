@@ -7,7 +7,9 @@
 // an ssh client included) and the pane's agent worker. Summing their /proc counters over the
 // status poll's interval gives the pane's share of the machine, which PaneChrome shows as a small
 // "cpu 12% · mem 3%" chip beside the pane's title (issue #D03W) and RelayWindow appends to the tab
-// label. Every surface prints that one wording (issue #6BGA) — see readingText() below.
+// label. Every surface prints that one wording (issue #6BGA) except the tab label, which prints
+// the same words with both halves always and two digits each, on a 5 s clock of its own (card
+// #MERX) — see tabSuffix() below.
 //
 // There is one /proc walk here, walkTrees(), and it is the only one in the program: the usage
 // meter reads it for the counters and Pane::programWaitingForInput() reads it for the pids (the
@@ -161,6 +163,11 @@ double ramPercentOf(qint64 bytes, qint64 totalBytes);
 // Whole-number percents; sub-half rounds to 0.
 QString formatPercent(double percent);
 
+// The same whole percent printed two digits wide — "00" to "99", and "100" unchanged, the only
+// three-digit reading. Only the tab label uses this (card #MERX): a tab's width is every other
+// tab's layout, so there a percent may not gain or lose a column as the number moves.
+QString formatPercent2(double percent);
+
 // Memory below this never puts the meter on screen, however large a share of the machine it is.
 // An agent worker sitting idle holds 60-80 MB and will do so all day; on a small machine that is
 // a percent or two, which used to pin the chip on permanently reading "0% / 1%".
@@ -202,9 +209,16 @@ struct ReadingPart {
 };
 QList<ReadingPart> readingParts(const Sample &sample, bool cpuOnly = false);
 
-// "  ·  cpu 12% · mem 3%" for a tab label: readingText() behind the tab bar's own separator.
-// Empty when there is nothing worth showing.
+// "  ·  cpu 07% · mem 00%" for a tab label: both halves always, each percent two digits wide
+// (card #MERX, owner 2026-09-19: "always show cpu 00% mem 00% and 01% or 05%, always use 2
+// digits, so they dont keep on widening and narrowing"). This is the one surface that does not
+// print readingText(): the chip leaves a half with nothing to say out because the header row has
+// room to breathe, but a tab suffix that appears, disappears and widens as work comes and goes
+// shuffles the whole bar's layout — so idle is "cpu 00% · mem 00%" and the width never moves.
+// A Sample with no reading behind it (nothing measured yet, or nothing to measure) formats as
+// 00/00 all the same; the caller decides whether the tab has panes to measure at all.
 QString tabSuffix(const Sample &sample);
+
 
 // readingText() under its old name, for the session manager's rows. Empty when there is nothing
 // worth showing.
@@ -240,13 +254,33 @@ QString memoryNote();
 // them, which is what the settings row promises.
 bool metersEnabled();
 
-// Hysteresis for a percentage on a label (issue #D03W). The poll runs at 2.5 Hz and a rounded
-// percent that wobbles by a point twice a second is a distraction — worse on a tab label, where
-// the text's width moves too. A freshly measured sample only replaces the one on screen when it
-// moved by kLabelStep points on either axis, or kLabelHoldMs has passed since the label last
-// changed. `shownAtMs` is when that happened; 0 (never) always follows.
-inline constexpr double kLabelStep = 3.0;
-inline constexpr qint64 kLabelHoldMs = 1000;
-bool labelShouldFollow(const Sample &shown, const Sample &measured, qint64 shownAtMs, qint64 nowMs);
+// The tab label's pace (card #MERX, owner 2026-09-19: "update only once every ~5 secs or so,
+// using the 5 sec average"). The poll still measures at 2.5 Hz — the pane chip and the Sessions
+// tag want that — but the tab label is refreshed from a window, not from the last poll: the mean
+// of the kTabWindowMs before it, taken once every kTabUpdateMs.
+inline constexpr qint64 kTabUpdateMs = 5000;
+inline constexpr qint64 kTabWindowMs = 5000;
+
+// The window itself: samples go in as the poll reads them, and average() is the plain mean of
+// what kTabWindowMs still holds. The poll's cadence is even, so a mean of samples is a mean over
+// time. Invalid samples — a pane that has not been measured twice yet — are left out of the
+// numbers rather than counted as zeros; the average is valid when one entry was, and an empty
+// window averages to an invalid Sample (the label reads 00/00 for the window it takes to fill).
+class RollingMean {
+public:
+    void add(const Sample &sample, qint64 atMs);
+    Sample average() const;
+    void clear() { m_entries.clear(); }
+
+private:
+    struct Entry {
+        bool valid = false;
+        qint64 atMs = 0;
+        double cpuPercent = 0.0;
+        double ramPercent = 0.0;
+        qint64 ramBytes = 0;
+    };
+    QList<Entry> m_entries;
+};
 
 }  // namespace relay::usage
