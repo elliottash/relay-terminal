@@ -9,7 +9,7 @@ workstream: agent
 assignee: agent
 rank: zzzzzzz
 created: '2026-09-19'
-acceptance: an agent internals pane opens beside a terminal pane as an ordinary splitter leaf, streams that pane's reasoning and tool calls live and in order across turns, the terminal prints neither while it is open and prints both again once it is closed, and it has a keymap action, a palette entry and a shortcut hint
+acceptance: an agent internals pane opens beside a terminal pane as an ordinary splitter leaf, streams that pane's reasoning and tool calls live and in order across turns, the terminal prints neither while it is open, and when it is closed the rows it hid are reprinted into the terminal in order and later ones print inline again, and it has a keymap action, a palette entry and a shortcut hint
 source: 'issues/feature_intake.txt, 2026-09-19'
 links: {plans: [], commits: [], evidence: [], related: [T8CN, K48R, BDXG, 9K5H], github: null}
 ---
@@ -25,10 +25,28 @@ links: {plans: [], commits: [], evidence: [], related: [T8CN, K48R, BDXG, 9K5H],
 - **What the terminal shows meanwhile: "nothing at all. but they come back when the agent internals
   pane is closed."** While the pane is open its owner prints no ✦ thinking row, no thinking fold and
   no tool-call rows. When it is closed, the terminal prints them again from that moment on — the
-  next reasoning block and the next call appear inline exactly as they do today. Rows that went to
-  the pane while it was open are not replayed into the grid (scrollback is append-only); the
-  turn's "✦ N tool calls" line still prints at the end of every turn, so each hidden turn keeps one
-  line in the terminal that opens the whole of it.
+  next reasoning block and the next call appear inline exactly as they do today.
+- **The hidden rows are reprinted on close** (owner, same day, correcting the first draft of this
+  card, which had left them out: "i did mean that the hidden rows should be reprinted on close").
+  Everything the pane took while it was open goes into the terminal when it closes: each
+  "▸ ✦ thought for N s" row and each tool-call row, settled and collapsed, in the order they
+  happened, with working fold anchors — a click unfolds a reprinted row exactly like one that was
+  printed live (the thinking folds answer from `m_turnThinking`, the call folds through
+  `tool_output_get`, as restored rows already do, #EC58). What follows from the grid being
+  append-only, and is decided here rather than left to the implementer:
+  - The rows land at the cursor at the moment of closing, so they sit *below* answers that printed
+    while the pane was open, not above them. They are therefore grouped per turn under a muted rule
+    carrying that turn's request (its first line), so the block reads as "what the agent did for
+    this", not as new activity. Runs that merged in the pane ("read 6 files") reprint as the one
+    merged row.
+  - A turn still running at close: its rows so far are reprinted first, then the live rows continue
+    under them with no rule in between — that turn reads exactly as if the pane had never been open.
+  - Relay only writes into the grid when it may (`inlineReady()`): if a program owns the screen at
+    close, the reprint waits until the pane is next ready, and is dropped for nothing.
+  - The pane keeps the hidden rows per open period and hands them over once; opening and closing
+    again does not print them twice. A pane closed because its owner is closing reprints nothing.
+  - Bound: the worker keeps detail for the last 50 turns, so at most the last 50 hidden turns are
+    reprinted; older ones collapse to a single muted "… N earlier turns" row.
 - **The name is "agent internals"** (the owner's words). Keymap action `agent.internalsPane`.
 - **A pane, not an overlay** (standing rule): a `ToolPane` leaf inserted beside its owner with
   `insertBeside`, so it drags, splits, resizes and closes like every other pane. One per owner pane;
@@ -68,7 +86,12 @@ links: {plans: [], commits: [], evidence: [], related: [T8CN, K48R, BDXG, 9K5H],
 
 - [ ] Open the pane, run a turn with reasoning and several tool calls: all of it streams in the
       pane, none of it in the terminal; the answer prints in the terminal as usual.
-- [ ] Close the pane mid-turn: the next tool call prints inline in the terminal.
+- [ ] Close the pane after two hidden turns: both turns' thought and tool rows are reprinted, grouped
+      per turn, in order, and each reprinted row unfolds on a click.
+- [ ] Close the pane mid-turn: that turn's rows so far are reprinted, then the next tool call prints
+      inline under them.
+- [ ] Close it while a full-screen program owns the screen: the reprint arrives once the prompt is back.
+- [ ] Open and close again with nothing new: nothing is printed twice.
 - [ ] Open it mid-reasoning: the inline fold settles, the pane shows the block from its start.
 - [ ] Drag the pane to another split position; close its owner — the internals pane goes with it.
 - [ ] Two terminal panes in one tab each get their own internals pane.
