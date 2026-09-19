@@ -2308,6 +2308,66 @@ private:
             defaultProject.aliases = QStringLiteral("inbox loose card project picker default switchboard");
             agent.rows << defaultProject;
         }
+        {
+            // The known-projects list (#916B; the lesson of Warp's #11899, where the list only
+            // grows): every project Relay knows, why it became known and when, each with a Remove
+            // that forgets the registry record and nothing else — the project's files, its board
+            // included, are not touched. The projects the user said no to ("do not make a
+            // Switchboard here") follow, each with an Undo, so a no is as reversible as a yes.
+            relay::projects::Registry &registry = m_manager->projects();
+            const QList<relay::projects::Record> known = registry.knownProjects();
+            const QStringList declined = registry.declined();
+            const qint64 now = QDateTime::currentSecsSinceEpoch();
+            if (known.isEmpty() && declined.isEmpty()) {
+                relay::SettingRow none;
+                none.kind = relay::SettingRow::Info;
+                none.id = QStringLiteral("info:known_projects");
+                none.label = QStringLiteral("No known projects yet");
+                none.detail = QStringLiteral("A project becomes known when a tab attaches to it: opening its Switchboard, "
+                                             "/card, the # card picker, or the project picker");
+                none.aliases = QStringLiteral("known projects registry");
+                agent.rows << none;
+            }
+            for (const relay::projects::Record &record : known) {
+                relay::SettingRow row;
+                row.kind = relay::SettingRow::Buttons;
+                row.id = QStringLiteral("project:") + record.key;
+                row.label = record.name.isEmpty() ? relay::projects::nameFor(record.path) : record.name;
+                QStringList detail{record.path};
+                if (!record.reason.isEmpty())
+                    detail << QStringLiteral("known because %1, %2").arg(relay::projects::reasonText(record.reason),
+                                                                          relay::projects::agoText(record.knownSince, now));
+                if (record.lastAttached > 0 && record.lastAttached != record.knownSince)
+                    detail << QStringLiteral("last attached %1").arg(relay::projects::agoText(record.lastAttached, now));
+                // The filesystem, not the record: a board made after the attach (the picker's
+                // "Initialize new project here") is on disk before the record is refreshed.
+                if (relay::projects::boardDirOf(record.path).isEmpty()) detail << QStringLiteral("no Switchboard yet");
+                row.detail = detail.join(QStringLiteral(" · "));
+                row.aliases = QStringLiteral("known project forget remove registry switchboard ") + record.path;
+                row.buttonTexts = QStringList{QStringLiteral("Remove")};
+                const QString path = record.path;
+                row.onButton = [this, path](int) {
+                    m_manager->projects().forget(path);
+                    notice(QStringLiteral("Forgot %1 · its files, Switchboard included, are untouched; an attached tab stays attached")
+                               .arg(relay::projects::nameFor(path)), 7000);
+                };
+                agent.rows << row;
+            }
+            for (const QString &path : declined) {
+                relay::SettingRow row;
+                row.kind = relay::SettingRow::Buttons;
+                row.id = QStringLiteral("declined:") + relay::projects::keyFor(path);
+                row.label = relay::projects::nameFor(path);
+                row.detail = QStringLiteral("%1 · you said no to a Switchboard here, so Relay does not ask again").arg(path);
+                row.aliases = QStringLiteral("known projects declined undo ask again switchboard ") + path;
+                row.buttonTexts = QStringList{QStringLiteral("Undo")};
+                row.onButton = [this, path](int) {
+                    m_manager->projects().undecline(path);
+                    notice(QStringLiteral("%1 may be asked about again.").arg(relay::projects::nameFor(path)), 5000);
+                };
+                agent.rows << row;
+            }
+        }
         agent.rows << headingRow(QStringLiteral("Turn limits"));
         agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
                               QStringLiteral("Fraction of the model window, 0.50–0.98 (empty: 80% minus output room)"),
@@ -4097,6 +4157,7 @@ public:
             QString::fromLatin1(dir.isEmpty() ? relay::projects::kBoardNone : relay::projects::kBoardRepo), dir);
         repointTabPanes(page);
         m_manager->scheduleSave();
+        updateTitles();   // the tab's chip (#916B)
     }
 
     // "Detach this tab from <project>". Nothing is closed and nothing is written: an open
@@ -4107,8 +4168,76 @@ public:
         const QString was = m_tabProject.take(page);
         repointTabPanes(page);
         m_manager->scheduleSave();
+        updateTitles();   // the chip goes with the attachment
         statusBar()->showMessage(QStringLiteral("This tab is no longer attached to %1.")
                                      .arg(relay::projects::nameFor(was)), 9000);
+    }
+
+    // ----- the chip on an attached tab (#916B) ------------------------------------------------
+    // An attached tab wears its project's name at the left of its label, and one click on it
+    // detaches. An unattached tab shows nothing at all: there is no "not attached" state to
+    // advertise, because unattached is the ordinary state. It lives in the tab's left box beside
+    // the ⧉ "move to new window" button (placeTabBarControls), so it moves with the tab and goes
+    // with it.
+    //
+    // The left box itself: one per tab, made by whichever of the two callers gets there first.
+    // A QTabBar side slot holds one widget, and this tab has two things to put there.
+    QWidget *tabLeftBox(int index) {
+        QTabBar *bar = m_tabs->tabBar();
+        if (QWidget *box = bar->tabButton(index, QTabBar::LeftSide)) return box;
+        auto *box = new QWidget(bar);
+        box->setObjectName(QStringLiteral("tabLeftBox"));
+        auto *row = new QHBoxLayout(box);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(2);
+        bar->setTabButton(index, QTabBar::LeftSide, box);
+        return box;
+    }
+    // A child came or went: the tab's width is cached from the box's size hint, and the one way
+    // to have QTabBar read it again is to set the slot afresh. The bar moves a side widget but
+    // never resizes it, so the box takes its own hint here — after the children's visibility is
+    // settled, since a layout's hint leaves hidden widgets out.
+    void relayoutTabLeftBox(int index) {
+        QTabBar *bar = m_tabs->tabBar();
+        QWidget *box = bar->tabButton(index, QTabBar::LeftSide);
+        if (!box) return;
+        box->adjustSize();
+        bar->setTabButton(index, QTabBar::LeftSide, nullptr);
+        bar->setTabButton(index, QTabBar::LeftSide, box);
+    }
+
+    void syncTabProjectChip(int index, QWidget *page) {
+        const QString project = tabProject(page);
+        QWidget *box = tabLeftBox(index);
+        auto *chip = box->findChild<QToolButton *>(QStringLiteral("tabProjectChip"), Qt::FindDirectChildrenOnly);
+        if (project.isEmpty()) {
+            if (chip) { chip->hide(); chip->setParent(nullptr); chip->deleteLater(); relayoutTabLeftBox(index); }
+            return;
+        }
+        if (chip && chip->property("project").toString() == project) return;
+        if (chip) { chip->hide(); chip->setParent(nullptr); chip->deleteLater(); }
+        chip = new QToolButton(box);
+        chip->setObjectName(QStringLiteral("tabProjectChip"));
+        chip->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        chip->setAutoRaise(true);
+        chip->setFocusPolicy(Qt::NoFocus);
+        chip->setCursor(Qt::PointingHandCursor);
+        chip->setText(relay::projects::nameFor(project));
+        chip->setProperty("project", project);
+        chip->setToolTip(QStringLiteral("This tab is attached to %1 · click to detach it (its panes lose the card tools; "
+                                        "an open Switchboard stays open)").arg(project));
+        QPointer<QWidget> pageGuard(page);
+        connect(chip, &QToolButton::clicked, this, [this, pageGuard] {
+            if (!pageGuard) return;
+            detachTab(pageGuard);
+            // The mouse is the slow path; the palette has the same action for the keyboard.
+            hint(QStringLiteral("project.detach.chip"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")),
+                                                QStringLiteral("then “Detach this tab”")));
+        });
+        box->layout()->addWidget(chip);   // after the ⧉ button, when that has been made
+        chip->show();                     // a child added to a shown box is otherwise shown a turn later
+        relayoutTabLeftBox(index);
     }
 
     // The project this tab is attached to, or an empty string. The one reader.
@@ -5203,6 +5332,7 @@ private:
             refreshTabJudgement(page, titles);
             m_tabs->setTabText(i, tabLabelText(page, titles));
             m_tabs->setTabToolTip(i, tabTooltipText(page, titles));
+            syncTabProjectChip(i, page);
         }
         syncChrome();
         // Which tool panes this tab holds decides which title-bar buttons are lit, and this runs
@@ -5835,9 +5965,12 @@ private:
         m_newTabButton->show(); m_newTabButton->raise();
         // A "move to new window" button on each tab, visible on the hovered tab.
         for (int i = 0; i < bar->count(); ++i) {
-            auto *detach = qobject_cast<QToolButton *>(bar->tabButton(i, QTabBar::LeftSide));
+            // The tab's left slot holds a box (tabLeftBox): this button first, then the project
+            // chip of an attached tab (#916B).
+            QWidget *box = tabLeftBox(i);
+            auto *detach = box->findChild<QToolButton *>(QStringLiteral("tabDetachButton"), Qt::FindDirectChildrenOnly);
             if (!detach) {
-                detach = new QToolButton(bar);
+                detach = new QToolButton(box);
                 detach->setObjectName(QStringLiteral("tabDetachButton"));
                 detach->setText(QStringLiteral("⧉"));
                 detach->setAutoRaise(true);
@@ -5846,12 +5979,14 @@ private:
                 connect(detach, &QToolButton::clicked, this, [this, detach] {
                     QTabBar *tabs = m_tabs->tabBar();
                     for (int j = 0; j < tabs->count(); ++j)
-                        if (tabs->tabButton(j, QTabBar::LeftSide) == detach) { moveTabToNewWindow(j); break; }
+                        if (tabs->tabButton(j, QTabBar::LeftSide) == detach->parentWidget()) { moveTabToNewWindow(j); break; }
                     const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.moveToNewWindow"));
                     hint(QStringLiteral("tab.detach.mouse"), keys.isEmpty() ? QStringLiteral("Tip: “Move tab to new window” is in the palette; bind a key in keybindings.json")
                                                                           : relay::ShortcutHints::nextTime(keys, QStringLiteral("move tab to new window")));
                 });
-                bar->setTabButton(i, QTabBar::LeftSide, detach);
+                static_cast<QHBoxLayout *>(box->layout())->insertWidget(0, detach);
+                detach->show();
+                relayoutTabLeftBox(i);
             }
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.moveToNewWindow"));
             detach->setToolTip(keys.isEmpty() ? QStringLiteral("Move tab to new window") : QStringLiteral("Move tab to new window  (%1)").arg(keys));
