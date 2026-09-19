@@ -47,11 +47,15 @@ def register_pane(state: str, workspace: str, cwd: str | None = None, helper: st
     return token, runtime
 
 
-def make_bridge(root: str, relay_version: str = "9.9") -> tuple[guest_bridge.Bridge, str, str]:
+def make_bridge(root: str, relay_version: str = "9.9",
+                port: int = 45999) -> tuple[guest_bridge.Bridge, str, str]:
+    """A bridge with a lock that already knows its port: the sidecar writes no lock before the
+    listener is bound, so a fixture at port 0 would be a bridge whose lock never appears."""
     state = make_state(root)
     lock_dir = os.path.join(root, "ide")
     os.makedirs(lock_dir, exist_ok=True)
-    lock = guest_bridge.LockFile(directory=lock_dir, port=0, pid=os.getpid(), token=secrets.token_hex(16))
+    lock = guest_bridge.LockFile(directory=lock_dir, port=port, pid=os.getpid(),
+                                 token=secrets.token_hex(16))
     bridge = guest_bridge.Bridge(lock, state, relay_version)
     bridge.refresh_registrations()
     return bridge, state, lock_dir
@@ -88,6 +92,17 @@ class LockFileLifecycle(unittest.TestCase):
             lock.remove()
             self.assertFalse(os.path.exists(lock.path))
             lock.remove()   # removing what is gone is not an error
+
+    def test_no_lock_is_written_before_the_port_is_known(self):
+        """`0.lock` would publish a live authToken at a port nobody listens on, and `remove()`
+        — which only ever unlinks the real port's name — could never clean it up."""
+        with tempfile.TemporaryDirectory() as root:
+            lock = guest_bridge.LockFile(directory=root, port=0, pid=os.getpid(), token="cd" * 16)
+            self.assertFalse(lock.write(["/a"]))
+            self.assertEqual([], os.listdir(root))
+            lock.port = 41000
+            self.assertTrue(lock.write(["/a"]))
+            self.assertEqual(["41000.lock"], os.listdir(root))
 
 
 class SweepStaleLocks(unittest.TestCase):
@@ -185,6 +200,53 @@ class PaneRouting(unittest.TestCase):
         self.assertIsNone(guest_bridge.pane_for_path(panes, ""))
 
 
+class ResolveInPane(unittest.TestCase):
+    """The path rule: a path the bridge may write is one that resolves inside the pane that owns
+    the request. Everything else — another pane's file, `..`, a symlink out — is None."""
+
+    def setUp(self):
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.workspace = os.path.join(self.root, "project")
+        self.outside = os.path.join(self.root, "outside")
+        os.makedirs(self.workspace)
+        os.makedirs(self.outside)
+        self.panes = {"a": guest_bridge.PaneRegistration(
+            token="a", runtime_dir="/tmp", helper="", python=sys.executable,
+            workspace=self.workspace, cwd=self.workspace, seen=1.0)}
+
+    def test_a_path_inside_the_pane_resolves(self):
+        target = os.path.join(self.workspace, "src", "x.py")
+        self.assertEqual(target, guest_bridge.resolve_in_pane(self.panes, "a", target))
+
+    def test_a_path_outside_the_pane_is_none(self):
+        self.assertIsNone(guest_bridge.resolve_in_pane(
+            self.panes, "a", os.path.join(self.outside, "authorized_keys")))
+
+    def test_a_dotdot_escape_is_none(self):
+        self.assertIsNone(guest_bridge.resolve_in_pane(
+            self.panes, "a", os.path.join(self.workspace, "..", "outside", "x")))
+
+    def test_a_symlink_pointing_out_of_the_pane_is_none(self):
+        link = os.path.join(self.workspace, "innocent.txt")
+        os.symlink(os.path.join(self.outside, "secret"), link)
+        self.assertIsNone(guest_bridge.resolve_in_pane(self.panes, "a", link))
+
+    def test_another_panes_file_is_none(self):
+        other = os.path.join(self.root, "other")
+        os.makedirs(other)
+        self.panes["b"] = guest_bridge.PaneRegistration(
+            token="b", runtime_dir="/tmp", helper="", python=sys.executable,
+            workspace=other, cwd=other, seen=1.0)
+        self.assertIsNone(guest_bridge.resolve_in_pane(self.panes, "a", os.path.join(other, "x")))
+        self.assertEqual(os.path.join(other, "x"),
+                         guest_bridge.resolve_in_pane(self.panes, "b", os.path.join(other, "x")))
+
+    def test_an_empty_path_or_token_is_none(self):
+        self.assertIsNone(guest_bridge.resolve_in_pane(self.panes, "a", ""))
+        self.assertIsNone(guest_bridge.resolve_in_pane(self.panes, "", self.workspace))
+
+
 class UnifiedDiff(unittest.TestCase):
     def test_change_headers_and_lines(self):
         with tempfile.TemporaryDirectory() as root:
@@ -247,6 +309,14 @@ class JsonRpc(unittest.TestCase):
     def test_a_notification_gets_no_reply(self):
         self.assertIsNone(self._call("notifications/initialized", {}, request_id=None))
         self.assertIsNone(self._call("notifications/cancelled", {}, request_id=None))
+
+    def test_a_notification_method_sent_as_a_request_gets_an_empty_result(self):
+        """JSON-RPC has no reply whose whole body is `null`; a client that puts an id on
+        logging/setLevel has asked a question and gets an answer."""
+        for method in ("notifications/initialized", "notifications/cancelled", "logging/setLevel"):
+            with self.subTest(method=method):
+                replies = self._call(method, {}, request_id=42)
+                self.assertEqual([{"jsonrpc": "2.0", "id": 42, "result": {}}], replies)
 
     def test_unknown_method_and_unknown_tool(self):
         reply = self._call("tools/deleteEverything", {})[0]
@@ -376,6 +446,32 @@ class EventChannel(unittest.TestCase):
         os.rmdir(runtime)
         self.assertFalse(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
 
+    def test_the_helper_gets_a_minimal_environment(self):
+        """The sidecar inherits the GUI's whole environment, provider keys included. The helper
+        that runs once per bridge event gets six variables and no more."""
+        helper = os.path.join(self.root, "guest-event.py")
+        Path(helper).write_text(
+            "import json, os, sys\n"
+            "event = json.load(sys.stdin)\n"
+            "event['env'] = dict(os.environ)\n"
+            "path = os.path.join(os.environ['RELAY_RUNTIME_DIR'], 'guest.json')\n"
+            "open(path + '.tmp', 'w').write(json.dumps(event))\n"
+            "os.replace(path + '.tmp', path)\n")
+        token, runtime = register_pane(self.state, self.workspace, helper=helper)
+        self.bridge.refresh_registrations()
+        pane = next(iter(self.bridge.panes.values()))
+        os.environ["RELAY_TEST_SECRET_KEY"] = "sk-do-not-leak"
+        self.addCleanup(os.environ.pop, "RELAY_TEST_SECRET_KEY", None)
+        self.assertTrue(self.bridge.emit(pane, "openFile", {"filePath": "/x"}))
+        environment = read_guest_json(runtime)["env"]
+        self.assertNotIn("RELAY_TEST_SECRET_KEY", environment)
+        self.assertEqual(runtime, environment["RELAY_RUNTIME_DIR"])
+        self.assertEqual(token, environment["RELAY_SESSION_TOKEN"])
+        self.assertEqual(sys.executable, environment["RELAY_PYTHON"])
+        self.assertLessEqual(set(environment),
+                             set(guest_bridge.HELPER_ENV_PASSTHROUGH)
+                             | {"RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN", "RELAY_PYTHON"})
+
     def test_the_lock_tracks_the_registered_folders(self):
         self.bridge.lock.write([])
         register_pane(self.state, self.workspace)
@@ -387,18 +483,21 @@ class OpenDiff(unittest.IsolatedAsyncioTestCase):
     """The blocking tool, without a socket: dispatch, the event, the reply file, the outcome."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp()
+        self.root = os.path.realpath(tempfile.mkdtemp())
         self.bridge, self.state, self.lock_dir = make_bridge(self.root)
         self.workspace = os.path.join(self.root, "project")
         os.makedirs(self.workspace, exist_ok=True)
+        self.outside = os.path.join(self.root, "outside")
+        os.makedirs(self.outside, exist_ok=True)
         self.target = os.path.join(self.workspace, "x.py")
         Path(self.target).write_text("keep\nold\n")
         self.token, self.runtime = register_pane(self.state, self.workspace)
         self.bridge.refresh_registrations()
 
-    def _call(self, arguments):
+    def _call(self, arguments, connection=None):
         return self.bridge.dispatch({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-                                     "params": {"name": "openDiff", "arguments": arguments}})[0]
+                                     "params": {"name": "openDiff", "arguments": arguments}},
+                                    connection=connection)[0]
 
     def _arguments(self, contents="keep\nnew\n"):
         return {"old_file_path": self.target, "new_file_path": self.target,
@@ -448,6 +547,105 @@ class OpenDiff(unittest.IsolatedAsyncioTestCase):
         deferred = self._call(self._arguments())
         self.bridge.abandon_pane(self.token)
         self.assertEqual(guest_bridge.DIFF_REJECTED, deferred.pending.future.result())
+
+    # ----- the path rule (A1): the pane that shows the diff is the pane that gets written --------
+
+    def _no_diff_was_opened(self, reply) -> None:
+        self.assertIsInstance(reply, dict)
+        self.assertEqual(guest_bridge.DIFF_REJECTED, reply["result"]["content"][0]["text"])
+        self.assertEqual({}, self.bridge.pending)
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "guest.json")),
+                         "a refused diff is never shown to the user either")
+
+    async def test_a_new_file_path_outside_the_pane_is_refused(self):
+        """The live exploit: route on an old_file_path in the workspace, write somewhere else."""
+        victim = os.path.join(self.outside, "authorized_keys")
+        Path(victim).write_text("original\n")
+        self._no_diff_was_opened(self._call(
+            {"old_file_path": self.target, "new_file_path": victim,
+             "new_file_contents": "ssh-rsa AAAA...\n"}))
+        self.assertEqual("original\n", Path(victim).read_text())
+
+    async def test_a_dotdot_new_file_path_is_refused(self):
+        self._no_diff_was_opened(self._call(
+            {"old_file_path": self.target,
+             "new_file_path": os.path.join(self.workspace, "..", "outside", "escaped"),
+             "new_file_contents": "x\n"}))
+
+    async def test_a_symlink_out_of_the_workspace_is_refused(self):
+        victim = os.path.join(self.outside, "secret")
+        Path(victim).write_text("original\n")
+        link = os.path.join(self.workspace, "innocent.txt")
+        os.symlink(victim, link)
+        self._no_diff_was_opened(self._call(
+            {"old_file_path": self.target, "new_file_path": link, "new_file_contents": "owned\n"}))
+        self.assertEqual("original\n", Path(victim).read_text())
+
+    async def test_an_old_file_path_outside_the_pane_is_refused_too(self):
+        """The new path is the one that gets written, but the old one is the file whose contents
+        the diff shows; both must be the pane's."""
+        outside = os.path.join(self.outside, "elsewhere.py")
+        Path(outside).write_text("secret\n")
+        self._no_diff_was_opened(self._call(
+            {"old_file_path": outside, "new_file_path": self.target, "new_file_contents": "x\n"}))
+
+    async def test_the_event_carries_the_resolved_paths(self):
+        """What the pane shows the user is the file that would actually be written."""
+        os.makedirs(os.path.join(self.workspace, "sub"), exist_ok=True)
+        winding = os.path.join(self.workspace, "sub", "..", "x.py")
+        self._call({"old_file_path": winding, "new_file_path": winding, "new_file_contents": "z\n"})
+        event = read_guest_json(self.runtime)
+        self.assertEqual(self.target, event["data"]["new_file_path"])
+        self.assertEqual(self.target, event["data"]["old_file_path"])
+        self.assertEqual(self.target, event["data"]["file"])
+
+    # ----- who owns a pending diff (A2, A5) -------------------------------------------------------
+
+    async def test_close_tab_settles_the_diff_of_that_name(self):
+        deferred = self._call(self._arguments())
+        reply = self.bridge.dispatch({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                                      "params": {"name": "close_tab",
+                                                 "arguments": {"tab_name": "Proposed changes"}}})[0]
+        self.assertEqual("TAB_CLOSED", reply["result"]["content"][0]["text"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, deferred.pending.future.result())
+
+    async def test_close_tab_of_another_name_leaves_the_diff_alone(self):
+        deferred = self._call(self._arguments())
+        self.bridge.dispatch({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                              "params": {"name": "close_tab", "arguments": {"tab_name": "other"}}})
+        self.assertFalse(deferred.pending.future.done())
+        self.bridge.dispatch({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                              "params": {"name": "close_tab", "arguments": {}}})
+        self.assertFalse(deferred.pending.future.done(), "a nameless close_tab closes nothing")
+
+    async def test_close_all_diff_tabs_spares_another_connections_diff(self):
+        mine, theirs = object(), object()
+        ours = self._call(self._arguments(), connection=mine)
+        other = self._call({"old_file_path": self.target, "new_file_path": self.target,
+                            "new_file_contents": "keep\nother\n", "tab_name": "Theirs"},
+                           connection=theirs)
+        reply = self.bridge.dispatch({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                                      "params": {"name": "closeAllDiffTabs", "arguments": {}}},
+                                     connection=mine)[0]
+        self.assertEqual("CLOSED_1_DIFF_TABS", reply["result"]["content"][0]["text"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, ours.pending.future.result())
+        self.assertFalse(other.pending.future.done())
+
+    async def test_a_connection_that_drops_settles_its_own_diffs_only(self):
+        mine, theirs = object(), object()
+        ours = self._call(self._arguments(), connection=mine)
+        other = self._call(self._arguments("keep\nother\n"), connection=theirs)
+        self.bridge.abandon_connection(mine)
+        self.assertEqual(guest_bridge.DIFF_REJECTED, ours.pending.future.result())
+        self.assertFalse(other.pending.future.done())
+
+    async def test_a_diff_nobody_answers_expires(self):
+        deferred = self._call(self._arguments())
+        self.assertEqual(0, self.bridge.expire_pending())
+        self.assertFalse(deferred.pending.future.done())
+        self.assertEqual(1, self.bridge.expire_pending(deferred.pending.deadline + 1.0))
+        self.assertEqual(guest_bridge.DIFF_REJECTED, deferred.pending.future.result())
+        self.assertEqual({}, self.bridge.pending)
 
     async def test_a_closed_pane_is_noticed_by_the_registration_poll(self):
         """A pane that closes takes its registration and its runtime dir with it; the poll's
@@ -511,30 +709,58 @@ async def handshake(reader, writer, port: int, token: str) -> str:
 
 class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.root = tempfile.mkdtemp()
+        self.root = os.path.realpath(tempfile.mkdtemp())
         self.bridge, self.state, self.lock_dir = make_bridge(self.root)
         self.workspace = os.path.join(self.root, "project")
         os.makedirs(self.workspace, exist_ok=True)
+        self.outside = os.path.join(self.root, "outside")
+        os.makedirs(self.outside, exist_ok=True)
         self.target = os.path.join(self.workspace, "x.py")
         Path(self.target).write_text("keep\nold\n")
         self.token, self.runtime = register_pane(self.state, self.workspace)
         self.bridge.refresh_registrations()
         self.server = guest_bridge.BridgeServer(self.bridge)
         self.port = await self.server.start()
-        self.reader, self.writer = await asyncio.open_connection("127.0.0.1", self.port)
-        response = await handshake(self.reader, self.writer, self.port, self.bridge.lock.token)
-        self.assertIn("101", response.splitlines()[0])
+        self._writers = []
+        self.reader, self.writer = await self._connect()
 
     async def asyncTearDown(self):
-        self.writer.close()
+        for writer in self._writers:
+            writer.close()
+        await asyncio.sleep(0.05)   # let the server notice, settle and finish its tasks
         for task in self.server._tasks:
             task.cancel()
         if self.server.server:
             self.server.server.close()
 
-    async def _send(self, message: dict) -> None:
-        self.writer.write(client_frame(json.dumps(message).encode()))
-        await self.writer.drain()
+    async def _connect(self):
+        """A second (or third) claude on the same bridge, handshake done."""
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        self._writers.append(writer)
+        response = await handshake(reader, writer, self.port, self.bridge.lock.token)
+        self.assertIn("101", response.splitlines()[0])
+        return reader, writer
+
+    def _patch(self, name: str, value) -> None:
+        """A module constant for the length of one test; the bridge reads them at use time."""
+        original = getattr(guest_bridge, name)
+        setattr(guest_bridge, name, value)
+        self.addCleanup(setattr, guest_bridge, name, original)
+
+    async def _send(self, message: dict, writer=None) -> None:
+        writer = writer or self.writer
+        writer.write(client_frame(json.dumps(message).encode()))
+        await writer.drain()
+
+    async def _replies(self, count: int, reader=None, timeout: float = 5.0) -> dict:
+        """The next `count` JSON-RPC replies, keyed by id — the order two answers arrive in is
+        not the bridge's promise, only that both do."""
+        reader = reader or self.reader
+        out = {}
+        for _ in range(count):
+            message = await asyncio.wait_for(next_text(reader), timeout)
+            out[message.get("id")] = message
+        return out
 
     async def test_initialize_list_and_an_ordinary_tool(self):
         await self._send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -585,18 +811,149 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
         with open(self.target, "r", encoding="utf-8") as stream:
             self.assertEqual("keep\nold\n", stream.read())
 
-    async def _wait_for_event(self, timeout: float = 5.0) -> dict:
-        """guest.json as the pane's poll would read it: written by the bridge's own tick."""
+    async def _wait_for_event(self, timeout: float = 5.0, seen: set | None = None) -> dict:
+        """guest.json as the pane's poll would read it: written by the bridge's own tick. The
+        channel is one slot per pane, so a second diff overwrites the first; `seen` skips the
+        reply paths this test has already collected."""
+        seen = seen or set()
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             try:
                 event = read_guest_json(self.runtime)
-                if event.get("data", {}).get("tool") == "openDiff" and event["data"].get("reply"):
+                reply = event.get("data", {}).get("reply")
+                if event.get("data", {}).get("tool") == "openDiff" and reply and reply not in seen:
                     return event
             except (OSError, ValueError):
                 pass
             await asyncio.sleep(0.02)
         self.fail("the bridge never wrote the openDiff event")
+
+    # ----- a pending diff must not gag the connection (A2) ----------------------------------------
+
+    async def _open_a_diff(self, request_id: int, tab_name: str = "Proposed changes",
+                           writer=None, seen: set | None = None) -> dict:
+        await self._send({"jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                          "params": {"name": "openDiff", "arguments": {
+                              "old_file_path": self.target, "new_file_path": self.target,
+                              "new_file_contents": "keep\nnew\n", "tab_name": tab_name}}}, writer)
+        return await self._wait_for_event(seen=seen)
+
+    async def test_the_connection_is_still_served_while_a_diff_waits(self):
+        """The read loop used to await the pending future inline, so nothing else on the socket
+        was read until the user decided: no tools/list, no pong — and no way in."""
+        event = await self._open_a_diff(20)
+        await self._send({"jsonrpc": "2.0", "id": 21, "method": "tools/list", "params": {}})
+        reply = await asyncio.wait_for(next_text(self.reader), 5.0)
+        self.assertEqual(21, reply["id"])
+        self.assertEqual(12, len(reply["result"]["tools"]))
+
+        self.writer.write(client_frame(b"still there", opcode=0x9))
+        await self.writer.drain()
+        opcode, payload = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0xA, opcode)
+        self.assertEqual(b"still there", payload)
+
+        guest_bridge.write_json_atomic(event["data"]["reply"], {"outcome": guest_bridge.FILE_SAVED})
+        reply = await asyncio.wait_for(next_text(self.reader), 5.0)
+        self.assertEqual(20, reply["id"])
+        self.assertEqual(guest_bridge.FILE_SAVED, reply["result"]["content"][0]["text"])
+
+    async def test_close_tab_cancels_the_clients_own_pending_diff(self):
+        """How claude withdraws a diff. It could never be read before, let alone answered."""
+        await self._open_a_diff(22, tab_name="✻ x.py")
+        await self._send({"jsonrpc": "2.0", "id": 23, "method": "tools/call",
+                          "params": {"name": "close_tab", "arguments": {"tab_name": "✻ x.py"}}})
+        replies = await self._replies(2)
+        self.assertEqual("TAB_CLOSED", replies[23]["result"]["content"][0]["text"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, replies[22]["result"]["content"][0]["text"])
+        self.assertEqual("keep\nold\n", Path(self.target).read_text())
+
+    async def test_a_diff_nobody_answers_times_out_on_the_wall_clock(self):
+        self._patch("DIFF_TIMEOUT_SECONDS", 0.3)
+        await self._open_a_diff(24)
+        reply = await asyncio.wait_for(next_text(self.reader), 5.0)
+        self.assertEqual(24, reply["id"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, reply["result"]["content"][0]["text"])
+        self.assertEqual("keep\nold\n", Path(self.target).read_text())
+
+    async def test_close_all_diff_tabs_is_this_connections_business_only(self):
+        """Two claudes, one sidecar: one tidying up must not cancel the diff the user is reading
+        in the other pane."""
+        other_reader, other_writer = await self._connect()
+        mine = await self._open_a_diff(25, tab_name="Mine")
+        theirs = await self._open_a_diff(26, tab_name="Theirs", writer=other_writer,
+                                         seen={mine["data"]["reply"]})
+        await self._send({"jsonrpc": "2.0", "id": 27, "method": "tools/call",
+                          "params": {"name": "closeAllDiffTabs", "arguments": {}}})
+        replies = await self._replies(2)
+        self.assertEqual("CLOSED_1_DIFF_TABS", replies[27]["result"]["content"][0]["text"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, replies[25]["result"]["content"][0]["text"])
+
+        guest_bridge.write_json_atomic(theirs["data"]["reply"], {"outcome": guest_bridge.FILE_SAVED})
+        reply = await asyncio.wait_for(next_text(other_reader), 5.0)
+        self.assertEqual(26, reply["id"])
+        self.assertEqual(guest_bridge.FILE_SAVED, reply["result"]["content"][0]["text"])
+
+    # ----- the path rule, again, at the moment of the write (A1) ----------------------------------
+
+    async def test_the_path_is_checked_again_when_the_user_saves(self):
+        """The pane set and the filesystem both move while a decision is on screen: the file the
+        bridge writes is re-resolved against the panes as they are at that instant."""
+        victim = os.path.join(self.outside, "authorized_keys")
+        Path(victim).write_text("original\n")
+        event = await self._open_a_diff(28)
+        os.unlink(self.target)
+        os.symlink(victim, self.target)   # planted after the user was shown an honest diff
+        guest_bridge.write_json_atomic(event["data"]["reply"], {"outcome": guest_bridge.FILE_SAVED})
+        reply = await asyncio.wait_for(next_text(self.reader), 5.0)
+        self.assertEqual(28, reply["id"])
+        self.assertEqual(guest_bridge.DIFF_REJECTED, reply["result"]["content"][0]["text"])
+        self.assertEqual("original\n", Path(victim).read_text())
+
+    # ----- keepalive, framing and the handshake (A6, A7, A8, A9) ----------------------------------
+
+    async def test_the_keepalive_ping_goes_out_on_its_interval(self):
+        self._patch("KEEPALIVE_SECONDS", 0.15)
+        self.server._last_ping = 0.0   # due now; the interval below is the one measured
+        started = asyncio.get_running_loop().time()
+        for _ in range(2):
+            opcode, payload = await asyncio.wait_for(server_message(self.reader), 5.0)
+            self.assertEqual(0x9, opcode)
+            self.assertEqual(b"relay", payload)
+        self.assertGreaterEqual(asyncio.get_running_loop().time() - started, 0.15)
+
+    async def test_an_unmasked_client_frame_fails_the_connection(self):
+        """RFC 6455 §5.1. A server that reads unmasked client frames is the hole masking closes."""
+        payload = json.dumps({"jsonrpc": "2.0", "id": 30, "method": "ping"}).encode()
+        self.writer.write(bytes([0x81, len(payload)]) + payload)
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1002, struct.unpack(">H", body[:2])[0])
+
+    async def test_an_oversized_frame_is_refused_before_a_byte_is_read(self):
+        """Only the 10-byte header is sent: the close comes back without the announced payload,
+        so nothing of that size was ever allocated or awaited."""
+        self.writer.write(bytes([0x81, 0xFF]) + struct.pack(">Q", 64 * 1024 * 1024))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1009, struct.unpack(">H", body[:2])[0])
+
+    async def test_fragments_cannot_add_up_past_the_cap(self):
+        self._patch("MAX_MESSAGE_BYTES", 256)
+        self.writer.write(client_frame(b"a" * 200, opcode=0x1, fin=False))
+        self.writer.write(client_frame(b"b" * 200, opcode=0x0))
+        await self.writer.drain()
+        opcode, body = await asyncio.wait_for(server_message(self.reader), 5.0)
+        self.assertEqual(0x8, opcode)
+        self.assertEqual(1009, struct.unpack(">H", body[:2])[0])
+
+    async def test_a_client_that_never_sends_its_handshake_is_dropped(self):
+        self._patch("HANDSHAKE_SECONDS", 0.25)
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        self._writers.append(writer)
+        self.assertEqual(b"", await asyncio.wait_for(reader.read(), 5.0), "the server hung up")
 
     async def test_a_wrong_auth_token_is_refused(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
@@ -636,6 +993,17 @@ class WebSocketEndToEnd(unittest.IsolatedAsyncioTestCase):
         opcode, payload = await server_message(self.reader)
         self.assertEqual(0xA, opcode)
         self.assertEqual(b"are you there", payload)
+
+
+class AcceptKey(unittest.TestCase):
+    def test_the_accept_key_matches_rfc_6455(self):
+        """Whichever implementation is in use — remote/ws.py's when the tree's `remote` package
+        is importable, the local three lines when only backend/ is on the path."""
+        self.assertEqual("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+                         guest_bridge.websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="))
+
+    def test_the_cap_is_a_sane_size(self):
+        self.assertEqual(4 * 1024 * 1024, guest_bridge.MAX_MESSAGE_BYTES)
 
 
 # ----- the sidecar as a process: ready line, lock, SIGTERM ----------------------------------------
@@ -689,6 +1057,54 @@ class ProcessLifecycle(unittest.TestCase):
             process.terminate()
             process.wait(timeout=5)
             self.assertFalse(os.path.exists(ready["lock"]), "SIGTERM removes the lock")
+
+    def test_no_zero_lock_is_ever_written(self):
+        """A pane registered before the sidecar starts used to make `refresh_registrations()`
+        write `0.lock` — a live authToken at a port nobody listens on, which nothing removes."""
+        with tempfile.TemporaryDirectory() as root:
+            state = make_state(root)
+            lock_dir = os.path.join(root, "ide")
+            os.makedirs(lock_dir)
+            for index in range(4):
+                register_pane(state, os.path.join(root, f"project-{index}"))
+            process = self._start(state, lock_dir)
+            ready = json.loads(process.stdout.readline())
+            self.assertTrue(ready["ready"], ready)
+            self.assertEqual([f"{ready['port']}.lock"], sorted(os.listdir(lock_dir)))
+            self.assertEqual(4, len(guest_bridge.read_json(ready["lock"])["workspaceFolders"]),
+                             "the panes registered before the port was known are still in it")
+            process.terminate()
+            process.wait(timeout=5)
+            self.assertEqual([], os.listdir(lock_dir))
+
+    def test_atexit_removes_the_lock_when_serve_never_unwinds(self):
+        """`serve()`'s own `finally` covers the ordinary exits. The atexit handler is for the
+        ones it does not see — here the interpreter shutting down under a daemon thread, which
+        is exactly the shape of a GUI that tears its worker down without a signal."""
+        script = ("import json, sys, threading\n"
+                  "from relay_core import guest_bridge\n"
+                  "ready = threading.Event()\n"
+                  "seen = {}\n"
+                  "def line(text):\n"
+                  "    seen.update(json.loads(text)); ready.set()\n"
+                  "thread = threading.Thread(target=guest_bridge.serve,\n"
+                  "                          args=(sys.argv[1], sys.argv[2], '0', line), daemon=True)\n"
+                  "thread.start()\n"
+                  "assert ready.wait(20), 'the bridge never became ready'\n"
+                  "print(json.dumps(seen), flush=True)\n")
+        with tempfile.TemporaryDirectory() as root:
+            state = make_state(root)
+            lock_dir = os.path.join(root, "ide")
+            os.makedirs(lock_dir)
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = str(BACKEND)
+            done = subprocess.run([sys.executable, "-u", "-c", script, state, lock_dir],
+                                  capture_output=True, text=True, timeout=60, env=environment)
+            self.assertEqual(0, done.returncode, done.stderr)
+            ready = json.loads(done.stdout.splitlines()[0])
+            self.assertTrue(ready["ready"], ready)
+            self.assertFalse(os.path.exists(ready["lock"]), "atexit removed the lock")
+            self.assertEqual([], os.listdir(lock_dir))
 
     def test_a_second_run_reuses_no_port_and_leaves_one_lock(self):
         with tempfile.TemporaryDirectory() as root:

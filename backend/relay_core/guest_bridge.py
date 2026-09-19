@@ -11,12 +11,13 @@ is what a claude started anywhere else in that shell reads to find the same serv
 
 Shape of the thing, one process:
 
-* **Lifecycle** — `python -m relay_core.guest_bridge serve --state-dir DIR`. It binds 127.0.0.1
-  on an ephemeral port, sweeps stale locks (a lock whose pid is gone), writes its own lock, and
-  prints one ready line on stdout (`{"ready": true, "port": N, "lock": path}`); the GUI reads
-  that line and stops waiting. Logs go to stderr, one line each. SIGTERM/SIGINT — and the GUI's
-  death, via PR_SET_PDEATHSIG — remove the lock and exit, so a crashed run leaves nothing behind
-  but a lock the next run's sweep removes.
+* **Lifecycle** — `python -m relay_core.guest_bridge serve --state-dir DIR`. It sweeps stale
+  locks (a lock whose pid is gone), binds 127.0.0.1 on an ephemeral port, and only then writes
+  its own lock — a lock names a port, so there is no lock before there is a port, and `0.lock`
+  is never a file that exists. It prints one ready line on stdout (`{"ready": true, "port": N,
+  "lock": path}`); the GUI reads that line and stops waiting. Logs go to stderr, one line each.
+  `atexit`, SIGTERM/SIGINT and the GUI's death (PR_SET_PDEATHSIG) each remove the lock, so a
+  crashed run leaves nothing behind but a lock the next run's sweep removes.
 * **Panes** — the GUI registers each pane as `<state-dir>/panes/<token>.json`: token, runtime
   dir, the shell/guest-event.py helper path, python, workspace and cwd. The sidecar polls that
   directory (a pane's cwd moves; its registration is rewritten). A registration whose runtime
@@ -35,9 +36,17 @@ Shape of the thing, one process:
   `new_file_contents` to `new_file_path`, so the GUI never writes a user file — or
   `DIFF_REJECTED`, which is also what an unmatched or abandoned request answers, because a
   guest left hanging is worse than a guest told no.
-* **Routing** — a request is matched to a pane by the longest workspace/cwd prefix of the paths
-  it names. Unmatched requests are logged and dropped (protocol 26.5): openDiff answers
-  `DIFF_REJECTED`, the rest answer a JSON-RPC error, so no call is ever left without a reply.
+* **Routing, and the path rule** — a request is matched to a pane by the longest workspace/cwd
+  prefix of the paths it names. Unmatched requests are logged and dropped (protocol 26.5):
+  openDiff answers `DIFF_REJECTED`, the rest answer a JSON-RPC error, so no call is ever left
+  without a reply. *Every* path an openDiff names must resolve — `os.path.realpath`, so `..` and
+  symlinks are followed first — inside that one pane, not just the path that chose it, and the
+  check is made again against the live pane set at the moment of the write. The file the sidecar
+  saves is always a file inside the workspace the user is looking at.
+* **Nothing blocks the connection** — a pending openDiff is settled by its own task, so
+  `tools/list`, pings and the client's own `close_tab` (which cancels the diff by tab name) are
+  read and answered while a decision is on screen. A pending diff also ends on its own after
+  `DIFF_TIMEOUT_SECONDS`, when its pane closes, when its connection drops, or at shutdown.
 * **getDiagnostics answers `[]`** — Relay has no LSP source. Documented, not faked.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 26 (26.2, 26.3, 26.5).
@@ -48,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import atexit
 import base64
 import difflib
 import hashlib
@@ -60,6 +70,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -69,9 +80,23 @@ MCP_PROTOCOL_VERSION = "2025-03-26"   # answered with the client's own when it n
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 AUTH_HEADER = "x-claude-code-ide-authorization"   # upstream's custom WebSocket auth header
 IDE_NAME = "relay"
-MAX_MESSAGE_BYTES = 64 * 1024 * 1024   # a diff's new_file_contents can be large; 64 MiB is plenty
+# A frame or a reassembled message larger than this is refused *before* the bytes are read, so a
+# peer cannot make the sidecar reserve memory by announcing a size. 4 MiB is far more than any
+# real openDiff: claude sends whole files, and a 4 MiB source file is not one.
+MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 POLL_SECONDS = 0.05                    # registration/reply polling tick; a stat, not a read
 KEEPALIVE_SECONDS = 30.0               # a WebSocket ping, so an idle claude knows we live
+HANDSHAKE_SECONDS = 10.0               # a connection that never sends its HTTP head is dropped
+# A diff nobody ever answers must not pin a claude for the life of the GUI. Generous on purpose:
+# the user may well leave a proposed change on screen over lunch.
+DIFF_TIMEOUT_SECONDS = 30 * 60.0
+
+try:   # remote/ws.py is this tree's RFC 6455 implementation; accept_key there is pure and
+    # side-effect-free, so the bridge borrows it when the `remote` package is on the path.
+    from remote.ws import accept_key as websocket_accept   # type: ignore[import-not-found]
+except ImportError:   # the sidecar runs with only backend/ on PYTHONPATH: the same three lines.
+    def websocket_accept(key: str) -> str:
+        return base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode()).digest()).decode()
 
 
 # ----- atomic files ----------------------------------------------------------------------------
@@ -138,9 +163,18 @@ class LockFile:
     def path(self) -> str:
         return os.path.join(self.directory, f"{self.port}.lock")
 
-    def write(self, workspace_folders) -> None:
+    def write(self, workspace_folders) -> bool:
+        """Write the lock, unless the port is not known yet.
+
+        A lock is an *advertisement*: it names a port a claude will dial and the token it will
+        present. Before `start()` returns there is no port, and writing `0.lock` would publish a
+        live authToken at a port nobody listens on and leave a file `remove()` — which only ever
+        unlinks the real port's name — could not clean up. So port 0 writes nothing."""
+        if self.port <= 0:
+            return False
         write_json_atomic(self.path, {"pid": self.pid, "workspaceFolders": sorted(set(workspace_folders)),
                                       "ideName": IDE_NAME, "transport": "ws", "authToken": self.token})
+        return True
 
     def remove(self) -> None:
         try:
@@ -237,6 +271,25 @@ def pane_for_path(panes: dict[str, PaneRegistration], path: str) -> PaneRegistra
             if key > best_key:
                 best, best_key = pane, key
     return best
+
+
+def resolve_in_pane(panes: dict[str, PaneRegistration], token: str, path: str) -> str | None:
+    """`path` made absolute and symlink-free, but only if it still lands inside the pane `token`
+    owns. Otherwise None, and the caller must refuse.
+
+    This is the whole of the bridge's file-write rule. A guest names two paths in one openDiff and
+    only the old one decides which pane shows the diff, so without this a diff opened in a pane on
+    the user's project could name `/tmp/…/authorized_keys` as the file to save and the sidecar
+    would have written it — outside the workspace, outside the pane, outside anything the user
+    agreed to. `realpath` first, because a symlink inside the workspace pointing out of it is the
+    same attack with one more step."""
+    if not path or not token:
+        return None
+    resolved = os.path.realpath(path)
+    owner = pane_for_path(panes, resolved)
+    if owner is None or owner.token != token:
+        return None
+    return resolved
 
 
 def workspace_folders_of(panes: dict[str, PaneRegistration]) -> list[str]:
@@ -380,9 +433,16 @@ def json_result(payload) -> dict:
 
 @dataclass
 class PendingDiff:
-    """An openDiff the pane has not answered yet."""
+    """An openDiff the pane has not answered yet, and everything needed to answer it without it:
+    the pane that was asked (it may close), the connection that asked (another claude's
+    `closeAllDiffTabs` is none of its business), the tab name (`close_tab` names it) and the wall
+    clock deadline after which an unanswered diff is a rejected one."""
     reply_path: str
     future: asyncio.Future = field(default=None)
+    pane_token: str = ""
+    connection: object = None
+    tab_name: str = ""
+    deadline: float = 0.0
 
 
 class Bridge:
@@ -399,6 +459,12 @@ class Bridge:
         self.replies_dir = os.path.join(state_dir, "replies")
         self.pending: dict[str, PendingDiff] = {}   # reply path -> the openDiff waiting on it
         self.folders_written: list[str] = []
+        # The connection whose message is being dispatched right now. `dispatch()` is synchronous
+        # from end to end — no await anywhere below it — so on one event loop this is never two
+        # connections at once, and a tool handler can ask "who called me?" without threading an
+        # argument through twelve signatures. None when nothing is dispatching, and None for the
+        # tests that drive `dispatch()` with no socket at all.
+        self.connection: object = None
 
     # ----- plumbing the server calls ------------------------------------------------------------
 
@@ -423,8 +489,26 @@ class Bridge:
         """A pane closed while one of its diffs was waiting: the user cannot answer a pane that
         is gone, and claude must not wait forever."""
         for pending in list(self.pending.values()):
-            if not pending.future.done() and getattr(pending.future, "pane", None) == token:
+            if not pending.future.done() and pending.pane_token == token:
                 self.settle(pending, DIFF_REJECTED, "pane closed")
+
+    def abandon_connection(self, connection: object) -> None:
+        """The claude that asked has hung up. Nothing is left to answer, so nothing may be saved:
+        a decision the user makes after the guest is gone must not still write its file."""
+        for pending in list(self.pending.values()):
+            if not pending.future.done() and pending.connection is connection:
+                self.settle(pending, DIFF_REJECTED, "connection closed")
+
+    def expire_pending(self, now: float | None = None) -> int:
+        """Reject the diffs whose wall-clock deadline has passed. A guest told no is recoverable;
+        a guest blocked forever on a diff the user walked away from is not."""
+        now = time.monotonic() if now is None else now
+        expired = 0
+        for pending in list(self.pending.values()):
+            if pending.deadline and now >= pending.deadline and not pending.future.done():
+                self.settle(pending, DIFF_REJECTED, "timed out")
+                expired += 1
+        return expired
 
     def settle(self, pending: PendingDiff, outcome: str, why: str = "") -> None:
         self.pending.pop(pending.reply_path, None)
@@ -467,10 +551,7 @@ class Bridge:
         data["tool"] = tool
         if reply_path:
             data["reply"] = reply_path
-        environment = dict(os.environ)
-        environment["RELAY_RUNTIME_DIR"] = pane.runtime_dir
-        environment["RELAY_SESSION_TOKEN"] = pane.token
-        environment.setdefault("RELAY_PYTHON", pane.python)
+        environment = helper_environment(pane)
         try:
             run = subprocess.run([pane.python, pane.helper, "bridge", "claude"], input=json.dumps(data),
                                  capture_output=True, text=True, timeout=10, env=environment)
@@ -484,22 +565,37 @@ class Bridge:
 
     # ----- JSON-RPC --------------------------------------------------------------------------------
 
-    def dispatch(self, message) -> list | None:
+    def dispatch(self, message, connection: object = None) -> list | None:
         """One decoded WebSocket message -> the replies to send (each a dict), or None.
-        A valid request that must wait returns a `Deferred` inside the list instead."""
-        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-            return [rpc_error(None, -32600, "Invalid Request")]
-        method = message.get("method")
-        if not isinstance(method, str):
-            return [rpc_error(message.get("id"), -32600, "Invalid Request")]
-        has_id = "id" in message
-        params = message.get("params") or {}
-        if not isinstance(params, dict):
-            params = {}
-        result = self.handle(method, params, message.get("id") if has_id else None)
-        if not has_id:
-            return None   # a notification: nothing to answer
-        return [result]
+        A valid request that must wait returns a `Deferred` inside the list instead.
+
+        `connection` is who asked; it is remembered for the duration of this call so that the
+        tools which act on other calls (`close_tab`, `closeAllDiffTabs`) act only on this
+        client's. Synchronous throughout, so the attribute cannot straddle two dispatches."""
+        self.connection = connection
+        try:
+            if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+                return [rpc_error(None, -32600, "Invalid Request")]
+            method = message.get("method")
+            if not isinstance(method, str):
+                return [rpc_error(message.get("id"), -32600, "Invalid Request")]
+            has_id = "id" in message
+            params = message.get("params") or {}
+            if not isinstance(params, dict):
+                params = {}
+            result = self.handle(method, params, message.get("id") if has_id else None)
+            if not has_id:
+                return None   # a notification: nothing to answer
+            if result is None:
+                # `handle` answers None for the methods that are notifications *by convention*
+                # (notifications/initialized and friends). A client that sends one with an id has
+                # asked a question, and JSON-RPC has no reply whose whole body is `null`: that is
+                # what went on the wire before, and a strict client rejects it. An empty result is
+                # the honest answer — nothing to report, the request succeeded.
+                return [rpc_ok(message.get("id"), {})]
+            return [result]
+        finally:
+            self.connection = None
 
     def handle(self, method: str, params: dict, request_id):
         if method == "initialize":
@@ -559,28 +655,45 @@ class Bridge:
         new_path = str(arguments.get("new_file_path") or "")
         contents = arguments.get("new_file_contents")
         contents = contents if isinstance(contents, str) else ""
+        tab_name = str(arguments.get("tab_name") or "")
         pane = pane_for_path(self.panes, old_path or new_path)
         if pane is None:
             # Unmatched is logged and dropped (26.5); openDiff answers DIFF_REJECTED rather than
             # nothing, because a blocking call that never returns hangs the guest.
             self.log(f"unmatched tool=openDiff old={old_path} new={new_path}")
             return text_result(DIFF_REJECTED)
+        # Both paths must resolve inside the pane that matched, not just the one that chose it.
+        # The routing above looks at old_file_path first, and new_file_path is what gets written.
+        old_real = resolve_in_pane(self.panes, pane.token, old_path) if old_path else ""
+        new_real = resolve_in_pane(self.panes, pane.token, new_path) if new_path else ""
+        if (old_path and old_real is None) or (new_path and new_real is None):
+            self.log(f"refused tool=openDiff reason=outside-pane pane={pane.token[:8]} "
+                     f"old={old_path} new={new_path}")
+            return text_result(DIFF_REJECTED)
+        target = new_real or old_real
+        if not target:
+            self.log("refused tool=openDiff reason=no-path")
+            return text_result(DIFF_REJECTED)
         os.makedirs(self.replies_dir, exist_ok=True)
         reply_path = os.path.join(self.replies_dir, f"{uuid.uuid4()}.json")
-        diff = unified_diff(old_path, new_path, contents, read_text(old_path))
+        source = old_real or target
+        diff = unified_diff(source, target, contents, read_text(source))
+        # The event carries the resolved paths: what the pane shows the user is the file the
+        # sidecar would actually write, symlinks and `..` already followed.
         sent = self.emit(pane, "openDiff",
-                         {"old_file_path": old_path, "new_file_path": new_path,
-                          "new_file_contents": contents, "tab_name": str(arguments.get("tab_name") or ""),
-                          "diff": diff, "file": new_path or old_path},
+                         {"old_file_path": source, "new_file_path": target,
+                          "new_file_contents": contents, "tab_name": tab_name,
+                          "diff": diff, "file": target},
                          reply_path=reply_path)
         if not sent:
             self.log(f"open_diff_dropped old={old_path} new={new_path}")
             return text_result(DIFF_REJECTED)
         future = asyncio.get_running_loop().create_future()
-        future.pane = pane.token   # abandon_pane() matches on this
-        pending = PendingDiff(reply_path=reply_path, future=future)
+        pending = PendingDiff(reply_path=reply_path, future=future, pane_token=pane.token,
+                              connection=self.connection, tab_name=tab_name,
+                              deadline=time.monotonic() + DIFF_TIMEOUT_SECONDS)
         self.pending[reply_path] = pending
-        return Deferred(pending, contents, new_path)
+        return Deferred(pending, contents, target)
 
     def tool_getCurrentSelection(self, arguments: dict) -> dict:
         return json_result({"success": False, "message": "No active editor found"})
@@ -610,19 +723,49 @@ class Bridge:
                             "message": f"Document not open: {arguments.get('filePath', '')}"})
 
     def tool_close_tab(self, arguments: dict) -> dict:
-        # Relay has no editor tabs of that name; claude calls this to tidy its own bookkeeping
-        # and reads TAB_CLOSED either way (upstream answers it unconditionally).
-        return text_result("TAB_CLOSED")
+        # Relay has no editor tabs, but a diff *is* a tab here and this is how claude cancels one
+        # it opened: it hits escape, sends close_tab with the same tab_name, and waits. Answering
+        # TAB_CLOSED without settling that diff leaves its own openDiff blocked forever on a
+        # decision it has just withdrawn. Only this connection's diffs, and only that name.
+        tab_name = str(arguments.get("tab_name") or "")
+        for pending in list(self.pending.values()):
+            if tab_name and pending.tab_name == tab_name and pending.connection is self.connection:
+                self.settle(pending, DIFF_REJECTED, f"close_tab {tab_name}")
+        return text_result("TAB_CLOSED")   # upstream answers it unconditionally
 
     def tool_closeAllDiffTabs(self, arguments: dict) -> dict:
+        # "All" is all of *this client's*. Two claudes in two panes share one sidecar, and one of
+        # them tidying up must not cancel a diff the user is reading in the other.
         count = 0
         for pending in list(self.pending.values()):
+            if pending.connection is not self.connection:
+                continue
             self.settle(pending, DIFF_REJECTED, "closeAllDiffTabs")
             count += 1
         return text_result(f"CLOSED_{count}_DIFF_TABS")
 
     def tool_executeCode(self, arguments: dict) -> dict:
         return json_result({"success": False, "message": "Relay has no notebook kernel."})
+
+
+HELPER_ENV_PASSTHROUGH = ("PATH", "HOME", "PYTHONPATH", "LANG", "LC_ALL")
+
+
+def helper_environment(pane: PaneRegistration) -> dict[str, str]:
+    """The environment `shell/guest-event.py` is run with: what a python script needs to start
+    (PATH, HOME, PYTHONPATH, the locale) and the three variables that tell it which pane it is
+    writing for. Nothing else.
+
+    The sidecar inherits the GUI's whole environment, provider keys and all; handing that to a
+    child spawned once per bridge event would put every one of them one `os.environ` away from
+    whatever the helper — or anything it execs — decides to do. The helper's job needs six
+    variables, so it gets six."""
+    environment = {name: os.environ[name] for name in HELPER_ENV_PASSTHROUGH if name in os.environ}
+    environment.setdefault("PATH", os.defpath)
+    environment["RELAY_RUNTIME_DIR"] = pane.runtime_dir
+    environment["RELAY_SESSION_TOKEN"] = pane.token
+    environment["RELAY_PYTHON"] = os.environ.get("RELAY_PYTHON") or pane.python
+    return environment
 
 
 @dataclass
@@ -658,9 +801,18 @@ class WebSocket:
         self.reader = reader
         self.writer = writer
         self.auth_token = auth_token
+        # Frames must not interleave: the read loop answers pings while settle tasks send tool
+        # replies, and two coroutines writing a header each would produce one unreadable frame.
+        self.send_lock = asyncio.Lock()
 
     async def handshake(self) -> bool:
-        head = await self.reader.readuntil(b"\r\n\r\n")
+        try:
+            head = await asyncio.wait_for(self.reader.readuntil(b"\r\n\r\n"), HANDSHAKE_SECONDS)
+        except asyncio.TimeoutError:
+            # A connection that opens and then says nothing holds a task and a socket for as long
+            # as the GUI runs. Ten seconds is forever for a loopback handshake.
+            self.writer.close()
+            return False
         request = head.decode("latin-1", "replace")
         headers = {}
         lines = request.split("\r\n")
@@ -676,7 +828,7 @@ class WebSocket:
         presented = headers.get(AUTH_HEADER, "")
         if not self.auth_token or not hmac.compare_digest(presented, self.auth_token):
             return await self._refuse("401 Unauthorized", "bad or missing auth token")
-        accept = base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode()).digest()).decode()
+        accept = websocket_accept(key)
         self.writer.write(("HTTP/1.1 101 Switching Protocols\r\n"
                            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                            f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
@@ -702,17 +854,24 @@ class WebSocket:
             head = await self.reader.readexactly(2)
             fin, opcode = head[0] & 0x80, head[0] & 0x0F
             masked, length = head[1] & 0x80, head[1] & 0x7F
+            if not masked:
+                # RFC 6455 §5.1: a client frame is always masked, and a server that accepts an
+                # unmasked one is the hole the masking rule exists to close (a crafted HTTP form
+                # post read as a frame). Fail the connection, do not try to interpret it.
+                await self.close(1002, "client frames must be masked")
+                return None
             if length == 126:
                 length = struct.unpack(">H", await self.reader.readexactly(2))[0]
             elif length == 127:
                 length = struct.unpack(">Q", await self.reader.readexactly(8))[0]
-            if length > MAX_MESSAGE_BYTES:
+            # Both checks are before any allocation: the announced length, and what it would make
+            # the reassembled message. A peer cannot reserve memory here by lying about a size.
+            if length > MAX_MESSAGE_BYTES or size + length > MAX_MESSAGE_BYTES:
                 await self.close(1009, "message too large")
                 return None
-            mask = await self.reader.readexactly(4) if masked else None
+            mask = await self.reader.readexactly(4)
             payload = await self.reader.readexactly(length) if length else b""
-            if mask:
-                payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
             if opcode == 0x8:   # close: echo and end
                 await self.close(1000)
                 return None
@@ -723,9 +882,6 @@ class WebSocket:
                 continue
             chunks.append(payload)
             size += len(payload)
-            if size > MAX_MESSAGE_BYTES:
-                await self.close(1009, "message too large")
-                return None
             if fin:
                 return b"".join(chunks).decode("utf-8", "replace")
 
@@ -741,8 +897,9 @@ class WebSocket:
             header += bytes([126]) + struct.pack(">H", length)
         else:
             header += bytes([127]) + struct.pack(">Q", length)
-        self.writer.write(header + payload)
-        await self.writer.drain()
+        async with self.send_lock:
+            self.writer.write(header + payload)
+            await self.writer.drain()
 
     async def ping(self) -> None:
         await self._send_frame(0x9, b"relay")
@@ -766,32 +923,45 @@ class BridgeServer:
         self.server: asyncio.AbstractServer | None = None
         self._tasks: list[asyncio.Task] = []
         self._panes_stamp = 0.0
+        self.connections: set[WebSocket] = set()
+        self._last_ping = 0.0
 
     async def start(self) -> int:
         self.server = await asyncio.start_server(self._client, host="127.0.0.1", port=0)
+        self._last_ping = time.monotonic()
         self._tasks.append(asyncio.ensure_future(self._tick()))
         return self.server.sockets[0].getsockname()[1]
 
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         socket = WebSocket(reader, writer, self.bridge.lock.token)
+        settlers: set[asyncio.Task] = set()
         try:
             if not await socket.handshake():
                 writer.close()
                 return
-            await self._serve(socket)
-        except (ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+            self.connections.add(socket)
+            await self._serve(socket, settlers)
+        except (ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError,
+                asyncio.TimeoutError):
             pass
         except asyncio.CancelledError:
             raise
         except Exception as error:   # a broken client must not take the bridge down
             self.bridge.log(f"client_error {error!r}")
         finally:
+            self.connections.discard(socket)
+            # The guest is gone: nothing it asked can be answered, so nothing it asked may still
+            # write a file. Settle first, then cancel — a settled future makes its task finish on
+            # its own and the cancel below is only for the ones that were already sending.
+            self.bridge.abandon_connection(socket)
+            for task in list(settlers):
+                task.cancel()
             try:
                 writer.close()
             except OSError:
                 pass
 
-    async def _serve(self, socket: WebSocket) -> None:
+    async def _serve(self, socket: WebSocket, settlers: set[asyncio.Task]) -> None:
         while True:
             text = await socket.read_message()
             if text is None:
@@ -801,34 +971,56 @@ class BridgeServer:
             except ValueError:
                 await socket.send_message(json.dumps(rpc_error(None, -32700, "Parse error")))
                 continue
-            replies = self.bridge.dispatch(message)
+            replies = self.bridge.dispatch(message, connection=socket)
             for reply in replies or []:
                 if isinstance(reply, Deferred):
-                    await self._answer_when_settled(socket, reply)
+                    # A blocking tool is answered by its own task, never here. Awaiting it inline
+                    # stops this loop reading, and then nothing else on the connection is served
+                    # while a diff is on screen: no tools/list, no pong, and — worst — not the
+                    # client's own close_tab, which is how it cancels the very diff we are waiting
+                    # for. The deadlock was real; this is the fix.
+                    task = asyncio.ensure_future(self._answer_when_settled(socket, reply))
+                    settlers.add(task)
+                    task.add_done_callback(settlers.discard)
                 else:
                     await socket.send_message(json.dumps(reply))
 
     async def _answer_when_settled(self, socket: WebSocket, deferred: Deferred) -> None:
+        pending = deferred.pending
         try:
-            outcome = await deferred.pending.future
+            outcome = await pending.future
         except asyncio.CancelledError:
-            outcome = DIFF_REJECTED
+            self.bridge.settle(pending, DIFF_REJECTED, "cancelled")
+            return   # the connection is going away; there is nobody to tell
+        reply = rpc_ok(deferred.request_id, text_result(outcome))
         if outcome == FILE_SAVED:
             # The save is the bridge's to do (26.5): the GUI shows and decides, the MCP editor
             # writes, exactly as the diff editor it is standing in for would have.
-            try:
-                write_text_atomic(deferred.new_path, deferred.contents)
-            except OSError as error:
-                self.bridge.log(f"save_failed path={deferred.new_path} {error!r}")
-                await socket.send_message(json.dumps(
-                    rpc_ok(deferred.request_id,
-                           tool_error(f"Relay could not save {deferred.new_path}: {error}"))))
-                return
-        await socket.send_message(json.dumps(rpc_ok(deferred.request_id, text_result(outcome))))
+            #
+            # The path was checked when the diff was opened, but that was minutes ago: panes come
+            # and go, and a symlink can be planted while a decision is on screen. So resolve it
+            # again, against the pane set as it is now, and write only what comes back.
+            target = resolve_in_pane(self.bridge.panes, pending.pane_token, deferred.new_path)
+            if target is None:
+                self.bridge.log(f"refused tool=openDiff reason=outside-pane-at-save "
+                                f"path={deferred.new_path}")
+                reply = rpc_ok(deferred.request_id, text_result(DIFF_REJECTED))
+            else:
+                try:
+                    write_text_atomic(target, deferred.contents)
+                except OSError as error:
+                    self.bridge.log(f"save_failed path={target} {error!r}")
+                    reply = rpc_ok(deferred.request_id,
+                                   tool_error(f"Relay could not save {target}: {error}"))
+        try:
+            await socket.send_message(json.dumps(reply))
+        except (ConnectionError, OSError) as error:
+            self.bridge.log(f"reply_dropped {error!r}")
 
     async def _tick(self) -> None:
-        """The one timer: panes in, replies out, a keepalive ping. Each is a stat or a tiny
-        write; 20 times a second costs nothing and keeps a blocking openDiff responsive."""
+        """The one timer: panes in, replies out, stale diffs expired, a keepalive ping. Each is a
+        stat or a tiny write; 20 times a second costs nothing and keeps a blocking openDiff
+        responsive. The ping runs on its own, much slower, clock."""
         while True:
             try:
                 await asyncio.sleep(POLL_SECONDS)
@@ -843,10 +1035,26 @@ class BridgeServer:
                     for token in before - set(self.bridge.panes):
                         self.bridge.abandon_pane(token)
                 self.bridge.check_replies()
+                self.bridge.expire_pending()
+                await self._keepalive()
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 self.bridge.log(f"tick_error {error!r}")
+
+    async def _keepalive(self) -> None:
+        """A ping on every live connection, every KEEPALIVE_SECONDS. An idle claude with a diff on
+        screen sees nothing on the socket for as long as the user takes; the ping is how it — and
+        anything between the two, a container's conntrack included — knows the bridge is alive."""
+        now = time.monotonic()
+        if now - self._last_ping < KEEPALIVE_SECONDS:
+            return
+        self._last_ping = now
+        for socket in list(self.connections):
+            try:
+                await socket.ping()
+            except (ConnectionError, OSError):
+                self.connections.discard(socket)
 
 
 # ----- entry point ----------------------------------------------------------------------------------
@@ -854,7 +1062,8 @@ class BridgeServer:
 
 def install_parent_death_signal() -> None:
     """PR_SET_PDEATHSIG(SIGTERM): if the GUI dies without saying goodbye, the kernel tells us.
-    Belt to atexit's braces — a SIGKILLed GUI runs no handlers at all."""
+    Belt to the atexit brace `serve()` fastens once the lock exists — a SIGKILLed GUI runs no
+    handlers at all, here or there."""
     try:
         import ctypes
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -865,7 +1074,11 @@ def install_parent_death_signal() -> None:
 
 def serve(state_dir: str, lock_dir: str | None = None, relay_version: str = "0",
           ready_line=print) -> int:
-    """Run the bridge until SIGTERM/SIGINT. Returns the process exit code."""
+    """Run the bridge until SIGTERM/SIGINT. Returns the process exit code.
+
+    The lock's life is bounded on three sides: it is not written until there is a port to
+    advertise, an `atexit` handler removes it the moment it exists, and the normal exit path below
+    removes it again (removing what is gone is not an error)."""
     install_parent_death_signal()
     lock_dir = lock_dir or guest.claude_ide_lock_dir()
     sweep_stale_locks(lock_dir)   # locks whose IDE is gone, so a fresh claude sees only live ones
@@ -873,7 +1086,8 @@ def serve(state_dir: str, lock_dir: str | None = None, relay_version: str = "0",
     os.makedirs(os.path.join(state_dir, "replies"), exist_ok=True)
     lock = LockFile(directory=lock_dir, port=0, pid=os.getpid(), token=secrets.token_hex(16))
     bridge = Bridge(lock, state_dir, relay_version)
-    bridge.refresh_registrations()
+    # The panes are read *after* the port is known, below: refreshing here would have the lock
+    # written at port 0 the moment a pane was already registered.
 
     stopped = asyncio.Event()
     loop = asyncio.new_event_loop()
@@ -885,8 +1099,14 @@ def serve(state_dir: str, lock_dir: str | None = None, relay_version: str = "0",
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, stop)
-        except (NotImplementedError, RuntimeError):
-            signal.signal(sig, lambda *_: stopped.set())
+        except (NotImplementedError, RuntimeError, ValueError):
+            # ValueError: not the main thread. Neither handler can be installed there, and
+            # `signal.signal` says so the same way; the caller that runs the bridge off the main
+            # thread is responsible for stopping it, and atexit still removes the lock.
+            try:
+                signal.signal(sig, lambda *_: stopped.set())
+            except ValueError:
+                pass
 
     server = BridgeServer(bridge)
     try:
@@ -895,7 +1115,9 @@ def serve(state_dir: str, lock_dir: str | None = None, relay_version: str = "0",
         ready_line(json.dumps({"ready": False, "error": f"bind failed: {error}"}))
         return 1
     lock.port = port
-    lock.write(bridge.folders_written)
+    bridge.refresh_registrations()   # may write the lock itself now that the port is real
+    lock.write(bridge.folders_written)   # and it exists even when no pane has registered yet
+    atexit.register(lock.remove)
 
     async def announce() -> None:
         ready_line(json.dumps({"ready": True, "port": port, "lock": lock.path}))

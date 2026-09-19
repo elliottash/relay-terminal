@@ -3106,6 +3106,15 @@ tool call returns only when the user saves (`FILE_SAVED`) or rejects (`DIFF_REJE
 A bridge-to-pane match is by workspace/cwd; unmatched requests are logged and dropped. Whether the
 server is Qt-side or a spawned sidecar is the phase's choice; the constraints above are not.
 
+**The path rule.** A file the bridge writes is always a file inside the pane that is showing the
+diff. *Both* paths an `openDiff` names are resolved with `os.path.realpath` — `..` and symlinks
+followed — and both must land inside the workspace/cwd of the one pane the request routed to;
+anything else answers `DIFF_REJECTED` and is logged (`refused … reason=outside-pane`) without ever
+being shown to the user. The check is made twice: when the diff is opened, and again against the
+live pane set at the instant of the write, because a pane can close and a symlink can be planted
+while the decision is on screen. Routing looks at `old_file_path` first and `new_file_path` is
+what gets written, so checking only the routing path is checking the wrong one.
+
 **Implementation (claude-bridge phase).** The server is a spawned sidecar,
 `backend/relay_core/guest_bridge.py serve --state-dir <dir>`, one per GUI run, started lazily by
 the first pane's `startTerminal` through `src/GuestBridge.h` (the GUI's whole end of the bridge:
@@ -3116,6 +3125,33 @@ without the bridge. Every claude pane registers itself as one JSON file in the r
 (`{token, runtime_dir, helper, python, workspace, cwd}`), rewritten when the cwd or workspace
 moves and removed when the claude exits or the pane closes; the sidecar routes by the longest
 workspace/cwd prefix of the paths a request names, newest file breaking a tie.
+
+**The lock's lifetime.** Stale locks (whose pid is gone) are swept at startup; then the listener
+binds, and only then is the lock written — a lock advertises a port and a live `authToken`, so
+there is no lock before there is a port and `0.lock` is never a file that exists. It is removed on
+three paths: `atexit`, registered the moment the lock is written; SIGTERM/SIGINT; and the GUI's
+own death via `PR_SET_PDEATHSIG`. A SIGKILLed run leaves a lock that the next run's sweep takes.
+
+**Nothing blocks the connection.** A pending `openDiff` is settled by its own task, so the read
+loop keeps serving while a decision is on screen: `tools/list` is answered, a ping gets its pong,
+and — the case that mattered — the client's own `close_tab` is read. `close_tab` settles the
+pending diff whose `tab_name` matches, on that connection, as `DIFF_REJECTED` (and still answers
+`TAB_CLOSED`, as upstream does unconditionally); that is how claude withdraws a diff it no longer
+wants. `closeAllDiffTabs` closes the calling connection's diffs only — two claudes share one
+sidecar, and one tidying up must not cancel what the user is reading in the other pane. A pending
+diff also ends by itself when its pane closes, when its connection drops, at shutdown, or after
+`DIFF_TIMEOUT_SECONDS` (30 minutes) on the wall clock. Every one of those answers `DIFF_REJECTED`:
+a guest told no is recoverable, a guest blocked forever is not.
+
+**The socket itself.** Loopback, one auth token in `x-claude-code-ide-authorization`, compared
+with `hmac.compare_digest`. A connection that does not finish its HTTP head within
+`HANDSHAKE_SECONDS` (10) is dropped. Client frames must be masked (RFC 6455 §5.1) or the
+connection is failed with close code 1002. A frame, and a reassembled fragmented message, is
+capped at `MAX_MESSAGE_BYTES` (4 MiB) and refused with 1009 *before* the announced bytes are read.
+Every `KEEPALIVE_SECONDS` (30) the sidecar pings each live connection, so an idle claude — and
+anything keeping state between the two — knows the bridge is alive. The accept-key helper is
+`remote/ws.py`'s when that package is importable and three equivalent lines when it is not; the
+rest of the frame layer is local because the sidecar runs with only `backend/` on its path.
 
 **The split that keeps the GUI honest.** The sidecar owns the socket, the JSON-RPC surface and
 the lock file, and it is the only side that can answer claude — including `getDiagnostics`
@@ -3133,7 +3169,10 @@ for the shim: the sidecar calls it as `guest-event.py bridge claude` with the ev
 stdin and `RELAY_RUNTIME_DIR`/`RELAY_SESSION_TOKEN` in its environment, and the helper builds
 the §26.3 envelope and replaces `guest.json` atomically. A helper that is missing, fails, or
 has no runtime dir to write is a failed emit — the event is not sent, and `openDiff` answers
-`DIFF_REJECTED` — never a second writer beside the channel's own.
+`DIFF_REJECTED` — never a second writer beside the channel's own. It is run with a minimal
+environment — `PATH`, `HOME`, `PYTHONPATH`, the locale and `RELAY_RUNTIME_DIR` /
+`RELAY_SESSION_TOKEN` / `RELAY_PYTHON` — not the sidecar's own, which inherits the GUI's
+provider keys.
 
 ### 26.6 Codex attach
 
