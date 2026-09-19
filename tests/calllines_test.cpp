@@ -114,6 +114,34 @@ private slots:
         }
     }
 
+    // Issue #7FD3: the "open in pane" link at a fold's foot is not the row's anchor — it is
+    // relay://open-call/…, while the pane's call records are keyed by the anchor — so
+    // `openCallTarget()` never finds a record under it and always falls back to the ids the link
+    // itself carries. That link is openUri(pane, ref.turn, ref.call) for the anchor's parsed ref
+    // (`Pane::foldOptions()`), so it must read back to a non-empty turn and a single call id — the
+    // first member's for a merged run, whose `+count` tail must not survive into the link — or the
+    // fold's link fails the way #7FD3's did, on a call that was seconds old.
+    void theFoldOpenInPaneLinkNamesOneRefetchableCall() {
+        const QStringList ids{QStringLiteral("call_1"), QStringLiteral("a/b"), QStringLiteral("c+2"),
+                              QStringLiteral("id with space"), QStringLiteral("%2F")};
+        for (const QString &id : ids) {
+            for (int extra : {0, 6}) {
+                const QString anchor = foldUri(QStringLiteral("pane1"), QStringLiteral("turn-9"), id, extra);
+                const Ref row = parseUri(anchor);
+                // exactly what Pane::foldOptions() puts in FoldOptions::openInPane
+                const QString link = openUri(QStringLiteral("pane1"), row.turn, row.call);
+                QVERIFY(link.startsWith(QStringLiteral("relay://open-call/")));
+                const Ref ref = parseUri(link);
+                QVERIFY(ref.valid);
+                QVERIFY(!ref.fold);
+                QVERIFY(!ref.turn.isEmpty());
+                QCOMPARE(ref.turn, QStringLiteral("turn-9"));
+                QCOMPARE(ref.call, id);          // the id openCallTarget() falls back to
+                QVERIFY(!ref.merged());          // one call, never a run of `extra`
+            }
+        }
+    }
+
     // A call id with a `+` of its own is encoded, so it can never be read as a run's count.
     void plusInACallIdIsNotACount() {
         const Ref ref = parseUri(foldUri(QStringLiteral("p"), QStringLiteral("t"), QStringLiteral("c+2")));

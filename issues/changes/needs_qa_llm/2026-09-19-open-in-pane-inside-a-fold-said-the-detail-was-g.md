@@ -12,7 +12,7 @@ rank: zzzz112
 created: '2026-09-19'
 acceptance: clicking "open in pane" at the foot of an open tool-call fold opens that call's output in a preview pane, including for a call that ran seconds ago
 source: 'issues/bug_intake.txt, 2026-09-19: "i clicked on an open in pane item for a tool call and it gave an error ''calls detail not available in this pane any more''"'
-links: {plans: [], commits: [7241a40], evidence: [], related: [EC58, TK9C], github: null}
+links: {commits: [7241a40], evidence: [docs/qa_evidence/2026-09-19-open-in-pane-inside-a-fold/], github: null, plans: [], related: [EC58, TK9C]}
 ---
 # "open in pane" inside a fold always said the call's detail was gone — even one second after the call
 
@@ -61,7 +61,7 @@ build older than `7241a40`** — the bug is in every Relay built before 2026-09-
 
 - [ ] Owner: rebuild or update Relay to at least `7241a40`; the installed build that produced this <!-- t:k4 -->
       report predates the fix
-- [ ] A regression test for the fold's link specifically: `foldOptions()` must produce an <!-- t:m7 -->
+- [x] A regression test for the fold's link specifically: `foldOptions()` must produce an <!-- t:m7 -->
       `openInPane` URI that `parseUri()` reads back to a non-empty turn and a single call id, so a
       later change to either spelling cannot silently break the link again
       (`tests/calllines_test.cpp`, beside `everyAnchorCarriesEnoughToRefetchTheCall`)
@@ -80,10 +80,18 @@ build older than `7241a40`** — the bug is in every Relay built before 2026-09-
   changed.
 
 ## QA checklist
-
-- [ ] Run a turn with a tool call, click the `▸` row to unfold it, then click `open in pane` at the
+- [x] Run a turn with a tool call, click the `▸` row to unfold it, then click `open in pane` at the
       foot of the fold: the call's output opens in a preview pane. The call is seconds old and the
       pane has not been restarted — this is the case that used to fail every time.
-- [ ] The same on a merged run's row (`read 6 files`): the fold offers no `open in pane` link, by
+      Verified 2026-09-19 (independent session, binary from a clean worktree of `main` at `424eff5`):
+      `run` scene of the evidence drive — fold clicked ~6 s after the answer, preview pane
+      `run_command-call_1.log` with `RUN COMMAND / Working directory / seq 1 40` and the 40 lines,
+      no status line (`implementer-run-preview.png`).
+- [x] The same on a merged run's row (`read 6 files`): the fold offers no `open in pane` link, by
       design, and the member rows still open their files.
-- [ ] `ctest --test-dir build -R calllines` passes.
+      Verified 2026-09-19: `merged` scene — six reads merged into `read 6 files · 72 lines`, the fold
+      lists the members with no `in pane` phrase anywhere in the window, and clicking `src/a.py`
+      opened the file's preview (`implementer-merged-fold.png`, `-file.png`).
+- [x] `ctest --test-dir build -R calllines` passes.
+      Verified 2026-09-19: `1/1 Test #53: calllines … Passed 0.02 sec`, with the new
+      `theFoldOpenInPaneLinkNamesOneRefetchableCall()` in the suite.
