@@ -15,6 +15,10 @@
   --rp-gap: 6px;
   --rp-pad: 6px;
   --rp-line: 1.35;
+  /* The height the reader can see. A viewport unit here would mean the whole screen even with an
+     on-screen keyboard over half of it (Safari), so the host sets this from the visual viewport
+     (app/viewport.js, applied in style.css and pane-demo.css); a host that does not is the screen. */
+  --rp-visible-height: 100vh;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -47,7 +51,13 @@
 
 /* ---- the terminal, and toasts over it ------------------------------------------------------ */
 .rp-term-wrap { position: relative; display: flex; flex: 1 1 auto; min-height: 96px; }
+/* The slot the host puts its terminal in is a column the terminal fills: a block here left the
+   host's terminal (app/app.js moves #terminal-pane in) at the height of its whole 24-row grid, which
+   no flex rule above could take back, and in a short window it pushed the queue and the prompt box
+   off the bottom of the screen (owner, 2026-09-18, an iPad in landscape with its keyboard up). */
 .rp-terminal {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -119,7 +129,9 @@
   -webkit-touch-callout: default;
   cursor: text;
 }
-.rp-thinking.rp-expanded .rp-thinking-tail { max-height: min(45vh, calc(var(--rp-tail-line) * 20)); }
+.rp-thinking.rp-expanded .rp-thinking-tail {
+  max-height: min(calc(var(--rp-visible-height) * 0.45), calc(var(--rp-tail-line) * 20));
+}
 .rp-thinking-tail::selection { background: var(--rt-selection); color: var(--rt-selection-text); }
 
 /* ---- the queue strip ---------------------------------------------------------------------- */
@@ -358,7 +370,7 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
   flex-direction: column;
   min-width: 220px;
   max-width: min(420px, calc(100% - 16px));
-  max-height: min(70vh, calc(100% - 16px));
+  max-height: min(calc(var(--rp-visible-height) * 0.7), calc(100% - 16px));
   overflow-y: auto;
   padding: var(--qss-menu-padding);
   background: var(--qss-menu-background);
@@ -442,3 +454,23 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
   .relay-pane[data-device="phone"] .rp-sheet { animation: rp-sheet-in 140ms ease-out; }
   @keyframes rp-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 }
+
+/* A short viewport (app/viewport.js: under 520 px, which is an iPad in landscape with its keyboard
+   up — about 330 px left). Everything the desktop pane stacks has to fit it with the prompt box and
+   its strip — the send button is on it — whole at the bottom. The terminal is what the reader came
+   for, so the rest gives way around it in the desktop's own order (Pane.h: "reasoning is commentary
+   on a turn: losing it costs less than losing the queue"). The reasoning panel steps aside until the
+   keyboard goes — the turn's clock and step count stay on the prompt box's strip, and the queue's
+   running line says what is running — the queue keeps one row and scrolls, the terminal keeps two
+   lines, and the gaps close up. The prompt box and its strip never give way. */
+.short-viewport .relay-pane { --rp-gap: 3px; }
+.short-viewport .rp-term-wrap { min-height: calc(var(--rt-pt) * 10 * 1.45 * 2); }
+.short-viewport .rp-thinking { display: none; }
+.short-viewport .relay-pane .rp-queue { padding-top: 3px; padding-bottom: 4px; }
+.short-viewport .rp-rows { max-height: calc(max(calc(1em * var(--rp-line) + 8px), var(--rp-tap)) + 4px); }
+.short-viewport .rp-composer { padding-top: 6px; padding-bottom: 6px; }
+/* Under 260 px (app/viewport.js: a phone in landscape with its keyboard up, about 185 px) the queue
+   steps aside too, and the terminal keeps one line; the prompt box and its strip are what is left
+   to type with, whole. Everything comes back when the keyboard goes. */
+.tiny-viewport .rp-queue { display: none; }
+.tiny-viewport .rp-term-wrap { min-height: calc(var(--rt-pt) * 10 * 1.45); }

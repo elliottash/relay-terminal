@@ -3,7 +3,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- interactive-widget: Chrome on Android shrinks the layout for its keyboard instead of laying the
+     keyboard over it. Safari ignores it; app/viewport.js does the same job there. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0e0f12">
 <title>Relay</title>
 <link rel="manifest" href="./manifest.webmanifest">

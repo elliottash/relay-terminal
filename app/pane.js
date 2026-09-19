@@ -17,6 +17,8 @@
 // Everything from the wire goes in through textContent. There is no innerHTML here, and styles are
 // set through CSSOM only, so the app's CSP (no inline script or style) holds.
 
+import { visibleHeight } from './viewport.js';
+
 const ACTION_ORDER = ['edit', 'steer', 'send_now', 'to_queue', 'up', 'down', 'remove'];
 
 // The desktop's own words for each action (the queue strip's hint line and row tooltips, Pane.h).
@@ -615,7 +617,9 @@ export function mountPane(container, options = {}) {
     const empty = !box.value;
     if (empty) box.value = box.placeholder;
     box.style.height = 'auto';
-    const max = Math.round(window.innerHeight * 0.3);
+    // The visible height, not innerHeight: with an on-screen keyboard up Safari still reports the
+    // whole screen, and a box allowed 30% of that fills most of what is left (app/viewport.js).
+    const max = Math.round(visibleHeight() * 0.3);
     box.style.height = `${Math.min(box.scrollHeight, max)}px`;
     if (empty) box.value = '';
   }

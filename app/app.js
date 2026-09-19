@@ -17,6 +17,11 @@ import { guestRoute, startGuest, startGuestIfInvited } from './guest.js';
 // model and prompt box, drawn from the `pane_state` it publishes. Every label in it was written
 // by the desktop; this file only carries messages in and out.
 import { mountPane } from './pane.js';
+// The page is as tall as what is visible, so an on-screen keyboard shrinks it instead of pushing it
+// off the screen (owner, 2026-09-18, an iPad in landscape).
+import { trackViewport } from './viewport.js';
+
+trackViewport();
 
 const rrp = new Rrp();
 let panes = [];

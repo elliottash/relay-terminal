@@ -12,6 +12,11 @@
 // tests/test_pane_view.py asserts against: the view must send exactly the protocol's messages.
 
 import { mountPane } from './pane.js';
+// Sized like the app: to the visible viewport, with the short-viewport caps under 520 px, so a
+// window the height of an iPad's strip above its keyboard shows what the iPad shows.
+import { trackViewport } from './viewport.js';
+
+trackViewport();
 
 // The fixtures, by name. A static page cannot list a directory, and these are the six states
 // worth looking at: idle, a busy queue, long reasoning, a paused queue, a view-only device (no
