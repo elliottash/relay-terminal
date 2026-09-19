@@ -2973,3 +2973,82 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   pane already has that session open, focuses that pane instead, so two workers never autosave one
   file; on a thread, Enter opens its history in the ⓘ pane.
 - `reset` now carries the new conversation's `session_id`.
+
+## 27. The agent asks the user a question (v3.3, 2026-09-19)
+
+Plan mode could investigate and it could write a plan; between the two it could not reach the user,
+so a planner that was unsure guessed (card #MQ9C, owner: "aksing questions. the planner doesnt do
+it yet"). `ask_user` is that channel. Like `type_into_program` (section 21) it is a round trip
+through the pane, because the worker cannot draw anything. Worker side:
+`backend/relay_core/questions.py`; tests `tests/test_questions.py`.
+
+### 27.1 The shape of it
+
+```
+model  → ask_user {questions: [{header, question, options, multiple?}]}
+worker → question {id, turn_id, questions}
+          … the turn thread blocks. No deadline: the user may be away …
+GUI    → question_answer {id, answers}
+worker → (the tool returns; the turn goes on)
+```
+
+`question_closed {id, reason}` is emitted instead when Stop or the end of the turn takes the card
+away before it was answered.
+
+### 27.2 `ask_user`
+
+| Argument | |
+|---|---|
+| `questions` | 1–4 questions, asked together |
+| `.header` | two or three words naming the decision, at most 30 characters |
+| `.question` | the question in full, at most 300 characters |
+| `.options` | 2–5 `{label (≤60), description (≤200), recommended?}` |
+| `.multiple` | let the user pick more than one (default `false`) |
+
+Refused, with a sentence the model gets to act on: an option labelled "Type your own answer" (the
+pane always offers one, as opencode's `question` tool does, so a catch-all option would be
+duplicated), two options with the same label, two recommendations in one question, and more than
+`MAX_ASKS_PER_TURN` (6) calls in one turn — the last returns `{ok: false, refused: "cap"}` telling
+the model to decide and say which way it went.
+
+The tool is **plan mode's**: `Agent.tools()` adds it beside `write_plan`, and a call in build mode
+is refused with a sentence telling the model to end its turn on the question instead. A spec costs
+its tokens on every turn of every pane, and it is the planner the card was asked for. It is **never
+offered to a subagent** either: it cannot see the pane and the user does not know it is running
+(`subagents.RestrictedExecutor` sets `can_ask = False`).
+
+The result is `{ok: true, answers: [{header, question, answer}], summary, note?}`. `answer` is the
+chosen labels joined with ", ", or the user's own words, or `"Unanswered"`. `note` appears when
+anything went unanswered and says to decide it and move on rather than ask again.
+
+### 27.3 `question` (worker → GUI) and `question_answer` (GUI → worker)
+
+`question.questions` is the validated, normalised list: whitespace collapsed, `multiple` always
+present, `recommended` present only on the recommended option. The pane draws it and answers
+
+```
+question_answer {id, answers: [["This file only"], [], ["neither: delete it"]]}
+```
+
+one list per question, in order: the labels chosen, the user's own text for an answer they typed,
+or an empty list for one they skipped. A dismissed card is every question skipped. An `id` nobody
+is waiting on is ignored — a click landing after Stop is the user being late, not an error.
+
+### 27.4 What the user sees (GUI, card #4E13)
+
+A question is the "needs human" state, so the card is drawn in the theme's amber `warning` ink, the
+pane's status glyph and its tab go to `NeedsYou` while it is open, and the pane's notification says
+the agent needs you. The card is keyboard-first: number keys choose, Enter confirms, `t` types an
+answer of your own, Esc skips. This is the visual language #4E13 asked for — amber is the colour of
+something waiting on a person.
+
+### 27.5 Deviations from the harnesses this follows
+
+- **No `plan_exit`.** opencode ends plan mode with a Yes/No question; Relay already has the plan
+  pane's Execute buttons, and asking "is this plan okay?" as a question would be a second, worse
+  copy of them. The prompt says so in as many words.
+- **`recommended` is a flag on the option**, not Warp's `recommended_option_index` and not
+  opencode's "(Recommended)" suffix inside the label: an index breaks when the model reorders, and a
+  suffix cannot be drawn differently from the words the user is reading.
+- **No deadline.** `type_into_program` gives the pane 20 s because a program is waiting; here a
+  person is, and a timeout would report "failed" for "still thinking".

@@ -349,6 +349,7 @@ public:
         facts.finishSerial = m_finishSerial;
         facts.lastOutcome = m_lastOutcome;
         facts.lastAsked = m_lastAsked;
+        facts.questionOpen = m_ask.open();
         return facts;
     }
     // The foreground program's command line while it is ssh, mosh or telnet; empty otherwise.
@@ -453,6 +454,7 @@ public:
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
         send({{"type", "reset"}}); clearFix();
+        closeQuestion(QString());   // the conversation it belonged to is over (#MQ9C)
         // Agent turns print into the terminal, so a new conversation that left the old ones on
         // screen looked as though /new had done nothing: clear it, the way "Clear terminal" does.
         // The note then goes to the toast rather than the screen, because printing it would erase
@@ -1478,6 +1480,175 @@ public:
         focusInput();
         toast(QStringLiteral("Still planning · tell the agent what to change"));
     }
+
+    // ----- the agent asks the user something (#MQ9C, protocol 27) --------------------------
+    // The worker cannot draw, so a question is a round trip: `question` comes in, the pane prints
+    // the card and waits, the prompt box takes the answer, `question_answer` goes back and the
+    // agent's turn — which has been blocked on it all this time — carries on.
+    //
+    // It is printed into the terminal rather than put in a widget over it, in the amber the rest
+    // of Relay's "needs you" marks use (#4E13: "questions or items needing human response could be
+    // in bold amber"). Numbers answer it, so the keyboard is enough: "2", "1,3" for a multiple
+    // choice, "0" to skip, and anything else is taken as the user's own words. Questions in one
+    // call are asked one at a time; answering the last one sends them all back together.
+    struct Ask {
+        QString id;
+        QJsonArray questions;
+        QList<QStringList> answers;
+        int current = -1;
+        bool open() const { return current >= 0 && current < questions.size(); }
+    };
+
+    bool questionOpen() const { return m_ask.open(); }
+
+    void showQuestion(const QJsonObject &event) {
+        // A second card can only mean the first one is stale (a worker restart, a turn that was
+        // stopped between the emit and the reply): drop it rather than stack them.
+        if (m_ask.open()) closeQuestion(QString());
+        m_ask = Ask{};
+        m_ask.id = event.value(QStringLiteral("id")).toString();
+        m_ask.questions = event.value(QStringLiteral("questions")).toArray();
+        if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) return;
+        for (int i = 0; i < m_ask.questions.size(); ++i) m_ask.answers.append(QStringList());
+        m_ask.current = 0;
+        printQuestion();
+        if (!watched())
+            notify(QStringLiteral("Agent needs you"), questionAt(0).value(QStringLiteral("question")).toString(),
+                   relay::NotificationCenter::kindWarning);
+        refreshBackgroundWait();
+        changed();
+        focusInput();
+    }
+
+    // The worker took the card away: Stop, or the turn ending under it.
+    void closeQuestion(const QString &reason) {
+        if (!m_ask.open()) { m_ask = Ask{}; return; }
+        m_ask = Ask{};
+        ensureLineStart();
+        printInline(reason.isEmpty() ? QStringLiteral("Question withdrawn\n")
+                                     : QStringLiteral("Question withdrawn · %1\n").arg(reason), Ink::Note);
+        closeInline();
+        refreshBackgroundWait();
+        changed();
+    }
+
+private:
+    QJsonObject questionAt(int index) const {
+        return m_ask.questions.at(index).toObject();
+    }
+
+    static QJsonArray questionOptions(const QJsonObject &question) {
+        return question.value(QStringLiteral("options")).toArray();
+    }
+
+    // The card for the question being asked now.
+    void printQuestion() {
+        const QJsonObject question = questionAt(m_ask.current);
+        const QJsonArray options = questionOptions(question);
+        const bool multiple = question.value(QStringLiteral("multiple")).toBool();
+        ensureLineStart();
+        const QString header = question.value(QStringLiteral("header")).toString();
+        const QString counter = m_ask.questions.size() > 1
+            ? QStringLiteral(" (%1 of %2)").arg(m_ask.current + 1).arg(m_ask.questions.size()) : QString();
+        printInline(QStringLiteral("? %1%2 · %3\n").arg(header, counter,
+                                                        question.value(QStringLiteral("question")).toString()),
+                    Ink::Ask);
+        for (int i = 0; i < options.size(); ++i) {
+            const QJsonObject option = options.at(i).toObject();
+            const bool recommended = option.value(QStringLiteral("recommended")).toBool();
+            printInline(QStringLiteral("  %1  %2%3\n").arg(i + 1).arg(option.value(QStringLiteral("label")).toString(),
+                                                                     recommended ? QStringLiteral("   ← recommended")
+                                                                                 : QString()),
+                        Ink::Ask);
+            const QString description = option.value(QStringLiteral("description")).toString();
+            if (!description.isEmpty())
+                printInline(QStringLiteral("     %1\n").arg(description), Ink::Note);
+        }
+        printInline(QStringLiteral("  0  Skip this one\n"), Ink::Note);
+        printInline(multiple ? QStringLiteral("  Answer with numbers (\"1,3\"), or type your own.\n")
+                             : QStringLiteral("  Answer with a number, or type your own.\n"), Ink::Note);
+        printInline(QStringLiteral("  Ctrl+Shift+Enter still runs a command.\n"), Ink::Note);
+        closeInline();
+    }
+
+    // What the prompt box says while a card is up. Longest first, for a narrow pane.
+    QStringList questionPlaceholders() const {
+        if (!m_ask.open()) return {};
+        const QJsonObject question = questionAt(m_ask.current);
+        const int count = questionOptions(question).size();
+        const QString header = question.value(QStringLiteral("header")).toString();
+        return {QStringLiteral("%1 · 1–%2, 0 to skip, or your own words").arg(header).arg(count),
+                QStringLiteral("1–%1, 0 to skip, or your own words").arg(count),
+                QStringLiteral("1–%1, or your own words").arg(count),
+                QStringLiteral("answer the question")};
+    }
+
+    // The text in the prompt box, read as an answer. Numbers pick options; "0" skips; anything
+    // else is the user's own words, which is the whole point of not making this a button row.
+    QStringList readAnswer(const QString &text) const {
+        const QJsonObject question = questionAt(m_ask.current);
+        const QJsonArray options = questionOptions(question);
+        const bool multiple = question.value(QStringLiteral("multiple")).toBool();
+        static const QRegularExpression numbers(QStringLiteral("^\\s*\\d+(?:\\s*[,\\s]\\s*\\d+)*\\s*$"));
+        if (!numbers.match(text).hasMatch()) return {text.trimmed()};
+        QStringList chosen;
+        const auto parts = text.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+        for (const QString &part : parts) {
+            const int index = part.toInt();
+            if (index == 0) return {};                       // skip wins: "0" is never a label
+            if (index < 1 || index > options.size()) return {text.trimmed()};   // out of range: their words
+            const QString label = options.at(index - 1).toObject().value(QStringLiteral("label")).toString();
+            if (!chosen.contains(label)) chosen.append(label);
+            if (!multiple) break;                            // one answer asked for, one taken
+        }
+        return chosen;
+    }
+
+    // Enter in the prompt box while a card is up. Returns false when there is no card, so the
+    // ordinary routing runs.
+    bool answerQuestion(const QString &text) {
+        if (!m_ask.open()) return false;
+        const QString trimmed = text.trimmed();
+        if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
+        const QJsonObject question = questionAt(m_ask.current);
+        const QStringList answer = readAnswer(trimmed);
+        m_ask.answers[m_ask.current] = answer;
+        // The slow path for this card is typing an option out in full when its number would do
+        // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in
+        // the user's own words is the tool working as intended, not something to correct.
+        for (int i = 0; i < questionOptions(question).size(); ++i)
+            if (questionOptions(question).at(i).toObject().value(QStringLiteral("label")).toString()
+                    .compare(trimmed, Qt::CaseInsensitive) == 0) {
+                hint(QStringLiteral("question.number"),
+                     QStringLiteral("Next time: just type %1").arg(i + 1));
+                break;
+            }
+        ensureLineStart();
+        printInline(QStringLiteral("✦ %1: %2\n").arg(question.value(QStringLiteral("header")).toString(),
+                                                     answer.isEmpty() ? QStringLiteral("skipped")
+                                                                      : answer.join(QStringLiteral(", "))),
+                    Ink::UserAgent);
+        closeInline();
+        ++m_ask.current;
+        if (m_ask.open()) { printQuestion(); refreshBackgroundWait(); return true; }
+        sendAnswers();
+        return true;
+    }
+
+    void sendAnswers() {
+        QJsonArray answers;
+        for (const QStringList &answer : std::as_const(m_ask.answers)) {
+            QJsonArray one;
+            for (const QString &label : answer) one.append(label);
+            answers.append(one);
+        }
+        send({{"type", "question_answer"}, {"id", m_ask.id}, {"answers", answers}});
+        m_ask = Ask{};
+        refreshBackgroundWait();
+        changed();
+    }
+
+public:
 
     // Settings changed in Actions › Agent options.
     void agentOptionsChanged(const QString &key) {
@@ -3833,7 +4004,8 @@ public:
     QString shareStatus() const {
         if (m_secretMode) return QStringLiteral("password");
         const relay::panestatus::Facts facts = statusFacts();
-        if (facts.programAsking || facts.handoffWaiting) return QStringLiteral("waiting_input");
+        if (facts.programAsking || facts.handoffWaiting || facts.questionOpen)
+            return QStringLiteral("waiting_input");
         if (facts.processBusy || facts.agentBusy) return QStringLiteral("running");
         // The last turn failed and nothing has happened since. Cleared when the pane is used
         // again (a new turn, a command), so a phone is told about a failure once rather than
@@ -4479,6 +4651,15 @@ private:
                 toast(mode == QStringLiteral("plan") ? QStringLiteral("Plan mode · the agent investigates and writes a plan")
                                                      : QStringLiteral("Build mode"));
             changed();
+            return true;
+        }
+        if (type == QStringLiteral("question")) {
+            showQuestion(event);
+            return true;
+        }
+        if (type == QStringLiteral("question_closed")) {
+            closeQuestion(event.value(QStringLiteral("reason")).toString() == QStringLiteral("cancelled")
+                              ? QStringLiteral("the turn was stopped") : QString());
             return true;
         }
         if (type == QStringLiteral("plan_written")) {
@@ -5767,7 +5948,11 @@ private:
         // The desktop's "do not blink" (a cursor flash time of 0) is this app's reduce-motion
         // signal — RichEditor::setCaretColor already takes the caret's blink from it.
         const bool animate = QApplication::cursorFlashTime() > 0;
-        const QStringList lines = relay::panestatus::waitingLines(waitingFacts(), animate ? m_waitPhase : -1);
+        // A question card owns the prompt box while it is up: what the box invites you to type is
+        // the answer, not "waiting for 2 subagents" (#MQ9C).
+        const QStringList lines = m_ask.open()
+            ? questionPlaceholders()
+            : relay::panestatus::waitingLines(waitingFacts(), animate ? m_waitPhase : -1);
         if (lines.isEmpty()) {
             if (m_waitDots) m_waitDots->stop();
             m_waitPhase = 0;
@@ -5783,7 +5968,10 @@ private:
         m_editor->setAccessibleDescription(lines.first().trimmed());
         // Nothing is drawn over typed text, so the timer has nothing to animate: stop it and let
         // the next keystroke (updateGhost) start it again once the box is empty.
-        if (!animate || !m_editor->toPlainText().isEmpty()) { if (m_waitDots) m_waitDots->stop(); return; }
+        if (!animate || m_ask.open() || !m_editor->toPlainText().isEmpty()) {
+            if (m_waitDots) m_waitDots->stop();
+            return;
+        }
         if (!m_waitDots) {
             m_waitDots = new QTimer(this);
             m_waitDots->setInterval(600);   // gentle: four steps, a little over two seconds a cycle
@@ -6234,6 +6422,9 @@ private:
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
+            // Nobody is left to answer to (#MQ9C): take the card down rather than leave the pane
+            // asking on behalf of a worker that is gone.
+            closeQuestion(QStringLiteral("the agent worker stopped"));
             stopTurnClock();
             relay::log::error(QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3")
                                   .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0));
@@ -6416,6 +6607,20 @@ private:
             return;
         }
         if (submit) {
+            // A question card is up: this text is the answer, not a prompt and not a command
+            // (#MQ9C). Nothing below runs — not `@path`, not `/commands`, not the router. An
+            // explicit terminal submit (Ctrl+Shift+Enter, or Enter with the chip on TERMINAL) is
+            // the exception: a question from the agent must not take the user's terminal away,
+            // and the card's own footer says so.
+            const bool toShell = (overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode)
+                                 == QStringLiteral("shell");
+            if (m_ask.open() && !toShell && !m_editor->toPlainText().trimmed().isEmpty()) {
+                const QString typed = m_editor->toPlainText().trimmed();
+                m_editor->remember(typed);
+                m_editor->clear();
+                answerQuestion(typed);
+                return;
+            }
             // `@path` on its own opens the file (or folder) in a Relay pane.
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
@@ -7697,8 +7902,12 @@ private:
         // Blocked on the background work it started, the strip says what it is blocked on rather
         // than "thinking" (cards #V7QD, #KP4M); the prompt box carries the same words, animated.
         const QString subject = relay::panestatus::waitingSubject(waitingFacts());
-        const QString what = subject.isEmpty() ? QStringLiteral("thinking")
-                                               : QStringLiteral("waiting for ") + subject;
+        // Blocked on a question card is the plainest case of all (#MQ9C): the turn is not thinking,
+        // it is waiting for the person reading it, and saying "thinking" would be a lie in the one
+        // place the user is looking while they decide.
+        const QString what = m_ask.open()   ? QStringLiteral("waiting for your answer")
+                             : subject.isEmpty() ? QStringLiteral("thinking")
+                                                 : QStringLiteral("waiting for ") + subject;
         const QString label = QStringLiteral("%1 · %2 s%3 · %4 stops")
                                   .arg(what)
                                   .arg(seconds)
@@ -7706,8 +7915,13 @@ private:
                                   .arg(stop.isEmpty() ? QStringLiteral("Esc") : stop);
         if (m_turnClockLabel) {
             m_turnClockLabel->setText(label);
-            m_turnClockLabel->setToolTip(QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
-                                             .arg(seconds).arg(stop.isEmpty() ? QStringLiteral("Esc") : stop));
+            m_turnClockLabel->setToolTip(
+                m_ask.open()
+                    ? QStringLiteral("The agent asked you something and its turn is blocked on the answer "
+                                     "(%1 s so far). %2 stops the turn.")
+                          .arg(seconds).arg(stop.isEmpty() ? QStringLiteral("Esc") : stop)
+                    : QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
+                          .arg(seconds).arg(stop.isEmpty() ? QStringLiteral("Esc") : stop));
             m_turnClockLabel->show();
         }
         if (m_thinkingShown && m_thinkingHeader)
@@ -7838,7 +8052,7 @@ public:
         in.busy = m_agentBusy;
         in.toolRunning = m_agentBusy && !m_liveCall.isEmpty();
         const relay::panestatus::Facts facts = statusFacts();
-        in.waiting = facts.programAsking || facts.handoffWaiting;
+        in.waiting = facts.programAsking || facts.handoffWaiting || facts.questionOpen;
         in.clock = m_agentBusy && m_turnClockLabel ? m_turnClockLabel->text() : QString();
         in.thinkingVisible = m_thinkingShown && !m_thinkingDismissed;
         if (m_thinkingHeader) in.thinkingHeader = m_thinkingHeader->text();
@@ -8165,7 +8379,7 @@ private:
     }
 
     // ----- inline output in the terminal -------------------------------------------------
-    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
+    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap, Ask };
 
     // Two levels (owner, 2026-09-18): the conversation carries colour — cyan for what the user
     // sent to the shell, violet for what they sent to the agent, white for the agent's prose —
@@ -8185,6 +8399,9 @@ private:
         case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: return t::TextMuted;
         case Ink::DiffAdd: return t::Success;
         case Ink::DiffRemove: case Ink::Error: return t::Error;
+        // The one thing waiting on a person (#MQ9C): amber, the warning token, which is what
+        // every other "needs you" mark in Relay is drawn in (the status glyph, the work chip).
+        case Ink::Ask: return t::Warning;
         }
         return t::Text;
     }
@@ -8194,7 +8411,10 @@ private:
         // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
         // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
         // "Legible text").
-        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent) ? QByteArray("1;") : QByteArray();
+        // Bold amber for a question, as card #4E13 asked: "questions or items needing human
+        // response could be in bold amber".
+        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent || ink == Ink::Ask)
+                                     ? QByteArray("1;") : QByteArray();
         return "\x1b[" + style + "38;2;" + QByteArray::number(c.red()) + ';' + QByteArray::number(c.green())
                + ';' + QByteArray::number(c.blue()) + 'm';
     }
@@ -8540,6 +8760,10 @@ private:
         // next tool call, which is what Enter on an empty prompt box does here (#C4M8). With no
         // turn to steer, the worker queues it, exactly as the desktop's own steer does.
         m_remoteAuthor = originName.trimmed();
+        // A question card is up (#MQ9C): the line answers it, wherever it was typed. The phone
+        // sees the card because it sees this pane's text; without this its answer would be queued
+        // as a prompt behind the very turn that is blocked waiting for it.
+        if (answerQuestion(trimmed)) { m_remoteAuthor.clear(); return; }
         if (when == QLatin1String("steer") && m_agentBusy) {
             m_remoteSubmit = true; submitAgent(trimmed, false, who); m_remoteSubmit = false;   // the name, not the id
             if (!m_entries.isEmpty() && m_entries.last().agent) {
@@ -11284,6 +11508,7 @@ private:
         else enqueue(entry);
     }
     QString m_lastPlanPath;      // the plan this pane's agent wrote last
+    Ask m_ask;                   // the question card up in this pane, if any (#MQ9C)
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     relay::SubagentsPanel *m_agentsPanel = nullptr;

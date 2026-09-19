@@ -532,7 +532,13 @@ class Agent:
             extra = extra + self.board.tool_specs()
         if self.mode == "plan":
             # Subagents may write files, so plan mode does not offer them either.
-            return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
+            # ask_user is plan mode's (#MQ9C): it is the planner that must not guess, and a tool
+            # spec costs its tokens on every turn of every pane, so build mode does not carry one
+            # it was never told to use. A build turn that needs the user still ends on a question,
+            # which the pane already reads as "needs you".
+            asking = [self.executor.questions.tool_spec()] if self.executor.can_ask else []
+            return ([t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS]
+                    + [WRITE_PLAN_SPEC] + asking + extra)
         if self.subagents is not None:
             tools = tools + self.subagents.tool_specs()
         return tools + extra
@@ -1053,6 +1059,7 @@ class Agent:
         self.executor.program.default_max_writes = self.max_program_writes
         self.executor.program.begin_turn(validated.get("program_control"))
         self.executor.terminal.begin_turn(validated.get("terminal_handoff"))
+        self.executor.questions.begin_turn()
         note = (self._pending_note + format_context(context) + format_attachments(attachments)
                 + image_block(attachments))
         if reset_cancellation:
@@ -1262,6 +1269,7 @@ class Agent:
             # Consent to type into the user's program never outlives the turn it was given for.
             self.executor.program.end_turn()
             self.executor.terminal.end_turn()
+            self.executor.questions.end_turn()
             self._turn = None
             self._turn_record = None
             self._turn_ctx = None
@@ -1633,6 +1641,9 @@ class Agent:
             items = args.get("items") if isinstance(args.get("items"), list) else []
             lines = [f"[{i.get('status')}] {str(i.get('text'))[:80]}" for i in items[:20] if isinstance(i, dict)]
             return Prepared(name, args, "UPDATE TODOS\n\n" + ("\n".join(lines) or "(empty list)"))
+        if name == "ask_user" and self.mode != "plan":
+            raise ValueError("ask_user is only available in plan mode. Say what you need in your reply "
+                             "and end on the question; the pane shows that as needing the user.")
         if name == "write_plan":
             if self.mode != "plan":
                 raise ValueError("write_plan is only available in plan mode.")
@@ -1646,6 +1657,11 @@ class Agent:
         if prepared.name == "type_into_program":
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))
+        if prepared.name == "ask_user":
+            # The card is drawn against the turn it belongs to, so the pane can close it if the
+            # turn is stopped while the user is still reading it.
+            ctx = self._turn_ctx or {}
+            return self.executor.questions.execute(prepared.arguments, ctx.get("turn_id"))
         if self.board is not None and self.board.handles(prepared.name):
             return self.board.run(prepared.name, prepared.arguments)
         if prepared.name == "update_todos":

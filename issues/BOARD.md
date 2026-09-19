@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-187 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+193 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (108)
+## Features (114)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -21,14 +21,18 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
+| `#G9VE` | [Fail over to another provider when one keeps failing a turn](features/2026-09-19-fail-over-to-another-provider-when-one-keeps-fai.md) | ready |  |  | [3](threads/G9VE.md) |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | in-progress | agent | 5/6 |  |
 | `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
 | `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 6/6 |  |
+| `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
+| `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
 | `#KDK9` | [The Switchboard cleans itself up: `board_cleanup`, its three tools and its changelog](features/needs_qa_llm/2026-09-18-switchboard-cleanup-button.md) | needs-qa-llm | agent |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | agent |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/needs_qa_llm/2026-09-17-aliases-and-workflows.md) | needs-qa-llm | agent |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | agent |  |  |
+| `#MQ9C` | [The planner asks the user questions, in the amber "needs human" ink](features/needs_qa_llm/2026-09-19-the-planner-asks-the-user-questions.md) | needs-qa-llm |  | 10/10 |  |
 | `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | agent |  |  |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/needs_qa_llm/2026-09-17-remote-phone-and-multiplayer.md) | needs-qa-llm | agent |  | [1](threads/W5N2.md) |
@@ -110,6 +114,8 @@
 | `#D8J3` | [The agent hands a command to the user's terminal: run it, or put it in the prompt box](features/needs_qa_llm/2026-09-18-agent-hands-commands-to-the-terminal.md) | needs-qa-llm | agent | 8/9 |  |
 | `#S5SH` | [SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host](features/needs_qa_llm/2026-09-18-ssh-and-mosh-sessions.md) | needs-qa-llm | agent | 14/14 |  |
 | `#C0PY` | [Copy on highlight works in the info pane and every other read-only pane, not only the terminal](features/needs_qa_llm/2026-09-18-copy-on-highlight-in-panes.md) | needs-qa-llm | agent | 6/6 |  |
+| `#Q7Y9` | [Chord: Ctrl+Alt+Left/Right then Ctrl+Alt+Down docks the pane beneath that neighbor](features/needs_qa_llm/2026-09-19-chord-ctrl-alt-left-right-then-ctrl-alt-down-doc.md) | needs-qa-llm |  | 3/4 | [13](threads/Q7Y9.md) |
+| `#VMZP` | [Retry transient provider refusals (429, 5xx) in the transport](features/needs_qa_llm/2026-09-19-retry-transient-provider-refusals-429-5xx-in-the.md) | needs-qa-llm |  | 6/6 | [7](threads/VMZP.md) |
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
 | `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
 | `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |

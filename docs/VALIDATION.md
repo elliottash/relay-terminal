@@ -324,6 +324,11 @@ Waiting for QA (`issues/changes/needs_qa_llm/`):
 - `2026-09-18-settings-as-a-full-pane.md`
 - `2026-09-18-skills-every-name-in-the-prompt.md`
 - `2026-09-18-unknown-slash-command.md`
+- `2026-09-19-the-planner-asks-the-user-questions.md`
+
+This list has fallen behind the folder (97 cards there, 139 lines here across both categories, and
+no 2026-09-19 entries but this one). `ls issues/features/needs_qa_llm/` is the truth; a session
+that lands a card should add its line here, and one that has a minute should reconcile the rest.
 
 Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
 `2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).

@@ -31,7 +31,8 @@ enum class State {
     Done,        // a turn finished while you were not looking
     Failed,      // a turn failed while you were not looking
     NeedsYou,    // blocked on you: a program asks for input, the agent waits on a handed command,
-                 // or a turn you have not seen ended on a question
+                 // the agent asked you a question and is waiting on the answer (#MQ9C), or a turn
+                 // you have not seen ended on a question
 };
 
 int urgency(State state);
@@ -52,6 +53,7 @@ struct Facts {
     quint64 finishSerial = 0;      // bumps on every finished turn
     QString lastOutcome;           // of that turn: "done", "error" or "cancelled"
     bool lastAsked = false;        // the last done turn's reply ended on a question
+    bool questionOpen = false;     // an `ask_user` card is up in the pane, waiting to be answered
 };
 
 // `seenSerial` is the finishSerial the user has already seen (the window records it whenever the

@@ -426,6 +426,13 @@ def main():
                 if agent is None:
                     raise ValueError("Configure a provider and workspace first.")
                 agent.executor.program.resolve(request)
+            elif kind == "question_answer":
+                # The pane's answer to an `ask_user` card (protocol 27); the waiting turn thread
+                # picks it up.
+                agent = turns.agent
+                if agent is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                agent.executor.questions.resolve(request)
             elif kind == "terminal_command_result":
                 # The pane's answer to a `terminal_command` (protocol 22).
                 agent = turns.agent

@@ -481,7 +481,9 @@ and rotating idle tips 4 s after a finished agent turn with an
 from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter) and the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share chip on a pane that is already shared (→ the palette, then "Sharing", because
-`pane.sharing` deliberately has no key of its own),
+`pane.sharing` deliberately has no key of its own), answering an `ask_user` card by typing an
+option out in full (→ its number, `question.number`; an answer in the user's own words is the
+card working and is never corrected),
 and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
@@ -1495,6 +1497,7 @@ prepared, `tool_started` carries a preview, and it executes immediately.
 | `edit_file` | replaces one exact string in an existing file (`old_string` → `new_string`, `replace_all` for every occurrence); refuses a file that does not exist, a string it cannot find, and one that occurs more than once without `replace_all`; same guards, SHA-256 recheck, atomic replace and checkpoint undo as `write_file`; neither is offered in plan mode |
 | `set_keybinding` | offered when the GUI sent a catalog (section 4) |
 | `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
+| `ask_user` | asks the user 1–4 multiple-choice questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). The pane prints the card in the amber "needs human" ink and goes to the `NeedsYou` state; numbers answer it, `0` skips, anything else is the user's own words. Never offered to a subagent, which cannot reach the user. Plan mode's prompt tells the planner to use it before `write_plan` rather than guess |
 
 File tools accept absolute paths and `..`, but every path is resolved and must land
 inside the workspace. Symlinks anywhere in the workspace part of the path, paths that

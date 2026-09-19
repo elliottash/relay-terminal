@@ -161,6 +161,17 @@ private Q_SLOTS:
         QCOMPARE(resolve(f, 0), State::NeedsYou);
     }
 
+    // An `ask_user` card is up and the turn is blocked on the answer (#MQ9C). "Working" would be
+    // a lie, and a tab whose pane is behind another would say nothing at all.
+    void anOpenQuestionOutranksTheTurnItBlocks() {
+        Facts f;
+        f.agentBusy = true;
+        QCOMPARE(resolve(f, 0), State::Working);
+        f.questionOpen = true;
+        QCOMPARE(resolve(f, 0), State::NeedsYou);
+        QCOMPARE(mostUrgent({State::Working, resolve(f, 0)}), State::NeedsYou);
+    }
+
     void questions() {
         QVERIFY(endsWithQuestion(QStringLiteral("Done.\n\nShould I also update the docs?")));
         QVERIFY(endsWithQuestion(QStringLiteral("Which one do you want: **A or B?**\n\n")));

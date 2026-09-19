@@ -264,6 +264,11 @@ FORWARDED_EVENTS = frozenset({
     # The agent handing a command to the user's real shell (protocol 22): same reason. The phone
     # only watches; the desktop pane is the one that answers it.
     "terminal_command",
+    # The agent asking the user something (protocol 27, #MQ9C). A phone must see the card: the
+    # turn is blocked on it, and a person holding the phone is exactly who it is waiting for. The
+    # answer travels back as an ordinary prompt from the device, which the desktop pane reads as
+    # the answer, so nothing new goes the other way.
+    "question", "question_closed",
     # The commands the agent left running (backend/relay_core/jobs.py): a phone watching a pane
     # should know a server is still up, for the same reason it sees tool_result.
     "jobs",

@@ -47,7 +47,9 @@ QString stateLabel(State state) {
 }
 
 State resolve(const Facts &facts, quint64 seenSerial) {
-    if (facts.programAsking || facts.handoffWaiting) return State::NeedsYou;
+    // An open `ask_user` card outranks the running turn it belongs to (#MQ9C): the turn is
+    // blocked on the answer, so "working" would be a lie and a background tab would say nothing.
+    if (facts.programAsking || facts.handoffWaiting || facts.questionOpen) return State::NeedsYou;
     if (facts.agentBusy) return State::Working;
     if (facts.finishSerial > seenSerial) {
         if (facts.lastOutcome == QStringLiteral("error")) return State::Failed;
