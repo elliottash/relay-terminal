@@ -5,7 +5,8 @@ The view draws `pane_state` (docs/REMOTE-PROTOCOL.md section 16) and sends back 
 worth asserting is exactly the contract between the two, because everything else about the pane
 is the desktop's business:
 
-* every label it shows is the desktop's, character for character — the view writes none of them;
+* every label the message carries is drawn as it arrived, character for character (the words on the
+  view's own controls — its sheets, its hints, the QUEUE heading — are the view's own, and fixed);
 * a row offers the actions the desktop listed for it, and no others;
 * a click or a key sends the protocol's message, naming the row by the desktop's own id;
 * a state that has been overtaken (a lower `seq`) is ignored rather than drawn;

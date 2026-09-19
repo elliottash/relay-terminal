@@ -10,7 +10,7 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code, relay-terminal-71), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'A paired phone, tablet or laptop browser draws the pane from `pane_state` — queue rows with the actions each offers, the reasoning, the turn clock, the model and its choices, the prompt box, the context chip, the session list — formatting nothing itself; it can steer, switch models, start a new conversation and edit or withdraw a queue row; a guest never receives `pane_state`; the web view''s colours are generated from `src/Theme.cpp`'
+acceptance: 'A paired phone, tablet or laptop browser draws the pane from `pane_state` — queue rows with the actions each offers, the reasoning, the turn clock, the model and its choices, the prompt box, the context chip, the session list — formatting nothing of the pane''s own work itself (the words on its own controls — the touch action sheet, the send menu, "New conversation", the accessibility labels — are the view''s); it can steer, switch models, start a new conversation and edit or withdraw a queue row; a guest never receives `pane_state`; the web view''s colours are generated from `src/Theme.cpp`'
 source: 'owner, 2026-09-18'
 links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-web-pane-view/], related: [W5N2, C4M8, HEFA, Y4GE], github: null}
 ---
@@ -47,6 +47,16 @@ sessions in the actual relay terminal app on my laptop. sphinxpad should be reac
   below `full`. (This replaces the earlier decision that opening a past conversation was not
   offered remotely, and moves `conversation_new` from AGENT to FULL.)
 - Keys, provider settings, the keyring and conversation deletion stay on the desktop.
+- **The claim went, not the strings** (owner, 2026-09-19, on "the view writes none of the pane's
+  words" being false of `app/pane.js`): either fix was acceptable, and the honest one is the
+  documentation. Publishing the sheet verbs, "New conversation" and the QUEUE heading in a `labels`
+  object would still leave every client a built-in fallback for a desktop that does not send them,
+  so the sentence would stay false while the words lived in two places and on the wire ten times a
+  second; several of them — the accessibility labels, the touch sheets' verbs, the view's own "Next
+  time" hints — have no desktop counterpart to publish at all, and `src/RemotePane.cpp` writes its
+  own set of the same words. So the claim is gone from `app/pane.js`, from section 16 and from the
+  acceptance line above, replaced by what is actually true: nothing the pane says about its own
+  work is written or reformatted by a client, and each client writes the words on its own controls.
 - Qt 6 port: not now.
 
 ## Tasks

@@ -11,10 +11,22 @@
 //
 // The layout is the Qt pane's, top to bottom: terminal, thinking bubble, queue strip, prompt box
 // with its strip (folder, turn clock, "% left", model), in the colours of the desktop's own theme
-// (the message's `theme`, drawn by app/pane-theme.css). The view writes none of the pane's words:
-// every label, hint and title comes from the message, and every action a row offers is one the
-// desktop listed for that row. What the view adds is the device: an action sheet and a send menu
-// for touch, the desktop's keys and its "Next time" hints for a keyboard.
+// (the message's `theme`, drawn by app/pane-theme.css).
+//
+// Everything the pane says about its own work comes from the message and is drawn as it arrived:
+// the row labels, the running line, the queue hint, the reasoning header and tail, the turn clock,
+// the context and allowance chips, the model names, the placeholder, the session titles. The view
+// neither formats nor abbreviates any of it, and every action a row offers is one the desktop
+// listed for that row.
+//
+// What the view does write is the words on its own controls, the parts the Qt pane has no
+// equivalent of: the touch action sheet's verbs (ACTION_WORDS), the send menu (SEND_WHEN), "New
+// conversation", the QUEUE heading, the "▸ running" lead, the accessibility labels, and the "Next
+// time" hints a keyboard gets. Those are fixed words about this view's own buttons — never a
+// restatement of anything in the message — and where the desktop has a word for the same thing
+// (its strip says QUEUE too, src/Pane.h) the two are kept in step by hand. It used to say here
+// that the view writes none of the pane's words, which was never true of them; owner, 2026-09-19:
+// published labels would still need these as a fallback, so the claim went instead (#0VT4).
 //
 // Everything from the wire goes in through textContent. There is no innerHTML here, and styles are
 // set through CSSOM only, so the app's CSP (no inline script or style) holds.

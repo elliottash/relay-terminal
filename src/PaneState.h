@@ -5,9 +5,11 @@
 // A paired phone, tablet or laptop browser is a thin view of the pane on the desktop. The desktop
 // pane publishes a `pane_state` message — what the turn is doing, the reasoning tail, the queue
 // with the actions each row allows right now, the model and the models it may switch to, the
-// composer, the context left and the session list — and the web view draws it. The desktop writes
-// every label; the web formats nothing and decides nothing. docs/REMOTE-PROTOCOL.md section 16 is
-// the normative shape.
+// composer, the context left and the session list — and the web view draws it, in the theme this
+// side names. The desktop writes every label the pane shows about its own work and the view draws
+// it as it arrived, deciding nothing; the words on the view's own controls (its action sheet, its
+// send menu, its accessibility labels) are the view's, and are all it writes — owner, 2026-09-19,
+// correcting "the web formats nothing". docs/REMOTE-PROTOCOL.md section 16 is the normative shape.
 //
 // This file is the pure half: plain inputs in, the v1 JSON out, plus a publisher that coalesces the
 // pane's many small changes (a reasoning chunk, a clock tick) into at most one message every

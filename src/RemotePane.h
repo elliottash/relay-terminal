@@ -4,9 +4,12 @@
 //
 // The other desktop is the model. It sends the screen as rows of styled runs (`screen_snapshot`,
 // `screen_diff`, `history`) and everything under the terminal as one `pane_state`
-// (docs/REMOTE-PROTOCOL.md sections 6.5 and 16). This file draws both and formats nothing: every
-// label, hint and model name is the desktop's, every queue action offered is one the row lists,
-// and every string from the wire is drawn as plain text.
+// (docs/REMOTE-PROTOCOL.md sections 6.5 and 16). This file draws both and formats nothing of the
+// pane's own work: every label, hint and model name it shows is the desktop's, every queue action
+// offered is one the row lists, and every string from the wire is drawn as plain text. The words on
+// this view's own controls are its own, as they are in the web view — "New conversation" in the
+// conversations menu is written here (owner, 2026-09-19, #0VT4: the claim that a client writes none
+// of the pane's words was corrected rather than the strings moved onto the wire).
 //
 // The encrypted session is a Python sidecar, `remote/viewer.py`, in the same arrangement as the
 // sharing side's `remote/gui_host.py` (src/RemoteShare.h): line JSON on stdio, no crypto here. The
