@@ -145,8 +145,9 @@ private slots:
     void anUnknownToolFallsBackToItsHumanisedName() {
         const Label label = relay::toollabel::fromEvent(json(
             "{'event': 'tool_started', 'tool': 'update_todos', 'preview': '[ ] write the test'}"));
-        QCOMPARE(label.line(), QStringLiteral("update todos [ ] write the test"));
-        QCOMPARE(label.runningLine(), QStringLiteral("running update todos"));
+        // #SHE3: the humanised fallback says "tasks" for update_todos, like the labelled row.
+        QCOMPARE(label.line(), QStringLiteral("update tasks [ ] write the test"));
+        QCOMPARE(label.runningLine(), QStringLiteral("running update tasks"));
     }
 
     void aFallbackTakesTheExitCodeAndTheError() {

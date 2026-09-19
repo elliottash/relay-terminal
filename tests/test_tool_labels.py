@@ -290,9 +290,11 @@ class LabelTests(unittest.TestCase):
         self.assertEqual(label['stats'], ['no change'])
 
     def test_todos(self):
+        # Card #SHE3: the wire name is update_todos / open.type todos; the row reads "tasks".
         label = self.label('update_todos', {'items': []}, {'ok': True, 'items': [], 'open': 3})
         self.assertEqual(label['kind'], 'plan')
-        self.assertEqual(label['title'], 'updated todos')
+        self.assertEqual(label['title'], 'updated tasks')
+        self.assertEqual(label['running'], 'updating tasks')
         self.assertEqual(label['stats'], ['3 open'])
         self.assertEqual(label['open'], {'type': 'todos'})
 

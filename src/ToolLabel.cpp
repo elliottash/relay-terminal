@@ -33,6 +33,10 @@ bool isPreviewNote(const QString &line) {
 }
 
 QString humanise(QString name) {
+    // The fallback for a worker that sends no label (§ 23.1): the tool's own name, read aloud. One
+    // exception — `update_todos` is the wire name of a list a person reads as tasks (#SHE3), so the
+    // fallback says so too rather than putting the retired word back on screen.
+    if (name == QLatin1String("update_todos")) return QStringLiteral("update tasks");
     name.replace(QLatin1Char('_'), QLatin1Char(' '));
     return name.trimmed();
 }

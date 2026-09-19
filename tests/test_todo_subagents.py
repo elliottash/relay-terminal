@@ -63,7 +63,8 @@ class ValidateTests(unittest.TestCase):
                                      {'text': 'd', 'status': 'cancelled', 'note': 'not wanted'}]}, set(), None)
         self.assertEqual(todo_list.check_delegable('T1')['text'], 'a')
         self.assertEqual(todo_list.check_delegable('T3')['text'], 'c')   # a retry after a failure
-        for bad, words in (('T2', 'completed'), ('T4', 'cancelled'), ('T9', 'No todo'), ('x', 'todo id')):
+        # #SHE3: the reasons a person may read say "task"; the argument keeps its name, todo_id.
+        for bad, words in (('T2', 'completed'), ('T4', 'cancelled'), ('T9', 'No task'), ('x', 'todo_id must be a task id')):
             with self.assertRaises(ValueError) as caught:
                 todo_list.check_delegable(bad)
             self.assertIn(words, str(caught.exception))
@@ -158,7 +159,7 @@ class ModelLinkTests(Base):
         agent.ask('go')
         results = self.tool_results(provider)
         self.assertIn('completed', results['c1']['error'])
-        self.assertIn('No todo T7', results['c2']['error'])
+        self.assertIn('No task T7', results['c2']['error'])
         self.assertEqual(self.rec.of('subagent_started'), [])
 
     def test_failed_foreground_subagent_blocks_its_todo(self):
@@ -221,7 +222,7 @@ class WorkerTodoSubagentTests(unittest.TestCase):
             events = [json.loads(line) for line in proc.stdout.splitlines()]
             errors = {e.get('id'): e['text'] for e in events if e['event'] == 'error'}
             self.assertIn('Configure', errors['q0'])
-            self.assertIn('No todo T1', errors['q1'])
+            self.assertIn('No task T1', errors['q1'])
 
 
 if __name__ == '__main__':

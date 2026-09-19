@@ -122,7 +122,7 @@ public:
     static QString statusLabel(const QString &status);   // "cancelled by you", blocked → "failed"
     static QString todoGlyph(const QString &status);
     static QList<LedgerOpenItem> parseOpenItems(const QJsonArray &items);
-    // "2 requests still open: R3 “fix the docs”, R4 “…” · 1 todo open" (empty when nothing is open).
+    // "2 tasks still open: T3 “fix the docs”, T4 “…”" (empty when nothing is open).
     static QString openItemsLine(const QList<LedgerOpenItem> &items, int maxChars = 160);
     // "‖ Stopped at the step limit (50 model steps, limit 50) · unfinished tasks stay open" for done{stop_reason:limit}.
     static QString limitLine(const QJsonObject &done);

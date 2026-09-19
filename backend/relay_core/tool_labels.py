@@ -402,7 +402,8 @@ def _base(name, args: dict, existed) -> dict:
                     f"{'edited' if edit else 'wrote'} {shown}",
                     f"{'edit' if edit else 'write'} {shown}", path=path)
     if name == "update_todos":
-        return _row("plan", "updating todos", "updated todos", "update todos")
+        # Card #SHE3: the wire name stays `update_todos`; what a person reads says "tasks".
+        return _row("plan", "updating tasks", "updated tasks", "update tasks")
     if name == "write_plan":
         title = _short(args.get("title"), 40)
         return _row("plan", "writing the plan", f"wrote plan “{title}”" if title else "wrote the plan",
@@ -693,7 +694,7 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
     elif name == "update_todos":
         items = args.get("items") if isinstance(args.get("items"), list) else []
         listing = "\n".join(f"[{i.get('status')}] {i.get('text')}" for i in items if isinstance(i, dict))
-        sections.append(_section("todos", "args", listing, keep_empty=True))
+        sections.append(_section("tasks", "args", listing, keep_empty=True))
     elif name == "agent":
         if isinstance(args.get("prompt"), str):
             sections.append(_section("task", "text", args["prompt"], cap=DETAIL_TEXT_CAP))

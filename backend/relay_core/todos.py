@@ -68,11 +68,11 @@ def validate(raw, known_request_ids, existing: list[dict], next_id: int,
         raise ValueError("update_todos takes {items: [...]}.")
     items = raw["items"]
     if len(items) > MAX_ITEMS:
-        raise ValueError(f"At most {MAX_ITEMS} todos.")
+        raise ValueError(f"At most {MAX_ITEMS} tasks.")
     existing_ids = {t["id"] for t in existing}
     out, seen = [], set()
     for index, item in enumerate(items, 1):
-        where = f"Todo {index}"
+        where = f"Task {index}"
         if not isinstance(item, dict) or set(item) - {"id", "text", "status", "request_ids", "note", "subagent"}:
             raise ValueError(f"{where}: allowed fields are id, text, status, request_ids, note.")
         text = item.get("text")
@@ -86,7 +86,7 @@ def validate(raw, known_request_ids, existing: list[dict], next_id: int,
             raise ValueError(f"{where}: note must be text of at most {MAX_NOTE} characters.")
         note = note.strip() if isinstance(note, str) and note.strip() else None
         if status in NEEDS_NOTE and not note:
-            raise ValueError(f"{where}: a {status} todo needs a note with the reason.")
+            raise ValueError(f"{where}: a {status} task needs a note with the reason.")
         links = item.get("request_ids") or []
         if not isinstance(links, list) or len(links) > MAX_LINKS or not all(isinstance(r, str) for r in links):
             raise ValueError(f"{where}: request_ids must be a list of request ids such as \"R3\".")
@@ -140,14 +140,14 @@ class TodoList:
         """The todo a subagent may take, or ValueError with a model-readable reason."""
         with self._lock:
             if not isinstance(todo_id, str) or not TODO_ID.match(todo_id):
-                raise ValueError("todo_id must be a todo id such as \"T3\".")
+                raise ValueError("todo_id must be a task id such as \"T3\".")
             todo = next((t for t in self.items if t["id"] == todo_id), None)
             if todo is None:
-                raise ValueError(f"No todo {todo_id} in the list.")
+                raise ValueError(f"No task {todo_id} in the list.")
             if todo_id in self.delegated:
-                raise ValueError(f"Todo {todo_id} is already being worked on by subagent {self.delegated[todo_id]}.")
+                raise ValueError(f"Task {todo_id} is already being worked on by subagent {self.delegated[todo_id]}.")
             if todo["status"] not in DELEGABLE:
-                raise ValueError(f"Todo {todo_id} is {todo['status']}; a completed or cancelled todo cannot go to a subagent.")
+                raise ValueError(f"Task {todo_id} is {todo['status']}; a completed or cancelled task cannot go to a subagent.")
             return dict(todo)
 
     def _set(self, todo_id: str, **fields) -> bool:
@@ -214,17 +214,17 @@ class TodoList:
         """Load a saved list. No subagent of a saved list is running: a todo one was still working on when
         the list was saved becomes pending again (restore() re-links the ones still running), link kept."""
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-            raise ValueError("Invalid todo list.")
+            raise ValueError("Invalid task list.")
         items = []
         for raw in data["items"][:MAX_ITEMS]:
             if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) or not TODO_ID.match(raw["id"]) \
                     or raw.get("status") not in STATUSES or not isinstance(raw.get("text"), str):
-                raise ValueError("Invalid todo entry.")
+                raise ValueError("Invalid task entry.")
             links = raw.get("request_ids") if isinstance(raw.get("request_ids"), list) else []
             subagent = raw.get("subagent") if isinstance(raw.get("subagent"), str) and SUBAGENT_ID.match(raw["subagent"]) else None
             status, note = raw["status"], raw.get("note") if isinstance(raw.get("note"), str) else None
             if subagent and status == "in_progress":
-                status, note = "pending", f"Subagent {subagent} is not running any more and had not finished this todo."
+                status, note = "pending", f"Subagent {subagent} is not running any more and had not finished this task."
             items.append({"id": raw["id"], "text": raw["text"], "status": status,
                           "request_ids": [r for r in links if isinstance(r, str)],
                           "note": note, "subagent": subagent})
@@ -248,11 +248,11 @@ def no_list_reminder_text(tool_calls: int) -> str:
     list on 2 of 12 runs of the same five-ask prompt.
     """
     return (f"[Relay reminder: this turn has made {tool_calls} tool calls and update_todos has not been "
-            "used. If this request has several parts, call it now with one todo per part so the parts "
+            "used. If this request has several parts, call it now with one task per part so the parts "
             "are tracked and none is missed; ignore this if it is a single simple ask.]")
 
 
 def reminder_text(open_todos: list[dict], steps: int) -> str:
     listed = "; ".join(f'{t["id"]} "{t["text"][:80]}" ({t["status"]})' for t in open_todos[:8])
-    return (f"[Relay reminder: update_todos has not been used for {steps} steps while todos are open: {listed}. "
+    return (f"[Relay reminder: update_todos has not been used for {steps} steps while tasks are open: {listed}. "
             "If the list is out of date, update it; ignore this if it is current.]")
