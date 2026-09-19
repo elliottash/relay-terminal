@@ -22,6 +22,10 @@ class GuestSlashTests(unittest.TestCase):
             (root / ".claude" / "commands" / "legacy.md").write_text("# legacy")
             (root / ".claude" / "commands" / "nested" / "review.md").write_text("# review")
             (root / ".claude" / "skills" / "ignored").mkdir()
+            # Claude Code reads a personal command directory as well as the project's, and offers
+            # its commands in every project; the catalog has to say the same thing the guest does.
+            (home / ".claude" / "commands").mkdir(parents=True)
+            (home / ".claude" / "commands" / "personal.md").write_text("# personal")
 
             catalog = guest_slash.claude_commands(root, home)
 
@@ -30,6 +34,7 @@ class GuestSlashTests(unittest.TestCase):
         self.assertIn("/project", catalog)
         self.assertIn("/legacy", catalog)
         self.assertIn("/review", catalog)
+        self.assertIn("/personal", catalog)
         self.assertNotIn("/ignored", catalog)
         self.assertEqual(catalog, sorted(set(catalog), key=str.casefold))
 
@@ -62,3 +67,19 @@ class GuestSlashTests(unittest.TestCase):
             invocation, payload = capture.read_text().split("\n", 1)
         self.assertEqual(invocation, "slash codex")
         self.assertEqual(json.loads(payload)["commands"], list(guest_slash.CODEX_BUILTINS))
+
+    def test_emit_runs_the_helper_through_an_interpreter_not_its_mode_bit(self):
+        """`relay_core.guest_codex` names the interpreter and so does this: a `guest-event.py`
+        that arrived without its execute bit must still carry the catalog (one channel, one way
+        of calling it, 26.3)."""
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory) / "payload.json"
+            helper = Path(directory) / "helper.py"
+            helper.write_text(
+                "import os, pathlib, sys\n"
+                "pathlib.Path(os.environ['CAPTURE']).write_text(' '.join(sys.argv[1:]))\n")
+            helper.chmod(0o644)          # no execute bit at all
+            with patch.dict(os.environ, {"RELAY_GUEST_EVENT": str(helper),
+                                         "CAPTURE": str(capture)}, clear=False):
+                self.assertTrue(guest_slash.emit("codex", directory))
+            self.assertEqual("slash codex", capture.read_text())

@@ -1,0 +1,25 @@
+[drive] isolated session at /tmp/relay-qa-options-nbstcbsj
+[drive] project /tmp/relay-qa-options-nbstcbsj/project, codex config /tmp/relay-qa-options-nbstcbsj/home/.codex/config.toml
+[drive] relay pid 3894569
+[drive] window 2097162
+[drive] wrote options-01-guests-section.png
+[drive] PASS 01-section: the Guests rows are on screen
+[drive] PASS 01-bridge-row: the IDE bridge row is on screen (nothing else can turn `guests/claude_bridge` on)
+[drive] wrote options-02-global-guarded.png
+[drive] PASS 02-global-guard: the guard notice is on screen
+[drive] PASS 02-global-not-stored: the refused choice was never written to settings
+[drive] PASS 03-marker: the marked entries are in the project's settings.local.json
+[drive] PASS 03-additive: the user's own hook survived
+[drive] FAIL 03-permission-request: the permission hook Relay installed is PermissionRequest
+[drive] PASS 03-no-pretooluse: PreToolUse is not installed: it fires before every tool call, allowed ones too
+[drive] PASS 03-shared-untouched: the shared .claude/settings.json is byte-for-byte unchanged
+[drive] wrote options-03-project-on.png
+[drive] PASS 03-notice: the notice names the file it wrote
+[drive] PASS 04-config-untouched: ~/.codex/config.toml is byte-for-byte unchanged
+[drive] wrote options-04-codex-conflict.png
+[drive] PASS 04-conflict-notice: the conflict message is on screen
+[drive] PASS 05-removed: the marked entries came out; the user's own hook stayed
+[drive] PASS 05-shared-still-untouched: the shared .claude/settings.json was never written, in either direction
+[drive] wrote options-05-project-off.png
+[drive] relay stopped
+[drive] FAILURES: 03-permission-request: the permission hook Relay installed is PermissionRequest

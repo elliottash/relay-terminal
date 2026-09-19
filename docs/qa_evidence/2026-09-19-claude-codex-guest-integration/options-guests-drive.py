@@ -7,10 +7,12 @@ person would and checks both ends: the screen (OCR of each picture, with the run
 evidence's own verification) and the files the rows claim to touch.
 
 The run is as isolated as the channel harness's (claude-hooks-drive.py): a fresh temp root for
-HOME/XDG_*/TMPDIR, and a `relay --fresh -w <project>` whose project carries a user's own
-`.claude/settings.json` — so the "install" pictures show Relay's marked entries landing next to
-a real file, not an empty one — and whose `$HOME/.codex/config.toml` holds a user's own `notify`,
-which is the conflict the third row must refuse to take.
+HOME/XDG_*/TMPDIR, and a `relay --fresh -w <project>` whose project carries a hook of the user's
+own in **both** Claude settings files — `.claude/settings.local.json`, which is the per-developer
+file Relay writes (so the "install" pictures show its marked entries landing next to a real file,
+not an empty one), and `.claude/settings.json`, the shared source-controlled file Relay must never
+touch, checked byte for byte at the end — and whose `$HOME/.codex/config.toml` holds a user's own
+`notify`, which is the conflict the Codex row must refuse to take.
 
 Rows are driven by keyboard (the Options search box: type, Enter), which is the path the pane
 promises every setting; the Guests tab is reached with the pane's own Left/Right tab keys.
@@ -59,9 +61,16 @@ def make_isolation() -> dict:
     # install lands additively next to it and leaves it in place.
     project = root / "project"
     (project / ".claude").mkdir(parents=True, exist_ok=True)
-    (project / ".claude" / "settings.json").write_text(json.dumps({
+    (project / ".claude" / "settings.local.json").write_text(json.dumps({
         "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
             {"type": "command", "command": "echo my-own-hook >/dev/null"}]}]},
+    }, indent=2) + "\n", encoding="utf-8")
+    # The shared, source-controlled file. Relay writes the `.local` one precisely so a commit of
+    # this one cannot hand a teammate a hook that only works inside a Relay pane (26.3), so the
+    # run's last check is that this file came through untouched.
+    (project / ".claude" / "settings.json").write_text(json.dumps({
+        "hooks": {"Stop": [{"hooks": [
+            {"type": "command", "command": "echo shared-hook >/dev/null"}]}]},
     }, indent=2) + "\n", encoding="utf-8")
     # A codex config with the user's own notify: the one entry Relay must never take.
     (home / ".codex").mkdir(parents=True, exist_ok=True)
@@ -153,7 +162,9 @@ def main() -> int:
         return 1
     isolation = make_isolation()
     environment = isolation["env"]
-    project_settings = isolation["project"] / ".claude" / "settings.json"
+    project_settings = isolation["project"] / ".claude" / "settings.local.json"
+    shared_settings = isolation["project"] / ".claude" / "settings.json"
+    shared_before = shared_settings.read_bytes()
     codex_config = isolation["home"] / ".codex" / "config.toml"
     codex_before = codex_config.read_bytes()
     log(f"isolated session at {isolation['root']}")
@@ -185,6 +196,8 @@ def main() -> int:
         text = screenshot(output / "options-01-guests-section.png")
         check("01-section", shows(text, "Claude Code in this project", "Codex notifications",
                                   "Also in"), "the Guests rows are on screen")
+        check("01-bridge-row", shows(text, "as Relay diffs"),
+              "the IDE bridge row is on screen (nothing else can turn `guests/claude_bridge` on)")
 
         # 2. The global row while the project row is off: the second opt-in must refuse, say why,
         #    and leave both rows as they were. (Each later step's Escape clears the previous
@@ -207,8 +220,20 @@ def main() -> int:
         press(window, "Return")
         time.sleep(SETTLE)
         installed = project_settings.read_text(encoding="utf-8")
-        check("03-marker", "--relay-guest" in installed, "the marked entries are in the project file")
+        check("03-marker", "--relay-guest" in installed,
+              "the marked entries are in the project's settings.local.json")
         check("03-additive", "my-own-hook" in installed, "the user's own hook survived")
+        # The file is JSON, so the command's own quotes are escaped in it: the event name follows
+        # `guest_hook.py\"`, not `guest_hook.py`.
+        marked = [line for line in installed.splitlines() if "--relay-guest" in line]
+        def installs(event: str) -> bool:
+            return any(f'guest_hook.py\\" {event} ' in line for line in marked)
+        check("03-permission-request", installs("PermissionRequest"),
+              "the permission hook Relay installed is PermissionRequest")
+        check("03-no-pretooluse", not installs("PreToolUse"),
+              "PreToolUse is not installed: it fires before every tool call, allowed ones too")
+        check("03-shared-untouched", shared_settings.read_bytes() == shared_before,
+              "the shared .claude/settings.json is byte-for-byte unchanged")
         text = screenshot(output / "options-03-project-on.png")
         check("03-notice", shows(text, "installed in"), "the notice names the file it wrote")
 
@@ -232,6 +257,8 @@ def main() -> int:
         removed = project_settings.read_text(encoding="utf-8")
         check("05-removed", "--relay-guest" not in removed and "my-own-hook" in removed,
               "the marked entries came out; the user's own hook stayed")
+        check("05-shared-still-untouched", shared_settings.read_bytes() == shared_before,
+              "the shared .claude/settings.json was never written, in either direction")
         screenshot(output / "options-05-project-off.png")
     finally:
         process.terminate()

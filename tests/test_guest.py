@@ -102,6 +102,37 @@ class MirroredInCxx(unittest.TestCase):
         self.assertIn("setGuest(guestProgram(foregroundArgv()))", text)
         self.assertNotIn("guestProgram(foregroundCommandLine())", text)
 
+    def test_every_hook_name_relay_installs_is_one_the_pane_handles(self):
+        """The hook names are a contract between the installers and `handleGuestHook` (26.4/26.6).
+        `guest_codex` writes a `notify` entry into ~/.codex/config.toml and forwards its payload as
+        a `hook` named `notify`; the pane had no branch for it, so the finished Codex turn the
+        Options row promises reached nothing at all."""
+        from relay_core import guest_codex, guest_install
+        text = self.PANE.read_text(encoding="utf-8")
+        body = text[text.index("void handleGuestHook("):]
+        body = body[:body.index("\n    }\n")]
+        for name in guest_install.HOOK_EVENTS + (guest_codex.NOTIFY_EVENT,):
+            with self.subTest(hook=name):
+                self.assertIn('QStringLiteral("%s")' % name, body)
+
+    def test_the_codex_rollout_tail_is_started_for_a_codex_pane(self):
+        """Codex has no statusline and no turn-start hook: without the tail (26.6) `guest_busy` is
+        never true for codex, so the composer types into a working Codex instead of queueing."""
+        text = self.PANE.read_text(encoding="utf-8")
+        self.assertIn("relay_core.guest_codex", text)
+        self.assertIn("startGuestTail(m_guest)", text)
+        self.assertIn("stopGuestTail()", text)
+
+    def test_a_helper_relay_starts_is_told_which_pane_it_writes_to(self):
+        """qputenv writes the GUI's own environment, so an inherited RELAY_GUEST_EVENT names
+        whichever pane started its shell last (26.3). Helpers get this pane's spool explicitly."""
+        text = self.PANE.read_text(encoding="utf-8")
+        body = text[text.index("QProcessEnvironment guestHelperEnvironment()"):]
+        body = body[:body.index("\n    }\n")]
+        for variable in ("RELAY_RUNTIME_DIR", "RELAY_SESSION_TOKEN", "RELAY_GUEST_EVENT"):
+            self.assertIn('QStringLiteral("%s")' % variable, body)
+        self.assertIn("setProcessEnvironment(guestHelperEnvironment())", text)
+
     def test_the_backend_directory_is_appended_to_pythonpath_only_once(self):
         """startTerminal runs per pane and per shell restart and qputenv mutates Relay's own
         environment, so an unguarded append grew PYTHONPATH without bound (review of 51587e3)."""

@@ -376,6 +376,7 @@ public:
         // show the change (26.5).
         settleGuestDiff(relay::guestbridge::diffRejected(), QStringLiteral("pane closed"));
         unregisterFromBridge();
+        stopGuestTail();   // the codex rollout tail dies with the pane it was reporting to (26.6)
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
@@ -395,12 +396,34 @@ public:
         }
     }
 
+    // The environment a guest helper Relay itself starts needs to reach *this* pane's spool
+    // (26.3). It cannot be inherited: `startTerminal` publishes the channel with `qputenv`, which
+    // writes the GUI's own environment, so a second pane's shell overwrites what the first one
+    // exported and an inherited `RELAY_GUEST_EVENT`/`RELAY_SESSION_TOKEN` names whichever pane
+    // started its shell last. Every event of pane A then landed on pane B's spool carrying pane
+    // B's token, which pane B duly accepted — one pane showing another's guest.
+    QProcessEnvironment guestHelperEnvironment() const {
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("RELAY_RUNTIME_DIR"), m_runtime.path());
+        environment.insert(QStringLiteral("RELAY_SESSION_TOKEN"), m_token);
+        environment.insert(QStringLiteral("RELAY_GUEST_EVENT"), guestEventsDir());
+        environment.insert(QStringLiteral("RELAY_PYTHON"), m_python);
+        // `-m relay_core.…` needs the backend importable; appended, never prepended (26.4).
+        const QString backend = m_data + QStringLiteral("/backend");
+        const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
+        if (!existing.split(QLatin1Char(':'), Qt::SkipEmptyParts).contains(backend))
+            environment.insert(QStringLiteral("PYTHONPATH"),
+                               existing.isEmpty() ? backend : existing + QLatin1Char(':') + backend);
+        return environment;
+    }
+
     // Scan asynchronously: an unreadable home/config directory or a vanished guest helper must
     // not block a keystroke in the pane. The helper publishes a normal `slash` event atomically.
     void publishGuestSlashCatalog(const QString &guest) {
         if (guest != QStringLiteral("claude") && guest != QStringLiteral("codex")) return;
         auto *scan = new QProcess(this);
         scan->setWorkingDirectory(m_cwd);
+        scan->setProcessEnvironment(guestHelperEnvironment());
         scan->setProgram(m_python);
         scan->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
                             QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
@@ -1132,6 +1155,10 @@ private:
         clearGuestState();
         m_guestSlashCommands.clear();
         if (!m_guest.isEmpty()) publishGuestSlashCatalog(m_guest);
+        // Codex reports a turn only in its rollout transcript (26.6): no statusline, and a
+        // `notify` that fires when the turn is already over. Its `state`/`statusline` events come
+        // from a tail that follows this pane's newest rollout for as long as the codex runs.
+        startGuestTail(m_guest);
         sendProgramState();
         changed();
         // The bridge follows the guest (26.5): a claude in the foreground means this pane must be
@@ -1140,6 +1167,50 @@ private:
         // registers — bridge_env("codex") is empty, so there is nothing to be found.
         if (m_guest == QStringLiteral("claude")) registerWithBridge();
         else if (m_guest.isEmpty()) unregisterFromBridge();
+    }
+
+    // ----- the codex rollout tail (GT7X, 26.6) -------------------------------------------------
+    //
+    // Claude has a statusline shim and hooks that bracket a turn; codex has neither. What it does
+    // have is the rollout transcript it appends to while it works, so `relay_core.guest_codex
+    // tail` follows the newest rollout whose own cwd is this pane's and emits `state` and
+    // `statusline` onto the pane's spool exactly as a shim would — which is what makes the codex
+    // chip, and the composer's "queued until it is ready", true for codex and not only for claude.
+    // One helper per codex pane, ended with the guest, and nothing at all for any other program.
+    void startGuestTail(const QString &guest) {
+        stopGuestTail();
+        if (guest != QStringLiteral("codex") || m_runtime.path().isEmpty()) return;
+        m_guestTail = new QProcess(this);
+        m_guestTail->setWorkingDirectory(m_cwd);
+        m_guestTail->setProcessEnvironment(guestHelperEnvironment());
+        m_guestTail->setProgram(m_python);
+        m_guestTail->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_codex"),
+                                   QStringLiteral("tail"), QStringLiteral("--cwd"), m_cwd});
+        m_guestTail->setStandardOutputFile(QProcess::nullDevice());
+        m_guestTail->setStandardErrorFile(QProcess::nullDevice());
+        connect(m_guestTail, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+            // A missing python or an unimportable backend: the pane works without the tail, so it
+            // is logged and not said out loud. Nothing retries it until the next codex.
+            relay::log::error(QStringLiteral("guest_tail_failed pane=%1").arg(paneLogId()));
+            stopGuestTail();
+        });
+        m_guestTail->start();
+    }
+
+    void stopGuestTail() {
+        if (!m_guestTail) return;
+        QProcess *tail = m_guestTail;
+        m_guestTail = nullptr;
+        tail->disconnect(this);            // errorOccurred must not call back into a gone pane
+        connect(tail, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+                tail, &QObject::deleteLater);
+        if (tail->state() == QProcess::NotRunning) { tail->deleteLater(); return; }
+        tail->terminate();
+        // Never waited for on the UI thread: the tail sleeps a second between polls, so a
+        // waitForFinished here would stall a pane close by that second.
+        QTimer::singleShot(2000, tail, [tail] {
+            if (tail->state() != QProcess::NotRunning) tail->kill();
+        });
     }
 
     // ----- the Claude IDE bridge: this pane's registration, and its diffs (GT7X, 26.5) --------
@@ -1317,6 +1388,14 @@ private:
         } else if (name == QStringLiteral("Notification")) {
             const QString message = payload.value(QStringLiteral("message")).toString().simplified();
             if (!message.isEmpty()) notify(guestDisplayName(guest), message);
+        } else if (name == QStringLiteral("notify")) {
+            // Codex's own `notify` program (26.6), which is what the Options row installs: its one
+            // payload is `agent-turn-complete`, so this is the finished turn reaching the
+            // notification centre — and the end of the turn, whatever the rollout tail last said.
+            const QString said = payload.value(QStringLiteral("last-assistant-message")).toString().simplified();
+            notify(guestDisplayName(guest),
+                   said.isEmpty() ? QStringLiteral("finished its turn.") : said.left(200));
+            setGuestBusy(false);
         } else if (name == QStringLiteral("UserPromptSubmit") || name == QStringLiteral("PreToolUse")) {
             setGuestBusy(true);   // a guest turn has begun; Stop ends it
         } else if (name == QStringLiteral("Stop")) {
@@ -1444,6 +1523,12 @@ private:
         const GuestQuestion question = m_guestQuestions.takeFirst();
         writeGuestAnswer(question.sequence, allow);
         status(allow ? QStringLiteral("Allowed in Relay.") : QStringLiteral("Denied in Relay."));
+        if (m_guestBarMouse) {
+            m_guestBarMouse = false;
+            hint(QStringLiteral("guest.permission.mouse"),
+                 QStringLiteral("Next time: Y or Enter allows, N or Esc denies · the bar holds the "
+                                "keyboard while it is up"));
+        }
         if (m_guestQuestions.isEmpty()) {
             if (m_guestBar) m_guestBar->hide();
             focusInput();          // the keyboard goes back where it came from
@@ -2472,6 +2557,10 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        // Answered with the mouse while Y and N were right there: the hint is owed (WARP.md's
+        // standing rule). Recorded on the press rather than on `clicked`, because Space on the
+        // focused button is `clicked` too and is not the slow path.
+        if (event->type() == QEvent::MouseButtonPress && guestBarOwns(object)) m_guestBarMouse = true;
         // A guest's permission question has the keyboard while it is up (GT7X, 26.4). Only the
         // bar's own widgets are filtered, so the terminal keeps every key when it is not.
         if (event->type() == QEvent::KeyPress && guestBarOwns(object)
@@ -3008,7 +3097,7 @@ private:
         });
         bannerRow->addWidget(m_takeControl);
         m_programBar->hide();
-        // A guest's permission question (GT7X, 26.4): the PreToolUse hook holds the shim open,
+        // A guest's permission question (GT7X, 26.4): the PermissionRequest hook holds the shim open,
         // and this bar is where the user answers it. The same banner idiom, the opposite
         // corner, so a question and the program banner never sit on top of each other.
         m_guestBar = new QFrame(this);
@@ -9776,8 +9865,10 @@ private:
     // multiline prompt literal, and Escape after a slash selection closes the guest menu before
     // Enter (otherwise Claude/Codex consumes Enter as menu navigation).
     bool typeIntoGuest(const QString &guest, const QString &text) {
-        if (!m_backend || guest != m_guest || text.trimmed().isEmpty()) {
-            status(QStringLiteral("Guest input was not sent: %1 is no longer ready.").arg(guestDisplayName(guest)));
+        if (text.trimmed().isEmpty()) return false;    // nothing to type; submitGuest sends the Return
+        if (!m_backend || guest != m_guest) {
+            status(QStringLiteral("Guest input was not sent: %1 is no longer in this pane.")
+                       .arg(guestDisplayName(guest)));
             return false;
         }
         m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
@@ -9795,6 +9886,15 @@ private:
             m_editor->remember(text);
             m_editor->clear();
             hideAtPopup(); hideSlashPopup(); clearAiGhost();
+        }
+        // Enter on an empty box. The composer is the guest's only input (the terminal does not
+        // take focus), so without this there was no way at all to answer a guest's own TUI
+        // question — its "1. Yes" list, its file picker — from the prompt box, and Enter instead
+        // reported the guest as "no longer ready". A bare Return belongs to what is on the guest's
+        // screen now, so it is never queued behind anything.
+        if (text.trimmed().isEmpty()) {
+            if (m_backend) m_backend->sendInput(QByteArrayLiteral("\r"));
+            return;
         }
         if (m_entries.isEmpty() && !m_activeValid && !m_guestBusy) {
             typeIntoGuest(m_guest, text);
@@ -12609,6 +12709,8 @@ private:
     int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
     bool m_guestBusy = false;
     QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
+    QProcess *m_guestTail = nullptr;    // relay_core.guest_codex tail, while a codex is in front
+    bool m_guestBarMouse = false;       // the question on screen was reached with the mouse
     // A bridge diff this pane still owes claude an answer to (GT7X, 26.5): where the sidecar is
     // waiting for the decision, and the file the decision is about.
     struct GuestDiff { bool pending = false; QString replyPath, file; };

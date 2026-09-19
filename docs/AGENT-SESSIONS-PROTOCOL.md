@@ -3283,14 +3283,30 @@ The hard invariant: **a shim with no `RELAY_GUEST_EVENT` in its environment is a
 print nothing (statusline shims print their passthrough line only), write nowhere. Hooks installed
 in a user's global settings must therefore be harmless in every other terminal.
 
+**A helper Relay starts itself is told which pane it writes to.** `startTerminal` publishes
+`RELAY_GUEST_EVENT`, `RELAY_RUNTIME_DIR` and `RELAY_SESSION_TOKEN` with `qputenv`, which writes the
+*GUI's* environment so that the shell it is about to spawn inherits them. A second pane's shell
+overwrites all three, so anything the GUI spawns later and lets inherit its environment names
+whichever pane started its shell last: pane A's slash catalog landed on pane B's spool carrying
+pane B's token, and pane B accepted it. Every helper the pane starts (`Pane::publishGuestSlashCatalog`,
+the codex tail of 26.6) is therefore given an explicit `QProcessEnvironment` from
+`Pane::guestHelperEnvironment()` holding *its* runtime dir, token and spool, plus `RELAY_PYTHON`
+and the backend appended to `PYTHONPATH`. A shim a guest runs is fine either way: it is a child of
+that pane's own shell.
+
 **`program_state` additions.** Three optional fields join `guest` (21.4, mirrored in 21.2):
 `guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
 `guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
 
-**Settings the shims live in.** Guest integration is per project and off by default. There is no
-Options surface for it yet: the entry point today is `python -m relay_core.guest_install --project
-<dir> --on|--off|--status`, and a GUI toggle calling that library is still to be built. Turning it
-on writes hooks into that project's **`.claude/settings.local.json`** (never `settings.json`,
+**Settings the shims live in.** Guest integration is per project and off by default. **Options ›
+Guests** is the surface (`src/RelayWindow.h`, four rows: the project install, the global file
+behind its own second opt-in, the Claude IDE bridge and Codex's `notify`); it runs the same command
+lines a script or a test would — `python -m relay_core.guest_install --project <dir>
+--on|--off|--status` and `python -m relay_core.guest_codex --enable|--disable|--settings-state` —
+and takes every row's state from their JSON answers, never from its own guess. A `--status` read
+needs no `--global-opt-in`: that gate is about writing the user's global file, and a row that
+cannot ask the file what is in it ends up asserting a stored choice that somebody has since undone
+by hand. Turning it on writes hooks into that project's **`.claude/settings.local.json`** (never `settings.json`,
 which is the shared, source-controlled file: a commit of Relay's entries would give every
 teammate a hook that only fails on their machine) / `~/.codex/config.toml`, additively — existing
 entries are preserved, Relay's carry a `--relay-guest` marker, and turning it off removes exactly
@@ -3477,6 +3493,22 @@ in `~/.codex/config.toml`, the same additive marked-entry rules) plus a rollout 
 `guest.codex_sessions_dir()` watched for the active pane's newest rollout - emitting `state` and
 `statusline`-equivalent events (model, token counts when the rollout carries them). The
 app-server daemon remains Tier A, deferred.
+
+**`notify` is a `hook` named `notify`.** Codex runs the `notify` program at the *end* of a turn and
+hands it one JSON argument; `guest_codex.py notify <payload>` forwards the only type Codex sends
+(`agent-turn-complete`) as `hook` with `data.name = "notify"`. The pane's `handleGuestHook` has a
+branch for that name: the notification centre gets the turn's `last-assistant-message` (or
+"finished its turn."), and `guest_busy` goes false. The hook names are a contract between the two
+installers and that one function - `tests/test_guest.py` reads `handleGuestHook` out of `src/Pane.h`
+and fails when an installed hook has no branch, because a name that matches nothing is a settings
+entry the user turned on for nothing at all.
+
+**Who runs the tail.** `guest_hook` is run by claude; nothing runs Codex's tail, so the pane does.
+`setGuest("codex")` starts one `relay_core.guest_codex tail --cwd <the pane's cwd>` per codex pane
+(`Pane::startGuestTail`, the environment of 26.3) and `stopGuestTail` ends it when the guest leaves,
+when the shell restarts and when the pane closes - `terminate`, then `kill` two seconds later, never
+waited for on the UI thread. It is the only source of `guest_busy` for codex: without it a codex
+pane's composer typed into a working Codex instead of queueing, and the chip stayed empty.
 
 ### 26.7 Sessions sources `claude` and `codex`
 

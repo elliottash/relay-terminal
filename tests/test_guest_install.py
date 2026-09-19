@@ -285,6 +285,17 @@ class CommandLine(unittest.TestCase):
             self.assertIn("hooks", read(Path(home) / ".claude" / "settings.json"))
             self.assertFalse((Path(home) / ".claude" / "settings.local.json").exists())
 
+    def test_global_status_needs_no_opt_in(self):
+        """Reading is not writing: Options › Guests draws the global row from the file, and a
+        read it could not make would leave the row asserting a stored choice instead."""
+        with tempfile.TemporaryDirectory() as home:
+            code, out, err = self.run_cli("--global", "--status", "--home", home)
+            self.assertEqual((0, True, False, ""), (code, out["ok"], out["installed"], err))
+            self.run_cli("--global", "--on", "--global-opt-in", "--home", home)
+            code, out, err = self.run_cli("--global", "--status", "--home", home)
+            self.assertEqual((0, True, ""), (code, out["installed"], err))
+            self.assertTrue(out["path"].endswith("/.claude/settings.json"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1805,7 +1805,11 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   makes the helper a no-op that writes nowhere, so the entries Relay leaves in a tool's
   settings are inert in an ordinary terminal. All five kinds are withheld from the wire, and
   any future one is refused by the same regression test until an explicit owner decision adds
-  it to `GUEST_CHANNEL_EVENTS`.
+  it to `GUEST_CHANNEL_EVENTS`. A helper Relay starts *itself* (the slash scan, the codex tail
+  of §26.6) is handed this pane's spool, token and runtime dir explicitly, in
+  `Pane::guestHelperEnvironment()`: `startTerminal` publishes them with `qputenv`, which writes
+  the GUI's own environment, so anything that inherits it names whichever pane started its shell
+  last — pane A's events landed on pane B's spool under pane B's token, and pane B took them.
 - **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`):
   marked, additive entries in the project's `.claude/settings.local.json` (never the shared,
   source-controlled `settings.json`) — hooks `PermissionRequest`, `UserPromptSubmit`, `Stop`
@@ -1829,8 +1833,12 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   small TOML *document* model keeps every untouched byte untouched — enabling then disabling
   returns the file byte for byte — and a key the user already owns is a hard
   `SettingsConflict`, never overwritten. What the pane knows about a codex turn comes from
-  `notify` (which also reaches Relay's notification centre) and from tailing the newest
-  rollout under `~/.codex/sessions/YYYY/MM/DD/`; the app-server daemon stays Tier A.
+  `notify` — forwarded as a `hook` named `notify`, which the pane turns into the finished-turn
+  notification — and from `guest_codex.py tail`, one short-lived helper the pane starts when a
+  codex turns up in its foreground and ends when it leaves: it follows the newest rollout under
+  `~/.codex/sessions/YYYY/MM/DD/` whose own cwd is this pane's and emits `state` and
+  `statusline` exactly as claude's shim does, which is what makes the codex chip and the
+  composer's "queued until it is ready" true for codex too. The app-server daemon stays Tier A.
 - **The Claude IDE bridge** (§26.5, `guest_bridge.py`, one sidecar per GUI run): Relay plays
   the *editor* side of Claude Code's IDE integration — JSON-RPC 2.0 over a loopback-only
   WebSocket, discovered upstream's own way: `CLAUDE_CODE_SSE_PORT` and
@@ -1862,14 +1870,18 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   one sends it to the pane as plain text — queued while the guest is busy ("Queued · sent to
   <guest> when it is ready") — and the router treats a guest pane's composer as terminal
   input throughout, the translator passing only what a TUI can take.
-- **Options** (Settings › Guests, `src/RelayWindow.h`): the rows are a thin front end over
-  the two installer command lines — `relay_core.guest_install` (project scope, and global
-  behind its own opt-in) and `relay_core.guest_codex` — each run with `-S -u -m` and the
+- **Options** (Settings › Guests, `src/RelayWindow.h`): four rows — the project install, the
+  global file behind its own second opt-in, the Claude IDE bridge (`guests/claude_bridge`, which
+  nothing else can turn on) and the Codex `notify` entry. The first, second and fourth are a thin
+  front end over two installer command lines — `relay_core.guest_install` (project scope, and
+  global behind its own opt-in) and `relay_core.guest_codex` — each run with `-S -u -m` and the
   shipped backend *appended* to PYTHONPATH, so the user's own environment keeps precedence.
-  The rows never guess at the files: showing the page re-reads `--status`, every apply draws
-  its state from the installer's own JSON answer, and the notice names the file that was
-  written — including the cases where what the user wrote themselves was kept because it is
-  theirs. No row declares a reset: off is what Relay ships, and off is idempotent.
+  The rows never guess at the files: showing the page re-reads `--status` for **both** Claude
+  files and `--settings-state` for Codex's, every apply draws its state from the installer's own
+  JSON answer and then re-reads the file, and the notice names the file that was written —
+  including the cases where what the user wrote themselves was kept because it is theirs.
+  Reading a file needs no opt-in; only writing the global one does. No row declares a reset: off
+  is what Relay ships, and off is idempotent.
 
 The pane's guest state rides the ordinary `program_state` (`guest_model`, `guest_context_pct`,
 `guest_busy`) so the title bar, tab labels and remote clients that are allowed to see process

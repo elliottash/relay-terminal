@@ -93,6 +93,7 @@ prove the settings file itself.
 The channel writer's no-op invariant, the envelope's token rejection, the payload cap, the answer
 files and the installer's add/remove round-trip are unit-tested instead
 (`tests/test_guest_hook.py`, `tests/test_guest_install.py`), since they are about the files rather
-than about pixels. There is no Options surface for turning a project's installation on; the entry
-point today is `python -m relay_core.guest_install --project <dir> --on|--off|--status`, and the
-GUI toggle that calls it is still to be built.
+than about pixels. Turning a project's installation on is Options › Guests, driven on its own screen
+in `options-guests-drive.py` beside this one; the command line it calls
+(`python -m relay_core.guest_install --project <dir> --on|--off|--status`) is what a script or a
+test uses.

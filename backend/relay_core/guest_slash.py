@@ -14,7 +14,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 from typing import Iterable
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -54,13 +56,19 @@ def _legacy_command_names(root: Path) -> Iterable[str]:
 
 def claude_commands(cwd: str | os.PathLike[str] | None = None,
                     home: str | os.PathLike[str] | None = None) -> list[str]:
-    """Claude built-ins and locally installed skills/legacy commands, sorted and deduped."""
+    """Claude built-ins and locally installed skills/legacy commands, sorted and deduped.
+
+    Both of Claude Code's locations are read for each kind: the personal one under the user's
+    home and the project one beside the code. A `/command` the user keeps in `~/.claude/commands`
+    is offered in every project, exactly as Claude Code offers it, and leaving that directory out
+    made the popup's guest rows a strict subset of what typing the same `/` into the guest gets.
+    """
     project = Path(cwd or os.getcwd())
     user_home = Path(home or Path.home())
     names: list[str] = list(CLAUDE_BUILTINS)
-    for skills in (user_home / ".claude" / "skills", project / ".claude" / "skills"):
-        names.extend("/" + name for name in _paths_with_skill_names(skills))
-    names.extend("/" + name for name in _legacy_command_names(project / ".claude" / "commands"))
+    for root in (user_home / ".claude", project / ".claude"):
+        names.extend("/" + name for name in _paths_with_skill_names(root / "skills"))
+        names.extend("/" + name for name in _legacy_command_names(root / "commands"))
     return sorted({command for name in names if (command := _command(name))}, key=str.casefold)
 
 
@@ -105,11 +113,16 @@ def emit(guest: str, cwd: str | os.PathLike[str] | None = None) -> bool:
     if not helper:
         return False
     payload = json.dumps({"commands": commands(guest, cwd)}, separators=(",", ":"))
+    # Named interpreter, never the helper's own execute bit: `relay_core.guest_codex` invokes the
+    # channel the same way, and a checkout whose `shell/guest-event.py` arrived without its mode
+    # bit (an export, a zip, a copy through a filesystem with no execute) would otherwise lose the
+    # catalog with an OSError nobody sees. `RELAY_PYTHON` is the pane's own interpreter.
+    interpreter = (os.environ.get("RELAY_PYTHON") or shutil.which("python3") or sys.executable)
     try:
-        completed = subprocess.run([helper, "slash", guest], input=payload, text=True,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        completed = subprocess.run([interpreter, "-S", helper, "slash", guest], input=payload,
+                                   text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    timeout=5, check=False)
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return False
     return completed.returncode == 0
 

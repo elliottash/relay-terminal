@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The marked settings installer for guest agents (GT7X, protocol 26.3).
 
-Guest integration is **per project and off by default**; today the only way to turn it on is this
-module's own command line (there is no Options pane for it yet):
+Guest integration is **per project and off by default**. Options › Guests is the front end (the
+"Claude Code in this project" row, and the global file behind its own second toggle); it calls
+this module's own command line, which is also how a script or a test does it:
 
     python -m relay_core.guest_install --project <dir> --on|--off|--status [--global --global-opt-in]
 
@@ -300,7 +301,8 @@ def status(path: Path) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Install or remove Relay's guest hooks (GT7X).")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--project", help="the project directory whose .claude/settings.json to touch")
+    target.add_argument("--project",
+                        help="the project directory whose .claude/settings.local.json to touch")
     target.add_argument("--global", dest="global_", action="store_true",
                         help="the user's ~/.claude/settings.json; needs --global-opt-in")
     action = parser.add_mutually_exclusive_group(required=True)
@@ -312,7 +314,10 @@ def main(argv=None) -> int:
     parser.add_argument("--home", help="the home directory to use for --global (tests, alternate homes)")
     args = parser.parse_args(argv)
 
-    if args.global_ and not args.global_opt_in:
+    # The opt-in gates *writing* into the user's own global settings, not reading it: a row that
+    # cannot ask the file what is in it has to draw from a stored choice, and then it says "on"
+    # for entries somebody removed by hand.
+    if args.global_ and not args.global_opt_in and not args.status:
         print(json.dumps({"ok": False, "error": "The global settings file needs the explicit "
                                                  "--global-opt-in; the project file does not."}))
         return 2

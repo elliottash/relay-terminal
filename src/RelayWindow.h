@@ -1336,7 +1336,9 @@ private:
     }
 
     void guestSectionShown() {
-        if (!guestProjectDir().isEmpty()) guestClaudeStatus();
+        // The project file first; its answer chains into the global one (guestClaudeDone), because
+        // the two share one QProcess. Without a project open there is only the global file to read.
+        guestClaudeStatus(guestProjectDir().isEmpty());
         guestCodexStatus();
     }
 
@@ -1350,10 +1352,18 @@ private:
         guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"), arguments);
     }
 
-    void guestClaudeStatus() {
+    // Which of the two files to read. Reading needs no `--global-opt-in`: that gate is about
+    // writing into the user's own global settings, and a row that draws from a stored choice
+    // rather than from the file says "on" for entries somebody removed by hand.
+    void guestClaudeStatus(bool global = false) {
         m_guestClaudeAction = QStringLiteral("status");
+        m_guestClaudeGlobal = global;
+        QStringList arguments;
+        if (global) arguments << QStringLiteral("--global");
+        else arguments << QStringLiteral("--project") << guestProjectDir();
+        arguments << QStringLiteral("--status");
         guestToolRun(&m_guestClaude, &m_guestClaudeOut, QStringLiteral("relay_core.guest_install"),
-                     {QStringLiteral("--project"), guestProjectDir(), QStringLiteral("--status")});
+                     arguments);
     }
 
     void guestCodexApply(bool on) {
@@ -1448,10 +1458,13 @@ private:
         m_guestClaudeAction.clear();
         if (action == QStringLiteral("status")) {
             if (result.value(QStringLiteral("ok")).toBool()) {
-                m_guestClaudeKnown = true;
-                m_guestClaudeInstalled = result.value(QStringLiteral("installed")).toBool();
+                const bool installed = result.value(QStringLiteral("installed")).toBool();
+                if (global) { m_guestGlobalKnown = true; m_guestGlobalInstalled = installed; }
+                else { m_guestClaudeKnown = true; m_guestClaudeInstalled = installed; }
                 refreshSettingsPanes();
             }
+            // One QProcess, two files: the global read follows the project one and stops there.
+            if (!global) QTimer::singleShot(0, this, [this] { guestClaudeStatus(true); });
             return;   // a failed read leaves the rows at their stored choice; the next try re-reads
         }
         const QString key = global ? QStringLiteral("guests/global_install")
@@ -1460,14 +1473,17 @@ private:
         if (!result.value(QStringLiteral("ok")).toBool()) {
             const QString error = result.value(QStringLiteral("error")).toString();
             notice(error.isEmpty() ? QStringLiteral("The Claude Code settings change failed.") : error, 8000);
-            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });
+            QTimer::singleShot(0, this, [this, global] { guestClaudeStatus(global); });
             return;
         }
         // `ok` means the writes happened, so the cache takes the choice — `installed` is not read
         // here: the installer's --on answer carries a list of the entries it added, while --status
         // carries the bool of the same name. The project row's truth is re-read from the file right
         // after; the global row drew from its own stored choice all along.
-        if (!global) {
+        if (global) {
+            m_guestGlobalKnown = true;
+            m_guestGlobalInstalled = action == QStringLiteral("on");
+        } else {
             m_guestClaudeKnown = true;
             m_guestClaudeInstalled = action == QStringLiteral("on");
         }
@@ -1485,8 +1501,8 @@ private:
             notice(QStringLiteral("Relay's guest entries were not in %1.").arg(path), 8000);
         }
         refreshSettingsPanes();
-        if (!global)
-            QTimer::singleShot(0, this, [this] { guestClaudeStatus(); });   // the file has the last word
+        // The file has the last word, for either target; a project read chains on into the global.
+        QTimer::singleShot(0, this, [this, global] { guestClaudeStatus(global); });
     }
 
     void guestCodexDone(int code) {
@@ -1527,6 +1543,7 @@ private:
     QString m_guestClaudeAction, m_guestCodexAction;   // status | on | off: what the running call was
     bool m_guestClaudeGlobal = false;
     bool m_guestClaudeKnown = false, m_guestClaudeInstalled = false;
+    bool m_guestGlobalKnown = false, m_guestGlobalInstalled = false;
     bool m_guestCodexKnown = false, m_guestCodexEnabled = false;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
@@ -2219,7 +2236,8 @@ private:
         guestSection.title = QStringLiteral("Guests");
         guestSection.blurb = QStringLiteral(
             "Claude Code and Codex running in Relay's panes reach Relay through marked entries in "
-            "their own settings files. Everything Relay writes is marked, and comes out again "
+            "their own settings files (Claude Code's per-developer .claude/settings.local.json, "
+            "Codex's ~/.codex/config.toml). Everything Relay writes is marked, and comes out again "
             "when its row is turned off; an entry you wrote yourself is never replaced — Relay "
             "says so and leaves it alone.");
         {
@@ -2228,15 +2246,20 @@ private:
                 row.kind = relay::SettingRow::Info;
                 row.id = QStringLiteral("info:guests/project");
                 row.label = QStringLiteral("Open a project folder first: the Claude Code entries "
-                                           "are written into that project's .claude/settings.json.");
+                                           "are written into that project's "
+                                           ".claude/settings.local.json.");
                 guestSection.rows << row;
             } else {
                 relay::SettingRow row;
                 row.kind = relay::SettingRow::Toggle;
                 row.id = QStringLiteral("option:guests/project_install");
                 row.label = QStringLiteral("Claude Code in this project");
+                // settings.local.json, not settings.json: the shared file is source-controlled,
+                // and a commit of Relay's entries hands every teammate a hook that only fails on
+                // their machine (26.3). The row has to name the file it really writes.
                 row.detail = QStringLiteral("Marked hook and statusline entries in this project's "
-                                            ".claude/settings.json: events and the context chip");
+                                            ".claude/settings.local.json (Claude Code's own "
+                                            "per-developer file): events and the context chip");
                 row.aliases = QStringLiteral("claude code hooks guest settings json install project");
                 row.checked = m_guestClaudeKnown ? m_guestClaudeInstalled
                     : QSettings().value(QStringLiteral("guests/project_install"), false).toBool();
@@ -2252,7 +2275,8 @@ private:
             row.detail = QStringLiteral("A second, explicit opt-in: the same marked entries in your "
                                         "global Claude settings, for Claude Code run outside Relay");
             row.aliases = QStringLiteral("global claude home user settings json opt in everywhere");
-            row.checked = QSettings().value(QStringLiteral("guests/global_install"), false).toBool();
+            row.checked = m_guestGlobalKnown ? m_guestGlobalInstalled
+                : QSettings().value(QStringLiteral("guests/global_install"), false).toBool();
             row.onToggle = [this](bool on) {
                 // §26.3: the global file is an opt-in on top of the project install, never instead
                 // of it. Refused here — nothing stored, so the row redraws unchecked on its own.
@@ -2264,6 +2288,33 @@ private:
                     return;
                 }
                 guestClaudeApply(on, true);
+            };
+            guestSection.rows << row;
+        }
+        {
+            // The IDE bridge (26.5). `guests/claude_bridge` is read by GuestBridge.h on the first
+            // claude pane and by nothing else, so without this row the bridge — openDiff, the
+            // twelve IDE tools — could be turned on only by editing relay.conf by hand.
+            relay::SettingRow row;
+            row.kind = relay::SettingRow::Toggle;
+            row.id = QStringLiteral("option:guests/claude_bridge");
+            row.label = QStringLiteral("Claude Code edits as Relay diffs");
+            row.detail = QStringLiteral("Relay answers as Claude Code's editor on a loopback port, "
+                                        "so its edits arrive as a diff you save or reject. Takes "
+                                        "effect in shells started after this");
+            row.aliases = QStringLiteral("ide bridge opendiff diff websocket mcp claude editor lock");
+            row.checked = QSettings().value(QStringLiteral("guests/claude_bridge"), false).toBool();
+            row.onToggle = [this](bool on) {
+                QSettings().setValue(QStringLiteral("guests/claude_bridge"), on);
+                // The port is in a shell's environment from the moment it starts, so an open pane
+                // keeps whatever it was given; saying so beats a user wondering why nothing
+                // changed in the claude already running.
+                notice(on ? QStringLiteral("Claude Code's edits will come to Relay as diffs. A "
+                                           "shell already open keeps its own setting: restart it, "
+                                           "or open a new pane, before starting claude.")
+                          : QStringLiteral("Claude Code will edit files directly again. A claude "
+                                           "already running keeps the bridge until it exits."),
+                       8000);
             };
             guestSection.rows << row;
         }
