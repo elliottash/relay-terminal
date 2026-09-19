@@ -11,7 +11,7 @@ rank: zzzzzzj
 created: '2026-09-19'
 acceptance: the agent in one pane can list the other panes of this Relay and send one a message; the send returns at once, an idle pane is resumed by it without anyone approving, a busy one reads it at its next step boundary, a reply is a message back, and a turn started by a wake cannot wake anyone else
 source: 'issues/feature_intake.txt, 2026-09-19: "allow relay terminals to talk to each other, and even better to claude and codex agents"'
-links: {plans: [], commits: [], evidence: [], related: [GT7X, W5N2, JQ7R, T4BS, C1HH, 2JY7, V7QD, TK9C, YMSR], github: null}
+links: {plans: [], commits: [], evidence: [], related: [3KB7, GT7X, W5N2, JQ7R, T4BS, C1HH, 2JY7, V7QD, TK9C, YMSR], github: null}
 ---
 # One pane's agent sends a message to another, inside one Relay
 
@@ -216,15 +216,19 @@ user's permission decision."
 
 1. **Both halves of that rule**, stated to the model: do not ask a peer to do what you could not do,
    and do not do for a peer what you would not do for your own user.
-2. **A turn started by a wake gets no `run_in_terminal` and no `program_control` grant**, via the
-   existing `entry.noHandoff` predicate (`src/Pane.h:325`, gated at `:10402`). A turn the *person*
-   started keeps everything, including one that happens to read a pending note — the distinction is
-   whether anybody is at the pane. The reason is narrow and evidenced: `run_command` "has no tty and
-   no stdin, so it cannot run a privileged command or answer a password prompt", while
+2. **A woken turn gets the full tool set, by default** — including `run_in_terminal` and a
+   `program_control` grant. Owner, 2026-09-19: "i think unattended turns get the full set -- make
+   that an option that is on by default." It is the setting `security/unattended_full_tools`,
+   default on, and it lives in the new Security section (#3KB7) rather than here. Turned off, a
+   woken turn falls back to the `entry.noHandoff` predicate that already keeps a phone's prompt off
+   the shell (`src/Pane.h:325`, gated at `:10402`).
+
+   What the setting is weighing, so its detail line can say it: `run_command` "has no tty and no
+   stdin, so it cannot run a privileged command or answer a password prompt", while
    `run_in_terminal` "hands a command to the user's real interactive shell … sudo, device logins,
-   ssh to a host the user is not logged into" (`backend/relay_core/agent.py:162-166`). It reaches
-   something the sending pane cannot, in a pane with nobody watching. **This is one predicate and is
-   reversible in a line if the owner wants unattended turns to have the full set.**
+   ssh to a host the user is not logged into" (`backend/relay_core/agent.py:162-166`). So a woken
+   turn can reach something the pane that woke it cannot, with nobody at the pane. The owner's
+   answer is that this is the point of an unattended turn, and the default follows it.
 3. **`pane_send` is not offered to a turn that is itself `noHandoff`** — the reverse gate. A phone, a
    browser guest or a remote participant composing into pane A must not reach pane B through it
    (every owner-side verb is `OWNER_ONLY`/`NEVER_FROM_CLIENT` for this reason,
@@ -280,8 +284,9 @@ sender never waits, so none of it has anything to attach to.
       and the result says `no_wake`
 - [ ] `notify_when_idle`: a one-shot idle notice per subscription, with the tool description saying <!-- t:s7 -->
       that polling is not the alternative
-- [ ] A woken turn gets no `run_in_terminal` and no `program_control`, through the existing <!-- t:x4 -->
-      `entry.noHandoff` predicate; a person-started turn that reads a pending note keeps both
+- [ ] `security/unattended_full_tools`, default on: a woken turn gets the full tool set. Off, it <!-- t:x4 -->
+      falls back to the `entry.noHandoff` predicate. The row itself belongs to #3KB7; this card
+      owns the predicate and the test for both positions
 - [ ] `backend/relay_core/tools.py`, `agent.py`, `tool_labels.py`, `worker.py`: construct and gate <!-- t:j0 -->
       the family, the `_execute` branch, the inbound frame, the wake-turn frame, the label rows,
       and the GUI↔worker messages. **`safe_args` must keep the message text out of the log.**
@@ -317,6 +322,9 @@ sender never waits, so none of it has anything to attach to.
   working after an agent completes (a send resumes it from its transcript)", with an approval hold
   only when the receiving session is in a different permission mode. The plan takes the wake and
   leaves the block.
+- 2026-09-19, owner: **unattended turns get the full tool set, as an option that is on by
+  default** — which reverses the narrower gate I had argued for earlier the same day. The option
+  itself, and a Security section to put it in, are #3KB7.
 - 2026-09-19, agent: depth one on wakes and the 20-wake budget are the one deliberate deviation from
   Claude Code, which caps neither. Kept because several panes here run agents against the same
   repository; both are small enough to remove if they are in the way.
@@ -325,10 +333,12 @@ sender never waits, so none of it has anything to attach to.
 
 ## Residual risk the owner is accepting
 
-1. **A pane can be woken while nobody is there**, and will run a turn on its own key, in its own
-   workspace, on the strength of another model's words. That is the requested behaviour. The bounds
-   are depth one, the 20-wake budget, the withheld shell tools, and the fact that the turn is
-   visible and stoppable in a pane rather than hidden in a background process.
+1. **A pane can be woken while nobody is there**, run a turn on its own key in its own workspace
+   on the strength of another model's words, and — by default — hand a command to that pane's real
+   interactive shell. That is the requested behaviour, twice over (the wake, and
+   `security/unattended_full_tools`). The bounds are depth one, the 20-wake budget, and the fact
+   that the turn is visible and stoppable in a pane rather than hidden in a background process.
+   Turning the setting off restores the narrower tool set without touching anything else.
 2. **A message to a busy pane may still never be acted on** — it is read at a step boundary and the
    agent may do nothing with it. Claude Code's posture: "a successful send means the message reached
    that session, not that its Claude read it… never treat silence as agreement."
