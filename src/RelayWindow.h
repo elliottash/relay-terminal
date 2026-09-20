@@ -18,6 +18,9 @@
 #include "Theme.h"
 #include "FilePanes.h"
 #include "BoardPane.h"
+// The helper agent's panel, whose composer answers Alt+M and Ctrl+Alt+M over its own model box
+// (#PK5Q): the window needs the class, not just its name.
+#include "HelperChat.h"
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Projects.h"         // which project a tab is attached to, and the registry of known ones
@@ -1130,6 +1133,15 @@ private:
         else if (id == QStringLiteral("agent.subagentPane")) toggleSubagentPane();   // card #WD83
         else if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();   // Relay-to-Relay
         else if (id == QStringLiteral("remote.join")) joinSharedSession();
+        // Alt+M and Ctrl+Alt+M in a *helper* prompt box (#PK5Q). The two keys belong to a prompt
+        // box rather than to a terminal pane: the helper's composer carries the same model box
+        // now, so the same keys reach it. Before the `!pane` guard, because Options, Actions,
+        // Sessions and the Switchboard are not terminal panes and this is where they answer.
+        else if ((id == QStringLiteral("agent.modelBox") || id == QStringLiteral("agent.model"))
+                 && helperComposerHasFocus()) {
+            if (id == QStringLiteral("agent.modelBox")) openHelperModelBox();
+            else openHelperModelPicker();
+        }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
@@ -1320,6 +1332,11 @@ private:
             if (pickHelperModel(data)) fillBox();
         });
         view->addHelperComposerWidget(box);
+        // `/model` and `/models` in this panel's composer (#PK5Q), over the box just added.
+        if (relay::HelperChatPanel *panel = view->helperPanel())
+            panel->onSlashCommand = [this](const QString &name, const QString &args) {
+                return helperSlashCommand(name, args);
+            };
 
         QTimer::singleShot(0, this, [this, guard, viewGuard, state, fillBox] {
             QWidget *page = guard ? pageOf(guard) : nullptr;
@@ -1445,6 +1462,38 @@ private:
     // the cursor in its composer. One key for all of them, because it is one helper — the tab's
     // — wherever it is asked; the Switchboard's list page keeps its bare `a` (#8YQ9), which it can
     // have because that list takes no typing.
+    // The model box of the helper prompt box the keyboard is in, or null. A terminal pane's box
+    // is the pane's own business (Pane::openModelBox); this is every other prompt box in Relay —
+    // the Switchboard's composer and an open card's reply box, and the panels in Options, Actions
+    // and Sessions (#PK5Q, §30.7).
+    QComboBox *focusedHelperModelBox() const {
+        auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
+        if (!tool) return nullptr;
+        if (auto *board = tool->board()) return board->focusedModelBox();
+        relay::HelperChatPanel *panel = nullptr;
+        if (auto *settings = tool->settings()) panel = settings->helperPanel();
+        else if (auto *sessions = sessionsViewOf(tool)) panel = sessions->helperPanel();
+        return panel && panel->composerHasFocus() ? panel->modelBox() : nullptr;
+    }
+    bool helperComposerHasFocus() const { return focusedHelperModelBox() != nullptr; }
+    void openHelperModelBox() {
+        if (QComboBox *box = focusedHelperModelBox()) {
+            box->setFocus(Qt::ShortcutFocusReason);
+            box->showPopup();
+        }
+    }
+
+    // `/model`, `/models` typed in any helper prompt box. False for a word neither of them, so
+    // the line goes to the agent as it always did.
+    bool helperSlashCommand(const QString &name, const QString &args) {
+        if (name == QStringLiteral("model")) { helperModelCommand(args); return true; }
+        if (name == QStringLiteral("models")) {
+            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
+            return true;
+        }
+        return false;
+    }
+
     void focusHelperOfActiveLeaf() {
         auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
         if (tool && tool->settings()) { tool->settings()->focusHelper(); return; }
@@ -6291,6 +6340,11 @@ public:
         view->onModelPick = [guard](const QString &data) {
             auto *w = windowOf(guard);
             return w != nullptr && w->pickHelperModel(data);
+        };
+        // `/model` and `/models` typed in the page agent's composer or an open card's reply box.
+        view->onSlashCommand = [guard](const QString &name, const QString &args) {
+            auto *w = windowOf(guard);
+            return w != nullptr && w->helperSlashCommand(name, args);
         };
         // A Switchboard put away no longer stops the worker: it is the tab's helper, and the tab's
         // Options, Actions and Sessions panes go on asking it (§30.7). Closing the tab is what

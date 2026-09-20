@@ -270,6 +270,10 @@ public:
     // does. `helperDraft` prefills it without sending, the Check-finding pattern.
     void focusHelper();
     void helperDraft(const QString &text);
+    // The panel itself, for the two keys that belong to a prompt box rather than to a pane
+    // (#PK5Q): Alt+M drops its model box open, Ctrl+Alt+M and `/model` open the picker over it.
+    // Null before the panel is built; the window checks `composerHasFocus()` through it.
+    HelperChatPanel *helperPanel() const { return m_helper; }
 
     void focusSearch();
     QString query() const;

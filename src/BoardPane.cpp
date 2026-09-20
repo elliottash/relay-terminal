@@ -2040,8 +2040,17 @@ public:
     // to be done again: a long model name is what takes the keys out of the buttons' labels.
     void refitButtons() { fitButtons(); }
 
+    // Whether the cursor is in the reply box, for the keys that belong to a prompt box (#PK5Q):
+    // Alt+M drops the box on this strip open, Ctrl+Alt+M and `/model` open the picker over it.
+    bool replyHasFocus() const { return m_reply != nullptr && m_reply->hasFocus(); }
+    QComboBox *modelBox() const { return m_modelBox; }
+
     // `mode` is "discuss" or "plan" for an agent turn (protocol 19.10), empty for a plain comment.
     std::function<void(const QString &text, const QString &mode)> onReply;
+    // A slash command typed in the reply box (#PK5Q). This is a prompt box for the same helper
+    // agent the Switchboard's composer talks to, so the words that work there work here: `/model`
+    // and `/models` reach the box on this very strip rather than being sent as a comment.
+    std::function<bool(const QString &name, const QString &args)> onSlashCommand;
     // Execute: hand the card to a terminal pane. `note` is what was in the reply box.
     std::function<void(const QString &note)> onExecute;
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
@@ -2737,6 +2746,15 @@ private:
         const QString text = m_reply->toPlainText().trimmed();
         if (text.isEmpty() || !onReply || (!mode.isEmpty() && m_busy))
             return;
+        if (text.startsWith(QLatin1Char('/')) && onSlashCommand) {
+            const QString line = text.mid(1);
+            const QString name = line.section(QLatin1Char(' '), 0, 0);
+            if (!name.isEmpty() && onSlashCommand(name, line.section(QLatin1Char(' '), 1).trimmed())) {
+                m_reply->remember(text);
+                m_reply->clear();
+                return;
+            }
+        }
         m_reply->remember(text);
         m_reply->clear();
         m_error->hide();
@@ -4307,6 +4325,13 @@ void BoardView::buildCleanupPanel(QVBoxLayout *layout)
 void BoardView::buildChatPanel(QVBoxLayout *layout)
 {
     m_chat = new BoardChatPanel(m_listPane);
+    // `/model` and `/models` in this composer, and in an open card's reply box: the window
+    // answers them over the helper's model box (#PK5Q).
+    m_chat->onSlashCommand = [this](const QString &name, const QString &args) {
+        return onSlashCommand && onSlashCommand(name, args);
+    };
+    if (m_detail != nullptr)
+        m_detail->onSlashCommand = m_chat->onSlashCommand;
     m_chat->onSend = [this](const QJsonObject &message) { send(message); };
     m_chat->nextRequestId = [this] { return nextRequestId(); };
     m_chat->onHint = [this](const QString &id, const QString &keys) {
@@ -4396,6 +4421,23 @@ void BoardView::focusChat()
 {
     if (m_chat)
         m_chat->focusComposer();
+}
+
+relay::HelperChatPanel *BoardView::helperPanel() const
+{
+    return m_chat;
+}
+
+// The model box the keyboard should reach from wherever the cursor is (#PK5Q). With a card open
+// the list page — tools, composer and the box in it — is hidden, so the card's own strip is the
+// one that can be seen and the one a key must move; Discuss and Plan are turns of the same agent.
+QComboBox *BoardView::focusedModelBox() const
+{
+    if (m_detail != nullptr && m_detail->replyHasFocus())
+        return m_detail->modelBox();
+    if (m_chat != nullptr && m_chat->composerHasFocus())
+        return m_chat->modelBox();
+    return nullptr;
 }
 
 bool BoardView::chatRunning() const

@@ -42,6 +42,7 @@ namespace relay {
 
 class BoardChatPanel;
 class CardDetail;
+class HelperChatPanel;
 class ColumnHeader;
 class RowList;
 
@@ -70,6 +71,11 @@ public:
     // board workers. It answers true when the box should go back to the row the helper is on —
     // a gear row, or a pick it refused — and false when a real pick is now on its way.
     std::function<bool(const QString &data)> onModelPick;
+    // A slash command typed in either of this view's prompt boxes — the page agent's composer or
+    // an open card's reply box (#PK5Q). `name` is without the slash. The window answers `/model`
+    // and `/models`, the pane's own words for the box beside the text; anything it does not know
+    // answers false and is sent as an ordinary prompt.
+    std::function<bool(const QString &name, const QString &args)> onSlashCommand;
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
     // The two link schemes the helper answers with that are not the board's (#FEJQ, §30.4):
@@ -237,6 +243,12 @@ public:
     // board; the Check button and every section's ⚠ run the board's own `check()` and show what
     // they find as lines that pre-fill that composer with a fix request.
     void focusChat();
+    // The helper panel, and the model box the keyboard should reach from wherever the cursor is
+    // (#PK5Q). On the list page that is the page agent's composer and its box; with a card open
+    // the whole list page is hidden, so it is the card's reply box and the box on its strip —
+    // Discuss and Plan are turns of the very same agent.
+    HelperChatPanel *helperPanel() const;
+    QComboBox *focusedModelBox() const;
     // `board_check {section}` — a section's ⚠ — or the unscoped Check button when `columnId` is
     // empty. The answer arrives as `board_problems {items, section}`.
     void requestCheck(const QString &columnId = QString());

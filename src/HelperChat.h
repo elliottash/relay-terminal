@@ -53,6 +53,7 @@ class QLabel;
 class QResizeEvent;
 class QTextBrowser;
 class QTimer;
+class QComboBox;
 class QToolButton;
 class QVBoxLayout;
 class RichEditor;
@@ -151,6 +152,9 @@ public:
     // A problem or a triage finding was clicked: put a fix request in the composer and focus it.
     // A **draft**, never sent (owner, 2026-09-19: "draft you confirm").
     void prefill(const QString &text);
+    // Send what is in the composer, exactly as Enter does — the slash commands below are offered
+    // the line first. Public so a test can press Enter without a window (#PK5Q).
+    void submitComposer();
     void focusComposer();
     bool composerHasFocus() const;
     bool running() const { return m_running; }
@@ -178,6 +182,18 @@ public:
     // chips that qualify it, and nothing else.
     void addToolWidget(QWidget *widget);
     void addComposerWidget(QWidget *widget);
+
+    // ---- the model box, and the keys that reach it (#PK5Q) -----------------------------------
+    // The first combo box put in the composer strip is the helper's model box, and this panel is
+    // where the keyboard finds it: a terminal pane answers Alt+M by dropping its own box open
+    // (Pane::openModelBox), and a helper composer with the cursor in it must answer the same key
+    // the same way. The panel does not own the box and knows nothing about its rows.
+    QComboBox *modelBox() const { return m_modelBox; }
+    void openModelBox();          // Alt+M: drop it open where it is
+    // A slash command typed in this composer, before it is sent as a prompt: `name` without the
+    // slash, `args` the rest. True when it was handled and nothing should be sent. `/model` and
+    // `/models` are what the window takes today, for the reason the pane takes them.
+    std::function<bool(const QString &name, const QString &args)> onSlashCommand;
 
     // Triage and Check findings, from `board_problems {items, section}`. `section` empty means the
     // unscoped Check button. Rendered as a clickable list under the conversation; a click calls
@@ -296,6 +312,7 @@ private:
     // sends, and while a turn runs the busy strip's ✕ Stop and Esc in the box end it.
     QFrame *m_box = nullptr;
     QHBoxLayout *m_composerRow = nullptr;    // the chip strip: context, model, microphone
+    QComboBox *m_modelBox = nullptr;         // the first combo the caller put in that strip (#PK5Q)
     RichEditor *m_composer = nullptr;
     QToolButton *m_mic = nullptr;
     QLabel *m_context = nullptr;             // "72% left", the pane's chip idiom

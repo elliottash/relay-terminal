@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HelperChat.h"
 
+#include <QComboBox>
+
 #include "CopyOnSelect.h"
 #include "RichEditor.h"
 #include "Theme.h"
@@ -903,6 +905,11 @@ void HelperChatPanel::addComposerWidget(QWidget *widget)
 {
     if (widget == nullptr || m_composerRow == nullptr)
         return;
+    // The first combo in this strip is the helper's model box (#PK5Q). Remembered so Alt+M can
+    // drop it open from the composer, the way Alt+M drops a terminal pane's box open: the key is
+    // the keyboard's way to the same control the mouse already has.
+    if (m_modelBox == nullptr)
+        if (auto *box = qobject_cast<QComboBox *>(widget)) m_modelBox = box;
     widget->setParent(m_box != nullptr ? static_cast<QWidget *>(m_box) : this);
     const int at = m_mic != nullptr ? m_composerRow->indexOf(m_mic) : -1;
     if (at >= 0)
@@ -1175,6 +1182,23 @@ QString HelperChatPanel::draft() const
 // 19.18: a second prompt **queues**, it is not refused. The page agent never refuses its own
 // prompt (#N8VK's FIFO semantics, the pane's rule), so nothing here checks `m_running` first — the
 // worker answers with `board_chat_queued` and the queue row appears from that.
+// Alt+M (Keymap `agent.modelBox`), from a composer that has the cursor. Expanding first, because
+// a collapsed panel has no strip to drop anything open in.
+void HelperChatPanel::openModelBox()
+{
+    if (m_modelBox == nullptr)
+        return;
+    if (m_collapsed)
+        expand();
+    m_modelBox->setFocus(Qt::ShortcutFocusReason);
+    m_modelBox->showPopup();
+}
+
+void HelperChatPanel::submitComposer()
+{
+    sendPrompt();
+}
+
 void HelperChatPanel::sendPrompt()
 {
     if (m_composer == nullptr)
@@ -1182,6 +1206,18 @@ void HelperChatPanel::sendPrompt()
     const QString text = m_composer->toPlainText().trimmed();
     if (text.isEmpty())
         return;
+    // A slash command typed here, before the line is a prompt. `/model` and `/models` are the
+    // pane's own words for the box beside this one and for Options › Models, and a prompt box is
+    // a prompt box: what works in a terminal pane's works here (#PK5Q).
+    if (text.startsWith(QLatin1Char('/')) && onSlashCommand) {
+        const QString line = text.mid(1);
+        const QString name = line.section(QLatin1Char(' '), 0, 0);
+        if (!name.isEmpty() && onSlashCommand(name, line.section(QLatin1Char(' '), 1).trimmed())) {
+            m_composer->clear();
+            m_composer->remember(text);
+            return;
+        }
+    }
     send({{QStringLiteral("type"), QStringLiteral("board_chat")},
           {QStringLiteral("text"), text}});
     m_composer->clear();

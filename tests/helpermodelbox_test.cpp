@@ -3,6 +3,7 @@
 // picker be the same as in the main terminal." So the assertion this file exists for is that a
 // helper's box, built from what its worker said, holds the same rows a terminal pane's box holds
 // for the same catalog — and that the row the resolved role sits on is the right one.
+#include "HelperChat.h"
 #include "HelperModelBox.h"
 #include "ModelRows.h"
 
@@ -168,6 +169,45 @@ private slots:
     {
         QVERIFY(helpermodel::guestRefusal(QStringLiteral("Claude Code"))
                     .startsWith(QStringLiteral("The helper agent cannot run on Claude Code.")));
+    }
+
+    // The panel is where the keyboard finds the box (#PK5Q): the first combo put in its composer
+    // strip is the model box, and Alt+M asks the panel for it.
+    void thePanelKnowsItsModelBox()
+    {
+        HelperChatPanel panel;
+        QCOMPARE(panel.modelBox(), nullptr);
+        auto *box = new QComboBox;
+        helpermodel::fill(box, state());
+        panel.addComposerWidget(box);
+        QCOMPARE(panel.modelBox(), box);
+        panel.addComposerWidget(new QComboBox);   // a second combo is not the model box
+        QCOMPARE(panel.modelBox(), box);
+    }
+
+    // `/model` typed in a helper composer is the fast path to that box, not a prompt. Anything
+    // the window does not answer is sent as it always was.
+    void slashCommandsAreOfferedBeforeThePromptIsSent()
+    {
+        HelperChatPanel panel;
+        QStringList sent;
+        panel.onSend = [&sent](const QJsonObject &message) {
+            sent << message.value(QStringLiteral("text")).toString();
+        };
+        QStringList seen;
+        panel.onSlashCommand = [&seen](const QString &name, const QString &args) {
+            seen << name + QLatin1Char('\t') + args;
+            return name == QStringLiteral("model") || name == QStringLiteral("models");
+        };
+        panel.prefill(QStringLiteral("/model kimi k3"));
+        panel.submitComposer();
+        QCOMPARE(seen, QStringList{QStringLiteral("model\tkimi k3")});
+        QVERIFY(sent.isEmpty());
+        QVERIFY(panel.draft().isEmpty());
+
+        panel.prefill(QStringLiteral("/nonsense please"));
+        panel.submitComposer();
+        QCOMPARE(sent, QStringList{QStringLiteral("/nonsense please")});
     }
 };
 

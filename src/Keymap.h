@@ -335,7 +335,10 @@ private:
         // Ctrl+Shift+M opens the model options — Options › Models (what /models opens). The two
         // Alt chords step aside for a program that owns the keyboard, like Alt+I; the Ctrl+Shift
         // one does not, so the options stay reachable from inside a full-screen program.
-        add("agent.modelBox", "agent", "Models: drop this pane's model box open (the quick pick)", {QStringLiteral("Alt+M")});
+        // Both work in a helper agent's prompt box too, over the box on its own strip (#PK5Q):
+        // the Switchboard's composer, an open card's reply box, and the panels in Options,
+        // Actions and Sessions. It is the same control, so it answers the same keys.
+        add("agent.modelBox", "agent", "Models: drop this prompt box's model box open (the quick pick)", {QStringLiteral("Alt+M")});
         add("agent.model", "agent", "Models: the picker — every model with filter, sort and reasoning level (/model)", {QStringLiteral("Ctrl+Alt+M")});
         add("agent.modelOptions", "agent", "Model options: Options › Models — providers, which models the picker shows, their order (/models)", {QStringLiteral("Ctrl+Shift+M")});
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
