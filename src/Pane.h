@@ -8415,6 +8415,15 @@ private:
     void connectWorker() {
         m_workerConnected = true;
         connect(&m_worker, &QProcess::readyReadStandardOutput, this, [this] {
+            // Nothing the worker says can matter to a pane that is being destroyed, and acting on
+            // it is fatal. ~Pane sends `cancel` and `shutdown` and then calls waitForFinished(),
+            // which pumps this very channel — so the worker's answer ran handle() from inside the
+            // destructor, and one of those events reached rebuildQueueStrip(), which re-parented
+            // widgets whose parents were already gone: SIGSEGV at 0x8 in
+            // QWidgetPrivate::reparentFocusWidgets, on quit, 2026-09-20 04:39 (the frames are in
+            // relay.log under `gui_crash`). The `finished` handler below has guarded this way all
+            // along; this one did not.
+            if (m_closing) return;
             m_workerBuffer += m_worker.readAllStandardOutput();
             if (m_workerBuffer.size() > 8 * 1024 * 1024) {
                 m_worker.kill(); status(QStringLiteral("Worker protocol overflow; stopped.")); return;
@@ -8432,6 +8441,9 @@ private:
             m_worker.readAllStandardError();
         });
         connect(&m_worker, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+            // Same rule: ~Pane kills the worker when it will not stop, and a status line written
+            // into a pane that is halfway through its own destructor is the same crash.
+            if (m_closing) return;
             status(QStringLiteral("Local worker failed: ") + m_worker.errorString());
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
