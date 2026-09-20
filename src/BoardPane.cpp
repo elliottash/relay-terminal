@@ -2388,6 +2388,9 @@ public:
         // whose parent is hidden whether it is itself.
         m_signalStripText->setVisible(!m_signalSection.isEmpty());
         m_signalStrip->setVisible(!m_signalSection.isEmpty());
+        // Said once: the strip has those words now, so the body below is the card's own.
+        if (!m_signalSection.isEmpty())
+            m_body = board::bodyWithoutSignalSection(m_body);
         render(sameCard ? Scroll::Keep : Scroll::Top);
         m_loading = false;
     }

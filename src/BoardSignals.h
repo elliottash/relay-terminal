@@ -109,6 +109,9 @@ QString dismissalExpiry(const QString &until, const QDateTime &now);
 // card has no such section. The heading is matched case-insensitively and the section ends at the
 // next `## `, so the machine's block can grow without this having to know its fields.
 QString signalSectionOf(const QString &body);
+// The same body with that section taken out, for a card whose page is showing it as a strip: the
+// card's own words are what is left, and the machine's block is said once.
+QString bodyWithoutSignalSection(const QString &body);
 
 // The whole signal state one board has, as `signals_changed` (and the `signals_list` answer) send
 // it. It is replaced whole on every event: the worker folds the record and pushes the result, so

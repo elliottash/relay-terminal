@@ -270,6 +270,24 @@ QString signalSectionOf(const QString &body)
     return text.trimmed();
 }
 
+QString bodyWithoutSignalSection(const QString &body)
+{
+    static const QRegularExpression heading(
+            QStringLiteral("^##[ \\t]+signal[ \\t]*$"),
+            QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch match = heading.match(body);
+    if (!match.hasMatch())
+        return body;
+    static const QRegularExpression next(QStringLiteral("^##[ \\t]+"),
+                                         QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch end = next.match(body, match.capturedEnd());
+    QString out = body.left(match.capturedStart());
+    if (end.hasMatch())
+        out += body.mid(end.capturedStart());
+    // Two blank lines where a section was removed read as a gap nobody typed.
+    return out.replace(QRegularExpression(QStringLiteral("\\n{3,}")), QStringLiteral("\n\n"));
+}
+
 // ------------------------------------------------------------------------ the state
 
 bool SignalsState::take(const QString &type, const QJsonObject &event)

@@ -317,6 +317,16 @@ void SignalsTests::theSignalSectionOfAPromotedCardsBody()
     // A `## Signals` section is not this one, and a mention in prose is not a heading.
     QCOMPARE(signalSectionOf(QStringLiteral("## Signals\nkey: a\n")), QString());
     QCOMPARE(signalSectionOf(QStringLiteral("the ## Signal is red\n")), QString());
+
+    // And the body without it, for the page that is showing it as a strip: said once.
+    using relay::board::bodyWithoutSignalSection;
+    QCOMPARE(bodyWithoutSignalSection(body),
+             QStringLiteral("# A failing test\n\n## Issue\nit fails\n\n## Plan\ndo the thing\n"));
+    QCOMPARE(bodyWithoutSignalSection(QStringLiteral("## Issue\nx\n\n## Signal\nkey: a\n")),
+             QStringLiteral("## Issue\nx\n\n"));
+    // A body with no such section is handed back untouched.
+    QCOMPARE(bodyWithoutSignalSection(QStringLiteral("## Issue\nno signal here\n")),
+             QStringLiteral("## Issue\nno signal here\n"));
 }
 
 // ---------------------------------------------------------------- the pane
