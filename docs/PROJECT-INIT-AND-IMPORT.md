@@ -58,6 +58,20 @@ trigger — the first prompt sent to the agent — for the rest of that Relay se
 explicit act asks again. The five acts that may ask at all, and nothing else, are listed in
 `AGENT-SESSIONS-PROTOCOL.md` §19.12.
 
+**What creating a board writes.** `board.scaffold` writes `board.yaml`, `threads/`, the board's
+`.gitignore` and the `.gitattributes` union-merge line — and, since card #R9G7, the two files that
+carry the Switchboard's rules to an agent that has no `board_*` tools. `<board>/POLICY.md` is those
+rules, generated from `board_policy.md` and the bundled `deliver` skill with an appendix that says
+how to file, claim, comment on and move a card by editing files; and a marked block is appended to
+the project's `CLAUDE.md` and `AGENTS.md` pointing at it, with `AGENTS.md` created when the project
+has none (it starts with an `@CLAUDE.md` import so it cannot shadow the project's own instructions,
+and `WARP.md` is never touched). Both are generated, so a stale copy is rewritten and nothing
+outside the markers is changed; the files appear in the `board_created` event's `files` list like
+the rest. The format doc has the detail (`SWITCHBOARD-FORMAT.md` §4.1), and
+`scripts/relay-board.py policy` regenerates them for a board that predates them. This is the one
+part of initialization that writes outside the board folder, and it writes instruction files only:
+no card, no code, nothing else in the project.
+
 Three rules the GUI must keep:
 
 1. **The checkboxes are unchecked.** Importing is a separate decision from initializing.

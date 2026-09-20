@@ -25,7 +25,7 @@ the way it already sees into `switchboard/` or `issues/`.
 
 Implementation: `backend/relay_core/board.py` (parsing, ids, ranks, task markers, thread appends,
 atomic hash-checked writes, the check rules) and `scripts/relay-board.py` (`check`, `index`,
-`migrate`). Neither calls a model or the network. This document stays the format alone; what reads
+`policy`, `migrate`). Neither calls a model or the network. This document stays the format alone; what reads
 and writes it has grown past phase 0 — the agent tools and the pane (`AGENT-SESSIONS-PROTOCOL.md`
 §19), the importers ([`PROJECT-INIT-AND-IMPORT.md`](PROJECT-INIT-AND-IMPORT.md)) and the GitHub
 sync ([`GITHUB-SYNC.md`](GITHUB-SYNC.md)) — and all of them write exactly these bytes.
@@ -38,6 +38,8 @@ issues/board.yaml              tabs, columns, autonomy (committed config); the m
                                (`switchboard/board.yaml` in a project initialized from
                                2026-09-18 on — same bytes, same rules)
 issues/BOARD.md                generated index; never hand-edited
+issues/POLICY.md               generated: the Switchboard's rules for an agent that has no
+                               `board_*` tools (section 4.1); never hand-edited
 issues/<category>/             features/ changes/ design/ marketing/ … = tabs
 issues/<category>/<state>/     needs_qa_llm/ needs_qa_human/ needs_review/ needs_labels/
                                needs_ab/ deferred/ done/
@@ -331,6 +333,45 @@ section change back like any other write.
 rank, with the id, the title linked to the file, the assignee, task progress and the thread link.
 It is never hand-merged — regenerate it.
 
+## 4.1 `issues/POLICY.md` and the instruction-file block
+
+A **guest** agent — Claude Code or Codex started in a Relay pane (`AGENT-SESSIONS-PROTOCOL.md`
+§26–29) — never sees the worker's system prompt and has no `board_*` tools, so nothing in
+`board_policy.md` reaches it. What it reads is the project's instruction files. So the rules are
+also a file in the board, and the instruction files point at it (card #R9G7, owner: "tell claude md
+and agents md to read the relay system prompt").
+
+`<board>/POLICY.md` is **generated**, like `BOARD.md`, by `board.policy_text(board)`, and its first
+line says so. Three sources, in this order: the body of `backend/relay_core/board_policy.md` (the
+same bytes the worker puts in its own system prompt, with the provenance comment stripped, so a
+guest and a pane agent are told the same thing), the body of the bundled `deliver` skill
+(`relay_core/skills_bundled/deliver/SKILL.md`, its headings demoted a level), and an appendix,
+**"Without the board tools"**, that maps each `board_*` call the other two name onto the file edit
+that does the same job: reading `BOARD.md` and the card files, a new card file with the front matter
+of section 2, a claim as `status: executing` plus `assignee:` — never `session:`, which is Relay's
+pane token and immutable (section 2.2) — a thread entry in the format of section 3, a status change
+with the file move of section 1, and `relay-board.py check` as the validator. The board's own folder
+name is substituted throughout, and a hidden `.switchboard/` carries the `rg --hidden` note from the
+top of this document.
+
+The pointer is a marked block, `<!-- relay:switchboard-policy start -->` … `<!-- … end -->`, naming
+the board folder and telling the reader to read `POLICY.md` before doing work. `board.scaffold_files`
+appends it to `CLAUDE.md` and to `AGENTS.md` when they exist, and **creates `AGENTS.md`** when the
+project has none — including a project that has only a `CLAUDE.md`, because both files are meant to
+point at the policy. A created `AGENTS.md` starts with an `@CLAUDE.md` import (and `@CLAUDE.local.md`
+when there is one): `relay_core.instructions` loads the *first* hit per directory in `PROJECT_ORDER`
+(`WARP.md`, `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, …), so a bare new `AGENTS.md` would
+shadow the project's own `CLAUDE.md`, and the import is what keeps that text in every prompt.
+`WARP.md` is never written: it is first in that order, so it is what Relay's own agent reads — and
+that agent has the policy in its system prompt already.
+
+Nothing outside the markers is read, moved or rewritten, a block that is already current is not
+rewritten at all, and a file holding one marker without the other is left for a person. Both files
+are generated, so a **stale** copy is a missing one: `scaffold_files` rewrites `POLICY.md` and
+replaces the block whenever the rendering has changed, `Board.write_index` refreshes an existing
+`POLICY.md` (it never creates one), and `relay-board.py policy` does both on a board that predates
+them. `POLICY.md` at the board root is not a card, so `check` ignores it as it does `BOARD.md`.
+
 ## 5. Privacy
 
 `issues/.private/` is the single private root: private cards, their threads, their plans and
@@ -350,6 +391,7 @@ two levels down, so `check` ignores both.
 |---|---|
 | `check [--fix] [--json] [--strict]` | the rules below; exit 1 on any error (`--strict`: on warnings too) |
 | `index [--stdout] [--private]` | regenerate `issues/BOARD.md` |
+| `policy [--stdout]` | regenerate `issues/POLICY.md` and the pointer block in `CLAUDE.md` / `AGENTS.md` (section 4.1) |
 | `migrate [--apply]` | convert a pre-board tracker (dry run by default) |
 
 `check` rules — errors: folder and status disagree; duplicate id; missing, malformed or lowercase
