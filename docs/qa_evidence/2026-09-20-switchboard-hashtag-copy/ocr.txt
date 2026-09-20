@@ -1,0 +1,18 @@
+02 bravo badge at: 1173 276
+PASS 02 badge notice (ocr 'Copied #bug')
+PASS 02 badge clipboard: '#bug'
+PASS 02 list still shown (card not opened): 'yes'
+PASS 03 body rendered (ocr 'ref')
+04 meta #bug at: 790 259
+PASS 04 meta notice (ocr 'Copied #bug')
+PASS 04 meta clipboard: '#bug'
+05 body #bug at: 773 343
+PASS 05 body notice (ocr 'Copied #bug')
+PASS 05 body clipboard: '#bug'
+06 thread #bug at: 797 441
+PASS 06 thread notice (ocr 'Copied #bug')
+PASS 06 thread clipboard: '#bug'
+07 ref #KAN3 at: 953 440
+PASS 07 clipboard untouched by the ref: '#bug'
+PASS 07 zoomed to Alpha's title: 'yes'
+---- 12 passed, 0 failed ----
