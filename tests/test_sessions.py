@@ -259,6 +259,79 @@ class CheckpointTests(Base):
         self.assertTrue(agent2.messages[1]['content'].startswith(SUMMARY_MARKER))
         self.assertEqual([m['content'] for m in agent2.messages if m['role'] == 'user'][-1], 'p2')
 
+    def test_rewind_keeps_what_it_undid(self):
+        """The turns a rewind drops are written out first, verbatim (card #0TJ9)."""
+        agent = self.write_turns()
+        before = [dict(m) for m in agent.messages]
+        event = agent.rewind(2, 'conversation')
+        self.assertEqual(event['rewound_n'], 1)
+        records = SessionStore(self.sessions).rewound(agent.session_id)
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(sorted(record), sorted(['n', 'at', 'turn', 'restore', 'epoch', 'prompt',
+                                                 'messages', 'restored_files', 'conflicts']))
+        self.assertEqual((record['n'], record['turn'], record['restore'], record['epoch']),
+                         (1, 2, 'conversation', 0))
+        self.assertEqual(record['prompt'], 'second edit')
+        self.assertEqual((record['restored_files'], record['conflicts']), ([], []))
+        self.assertLess(abs(record['at'] - time.time()), 60)
+        # nothing is lost: what is left plus what was kept is the conversation as it was
+        self.assertEqual(agent.messages + record['messages'], before)
+        self.assertEqual(record['messages'][0]['content'], 'second edit')
+        self.assertEqual(oct(os.stat(self.sessions / f'{agent.session_id}.rewound.jsonl').st_mode & 0o777),
+                         '0o600')
+
+    def test_rewind_after_compaction_keeps_the_replaced_conversation(self):
+        agent = self.agent(ScriptedProvider(side_reply='sum'))
+        for i in range(4):
+            agent.ask(f'prompt {i}')
+        agent.compact('manual')
+        before = [dict(m) for m in agent.messages]
+        agent.rewind(2, 'conversation')
+        record = SessionStore(self.sessions).rewound(agent.session_id)[0]
+        self.assertEqual(record['epoch'], 1)                 # the epoch it was rewound *from*
+        # the compacted conversation is replaced wholesale, so everything past the system message
+        # is what left the pane
+        self.assertEqual(agent.messages[:1] + record['messages'], before)
+        self.assertTrue(any(m.get('content') == 'prompt 3' for m in record['messages']))
+
+    def test_rewound_records_count_up_and_the_oldest_drop_off(self):
+        agent = self.agent(ScriptedProvider(side_reply='sum'))
+        store = SessionStore(self.sessions)
+        for expected in range(1, 23):
+            agent.ask('again')
+            self.assertEqual(agent.rewind(agent.checkpoint_listing()[-1]['turn'], 'conversation')['rewound_n'],
+                             expected)
+        records = store.rewound(agent.session_id)
+        self.assertEqual([r['n'] for r in records], list(range(3, 23)))   # newest 20, numbers kept
+
+    def test_rewind_files_keeps_no_record(self):
+        agent = self.write_turns()
+        event = agent.rewind(1, 'files')
+        self.assertIsNone(event['rewound_n'])
+        self.assertFalse((self.sessions / f'{agent.session_id}.rewound.jsonl').exists())
+
+    def test_a_failed_sidecar_write_does_not_fail_the_rewind(self):
+        agent = self.write_turns()
+
+        def refuse(*args, **kwargs):
+            raise OSError('no room')
+
+        agent.store.append_rewound = refuse
+        event = agent.rewind(2, 'conversation')
+        self.assertIsNone(event['rewound_n'])
+        self.assertEqual([m['content'] for m in agent.messages if m['role'] == 'user'], ['first edit'])
+
+    def test_rewound_file_survives_a_truncated_last_line(self):
+        agent = self.write_turns()
+        agent.rewind(2, 'conversation')
+        path = self.sessions / f'{agent.session_id}.rewound.jsonl'
+        with open(path, 'a', encoding='utf-8') as handle:
+            handle.write('{"n": 2, "turn": 1, "mess')     # a crash mid-append
+        store = SessionStore(self.sessions)
+        self.assertEqual([r['n'] for r in store.rewound(agent.session_id)], [1])
+        self.assertEqual(store.append_rewound(agent.session_id, {'turn': 1}), 2)
+
     def test_rewind_unknown_turn(self):
         agent = self.agent(ScriptedProvider())
         with self.assertRaises(ValueError):
@@ -401,6 +474,25 @@ class SessionTests(Base):
         self.assertIn('Fix the login bug', provider.side_requests[-1][-1]['content'])
         long = ScriptedProvider(side_reply=json.dumps({'summary': 'word ' * 400, 'next_action': None}))
         self.assertLessEqual(len(suggestions.recap(long, agent.messages, 3, 'manual')['text']), 700)
+
+    def test_delete_removes_every_sidecar(self):
+        """A delete leaves nothing of the conversation behind, and nothing of anyone else's
+        (card #0TJ9): the saved terminal text and the rewound branches go with the session."""
+        agent = self.agent(ScriptedProvider())
+        agent.ask('one')
+        agent.rewind(1, 'conversation')
+        store = SessionStore(self.sessions)
+        mine, other = agent.session_id, 'b' * 32
+        for name in (f'{mine}.scrollback.txt', f'{mine}.rewound-1.scrollback.txt',
+                     f'{mine}.rewound-2.scrollback.txt', f'{other}.scrollback.txt',
+                     f'{other}.rewound.jsonl', f'{other}.rewound-1.scrollback.txt'):
+            (self.sessions / name).write_text('text\n')
+        self.assertTrue((self.sessions / f'{mine}.rewound.jsonl').is_file())
+        store.delete(mine)
+        self.assertEqual(sorted(p.name for p in self.sessions.glob(f'{mine}*')), [])
+        self.assertEqual(len(list(self.sessions.glob(f'{other}*'))), 3)
+        with self.assertRaises(ValueError):
+            store.delete(mine)
 
 
 class PlanModeTests(Base):

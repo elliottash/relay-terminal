@@ -2831,6 +2831,29 @@ class Agent:
     def checkpoint_listing(self) -> list[dict]:
         return self.checkpoints.listing(lambda item: self._location(item) is not None)
 
+    def _record_rewound(self, turn, restore: str, item: dict, kept: list[dict],
+                        restored: list, conflicts: list) -> int | None:
+        """Keep what this rewind is about to drop, in ``<id>.rewound.jsonl`` beside the session.
+
+        The undone turns leave the conversation for good — their snapshots and the autosave go with
+        them — so they are written out before the cut, with the turn and the epoch they sat at so
+        the branch can be put back where it was. The sidecar is not the conversation: a failure
+        here is logged and the rewind the user asked for still happens. Returns the record's `n`
+        (`rewound_n` in the event, which the GUI names its scrollback file after), or None when
+        nothing was written.
+        """
+        if self.store is None or not self.session_id:
+            return None
+        try:
+            return self.store.append_rewound(self.session_id, {
+                "at": time.time(), "turn": turn, "restore": restore, "epoch": self.epoch,
+                "prompt": item.get("prompt", ""), "messages": _dropped_messages(self.messages, kept),
+                "restored_files": list(restored), "conflicts": list(conflicts)})
+        except (OSError, ValueError, TypeError) as exc:
+            logs.event(_log, "rewound_branch_not_kept", level_name="error", session=self.session_id,
+                       turn=turn, error=f"{type(exc).__name__}: {exc}")
+            return None
+
     def rewind(self, turn, restore: str) -> dict:
         if restore not in ("conversation", "files", "both"):
             raise ValueError('restore must be "conversation", "files" or "both".')
@@ -2845,9 +2868,12 @@ class Agent:
             notes = ["Shell command side effects (run_command) are never undone."]
             if conflicts:
                 notes.append(f"{len(conflicts)} file(s) changed since the agent wrote them and were left as they are.")
+            rewound_n = None
             if location is not None:
                 key, base, index = location
-                self.messages = [self.messages[0]] + list(base[1:index])
+                kept = [self.messages[0]] + list(base[1:index])
+                rewound_n = self._record_rewound(turn, restore, item, kept, restored, conflicts)
+                self.messages = kept
                 self.epoch = int(key)
                 for stale in [k for k in self.snapshots if int(k) >= self.epoch]:
                     del self.snapshots[stale]
@@ -2867,7 +2893,8 @@ class Agent:
                     notes.append("Files were not restored.")
             self.autosave()
             return {"event": "rewound", "turn": turn, "restore": restore, "restored_files": restored,
-                    "conflicts": conflicts, "note": " ".join(notes), "prompt": item.get("prompt", "")}
+                    "conflicts": conflicts, "note": " ".join(notes), "prompt": item.get("prompt", ""),
+                    "rewound_n": rewound_n}
 
     def _state_messages(self, turn=None) -> list[dict]:
         if turn is None:
@@ -3096,6 +3123,21 @@ class Agent:
         if time.monotonic() - self._last_save < MID_TURN_SAVE_S:
             return
         self.autosave()
+
+
+def _dropped_messages(before: list[dict], kept: list[dict]) -> list[dict]:
+    """The messages a rewind takes out of the live conversation: everything past the point where
+    the two lists stop agreeing.
+
+    Within one epoch `kept` is a prefix of `before` and this is simply the tail it cuts off. After
+    a compaction the conversation comes back from an older epoch's snapshot, so the two diverge at
+    the summary message — from there on the whole live conversation is replaced, and all of it is
+    what the user would otherwise lose.
+    """
+    shared = 0
+    while shared < len(before) and shared < len(kept) and before[shared] == kept[shared]:
+        shared += 1
+    return list(before[shared:])
 
 
 def transcript_item(message: dict) -> dict:

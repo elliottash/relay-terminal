@@ -4,6 +4,9 @@
 Layout under session_dir (0700):
     <id>.json        full state (messages, checkpoints, compaction snapshots), 0600
     <id>.meta.json   {id, title, updated, turns, model}, 0600
+    <id>.rewound.jsonl  one line per rewind: the turns it undid, verbatim (newest REWOUND_KEPT), 0600
+    <id>.scrollback.txt the session's saved terminal text (written by the GUI), 0600
+    <id>.rewound-<n>.scrollback.txt  the terminal text a rewind undid, beside its record, 0600
     <id>.blobs/      checkpoint file pre-images (content-addressed)
     <id>.threads/    subagent threads this session started, one <thread-id>.json each, 0600:
                      {kind: "relay_subagent_thread", id, owner_session, parent_thread, spawn_turn,
@@ -37,6 +40,7 @@ MAX_LISTED = 200
 STATE_VERSION = 1
 ROLES = {"user", "assistant", "tool"}
 MAX_STATE_MESSAGES = 50000
+REWOUND_KEPT = 20           # rewound branches a session keeps; the oldest drop off the front
 
 
 def new_id() -> str:
@@ -129,17 +133,21 @@ def models_with(models: list, current: str) -> list:
     return note_model(list(models), current)
 
 
-def _atomic_json(path: Path, data: dict) -> None:
+def _atomic_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".session-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             os.fchmod(out.fileno(), 0o600)
-            json.dump(data, out, ensure_ascii=False)
+            out.write(text)
         os.replace(temp, path)
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
+
+
+def _atomic_json(path: Path, data: dict) -> None:
+    _atomic_text(path, json.dumps(data, ensure_ascii=False))
 
 
 def read_meta(directory: str | Path, session_id: str) -> dict:
@@ -264,13 +272,83 @@ class SessionStore:
             except (OSError, ValueError, sqlite3.Error):
                 pass
 
+    # ----- rewound branches (card #0TJ9) ------------------------------------------------------
+    def rewound_path(self, session_id: str) -> Path:
+        return self.directory / f"{check_id(session_id)}.rewound.jsonl"
+
+    def rewound(self, session_id: str) -> list[dict]:
+        """The rewound branches kept for a session, oldest first.
+
+        A line that does not parse is skipped rather than failing the read: the file is appended
+        to, so a crash mid-write leaves a truncated last line and everything before it still
+        counts. Returns [] when there is no file.
+        """
+        out: list[dict] = []
+        try:
+            with open(self.rewound_path(session_id), encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+        except OSError:
+            return out
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict):
+                out.append(record)
+        return out
+
+    def append_rewound(self, session_id: str, record: dict) -> int:
+        """Keep one rewound branch beside the session and return its `n`.
+
+        `n` is 1-based, counts up for the life of the session and is never reused — the GUI names
+        `<id>.rewound-<n>.scrollback.txt` after it — so it is taken from the records still here,
+        not from how many there are. Only the newest REWOUND_KEPT are kept; trimming rewrites the
+        file atomically, appending does not.
+        """
+        session_id = check_id(session_id)
+        path = self.rewound_path(session_id)
+        kept = self.rewound(session_id)
+        number = max([r.get("n") for r in kept if isinstance(r.get("n"), int)] or [0]) + 1
+        record = {"n": number, **{key: value for key, value in record.items() if key != "n"}}
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        if len(kept) >= REWOUND_KEPT:
+            older = kept[len(kept) - REWOUND_KEPT + 1:]
+            _atomic_text(path, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in older) + line)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600),
+                           "a", encoding="utf-8") as out:
+                out.write(line)
+        return number
+
+    def sidecars(self, session_id: str) -> list[Path]:
+        """The per-session files that are not the session itself: its saved terminal text, its
+        rewound branches and the text each of those rewinds undid. The id is validated, so the
+        glob below can only match this session's own files."""
+        session_id = check_id(session_id)
+        found = [self.directory / f"{session_id}.scrollback.txt", self.rewound_path(session_id)]
+        try:
+            found += sorted(self.directory.glob(f"{session_id}.rewound-*.scrollback.txt"))
+        except OSError:
+            pass
+        return found
+
     def delete(self, session_id: str) -> dict:
-        """Remove a session, its metadata, its checkpoint blobs and its index rows."""
+        """Remove a session, its metadata, its sidecars, its checkpoint blobs and its index rows."""
         session_id = check_id(session_id)
         removed = 0
         for name in (f"{session_id}.json", f"{session_id}.meta.json"):
             try:
                 (self.directory / name).unlink()
+                removed += 1
+            except OSError:
+                pass
+        for sidecar in self.sidecars(session_id):
+            try:
+                sidecar.unlink()
                 removed += 1
             except OSError:
                 pass
