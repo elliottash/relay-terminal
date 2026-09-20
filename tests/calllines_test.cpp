@@ -516,14 +516,37 @@ private slots:
     void aTaskRowAnchorsAFoldOnlyWhenTheBackendHasOne() {
         QVERIFY(anchorsFold(Click::Todos, false, true));      // the row folds to its task list
         QVERIFY(anchorsFold(Click::Fold, false, true));
+        QVERIFY(anchorsFold(Click::Card, false, true));       // folds; only its #ID opens the card (#1NW3)
         QVERIFY(anchorsFold(Click::File, true, true));        // a merged run always folds
         QVERIFY(!anchorsFold(Click::File, false, true));      // opens a preview pane
         QVERIFY(!anchorsFold(Click::Diff, false, true));
         QVERIFY(!anchorsFold(Click::Subagent, false, true));
         // No fold layer: every row anchors relay://open-call, so a click still reaches the detail.
-        for (const Click click : {Click::Todos, Click::Fold, Click::File, Click::Diff})
+        for (const Click click : {Click::Todos, Click::Fold, Click::File, Click::Diff, Click::Card})
             QVERIFY(!anchorsFold(click, false, false));
         QVERIFY(!anchorsFold(Click::Fold, true, false));
+    }
+
+    // #1NW3: a board call's row unfolds on a click like any other; the `#K7Q2` it names is the
+    // card's own link. cardSegment() finds that span in the row's text, and says -1 when there is
+    // no card to find or the id was cut away on a narrow pane.
+    void aCardRowFindsItsOwnId() {
+        const Label comment = label(
+            "{'kind': 'board', 'running': 'commenting on card #XH4K',"
+            " 'title': 'commented on card #XH4K', 'stats': ['note'], 'ok': true,"
+            " 'open': {'type': 'card', 'id': 'XH4K'}}");
+        // The finished row: "commented on card #XH4K · note" — the id ends the title.
+        const Row done = finishedRow(comment, 0);
+        QCOMPARE(cardSegment(done, comment), done.title.indexOf(QStringLiteral("#XH4K")));
+        QCOMPARE(done.text().mid(cardSegment(done, comment), 5), QStringLiteral("#XH4K"));
+        // The running row: "commenting on card #XH4K…".
+        const Row running = runningRow(comment, 0);
+        QCOMPARE(running.text().mid(cardSegment(running, comment), 5), QStringLiteral("#XH4K"));
+        // A row cut so narrow the id fell to "…" links nothing.
+        QCOMPARE(cardSegment(finishedRow(comment, 12), comment), -1);
+        // A card the label does not name, and a row that is not a card's, link nothing either.
+        QCOMPARE(cardSegment(done, Label()), -1);
+        QCOMPARE(cardSegment(finishedRow(pytest(), 0), pytest()), -1);
     }
 
     // #EC58: a pane restored from saved scrollback holds no CallRecord, so Pane::handleFoldReply()

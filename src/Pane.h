@@ -5559,8 +5559,9 @@ private:
     // Every call is one row: "▸ ran pytest · 212 lines · exit 1 · 8 s". The row is an OSC 8 anchor
     // over relay://call/<pane>/<turn>/<call> — the prefix the engine's fold layer owns — so a click
     // unfolds the call's detail underneath it, in the terminal (docs/ENGINE.md, "Folds"). A line
-    // whose click is not a fold (a file, a big diff, a subagent, a card) anchors relay://open-call/
-    // instead, which the fold layer leaves alone and openOutputTarget routes.
+    // whose click is not a fold (a file, a big diff, a subagent) anchors relay://open-call/
+    // instead, which the fold layer leaves alone and openOutputTarget routes. A card row folds on
+    // a click like any other since card #1NW3; only the `#K7Q2` it names is the card's link.
     //
     // The anchor begins at column 0 with a "▸ " placeholder the view overpaints with ▸ or ▾: on the
     // ghostty core an anchor is only found when it starts in the first column.
@@ -5606,7 +5607,8 @@ private:
     // beginBlock(Call) goes *before* m_callCursor.start()/result(), never here: a gap prints
     // through printInline, whose endCallRun() tells the cursor "something else printed", and a
     // row started after that could not be rewritten by its own result (#5AWD).
-    void drawCallRow(const relay::calllines::Step &step, const QString &turnId, const QString &anchor) {
+    void drawCallRow(const relay::calllines::Step &step, const QString &turnId, const QString &anchor,
+                     const relay::toollabel::Label &label) {
         QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (step.endRun && !m_atLineStart) { out += "\r\n"; m_atLineStart = true; }
@@ -5615,8 +5617,23 @@ private:
         out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\";
         // Two levels, as everywhere else in the pane: a failure takes the error ink, everything
         // else is the same muted grey, and the stats are the italic grey notes already use.
-        out += inkCode(step.row.failed ? Ink::Error : Ink::Tool) + QByteArray("▸ ")
-               + sanitize(step.row.title).toUtf8() + "\x1b[0m";
+        out += inkCode(step.row.failed ? Ink::Error : Ink::Tool) + QByteArray("▸ ");
+        // A card row folds on a click like any other; only its own `#K7Q2` links to the card
+        // (card #1NW3). The segment is a mid-line switch of the OSC 8 anchor — the same mechanism
+        // the whole-row open-call anchor uses — and the fold anchor still opens the row at
+        // column 0, which is where the fold layer looks for it.
+        const int cardAt = relay::calllines::cardSegment(step.row, label);
+        if (cardAt >= 0) {
+            const QString cardUri = relay::links::cardTarget(label.openId.toUpper());
+            const int cardLen = label.openId.size() + 1;   // the '#' counts a column too
+            out += sanitize(step.row.title.left(cardAt)).toUtf8() + "\x1b[0m";
+            out += "\x1b]8;;" + cardUri.toUtf8() + "\x1b\\"
+                   + sanitize(step.row.title.mid(cardAt, cardLen)).toUtf8();
+            out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\"
+                   + sanitize(step.row.title.mid(cardAt + cardLen)).toUtf8() + "\x1b[0m";
+        } else {
+            out += sanitize(step.row.title).toUtf8() + "\x1b[0m";
+        }
         if (!step.row.rest.isEmpty()) out += inkCode(Ink::Note) + sanitize(step.row.rest).toUtf8() + "\x1b[0m";
         out += "\x1b]8;;\x1b\\";
         if (step.hold) { m_atLineStart = false; }
@@ -10244,7 +10261,7 @@ private:
                     const int lines = m_toolLines + (m_toolPartialLine ? 1 : 0);
                     const relay::calllines::Step step =
                         m_callCursor.live(m_liveCall, m_liveLabel, lines, callLineCells());
-                    if (!step.nothing) drawCallRow(step, m_liveTurn, callAnchor(step, m_liveTurn, m_liveLabel));
+                    if (!step.nothing) drawCallRow(step, m_liveTurn, callAnchor(step, m_liveTurn, m_liveLabel), m_liveLabel);
                 }
             }
         } else if (type == QStringLiteral("tool_started")) {
@@ -10281,7 +10298,7 @@ private:
                 m_callCursor.setCells(callLineCells());
                 beginBlock(relay::gaps::Block::Call);   // a blank line after prose, none inside a run (#5AWD)
                 const relay::calllines::Step step = m_callCursor.start(call, label);
-                if (!step.nothing) drawCallRow(step, turn, callAnchor(step, turn, label));
+                if (!step.nothing) drawCallRow(step, turn, callAnchor(step, turn, label), label);
                 // With the stream on, the output goes under the line: the row is finished here.
                 if (showToolOutput()) endCallRun();
             }
@@ -10324,7 +10341,7 @@ private:
                 m_callCursor.setCells(callLineCells());
                 const relay::calllines::Step step = m_callCursor.result(call, label, callLineCells());
                 const QString anchor = callAnchor(step, turn, label);
-                drawCallRow(step, turn, anchor);
+                drawCallRow(step, turn, anchor, label);
                 CallRecord record;
                 record.turnId = turn;
                 record.label = label;

@@ -4171,6 +4171,10 @@ not the capped first line.
 
 A failed call always opens the fold, whatever it would have opened.
 
+`{"type": "card"}` is **a fold on a surface that has one** (card #1NW3): the row unfolds the call's
+detail like any other, and only the `#K7Q2` the row's text names is the card's own link. A surface
+with no fold layer keeps the whole row as the card's link, with the call's detail as the fallback.
+
 `{"type": "todos"}` is **a fold on a surface that has one** (card #BDXG): the `tasks` section above
 *is* the task list that call left behind, so a click unfolds it in place — one row per task with its
 status glyph — rather than opening another surface, and the fold's last row links to the task list

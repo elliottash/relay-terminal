@@ -179,7 +179,12 @@ Click clickFor(const toollabel::Label &label) {
 
 bool anchorsFold(Click click, bool merged, bool backendFolds) {
     if (!backendFolds) return false;
-    return merged || click == Click::Fold || click == Click::Todos;
+    return merged || click == Click::Fold || click == Click::Todos || click == Click::Card;
+}
+
+int cardSegment(const Row &row, const toollabel::Label &label) {
+    if (clickFor(label) != Click::Card || label.openId.isEmpty()) return -1;
+    return row.text().indexOf(QLatin1Char('#') + label.openId);
 }
 
 // ----- what a live tool_output adds to the row's counter ------------------------------------------

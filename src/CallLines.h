@@ -97,10 +97,17 @@ Click clickFor(const toollabel::Label &label);
 
 // Which scheme the row's OSC 8 anchor takes: relay://call/ (true) or relay://open-call/ (false).
 // A fold when the terminal *has* a fold layer and the row's click is one the fold answers —
-// Click::Fold, a merged run, or Click::Todos, whose task list is the detail and so has nothing
-// else to open (card #BDXG). Everything else opens a pane, and on a backend with no fold layer
-// every row anchors open-call so a click still reaches the detail.
+// Click::Fold, a merged run, Click::Todos, whose task list is the detail and so has nothing
+// else to open (card #BDXG), or Click::Card, whose row folds like any other and links only its
+// `#K7Q2` segment to the card itself (cardSegment, card #1NW3). Everything else opens a pane,
+// and on a backend with no fold layer every row anchors open-call so a click still reaches the
+// detail — there a card row's whole line opens the card, as it always did.
 bool anchorsFold(Click click, bool merged, bool backendFolds);
+
+// The span of a card row's own `#K7Q2` inside Row::text() — the segment the pane draws under
+// relay://card/<id> while the rest of the row stays the fold anchor (card #1NW3). -1 when the
+// label names no card or the id is not in the text (cut away by `fit` on a narrow pane).
+int cardSegment(const Row &row, const toollabel::Label &label);
 
 // ----- what a live tool_output adds to the row's counter ------------------------------------------
 
