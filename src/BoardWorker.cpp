@@ -44,11 +44,19 @@ void BoardWorker::connectProcess()
             onStatus(QStringLiteral("Switchboard worker failed: ") + m_process.errorString());
     });
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
-            [this](int, QProcess::ExitStatus) {
+            [this](int, QProcess::ExitStatus status) {
                 m_configured = false;
                 m_ready = false;
-                if (!m_stopping && onStatus)
+                // Nothing that was waiting for `ready` will ever be written now, and keeping it
+                // would send a dead turn's messages to the *next* worker (start() clears the list
+                // too, which is one restart too late for anything read in between).
+                m_queued.clear();
+                if (m_stopping)
+                    return;
+                if (onStatus)
                     onStatus(QStringLiteral("The Switchboard worker exited."));
+                if (onExit)
+                    onExit(status == QProcess::CrashExit);
             });
     connect(&m_process, &QProcess::started, this, [this] {
         for (const QByteArray &line : std::as_const(m_pending))

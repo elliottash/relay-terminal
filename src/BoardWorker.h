@@ -38,6 +38,13 @@ public:
 
     std::function<void(const QJsonObject &)> onEvent;
     std::function<void(const QString &)> onStatus;
+    // The process has gone when nobody asked it to (it exited, it crashed, it could not start).
+    // `onStatus` says so in a sentence for the status bar and the board's empty area; this is the
+    // *event*, and it exists because a turn was very likely running when it happened: the panels
+    // of the tab are still showing a busy strip for an answer that is never coming, and only
+    // something that fires here can put them back (§30.7, #H6VQ). `crashed` is a signal rather
+    // than a non-zero exit.
+    std::function<void(bool crashed)> onExit;
 
 private:
     void connectProcess();

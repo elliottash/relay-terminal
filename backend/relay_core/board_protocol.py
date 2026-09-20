@@ -1669,9 +1669,18 @@ class BoardCommands:
         elif kind == "board_chat":
             self._chat(request, rid)
         elif kind == "board_chat_cancel":
+            # One turn at a time, so a Stop pressed in any of the tab's four panels stops *the*
+            # turn — which is right: it is one conversation (30.7). What was wrong is the answer.
+            # It went out with no `pane`, so every panel but the Switchboard's dropped it and the
+            # one that pressed Stop sat there running until something else arrived (owner,
+            # 2026-09-20: "message queue isn't working in the sessions helper, i can't
+            # interrupt"). It is addressed to whoever asked, falling back to the turn's own pane
+            # for a client from before 30.7.
+            pane = board_chat.validate_pane(request.get("pane")) if request.get("pane") \
+                else self.chat.pane
             stopped = self.chat.stop()
             self._send({"event": "board_chat_cancelled", "id": rid, "stopped": stopped,
-                        "chat": self.chat.state()})
+                        "pane": pane, "chat": self.chat.state()})
         elif kind == "board_chat_queue_remove":
             item = request.get("item")
             if not isinstance(item, str) or not self.chat.remove(item):

@@ -561,6 +561,24 @@ class ProtocolChatTest(unittest.TestCase):
         self.assertTrue(self.of("board_chat_cancelled")[0]["stopped"])
         self.assertFalse(self.commands.chat.busy())
 
+    def test_a_cancel_is_answered_to_the_panel_that_pressed_stop(self):
+        # There is one turn per worker, so Stop in any of the tab's four panels stops it — but
+        # the answer used to carry no `pane` at all, and every panel but the Switchboard's drops
+        # an event addressed to somebody else. The Sessions panel that pressed Stop then kept its
+        # busy strip: "message queue isn't working in the sessions helper, i can't interrupt"
+        # (owner, 2026-09-20).
+        self.ask("hold", pane="sessions")
+        self.commands.dispatch({"type": "board_chat_cancel", "id": "r2", "pane": "sessions"})
+        self.wait_idle()
+        answer = self.of("board_chat_cancelled")[0]
+        self.assertEqual(answer["pane"], "sessions")
+        self.assertTrue(answer["stopped"])
+        # With no pane on the request (a client from before 30.7) it goes to the turn's own pane.
+        self.ask("hold again", pane="options")
+        self.commands.dispatch({"type": "board_chat_cancel", "id": "r3"})
+        self.wait_idle()
+        self.assertEqual(self.of("board_chat_cancelled")[1]["pane"], "options")
+
     def test_a_bad_model_is_refused_before_anything_runs(self):
         with self.assertRaises(ValueError):
             self.ask("hi", model="not-a-role")

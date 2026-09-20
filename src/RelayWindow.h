@@ -6365,6 +6365,20 @@ public:
                 }));
                 return;
             }
+            // Which panels of this tab are waiting on the helper right now (#H6VQ). A worker that
+            // dies mid-turn tells nobody: `done` never comes, so the panel that asked keeps its
+            // busy strip and its composer refuses a second prompt for ever. This is the list that
+            // gets put back — the pane a turn started in, and any pane with a prompt queued
+            // behind it.
+            if (type == QStringLiteral("board_chat_started") || type == QStringLiteral("board_chat_queued")) {
+                const QString from = event.value(QStringLiteral("pane")).toString();
+                guard->m_helperWaiting[tab].insert(from.isEmpty() ? QStringLiteral("switchboard") : from);
+            } else if (event.value(QStringLiteral("chat")).toBool()
+                       && (type == QStringLiteral("done") || type == QStringLiteral("error")
+                           || type == QStringLiteral("cancelled"))) {
+                const QString from = event.value(QStringLiteral("pane")).toString();
+                guard->m_helperWaiting[tab].remove(from.isEmpty() ? QStringLiteral("switchboard") : from);
+            }
             // What this worker says about its own model is kept for the panels that are not
             // open yet: it is said on configure and not again (#BRD3).
             guard->m_helperModels[tab].take(type, event);
@@ -6393,6 +6407,13 @@ public:
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                     tool->board()->handleEvent(event);
             guard->deliverToHelperPanels(page, event);
+        };
+        // The process has gone and nobody asked it to: every panel of this tab that was waiting
+        // on it is put back to idle (#H6VQ, §30.7). Nothing else says so — `done` was the
+        // worker's to send — and the next ask starts a fresh one through the first-ask path, so
+        // the composer must be usable again the moment this returns.
+        worker->onExit = [guard, tab](bool crashed) {
+            if (guard) guard->helperWorkerGone(tab, crashed);
         };
         // What the worker says about *itself* — it would not start, it exited, its pipe
         // overflowed. The status bar is not shown in this layout, so until 2026-09-20 a
@@ -6482,6 +6503,33 @@ public:
         return {};
     }
 
+    // A helper worker that died mid-turn, told to the panels that were waiting on it (#H6VQ).
+    // It goes out as the turn's own `error` event, tagged with the pane that asked, because that
+    // is the one message every panel already knows how to end a turn on: the busy strip goes, the
+    // composer takes prompts again and the line is written into the log where the answer would
+    // have been. A fresh worker starts at the next ask (`helperWorker(page, true)`), which is
+    // where a helper comes from anyway.
+    void helperWorkerGone(const QString &tab, bool crashed) {
+        const QSet<QString> waiting = m_helperWaiting.take(tab);
+        QWidget *page = pageOfTabId(tab);
+        if (!page || waiting.isEmpty()) return;
+        const QString text = crashed
+            ? QStringLiteral("The helper stopped before it answered (it crashed). Your message is "
+                             "kept — ask again and a fresh helper starts.")
+            : QStringLiteral("The helper stopped before it answered. Your message is kept — ask "
+                             "again and a fresh helper starts.");
+        for (const QString &pane : waiting) {
+            const QJsonObject event{{QStringLiteral("event"), QStringLiteral("error")},
+                                    {QStringLiteral("chat"), true},
+                                    {QStringLiteral("pane"), pane},
+                                    {QStringLiteral("text"), text}};
+            for (QWidget *leaf : leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
+                    tool->board()->handleEvent(event);
+            deliverToHelperPanels(page, event);
+        }
+    }
+
     // The tab has gone, so its helper has nobody left to talk to (§30.7: "closing the tab stops
     // its worker"). It is no longer the last Switchboard closing that ends it: the helper serves
     // the tab's Options, Actions and Sessions panes too, and a Switchboard put away is not a
@@ -6491,9 +6539,11 @@ public:
         const QString tab = page->property("relayTabId").toString();
         if (tab.isEmpty()) return;                       // nothing ever asked: no worker to stop
         m_helperModels.remove(tab);                      // what it said about its model goes with it
+        m_helperWaiting.remove(tab);
         if (relay::BoardWorker *worker = m_boardWorkers.take(tab).data()) {
             worker->onEvent = nullptr;
             worker->onStatus = nullptr;
+            worker->onExit = nullptr;
             worker->stop();
             worker->deleteLater();
         }
@@ -6505,10 +6555,12 @@ public:
     void stopBoardWorkers() {
         const QList<QPointer<relay::BoardWorker>> workers = m_boardWorkers.values();
         m_boardWorkers.clear();
+        m_helperWaiting.clear();
         for (const QPointer<relay::BoardWorker> &worker : workers)
             if (worker) {
                 worker->onEvent = nullptr;
                 worker->onStatus = nullptr;
+                worker->onExit = nullptr;
                 worker->stop();
                 worker->deleteLater();
             }
@@ -9420,6 +9472,9 @@ private:
     // conversation; the owner's rule is that Switchboards are per tab, so each tab gets its own
     // agent over the one shared set of board files. It ends when the tab does (forgetTab).
     QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
+    // Per tab, the panes whose panels are waiting on the helper: a turn's own pane and any pane
+    // with a prompt queued behind it. `helperWorkerGone` is the only reader (#H6VQ).
+    QMap<QString, QSet<QString>> m_helperWaiting;
     QSet<QString> m_helperStarting;   // tabs whose helper startBoardWorker() is building right now
     // /update: the one running updater (scripts/relay-update.py), its unread output and whether
     // its final line was the UPDATED marker the restart waits for. One at a time.

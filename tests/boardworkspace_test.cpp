@@ -57,6 +57,8 @@ private slots:
     void attachTabIsTheOnlyWriterOfTheTabsProject();
     void theConfigureFunnelAlwaysSendsABoardBlock();
     void theHelpersConfigureCarriesTheKeybindings();
+    void theHelperOutlivesItsPanelsAndOnlyTheTabEndsIt();
+    void aHelperThatDiesMidTurnPutsItsPanelsBack();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
 };
@@ -287,6 +289,60 @@ void BoardWorkspaceTests::theHelpersConfigureCarriesTheKeybindings()
     QVERIFY2(send.contains(QStringLiteral("worker->configured()")), qPrintable(send));
     // And the reload listener calls it, beside the panes'.
     QVERIFY2(text.contains(QStringLiteral("sendHelperKeybindings();")), "nothing reloads the helper");
+}
+
+// The tab's helper is the tab's (§30.7): it serves the Switchboard, Options, Actions and Sessions
+// panes of that tab, so a Switchboard put away must not stop it and only the tab closing may.
+// This is the rule the old per-board-pane teardown broke, and the one a future edit is most
+// likely to break again by hanging the worker off a pane once more.
+void BoardWorkspaceTests::theHelperOutlivesItsPanelsAndOnlyTheTabEndsIt()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    // One owner: the tab, through forgetTab().
+    const QString forget = bodyOf(text, QStringLiteral("void forgetTab(QWidget *page) {"));
+    QVERIFY2(forget.contains(QStringLiteral("releaseBoardWorker(page)")), qPrintable(forget));
+    QCOMPARE(text.count(QStringLiteral("releaseBoardWorker(page);")), 1);
+    // And nothing takes a worker out of the map except that release and the window's own
+    // shutdown: `m_boardWorkers.take(...)` anywhere else is a pane stopping the tab's helper.
+    QCOMPARE(text.count(QStringLiteral("m_boardWorkers.take(")), 1);
+}
+
+// A worker that dies mid-turn (its tab closed under it, it crashed, it could not start) tells
+// nobody: `done` never comes, so the panel that asked keeps its busy strip and refuses the next
+// prompt for ever. That is what the owner met — "message queue isn't working in the sessions
+// helper, i can't interrupt" (2026-09-20) — after the same worker died with an `app_open` still
+// in flight. Every panel that was waiting is put back, and the next ask starts a fresh worker.
+void BoardWorkspaceTests::aHelperThatDiesMidTurnPutsItsPanelsBack()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    // The worker reports it, and the window listens.
+    QVERIFY2(text.contains(QStringLiteral("worker->onExit = [guard, tab](bool crashed) {")),
+             "nothing is listening for a helper worker's death");
+    const QString gone = bodyOf(text, QStringLiteral("void helperWorkerGone(const QString &tab, bool crashed) {"));
+    QVERIFY2(!gone.isEmpty(), "RelayWindow::helperWorkerGone() is gone");
+    // It ends the turn the way a turn ends, so every panel already knows how to draw it…
+    QVERIFY2(gone.contains(QStringLiteral("QStringLiteral(\"error\")")), qPrintable(gone));
+    QVERIFY2(gone.contains(QStringLiteral("{QStringLiteral(\"chat\"), true}")), qPrintable(gone));
+    QVERIFY2(gone.contains(QStringLiteral("{QStringLiteral(\"pane\"), pane}")), qPrintable(gone));
+    // …and it reaches the embedded panels of Options, Actions and Sessions, not only the board.
+    QVERIFY2(gone.contains(QStringLiteral("deliverToHelperPanels(page, event)")), qPrintable(gone));
+    QVERIFY2(gone.contains(QStringLiteral("m_helperWaiting.take(tab)")), qPrintable(gone));
+    // The waiting list is kept from the worker's own events: a turn's pane and a queued prompt's.
+    QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"board_chat_started\")")));
+    QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"board_chat_queued\")")));
+    // A deliberate stop is not a death: the callbacks come off before the worker is asked to go.
+    const QString release = bodyOf(text, QStringLiteral("void releaseBoardWorker(QWidget *page) {"));
+    QVERIFY2(release.contains(QStringLiteral("worker->onExit = nullptr")), qPrintable(release));
+
+    QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/BoardWorker.cpp"));
+    QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+    const QString worker = QString::fromUtf8(source.readAll());
+    QVERIFY2(worker.contains(QStringLiteral("onExit(status == QProcess::CrashExit)")),
+             "BoardWorker no longer reports an exit nobody asked for");
+    QVERIFY2(worker.contains(QStringLiteral("if (m_stopping)\n                    return;")),
+             "a deliberate stop reports itself as a death");
 }
 
 // The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4, owner 2026-09-19 "yeah build
