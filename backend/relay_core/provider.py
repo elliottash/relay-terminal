@@ -896,7 +896,9 @@ class ChatProvider:
                     if delay is not None:
                         note = (f"Provider HTTP {exc.code} · asking again in {self._wait_text(delay)} s "
                                 f"(retry {retries + 1} of {self.HTTP_RETRY_ATTEMPTS})")
-                        emit({"event": "provider_retry", "reason": "http",
+                        # `status` is what was refused: the pane reads a 429 that the retries
+                        # never cleared as a spent subscription (owner, 2026-09-20).
+                        emit({"event": "provider_retry", "reason": "http", "status": exc.code,
                               "attempt": retries + 1, "max_attempts": self.HTTP_RETRY_ATTEMPTS,
                               "text": note})
                         emit({"event": "status", "text": note})

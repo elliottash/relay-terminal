@@ -6,6 +6,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QDateTime>
 #include <QComboBox>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -149,6 +150,46 @@ private Q_SLOTS:
         // A second picker opens on the saved sort.
         ModelPicker again(context());
         QCOMPARE(again.sortBox()->currentData().toString(), QStringLiteral("alpha"));
+    }
+
+    void anExhaustedSubscriptionIsGreyedStillSelectableAndSaysWhenItResets() {
+        ModelPicker::Context ctx = context();
+        ctx.now = QDateTime(QDate(2026, 9, 20), QTime(9, 0)).toSecsSinceEpoch();
+        const qint64 resets = QDateTime(QDate(2026, 9, 20), QTime(14, 30)).toSecsSinceEpoch();
+        ctx.catalog.limits[QStringLiteral("anthropic")] = {LimitWindow{QStringLiteral("5h"), 100, resets}};
+        ModelPicker picker(ctx);
+        // The row is still there, in its rank…
+        QCOMPARE(keys(picker.list()).at(2), QStringLiteral("anthropic|claude-opus-5"));
+        QTreeWidgetItem *spent = picker.list()->topLevelItem(2);
+        QCOMPARE(spent->text(5), QStringLiteral("0% · resets 14:30"));
+        const QColor muted = picker.palette().color(QPalette::Disabled, QPalette::Text);
+        QCOMPARE(spent->foreground(0).color(), muted);
+        QCOMPARE(spent->foreground(5).color(), muted);
+        QVERIFY(spent->toolTip(0).contains(QStringLiteral("exhausted")));
+        // …a live row is not muted…
+        QTreeWidgetItem *live = picker.list()->topLevelItem(0);
+        QCOMPARE(live->text(5), QString());   // glm has no figures
+        QVERIFY(live->foreground(0).color() != muted || live->foreground(0).style() == Qt::NoBrush);
+        QCOMPARE(picker.list()->topLevelItem(3)->text(5), QStringLiteral("62%"));   // the guest's 5h window
+        // …and the user may still insist on it.
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.accept();
+        QVERIFY(picker.pick().accepted);
+        QCOMPARE(picker.pick().key, QStringLiteral("anthropic|claude-opus-5"));
+        // The limits line under the list says the same in words.
+        ModelPicker again(ctx);
+        again.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(again.findChild<QLabel *>(QStringLiteral("modelLimits"))->text(), QStringLiteral("anthropic (claude): 5h 0% left, resets 14:30"));
+        // Spent with no reset time known: "0%" alone, still greyed.
+        ctx.catalog.limits[QStringLiteral("anthropic")] = {LimitWindow{QStringLiteral("5h"), 100, 0}};
+        ModelPicker unknown(ctx);
+        QCOMPARE(unknown.list()->topLevelItem(2)->text(5), QStringLiteral("0%"));
+        QCOMPARE(unknown.list()->topLevelItem(2)->foreground(0).color(), muted);
+        // Past its reset: an ordinary row again, with the figure the window still reports.
+        ctx.catalog.limits[QStringLiteral("anthropic")] = {LimitWindow{QStringLiteral("5h"), 100, ctx.now - 1}};
+        ModelPicker back(ctx);
+        QCOMPARE(back.list()->topLevelItem(2)->text(5), QStringLiteral("0%"));
+        QVERIFY(back.list()->topLevelItem(2)->foreground(0).style() == Qt::NoBrush);
     }
 
     void customizeClosesAndOpensThePage() {

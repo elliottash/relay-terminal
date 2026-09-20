@@ -1471,7 +1471,9 @@ New event, emitted before the retried model call:
 `provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended" |
 "route_dropped" | "switch", attempt, max_attempts, seconds, step, text}`
 
-`seconds` is sent only for `"stall"`; `step` is sent by everything the agent emits and not by
+`seconds` is sent only for `"stall"`; `status` (the HTTP status that was refused) by `"http"` and
+`"switch"` — a pane that saw a 429 retried and then the turn leave the provider treats that
+provider as exhausted for a while (`docs/ARCHITECTURE.md`, the model catalog); `step` is sent by everything the agent emits and not by
 `"http"` or `"failover_ended"` (the transport does not know the step, and the restore is not at one);
 `turn_id` is absent only for `"http"`, which the transport
 emits without knowing the turn. `"http"` is the transport's retry of a refused request (below);

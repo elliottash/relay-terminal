@@ -1958,7 +1958,9 @@ private:
         Pane *pane = m_active;
         QSettings settings;
         const QJsonArray presets = pane ? pane->allPresets() : QJsonArray();
-        const relay::models::Catalog catalog = relay::models::catalogFrom(presets);
+        // The pane's catalog, not a bare catalogFrom: it carries the usage limits that arrived
+        // since the last presets answer (the "5h 62% left" status line, an exhausted row).
+        const relay::models::Catalog catalog = pane ? pane->modelCatalog() : relay::models::catalogFrom(presets);
         const qint64 now = QDateTime::currentSecsSinceEpoch();
         auto curated = [this] {
             refreshSettingsPanes();
@@ -2355,7 +2357,9 @@ private:
             row.kind = relay::SettingRow::Buttons;
             row.id = QStringLiteral("models/rank/") + entry.key;
             row.label = QStringLiteral("%1. %2").arg(i + 1).arg(entry.displayName());
-            row.detail = i == 0 ? QStringLiteral("main · new panes start here · drag rows to reorder")
+            const qint64 spentUntil = relay::models::exhaustedUntil(catalog, entry.preset, now);
+            row.detail = spentUntil >= 0 ? QStringLiteral("exhausted · resets %1 · skipped").arg(spentUntil > 0 ? relay::models::resetText(spentUntil, now) : QStringLiteral("when the provider says so"))
+                       : i == 0 ? QStringLiteral("main · new panes start here · drag rows to reorder")
                        : i < threshold ? QStringLiteral("fallback %1%2").arg(i).arg(i == 1 ? QStringLiteral(" · /swap goes here") : QString())
                                        : QString();
             row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
@@ -2430,7 +2434,9 @@ private:
     // Rank 1 of the priority list is what a new pane starts on: the same two keys a switch writes.
     // A guest at rank 1 is left alone — a fresh pane starting a harness unasked is a surprise.
     static void applyMainDefault(const relay::models::Catalog &catalog) {
-        const relay::models::Entry main = relay::models::mainDefault(catalog);
+        // Rank 1 itself, exhausted or not: a subscription's reset must not leave new panes on the
+        // rank 2 that stood in for it (mainDefault skips exhausted entries; this is the setting).
+        const relay::models::Entry main = relay::models::shown(catalog).value(0);
         Pane::rememberFallback(catalog);
         if (main.key.isEmpty() || main.guest) return;
         QSettings settings;

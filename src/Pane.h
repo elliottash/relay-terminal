@@ -1046,7 +1046,68 @@ public:
     // Every model of every preset row the worker sent, as relay::models entries; what the user
     // checked and ranked lives in QSettings under models/*. The box, the picker, /model <name> and
     // /swap all read this and all switch through selectEntry, so a pick is one thing.
-    relay::models::Catalog modelCatalog() const { return relay::models::catalogFrom(m_presets); }
+    relay::models::Catalog modelCatalog() const {
+        relay::models::Catalog catalog = relay::models::catalogFrom(m_presets);
+        // The figures that arrived since the last `presets` answer are the fresher ones.
+        for (auto it = m_limits.constBegin(); it != m_limits.constEnd(); ++it) catalog.limits.insert(it.key(), it.value());
+        for (auto it = m_limitStatus.constBegin(); it != m_limitStatus.constEnd(); ++it) {
+            if (it.value().isEmpty()) catalog.status.remove(it.key());
+            else catalog.status.insert(it.key(), it.value());
+        }
+        return catalog;
+    }
+    // ----- usage limits (owner, 2026-09-20) ---------------------------------------------------
+    // "When a model subscription is exhausted, it gets grayed-out and skipped in the priority
+    // until it's restored." The figures live in m_limits; relay::models::exhausted reads them.
+    QString hostedPresetId() const {
+        for (const auto &item : m_presets)
+            if (item.toObject().value(QStringLiteral("hosted")).toBool()) return item.toObject().value(QStringLiteral("id")).toString();
+        return QString();
+    }
+    // Fresh figures for one preset: the model box and the picker redraw, Options › Models' status
+    // line follows, and the failover chain the worker holds is recomputed without the exhausted
+    // ones. When the nearest reset lands, the same again, so the row comes back on its own.
+    void noteLimits(const QString &preset, const QList<relay::models::LimitWindow> &windows, const QString &status) {
+        if (preset.isEmpty()) return;
+        const QStringList before = exhaustedPresets();
+        m_limits.insert(preset, windows);
+        m_limitStatus.insert(preset, status);
+        limitsChanged(before != exhaustedPresets());
+    }
+    QStringList exhaustedPresets() const {
+        QStringList out;
+        const relay::models::Catalog catalog = modelCatalog();
+        for (const QString &preset : catalog.presets())
+            if (relay::models::exhausted(catalog, preset)) out << preset;
+        return out;
+    }
+    // `chainChanged`: a preset became exhausted or came back, so the worker's failover chain is
+    // re-sent; a mere figure (Relay Free's chip after every call) only redraws.
+    void limitsChanged(bool chainChanged) {
+        const relay::models::Catalog catalog = modelCatalog();
+        rememberFallback(catalog);
+        if (chainChanged) agentOptionsChanged(QStringLiteral("models/fallback"));
+        refreshPickers();
+        relay::SettingsWatch::instance().notify();
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        qint64 soonest = 0;
+        for (const QString &preset : catalog.presets()) {
+            const qint64 until = relay::models::exhaustedUntil(catalog, preset, now);
+            if (until > now && (soonest == 0 || until < soonest)) soonest = until;
+        }
+        if (soonest > 0) QTimer::singleShot(int(qMin<qint64>(soonest - now + 1, 24 * 3600) * 1000), this, [this] { limitsChanged(true); });
+    }
+    // A provider with no quota endpoint (GLM, Kimi, MiniMax plans) said 429 until the transport's
+    // retries were spent: a cool-off keeps the priority off it. `until` 0 = no reset known.
+    void markExhausted(const QString &preset, const QString &kind, qint64 until) {
+        if (preset.isEmpty()) return;
+        QList<relay::models::LimitWindow> windows = m_limits.value(preset);
+        if (windows.isEmpty()) windows = modelCatalog().limits.value(preset);
+        for (int i = windows.size() - 1; i >= 0; --i) if (windows.at(i).kind == kind) windows.removeAt(i);
+        windows << relay::models::LimitWindow{kind, 100.0, until};
+        noteLimits(preset, windows, m_limitStatus.value(preset));
+    }
+    static constexpr qint64 kRateLimitCoolOffSeconds = 30 * 60;
     // The entry this pane runs on: its preset and the model the worker last reported (a guest's
     // own model while a guest answers). Before the worker names one, the preset's Main model.
     QString currentEntryKey() const {
@@ -4000,6 +4061,11 @@ private:
         // A fresh allowance retires the offer to add a key: the next exhaustion may make it again.
         if (m_quotaLimit > 0 && m_quotaUsed < m_quotaLimit) m_hostedOfferShown = false;
         updateQuotaLabel();
+        // The allowance is Relay Free's one "daily" window in the catalog: spent = exhausted.
+        if (m_quotaLimit > 0)
+            noteLimits(hostedPresetId(), {relay::models::LimitWindow{QStringLiteral("daily"),
+                                          100.0 * double(m_quotaUsed) / double(m_quotaLimit), m_quotaResets}},
+                       m_limitStatus.value(hostedPresetId()));
     }
 
     void updateQuotaLabel() {
@@ -4046,6 +4112,10 @@ private:
         const qint64 resets = event.value(QStringLiteral("resets_at")).toVariant().toLongLong();
         if (resets > 0) m_quotaResets = resets;
         if (code == QStringLiteral("quota_exhausted") && m_quotaLimit > 0) { m_quotaUsed = m_quotaLimit; updateQuotaLabel(); }
+        // The gateway said the day's allowance is spent: the priority skips Relay Free until the
+        // reset it named (the chip may not have a limit figure yet, so the window is written here).
+        if (code == QStringLiteral("quota_exhausted"))
+            markExhausted(hostedPresetId(), QStringLiteral("daily"), resets > 0 ? resets : m_quotaResets);
         const QString what = code == QStringLiteral("quota_exhausted")
             ? QStringLiteral("Relay Free allowance used for today%1.")
                   .arg(resets > 0 ? QStringLiteral("; resets at %1").arg(localClock(resets)) : QString())
@@ -6570,6 +6640,21 @@ private:
             if (m_keysDialog) m_keysDialog->handleEvent(event);
             return true;
         }
+        if (type == QStringLiteral("usage_limits")) {
+            // A guest's subscription windows (protocol 29.3), fresh from its harness: the picker's
+            // "left" column and the priority follow at once rather than at the next presets answer.
+            QList<relay::models::LimitWindow> windows;
+            for (const auto &value : event.value(QStringLiteral("windows")).toArray()) {
+                const QJsonObject window = value.toObject();
+                relay::models::LimitWindow w;
+                w.kind = window.value(QStringLiteral("kind")).toString();
+                w.usedPercent = window.contains(QStringLiteral("used_percent")) ? window.value(QStringLiteral("used_percent")).toDouble() : -1;
+                w.resetsAt = window.value(QStringLiteral("resets_at")).toVariant().toLongLong();
+                if (!w.kind.isEmpty()) windows << w;
+            }
+            noteLimits(event.value(QStringLiteral("preset")).toString(), windows, event.value(QStringLiteral("status")).toString());
+            return true;
+        }
         if (type == QStringLiteral("context")) {
             m_ctxUsed = event.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
             m_ctxWindow = event.value(QStringLiteral("window")).toVariant().toLongLong();
@@ -7665,15 +7750,21 @@ private:
             // Owner (card #DC4J): "/swap … immediately swaps to your default fallback (or back to
             // your first choice provider if you are on the fallback)". Rank 1 and rank 2 of the
             // priority list in Options › Models. A switch lands at once even mid-retry (7824689d).
+            // Both skip an exhausted subscription (owner, 2026-09-20): from a spent model, /swap
+            // goes to the first live one, whatever rank the spent one held.
             const relay::models::Catalog catalog = modelCatalog();
             const relay::models::Entry main = relay::models::mainDefault(catalog);
             const relay::models::Entry fallback = relay::models::fallback(catalog);
-            if (fallback.key.isEmpty()) {
-                status(QStringLiteral("No fallback model yet: rank a second model in Options › Models (/models)."));
+            const QString current = currentEntryKey();
+            QString currentPreset;
+            relay::models::Catalog::splitKey(current, &currentPreset, nullptr);
+            const bool spent = !currentPreset.isEmpty() && relay::models::exhausted(catalog, currentPreset);
+            if (fallback.key.isEmpty() && !(spent && !main.key.isEmpty())) {
+                status(main.key.isEmpty() ? QStringLiteral("No model with anything left to swap to: every ranked subscription is exhausted.")
+                                          : QStringLiteral("No fallback model yet: rank a second model in Options › Models (/models)."));
                 return;
             }
-            const QString current = currentEntryKey();
-            const relay::models::Entry &target = current == fallback.key ? main : fallback;
+            const relay::models::Entry &target = spent || current == fallback.key ? main : fallback;
             if (current == target.key) { status(QStringLiteral("Already on %1.").arg(target.displayName())); return; }
             selectEntry(target.key);
             status(QStringLiteral("Swapped to %1%2.").arg(target.displayName(), &target == &fallback ? QStringLiteral(" (the fallback)") : QStringLiteral(" (the main model)")));
@@ -9755,6 +9846,25 @@ private:
             // nothing here.
             if (reason == QStringLiteral("failover")) pushServingModel(reason, event);
             else if (reason == QStringLiteral("failover_ended")) popServingModel(QStringLiteral("failover"));
+            // A provider with no quota endpoint reports its exhaustion the only way it can: 429
+            // after 429 until the transport's retries are spent and the turn moves on (#YJG7 —
+            // fifteen hours of six retries a turn on a plan out of quota until Tuesday). Only that
+            // shape — a 429 was retried on this turn, and now the turn is leaving the provider —
+            // earns the cool-off; a stall, a 5xx or a single refusal that the retry cleared does not.
+            if (reason == QStringLiteral("http")) {
+                const int status = event.value(QStringLiteral("status")).toInt();
+                if (status == 429 || (status == 0 && event.value(QStringLiteral("text")).toString().contains(QStringLiteral("HTTP 429"))))
+                    m_turnSaw429 = true;
+            } else if (reason == QStringLiteral("failover")) {
+                const QString from = event.value(QStringLiteral("attempt")).toInt() <= 1 || m_failoverTarget.isEmpty()
+                    ? m_currentPreset : m_failoverTarget;
+                if (m_turnSaw429 && !presetById(from).value(QStringLiteral("hosted")).toBool())
+                    markExhausted(from, QStringLiteral("rate limit"), QDateTime::currentSecsSinceEpoch() + kRateLimitCoolOffSeconds);
+                m_turnSaw429 = false;
+                m_failoverTarget = event.value(QStringLiteral("to_preset")).toString();
+            } else if (reason == QStringLiteral("switch") || reason == QStringLiteral("route_dropped")) {
+                m_turnSaw429 = false;
+            }
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
             // While a turn runs the clock owns the status line; a step note rides along with it
@@ -9767,6 +9877,7 @@ private:
             }
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
             stopTurnClock();
+            m_turnSaw429 = false; m_failoverTarget.clear();
             if (m_infoView) m_infoView->refreshIfLive();   // the ⓘ pane follows the turns it lists
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
@@ -9814,6 +9925,11 @@ private:
                 const QString code = event.value(QStringLiteral("code")).toString();
                 if (code == QStringLiteral("quota_exhausted") || code == QStringLiteral("free_unavailable")) onHostedRefusal(code, event);
                 else { ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); }
+                // The turn died on the 429s the transport had been retrying (the text is the pane's
+                // own provider's, even after a failover chain: agent._failover_failure): a cool-off.
+                if (m_turnSaw429 && text.contains(QStringLiteral("HTTP 429")) && !onHostedPreset())
+                    markExhausted(m_currentPreset, QStringLiteral("rate limit"), QDateTime::currentSecsSinceEpoch() + kRateLimitCoolOffSeconds);
+                m_turnSaw429 = false; m_failoverTarget.clear();
                 printTurnEndRequests(type, event);   // request ledger UI
                 if (!moreTurnsPending()) closeInline();
                 finishFixTurn(false);
@@ -10802,7 +10918,9 @@ private:
             for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
                 if (entry.key == currentKey) continue;
                 if (entry.guest && !guestHarnessUsable(guestOfPreset(entry.preset))) continue;
-                m_modelBox->addItem(entry.displayName(), QStringLiteral("entry:") + entry.key);
+                // An exhausted subscription keeps its row, marked, and the priority skips it.
+                m_modelBox->addItem(entry.displayName() + (relay::models::exhausted(catalog, entry.preset) ? QStringLiteral(" · exhausted") : QString()),
+                                    QStringLiteral("entry:") + entry.key);
             }
         }
         if (liveIndex >= 0) m_modelBox->setCurrentIndex(liveIndex);
@@ -15557,6 +15675,16 @@ private:
     QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
+    // Usage limits as the worker last reported them, by preset id (owner, 2026-09-20): the guest's
+    // `usage_limits` windows and status, Relay Free's allowance as one "daily" window, and the
+    // cool-off a spent 429 earns a provider that reports no figures. Overlaid on the catalog, so
+    // the box, the picker and the priority see them the moment they arrive, not at the next
+    // `presets` answer. `m_turnSaw429`: the running turn's transport retried a 429 (protocol
+    // 15.2.1); a failover or a failed turn right after it is the sign the provider is out.
+    QHash<QString, QList<relay::models::LimitWindow>> m_limits;
+    QHash<QString, QString> m_limitStatus;
+    bool m_turnSaw429 = false;
+    QString m_failoverTarget;   // the preset the last failover of this turn moved to
     bool m_configuring = false;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     // agent sessions UI

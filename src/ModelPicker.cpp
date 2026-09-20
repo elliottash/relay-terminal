@@ -169,10 +169,19 @@ QTreeWidgetItem *ModelPicker::addRow(const Entry &entry) {
                         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
                         speed > 0 ? QString::number(qRound(speed)) : QString(),
                         percent(percentLeft(m_context.catalog, entry.preset))};
+    // An exhausted subscription (owner, 2026-09-20): the row stays, greyed, still selectable — the
+    // user may insist — and "left" says when it comes back. The priority skips it meanwhile.
+    const qint64 now = m_context.now > 0 ? m_context.now : QDateTime::currentSecsSinceEpoch();
+    const qint64 until = exhaustedUntil(m_context.catalog, entry.preset, now);
+    if (until >= 0)
+        columns[ColLeft] = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     auto *item = new QTreeWidgetItem(m_list, columns);
     item->setData(0, KeyRole, entry.key);
-    item->setToolTip(0, entry.model + (entry.custom ? QStringLiteral(" (added by you)") : QString()));
+    item->setToolTip(0, entry.model + (entry.custom ? QStringLiteral(" (added by you)") : QString())
+                     + (until >= 0 ? QStringLiteral(" · exhausted: skipped in the priority until it resets") : QString()));
     for (int c = ColReasoning; c < ColCount; ++c) item->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
+    if (until >= 0)
+        for (int c = 0; c < ColCount; ++c) item->setForeground(c, palette().color(QPalette::Disabled, QPalette::Text));
     if (entry.key == m_context.currentKey) {
         QFont font = item->font(0);
         font.setBold(true);

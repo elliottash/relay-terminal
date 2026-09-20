@@ -60,6 +60,10 @@ struct LimitWindow {
 struct Catalog {
     QList<Entry> entries;                 // every model of every preset, in the worker's order
     QHash<QString, QList<LimitWindow>> limits;   // by preset id, from `limits` / Relay Free's `quota`
+    // By preset id, the provider's own verdict on the next turn as the last report carried it:
+    // "allowed" | "allowed_warning" | "rejected" (usage_limits.status, protocol 29.3). Absent when
+    // the provider only gave figures.
+    QHash<QString, QString> status;
     QHash<QString, QString> presetLabels; // by preset id, the row's own lower-case label
 
     const Entry *find(const QString &key) const;
@@ -152,13 +156,28 @@ void setSort(Sort sort);
 QList<Entry> shown(const Catalog &catalog);
 // The same list under one sort. Every sort is stable over `entries`' order, so ties keep rank.
 QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog);
-// Rank 1 and rank 2 of the shown list; an empty Entry (key.isEmpty()) when there is none.
-Entry mainDefault(const Catalog &catalog);
-Entry fallback(const Catalog &catalog);
-// Ranks 2 … threshold of the shown list, in order: the failover chain the worker is sent.
-QList<Entry> fallbacks(const Catalog &catalog);
+
+// An exhausted subscription (owner, 2026-09-20: "grayed-out and skipped in the priority until
+// it's restored"): a window the provider reports fully spent (used_percent >= 100), or the
+// provider's own `status: "rejected"`, while its reset time is still ahead or unknown. The moment
+// `resets_at` has passed the preset is live again without waiting for a fresh report. `now` is
+// unix seconds; 0 means the clock. `exhaustedUntil` is -1 when the preset is live, 0 when it is
+// exhausted with no reset time known, else the unix second it comes back.
+qint64 exhaustedUntil(const Catalog &catalog, const QString &preset, qint64 now = 0);
+bool exhausted(const Catalog &catalog, const QString &preset, qint64 now = 0);
+// The shown list without the exhausted presets: what the priority actually runs on.
+QList<Entry> live(const Catalog &catalog, qint64 now = 0);
+// Rank 1 and rank 2 of the live list — an exhausted entry keeps its row but the next live one
+// takes its place — or an empty Entry (key.isEmpty()) when there is none.
+Entry mainDefault(const Catalog &catalog, qint64 now = 0);
+Entry fallback(const Catalog &catalog, qint64 now = 0);
+// Ranks 2 … threshold of the live list, in order: the failover chain the worker is sent.
+QList<Entry> fallbacks(const Catalog &catalog, qint64 now = 0);
 // The best "percent left" over a preset's windows, or -1 with no figures.
 double percentLeft(const Catalog &catalog, const QString &preset);
+// When a reset lands, in the words the limits line uses: today's "14:30", "tue" within a week,
+// else "23 sep". Empty when `resetsAt` is unknown (0).
+QString resetText(qint64 resetsAt, qint64 now);
 // "5h 62% left, resets 14:30 · weekly 40% left, resets tue" — empty with no figures. `now` is
 // unix seconds, for the wording of the reset time (today's hour, else a weekday).
 QString limitsText(const QList<LimitWindow> &windows, qint64 now);

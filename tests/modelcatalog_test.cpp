@@ -4,6 +4,7 @@
 #include "ModelCatalog.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QSettings>
@@ -273,6 +274,91 @@ private Q_SLOTS:
         QCOMPARE(limitsText(windows, now), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
         QCOMPARE(limitsText({}, now), QString());
         QCOMPARE(limitsText({LimitWindow{QStringLiteral("5h"), -1, 0}}, now), QString());
+    }
+
+    void theWorkersLimitsObjectIsReadWindowsAndStatus() {
+        // The real row (protocol 29.3): `limits: {windows, status?, updated_at}`, not a bare array.
+        QJsonArray rows = presets();
+        QJsonObject guest = rows.at(3).toObject();
+        guest.insert(QStringLiteral("limits"), QJsonObject{
+            {QStringLiteral("windows"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 100.0}, {QStringLiteral("resets_at"), 2000}}}},
+            {QStringLiteral("status"), QStringLiteral("rejected")}, {QStringLiteral("updated_at"), 1500}});
+        rows.replace(3, guest);
+        const Catalog catalog = catalogFrom(rows);
+        QCOMPARE(catalog.limits.value(QStringLiteral("guest:claude")).size(), 1);
+        QCOMPARE(catalog.limits.value(QStringLiteral("guest:claude")).first().usedPercent, 100.0);
+        QCOMPARE(catalog.status.value(QStringLiteral("guest:claude")), QStringLiteral("rejected"));
+        QVERIFY(catalog.status.value(QStringLiteral("glm-coding")).isEmpty());
+    }
+
+    void exhaustedIsASpentWindowUntilItsReset() {
+        Catalog catalog = catalogFrom(presets());
+        const qint64 now = 1000;
+        // 38% and 60% used: live.
+        QVERIFY(!exhausted(catalog, QStringLiteral("guest:claude"), now));
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("guest:claude"), now), -1);
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now));   // no figures at all
+        // A window at 100% with its reset ahead.
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("5h"), 100, now + 600}};
+        QVERIFY(exhausted(catalog, QStringLiteral("kimi-code"), now));
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("kimi-code"), now), now + 600);
+        // …and the moment the reset has passed it is live again, with no new report.
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now + 600));
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now + 601));
+        // Spent with no reset time: exhausted until the provider says otherwise (until = 0).
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("weekly"), 100, 0}};
+        QVERIFY(exhausted(catalog, QStringLiteral("kimi-code"), now));
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("kimi-code"), now), 0);
+        // Two spent windows: until the later reset.
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("5h"), 100, now + 100}, LimitWindow{QStringLiteral("weekly"), 100, now + 5000}};
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("kimi-code"), now), now + 5000);
+        // 99.6% is not spent: the provider has not refused yet.
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("5h"), 99.6, now + 100}};
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now));
+        // The provider's own "rejected" verdict counts even below 100%, until the latest reset it named.
+        catalog.status[QStringLiteral("kimi-code")] = QStringLiteral("rejected");
+        QVERIFY(exhausted(catalog, QStringLiteral("kimi-code"), now));
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("kimi-code"), now), now + 100);
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now + 100));   // the reset passed: live
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("5h"), 40, 0}};
+        QCOMPARE(exhaustedUntil(catalog, QStringLiteral("kimi-code"), now), 0);   // rejected, no reset known
+        catalog.status[QStringLiteral("kimi-code")] = QStringLiteral("allowed_warning");
+        QVERIFY(!exhausted(catalog, QStringLiteral("kimi-code"), now));
+    }
+
+    void thePrioritySkipsAnExhaustedPresetUntilItResets() {
+        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
+        curation::setFallbackThreshold(3);
+        Catalog catalog = catalogFrom(presets());
+        const qint64 now = 1000;
+        // Rank: k3, kimi highspeed, glm-5.3, glm flash, opus, sonnet, bonsai.
+        QCOMPARE(mainDefault(catalog, now).key, QStringLiteral("kimi-code|k3"));
+        QCOMPARE(fallback(catalog, now).key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("weekly"), 100, now + 3600}};
+        // Both kimi rows are gone from the live list; the next live ones take their places.
+        QCOMPARE(shown(catalog).size(), 7);   // the picker still lists them…
+        QCOMPARE(live(catalog, now).size(), 5);   // …the priority does not
+        QCOMPARE(mainDefault(catalog, now).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(fallback(catalog, now).key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        const QList<Entry> chain = fallbacks(catalog, now);
+        QCOMPARE(chain.size(), 2);
+        QCOMPARE(chain.at(0).key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(chain.at(1).key, QStringLiteral("guest:claude|opus"));
+        // After the reset, rank 1 is rank 1 again.
+        QCOMPARE(mainDefault(catalog, now + 3600).key, QStringLiteral("kimi-code|k3"));
+        QCOMPARE(fallbacks(catalog, now + 3600).first().key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        // Everything exhausted: nothing to run on, not a crash.
+        for (const QString &preset : catalog.presets()) catalog.limits[preset] = {LimitWindow{QStringLiteral("daily"), 100, 0}};
+        QVERIFY(mainDefault(catalog, now).key.isEmpty());
+        QVERIFY(fallbacks(catalog, now).isEmpty());
+    }
+
+    void resetTextIsTheLimitsLinesWording() {
+        const qint64 now = QDateTime(QDate(2026, 9, 20), QTime(9, 0)).toSecsSinceEpoch();
+        QCOMPARE(resetText(QDateTime(QDate(2026, 9, 20), QTime(14, 30)).toSecsSinceEpoch(), now), QStringLiteral("14:30"));
+        QCOMPARE(resetText(QDateTime(QDate(2026, 9, 22), QTime(3, 0)).toSecsSinceEpoch(), now), QStringLiteral("tue"));
+        QCOMPARE(resetText(QDateTime(QDate(2026, 10, 5), QTime(3, 0)).toSecsSinceEpoch(), now), QStringLiteral("5 oct"));
+        QCOMPARE(resetText(0, now), QString());
     }
 
     void filterMatchesEveryWordAnywhere() {

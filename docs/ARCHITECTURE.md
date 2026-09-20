@@ -1813,6 +1813,24 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the per-provider checklist with "add a model by id", the priority list, the defaults; it replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page (a guest's permission
   posture sits under its models). Labels are lower-case throughout, per the owner.
+- **Usage limits and an exhausted subscription (owner, 2026-09-20).** `Catalog.limits` (one
+  `LimitWindow{kind, usedPercent, resetsAt}` per window, by preset) and `Catalog.status` come from
+  the preset rows — a guest's `limits: {windows, status?}`, Relay Free's `quota` — and the pane
+  overlays what arrived since (`Pane::m_limits`, `noteLimits`): the worker's `usage_limits` event
+  (29.3) the moment a guest reports, `hosted_quota` as one `daily` window, and a cool-off written by
+  the pane itself when a provider with no quota endpoint (a GLM, Kimi or MiniMax plan) answered 429
+  through the transport's retries and the turn then failed over or died on it — a `rate limit`
+  window at 100% for 30 minutes (`markExhausted`; a stall, a 5xx or a 429 the retry cleared earns
+  nothing, #YJG7). `relay::models::exhausted(catalog, preset, now)` is a window at `used_percent >=
+  100`, or `status: "rejected"`, while `resets_at` is ahead or unknown; once it has passed the row is
+  live again with no new report. `mainDefault`, `fallback` and `fallbacks` read the `live` list —
+  the shown list minus exhausted presets, so the next live entry takes the place — which is what
+  `/swap` and `models/fallbacks` (the worker's chain) use; the picker's row stays, greyed
+  (`QPalette::Disabled`, "left" = "0% · resets 14:30"), still selectable; the model box says " ·
+  exhausted"; the priority list's detail says "exhausted · resets tue · skipped". Every change
+  redraws the box, notifies `SettingsWatch` (the providers' status line), re-sends the chain when
+  the exhausted set changed, and arms a single-shot timer for the nearest reset so the row comes
+  back by itself. `applyMainDefault` still writes rank 1 itself as the new-pane default.
 - The pane's model box (`Pane::refreshPickers`) is one flat list, roles first (owner, 2026-09-19:
   no separate Main / Flash / Local section — `model (main)`, `model (flash)`, and `model (local)`
   when this machine serves one, `role:<id>`; `Pane::chooseAgentRole`), then the catalog's shown

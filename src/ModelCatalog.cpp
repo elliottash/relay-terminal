@@ -47,7 +47,10 @@ bool usableRow(const QJsonObject &preset) {
 
 QList<LimitWindow> windowsOf(const QJsonObject &preset) {
     QList<LimitWindow> windows;
-    const QJsonArray limits = preset.value(QStringLiteral("limits")).toArray();
+    // The worker's guest row carries `limits: {windows, status?, updated_at}` (protocol 29.3): the
+    // last usage_limits event as it held it. A bare array of windows is read too.
+    const QJsonValue held = preset.value(QStringLiteral("limits"));
+    const QJsonArray limits = held.isObject() ? held.toObject().value(QStringLiteral("windows")).toArray() : held.toArray();
     for (const auto &value : limits) {
         const QJsonObject window = value.toObject();
         LimitWindow w;
@@ -131,6 +134,9 @@ Catalog catalogFrom(const QJsonArray &presets) {
         catalog.presetLabels.insert(id, str(preset, "label").toLower());
         const QList<LimitWindow> windows = windowsOf(preset);
         if (!windows.isEmpty()) catalog.limits.insert(id, windows);
+        // A guest row's `limits` is the worker's copy of the last usage_limits event, status included.
+        const QString status = str(preset.value(QStringLiteral("limits")).toObject(), "status");
+        if (!status.isEmpty()) catalog.status.insert(id, status);
 
         QJsonArray models = preset.value(QStringLiteral("models")).toArray();
         if (models.isEmpty()) {
@@ -475,19 +481,72 @@ QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog) {
     return entries;
 }
 
-Entry mainDefault(const Catalog &catalog) {
-    const QList<Entry> list = shown(catalog);
+qint64 exhaustedUntil(const Catalog &catalog, const QString &preset, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    const QList<LimitWindow> windows = catalog.limits.value(preset);
+    const bool rejected = catalog.status.value(preset) == QStringLiteral("rejected");
+    // A spent window holds the preset until its reset; with several, until the last one. A reset
+    // time the provider did not give (0) means "until it says otherwise".
+    qint64 until = -1;
+    bool unknown = false;
+    for (const LimitWindow &window : windows) {
+        if (window.usedPercent < 100) continue;
+        if (window.resetsAt > 0 && window.resetsAt <= now) continue;   // reset already
+        if (window.resetsAt <= 0) unknown = true;
+        else until = qMax(until, window.resetsAt);
+    }
+    if (until < 0 && !unknown && rejected) {
+        // The provider refuses without any window at 100 (codex's rateLimitReachedType): it lifts
+        // at the latest reset it named, or when it next reports, if it named none.
+        qint64 latest = 0;
+        bool anyAhead = false, anyKnown = false;
+        for (const LimitWindow &window : windows) {
+            if (window.resetsAt <= 0) continue;
+            anyKnown = true;
+            if (window.resetsAt > now) { anyAhead = true; latest = qMax(latest, window.resetsAt); }
+        }
+        if (anyAhead) until = latest;
+        else if (!anyKnown) unknown = true;
+    }
+    if (until < 0 && unknown) return 0;
+    return until;
+}
+
+bool exhausted(const Catalog &catalog, const QString &preset, qint64 now) {
+    return exhaustedUntil(catalog, preset, now) >= 0;
+}
+
+QList<Entry> live(const Catalog &catalog, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    QList<Entry> out;
+    for (const Entry &entry : shown(catalog))
+        if (!exhausted(catalog, entry.preset, now)) out << entry;
+    return out;
+}
+
+Entry mainDefault(const Catalog &catalog, qint64 now) {
+    const QList<Entry> list = live(catalog, now);
     return list.isEmpty() ? Entry() : list.first();
 }
 
-Entry fallback(const Catalog &catalog) {
-    const QList<Entry> list = shown(catalog);
+Entry fallback(const Catalog &catalog, qint64 now) {
+    const QList<Entry> list = live(catalog, now);
     return list.size() < 2 ? Entry() : list.at(1);
 }
 
-QList<Entry> fallbacks(const Catalog &catalog) {
-    const QList<Entry> list = shown(catalog);
+QList<Entry> fallbacks(const Catalog &catalog, qint64 now) {
+    const QList<Entry> list = live(catalog, now);
     return list.mid(1, qMax(0, curation::fallbackThreshold() - 1));
+}
+
+QString resetText(qint64 resetsAt, qint64 now) {
+    if (resetsAt <= 0) return QString();
+    const QDateTime resets = QDateTime::fromSecsSinceEpoch(resetsAt);
+    const QDateTime at = QDateTime::fromSecsSinceEpoch(now);
+    return resets.date() == at.date()
+        ? resets.toString(QStringLiteral("HH:mm"))
+        : resets.secsTo(at) > -7 * 86400 ? QLocale::c().dayName(resets.date().dayOfWeek(), QLocale::ShortFormat).toLower()
+                                          : resets.toString(QStringLiteral("d MMM")).toLower();
 }
 
 QString limitsText(const QList<LimitWindow> &windows, qint64 now) {
@@ -495,15 +554,7 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now) {
     for (const LimitWindow &window : windows) {
         if (window.usedPercent < 0) continue;
         QString part = QStringLiteral("%1 %2% left").arg(window.kind).arg(qRound(qBound(0.0, 100.0 - window.usedPercent, 100.0)));
-        if (window.resetsAt > 0) {
-            const QDateTime resets = QDateTime::fromSecsSinceEpoch(window.resetsAt);
-            const QDateTime at = QDateTime::fromSecsSinceEpoch(now);
-            const QString when = resets.date() == at.date()
-                ? resets.toString(QStringLiteral("HH:mm"))
-                : resets.secsTo(at) > -7 * 86400 ? QLocale::c().dayName(resets.date().dayOfWeek(), QLocale::ShortFormat).toLower()
-                                                  : resets.toString(QStringLiteral("d MMM")).toLower();
-            part += QStringLiteral(", resets %1").arg(when);
-        }
+        if (window.resetsAt > 0) part += QStringLiteral(", resets %1").arg(resetText(window.resetsAt, now));
         parts << part;
     }
     return parts.join(QStringLiteral(" · "));
