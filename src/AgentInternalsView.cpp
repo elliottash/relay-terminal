@@ -17,6 +17,7 @@
 #include <QShowEvent>
 #include <QStringList>
 #include <QTextCharFormat>
+#include <QTextDocument>
 #include <QVBoxLayout>
 
 #include <algorithm>
