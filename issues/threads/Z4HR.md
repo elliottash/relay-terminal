@@ -60,3 +60,15 @@ plan on it. The one judgement call I made rather than asked: **no bulk migration
 carry a what-was-built heading in 40 spellings, and rewriting them all in a checkout with twenty
 live sessions is a bigger risk than the inconsistency. The checker warns instead, so the backlog
 is visible and countable, and cards convert as they are touched.
+
+<!-- relay:entry 20260920T202933Z-j2 author=claude-code kind=note -->
+### Claude Code · 2026-09-20 20:29
+**`## Tests` is already owned by #7BM4, which is executing now.** `"tests"` is in
+`AGENT_SECTIONS` (`board_tools.py:120`) from its work, and its task `t:q5` builds the section
+strip, the Check button, the dated `### Check` blocks and a gate on leaving `needs-verification`.
+
+That definition is more specific than this card's "the tests that were set up, if any", and it
+wins. Row 8 of the table stands, but the **format** of the section is #7BM4's, not this card's to
+invent: a Markdown list, one line per test, an invocation plus an identifier, with Check appending
+dated blocks under it. This card's docs task (`t:s6`) must describe that format and link #7BM4
+rather than writing a second one. Commented on #7BM4 so its implementer knows before `t:q5` lands.
