@@ -270,6 +270,12 @@ class Store:
                   if token_id][:MAX_REVOKED_TOKENS]
         self.db.executemany("INSERT OR IGNORE INTO revoked_tokens (desktop_id, token_id)"
                             " VALUES (?, ?)", [(desktop_id, token_id) for token_id in wanted])
+        # Bounded per desktop: repeated revokes between two registrations keep the newest
+        # MAX_REVOKED_TOKENS ids, which is all the next registration would carry anyway.
+        self.db.execute(
+            "DELETE FROM revoked_tokens WHERE desktop_id = ? AND rowid NOT IN ("
+            " SELECT rowid FROM revoked_tokens WHERE desktop_id = ? ORDER BY rowid DESC LIMIT ?)",
+            (desktop_id, desktop_id, MAX_REVOKED_TOKENS))
         self.db.commit()
         return wanted
 

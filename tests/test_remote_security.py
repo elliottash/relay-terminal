@@ -1069,6 +1069,23 @@ class PaneStateTests(unittest.TestCase):
 
 
 class RendezvousTests(unittest.TestCase):
+    def test_revoked_ids_are_bounded_per_desktop_between_registrations(self):
+        """`/v1/revoke` may be posted any number of times before the next registration replaces
+        the set, so the table keeps only the newest MAX_REVOKED_TOKENS ids per desktop — the
+        ones the next registration would carry — and never grows past that."""
+        from rendezvous import server as rz
+        store = rz.Store(":memory:")
+        ids = [f"{i:018x}" for i in range(rz.MAX_REVOKED_TOKENS + 40)]
+        for i in range(0, len(ids), 8):
+            store.add_revoked_tokens("d" * 32, ids[i:i + 8])
+        store.add_revoked_tokens("e" * 32, ["other"])
+        kept = store.db.execute("SELECT COUNT(*) FROM revoked_tokens WHERE desktop_id = ?",
+                                ("d" * 32,)).fetchone()[0]
+        self.assertEqual(kept, rz.MAX_REVOKED_TOKENS)
+        self.assertTrue(store.token_revoked("d" * 32, ids[-1]))
+        self.assertFalse(store.token_revoked("d" * 32, ids[0]))
+        self.assertTrue(store.token_revoked("e" * 32, "other"))
+
     def test_one_address_cannot_take_every_channel_slot_on_a_desktop(self):
         """Section 8 counts sockets per device so that "anyone who learns a `desktop_id`" cannot
         "open every slot and keep the owner's own phone out". A stranger has no connect token,
