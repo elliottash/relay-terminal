@@ -3349,8 +3349,8 @@ private:
     // ----- moving the pane by its header (owner, 2026-09-17) ---------------------------------
     // Press anywhere on the header — the title, the "auto" badge, the folder line, the gap
     // between them — and drag: the pane travels, exactly as it does from the chrome's ⠿ grip.
-    // Drop it on another pane's edge to split that pane, or on the tab bar to give it a tab of
-    // its own; Esc puts it back.
+    // Drop it on another pane's edge to split that pane; on a tab's label to move into that
+    // tab; on the tab bar's empty space to give it a tab of its own. Esc puts it back.
     //
     // A press is not taken here, only watched: anything shorter than the platform's drag distance
     // is still an ordinary click, so double click still renames and the folder line still opens
@@ -14569,7 +14569,7 @@ public:
                    : QStringLiteral("\n\nThe terminal is in %1, and the agent's workspace is %2.")
                          .arg(m_cwd, m_workspace);
         return tip + QStringLiteral("\n\nDouble click to rename · /rename")
-               + QStringLiteral("\nDrag this header onto another pane's edge to move the pane there, or onto the tab bar to make it a tab");
+               + QStringLiteral("\nDrag this header onto another pane's edge to move the pane there, onto a tab's label to move it into that tab, or onto the tab bar's empty space to make it a tab");
     }
 
     // The pane button row floats over the top right of the leaf, exactly where the directory sits.
