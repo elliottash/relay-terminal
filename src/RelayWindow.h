@@ -5565,11 +5565,14 @@ public:
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
                               const QJsonArray &hidden = {}, const QString &sort = QString(),
-                              const QJsonArray &labels = {}) {
+                              const QJsonArray &labels = {},
+                              const QJsonArray &selfClosed = {}) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
         if (!labels.isEmpty()) view->setLabelFilter(labels);
+        // Which "N closed by the agent" rows were open (#93WR); none of them is the default.
+        if (!selfClosed.isEmpty()) view->setOpenSelfClosed(selfClosed);
         // The sort the pane was saved with; empty (or unknown) leaves it Manual.
         if (!sort.isEmpty()) view->setSortOrder(sort);
         auto *tool = new ToolPane(view, workspace);
@@ -6038,7 +6041,8 @@ private:
                 ToolPane *tool = createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
                                                  board.value(QStringLiteral("hidden")).toArray(),
                                                  board.value(QStringLiteral("sort")).toString(),
-                                                 board.value(QStringLiteral("labels")).toArray());
+                                                 board.value(QStringLiteral("labels")).toArray(),
+                                                 board.value(QStringLiteral("self_closed")).toArray());
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.

@@ -497,10 +497,13 @@ public:
     QJsonObject node() const {
         // The rows board has no tabs to remember; what it keeps is which sections are collapsed and
         // which are unticked in the section checkboxes.
+        // `self_closed` is the sections whose "N closed by the agent" row is open (#93WR), beside
+        // the folded set and in the same shape: default folded, so an empty array is the default.
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},
                                                    {"labels", m_board->labelFilter()},
+                                                   {"self_closed", m_board->openSelfClosed()},
                                                    {"sort", m_board->sortOrder()}}}};
         if (m_subagent) return m_subagent->node();
         // The Activity pane (card #QT8C) comes back open beside its owner, empty until the
