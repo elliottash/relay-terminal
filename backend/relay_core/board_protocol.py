@@ -1199,10 +1199,28 @@ class BoardCommands:
                                                 request.get("priority"))
                 except (BoardToolError, B.BoardError) as exc:
                     result = {"error": str(exc), "code": getattr(exc, "code", "board_refused")}
+            elif kind == "board_delete":
+                # The trash button and the Delete key (card #CYM9): the owner's confirmed delete,
+                # with the same standing as the flag click — no base_hash, no run() budget, and
+                # never offered to the agent (board_policy.md rule 9). Refused while anything
+                # that could be writing this card runs: a turn on it, a cleanup, the page agent,
+                # a sync — deleting under a running writer would race it.
+                try:
+                    card_id = normalize_id(request.get("card") or "")
+                    if self._forge_busy(rid, "the delete") or \
+                            self._busy_error(rid, "the delete", card_id):
+                        return
+                    result = tools.delete_card(card_id, request.get("reason") or "")
+                except (BoardToolError, B.BoardError) as exc:
+                    result = {"error": str(exc), "code": getattr(exc, "code", "board_refused")}
             else:
+                # `pane_token` (#HKAP): the pane Execute handed the card to, so the thread entry
+                # can link back to it. Absent (or empty) on every other comment.
                 result = tools.run("board_comment", {"id": request.get("card"),
                                                      "kind": request.get("kind") or "note",
-                                                     "text": request.get("text")})
+                                                     "text": request.get("text"),
+                                                     **{k: request[k] for k in ("pane_token",)
+                                                        if request.get(k)}})
         finally:
             tools.context.actor = "owner"
         if result.get("error"):

@@ -4683,6 +4683,11 @@ public:
         view->onOpenFile = [guard](const QString &path) {
             if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
         };
+        // A thread entry's pane link (#HKAP): the token names a pane Execute opened — the manager
+        // looks in every window, so a pane dragged into its own window still comes back.
+        view->onFocusPane = [guard](const QString &token) {
+            if (auto *w = windowOf(guard)) w->m_manager->focusPane(token);
+        };
         view->onSendToTerminal = [guard](const QString &reference) {
             auto *w = windowOf(guard);
             if (!w || !w->m_active) return;
@@ -4691,18 +4696,21 @@ public:
             w->m_active->focusInput();
         };
         // Execute (#XS6Q): a new terminal pane beside the board, in the board's workspace, on
-        // the main agent (it builds the card), handed the card as its first task.
+        // the main agent (it builds the card), handed the card as its first task. The pane's
+        // session token comes back (#HKAP) so the card's thread can link to it; an empty string
+        // says no pane was opened.
         view->onExecuteCard = [guard, workspace](const QString &card, const QString &task) {
             auto *w = windowOf(guard);
-            if (!w) return;
+            if (!w) return QString();
             Pane *pane = nullptr;
             try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}}); }
-            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
+            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return QString(); }
             w->insertBeside(guard, pane, Qt::Horizontal, false);
             w->setActive(pane);
             focusLeaf(pane);
             pane->startBoardTask(task, card);
             w->updateTitles();
+            return pane->sessionToken();
         };
         // Verify (#T71W): the same pane beside the board, but on the verifier the worker picked —
         // a different provider family from the one that implemented the card. A `preset:` runner

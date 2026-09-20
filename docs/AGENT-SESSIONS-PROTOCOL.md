@@ -2023,13 +2023,23 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
 | `board_move {id?, card, status?, tab?, section?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
 | `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
-| `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
+| `board_delete {id?, card, reason?, author?}` | `board_written` + `board_changed` |
+| `board_comment {id?, card, text, kind?, author?, pane_token?}` | `board_written` + `board_changed` |
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
 
 `board_priority` (2026-09-20, #VKFV) is the pane's flag click: `priority` is one clamped integer
 (−1…+3, `0` clearing the flag), so like a drag's rank it needs no `base_hash` — the whole patch is
 the number — and it is not an agent tool; an agent or a cleanup sets the same field through
 `board_update_card`'s `fields`. The write is undoable like any other.
+
+`board_delete` (2026-09-20, #CYM9) is the owner's confirmed delete: the card detail's trash button,
+the `Del` key on the selection, and "Delete card…" at the foot of the `m` popup all ask one
+question naming the card, then send this. The worker removes the card file and its thread from
+disk — both privacy variants of the thread — with the bytes on the write record, so
+`board_undo` puts them back exactly for the usual 30 s and `git` is the recovery after that; the
+`board_changed` that follows names the card in `removed`. It is refused with `board_busy` while a
+turn runs on that card, a cleanup, the page agent or a sync runs, and it is never an agent tool:
+agents close a card with `board_move_card` (`done`/`dropped`) exactly as before.
 
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
 is its first line (shortened) unless one is given. `section` (2026-09-20, #3XZV) parks the new
@@ -2337,12 +2347,18 @@ a cleanup runs (`board_busy`, text "… then start the plan."), with nothing wri
 **Execute** (no message). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
 against the hash the card was read at, unless it is already the agent's; (b) `board_move {status:
 "executing", reason: "Execute: handed to a terminal pane"}` unless it is already there (or
-`in-progress`, on a board configured before the stage statuses; #3XZV); (c)
-`board_comment {kind: "progress", text: "Execute · handed to a new terminal pane …"}`, with the
-reply box's text appended as the owner's note; then (d) the window opens a terminal pane beside
-the board, in the board's workspace, on the main agent, and submits the task as that pane's first
-`ask` with `cards: [{id}]` — so the pane agent has the card's front matter (acceptance), body (issue,
-plan) and thread tail as the 19.6 block even before the pane has its own board rows. The task text
+`in-progress`, on a board configured before the stage statuses; #3XZV); (c) the window opens a
+terminal pane beside the board, in the board's workspace, on the main agent, and submits the task
+as that pane's first `ask` with `cards: [{id}]` — so the pane agent has the card's front matter
+(acceptance), body (issue, plan) and thread tail as the 19.6 block even before the pane has its
+own board rows; then (d) `board_comment {kind: "progress", pane_token: <the pane's session token>,
+text: "Executing (<the token's first 8 characters>) · handed to a new terminal pane …"}`, with the
+reply box's text appended as the owner's note (#HKAP). The pane's session token persists as an
+entry attr (at most 64 characters, no whitespace or `>`), and the thread draws the entry's first
+line as a link on it: clicking `Executing (xxxxxxxx)` reveals the pane with that token in whatever
+window it lives in, and does nothing when no pane has it — closed, or another machine's board.
+When no pane could be opened the entry keeps the plain `Execute · …` wording and carries no
+`pane_token`. The task text
 (`relay::board::executeTask`) names the card, says to set `implemented_by`, to put `#ID` in every
 commit message and add each commit's hash to `links.commits` with `board_update_card`, to post
 progress with `board_comment`, and to land in `needs-verification` per the policy (#3XZV): the

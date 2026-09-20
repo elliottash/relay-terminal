@@ -257,7 +257,12 @@ TOOL_SPECS = [
          "and is append-only; nothing you write here is ever rewritten.",
          {"id": _ID_ARG,
           "kind": {"type": "string", "enum": list(COMMENT_KINDS)},
-          "text": {"type": "string"}},
+          "text": {"type": "string"},
+          "pane_token": {"type": "string",
+                         "description": "The pane's session token, when this entry records a "
+                                        "hand-off to a terminal pane (Execute, #HKAP): the thread "
+                                        "draws it as a link that reveals that pane. At most 64 "
+                                        "characters, no whitespace or '>'."}},
          ["id", "kind", "text"]),
 ]
 
@@ -1703,9 +1708,9 @@ class BoardTools:
         except OSError:
             return 0
 
-    def _append(self, card: B.Card, text: str, kind: str = "event") -> B.ThreadEntry:
+    def _append(self, card: B.Card, text: str, kind: str = "event", **attrs) -> B.ThreadEntry:
         return self.board.append_thread(card.id, text, author=self.context.actor, kind=kind,
-                                        private=card.private, **self.context.attrs())
+                                        private=card.private, **self.context.attrs(), **attrs)
 
     def _create(self, args: dict) -> dict:
         allowed = {"tab", "status", "section", "title", "request", "type", "labels", "source",
@@ -2138,8 +2143,8 @@ class BoardTools:
         return B.rank_between(low, high)
 
     def _comment(self, args: dict) -> dict:
-        if set(args) - {"id", "kind", "text"}:
-            raise BoardToolError("board_comment takes id, kind and text.")
+        if set(args) - {"id", "kind", "text", "pane_token"}:
+            raise BoardToolError("board_comment takes id, kind, text and pane_token.")
         card_id = normalize_id(args.get("id"))
         kind = str(args.get("kind") or "").strip().lower()
         if kind not in COMMENT_KINDS:
@@ -2151,9 +2156,15 @@ class BoardTools:
                 'A decision entry quotes the user\'s own words in quotation marks, e.g. '
                 '2026-09-17, owner: "cloud is fine" → default to the cloud model. Quote them, '
                 "then repeat the call.", code="board_refused", requires="verbatim_quote")
+        # The pane an Execute hand-off landed in (#HKAP): carried in the entry's attrs so the
+        # GUI can draw the entry as a link that reveals that pane. Kept to what the entry
+        # marker can hold — short, no whitespace, no '>' closing it early.
+        pane_token = str(args.get("pane_token") or "").strip()
+        if len(pane_token) > 64 or re.search(r"[\s>]", pane_token):
+            raise BoardToolError("pane_token is at most 64 characters, with no whitespace or '>'.")
         size = self._thread_size(card)
         before = card.path.read_bytes()
-        entry = self._append(card, text, kind=kind)
+        entry = self._append(card, text, kind=kind, **({"pane_token": pane_token} if pane_token else {}))
         self.writes_this_turn += 1
         write_id = self._record("comment", card, f"{kind}: {text.splitlines()[0][:120]}", before, size)
         # The stage move the comment makes (#3XZV): the thread's first non-event entry moves an

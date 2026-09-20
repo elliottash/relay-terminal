@@ -1442,6 +1442,14 @@ public:
                 onOpenPath(link);
         });
         connect(m_doc, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) {
+            // The thread's pane links (#HKAP): relay-pane:<session token> reveals that pane —
+            // before the external branch, or the desktop would be asked to open it. Any other
+            // scheme is a real URL; a bare path opens like a link in the body.
+            if (url.scheme() == QStringLiteral("relay-pane")) {
+                if (onFocusPane)
+                    onFocusPane(url.path());
+                return;
+            }
             if (!url.scheme().isEmpty() && url.scheme() != QStringLiteral("file")) {
                 QDesktopServices::openUrl(url);
                 return;
@@ -1466,6 +1474,8 @@ public:
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
     // different provider family from the one that implemented it. `note` is the reply box again.
     std::function<void(const QString &note)> onVerify;
+    // A `relay-pane:` anchor in the thread names a pane by session token (#HKAP).
+    std::function<void(const QString &token)> onFocusPane;
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void(const QString &what, const QString &value)> onMove;
@@ -2350,8 +2360,25 @@ private:
                 extra << age;
             if (!extra.isEmpty())
                 cursor.insertText(QStringLiteral("  ") + extra.join(QStringLiteral(" · ")), muted);
-            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
-            insertMarkdown(cursor, board::threadMarkdown(text, kind), base);
+            // An entry that handed the card to a pane links to it (#HKAP): its whole first
+            // line — "Executing (xxxxxxxx) · …" — is an anchor on that pane's session token,
+            // in the palette's link colour so it reads as clickable before it is clicked.
+            // Anything after the first line (the owner's note on the hand-off) is ordinary
+            // body text; entries without a token keep the Markdown path.
+            const QString paneToken = attrs.value(QStringLiteral("pane_token")).toString();
+            if (paneToken.isEmpty()) {
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
+                insertMarkdown(cursor, board::threadMarkdown(text, kind), base);
+            } else {
+                QTextCharFormat link;
+                link.setForeground(theme::Link);
+                link.setAnchor(true);
+                link.setAnchorHref(QStringLiteral("relay-pane:") + paneToken);
+                const int split = text.indexOf(QLatin1Char('\n'));
+                insertLine(cursor, split < 0 ? text : text.left(split), link, 2);
+                if (split >= 0)
+                    insertMarkdown(cursor, board::threadMarkdown(text.mid(split).trimmed(), kind), base);
+            }
         }
         // A block sealed after the last entry on screen (or with none at all) still draws: it
         // ran after everything the thread shows so far.
@@ -2715,6 +2742,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail->onToPrompt = [this] {
         if (onSendToTerminal && !m_detail->cardId().isEmpty())
             onSendToTerminal(QStringLiteral("#") + m_detail->cardId() + QLatin1Char(' '));
+    };
+    m_detail->onFocusPane = [this](const QString &token) {
+        if (onFocusPane && !token.isEmpty())
+            onFocusPane(token);
     };
     m_detail->onOpenPath = [this](const QString &path) {
         if (!onOpenFile || path.isEmpty())
@@ -4598,8 +4629,9 @@ void BoardView::cardAction(const QString &action)
 // Execute (#XS6Q): the card goes to a terminal pane's agent. The board records the hand-off with
 // the writes it already has — assignee, In progress, a progress note in the thread — and the
 // window opens the pane (`onExecuteCard`), whose agent gets the card attached and the task text
-// that tells it the board's conventions (board::executeTask). Nothing here is a model turn, so
-// the Switchboard worker stays free for the next Discuss or Plan.
+// that tells it the board's conventions (board::executeTask); the pane's session token comes
+// back and rides on the note, which then names the pane and links to it (#HKAP). Nothing here is
+// a model turn, so the Switchboard worker stays free for the next Discuss or Plan.
 void BoardView::executeCard(const QString &note)
 {
     const QString card = m_detail->cardId();
@@ -4625,15 +4657,23 @@ void BoardView::executeCard(const QString &note)
               {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("executing")},
               {QStringLiteral("reason"), QStringLiteral("Execute: handed to a terminal pane")}});
     }
+    // The pane opens before the note is sent (#HKAP), because the note carries its session
+    // token: the entry then reads "Executing (<first 8 characters>) · …" and the thread draws it
+    // as a link that reveals that pane. Without a token — the window could not open a pane —
+    // the entry keeps the plain Execute wording, and the card still records the hand-off.
+    const QString paneToken = onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
+                                                                     m_detail->hasAcceptance(), note));
+    const QString entry = paneToken.isEmpty()
+            ? QStringLiteral("Execute · handed to a new terminal pane beside the Switchboard, whose "
+                             "agent works on it and records its commits in `links.commits`.")
+            : QStringLiteral("Executing (%1) · handed to a new terminal pane beside the Switchboard, "
+                             "whose agent works on it and records its commits in `links.commits`.")
+                      .arg(paneToken.left(8));
     send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
           {QStringLiteral("kind"), QStringLiteral("progress")},
-          {QStringLiteral("text"), QStringLiteral("Execute · handed to a new terminal pane beside the "
-                                                  "Switchboard, whose agent works on it and records "
-                                                  "its commits in `links.commits`.")
-                                       + (note.isEmpty() ? QString()
-                                                         : QStringLiteral("\n\n") + note)}});
-    onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
-                                           m_detail->hasAcceptance(), note));
+          {QStringLiteral("pane_token"), paneToken},
+          {QStringLiteral("text"), entry + (note.isEmpty() ? QString()
+                                                           : QStringLiteral("\n\n") + note)}});
 }
 
 // Verify (#T71W): the card goes to a terminal pane on the verifier the worker recommends — a

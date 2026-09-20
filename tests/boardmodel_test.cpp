@@ -2095,9 +2095,10 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
         ++opened;
         handedCard = id;
         handedTask = task;
+        return QStringLiteral("pane-session-token-0001");
     };
     view.handleEvent(::opened({row("K7Q2", "ready", "features")}));
-    view.handleEvent(card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
+    openCard(view, sent, card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
     auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
 
     // No plan and no acceptance: the first press asks, here on the card, and does nothing else.
@@ -2122,7 +2123,11 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
              QStringLiteral("agent"));
     // The stage lifecycle (#3XZV, 4f5acd43): what Execute moves a card into is `executing`.
     QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("executing"));
-    QVERIFY(sent.at(2).value("text").toString().startsWith(QStringLiteral("Execute ·")));
+    // The hand-off names the pane it landed in (#HKAP): its session token rides on the note and
+    // the first line reads "Executing (<its first 8 characters>)".
+    QCOMPARE(sent.at(2).value("pane_token").toString(), QStringLiteral("pane-session-token-0001"));
+    QVERIFY(sent.at(2).value("text").toString().startsWith(
+        QStringLiteral("Executing (pane-ses) · handed to a new terminal pane")));
     QVERIFY(error->isHidden());
 
     // A card with a plan goes at once, and one already in progress and assigned is not rewritten.
@@ -2130,12 +2135,13 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     planned.insert("status", "in-progress");
     planned.insert("sections", QJsonArray{"Issue", "Plan"});
     planned.insert("front", QJsonObject{{"assignee", "agent"}});
-    view.handleEvent(planned);
+    openCard(view, sent, planned);
     sent.clear();
     view.cardAction(QStringLiteral("execute"));
     QCOMPARE(opened, 2);
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_comment"));
+    QCOMPARE(sent.last().value("pane_token").toString(), QStringLiteral("pane-session-token-0001"));
     QVERIFY(handedTask.contains(QStringLiteral("`## Plan`")));
 }
 

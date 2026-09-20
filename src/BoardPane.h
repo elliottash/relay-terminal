@@ -55,13 +55,23 @@ public:
     std::function<void(const QString &data)> onModelPick;
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
+    // A thread entry's pane link (#HKAP): reveal the pane with this session token, in whatever
+    // window it lives in. No pane has it (closed, or another machine's board) → inert.
+    std::function<void(const QString &token)> onFocusPane;
     // Execute (`x`, #XS6Q): open a terminal pane beside the board whose agent is handed `task`
-    // with card `id` attached. The board has already moved the card to In progress.
-    std::function<void(const QString &id, const QString &task)> onExecuteCard;
+    // with card `id` attached. The board has already moved the card to In progress. Returns the
+    // pane's session token — empty when no pane could be opened — so the hand-off note can name
+    // and link it (#HKAP).
+    std::function<QString(const QString &id, const QString &task)> onExecuteCard;
     // Verify (`v`, #T71W): open a terminal pane beside the board on `runner` — "guest:codex",
     // "guest:claude" or "preset:<id>", the verifier the worker recommends for this card — and hand
     // it `task`, the QA brief. The card keeps its QA status: only the verifier's verdict moves it.
     std::function<void(const QString &id, const QString &runner, const QString &task)> onVerifyCard;
+    // A card turn ended (protocol 19.16): `id` the card, `mode` "discuss" or "plan", `outcome`
+    // "done", "error" or "cancelled". The window turns the outcomes worth a bell into a
+    // notification (#NQP9); the view itself never moves focus, and a cleanup run never gets here
+    // (it is not a card turn, so it is not in m_cardTurns — its own panel reports it).
+    std::function<void(const QString &id, const QString &mode, const QString &outcome)> onTurnEnded;
     std::function<void(const QString &)> onTitleChanged;
     std::function<void(const QString &)> onStatus;           // one line for the pane's status area
     std::function<void(const QString &id, const QString &text)> onHint;  // shortcut hints

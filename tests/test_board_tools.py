@@ -816,6 +816,37 @@ class CommentTests(BoardToolsTest):
         self.assertIn("kind must be", self.tools.run(
             "board_comment", {"id": self.card_id, "kind": "shout", "text": "x"})["error"])
 
+    def test_a_pane_token_rides_on_the_entry(self):
+        # Execute's hand-off names the pane it opened (#HKAP): the token rides in the entry's
+        # attrs — what the GUI draws as a link that reveals that pane — and the entry marker
+        # round-trips it. An empty token is dropped: a comment that handed over no pane
+        # (or an old worker) gets no attr at all.
+        result = self.tools.run("board_comment", {
+            "id": self.card_id, "kind": "progress", "pane_token": "abcd1234efgh5678",
+            "text": "Executing (abcd1234) · handed to a new terminal pane beside the Switchboard"})
+        self.assertNotIn("error", result)
+        # The first non-event entry also moves the card to Discussing (#3XZV), so find the
+        # entry by kind rather than taking the last one.
+        entry = next(e for e in self.board.thread(self.card_id) if e.kind == "progress")
+        self.assertEqual(entry.attrs["pane_token"], "abcd1234efgh5678")
+        self.assertIn("pane_token=abcd1234efgh5678", self.thread_text(self.card_id))
+        plain = self.tools.run("board_comment", {"id": self.card_id, "kind": "note",
+                                                 "text": "no pane", "pane_token": ""})
+        self.assertNotIn("error", plain)
+        note = next(e for e in self.board.thread(self.card_id) if e.text == "no pane")
+        self.assertNotIn("pane_token", note.attrs)
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_a_pane_token_the_entry_marker_cannot_hold_is_refused(self):
+        # The attrs live inside an HTML comment: whitespace would split one, '>' would close
+        # it, and 64 characters is the cap the protocol sets (19.10).
+        for bad in ("a b", "a>b", "x" * 65):
+            self.assertIn("pane_token", self.tools.run(
+                "board_comment", {"id": self.card_id, "kind": "progress", "text": "x",
+                                  "pane_token": bad})["error"], bad)
+        # Nothing was written: the thread still holds only the creation event.
+        self.assertEqual([e.kind for e in self.board.thread(self.card_id)], ["event"])
+
     def test_a_decision_has_to_quote_the_user(self):
         result = self.tools.run("board_comment", {"id": self.card_id, "kind": "decision",
                                                   "text": "the owner wants the cloud model"})
