@@ -1190,8 +1190,10 @@ class ConversationIndex:
             # What is indexed is read and rewritten under one write lock (#TZWF): two workers may
             # save the same conversation — the pane that holds it, and any worker reconciling the
             # store — and a check-then-append that read outside the transaction could append what
-            # the other one had just appended.
-            db.execute("BEGIN IMMEDIATE")
+            # the other one had just appended. Inside a transaction already (a caller that left
+            # one open) it is that one's lock, and beginning a second would raise.
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")
             try:
                 keep = db.execute("SELECT custom_title, pinned, summary, entry_count, entry_digest"
                                   " FROM conversations WHERE session_id=?", (session_id,)).fetchone()
@@ -1409,7 +1411,8 @@ class ConversationIndex:
         runs = data.get("runs") if type(data.get("runs")) is int else 1
 
         def work(db):
-            db.execute("BEGIN IMMEDIATE")            # as in update_session (#TZWF)
+            if not db.in_transaction:                # as in update_session (#TZWF)
+                db.execute("BEGIN IMMEDIATE")
             try:
                 keep = db.execute("SELECT custom_title, pinned, entry_count, entry_digest FROM conversations"
                                   " WHERE session_id=?", (thread_id,)).fetchone()
