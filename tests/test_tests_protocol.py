@@ -14,6 +14,7 @@ Everything happens in a throwaway project under `/tmp`:
 
 No network, no model, no keyring, and no test here runs the repository's own suite.
 """
+import datetime
 import json
 import os
 import shutil
@@ -477,7 +478,8 @@ class CheckTest(TestsProtocolTest):
         self.card("AAA1", "No tests named", "needs-verification")
         self.send(type="tests_check", card="AAA1", id="r9")
         event = self.of("tests_check")[0]
-        self.assertEqual(set(event), {"event", "id", "card", "findings", "actions"})
+        self.assertEqual(set(event), {"event", "id", "card", "findings", "actions",
+                                      "ids", "files", "failing"})
         self.assertEqual(event["card"], "AAA1")
         self.assertEqual(len(event["findings"]), 1)
         finding = event["findings"][0]
@@ -531,6 +533,261 @@ class CheckTest(TestsProtocolTest):
                   body="\n## Tests\n- `ctest -R alpha`\n")
         self.assertEqual(self.tests.card_files("AAA5"), ["src.txt"])
         self.assertTrue(self.tests.head_commit())
+
+
+class CheckPayloadTest(TestsProtocolTest):
+    """The three keys Check's answer carries beside its findings (#7BM4 phase 4)."""
+
+    def test_the_event_carries_the_ids_a_run_would_use(self):
+        self.card("BBB1", "Two real tests", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n- `ctest -R beta`\n")
+        self.send(type="tests_check", card="BBB1")
+        event = self.of("tests_check")[0]
+        self.assertEqual(event["ids"], ["ctest:alpha", "ctest:beta"])
+        # `Run these` is pressable: every id it would send is a runnable runner.
+        self.assertTrue(all(i.split(":")[0] in TP.RUNNABLE for i in event["ids"]))
+
+    def test_a_manual_line_is_not_an_id_to_run(self):
+        (self.project / "docs").mkdir()
+        self.card("BBB2", "Manual evidence", "needs-verification",
+                  body="\n## Tests\n- manual: docs\n- `ctest -R alpha`\n")
+        self.send(type="tests_check", card="BBB2")
+        self.assertEqual(self.of("tests_check")[0]["ids"], ["ctest:alpha"])
+
+    def test_files_and_failing_name_what_the_actions_open(self):
+        self.card("BBB3", "One that failed", "needs-verification",
+                  body="\n## Tests\n- `ctest -R beta` — tests/beta_test.cpp\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:beta", result="fail",
+                              duration=0.5, runner="ctest", run_id="r1", host="spark")],
+                 self.tests.store_path())
+        self.send(type="tests_check", card="BBB3")
+        event = self.of("tests_check")[0]
+        self.assertEqual(event["failing"], ["ctest:beta"])
+        self.assertEqual(event["files"].get("ctest:beta"), "tests/beta_test.cpp")
+        self.assertIn("Open the failing one", event["actions"])
+
+    def test_a_card_without_a_tests_section_still_carries_the_three_keys(self):
+        self.card("BBB4", "No tests named", "needs-verification")
+        self.send(type="tests_check", card="BBB4")
+        event = self.of("tests_check")[0]
+        self.assertEqual((event["ids"], event["files"], event["failing"]), ([], {}, []))
+
+
+class CheckBlockTest(TestsProtocolTest):
+    """The dated `### Check` block the **worker** leaves under `## Tests`."""
+
+    def body_of(self, card_id):
+        return self.board.card_by_id(card_id).body
+
+    def test_a_check_writes_a_dated_block_with_one_line_per_finding(self):
+        self.card("CCC1", "Names a test that is gone", "needs-verification",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.send(type="tests_check", card="CCC1")
+        body = self.body_of("CCC1")
+        self.assertRegex(body, r"### Check \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+        self.assertIn("- failure · ctest:vanished — ", body)
+        # And the thread says it happened, so the audit trail is not only the body.
+        kinds = [(e.kind, e.text) for e in self.board.thread("CCC1")]
+        self.assertTrue(any(k == "evidence" and "Check ·" in text for k, text in kinds), kinds)
+
+    def test_a_clean_card_gets_a_block_that_says_no_findings(self):
+        self.card("CCC2", "A test that passed", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:alpha", result="pass",
+                              duration=0.2, runner="ctest", run_id="r1", host="spark")],
+                 self.tests.store_path())
+        self.send(type="tests_check", card="CCC2")
+        self.assertIn("- no findings", self.body_of("CCC2"))
+
+    def test_a_second_check_inside_the_hour_writes_nothing(self):
+        self.card("CCC3", "Checked twice", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.send(type="tests_check", card="CCC3")
+        first = self.body_of("CCC3")
+        self.send(type="tests_check", card="CCC3")
+        self.assertEqual(self.body_of("CCC3"), first)
+        self.assertEqual(first.count("### Check "), 1)
+        # The GUI still got both answers: only the card file is quiet.
+        self.assertEqual(len(self.of("tests_check")), 2)
+
+    def test_an_older_block_from_today_is_replaced_not_stacked(self):
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d")
+        self.card("CCC4", "Checked this morning", "needs-verification",
+                  body=f"\n## Tests\n- `ctest -R alpha`\n\n### Check {stamp} 01:02\n"
+                       f"- notice · ctest:alpha — an older answer\n")
+        self.send(type="tests_check", card="CCC4")
+        body = self.body_of("CCC4")
+        self.assertEqual(body.count("### Check "), 1)
+        self.assertNotIn("an older answer", body)
+        self.assertNotIn("01:02", body)
+
+    def test_a_block_from_another_day_is_kept_and_a_new_one_appended(self):
+        self.card("CCC5", "Checked last week", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n\n### Check 2026-09-01 09:00\n"
+                       "- notice · ctest:alpha — last week's answer\n")
+        self.send(type="tests_check", card="CCC5")
+        body = self.body_of("CCC5")
+        self.assertEqual(body.count("### Check "), 2)
+        self.assertIn("last week's answer", body)
+
+    def test_the_block_is_not_read_back_as_a_test(self):
+        self.card("CCC6", "Checked twice over", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n\n### Check 2026-09-01 09:00\n"
+                       "- failure · ctest:alpha — `ctest -R alpha` is not in the project any more\n")
+        self.send(type="tests_check", card="CCC6")
+        # One listed test, not two: the block's own line names a test but is not one.
+        self.assertEqual(self.of("tests_check")[0]["ids"], ["ctest:alpha"])
+
+    def test_a_card_with_no_tests_section_gets_no_block(self):
+        self.card("CCC7", "Nothing listed", "needs-verification")
+        before = self.body_of("CCC7")
+        self.send(type="tests_check", card="CCC7")
+        self.assertEqual(self.body_of("CCC7"), before)
+        self.assertNotIn("block", self.of("tests_check")[0])
+
+
+class SuggestTest(TestsProtocolTest):
+    """`tests_suggest {card}`: what this card's commits touched, mapped to tests by convention."""
+
+    def repo_with_commit(self, card_id, filename):
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        for key, value in (("user.email", "t@example.com"), ("user.name", "T")):
+            subprocess.run(["git", "-C", str(self.project), "config", key, value], check=True)
+        path = self.project / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("one\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.project), "add", str(path)], check=True)
+        subprocess.run(["git", "-C", str(self.project), "commit", "-qm", f"work (#{card_id})"],
+                       check=True)
+
+    def test_it_appends_the_tests_named_after_what_the_card_changed(self):
+        self.card("DDD1", "Touched the sample module", "executing",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.repo_with_commit("DDD1", "tests/sample.py")
+        self.send(type="tests_suggest", card="DDD1", id="r4")
+        event = self.of("tests_suggest")[0]
+        self.assertTrue(event["added"])
+        self.assertTrue(event["ids"], event)
+        self.assertTrue(all(i.startswith("unittest:tests.test_sample.") for i in event["ids"]),
+                        event["ids"])
+        body = self.board.card_by_id("DDD1").body
+        for line in event["lines"]:
+            self.assertIn(line, body)
+        self.assertTrue(any(e.kind == "evidence" for e in self.board.thread("DDD1")))
+
+    def test_a_test_the_section_already_lists_is_not_suggested_twice(self):
+        self.card("DDD2", "Already lists it", "executing",
+                  body="\n## Tests\n- `tests/test_sample.py::SampleTests::test_ok`\n")
+        self.repo_with_commit("DDD2", "tests/sample.py")
+        self.send(type="tests_suggest", card="DDD2")
+        ids = self.of("tests_suggest")[0]["ids"]
+        self.assertNotIn("unittest:tests.test_sample.SampleTests.test_ok", ids)
+
+    def test_nothing_to_map_is_one_sentence_and_no_write(self):
+        self.card("DDD3", "No commits", "executing", body="\n## Tests\n- `ctest -R alpha`\n")
+        before = self.board.card_by_id("DDD3").body
+        self.send(type="tests_suggest", card="DDD3")
+        event = self.of("tests_suggest")[0]
+        self.assertFalse(event["added"])
+        self.assertEqual(event["lines"], [])
+        self.assertIn("no commits", event["message"])
+        self.assertEqual(self.board.card_by_id("DDD3").body, before)
+
+    def test_apply_false_suggests_without_writing(self):
+        self.card("DDD4", "Only asking", "executing", body="\n## Tests\n- `ctest -R alpha`\n")
+        self.repo_with_commit("DDD4", "tests/sample.py")
+        before = self.board.card_by_id("DDD4").body
+        self.send(type="tests_suggest", card="DDD4", apply=False)
+        self.assertTrue(self.of("tests_suggest")[0]["lines"])
+        self.assertFalse(self.of("tests_suggest")[0]["added"])
+        self.assertEqual(self.board.card_by_id("DDD4").body, before)
+
+    def test_an_unknown_card(self):
+        with self.assertRaises(ValueError) as caught:
+            self.tests.dispatch({"type": "tests_suggest", "card": "ZZZ8"})
+        self.assertIn("No card #ZZZ8", str(caught.exception))
+
+
+class GateTest(TestsProtocolTest):
+    """Leaving `needs-verification` while the tests a card names do not prove it (#7BM4)."""
+
+    def commands(self):
+        commands = BP.BoardCommands(None, self.events.append)
+        commands.tools = BT.BoardTools(self.board, emit=self.events.append,
+                                       state_path=self.project / ".relay" / "rate.json")
+        return commands
+
+    def move(self, card_id, status="done", **extra):
+        self.commands().dispatch({"type": "board_move", "id": "m1", "card": card_id,
+                                  "status": status, "reason": "landing", **extra})
+
+    def errors(self):
+        return [e for e in self.events if e.get("event") == "error"]
+
+    def test_the_gate_and_the_move_path_agree_on_their_two_ends(self):
+        self.assertEqual(BP.TP_GATE_FROM, TP.GATE_FROM_STATUS)
+        self.assertEqual(tuple(BP.TP_GATE_TO), tuple(TP.GATE_TO_STATUSES))
+
+    def test_a_gone_test_refuses_the_landing_and_writes_nothing(self):
+        self.card("EEE1", "Names a test that is gone", "needs-verification",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.move("EEE1")
+        error = self.errors()[0]
+        self.assertEqual(error["code"], "tests_gate")
+        self.assertEqual(error["tests"], ["ctest:vanished"])
+        self.assertIn("ctest:vanished", error["text"])
+        self.assertEqual(self.board.card_by_id("EEE1").status, "needs-verification")
+        self.assertEqual([e for e in self.events if e.get("event") == "board_written"], [])
+
+    def test_a_test_that_last_failed_refuses_it_too(self):
+        self.card("EEE2", "Its test failed", "needs-verification",
+                  body="\n## Tests\n- `ctest -R beta`\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:beta", result="fail",
+                              duration=0.5, runner="ctest", run_id="r1", host="spark")],
+                 self.tests.store_path())
+        self.move("EEE2", status="needs-qa-llm")
+        self.assertEqual(self.errors()[0]["code"], "tests_gate")
+        self.assertEqual(self.errors()[0]["tests"], ["ctest:beta"])
+
+    def test_a_card_whose_tests_passed_lands(self):
+        self.card("EEE3", "Proven", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:alpha", result="pass",
+                              duration=0.2, runner="ctest", run_id="r1", host="spark")],
+                 self.tests.store_path())
+        self.move("EEE3")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE3").status, "done")
+
+    def test_a_card_with_no_tests_section_is_not_gated(self):
+        self.card("EEE4", "Older than the section", "needs-verification")
+        self.move("EEE4")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE4").status, "done")
+
+    def test_an_override_lands_it_and_quotes_the_reason_on_the_thread(self):
+        self.card("EEE5", "Gone test, overridden", "needs-verification",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.move("EEE5", override="the test moved into the suite next door")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE5").status, "done")
+        decisions = [e for e in self.board.thread("EEE5") if e.kind == "decision"]
+        self.assertEqual(len(decisions), 1, [e.kind for e in self.board.thread("EEE5")])
+        self.assertIn('"the test moved into the suite next door"', decisions[0].text)
+
+    def test_a_move_that_is_not_a_landing_is_never_gated(self):
+        self.card("EEE6", "Back to work", "needs-verification",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.move("EEE6", status="in-progress")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE6").status, "in-progress")
+
+    def test_a_card_that_is_not_in_needs_verification_is_never_gated(self):
+        self.card("EEE7", "Straight from executing", "in-progress",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.move("EEE7")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE7").status, "done")
 
 
 class WordingTest(unittest.TestCase):

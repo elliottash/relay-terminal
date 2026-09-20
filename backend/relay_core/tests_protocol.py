@@ -16,6 +16,11 @@ Five requests, answered with the four events of the wire contract:
     tests_stop {run_id}                     -> tests_run       stopped
     tests_history {id, limit}               -> tests_history   one test's executions
     tests_check {card}                      -> tests_check     one card's staleness findings
+    tests_suggest {card}                    -> tests_suggest    tests named after what it changed
+
+`tests_check` also leaves a dated `### Check` block under the card's `## Tests`, and
+`gate_move()` is the rule that stops a card leaving `needs-verification` while the tests it
+names are gone, never run or failing (#7BM4 phase 4).
 
 Three rules this module keeps, all of them learned from the research in
 `docs/SWITCHBOARD-TOOLING-RESEARCH.md` and from the ways a test runner behind a button goes
@@ -42,6 +47,7 @@ be counted twice.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -62,7 +68,8 @@ from . import test_history as H
 from . import test_probe as P
 
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
-TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "tests_check"})
+TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
+                   "tests_suggest"})
 
 #: The card section that lists what proves a card, and the statuses at which not having one is
 #: worth reporting: a card being worked, or waiting for a verifier, with no tests named is the
@@ -70,6 +77,26 @@ TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "te
 TESTS_HEADING = "Tests"
 UNTESTED_STATUSES = ("executing", "in-progress", "needs-verification",
                      "needs-qa-llm", "needs-qa-human")
+
+#: The dated block Check leaves under `## Tests` (#7BM4 phase 4).  A durable artefact rather
+#: than a toast — the Trunk shape — so the card itself says when it was last checked and what
+#: was wrong.  `### Check YYYY-MM-DD HH:MM`, local time, to the minute.
+CHECK_HEADING = "Check"
+CHECK_BLOCK_RE = re.compile(
+    r"^###[ \t]+Check[ \t]+(?P<date>\d{4}-\d{2}-\d{2})[ \t]+(?P<time>\d{2}:\d{2})[ \t]*$", re.M)
+#: At most one block per card per hour: a Check pressed twice in a minute is one answer, not two
+#: entries in the card's history.  Inside the hour the findings are still sent to the GUI.
+CHECK_MIN_GAP_SECONDS = 3600.0
+
+#: The gate (#7BM4, owner 2026-09-20: Check "is a gate on leaving `needs-verification`, with a
+#: recorded override").  Moving *out of* `needs-verification` towards one of these is a landing:
+#: from here on a verifier, or nobody, reads the card again.
+GATE_FROM_STATUS = "needs-verification"
+GATE_TO_STATUSES = ("needs-qa", "needs-qa-llm", "needs-qa-human", "needs-review", "done",
+                    "verified")
+#: The verdicts that stop a landing.  `skipped-forever`, `edited`, `flaky` and `slow` are worth
+#: reading and are not worth blocking on: they say a test is weak, not that the card is unproven.
+GATE_VERDICTS = ("gone", "never-run")
 
 #: Ceilings.  A run is the owner's or the agent's deliberate act, so these are about what can
 #: be typed by mistake, not about what is allowed to take time.
@@ -81,6 +108,7 @@ CTEST_TEST_TIMEOUT = 900        # `ctest --timeout`, per test
 MAX_HISTORY_LIMIT = 500         # executions one `tests_history` may carry
 MAX_COMMITS = 20                # commits of a card read for their changed files
 MAX_CHANGED_FILES = 400
+MAX_SUGGESTED = 20           # lines one `tests_suggest` appends to a card
 GIT_TIMEOUT = 20.0
 
 #: The runners a run can actually start.  `manual` is evidence a person records, so a row for
@@ -246,6 +274,9 @@ class TestsCommands:
             self.emit_history(request.get("id") or request.get("test"), request)
         elif kind == "tests_check":
             self.emit_check(request.get("card"), request.get("id"))
+        elif kind == "tests_suggest":
+            self.emit_suggest(request.get("card"), request.get("id"),
+                              apply=request.get("apply", True))
         return True
 
     def shutdown(self) -> None:
@@ -300,8 +331,9 @@ class TestsCommands:
             card_id = card.id
             if not card_id or card.type != "work":
                 continue
-            text = B.section_text(card.body, TESTS_HEADING)
-            lines = [line for line in text.splitlines() if H.parse_test_line(line)]
+            lines = [line for line in section_lines(card.body,
+                                                    B.section_span(card.body, TESTS_HEADING))
+                     if H.parse_test_line(line)]
             if lines:
                 index[card_id] = lines
             elif card.status in UNTESTED_STATUSES:
@@ -413,19 +445,172 @@ class TestsCommands:
                             f"prove it: add one line per test, e.g. `ctest -R board` or "
                             f"`tests/test_board.py::CardTests::test_roundtrip`."),
                 "severity": "warning"}],
-                "actions": ["Add the tests this card's commits touched"]}
-        lines = card.body[span[0]:span[1]].splitlines()
+                "actions": ["Add the tests this card's commits touched"],
+                "ids": [], "files": {}, "failing": []}
+        lines = section_lines(card.body, span)
         discovered = P.discover(self.project, build_dir=self.build_dir(build_dir))
         executions = H.read(self.store_path())
         index, _ = self.card_index()
         records = H.records(discovered, executions, index)
         result = H.check_card(lines, self.card_files(ident, card), records)
-        return {"card": ident, **result}
+        return {"card": ident, **result, **resolved_tests(lines, records)}
 
     def emit_check(self, card_id, rid=None) -> dict:
+        """Answer one Check, and leave the dated block on the card that says it happened.
+
+        The **worker** writes the block, not the GUI: an agent's `tests_check`, the card's
+        button and a check run from another window all leave the same artefact, and the card
+        file stays the record even when no window is open.  A card with no `## Tests` section
+        gets no block at all — there is nowhere to put it, and the one finding already says the
+        section is missing.
+        """
         result = self.check_card(card_id)
-        self.emit({"event": "tests_check", **_rid(rid), **result})
+        written = self.write_check_block(result)
+        self.emit({"event": "tests_check", **_rid(rid), **result,
+                   **({"block": written} if written else {})})
         return result
+
+    # ---- the dated `### Check` block -------------------------------------------
+    def write_check_block(self, result: dict) -> str:
+        """Append (or replace) `### Check <date>` under the card's `## Tests`.  "" when it did not.
+
+        Two rules, both about not turning a card into a log: **at most one block an hour** — a
+        button pressed twice in a minute is one answer — and, when an hour has passed but the
+        newest block is from **today**, that block is *replaced* rather than stacked on, so a day
+        of checking leaves one current line instead of twelve historical ones.
+        """
+        ident = str(result.get("card") or "")
+        if not ident or any(f.get("verdict") == "no-tests" for f in result.get("findings") or []):
+            return ""                       # no section: nothing to write the block under
+        board = self.board()
+        card = board.card_by_id(ident) if board is not None else None
+        if card is None:
+            return ""
+        span = B.section_span(card.body, TESTS_HEADING)
+        if span is None:
+            return ""
+        section = card.body[span[0]:span[1]]
+        now = datetime.datetime.now()
+        newest = _newest_check(section)
+        if newest is not None and (now - newest[1]).total_seconds() < CHECK_MIN_GAP_SECONDS:
+            return ""                       # inside the hour: the GUI still has the findings
+        stamp = now.strftime("%Y-%m-%d %H:%M")
+        block = f"### {CHECK_HEADING} {stamp}\n" + _check_lines(result)
+        if newest is not None and newest[1].date() == now.date():
+            start, end = newest[0]
+            body = card.body[:span[0] + start] + block + card.body[span[0] + end:]
+        else:
+            body = B.append_body_section(card.body, TESTS_HEADING, block)
+        card.body = body
+        try:
+            board.save(card)
+            board.append_thread(ident, f"Check · {_check_sentence(result)}",
+                                author="agent", kind="evidence")
+        except (B.BoardError, OSError):                   # pragma: no cover - defensive
+            return ""
+        return stamp
+
+    # ---- tests_suggest ---------------------------------------------------------
+    def suggest_tests(self, card_id, *, build_dir=None) -> dict:
+        """The tests this card's commits touched, by the convention `check_card` calls "orphaned".
+
+        There is no coverage data here, so the honest mapping is the naming one `test_history`
+        already uses for the orphaned verdict (`_covers`: same directory, or matching normalised
+        stems).  A test the section already lists is not suggested again, and nothing is invented:
+        every line comes from a test discovery actually found.
+        """
+        ident = str(card_id or "").strip().lstrip("#").upper()
+        if not ident:
+            raise ValueError("tests_suggest needs `card`: the card id, e.g. 7BM4.")
+        board = self.board()
+        card = board.card_by_id(ident) if board is not None else None
+        if card is None:
+            raise ValueError(f"No card #{ident} on this board.")
+        changed = self.card_files(ident, card)
+        span = B.section_span(card.body, TESTS_HEADING)
+        listed = section_lines(card.body, span) if span is not None else []
+        known = set()
+        for line in listed:
+            parsed = H.parse_test_line(line)
+            if parsed:
+                known.add(parsed["id"])
+        discovered = P.discover(self.project, build_dir=self.build_dir(build_dir))
+        lines, ids = [], []
+        for test in H._discovered_dicts(discovered):
+            test_id = str(test.get("id") or "")
+            source = str(test.get("file") or "")
+            if not test_id or test_id in known or test_id in ids or not source:
+                continue
+            if not any(H._covers(source, name) for name in changed):
+                continue
+            invocation = str(test.get("invocation") or test.get("name") or "")
+            lines.append(f"- `{invocation}` — {source}" if invocation else f"- {source}")
+            ids.append(test_id)
+            if len(ids) >= MAX_SUGGESTED:
+                break
+        return {"card": ident, "changed": changed, "lines": lines, "ids": ids}
+
+    def emit_suggest(self, card_id, rid=None, *, apply: bool = True) -> dict:
+        """`tests_suggest {card}` — suggest, and (by default) append the lines to `## Tests`.
+
+        The write goes down the board's own path with a thread entry, exactly as the button's
+        other two actions go down the worker's: the GUI never writes a card file.
+        """
+        result = self.suggest_tests(card_id)
+        ident = result["card"]
+        added = False
+        if apply and result["lines"]:
+            board = self.board()
+            card = board.card_by_id(ident)
+            if card is not None:
+                card.body = B.append_body_section(card.body, TESTS_HEADING,
+                                                  "\n".join(result["lines"]))
+                board.save(card)
+                board.append_thread(
+                    ident,
+                    "Added the tests this card's commits touched to `## Tests`:\n\n"
+                    + "\n".join(result["lines"]),
+                    author="agent", kind="evidence")
+                added = True
+        result["added"] = added
+        result["message"] = _suggest_sentence(result)
+        self.emit({"event": "tests_suggest", **_rid(rid), **result})
+        return result
+
+    # ---- the needs-verification gate -------------------------------------------
+    def gate_move(self, card_id, status) -> dict | None:
+        """Why this card may not leave `needs-verification` yet, or None when it may.
+
+        The owner's rule (#7BM4): a card does not land while the tests it *names* are gone,
+        have never run, or last failed.  A card that names **no** tests is not gated — the
+        `no-tests` finding is advisory, because gating on it would stop every card that predates
+        the section from ever closing.
+        """
+        result = self.check_card(card_id)
+        if any(f.get("verdict") == "no-tests" for f in result.get("findings") or []):
+            return None
+        offending: list[str] = []
+        reasons: list[str] = []
+        for finding in result.get("findings") or []:
+            if finding.get("verdict") not in GATE_VERDICTS:
+                continue
+            name = str(finding.get("test") or "")
+            if name and name not in offending:
+                offending.append(name)
+            reasons.append(str(finding.get("message") or ""))
+        for test_id in result.get("failing") or []:
+            if test_id not in offending:
+                offending.append(test_id)
+                reasons.append(f"{test_id} last failed here")
+        if not offending:
+            return None
+        shown = ", ".join(offending[:3]) + ("…" if len(offending) > 3 else "")
+        return {"card": result["card"], "status": str(status or ""),
+                "tests": offending, "findings": result.get("findings") or [],
+                "message": (f"#{result['card']} still has {len(offending)} test(s) that do not "
+                            f"prove it ({shown}): run or fix them, or move it with an override "
+                            f"that says why."),
+                "reasons": reasons}
 
     def card_files(self, card_id: str, card=None) -> list[str]:
         """The repo-relative files this card's commits touched, newest commit first.
@@ -787,8 +972,8 @@ def format_seconds(seconds: float) -> str:
 def _rid(rid) -> dict:
     """`{"id": rid}` when there is a request to answer, and nothing at all when there is not.
 
-    `tests_list` and `tests_check` are the two events with the `id` key free (on the other two
-    it is the *test*), so a null there would be a key the contract does not have.
+    `tests_list`, `tests_check` and `tests_suggest` are the events with the `id` key free (on
+    the other two it is the *test*), so a null there would be a key the contract does not have.
     """
     return {"id": rid} if rid is not None else {}
 
@@ -835,3 +1020,111 @@ def format_run(result: dict) -> str:
     if result.get("state") == "timed-out":
         lines.append("  the run passed its timeout and was stopped")
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------------- the card's `## Tests` body
+
+def section_lines(body: str, span) -> list[str]:
+    """The `## Tests` section's lines, **without** the `### Check` blocks under it.
+
+    A check block's own lines are prose about tests, not tests: reading them back as entries
+    would make every check add phantom "tests" to the next one.  The split is the heading, so a
+    hand-written `### ` sub-heading of any other name is left in place and simply parses as the
+    prose it is.
+    """
+    if span is None:
+        return []
+    section = body[span[0]:span[1]]
+    first = CHECK_BLOCK_RE.search(section)
+    return section[:first.start() if first else len(section)].splitlines()
+
+
+def _newest_check(section: str):
+    """`((start, end), when)` of the newest `### Check` block in a section, or None."""
+    blocks = list(CHECK_BLOCK_RE.finditer(section))
+    if not blocks:
+        return None
+    newest, when = None, None
+    for index, match in enumerate(blocks):
+        try:
+            stamp = datetime.datetime.strptime(
+                f"{match.group('date')} {match.group('time')}", "%Y-%m-%d %H:%M")
+        except ValueError:                                   # pragma: no cover - regex-guarded
+            continue
+        end = blocks[index + 1].start() if index + 1 < len(blocks) else len(section)
+        if when is None or stamp >= when:
+            newest, when = (match.start(), end), stamp
+    return None if when is None else (newest, when)
+
+
+def _check_lines(result: dict) -> str:
+    """The body of one dated block: one line per finding, or the one line that says there are none."""
+    findings = result.get("findings") or []
+    if not findings:
+        return "- no findings\n"
+    out = []
+    for item in findings:
+        test = str(item.get("test") or "").strip()
+        out.append(f"- {item.get('severity', 'notice')} · {test or 'card'} — "
+                   f"{str(item.get('message', '')).strip()}")
+    return "\n".join(out) + "\n"
+
+
+def _check_sentence(result: dict) -> str:
+    count = len(result.get("findings") or [])
+    if not count:
+        return "no findings; every test this card names is collected, has run and passed."
+    verdicts = ", ".join(dict.fromkeys(str(f.get("verdict") or "") for f in result["findings"]))
+    return f"{count} finding{'' if count == 1 else 's'} ({verdicts}); the block is under `## Tests`."
+
+
+def _suggest_sentence(result: dict) -> str:
+    lines, changed = result.get("lines") or [], result.get("changed") or []
+    if not changed:
+        return (f"#{result.get('card', '')} has no commits on it yet, so there is nothing to "
+                "map to tests.")
+    if not lines:
+        return (f"No discovered test is named after any of the {len(changed)} file(s) "
+                f"#{result.get('card', '')}'s commits touched, so nothing was added.")
+    verb = "Added" if result.get("added") else "Found"
+    return (f"{verb} {len(lines)} test(s) named after what #{result.get('card', '')}'s commits "
+            f"touched.")
+
+
+def resolved_tests(lines: Sequence[str], records_list: Sequence[dict]) -> dict:
+    """The three keys Check's event carries beside its findings (31.5).
+
+    `ids` are the runnable test ids the section's lines resolve to — what *Run these* sends;
+    `files` maps a test id to its source, so a finding's row can be clicked open; `failing` are
+    the ids whose last stored result was not a pass, which is the third action's target and half
+    of the landing gate's rule.  All three are derived from the same resolution `check_card`
+    does, so no caller has to redo it and no two callers can disagree about what a line names.
+    """
+    ids: list[str] = []
+    files: dict[str, str] = {}
+    failing: list[str] = []
+    for line in lines or []:
+        entry = H.parse_test_line(line)
+        if not entry:
+            continue
+        found = H.resolve(entry, records_list)
+        if not found and entry.get("runner") in RUNNABLE:
+            # Gone: keep the id anyway so *Run these* can still be pressed on a list that has
+            # one bad line in it, and so the gate can name the line the card actually holds.
+            if entry["id"] not in ids:
+                ids.append(entry["id"])
+            if entry.get("file"):
+                files.setdefault(entry["id"], entry["file"])
+            continue
+        for record in found:
+            test_id = str(record.get("id") or "")
+            if not test_id:
+                continue
+            if record.get("runner") in RUNNABLE and test_id not in ids:
+                ids.append(test_id)
+            source = str(record.get("file") or "") or str(entry.get("file") or "")
+            if source:
+                files.setdefault(test_id, source)
+            if record.get("last_result") in H.BAD_RESULTS and test_id not in failing:
+                failing.append(test_id)
+    return {"ids": ids[:MAX_IDS], "files": files, "failing": failing}

@@ -40,7 +40,15 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 #: `tests_protocol`: that module pulls in `test_probe` and `jobs`, and a pane that never opens
 #: the Test suites pane should not pay for them at start-up (#TZWF item 4). It is the same set
 #: as `tests_protocol.TYPES`, and `tests/test_tests_protocol.py` fails if the two drift.
-TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check")
+TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
+               "tests_suggest")
+
+#: The Check gate's two ends (#7BM4), spelled out here for the same reason `TESTS_TYPES` is: the
+#: move path must not import `tests_protocol` — and through it `test_probe` and `jobs` — to decide
+#: that an ordinary move is not a landing. `tests/test_tests_protocol.py` fails if they drift from
+#: `tests_protocol.GATE_FROM_STATUS` / `GATE_TO_STATUSES`.
+TP_GATE_FROM = "needs-verification"
+TP_GATE_TO = ("needs-qa", "needs-qa-llm", "needs-qa-human", "needs-review", "done", "verified")
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
@@ -1451,6 +1459,59 @@ class BoardCommands:
             self._tests_cache = cached
         return cached[1]
 
+    def _tests_gate(self, request: dict, rid) -> bool:
+        """The Check gate on leaving `needs-verification` (#7BM4).  True when it refused.
+
+        The owner's decision, 2026-09-20: Check "is a gate on leaving `needs-verification`, with
+        a recorded override", "because a report nobody must read is what every CI product ends up
+        ignoring".  So a landing move is refused while a test the card *names* is gone, has never
+        run, or last failed — one sentence, the offending tests, and nothing written.
+
+        Three deliberate holes.  A card with **no** `## Tests` section is not gated: the missing
+        section is a warning on the card, not a reason nothing may ever close, and gating on it
+        would strand every card filed before the section existed.  An `override` string lets the
+        move through and is quoted onto the thread by `_record_override`.  And any failure of the
+        check itself — no discovery, no build directory, an unreadable store — lets the move
+        through: a gate that fires when its own evidence is missing is a gate that stops work for
+        reasons nobody can act on.
+        """
+        status = request.get("status")
+        if not isinstance(status, str) or status not in TP_GATE_TO:
+            return False
+        override = request.get("override")
+        if isinstance(override, str) and override.strip():
+            return False
+        try:
+            card_id = normalize_id(request.get("card") or "")
+            card = self._need().board.card_by_id(card_id)
+            if card is None or card.status != TP_GATE_FROM:
+                return False
+            blocked = self._tests().gate_move(card_id, status)
+        except Exception:                                    # the check's own trouble, not the card's
+            return False
+        if not blocked:
+            return False
+        self.emit({"event": "error", "id": rid, "code": "tests_gate",
+                   "text": blocked["message"], "card": blocked["card"],
+                   "card_id": blocked["card"], "status": status,
+                   "tests": blocked["tests"], "findings": blocked["findings"]})
+        return True
+
+    def _record_override(self, request: dict, card_id, author: str) -> None:
+        """A move that carried an `override` is a decision, so the thread quotes it verbatim."""
+        override = request.get("override")
+        if not isinstance(override, str) or not override.strip() or not card_id:
+            return
+        reason = override.strip()[:2000]
+        try:
+            self._need().board.append_thread(
+                str(card_id),
+                f'Moved to `{request.get("status") or ""}` with the Check gate overridden: '
+                f'"{reason}"',
+                author=author or "owner", kind="decision")
+        except Exception:                                    # pragma: no cover - defensive
+            pass
+
     # ---- dispatch -------------------------------------------------------------
     def dispatch(self, request: dict) -> bool:
         kind = request.get("type")
@@ -1617,6 +1678,11 @@ class BoardCommands:
                 result = tools.run("board_update_card",
                                    {"id": request.get("card"), "base_hash": request.get("base_hash"), **patch})
             elif kind == "board_move":
+                # The Check gate (#7BM4): a card does not leave `needs-verification` while the
+                # tests it names are gone, have never run, or last failed — unless the move
+                # carries an `override` that says why, which is then quoted on the thread.
+                if self._tests_gate(request, rid):
+                    return
                 result = tools.run("board_move_card", {
                     "id": request.get("card"), "reason": request.get("reason") or "moved in the Switchboard",
                     # `section` rides along even when it is the empty string: that is how a drop
@@ -1680,6 +1746,8 @@ class BoardCommands:
                        "code": result.get("code"), **{k: v for k, v in result.items()
                                                       if k in ("current_hash", "possible_duplicates")}})
             return
+        if kind == "board_move":
+            self._record_override(request, result.get("id"), author)
         self._send({"event": "board_written", **result, "card_id": result.get("id"),
                     "id": rid, "kind": kind})
         self._emit_changed(result.get("write_id"))
