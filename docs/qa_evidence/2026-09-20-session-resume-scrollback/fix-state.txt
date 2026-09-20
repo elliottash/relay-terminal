@@ -1,0 +1,20 @@
+== session files and their terminal text, after run 1 ==
+4324	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/4c12a7cc7a5e4b5ab113b1eaf2ea6ffe.json
+369	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/4c12a7cc7a5e4b5ab113b1eaf2ea6ffe.meta.json
+2090	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/4c12a7cc7a5e4b5ab113b1eaf2ea6ffe.scrollback.txt
+4325	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/5b018559a163469180ef01e68f42aca4.json
+370	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/5b018559a163469180ef01e68f42aca4.meta.json
+2195	/tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/5b018559a163469180ef01e68f42aca4.scrollback.txt
+
+-- /tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/4c12a7cc7a5e4b5ab113b1eaf2ea6ffe.scrollback.txt
+   ALPHA-MARKER lines: 0   BRAVO-MARKER lines: 60
+-- /tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/5b018559a163469180ef01e68f42aca4.scrollback.txt
+   ALPHA-MARKER lines: 60   BRAVO-MARKER lines: 0
+
+== (c) session B's file does not begin with session A's text ==
+A (older): /tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/5b018559a163469180ef01e68f42aca4.scrollback.txt
+B (newer): /tmp/r0tj9.dh9952/home/.local/share/relay/sessions/f4d86bc83c82f3d1/4c12a7cc7a5e4b5ab113b1eaf2ea6ffe.scrollback.txt
+PASS: two files; the newer holds BRAVO-MARKER and no ALPHA-MARKER
+
+== (b) every *.scrollback.txt deleted; run 3 has only the transcript to go on ==
+   files left: 0

@@ -1,0 +1,21 @@
+== state directory after the quit ==
+1177	/tmp/tmp.2VuUZ0Kcws/relay/state/windows.json
+20	/tmp/tmp.2VuUZ0Kcws/relay/state/prompt-history/8efb1585-6a34-42ea-a460-14ba10707a26.txt
+646	/tmp/tmp.2VuUZ0Kcws/relay/state/scrollback/8efb1585-6a34-42ea-a460-14ba10707a26.txt
+
+== pane nodes in windows.json (session_id paired with scrollback id) ==
+{'session_id': '75560aa29fed44ef93f2cd1cd4299720', 'scrollback': '8efb1585-6a34-42ea-a460-14ba10707a26'}
+
+== the saved text, head and tail ==
+-- /tmp/tmp.2VuUZ0Kcws/relay/state/scrollback/8efb1585-6a34-42ea-a460-14ba10707a26.txt
+elliott@spark-dcc9:/tmp/tmp.L5WzoCHNm5$
+Relay Free: this pane's prompts and tool context go to Relay's hosted service and on to the model provider; Relay keeps request
+metadata only. Add your own key under Options › Models to keep it between you and your provider.
+...
+▸ ran seq -f 'MARKER-%g' 1 80 · 80 lines · exit 0
+✦ 1 tool call · 5 s  (Ctrl+click)
+✗ Relay Free refused the request (HTTP 400): messages[2] has a field that is not allowed: reasoning.
+
+== seeded session 9cb36f6f5efe4b5ba6a4b0638ae90ed3 (smallest session file from the real profile, deleted with the temp dirs) ==
+== windows.json pane nodes after the seed ==
+{'session_id': '9cb36f6f5efe4b5ba6a4b0638ae90ed3', 'scrollback': '8efb1585-6a34-42ea-a460-14ba10707a26'}

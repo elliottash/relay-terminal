@@ -1,0 +1,8 @@
+== scrollback store after run 2's resume: the text is still on disk, keyed by run 1's pane token ==
+total 8
+drwx------ 2 elliott elliott 4096 Sep 20 12:47 .
+drwx------ 4 elliott elliott 4096 Sep 20 12:47 ..
+
+== nothing in run 2's fresh panes points at that id: the manager resume path
+   (Pane::openSavedSession -> RelayWindow::openFork -> createPane) builds a pane
+   whose scrollback id is its own new token, and no saved text is read. ==

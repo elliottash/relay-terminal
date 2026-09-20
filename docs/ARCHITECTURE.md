@@ -593,6 +593,48 @@ nothing is re-run.
     idea of where its prompt sits has just scrolled away. The rules are Relay's own chrome and are
     filtered out of the next save, so they do not stack up over restarts, and restored lines go
     through `sanitize()`, so a hand-edited file cannot drive the terminal.
+- **The conversation's own copy** (`relay::sessiontext`, card #0TJ9; owner report: "when i accessed
+  a convo in the session manager, i couldnt scroll back"). The store above is keyed by *pane*, and
+  the layout prune deletes a pane's file the moment it leaves the layout — so a conversation opened
+  from the sessions manager days later found nothing above its "Session loaded" line, whatever the
+  resume path did. The same text is therefore also written under the **session's** id, beside the
+  session file, where it lives exactly as long as the conversation does:
+  `<session_dir>/<id>.scrollback.txt`, a guest's (claude, codex — Relay never writes inside
+  `~/.claude` or `~/.codex`) at `<data>/relay/sessions/guests/<source>/<id>.scrollback.txt`, and
+  what a rewind undid at `<session_dir>/<id>.rewound-<n>.scrollback.txt`, `n` being the `rewound_n`
+  of the worker's `rewound` event. Same format and literally the same file layer as the per-pane
+  store — plain UTF-8 lines, `clampScrollback`, `QSaveFile`, 0600, directories 0700 — and every id
+  is validated before it becomes a file name (a Relay id is 32 lowercase hex, a guest id a
+  canonical UUID, the source exactly `claude` or `codex`). The worker deletes all of it with the
+  conversation, and indexes it (protocol §14.1).
+  - **Which text belongs to which conversation.** The pane records the line of its *history* the
+    conversation began at, and saves from there, so a pane that held session A and then session B
+    does not write A's text into B's file. The history above the screen is what that mark counts:
+    the visible screen's row count is the grid height whatever is written on it, so a mark that
+    counted it would be a constant and every slice empty. The screen is appended whole, because it
+    is always *now*. The mark is taken again 400 ms after a switch and the smaller kept — the clear
+    `/new` does is a round trip through the pty, so the first reading can still hold the
+    conversation that is leaving. Past the engine's whole history the mark is beyond the oldest line
+    held and the save starts there, which is the documented approximation.
+  - **When it writes.** Wherever the per-pane store does, and additionally under the *outgoing* id
+    whenever the pane's conversation changes, before anything is replaced — "Resume here", "Open in
+    new pane", `/new`, a fork, a guest arriving, leaving or being replaced (`adoptSessionText()`,
+    which every one of those already passes through). Unlike the per-pane store it never removes a
+    file: an empty pane is not evidence that the conversation printed nothing, and this file is the
+    conversation's record.
+  - **What comes back.** `openSavedSession`, `setInitialState` and the guest resume path read the
+    file and hand it to the same replay a restart uses, under rules of its own — “— saved terminal
+    text from this conversation —” / “— end of the conversation's saved text; this shell is new —”,
+    because “this pane's previous shell” is untrue of text printed somewhere else. A fork carries
+    the text its parent was holding, written under the fork's new id (which only exists once the
+    new pane loads the state) and replayed there. With **no file** — every conversation from before
+    this store existed, a crash, one made on the phone — the pane asks the worker for the
+    transcript (`conversation_get`, its own request id) and draws the entries as turns through the
+    inline printer a live turn uses: the ✦ prompt, the reply, one ▸ row per tool call, tool output
+    left out. `relay::transcriptreplay::render()` (`src/TranscriptReplay.h`,
+    `tests/transcriptreplay_test.cpp`) is that step, pure and one renderer for agent, claude and
+    codex alike, because conv_index.py returns all three in one shape. Driven proof:
+    `docs/qa_evidence/2026-09-20-session-resume-scrollback/` (`drive-fix.sh`).
 - **Controls.** The setting `windows/restore` ("Reopen windows on start" in the palette, default
   on; turning it off deletes the file and the saved scrollback), `relay --fresh` (ignores the file
   once, keeps it), and the palette action `windows.fresh` ("Start a fresh window set": deletes the
