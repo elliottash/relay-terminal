@@ -1385,25 +1385,30 @@ public:
     // to jump) stay the popup's own.
     class PopupHotkeys final : public QObject {
     public:
-        PopupHotkeys(QComboBox *box, QWidget *target) : QObject(box), m_box(box), m_target(target) {}
+        // `own` is the action that opens this very box: pressed again while it is open, the box
+        // just closes (owner, 2026-09-20: "if I press Alt+M or Alt+E again, it closes the picker").
+        PopupHotkeys(QComboBox *box, QWidget *target, QString own) : QObject(box), m_box(box), m_target(target), m_own(std::move(own)) {}
     protected:
         bool eventFilter(QObject *, QEvent *event) override {
             if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride) return false;
             auto *key = static_cast<QKeyEvent *>(event);
             const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
-            if (!mods || Keymap::instance().match(key).isEmpty()) return false;
+            const QString id = mods ? Keymap::instance().match(key) : QString();
+            if (id.isEmpty()) return false;
             if (event->type() == QEvent::ShortcutOverride) { event->accept(); return true; }   // ours, not the view's
             m_box->hidePopup();
-            QCoreApplication::postEvent(m_target, new QKeyEvent(QEvent::KeyPress, key->key(), key->modifiers(), key->text()));
+            if (id != m_own)   // another chord goes on to the window; this box's own just closes it
+                QCoreApplication::postEvent(m_target, new QKeyEvent(QEvent::KeyPress, key->key(), key->modifiers(), key->text()));
             return true;
         }
     private:
         QComboBox *m_box;
         QWidget *m_target;
+        QString m_own;
     };
-    void passHotkeysThrough(QComboBox *box) {
+    void passHotkeysThrough(QComboBox *box, const QString &ownAction) {
         if (!box || !box->view()) return;
-        auto *filter = new PopupHotkeys(box, window());
+        auto *filter = new PopupHotkeys(box, window(), ownAction);
         box->view()->installEventFilter(filter);
     }
     // Alt+E (agent.effortBox): the level box beside the model box drops open.
@@ -4117,8 +4122,8 @@ private:
         // is open and I press Alt+E, get to the effort without changing anything, and vice versa;
         // in general an open box doesn't interrupt other hotkeys"): the popup closes with nothing
         // picked and the key goes on to the window, which runs it as it would have.
-        passHotkeysThrough(m_modelBox);
-        if (m_effortBox) passHotkeysThrough(m_effortBox);
+        passHotkeysThrough(m_modelBox, QStringLiteral("agent.modelBox"));
+        if (m_effortBox) passHotkeysThrough(m_effortBox, QStringLiteral("agent.effortBox"));
         // Voice transcription: the chip toggles recording, the hold key is push-to-talk.
         m_mic = new QToolButton;
         m_mic->setObjectName(QStringLiteral("stripChip"));
