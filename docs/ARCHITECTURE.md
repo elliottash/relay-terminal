@@ -703,9 +703,9 @@ double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify b
 the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
-`pane.sharing` deliberately has no key of its own), answering an `ask_user` card by typing an
+`pane.sharing` deliberately has no key of its own), answering an ask (`ask_user`) by typing an
 option out in full (→ its number, `question.number`; an answer in the user's own words is the
-card working and is never corrected), dropping a pane on another's bottom edge (→ the move
+ask working and is never corrected), dropping a pane on another's bottom edge (→ the move
 toward that pane then Move-down, `pane.dockBeneath`; the chord's own arming line is
 `pane.dockBeneath.chord`), the first reasoning delta of a turn (→ a click or `agent.thinkingPanel`
 folds it away, `thinking.fold`), closing a focused Switchboard by its button or the palette
@@ -845,7 +845,7 @@ Pasting never submits.
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
 | Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
 | Shift+Enter | newline |
-| Esc | skip the question on a card that is up (sessions protocol 27.4), else stop the agent turn, or interrupt the running program; Esc Esc in an empty box opens Rewind. It never takes control of the terminal (Ctrl+H or the "Take control" button do) |
+| Esc | skip the question on an ask that is up (sessions protocol 27.4), else stop the agent turn, or interrupt the running program; Esc Esc in an empty box opens Rewind. It never takes control of the terminal (Ctrl+H or the "Take control" button do) |
 | PageUp / PageDown | scroll the terminal scrollback one page |
 
 Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
@@ -893,7 +893,7 @@ part way through typing. The route label says the same thing before Enter does. 
 attempt at a command is `relay::slash::attemptedName`: one name-shaped word after the `/`, on one
 line, that is not a path — `/usr/bin/foo`, `/etc/hosts` and an existing single segment such as
 `/tmp` are paths and still run in the shell. `/shell ` and `/agent ` are names in the same list, so
-they keep falling through to the router. `/help` shows the same card `?` shows in an empty prompt
+they keep falling through to the router. `/help` shows the same popup `?` shows in an empty prompt
 box (issue #Q4SD, owner report: an unknown command answered with `bash: /nosuchthing: command not
 found`).
 
@@ -2074,7 +2074,7 @@ prepared, `tool_started` carries a preview, and it executes immediately.
 | `edit_file` | replaces one exact string in an existing file (`old_string` → `new_string`, `replace_all` for every occurrence); refuses a file that does not exist, a string it cannot find, and one that occurs more than once without `replace_all`; same guards, SHA-256 recheck, atomic replace and checkpoint undo as `write_file`; neither is offered in plan mode |
 | `set_keybinding` | offered when the GUI sent a catalog (section 4) |
 | `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
-| `ask_user` | asks the user 1–4 questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). `options` is optional: with them a number is the answer and `0` skips, without them the question is open and whatever is typed is the answer; `/skip` passes. The pane prints the card in the amber "needs human" ink and goes to the `NeedsYou` state. Offered in both modes, never to a subagent, which cannot reach the user; plan mode's prompt additionally tells the planner to use it before `write_plan` rather than guess |
+| `ask_user` | asks the user 1–4 questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). `options` is optional: with them a number is the answer and `0` skips, without them the question is open and whatever is typed is the answer; `/skip` passes. The pane prints the ask in the amber "needs human" ink and goes to the `NeedsYou` state. Offered in both modes, never to a subagent, which cannot reach the user; plan mode's prompt additionally tells the planner to use it before `write_plan` rather than guess |
 
 **The recursive-walk cost guard (card #2Y96).** A pane's workspace is the directory the pane is
 in, so a pane standing in `$HOME` or `/` gets a very wide sandbox. The owner accepted that on
@@ -2394,7 +2394,7 @@ root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no excep
   `claude -p --input-format stream-json --output-format stream-json` or of `codex app-server`
   and forwards the guest's events in Relay's own vocabulary (`delta`, `tool_started`,
   `tool_result` with a diff, `context`, `question`), so the transcript, the call lines, the chips
-  and the question card are Relay's, the pane's shell stays the user's terminal, and nothing is
+  and the ask are Relay's, the pane's shell stays the user's terminal, and nothing is
   typed into a TUI. The model box lists the worker's row when the harness is usable and falls
   back to the Tier B launch otherwise; a hand-typed `claude` is still served the Tier B way.
   Adapters are held to recorded transcripts replayed through a fake process; no test starts a
@@ -2664,7 +2664,7 @@ There are three channels, and one meaning per colour:
 | `shell` (cyan) | the terminal — as a **destination** and as **terminal work** | mode chip, caret, syntax, the `!` prefix chip, `Ink::User`, the Running glyph and its live dot, the Sessions band |
 | `agent` (violet) | the agent — destination and agent work | the same list for the agent: the `*` prefix chip, `Ink::UserAgent`, the plan chip, Working/Subagents, every agent pane's band, a cleanup while it runs |
 | `success` (green) | finished | the Done glyph, `**Done:**`, the fill of diff additions, the Options band |
-| `warning` (amber) | **something is waiting on a person** | the NeedsYou glyph and tab icon, the question card (`Ink::Ask`), `**Need:**`, the notification, the work chip's attention state, a context or quota chip near its limit, the board's problems, the composer hint *only* while a program waits for input |
+| `warning` (amber) | **something is waiting on a person** | the NeedsYou glyph and tab icon, the ask (`Ink::Ask`), `**Need:**`, the notification, the work chip's attention state, a context or quota chip near its limit, the board's problems, the composer hint *only* while a program waits for input |
 | `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, the fill of diff removals, the ssh band |
 | `action` (red-orange) | the Actions pane | its band, glyph and title-bar button |
 | `tool` (brass) | this pane is a tool | the Switchboard's band and its neighbours' |

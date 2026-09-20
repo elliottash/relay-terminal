@@ -382,7 +382,7 @@ Options › Security rows in `src/RelayWindow.h`, which now read "Backstop for a
 nothing", not "unchanged", which is why the GUI sends both keys on every `configure` and
 `set_agent_options`. While `approvals_chosen` is false — the first-launch screen not yet answered
 — the worker applies the cautious set (`edit`, `delete_or_move`, `read_outside`, `terminal`,
-`program`) whatever the list says, so a fresh Relay is never allow-everything by default. A card's
+`program`) whatever the list says, so a fresh Relay is never allow-everything by default. An ask's
 "Always allow" (27.6) unticks the matching row by sending both keys again. Subagents follow the
 pane's policy, at spawn and whenever it changes.
 
@@ -4743,7 +4743,11 @@ allow), so no hook shim waits out its timeout on an answer nobody can give (revi
 Plan mode could investigate and it could write a plan; between the two it could not reach the user,
 so a planner that was unsure guessed (card #MQ9C, owner: "aksing questions. the planner doesnt do
 it yet"). `ask_user` is that channel. Like `type_into_program` (section 21) it is a round trip
-through the pane, because the worker cannot draw anything. Worker side:
+through the pane, because the worker cannot draw anything. **What the pane puts up is called *the
+ask*** — *the approval ask* for 27.6 — and never a card: it is inline terminal text in `Ink::Ask`
+with no border or surface of its own, and *card* is reserved for a Switchboard record (section 19,
+card #VQ8T). The wire keeps its own names: the events are `question`, `question_closed` and
+`question_answer`, the tool is `ask_user` and the setting is `approvals_ask`. Worker side:
 `backend/relay_core/questions.py`; tests `tests/test_questions.py`.
 
 ### 27.1 The shape of it
@@ -4756,8 +4760,8 @@ GUI    → question_answer {id, answers}
 worker → (the tool returns; the turn goes on)
 ```
 
-`question_closed {id, reason}` is emitted instead when Stop or the end of the turn takes the card
-away before it was answered. Stop is no longer Esc while a card is up (27.4): Esc skips the
+`question_closed {id, reason}` is emitted instead when Stop or the end of the turn takes the ask
+away before it was answered. Stop is no longer Esc while an ask is up (27.4): Esc skips the
 question in front of the user, and the turn's Stop is the `agent.stop` action.
 
 ### 27.2 `ask_user`
@@ -4800,65 +4804,65 @@ question_answer {id, answers: [["This file only"], [], ["neither: delete it"]]}
 
 one list per question, in order: the labels chosen, the user's own text for an answer they typed
 (always the case for an open question), or an empty list for one they skipped. There is no way to
-dismiss a card: every question is answered or skipped one at a time, and the whole set goes back
+dismiss an ask: every question is answered or skipped one at a time, and the whole set goes back
 together when the last one is. An `id` nobody is waiting on is ignored — a click landing after Stop
-is the user being late, not an error. An `id` the pane cannot draw a card for (no `id`, or no
+is the user being late, not an error. An `id` the pane cannot draw an ask for (no `id`, or no
 questions) is answered at once with empty `answers`, so a malformed event costs the turn its
 answers and not its life.
 
-A card is drawn by the **desktop pane only**. `question` and `question_closed` are in
+An ask is drawn by the **desktop pane only**. `question` and `question_closed` are in
 `FORWARDED_EVENTS` (docs/REMOTE-PROTOCOL.md section 6.4) but no web client draws them and they are
 not in `GUEST_EVENTS`, so a phone, a tablet or a share participant sees the question only as the
-text the desktop printed into the mirrored terminal, never as a card of its own. It can still be
+text the desktop printed into the mirrored terminal, never as an ask of its own. It can still be
 answered from there, by the desktop's own rule (owner, 2026-09-19): the line is **routed first**,
-and the card takes it only when the route is the agent (`relay::input::cardTakesRemoteLine`,
+and the ask takes it only when the route is the agent (`relay::input::cardTakesRemoteLine`,
 decided in `Pane::takeRemoteRoute`). A line the router reads as a command runs in the shell, so an
-unanswered card no longer locks a paired device out of the terminal — `Pane::submitRemote` used to
-hand the card every line before anything was routed, which is the one thing the desktop has never
+unanswered ask no longer locks a paired device out of the terminal — `Pane::submitRemote` used to
+hand the ask every line before anything was routed, which is the one thing the desktop has never
 done. A device that cannot ask the router (`route: false`, or the worker is not up) can only reach
-the agent, so its line is the card's, and so is a `when: "steer"` line, which its sender has already
-aimed at the agent. The answer is attributed to whoever typed it: the echo under the card reads
+the agent, so its line is the ask's, and so is a `when: "steer"` line, which its sender has already
+aimed at the agent. The answer is attributed to whoever typed it: the echo under the ask reads
 `✦ <header>: <answer> · from <name>`.
 
 ### 27.4 What the user sees (GUI, card #4E13)
 
-A question is the "needs human" state, so the card is drawn in the theme's amber `warning` ink, the
+A question is the "needs human" state, so the ask is drawn in the theme's amber `warning` ink, the
 pane's status glyph and its tab go to `NeedsYou` while it is open, and the pane's notification says
 the agent needs you. This is the visual language #4E13 asked for — amber is the colour of something
 waiting on a person.
 
-There is no separate answering mode: the card is printed into the terminal and **the answer is
+There is no separate answering mode: the ask is printed into the terminal and **the answer is
 typed into the pane's own prompt box**, which is where everything else is typed. Exactly what the
 code does with what is typed, in order:
 
 | Typed | |
 |---|---|
 | `/skip` | this question is skipped, whether or not it has options |
-| `0` | with options, skipped as well — the card lists it as "0  Skip this one" |
-| `2` | with options, picks option 2. A number the card has no option for is not an answer: the pane prints "There is no option 4" and prints the card again, still waiting |
+| `0` | with options, skipped as well — the ask lists it as "0  Skip this one" |
+| `2` | with options, picks option 2. A number the ask has no option for is not an answer: the pane prints "There is no option 4" and prints the ask again, still waiting |
 | `1,3` | with `multiple`, picks both; without it, the first number is taken and the rest ignored |
 | anything else | their own words, which is the answer — for an open question this is the only case |
-| nothing | Enter on an empty box does nothing; the card stays |
+| nothing | Enter on an empty box does nothing; the ask stays |
 | `Esc` | skips this question, exactly as `0` does, and the next one goes up; whatever is in the box is left there (owner, 2026-09-19) |
 
 **Enter** submits whatever is in the box. **Ctrl+Shift+Enter** still runs it as a shell command, so
 a question from the agent never takes the terminal away. **Esc skips the question** (owner,
 2026-09-19): it records the same "unanswered" `0` does and puts the next question up, and on the
 last one it sends the answers back and the turn goes on. It used to stop the whole turn, which made
-the key nearest the reader's hand the most destructive thing on the card — a person who does not
+the key nearest the reader's hand the most destructive thing on the ask — a person who does not
 want to answer wants to move past the question, not end the work they are being asked about.
 
-**Stop, while a card is up, is the `agent.stop` action** — Actions › Stop agent, or the shortcut the
+**Stop, while an ask is up, is the `agent.stop` action** — Actions › Stop agent, or the shortcut the
 user bound to it, since Relay ships `agent.stop` unbound and Esc was the only key that reached it.
-The card's last footer line says which of the two applies, read live from the Keymap, and so does
+The ask's last footer line says which of the two applies, read live from the Keymap, and so does
 the "Relaying · waiting for your answer…" caption, which offers `Esc skips it` rather than the Stop it
 can no longer promise. There is deliberately no second Esc that stops: on the last question a second
-Esc is an ordinary Esc in an idle pane. Stop still takes the card away with the turn
+Esc is an ordinary Esc in an idle pane. Stop still takes the ask away with the turn
 (`question_closed`).
 
 Questions from one call are asked one at a time; answering the last one sends
 them all back together. There are no number keys to press without the box, no `t` for "type your
-own" and no key that dismisses the card: those would each be a mode, and the box is already there.
+own" and no key that dismisses the ask: those would each be a mode, and the box is already there.
 
 ### 27.5 Deviations from the harnesses this follows
 
@@ -4871,7 +4875,7 @@ own" and no key that dismisses the card: those would each be a mode, and the box
 - **No deadline.** `type_into_program` gives the pane 20 s because a program is waiting; here a
   person is, and a timeout would report "failed" for "still thinking".
 
-### 27.6 Approval cards (card #K2FV, 2026-09-19)
+### 27.6 Approval asks (card #K2FV, 2026-09-19)
 
 The questions of 27.1–27.4 are the model's; these are **Relay's, asked on the model's behalf**,
 before an action the user ticked on the first-launch checklist (Options › Security; the
@@ -4887,35 +4891,35 @@ GUI    → question_answer {id, decision: "once"|"turn"|"always"|"deny"}
 
 | Field | |
 |---|---|
-| `kind` | `"approval"`; absent on an `ask_user` card |
+| `kind` | `"approval"`; absent when the ask came from `ask_user` |
 | `capability` | one of the seven of 12.1: which checklist row the action is |
-| `header` | the row's label, capitalised — the card and Options › Security use the same words |
+| `header` | the row's label, capitalised — the ask and Options › Security use the same words |
 | `question` | `Allow the agent to <label>?`, a newline, then the subject |
 | `subject` | the file path or command the call is about |
-| `subagent`, `agent_id` | present when a subagent's action drew the card: its description and id |
+| `subagent`, `agent_id` | present when a subagent's action drew the ask: its description and id |
 
 The decision: **once** allows this one call; **turn** allows the capability for the rest of the
 turn (forgotten when the next turn begins); **always** also unticks the matching row in Options ›
 Security — the pane sends `set_agent_options` with the new `approvals_ask`/`approvals_chosen`
 before it sends the decision; **deny** refuses the call and the turn carries on, the model told
 in `approvals.refusal()`'s words, which it must respect rather than route around. Deny is not
-Stop (27.4): Stop under a card still ends the wait (`question_closed`; the tool raises
-`Cancelled`). An invalid or absent decision is a **deny** — the safe side of a card nobody
+Stop (27.4): Stop under an ask still ends the wait (`question_closed`; the tool raises
+`Cancelled`). An invalid or absent decision is a **deny** — the safe side of an ask nobody
 answered — and there is no skip: `0`, `/skip` and free text are not answers, and Esc does not
 deny, because the key nearest the reader's hand must not be the thing that silently allows or
 refuses.
 
-The check runs at the tool's **prepare**, so nothing has executed when the card goes up, and
+The check runs at the tool's **prepare**, so nothing has executed when the ask goes up, and
 again at execute for `run_command` — the two-look rule the command denylist has. `delete_or_move`
 and `network` are **classifiers, not proofs**: they read the program names out of a Bash line, so
 `rm -rf build`, `sudo mv a b` and a plain `> existing` are caught and a variable, a script or a
 here-doc is not. What contains a command is the workspace, the secret-file guard and systemd
 isolation, exactly as before.
 
-A **subagent's** action draws the card in the same pane, named as the subagent's (`subagent`,
+A **subagent's** action draws the ask in the same pane, named as the subagent's (`subagent`,
 `agent_id` above), and its `question_answer` routes back by id. The subagent's `can_ask` stays
 false — it still cannot ask the user anything — while the flag that lets Relay draw *this* kind
-of card is separate (`may_approve`), because the card is the pane's to answer, not the
+of ask is separate (`may_approve`), because the ask is the pane's to answer, not the
 subagent's to ask. A **turn** allowance lives on the agent whose action asked.
 
 
@@ -5041,8 +5045,8 @@ into the TUI, reads hooks, a statusline and rollout files, and gets diffs throug
 This section runs the guest's own **headless harness** — `claude -p --input-format stream-json
 --output-format stream-json` and `codex app-server` — and makes the guest the pane's agent the way
 a provider is: the prompt goes through the ordinary `ask`, the guest's tool calls print as Relay's
-own call lines (section 23), its usage feeds the context chip, its questions are Relay's question
-cards (section 27), and the pane's shell stays the user's terminal. Nothing is typed into a TUI and
+own call lines (section 23), its usage feeds the context chip, its questions are Relay's own
+asks (section 27), and the pane's shell stays the user's terminal. Nothing is typed into a TUI and
 nothing is scraped. Section 26 stays as built: a `claude` or `codex` the user types at the prompt
 is still detected and served the Tier B way, and the picker row falls back to the Tier B launch
 (26.9) when the harness is not available for that guest.
@@ -5059,7 +5063,7 @@ One `Harness` per pane: `start(cwd, model?, resume?, fork?, permissions)` → `{
 stop_reason: end|interrupted|error, usage}`; `interrupt()`, `set_model(model)`, `compact()`,
 `answer(request_id, decision)` and `close()` may be called from any thread while `send()` blocks.
 `permissions` is `bypass` (the default and the owner's rule: no per-action approvals, as for Relay's
-own agent), `ask` (every approval the guest raises becomes a question card) or `deny`.
+own agent), `ask` (every approval the guest raises becomes an ask) or `deny`.
 
 What a harness reports while a turn runs is one flat vocabulary, and the provider maps each kind
 onto exactly one Relay event, so an adapter never learns Relay's names and Relay never learns the
@@ -5267,7 +5271,7 @@ seconds and no output, is ignored rather than rendered: the pane's own turn cloc
 running step and counts the seconds.
 
 **An approval can be scoped, and is reachable.** `answer()` takes `once` (the default), `session`,
-or `stop` for a deny that ends the turn as well, so the card the pane draws under
+or `stop` for a deny that ends the turn as well, so the ask the pane draws under
 `permissions: "ask"` offers four choices rather than two. Which posture a guest starts in is
 Options › Claude Code and Codex's third row per guest ("When it wants to use a tool": just run it,
 ask me, refuse it), stored as `guests/<guest>/permissions` and carried in the `guest` block beside
@@ -5279,7 +5283,7 @@ command, and claude writes a rule as narrow as what was asked about, so a later 
 judges different is asked again and that is correct. Codex has all three on the wire; Claude Code has them too — an allow may
 carry a session rule and a deny may carry `interrupt: true` — and the rule Relay writes is kept as
 narrow as the thing that was asked about, never a blanket "Bash is allowed now". A scope the table
-does not recognise, and a card the user stops, is a plain deny.
+does not recognise, and an ask the user stops, is a plain deny.
 
 **The model and the reasoning effort are the guest's own** (owner, 2026-09-19: "you should be able
 to pick the model and reasoning effort for those"). The `guest` block of a `configure` or
@@ -5296,7 +5300,7 @@ background thread because `presets` is answered on the protocol thread and may n
 subprocess; until it lands the row says `models: []` and the GUI offers a text box. When the scan
 lands the worker **re-emits `presets` unsolicited** (#E516) — nothing re-asks for it, and without
 the push the GUI's cached copy would keep the empty list and the text box forever, which is what
-the card was filed on. A scan that completes *empty* (codex missing, refusing or slow) then serves
+card #E516 was filed on. A scan that completes *empty* (codex missing, refusing or slow) then serves
 a four-model fallback (`_CODEX_FALLBACK_MODELS`, read off codex-cli 0.155.1; a scan with rows
 always wins), so the row is a menu even on a machine whose codex cannot be asked. The pane
 re-renders open settings panes on every `presets` event, so an Options page that is already open
@@ -5320,7 +5324,7 @@ picking one is `configurePreset("guest:<id>")` like any preset — the conversat
 the call lines are Relay's — and the Tier B `launchGuest` is the fallback for a row whose preset
 says `harness: false`, and the path for a `claude`/`codex` the user types by hand. While the pane
 is on a guest preset: the model chip shows the guest's model; the context chip reads `context`; a
-`question` draws the section 27 card (Allow/Deny for an approval); a `tool_result` with a `diff`
+`question` draws the section 27 ask (Allow/Deny for an approval); a `tool_result` with a `diff`
 prints it inline or opens the diff pane past the inline limit, as for Relay's own edits; the prompt
 box's terminal/agent routing is the ordinary one and a terminal line runs in the pane's own shell,
 because there is no TUI to pipe it into. A guest sessions row resumes through the preset with
@@ -5655,7 +5659,7 @@ decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "O
 
 ### 30.8 Notes and deviations
 
-- **No `helper_ask` message.** The card's plan sketched one; `board_chat` already carries a turn to
+- **No `helper_ask` message.** Card `#FEJQ`'s plan sketched one; `board_chat` already carries a turn to
   this worker, with a queue, a stop and events the panels can draw, so `pane` on `board_chat` is
   that message. One message and one conversation is also what "a single joint system" means on the
   wire.
