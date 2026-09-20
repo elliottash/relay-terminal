@@ -114,6 +114,10 @@ private:
     QList<QJsonObject> m_stack;        // requests, oldest first; the last one is on screen
     QJsonObject m_current;             // the last event shown
     QString m_pendingId;
+    // The anchor the current left-button press started on, when it started on one. A shaky
+    // click on a copy link turns into a drag-selection past the drag threshold, Qt drops the
+    // anchor and no anchorClicked arrives; the release rescues the copy (see eventFilter).
+    QString m_pressAnchor;
     int m_counter = 0;
 };
 

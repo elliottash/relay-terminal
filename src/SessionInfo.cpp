@@ -9,12 +9,15 @@
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QScrollBar>
 #include <QShowEvent>
 #include <QStyleOptionToolButton>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -412,6 +415,7 @@ InfoView::InfoView(QWidget *parent) : QWidget(parent) {
     m_body->setOpenLinks(false);
     m_body->setOpenExternalLinks(false);
     m_body->installEventFilter(this);
+    m_body->viewport()->installEventFilter(this);   // mouse events go to the viewport, not m_body
     relay::installCopyOnSelect(m_body);
     connect(m_body, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { linkActivated(url); });
     layout->addWidget(m_body, 1);
@@ -580,13 +584,47 @@ void InfoView::linkActivated(const QUrl &url) {
     else if (what == QLatin1String("live")) { if (onOpenLive) onOpenLive(value("agent"), value("thread")); }
     else if (what == QLatin1String("file")) { if (onOpenFile) onOpenFile(value("path")); }
     else if (what == QLatin1String("copy")) {
-        QApplication::clipboard()->setText(value("text"));
+        // PRIMARY as well as the clipboard, the same deal copy-on-select makes: a shaky click's
+        // selection copy may have put the ⧉ glyph there first (see eventFilter).
+        QClipboard *clipboard = QApplication::clipboard();
+        if (clipboard->supportsSelection()) clipboard->setText(value("text"), QClipboard::Selection);
+        clipboard->setText(value("text"));
         flashHint(value("what").isEmpty() ? QStringLiteral("Copied to the clipboard")
                                           : QStringLiteral("Copied %1 to the clipboard").arg(value("what")));
     }
 }
 
 bool InfoView::eventFilter(QObject *object, QEvent *event) {
+    if (object == m_body->viewport() && event->type() == QEvent::MouseButtonPress) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        m_pressAnchor = mouse->button() == Qt::LeftButton ? m_body->anchorAt(mouse->pos())
+                                                          : QString();
+    } else if (object == m_body->viewport() && event->type() == QEvent::MouseButtonRelease) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        const QString pressed = m_pressAnchor;
+        m_pressAnchor.clear();
+        // A shaky click on a copy link: past the drag threshold QTextBrowser abandons the anchor
+        // and selects instead, so anchorClicked never fires and copy-on-select puts the selected
+        // glyph — the ⧉ button itself — on the clipboard. Rescue copy links only (a drag across
+        // one wants its text on the clipboard anyway), and only when a selection says Qt did not
+        // activate the link itself. Scheduled after the release like copy-on-select's own
+        // singleShot: the selection is cleared first, so whichever runs second leaves the
+        // clipboard holding the id, not the glyph.
+        if (mouse->button() == Qt::LeftButton && !pressed.isEmpty()
+            && m_body->anchorAt(mouse->pos()) == pressed) {
+            const QUrl url(pressed);
+            if (url.scheme() == QLatin1String(kScheme) && url.path() == QLatin1String("copy")) {
+                QPointer<InfoView> self(this);
+                QTimer::singleShot(0, m_body, [self, url] {
+                    if (!self || !self->m_body->textCursor().hasSelection()) return;
+                    QTextCursor cursor = self->m_body->textCursor();
+                    cursor.clearSelection();
+                    self->m_body->setTextCursor(cursor);
+                    self->linkActivated(url);
+                });
+            }
+        }
+    }
     if (object == m_body && event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
         if (key->key() == Qt::Key_Escape) { if (onClose) onClose(); return true; }
