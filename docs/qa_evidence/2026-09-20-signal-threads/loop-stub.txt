@@ -1,0 +1,58 @@
+== fold 1: the signal opens, and the pane whose run opened it has this fold to claim it
+   unittest:test_width.WidthTests.test_three open broken x2 session=''
+   threads running: 0
+== fold 2: nobody claimed it, so Relay does
+EVENT {"event": "signal_thread", "key": "unittest:test_width.WidthTests.test_three", "session_id": "", "state": "started", "thread_id": "a7ab4d6d04354dc0bdf966dd5deef51b"}
+   threads running: 1
+   claim: 'a7ab4d6d04354dc0bdf966dd5deef51b' (the thread's own id)
+   thread_id=a7ab4d6d04354dc0bdf966dd5deef51b agent=a1 owner=''
+== the task it was started with
+A test in /tmp/aq6x-loop-4lktm4iq/proj is failing and nobody is working on it. Fix it.
+
+The signal is `unittest:test_width.WidthTests.test_three` (broken); it has failed 2 execution(s), last at 2026-09-20T22:15:54Z.
+
+The failure, in the check's own words:
+```
+AssertionError: width.txt says '7', expected '3'
+```
+
+Relay has already claimed this signal for you under the session token `a7ab4d6d04354dc0bdf966dd5deef51b`: `python3 scripts/relay-board.py --board .switchboard signals` lists the board's signals and shows the claim. Nobody else will take it while you hold it.
+
+How this ends, in the order you should try:
+1. Fix the cause and run the check until the signal resolves. It resolves on 2 consecutive passing executions of that key and on nothing else, so run it that many times.
+2. If the failure is not the code's fault and you can *show* that it is not: `python3 scripts/relay-board.py --board .switchboard signals dismiss unittest:test_width.WidthTests.test_three --reason environmental|flaky-known --comment '<what you checked>' --until <YYYY-MM-DD, at most a week out>`.
+3. If you cannot fix it, say so out loud rather than leaving it: `python3 scripts/relay-board.py --board .switchboard signals release unittest:test_width.WidthTests.test_three --reason gave-up --as a7ab4d6d04354dc0bdf966dd5deef51b`, which files it as a bug card for a person. Then report what you tried and what you believe is wrong.
+
+House rules for this checkout (they are the owner's, in CLAUDE.md and WARP.md — read both before you write anything):
+- Commit only through `python3 scripts/land.py begin <name> <paths>` and `python3 scripts/land.py commit <name> -m "…"`. Never `git add`, `git commit`, `git stash`, `git checkout` or `git reset`: several sessions share this working tree.
+- Claim the paths immediately before you edit them and dry-run every commit (`commit --dry-run`): a stale snapshot lands somebody else's work.
+- `python3 scripts/land.py who` says which paths other live sessions hold. If your fix needs one of them, do not edit it — release the signal with reason `gave-up`, naming the file and the session, and let a person decide.
+- Build through `scripts/relay-build`, never `cmake --build`. Run the targeted tests for what you changed, never a whole suite.
+
+You were started by Relay, not by a person, and nobody is watching this run: do not ask questions, and do not do anything the fault does not need.
+== waiting up to 60s for the thread's agent to stop
+EVENT {"event": "signal_thread", "key": "unittest:test_width.WidthTests.test_three", "outcome": "fixed", "session_id": "", "state": "finished", "thread_id": "a7ab4d6d04354dc0bdf966dd5deef51b"}
+   subagent status=done after 2s
+   its report: 'Fixed: width.txt said 7, the test wants 3.'
+   width.txt is now '3'
+== the worker finishes the thread by itself: it runs the check, and the check decides
+     r1                             fail
+     r2                             fail
+     20260920T222054Z-87b5          pass
+     20260920T222054Z-0717          pass
+   signal is now resolved card='' session='' green_streak=2
+== the signal log
+   {"action": "claim", "key": "unittest:test_width.WidthTests.test_three", "session": "a7ab4d6d04354dc0bdf966dd5deef51b", "ts": "2026-09-20T22:20:54Z", "v": 1}
+   {"action": "run", "run_id": "20260920T222054Z-87b5", "session": "", "ts": "2026-09-20T22:20:54Z", "v": 1}
+   {"action": "run", "run_id": "20260920T222054Z-0717", "session": "", "ts": "2026-09-20T22:20:54Z", "v": 1}
+   {"action": "release", "key": "unittest:test_width.WidthTests.test_three", "reason": "fixed", "session": "a7ab4d6d04354dc0bdf966dd5deef51b", "ts": "2026-09-20T22:20:54Z", "v": 1}
+== the thread file (what the Sessions manager and the ⓘ view read)
+   {"description": "unittest:test_width.WidthTests.test_three", "id": "a7ab4d6d04354dc0bdf966dd5deef51b", "model": "bonsai-2-27b", "runs": 1, "signal": "unittest:test_width.WidthTests.test_three", "status": "done", "title": "unittest:test_width.WidthTests.test_three", "type": "signal"}
+== every signal_thread event, in order
+   {"event": "signal_thread", "key": "unittest:test_width.WidthTests.test_three", "session_id": "", "state": "started", "thread_id": "a7ab4d6d04354dc0bdf966dd5deef51b"}
+   {"event": "signal_thread", "key": "unittest:test_width.WidthTests.test_three", "outcome": "fixed", "session_id": "", "state": "finished", "thread_id": "a7ab4d6d04354dc0bdf966dd5deef51b"}
+== the board's bugs tab
+   0 card(s): []
+
+agent: scripted provider (4 steps, real tools)
+project kept at /tmp/aq6x-loop-4lktm4iq/proj

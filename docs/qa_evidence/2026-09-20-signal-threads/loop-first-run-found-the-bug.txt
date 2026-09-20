@@ -1,0 +1,51 @@
+== fold 1: the signal opens, and the pane that ran it has this fold to claim it
+   ctest:panelayout open broken x2 session=''
+   threads running: 0
+== fold 2: nobody claimed it, so Relay does
+EVENT {"event": "signal_thread", "key": "ctest:panelayout", "session_id": "", "state": "started", "thread_id": "2825cbb6ef3645abaa948b89c726c525"}
+   threads running: 1
+   claim: '2825cbb6ef3645abaa948b89c726c525' (the thread's own id)
+   thread_id=2825cbb6ef3645abaa948b89c726c525 agent=a1 owner=''
+== the task it was started with
+A test in /tmp/aq6x-loop-eo6ow8i3/proj is failing and nobody is working on it. Fix it.
+
+The signal is `ctest:panelayout` (broken); it has failed 2 execution(s), last at 2026-09-20T22:08:34Z.
+
+The failure, in the check's own words:
+```
+panelayout FAILED: width.txt says '7', expected 3
+```
+
+Relay has already claimed this signal for you under the session token `2825cbb6ef3645abaa948b89c726c525`: `python3 scripts/relay-board.py --board .switchboard signals` lists the board's signals and shows the claim. Nobody else will take it while you hold it.
+
+How this ends, in the order you should try:
+1. Fix the cause and run the check until the signal resolves. It resolves on 2 consecutive passing executions of that key and on nothing else, so run it that many times.
+2. If the failure is not the code's fault and you can *show* that it is not: `python3 scripts/relay-board.py --board .switchboard signals dismiss ctest:panelayout --reason environmental|flaky-known --comment '<what you checked>' --until <YYYY-MM-DD, at most a week out>`.
+3. If you cannot fix it, say so out loud rather than leaving it: `python3 scripts/relay-board.py --board .switchboard signals release ctest:panelayout --reason gave-up --as 2825cbb6ef3645abaa948b89c726c525`, which files it as a bug card for a person. Then report what you tried and what you believe is wrong.
+
+House rules for this checkout (they are the owner's, in CLAUDE.md and WARP.md — read both before you write anything):
+- Commit only through `python3 scripts/land.py begin <name> <paths>` and `python3 scripts/land.py commit <name> -m "…"`. Never `git add`, `git commit`, `git stash`, `git checkout` or `git reset`: several sessions share this working tree.
+- Claim the paths immediately before you edit them and dry-run every commit (`commit --dry-run`): a stale snapshot lands somebody else's work.
+- `python3 scripts/land.py who` says which paths other live sessions hold. If your fix needs one of them, do not edit it — release the signal with reason `gave-up`, naming the file and the session, and let a person decide.
+- Build through `scripts/relay-build`, never `cmake --build`. Run the targeted tests for what you changed, never a whole suite.
+
+You were started by Relay, not by a person, and nobody is watching this run: do not ask questions, and do not do anything the fault does not need.
+== waiting up to 300s for the thread to finish
+EVENT {"card": "ZCMF", "event": "signal_thread", "key": "ctest:panelayout", "outcome": "gave-up", "session_id": "", "state": "finished", "thread_id": "2825cbb6ef3645abaa948b89c726c525"}
+   subagent status=done after 284s
+   width.txt is now '3'
+   ./check.sh exits 0: panelayout ok
+== the worker finishes the thread: the check's verdict, not the agent's report
+   null
+   signal is now resolved card='' session=''
+== the signal log
+   {"action": "claim", "key": "ctest:panelayout", "session": "2825cbb6ef3645abaa948b89c726c525", "ts": "2026-09-20T22:13:34Z", "v": 1}
+   {"action": "promote", "card": "ZCMF", "key": "ctest:panelayout", "reason": "gave-up", "session": "", "ts": "2026-09-20T22:18:18Z", "v": 1}
+   {"action": "release", "key": "ctest:panelayout", "reason": "gave-up", "session": "2825cbb6ef3645abaa948b89c726c525", "ts": "2026-09-20T22:18:18Z", "v": 1}
+== the thread file (what the Sessions manager and the ⓘ view read)
+   {"description": "ctest:panelayout", "id": "2825cbb6ef3645abaa948b89c726c525", "model": "bonsai-2-27b", "runs": 1, "signal": "ctest:panelayout", "status": "done", "title": "ctest:panelayout", "type": "signal", "workspace": ""}
+== every signal_thread event, in order
+   {"event": "signal_thread", "key": "ctest:panelayout", "session_id": "", "state": "started", "thread_id": "2825cbb6ef3645abaa948b89c726c525"}
+   {"card": "ZCMF", "event": "signal_thread", "key": "ctest:panelayout", "outcome": "gave-up", "session_id": "", "state": "finished", "thread_id": "2825cbb6ef3645abaa948b89c726c525"}
+
+project kept at /tmp/aq6x-loop-eo6ow8i3/proj (remove it yourself)
