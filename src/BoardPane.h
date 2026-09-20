@@ -286,6 +286,14 @@ private:
     void showNotice(const QString &text, bool error, const QString &undoWriteId = QString());
     void placeNotice();
     void watchIssues();
+    // Ask the worker about the filter's plain words (#7M6E). Debounced by `m_searchTimer`;
+    // `startSearch` restarts it, `sendSearch` is what fires. Nothing is sent for a filter with
+    // no plain words in it — the scoped terms are answered here, from the rows.
+    void startSearch();
+    void sendSearch();
+    // The pane's own empty area. `retry` puts a Retry button under the words, which nothing but
+    // a worker failure does; every other state clears it.
+    void setEmptyText(const QString &text, bool retry = false);
     void showProblems(const QJsonArray &problems);
     void step(int delta);                  // Up/Down, across section breaks
     void reorder(int delta);               // Alt+Shift+Up/Down, inside the section
@@ -461,6 +469,19 @@ private:
     // all reach the pane the same way (protocol 19.2, board_refresh).
     QFileSystemWatcher *m_watcher = nullptr;
     QTimer *m_refresh = nullptr;
+    // The filter bar's plain words, asked of the worker (#7M6E, `board_search`): the rows no
+    // longer carry each card's text, so the words go down the pipe instead of scanning 2.2 MB on
+    // this thread per keystroke. Debounced, so typing never queues a search per key, and only
+    // the newest request id is believed, so an answer that arrives out of order is dropped.
+    QTimer *m_searchTimer = nullptr;
+    QString m_searchRequest;        // the request id of the search in flight, or empty
+    QString m_searchAsked;          // the words that request asks about
+    // What the worker last said about itself when it was not a card event: a crash, an overflow
+    // or an exit. It goes in the pane's own empty area, with a Retry, when the board has never
+    // loaded — the status bar it used to go to is not shown in this layout (#7M6E).
+    QString m_workerError;
+    QWidget *m_emptyRetryRow = nullptr;
+    QStringList m_emptySections;    // the section names the empty board draws its jacks from
 };
 
 }  // namespace relay

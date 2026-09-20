@@ -797,6 +797,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-boardpane-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardpane COMMAND relay-boardpane-tests)
     set_tests_properties(boardpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(relay-boardfilter-tests tests/boardfilter_test.cpp)
+    target_link_libraries(relay-boardfilter-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardfilter COMMAND relay-boardfilter-tests)
+    set_tests_properties(boardfilter PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The project model: candidate projects, the board folder, the key the backend's workspace
     # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
     add_executable(relay-projects-tests tests/projects_test.cpp)

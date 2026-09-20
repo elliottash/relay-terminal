@@ -196,6 +196,7 @@ private slots:
     void rankOrdersASectionAndDoneIsNewestFirst();
     void timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip();
     void theFilterLanguageMatchesEveryTerm();
+    void theWorkerAnswersThePlainWordsOfTheFilter();
     void theFilterHidesEmptySectionsAndUnfoldsTheRest();
     void searchRanksOpenCardsAndExactIdsFirst();
     void upsertAndRemoveKeepTheBoardInStep();
@@ -517,6 +518,56 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     QVERIFY(!Model::matches(card, QStringLiteral("label:voice @dana")));
     QVERIFY(Model::matches(card, QStringLiteral("label:voice hotline")));
     QVERIFY(!Model::matches(card, QStringLiteral("label:voice clickable")));
+}
+
+void BoardModelTests::theWorkerAnswersThePlainWordsOfTheFilter()
+{
+    // #7M6E: the card's text stopped riding on every row, so the plain words are asked of the
+    // worker (`board_search`) and the scoped terms stay here. Same language, same answers.
+    using relay::board::Model;
+    QCOMPARE(Model::plainTerms(QString()), QStringList{});
+    QCOMPARE(Model::plainTerms(QStringLiteral("label:voice status:ready @agent #K7Q2 waiting:me "
+                                              "folder:changes")),
+             QStringList{});
+    QCOMPARE(Model::plainTerms(QStringLiteral("label:voice hotline  dana")),
+             (QStringList{QStringLiteral("hotline"), QStringLiteral("dana")}));
+
+    Card card;
+    card.id = QStringLiteral("K7Q2");
+    card.title = QStringLiteral("Voice transcription mode");
+    card.status = QStringLiteral("ready");
+    card.labels = QStringList{QStringLiteral("voice")};
+    // Nothing on the row says "hotline": the word is in the card's body, which only the worker
+    // has now, and `card.text` is empty from a current worker.
+    const QSet<QString> matched{QStringLiteral("K7Q2")};
+    const QSet<QString> none;
+    QVERIFY(Model::matches(card, QStringLiteral("hotline"), &matched));
+    QVERIFY(!Model::matches(card, QStringLiteral("hotline"), &none));
+    // The scoped terms are still decided here, and they compose with the worker's answer.
+    QVERIFY(Model::matches(card, QStringLiteral("status:ready hotline"), &matched));
+    QVERIFY(!Model::matches(card, QStringLiteral("status:inbox hotline"), &matched));
+    QVERIFY(!Model::matches(card, QStringLiteral("status:ready hotline"), &none));
+    // An all-scoped filter needs no answer at all: an empty id set must not hide it.
+    QVERIFY(Model::matches(card, QStringLiteral("status:ready"), &none));
+    QVERIFY(Model::matches(card, QString(), &none));
+
+    // The model holds one answer and uses it only for the words it answers. Until the answer for
+    // what is in the box arrives, the row's own fields decide — so a title match is instant.
+    Model model;
+    model.setConfig(config());
+    QJsonObject object = row("K7Q2", "ready", "features");
+    object.insert(QStringLiteral("title"), QStringLiteral("Voice transcription mode"));
+    model.reset(QJsonArray{object});
+    model.setFilter(QStringLiteral("hotline"));
+    QCOMPARE(model.openCount(), 0);                 // no field holds it, no answer yet
+    model.setSearchResult(QStringLiteral("hotline"), matched);
+    QCOMPARE(model.openCount(), 1);
+    model.setFilter(QStringLiteral("hotline t"));   // another keystroke: the answer is stale
+    QCOMPARE(model.openCount(), 0);
+    model.setFilter(QStringLiteral("transcription"));
+    QCOMPARE(model.openCount(), 1);                 // the title, without waiting for the worker
+    model.setSearchResult(QStringLiteral("transcription"), none);
+    QCOMPARE(model.openCount(), 0);                 // and the worker's word is final
 }
 
 void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()

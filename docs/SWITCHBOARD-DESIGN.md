@@ -320,9 +320,15 @@ has the pane to itself.
 left out, the counts follow, and nothing is folded while a filter is active — a search that hid
 its own matches would be a search that does nothing. The tokens are `label:`, `status:`,
 `folder:`, `@assignee`, `waiting:`, `#ID` and words. A word is full-text search (2026-09-19): it
-matches the row's own fields and the card's whole text — body and thread, which the worker sends
-on each row as `text`, capped at 64 KiB (protocol 19.2) — so a phrase remembered from the
-request, a decision or a comment finds its card.
+matches the row's own fields and the card's whole text — body and thread — so a phrase remembered
+from the request, a decision or a comment finds its card.
+
+The scoped tokens are decided in the pane, from the rows it already has; the words are asked of
+the worker, which holds the text (`board_search`, protocol 19.2). Until 2026-09-20 every row
+carried its card's whole text for this, which was 92.6 % of the board event's bytes and stopped
+the pane loading at all above about 1,160 cards (#7M6E). The pane redraws on the keystroke from
+the fields alone and the worker's answer — a round trip of about a millisecond, debounced —
+settles it, so a title match is instant and a body match arrives a moment behind it.
 
 ### 4.7 The tools are the top of the list page, not the pane's header (owner, 2026-09-18)
 

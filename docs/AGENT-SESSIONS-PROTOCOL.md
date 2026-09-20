@@ -2157,7 +2157,7 @@ directory Relay was launched from. Re-pointing a worker at another board forgets
 conversation, the row snapshot and the initialize-this-project answer of the one it left.
 
 **Every `board_*` event carries `root`**, the string of that `issues/` directory: `board`,
-`board_changed`, `board_card`, `board_written`, `board_undone`, `board_problems`,
+`board_changed`, `board_cards`, `board_search`, `board_card`, `board_written`, `board_undone`, `board_problems`,
 `board_thread_appended`, `board_activity`, `board_cleanup_started` and `board_cleanup_summary`.
 A GUI with more than one project open routes by it instead of assuming an event belongs to whichever
 board it asked about last. (`board` also carries `workspace`, the project root.)
@@ -2176,8 +2176,9 @@ no key — that window used to show "Loading the Switchboard…" forever.
 
 | Message | Reply |
 |---|---|
-| `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], problems}` |
-| `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
+| `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], cards_total, more, problems}`, then a `board_cards` per further batch |
+| `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}`, then a `board_cards` per further batch |
+| `board_search {id?, query}` | `board_search {id, root, query, ids: [card_id]}` |
 | `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
 
@@ -2188,7 +2189,7 @@ no table of its own.
 
 A **row** is `{id, title, type, status, section, tab, labels, assignee, waiting_on, rank, private,
 priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
-implemented_by, verified_by, session, text}` — enough to draw a card without reading the file.
+implemented_by, verified_by, session}` — enough to draw a card without reading the file.
 `session` (2026-09-20, #R9G7) is the pane session token holding the card (19.19): the pane draws
 its first eight characters as a chip that reveals that pane, and an agent's `board_list` sees from
 the row alone that a card is taken. `implemented_by` and `verified_by` are the signatures of 19.15,
@@ -2210,12 +2211,32 @@ file it is `priority:` in the front matter, written only when nonzero.
 file's if that is later — as an ISO UTC timestamp. The pane's **Recently updated** sort keys on
 it (a GUI talking to an older worker gets none and falls back to `created`).
 
-`text` (2026-09-19) is the card's whole searchable text — its body, then each thread entry's
-author, kind and words — capped at `board_protocol.MAX_ROW_TEXT` (64 KiB), so the pane's filter
-bar is full-text search rather than a title search. The entry headers' metadata is left out on
-purpose: `pane=switchboard` sits in every header, so the word "switchboard" would otherwise match
-every card with a thread. Only the GUI's rows carry it (`board_open`, `board_changed` upserts);
-`board_list`'s rows go to an agent's tool result and stay light.
+**`board_search {query}`** (2026-09-20, #7M6E) is the pane's filter bar. `query` is the filter's
+**plain words** — everything in the box that is not `label:`, `status:`, `waiting:`, `folder:`,
+`@name` or `#ID`, which the pane answers from the rows it already has — and the answer is the ids
+of the cards that hold **every** one of them, case-insensitively, in the row's own fields
+(`id title labels assignee milestone`) **or** in the card's body and thread. The searchable text is
+its body, then each thread entry's author, kind and words, each capped at
+`board_protocol.MAX_ROW_TEXT` (64 KiB); the entry headers' metadata is left out on purpose, because
+`pane=switchboard` sits in every header and the word "switchboard" would otherwise match every card
+with a thread. The worker folds it once, when it parses the card, and keeps it — so a search costs
+about 1 ms at 337 cards and 5 ms at 3,000.
+
+A row carried that whole text as `text` from 2026-09-19 until 2026-09-20, for one substring test in
+the GUI. It was **92.6 % of the `board` event's bytes** (7,211 B a card), every filter keystroke
+scanned it on the GUI thread (30–80 ms), and past about **1,160 cards the event exceeded the 8 MiB
+read buffer in `src/BoardWorker.cpp` and the GUI killed the worker** — the pane then said "Loading
+the Switchboard…" for ever, with the only explanation going to a status bar this layout does not
+show. The filter is still full-text search (owner, 2026-09-19); only the scan moved. A GUI too old
+to send `board_search` gets no `text` and filters on the row's fields alone.
+
+**`board_cards {id?, root, rev, cards: [row], more}`** (2026-09-20, #7M6E) is the rest of a `board`
+or `board_changed` whose rows do not fit one message: at most
+`board_protocol.MAX_ROWS_PER_MESSAGE` (400) rows and `MAX_ROW_BYTES_PER_MESSAGE` (512 KiB) of them
+per message, so no board size can reach that buffer cap. The first batch rides on the `board` or
+`board_changed` itself — which also carries `cards_total` and `more` — and the pane patches each
+further batch in exactly as it patches an upsert, redrawing when `more` is false. A worker that
+sends everything in one message is still understood: `more` simply never appears.
 
 `issue` on `board_card` is the text of the card's own-words section and `issue_heading` the spelling
 that card uses for it — `Issue` since 2026-09-18, `Request` on a card filed before that (both are

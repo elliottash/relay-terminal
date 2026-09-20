@@ -1442,6 +1442,32 @@ QStringList Model::allIds() const
 void Model::setFilter(const QString &text)
 {
     m_filter = text.trimmed();
+    m_plainTerms = plainTerms(m_filter).join(QLatin1Char(' '));
+}
+
+// Which of a filter's terms the worker answers. Everything with a scope on it — `label:`,
+// `status:`, `waiting:`, `folder:`, `@name`, `#ID` — is decided here from the row, which is why
+// a `status:` term has always been free; the plain words are the ones that used to scan every
+// card's text on the GUI thread, 30–80 ms a keystroke (#7M6E).
+QStringList Model::plainTerms(const QString &filter)
+{
+    QStringList out;
+    const QStringList terms = filter.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString &raw : terms) {
+        const QString term = raw.trimmed();
+        if (term.isEmpty() || term.startsWith(QLatin1Char('@')) || term.startsWith(QLatin1Char('#'))
+            || term.startsWith(QStringLiteral("label:")) || term.startsWith(QStringLiteral("status:"))
+            || term.startsWith(QStringLiteral("waiting:")) || term.startsWith(QStringLiteral("folder:")))
+            continue;
+        out << term;
+    }
+    return out;
+}
+
+void Model::setSearchResult(const QString &terms, const QSet<QString> &ids)
+{
+    m_searchTerms = terms;
+    m_searchIds = ids;
 }
 
 // The text filter and the label chips ask their questions together: this is the one gate every
@@ -1454,14 +1480,20 @@ bool Model::shown(const Card &card) const
             if (!containsCaseless(card.labels, label))
                 return false;
     }
-    return matches(card, m_filter);
+    // The worker's answer only while it answers the words that are in the box: one more keystroke
+    // and it is a query out of date, and the fields decide until the next one lands (#7M6E).
+    const bool current = !m_plainTerms.isEmpty() && m_searchTerms == m_plainTerms;
+    return matches(card, m_filter, current ? &m_searchIds : nullptr);
 }
 
-bool Model::matches(const Card &card, const QString &filter)
+bool Model::matches(const Card &card, const QString &filter, const QSet<QString> *textMatch)
 {
     const QString trimmed = filter.trimmed();
     if (trimmed.isEmpty())
         return true;
+    // Every plain word is the worker's to answer when it has answered them (see the header): all
+    // of them or none, because its id set is the conjunction, not one term's.
+    bool plain = false;
     const QStringList terms = trimmed.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     for (const QString &raw : terms) {
         const QString term = raw.trimmed();
@@ -1491,6 +1523,8 @@ bool Model::matches(const Card &card, const QString &filter)
         } else if (term.startsWith(QLatin1Char('#'))) {
             if (card.id.compare(term.mid(1), Qt::CaseInsensitive) != 0)
                 return false;
+        } else if (textMatch) {
+            plain = true;   // the worker is answering this word, with all the others
         } else {
             const QString haystack = card.id + QLatin1Char(' ') + card.title + QLatin1Char(' ')
                                      + card.labels.join(QLatin1Char(' ')) + QLatin1Char(' ')
@@ -1503,7 +1537,7 @@ bool Model::matches(const Card &card, const QString &filter)
                 return false;
         }
     }
-    return true;
+    return !plain || textMatch->contains(card.id);
 }
 
 int Model::score(const QString &query, const Card &card)

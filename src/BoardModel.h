@@ -42,10 +42,13 @@ struct Card {
     // wins over the status for as long as that column exists, so a parked card stays put while
     // its stage moves underneath it, and the drop that takes it out clears it.
     QString section;
-    // The card's whole text — body, then each thread entry — sent by the worker (protocol 19.2
-    // `text`, capped at 64 KiB there) so the filter's plain words search the whole card, not
-    // only the title (owner, 2026-09-19: "switchboard filter bar should be full text search").
-    // Not for drawing: the card detail reads the real body.
+    // The card's whole text — body, then each thread entry — as the worker used to send it on
+    // every row (protocol 19.2 `text`) for the filter's plain words. It stopped sending it on
+    // 2026-09-20 (#7M6E): it was 92.6 % of the `board` event and past about 1,160 cards the
+    // event overflowed the worker pipe's read buffer, so the pane never loaded at all. The
+    // filter is still full-text search (owner, 2026-09-19) — `board_search` answers the plain
+    // words in the worker now (see `matches` below). Empty from a current worker, filled by an
+    // older one, and then `matches` searches it exactly as it always did.
     QString text;
     QString type = QStringLiteral("work");
     QStringList labels;
@@ -390,8 +393,25 @@ public:
     // way `label:` terms do. Labels compare case-insensitively, as the filter terms do.
     void setLabelFilter(const QSet<QString> &labels) { m_labelFilter = labels; }
     QSet<QString> labelFilter() const { return m_labelFilter; }
+    // The filter's plain words — every term that is not `label:`, `status:`, `waiting:`,
+    // `folder:`, `@` or `#` — in the order they were typed. These, and only these, are what the
+    // worker answers (`board_search`); an all-scoped filter needs no search at all.
+    static QStringList plainTerms(const QString &filter);
     // `label:voice status:ready folder:changes @agent waiting:me some words`; every term matches.
-    static bool matches(const Card &card, const QString &filter);
+    //
+    // `textMatch` is the worker's answer for `plainTerms(filter)`: the ids whose row fields, body
+    // or thread hold every one of those words. Null means no answer for *this* filter has
+    // arrived yet, and then a plain word is judged on the row's own fields (and `card.text`, for
+    // an older worker that still sends it), so a title match shows the instant it is typed and
+    // the body matches join it a moment later.
+    static bool matches(const Card &card, const QString &filter,
+                        const QSet<QString> *textMatch = nullptr);
+    // The worker's `board_search` answer (#7M6E). `terms` is the query it answers, which is
+    // `plainTerms(filter).join(' ')`; an answer for anything else is held but not used, so a
+    // superseded search never filters the list by the wrong words.
+    void setSearchResult(const QString &terms, const QSet<QString> &ids);
+    // What the held answer answers, for the pane's debounce (empty when there is none).
+    QString searchTerms() const { return m_searchTerms; }
     // Fuzzy ranking for the composer's `#` picker and the pane's search, best first.
     QList<Card> search(const QString &query, int limit = 20) const;
     static int score(const QString &query, const Card &card);
@@ -410,6 +430,12 @@ private:
     QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
     QString m_filter;
+    // The plain words of `m_filter`, and the worker's answer for them (#7M6E). The answer is
+    // used only while `m_searchTerms` still equals `m_plainTerms`: the moment another key is
+    // typed the held ids are one query out of date, and the fields alone answer until the new
+    // one lands.
+    QString m_plainTerms, m_searchTerms;
+    QSet<QString> m_searchIds;
     QSet<QString> m_labelFilter;
     Sort m_sort = Sort::Manual;
 };

@@ -3204,6 +3204,30 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_empty->setWordWrap(true);
     layout->addWidget(m_empty, 1);
 
+    // Under those words when — and only when — the worker has failed (#7M6E): the board that
+    // never loaded used to say "Loading the Switchboard…" for ever, because the one place the
+    // failure was reported was a status bar this layout does not show. The button is the same
+    // `board_open` the pane opens with, and the window starts a fresh worker for it.
+    m_emptyRetryRow = new QWidget(this);
+    m_emptyRetryRow->setObjectName(QStringLiteral("boardEmptyRetry"));
+    auto *retryRow = new QHBoxLayout(m_emptyRetryRow);
+    retryRow->setContentsMargins(0, 0, 0, 14);
+    auto *retry = new QToolButton(m_emptyRetryRow);
+    retry->setObjectName(QStringLiteral("boardAddButton"));   // the pane's own button styling
+    retry->setText(QStringLiteral("Retry"));
+    retry->setCursor(Qt::PointingHandCursor);
+    retry->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    connect(retry, &QToolButton::clicked, this, [this] {
+        m_workerError.clear();
+        rebuild();
+        reload();
+    });
+    retryRow->addStretch(1);
+    retryRow->addWidget(retry);
+    retryRow->addStretch(1);
+    m_emptyRetryRow->hide();
+    layout->addWidget(m_emptyRetryRow);
+
     // The gear's page. A sibling of the splitter rather than a window over it (owner: new
     // surfaces are panes, not floating strips), shown in its place and gone again on Save or
     // Cancel — the pane keeps its size and its place in the window either way.
@@ -3501,7 +3525,12 @@ void BoardView::buildListTools(QVBoxLayout *layout)
 
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) {
         m_model.setFilter(text);
+        // The list redraws on this keystroke from the rows alone — the scoped terms and the
+        // fields — and the worker's answer about the card bodies settles it a moment later
+        // (#7M6E). The rows stopped carrying each card's text, which was 2.2 MB scanned on this
+        // thread per key.
         rebuild();
+        startSearch();
     });
     connect(m_add, &QToolButton::clicked, this, [this] {
         if (onHint)
@@ -3835,6 +3864,9 @@ void BoardView::syncSectionChecks()
         titles << section.title;
     }
     // The empty board draws one unlit jack per section under these names (EmptyBoard, above).
+    // Kept as well as set: `setEmptyText` takes them off again for a worker failure, where a row
+    // of jacks under the bad news would read as decoration (#7M6E).
+    m_emptySections = titles;
     static_cast<EmptyBoard *>(m_empty)->setSections(titles);
     // The names as well as the ids: renaming a section in the gear leaves the ids exactly as they
     // were, and comparing those alone left a box reading "Ready to start" under a header that
@@ -3973,6 +4005,49 @@ void BoardView::watchIssues()
         m_watcher->addPaths(fresh);
 }
 
+// The filter bar's plain words, asked of the worker (#7M6E, protocol 19.2 `board_search`).
+//
+// Each card's whole body and thread used to ride on every row for one substring test here: it
+// was 92.6 % of the `board` event's bytes, it overflowed the worker pipe's read buffer past
+// about 1,160 cards — the pane then said "Loading the Switchboard…" for ever — and every
+// keystroke scanned 2.2 MB on the GUI thread (30–80 ms). The worker already holds the text, so
+// the words go to it and only the matching ids come back.
+//
+// Debounced rather than sent per key, so a burst of typing is one question, and only the newest
+// request is believed: an answer for anything else is a superseded search and is dropped. The
+// scoped terms (`status:`, `label:`, `@`, …) never leave this side, so they still cost nothing.
+void BoardView::startSearch()
+{
+    if (!m_searchTimer) {
+        m_searchTimer = new QTimer(this);
+        m_searchTimer->setSingleShot(true);
+        m_searchTimer->setInterval(120);
+        connect(m_searchTimer, &QTimer::timeout, this, [this] { sendSearch(); });
+    }
+    if (board::Model::plainTerms(m_filter->text()).isEmpty()) {
+        // Nothing for the worker to answer: an empty box, or a filter that is all scoped terms.
+        m_searchTimer->stop();
+        m_searchRequest.clear();
+        m_searchAsked.clear();
+        return;
+    }
+    m_searchTimer->start();
+}
+
+void BoardView::sendSearch()
+{
+    const QString terms = board::Model::plainTerms(m_filter->text()).join(QLatin1Char(' '));
+    if (terms.isEmpty())
+        return;
+    // Asked again for the same words when the cards change, which is why the answer is not
+    // cached here: a card file edited under a live filter has to join or leave the list.
+    m_searchAsked = terms;
+    m_searchRequest = nextRequestId();
+    send({{QStringLiteral("id"), m_searchRequest},
+          {QStringLiteral("type"), QStringLiteral("board_search")},
+          {QStringLiteral("query"), terms}});
+}
+
 QString BoardView::nextRequestId()
 {
     return m_requestPrefix + QString::number(++m_requestSeq);
@@ -3989,6 +4064,17 @@ void BoardView::send(QJsonObject message)
 void BoardView::reload()
 {
     send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+}
+
+// The words in the pane's own empty area, and whether a Retry sits under them. Only a worker
+// failure gets the button (#7M6E); "Loading…" and "No cards yet." are states, not faults.
+void BoardView::setEmptyText(const QString &text, bool retry)
+{
+    m_empty->setText(text);
+    // The rings belong to a board with no cards, not to a failure: an error with a row of unlit
+    // jacks under it reads as decoration over bad news.
+    static_cast<EmptyBoard *>(m_empty)->setSections(retry ? QStringList() : m_emptySections);
+    m_emptyRetryRow->setVisible(retry && m_empty->isVisible());
 }
 
 // "Switchboard · 84 open": the number the pane is actually about, not every card ever filed.
@@ -4103,8 +4189,53 @@ void BoardView::handleEvent(const QJsonObject &event)
         rebuildModelBox();
         return;
     }
+    // The worker said something about itself: it died, its pipe overflowed, it would not start.
+    // Until 2026-09-20 this only ever reached `statusBar()->showMessage`, which this layout does
+    // not show, so a Switchboard that never loaded said "Loading the Switchboard…" for ever
+    // (#7M6E). A board that *is* on screen keeps its cards and gets the ordinary error notice.
+    if (type == QStringLiteral("board_worker_status")) {
+        const QString text = event.value(QStringLiteral("text")).toString();
+        if (text.isEmpty())
+            return;
+        if (m_open) {
+            showNotice(text, true);
+        } else {
+            m_workerError = text;
+            rebuild();
+        }
+        return;
+    }
+    // The rest of a chunked `board_open`, or of a `board_changed` too big for one message
+    // (#7M6E): rows to patch in, exactly as an upsert is.
+    if (type == QStringLiteral("board_cards")) {
+        const QJsonArray cards = event.value(QStringLiteral("cards")).toArray();
+        m_model.upsert(cards);
+        // Redraw when the last batch lands, not on each: the first batch is already on screen,
+        // and a refill per batch would cost a full list rebuild for every 400 cards.
+        if (!event.value(QStringLiteral("more")).toBool()) {
+            rebuild();
+            if (onTitleChanged)
+                onTitleChanged(title());
+        }
+        return;
+    }
+    // The worker's answer about the filter's plain words (#7M6E). Only the newest question is
+    // believed: anything else is a search the box has already moved past.
+    if (type == QStringLiteral("board_search") && mine) {
+        if (requestId != m_searchRequest)
+            return;
+        QSet<QString> ids;
+        const QJsonArray found = event.value(QStringLiteral("ids")).toArray();
+        ids.reserve(found.size());
+        for (const QJsonValue &value : found)
+            ids.insert(value.toString());
+        m_model.setSearchResult(event.value(QStringLiteral("query")).toString(), ids);
+        rebuild();
+        return;
+    }
     if (type == QStringLiteral("board")) {
         m_open = true;
+        m_workerError.clear();
         // The page agent's conversation rides on this event (19.18), so a pane opened while the
         // agent is half way through an answer draws the panel — history, queue and all — from it.
         if (m_chat) {
@@ -4119,6 +4250,9 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_pendingDeletes.clear();
         const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
         rebuild();
+        // A pane reopened with words already in its filter asks about them again: the answer it
+        // holds is about the cards of a moment ago (#7M6E).
+        startSearch();
         if (hadFocus)
             focusInput();
         showProblems(event.value(QStringLiteral("problems")).toArray());
@@ -4152,6 +4286,10 @@ void BoardView::handleEvent(const QJsonObject &event)
             removed << value.toString();
         m_model.remove(removed);
         rebuild();
+        // The cards moved under a live filter, so the worker is asked about its words again:
+        // a card whose body now holds them has to join the list, and one whose body no longer
+        // does has to leave it (#7M6E). Debounced, so a storm of writes is one search.
+        startSearch();
         if (onTitleChanged)
             onTitleChanged(title());
         // A card that is open stays in step with its file; other cards' changes leave it alone.
@@ -4716,15 +4854,23 @@ void BoardView::rebuild()
     updateCounts();
 
     const bool empty = m_model.total() == 0;
-    if (!m_open)
-        m_empty->setText(QStringLiteral("Loading the Switchboard…"));
+    if (!m_open && !m_workerError.isEmpty())
+        // The board never loaded and the worker said why (#7M6E). Here rather than in the status
+        // bar, which this layout does not show — so "Loading the Switchboard…" used to stay up
+        // for ever, which is what a board of more than about 1,160 cards did to it.
+        setEmptyText(m_workerError + QStringLiteral("\n\nThe cards are files; nothing has been "
+                                                    "lost."), true);
+    else if (!m_open)
+        setEmptyText(QStringLiteral("Loading the Switchboard…"));
     else
-        m_empty->setText(QStringLiteral("No cards yet.\n\nPress n or click “+ New card” to add the first one."));
+        setEmptyText(QStringLiteral("No cards yet.\n\nPress n or click “+ New card” to add the first one."));
     m_empty->setVisible(!m_open || empty);
+    m_emptyRetryRow->setVisible(m_empty->isVisible() && !m_workerError.isEmpty());
     m_splitter->setVisible(m_open && !empty);
     m_keys->setVisible(m_open && !empty);
     if (m_sectionsOpen) {        // the gear's page has the pane: a redraw must not push it off
         m_empty->hide();
+        m_emptyRetryRow->hide();
         m_splitter->hide();
         m_keys->hide();
     }
@@ -5134,6 +5280,7 @@ void BoardView::quickAddIn(const QString &columnId)
     if (m_model.total() == 0) {
         // The empty board hides the list; show it so the field has somewhere to go.
         m_empty->hide();
+        m_emptyRetryRow->hide();
         m_splitter->show();
     }
     QString id = columnId;

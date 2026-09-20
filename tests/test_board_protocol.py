@@ -4,6 +4,7 @@
 
 No model, no network, no keyring: `board_ask` runs against a stub supervisor.
 """
+import contextlib
 import json
 import os
 import subprocess
@@ -140,9 +141,11 @@ class OpenTests(ProtocolTest):
         board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
         row = board["cards"][0]
         for key in ("id", "title", "status", "tab", "labels", "assignee", "waiting_on", "rank",
-                    "thread_entries", "tasks_done", "tasks_total", "path", "created", "updated",
-                    "text"):
+                    "thread_entries", "tasks_done", "tasks_total", "path", "created", "updated"):
             self.assertIn(key, row)
+        # …and not the card's text, which stopped riding on every row on 2026-09-20 (#7M6E):
+        # it was 92.6 % of the event's bytes, and `board_search` answers the filter now.
+        self.assertNotIn("text", row)
 
     def test_a_row_says_when_the_card_last_changed(self):
         card_id = self.make_card()
@@ -158,38 +161,204 @@ class OpenTests(ProtocolTest):
         self.assertRegex(after, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
         self.assertGreater(after, first)
 
-    def test_a_row_carries_the_whole_card_for_the_panes_full_text_filter(self):
+    # ---- board_search: the pane's full-text filter, answered by the worker (19.2, #7M6E) ------
+    #
+    # These pin the semantics `src/BoardModel.cpp`'s `Model::matches` had while each card's whole
+    # text rode on every row: every word must match, case does not matter, and a word matches the
+    # row's own fields *or* the card's body and thread. Only the words come here — the pane still
+    # decides `status:`, `label:`, `folder:`, `@` and `#` from the row it already has.
+
+    def search(self, query):
+        self.send(type="board_open")
+        events = self.send(type="board_search", id="s1", query=query)
+        answer = [e for e in events if e["event"] == "board_search"]
+        self.assertTrue(answer, events)
+        self.assertEqual(answer[0]["id"], "s1")
+        self.assertEqual(answer[0]["query"], query)
+        return answer[0]["ids"]
+
+    def test_board_search_finds_a_word_in_the_body_and_in_the_thread(self):
         card_id = self.make_card(text="the composer eats the third bullet point")
-        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
-        row = next(r for r in board["cards"] if r["id"] == card_id)
-        # The body rides on the row…
-        self.assertIn("## Issue", row["text"])
-        self.assertIn("the composer eats the third bullet point", row["text"])
-        # …and so does the thread: its words, its author, its kind. The comment's own
-        # `board_changed` carries the upsert, so a live filter matches it without a refresh.
-        events = self.send(type="board_comment", id="c1", card=card_id, author="dana",
-                           kind="question", text="does it work offline?")
-        changed = [e for e in events if e["event"] == "board_changed"][-1]
-        row = next(r for r in changed["upserts"] if r["id"] == card_id)
-        self.assertIn("does it work offline?", row["text"])
-        self.assertIn("dana", row["text"])
-        self.assertIn("question", row["text"])
+        other = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.assertEqual(self.search("composer"), [card_id])
+        self.assertEqual(self.search("bullet"), [card_id])
+        # The thread's words, its author and its kind are searchable too.
+        self.send(type="board_comment", id="c1", card=card_id, author="dana",
+                  kind="question", text="does it work offline?")
+        self.assertEqual(self.search("offline"), [card_id])
+        self.assertEqual(self.search("dana"), [card_id])
+        self.assertEqual(self.search("question"), [card_id])
         # But not the entries' header metadata: `pane=switchboard` sits in every header, so the
         # word "switchboard" would otherwise match every card that has a thread.
-        self.assertNotIn("relay:entry", row["text"])
-        self.assertNotIn("pane=", row["text"])
+        self.assertEqual(self.search("relay:entry"), [])
+        self.assertEqual(self.search("pane="), [])
+        self.assertEqual(sorted(self.search("")), sorted([card_id, other]))
 
-    def test_the_rows_text_is_capped_so_the_board_message_stays_bounded(self):
+    def test_board_search_matches_the_rows_own_fields_too(self):
+        card_id = self.make_card(labels=["voice"])
+        self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        card = self.board.card_by_id(card_id)
+        card.set("assignee", "dana")
+        card.set("milestone", "beta")
+        self.board.save(card)
+        self.assertEqual(self.search("voice"), [card_id])       # a label
+        self.assertEqual(self.search("dana"), [card_id])        # the assignee
+        self.assertEqual(self.search("beta"), [card_id])        # the milestone
+        self.assertEqual(self.search(card_id), [card_id])       # the id
+        self.assertEqual(self.search("Voice mode"), [card_id])  # the title, two words
+
+    def test_board_search_is_case_insensitive_and_every_word_must_match(self):
+        card_id = self.make_card(text="the composer eats the third bullet point")
+        self.make_card(title="Composer height", text="nothing about lists here")
+        self.assertEqual(self.search("COMPOSER BULLET"), [card_id])
+        self.assertEqual(self.search("composer supercalifragilistic"), [])
+        self.assertEqual(len(self.search("composer")), 2)
+
+    def test_board_search_follows_the_cards_as_they_change(self):
+        card_id = self.make_card()
+        self.assertEqual(self.search("hotline"), [])
+        card = self.board.card_by_id(card_id)
+        card.body = card.body + "\n\ndana asked for a hotline\n"
+        self.board.save(card)
+        self.send(type="board_refresh")
+        self.assertEqual(self.search("hotline"), [card_id])
+
+    def test_the_searchable_text_is_capped_so_one_long_card_cannot_fill_the_worker(self):
         card_id = self.make_card()
         # Quick add refuses a text over 8000 characters, so a card long enough to test the cap
         # is written through the Board itself.
         card = self.board.card_by_id(card_id)
         card.body = "# Voice mode\n\n## Issue\n" + "a very long ask " * 100_000
         self.board.save(card)
-        board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
-        text = next(r for r in board["cards"] if r["id"] == card_id)["text"]
-        self.assertLessEqual(len(text), P.MAX_ROW_TEXT)
-        self.assertTrue(text.startswith("# Voice mode"))
+        self.send(type="board_open")
+        body, thread = self.commands._search_index[card_id]
+        self.assertLessEqual(len(body), P.MAX_ROW_TEXT + 200)   # + the row's own fields
+        self.assertLessEqual(len(thread), P.MAX_ROW_TEXT)
+        self.assertIn("a very long ask", body)
+
+    # ---- the rows travel in batches, so no board size reaches the GUI's buffer (#7M6E) --------
+
+    def test_board_open_sends_the_rows_in_batches_no_message_can_overflow(self):
+        for index in range(P.MAX_ROWS_PER_MESSAGE + 5):
+            self.send(type="board_create", tab="features", status="inbox",
+                      title=f"Card {index}", text=f"body {index}")
+        events = self.send(type="board_open", id="o1")
+        board = [e for e in events if e["event"] == "board"][0]
+        batches = [e for e in events if e["event"] == "board_cards"]
+        total = P.MAX_ROWS_PER_MESSAGE + 5
+        self.assertEqual(board["cards_total"], total)
+        self.assertTrue(board["more"])
+        self.assertEqual(len(board["cards"]), P.MAX_ROWS_PER_MESSAGE)
+        self.assertEqual(sum(len(e["cards"]) for e in batches), 5)
+        self.assertEqual(batches[-1]["more"], False)
+        for event in [board] + batches:
+            self.assertLessEqual(len(json.dumps(event)),
+                                 P.MAX_ROW_BYTES_PER_MESSAGE + 64 * 1024)
+        # Every card arrives exactly once, and every batch names the request and the revision.
+        seen = [c["id"] for c in board["cards"]] + [c["id"] for e in batches for c in e["cards"]]
+        self.assertEqual(len(seen), total)
+        self.assertEqual(len(set(seen)), total)
+        for event in batches:
+            self.assertEqual(event["id"], "o1")
+            self.assertEqual(event["rev"], board["rev"])
+            self.assertEqual(event["root"], board["root"])
+
+    # ---- a refresh re-parses only what changed (#7M6E, profile finding 6) --------------------
+
+    @contextlib.contextmanager
+    def parse_counts(self):
+        """How many card files and thread files were read and parsed inside the block.
+
+        Every `board_refresh` used to parse the whole tree *twice* — once for the rows and once
+        for `board.check()` in `_problems` — whatever had changed: 179 ms at 337 cards and
+        1,596 ms at 3,000, on every watcher tick.
+        """
+        counts = {"cards": 0, "threads": 0}
+        load, parse = B.Card.load, B.parse_thread
+
+        def counted_load(path):
+            counts["cards"] += 1
+            return load(path)
+
+        def counted_parse(text):
+            counts["threads"] += 1
+            return parse(text)
+
+        with unittest.mock.patch.object(B.Card, "load", counted_load), \
+                unittest.mock.patch.object(B, "parse_thread", counted_parse):
+            yield counts
+
+    def test_a_refresh_with_nothing_changed_parses_nothing(self):
+        self.make_card()
+        self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.send(type="board_open")
+        with self.parse_counts() as counts:
+            events = self.send(type="board_refresh")
+        self.assertEqual(counts, {"cards": 0, "threads": 0})
+        self.assertEqual(events[0]["upserts"], [])
+
+    def test_a_refresh_parses_the_one_card_that_changed(self):
+        first = self.make_card()
+        self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.send(type="board_open")
+        card = self.board.card_by_id(first)
+        card.set("assignee", "agent")
+        self.board.save(card)
+        with self.parse_counts() as counts:
+            events = self.send(type="board_refresh")
+        # Its thread is not touched: the body and the thread are cached against their own files.
+        self.assertEqual(counts, {"cards": 1, "threads": 0})
+        self.assertEqual([r["id"] for r in events[0]["upserts"]], [first])
+
+    def test_a_thread_append_re_parses_that_thread_and_nothing_else(self):
+        first = self.make_card()
+        self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.send(type="board_open")
+        self.board.append_thread(first, "a nudge", author="dana", kind="comment")
+        with self.parse_counts() as counts:
+            events = self.send(type="board_refresh")
+        # The thread is parsed once — for the row's count, its search text and its own
+        # `check_thread` problems together — and the one card it belongs to is re-read, because
+        # its row carries the entry count and the later of the two files' mtimes. The other
+        # card's files are not touched.
+        self.assertEqual(counts, {"cards": 1, "threads": 1})
+        self.assertEqual([r["id"] for r in events[0]["upserts"]], [first])
+        self.assertEqual(self.search("nudge"), [first])
+
+    def test_a_board_yaml_change_drops_the_whole_cache(self):
+        self.make_card()
+        self.send(type="board_open")
+        (self.root / B.BOARD_CONFIG).write_text(
+            CONFIG.replace("folder: features", "folder: features, title: Wishes"),
+            encoding="utf-8")
+        with self.parse_counts() as counts:
+            self.send(type="board_refresh")
+        # A row's `tab` and a parked card's section come from board.yaml, so nothing cached
+        # against it survives it.
+        self.assertEqual(counts["cards"], 1)
+
+    def test_the_problems_a_refresh_reports_are_the_ones_a_full_check_finds(self):
+        self.make_card()
+        (self.root / "features" / "broken.md").write_text("no front matter here\n",
+                                                          encoding="utf-8")
+        (self.root / "threads").mkdir(exist_ok=True)
+        (self.root / "threads" / "ZZZZ.md").write_text(
+            "<!-- relay:entry 20260920T000000Z-aa author=owner kind=comment -->\nhi\n",
+            encoding="utf-8")
+        self.send(type="board_open")
+        reported = self.send(type="board_refresh")[0]["problems"]
+        expected = [{"code": p.code, "path": p.path, "message": p.message, "severity": p.severity}
+                    for p in self.board.check()][:100]
+        self.assertEqual(reported, expected)
+        self.assertIn("orphan_thread", [p["code"] for p in reported])
+        self.assertIn("no_front_matter", [p["code"] for p in reported])
+
+    def test_a_small_board_still_arrives_in_one_message(self):
+        self.make_card()
+        events = self.send(type="board_open")
+        board = [e for e in events if e["event"] == "board"][0]
+        self.assertFalse(board["more"])
+        self.assertEqual([e for e in events if e["event"] == "board_cards"], [])
 
     def test_board_refresh_reports_only_what_changed(self):
         card_id = self.make_card()

@@ -45,6 +45,21 @@ ID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4}$")
 ITEM_ID_RE = re.compile(r"^[0-9a-hjkmnp-tv-z]{2}$")
 
 
+def relative_name(path: str | os.PathLike, root: Path) -> str:
+    """`str(path.relative_to(root))`, as a string slice.
+
+    Everything that walks a board asks this of every file it sees, and `pathlib.relative_to`
+    rebuilds both paths from their parsed parts to answer: it was 1.17 s of the 2.26 s
+    `relay-board.py index` spends at 3,000 cards, and most of what a fully cached
+    `board_refresh` still cost once the parsing was gone (#7M6E).  A path that is not under
+    `root` falls through to pathlib, which is the one that raises about it.
+    """
+    text, base = str(path), str(root)
+    if text.startswith(base) and text[len(base):len(base) + 1] == os.sep:
+        return text[len(base) + 1:]
+    return str(Path(path).relative_to(root))
+
+
 def valid_id(value: str) -> bool:
     """A card id: four Crockford-base32 characters with at least one letter."""
     return bool(value) and bool(ID_RE.match(value)) and any(c in ID_LETTERS for c in value)
@@ -1093,8 +1108,7 @@ class Board:
             if not base.is_dir():
                 continue
             for path in sorted(base.rglob("*.md")):
-                rel = path.relative_to(self.root)
-                parts = rel.parts
+                parts = tuple(relative_name(path, self.root).split(os.sep))
                 if parts[0] == PRIVATE_FOLDER:
                     if not include_private:
                         continue
@@ -1107,7 +1121,7 @@ class Board:
         return sorted(set(out))
 
     def category_of(self, path: Path) -> str:
-        parts = Path(path).relative_to(self.root).parts
+        parts = relative_name(path, self.root).split(os.sep)
         if parts and parts[0] == PRIVATE_FOLDER:
             parts = parts[1:]
         return parts[0] if parts else ""
@@ -1175,28 +1189,96 @@ class Board:
         return rank_between(ranks[-1] if ranks else None, None)
 
     # ---- check
+    #
+    # `check()` is the whole walk; the four pieces under it are the same work cut along the lines
+    # of what invalidates each answer, so a caller that has already parsed the board can reuse
+    # what it has (#7M6E).  One card's problems depend only on that file and on board.yaml; one
+    # thread's depend only on that file, except the two that ask which cards exist; the rest are
+    # about the board as a whole.  The Switchboard worker caches the first two per file against
+    # the file's mtime and size, which is why `board_refresh` no longer parses the tree twice.
     def check(self, fix: bool = False) -> list[Problem]:
         problems: list[Problem] = []
         by_id: dict[str, list[str]] = {}
         seen_ids: set[str] = set()
         for path in self.card_paths():
-            rel = str(path.relative_to(self.root))
+            rel = relative_name(path, self.root)
             try:
                 card = Card.load(path)
             except (BoardError, UnicodeDecodeError) as exc:
                 problems.append(Problem("bad_card", rel, str(exc)))
                 continue
-            problems.extend(self._check_card(card, rel, fix))
+            problems.extend(self.check_card(card, rel, fix))
             if card.id:
                 by_id.setdefault(card.id, []).append(rel)
                 seen_ids.add(card.id)
+        for private in (False, True):
+            directory = self.threads_dir(private)
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.glob("*.md")):
+                problems.extend(self.check_thread_name(path, seen_ids))
+                problems.extend(self.check_thread(path, None, fix))
+        problems.extend(self.check_whole_board(by_id))
+        return sorted(problems, key=lambda p: (p.path, p.code))
+
+    def check_card(self, card: Card, rel: str, fix: bool = False) -> list[Problem]:
+        """One card file's problems, exactly as `check()` finds them.  They depend on the file
+        and on board.yaml (the category folder a status belongs in, and `columns:` for a parked
+        card's section) and on nothing else, so a caller may cache them per file."""
+        return self._check_card(card, rel, fix)
+
+    def check_thread_name(self, path: Path, card_ids: set[str]) -> list[Problem]:
+        """The two thread problems that depend on what cards exist, so the rest can be cached
+        while cards come and go: a file not named `<ID>.md`, and a thread no card owns."""
+        rel = relative_name(path, self.root)
+        card_id = path.stem.upper()
+        if not valid_id(card_id):
+            return [Problem("bad_thread_name", rel, "thread file is not named <ID>.md")]
+        if card_id not in card_ids:
+            return [Problem("orphan_thread", rel, f"no card has id {card_id}", "warning")]
+        return []
+
+    def check_thread(self, path: Path, entries: Sequence[ThreadEntry] | None,
+                     fix: bool = False) -> list[Problem]:
+        """One thread file's own problems: repeated or unsortable entry ids, an unknown kind, and
+        entries a union merge left out of order.  `entries` is the already-parsed file when the
+        caller has it; None reads and parses it here."""
+        rel = relative_name(path, self.root)
+        if entries is None:
+            entries = parse_thread(path.read_text(encoding="utf-8"))
+        problems: list[Problem] = []
+        ids = [e.entry_id for e in entries]
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        if duplicates:
+            problems.append(Problem("duplicate_thread_entry", rel,
+                                    f"repeated entry id(s): {', '.join(duplicates)}"))
+        bad = [i for i in ids if not ENTRY_ID_RE.match(i)]
+        if bad:
+            problems.append(Problem("bad_thread_entry", rel,
+                                    f"entry id(s) not sortable timestamps: {', '.join(bad[:3])}"))
+        for entry in entries:
+            if entry.kind not in ENTRY_KINDS:
+                problems.append(Problem("bad_thread_entry", rel,
+                                        f"entry {entry.entry_id} has unknown kind {entry.kind!r}"))
+        if ids != sorted(ids):
+            if fix:
+                _atomic_write(path, render_thread(sorted(entries, key=lambda e: e.entry_id)))
+            else:
+                problems.append(Problem("thread_unsorted", rel,
+                                        "entries are not in id order (a union merge interleaved them)",
+                                        "warning", fixable=True))
+        return problems
+
+    def check_whole_board(self, by_id: dict[str, list[str]]) -> list[Problem]:
+        """What only the whole board can see: one id on two cards, and private files git tracks.
+        `by_id` maps each card id to the paths (relative to the board root) that carry it."""
+        problems: list[Problem] = []
         for card_id, paths in sorted(by_id.items()):
             if len(paths) > 1:
                 problems.append(Problem("duplicate_id", paths[0],
                                         f"id {card_id} is used by {len(paths)} cards: {', '.join(paths)}"))
-        problems.extend(self._check_threads(seen_ids, fix))
         problems.extend(self._check_private())
-        return sorted(problems, key=lambda p: (p.path, p.code))
+        return problems
 
     def _check_card(self, card: Card, rel: str, fix: bool) -> list[Problem]:
         problems: list[Problem] = []
@@ -1298,42 +1380,6 @@ class Board:
                     problems.append(Problem("task_marker_stale", rel,
                                             f"{len(mismatched)} item(s) have a checkbox the marker disagrees with",
                                             "warning", fixable=True))
-        return problems
-
-    def _check_threads(self, card_ids: set[str], fix: bool) -> list[Problem]:
-        problems: list[Problem] = []
-        for private in (False, True):
-            directory = self.threads_dir(private)
-            if not directory.is_dir():
-                continue
-            for path in sorted(directory.glob("*.md")):
-                rel = str(path.relative_to(self.root))
-                entries = parse_thread(path.read_text(encoding="utf-8"))
-                card_id = path.stem.upper()
-                if not valid_id(card_id):
-                    problems.append(Problem("bad_thread_name", rel, "thread file is not named <ID>.md"))
-                elif card_id not in card_ids:
-                    problems.append(Problem("orphan_thread", rel, f"no card has id {card_id}", "warning"))
-                ids = [e.entry_id for e in entries]
-                duplicates = sorted({i for i in ids if ids.count(i) > 1})
-                if duplicates:
-                    problems.append(Problem("duplicate_thread_entry", rel,
-                                            f"repeated entry id(s): {', '.join(duplicates)}"))
-                bad = [i for i in ids if not ENTRY_ID_RE.match(i)]
-                if bad:
-                    problems.append(Problem("bad_thread_entry", rel,
-                                            f"entry id(s) not sortable timestamps: {', '.join(bad[:3])}"))
-                for entry in entries:
-                    if entry.kind not in ENTRY_KINDS:
-                        problems.append(Problem("bad_thread_entry", rel,
-                                                f"entry {entry.entry_id} has unknown kind {entry.kind!r}"))
-                if ids != sorted(ids):
-                    if fix:
-                        _atomic_write(path, render_thread(sorted(entries, key=lambda e: e.entry_id)))
-                    else:
-                        problems.append(Problem("thread_unsorted", rel,
-                                                "entries are not in id order (a union merge interleaved them)",
-                                                "warning", fixable=True))
         return problems
 
     def _check_private(self) -> list[Problem]:

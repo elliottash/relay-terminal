@@ -14,6 +14,7 @@ the card reseeds it, so the file stays the memory and a collaborator continues t
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import threading
@@ -21,14 +22,15 @@ from pathlib import Path
 
 from . import board as B
 from . import board_chat
-from . import board_import as I
 from . import board_turns
-from . import forge_github as GH
-from . import forge_sync as F
 from . import guest_harness_provider as GHP
 from . import logs
-from . import project_probe as PP
 from . import roles as model_roles
+# `board_import`, `forge_github`, `forge_sync` and `project_probe` are imported inside the
+# five on-demand handlers that use them (`project_probe`, `board_import_*`, `forge_sync_*`
+# and the new-board survey), not here: importing them at module level cost every worker
+# 5.5 ms of start-up for code most workers never reach (#TZWF item 4). `sys.modules` makes
+# every call after the first a dict lookup.
 from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
                           card_brief, check_pane_token, cleanup_brief, find_board_root,
@@ -37,6 +39,8 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
          "board_cancel", "board_check",
+         # The pane's filter bar, answered here over the text the rows stopped carrying (#7M6E).
+         "board_search",
          # Execute's hand-off in one message (19.19, #R9G7): the three writes it used to send
          # by hand, plus the pane session token the card records as `session`.
          "board_claim",
@@ -74,10 +78,20 @@ NOT_INITIALIZED_ERROR = ("This project has no Switchboard yet. Create one first 
 #: capped by `board_import.MAX_PROPOSALS`; this is the wire.
 MAX_IMPORT_KEYS = 1000
 
-#: The searchable text one row may carry (19.2 `text`): the card's whole body and thread for
-#: the pane's full-text filter.  Capped so `board`, which carries every row at once, stays well
-#: inside the worker's 8 MiB line buffer even on a board of long cards.
+#: How much of one card is searchable: its whole body and thread, capped.  Until 2026-09-20 this
+#: text travelled on every row (19.2 `text`) for one substring test in the GUI; it was 92.6 % of
+#: `board`'s bytes, and past about 1,160 cards the event overflowed the GUI's 8 MiB read buffer
+#: and killed the worker (#7M6E).  It stays here now and `board_search` answers over it, so the
+#: cap bounds the worker's own memory rather than a message.
 MAX_ROW_TEXT = 64 * 1024
+
+#: How many rows one message may carry, and how many bytes of them (#7M6E).  `board` was one line
+#: of every card; the rows travel in batches now (`board_cards`), which the pane patches in
+#: exactly as it patches a `board_changed` upsert, so no board size can reach the buffer cap.
+#: Both limits apply — the count keeps a normal board to one or two messages, the byte budget
+#: keeps a board of unusually long titles inside the cap whatever the count says.
+MAX_ROWS_PER_MESSAGE = 400
+MAX_ROW_BYTES_PER_MESSAGE = 512 * 1024
 
 #: The `code` a failed `forge_sync_*` answers with (19.14), so the GUI can offer the right thing:
 #: signing in, waiting until `retry_at`, or just saying what happened.
@@ -95,6 +109,84 @@ MAX_ASK_TEXT = 32768
 #: large board fits; the agent reads the cards it cares about with `board_read`.
 MAX_CLEANUP_ROSTER = 400
 MAX_CLEANUP_NOTE = 4000
+
+
+class _CardEntry:
+    """One card file in the Switchboard's parse cache (#7M6E): what it was when we read it, and
+    everything derived from it.  `key` is its (mtime_ns, size) and `thread_key` its thread file's,
+    because the row's entry count and the searchable text come from both; either moving re-reads
+    the card.  `row` is None for a file that would not parse, and `problems` then holds the
+    `bad_card` that `check()` would report for it."""
+    __slots__ = ("key", "thread_key", "card_id", "rel", "row", "search", "problems")
+
+    def __init__(self, key, thread_key, card_id, rel, row, search, problems):
+        self.key = key
+        self.thread_key = thread_key
+        self.card_id = card_id
+        self.rel = rel
+        self.row = row
+        self.search = search
+        self.problems = problems
+
+
+class _ThreadEntryCache:
+    """One thread file in the same cache: how many entries it holds (the row's `thread_entries`),
+    its `check_thread` problems and its folded searchable text, all keyed on its (mtime_ns, size).
+    The two problems that depend on which cards exist are not here — see `check_thread_name`."""
+    __slots__ = ("key", "count", "problems", "search")
+
+    def __init__(self, key, count, problems, search):
+        self.key = key
+        self.count = count
+        self.problems = problems
+        self.search = search
+
+
+def _stat_key(path: Path) -> tuple | None:
+    """What says a file has not changed: its mtime in nanoseconds and its size.  None when it is
+    not there, which is a change like any other."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _search_fields(row: dict) -> str:
+    """The row's own searchable fields, in the order `BoardModel.cpp`'s filter puts them: a plain
+    word in the filter bar matches these or the card's text, and both are folded together here so
+    `board_search` answers exactly what the GUI used to answer for itself (#7M6E)."""
+    return " ".join(str(part) for part in
+                    (row.get("id") or "", row.get("title") or "",
+                     " ".join(str(l) for l in (row.get("labels") or [])),
+                     row.get("assignee") or "", row.get("milestone") or ""))
+
+
+def _fold(*parts: str) -> str:
+    """One case-folded string to search.  Folded once here rather than per keystroke: the filter
+    has always been case-insensitive, and nothing ever displays this copy."""
+    return "\n".join(parts).lower()
+
+
+def _row_batches(rows: list[dict]) -> list[list[dict]]:
+    """The rows cut into messages small enough that no board size reaches the GUI's read buffer
+    (#7M6E).  A batch ends at MAX_ROWS_PER_MESSAGE rows or MAX_ROW_BYTES_PER_MESSAGE of them,
+    whichever comes first; a single oversized row still gets a batch of its own rather than being
+    dropped, because the pane must be able to draw every card it has."""
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    size = 0
+    for row in rows:
+        width = len(json.dumps(row, default=str))
+        if current and (len(current) >= MAX_ROWS_PER_MESSAGE
+                        or size + width > MAX_ROW_BYTES_PER_MESSAGE):
+            batches.append(current)
+            current, size = [], 0
+        current.append(row)
+        size += width
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _turn_phrase(mode: str | None) -> str:
@@ -218,6 +310,26 @@ class BoardCommands:
         self._init_git = None
         self.rev = 0
         self._snapshot: dict[str, dict] = {}
+        #: The searchable text the snapshot's rows were taken with, so `_changed` notices a body
+        #: edit the row itself does not show (#7M6E).
+        self._snapshot_search: dict[str, str] = {}
+        #: The parse cache behind `_rows()` and `_problems()` (#7M6E): one entry per card file and
+        #: one per thread file, keyed on that file's (mtime_ns, size), so a `board_refresh` after a
+        #: one-card write re-reads one card and one thread rather than the whole tree twice.  It is
+        #: dropped whole when board.yaml changes — a row's `tab` and a parked card's section come
+        #: from it — and per file whenever the file's stat moves.  `set_board` clears it below.
+        self._card_cache: dict[str, _CardEntry] = {}
+        self._thread_cache: dict[str, _ThreadEntryCache] = {}
+        self._cache_config: tuple | None = None
+        #: What `_rows()` left for `_problems()`: the per-file problems it collected, the ids it
+        #: saw and where, and the thread files it walked.  None before the first `_rows()`, and
+        #: then `_problems()` falls back to a full `board.check()`.
+        self._check_state: tuple | None = None
+        #: Each card's searchable text, case-folded once, for `board_search` (19.2, #7M6E): its
+        #: row fields and body, then its thread, held apart because they are cached against two
+        #: different files.  The rows no longer carry this text — it was 92.6 % of `board`'s
+        #: bytes, and past about 1,160 cards the event overflowed the GUI's buffer.
+        self._search_index: dict[str, tuple[str, str]] = {}
         # board_ask state: which card the conversation is seeded from, and the card hash it was
         # seeded at, so an edit to the card reseeds instead of answering from a stale copy.
         self._ask_card: str | None = None
@@ -380,6 +492,8 @@ class BoardCommands:
         self.cards.drop()
         self.chat.drop()
         self._snapshot = {}
+        self._snapshot_search = {}
+        self._drop_parse_cache()
         self._ask_card = self._ask_hash = self._ask_turn = None
         self._ask_text = []
         self._ask_mode = "discuss"
@@ -812,7 +926,7 @@ class BoardCommands:
         # sections from the file that was just written rather than from what the gear sent.
         self._send({"event": "board_written", **result, "id": rid, "kind": "board_sections",
                     "board": self.state_block()})
-        self.emit(self._changed(result.get("write_id")))
+        self._emit_changed(result.get("write_id"))
 
     def handles(self, kind: str) -> bool:
         return kind in TYPES
@@ -855,6 +969,7 @@ class BoardCommands:
         return Path(os.path.abspath(path))
 
     def _kinds(self, request: dict):
+        from . import project_probe as PP
         kinds = request.get("kinds")
         if kinds is None:
             return None
@@ -879,6 +994,7 @@ class BoardCommands:
         Needs no board — it is what the GUI asks *before* there is one — and writes nothing, so
         it is safe to send for a project that already has a board and safe to send twice.
         """
+        from . import project_probe as PP
         project = self._project(request, "project_probe")
         result = PP.probe(project, kinds=self._kinds(request))
         event = {"event": "project_probe_result", "id": rid, **result}
@@ -889,6 +1005,8 @@ class BoardCommands:
 
     def _import_propose(self, request: dict, rid) -> None:
         """`board_import_propose`: the cards an import would create.  Writes nothing."""
+        from . import board_import as I
+        from . import project_probe as PP
         project = self._project(request, "board_import_propose")
         kinds = self._kinds(request)
         board = self._board_for_project(project)
@@ -910,6 +1028,8 @@ class BoardCommands:
         last `board_import_proposals`, and the proposals themselves are read again from the
         project, so nothing a client sent becomes a card body.
         """
+        from . import board_import as I
+        from . import project_probe as PP
         tools = self._need_ready()
         project = (self._project(request, "board_import_apply") if request.get("project")
                    else Path(tools.board.repo))
@@ -950,7 +1070,7 @@ class BoardCommands:
         done = {c["source_key"] for c in cards}
         self._send({"event": "board_imported", "id": rid, "project": str(project),
                     "cards": cards, "skipped": [k for k in wanted if k not in done]})
-        self.emit(self._changed())
+        self._emit_changed()
 
     # ---- GitHub sync (19.14) ---------------------------------------------------
     def _forge_busy(self, rid, what: str) -> bool:
@@ -976,6 +1096,8 @@ class BoardCommands:
         the exception rather than carrying a traceback, and no credential is ever in it: the
         provider holds the token and never hands it over (`GitHubProvider._safe`).
         """
+        from . import forge_github as GH
+        from . import forge_sync as F
         tools = self._need_ready()
         if self._forge_busy(rid, "start another sync"):
             return
@@ -1040,7 +1162,7 @@ class BoardCommands:
                 # A sync writes card files outside BoardTools, so the pane is told the same way
                 # any other write tells it.
                 try:
-                    self.emit(self._changed())
+                    self._emit_changed()
                 except (B.BoardError, OSError):            # pragma: no cover - unreadable tree
                     pass
 
@@ -1068,41 +1190,127 @@ class BoardCommands:
 
     # ---- rows -----------------------------------------------------------------
     @staticmethod
-    def _search_text(card: B.Card, entries: list[B.ThreadEntry]) -> str:
-        """The card's whole text as one searchable string: its body, then each thread entry's
-        author, kind and words (protocol 19.2 `text`).
+    def _thread_search_text(entries: list[B.ThreadEntry]) -> str:
+        """A thread as one searchable string: each entry's author, kind and words.
 
         The entries' header metadata (timestamps, turn and pane ids) is left out on purpose:
         `pane=switchboard` sits in every header, so a search for "switchboard" would match
-        every card that has a thread."""
-        parts = [card.body.strip()]
-        parts.extend(f"{entry.author} {entry.kind} {entry.text}".strip() for entry in entries)
-        return "\n\n".join(part for part in parts if part)
+        every card that has a thread.  A card's body is the other half, and the two are held
+        apart so a card edit does not re-parse its thread, nor an append its card."""
+        return "\n\n".join(part for part in
+                           (f"{entry.author} {entry.kind} {entry.text}".strip()
+                            for entry in entries) if part)
+
+    def _drop_parse_cache(self) -> None:
+        self._card_cache = {}
+        self._thread_cache = {}
+        self._cache_config = None
+        self._check_state = None
+        self._search_index = {}
 
     def _rows(self) -> dict[str, dict]:
+        """Every card's row, re-parsing only the files whose mtime or size moved (#7M6E).
+
+        This used to read and parse the whole tree, and `_problems()` then read and parsed it a
+        second time through `board.check()`: 179 ms at 337 cards and 1,596 ms at 3,000, the same
+        whether one card had changed or none, on every watcher tick.  Now each card file and each
+        thread file carries a cache entry keyed on its own (mtime_ns, size) holding its row, its
+        folded search text and its `check_card` problems, so an unchanged file costs one `stat`.
+        board.yaml decides a row's `tab` and a parked card's section, so a change to it drops the
+        whole cache; `set_board` drops it too, because the next board is a different tree.
+        """
         tools = self._need()
-        threads = tools._threads()
-        counts = {card_id: len(entries) for card_id, entries in threads.items()}
-        rows: dict[str, dict] = {}
-        for card in tools.board.cards():
-            if card.id is None:
+        board = tools.board
+        config_key = _stat_key(board.config_path)
+        if config_key != self._cache_config:
+            self._drop_parse_cache()
+            self._cache_config = config_key
+
+        # The thread files first: a row's entry count and half of its searchable text come from
+        # them, so the card loop below needs them settled.  Each is parsed only when its own stat
+        # moved — which is what keeps a card edit from re-reading that card's thread as well.
+        problems: list[B.Problem] = []
+        threads: dict[str, _ThreadEntryCache] = {}   # thread file -> its cache entry
+        thread_paths: dict[str, str] = {}            # CARD ID -> thread file
+        for private in (False, True):
+            folder = board.threads_dir(private)
+            if not folder.is_dir():
                 continue
-            row = tools._row(card, counts)
-            row["created"] = card.front.get("created")
-            row["milestone"] = card.front.get("milestone")
-            row["component"] = card.front.get("component")
-            row["implemented_by"] = card.front.get("implemented_by")
-            # The signatures travel on every row; the `qa` recommendation does not — it is per card
-            # and costs a PATH and keyring probe, so it rides on `board_card_get` (19.15) instead.
-            row["verified_by"] = card.front.get("verified_by")
-            # The whole card, so the pane's filter bar is full-text search (owner, 2026-09-19):
-            # body and thread together, capped at MAX_ROW_TEXT.  Only this row carries it —
-            # `board_list`'s rows go to an agent's tool result and stay light.
-            row["text"] = self._search_text(card, threads.get(card.id, []))[:MAX_ROW_TEXT]
-            tasks = card.tasks()
-            row["tasks_done"] = sum(1 for t in tasks if t.done)
-            row["tasks_total"] = len(tasks)
-            rows[card.id] = row
+            for path in folder.glob("*.md"):
+                name = str(path)
+                key = _stat_key(path)
+                if key is None:
+                    continue                        # removed between the listing and the stat
+                held = self._thread_cache.get(name)
+                if held is None or held.key != key:
+                    try:
+                        entries = B.parse_thread(path.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError):
+                        entries = []
+                    # The two problems that depend on which cards exist (`bad_thread_name`,
+                    # `orphan_thread`) are not here: `_problems()` recomputes them, so a card
+                    # appearing or going does not invalidate every thread's entry.
+                    held = _ThreadEntryCache(
+                        key, len(entries), board.check_thread(path, entries),
+                        _fold(self._thread_search_text(entries)[:MAX_ROW_TEXT]))
+                threads[name] = held
+                thread_paths[path.stem.upper()] = name
+                problems.extend(held.problems)
+        self._thread_cache = threads
+
+        rows: dict[str, dict] = {}
+        search: dict[str, tuple[str, str]] = {}
+        by_id: dict[str, list[str]] = {}
+        cache: dict[str, _CardEntry] = {}
+        for path in board.card_paths():
+            name = str(path)
+            key = _stat_key(path)
+            if key is None:
+                continue
+            entry = self._card_cache.get(name)
+            thread = thread_paths.get((entry.card_id if entry else None) or "", "")
+            held = threads.get(thread)
+            thread_key = held.key if held else None
+            if entry is None or entry.key != key or entry.thread_key != thread_key:
+                rel = B.relative_name(path, board.root)
+                try:
+                    card = B.Card.load(path)
+                except (B.BoardError, UnicodeDecodeError, OSError) as exc:
+                    # The same problem `check()` reports for an unreadable card, and no row: the
+                    # pane cannot draw a card nothing could parse.
+                    entry = _CardEntry(key, None, None, rel, None, "",
+                                       [B.Problem("bad_card", rel, str(exc))])
+                    cache[name] = entry
+                    problems.extend(entry.problems)
+                    continue
+                thread = thread_paths.get(card.id or "", "")
+                held = threads.get(thread)
+                row = tools._row(card, {card.id or "": held.count if held else 0})
+                row["created"] = card.front.get("created")
+                row["milestone"] = card.front.get("milestone")
+                row["component"] = card.front.get("component")
+                row["implemented_by"] = card.front.get("implemented_by")
+                # The signatures travel on every row; the `qa` recommendation does not — it is per
+                # card and costs a PATH and keyring probe, so it rides on `board_card_get` (19.15).
+                row["verified_by"] = card.front.get("verified_by")
+                # The card's whole text does **not**: it was 92.6 % of `board`'s bytes for one
+                # substring test in the GUI, and the pane's filter is still full-text search
+                # (owner, 2026-09-19) — `board_search` answers it here instead, over the folded
+                # copy below.  `_row` already counted the tasks, so they are not recounted.
+                entry = _CardEntry(key, held.key if held else None, card.id, rel, row,
+                                   _fold(_search_fields(row), card.body.strip()[:MAX_ROW_TEXT]),
+                                   board.check_card(card, rel))
+            cache[name] = entry
+            problems.extend(entry.problems)
+            if entry.card_id:
+                by_id.setdefault(entry.card_id, []).append(entry.rel)
+            if entry.row is not None and entry.card_id:
+                rows[entry.card_id] = entry.row
+                search[entry.card_id] = (entry.search, held.search if held else "")
+        self._card_cache = cache
+
+        self._search_index = search
+        self._check_state = (problems, by_id, sorted(threads))
         return rows
 
     def _config(self) -> dict:
@@ -1127,9 +1335,16 @@ class BoardCommands:
     def _changed(self, write_id: str | None = None) -> dict:
         """Diff the tree against the last snapshot, so the GUI patches rather than reloads."""
         rows = self._rows()
-        upserts = [row for cid, row in rows.items() if self._snapshot.get(cid) != row]
+        search = self._search_index
+        # The searchable text is part of "changed" although it no longer travels (#7M6E): an edit
+        # to a card's body within the same second as the last one moves no field on the row —
+        # `updated` is an ISO timestamp — and the pane would not re-read the open card for it.
+        upserts = [row for cid, row in rows.items()
+                   if self._snapshot.get(cid) != row
+                   or self._snapshot_search.get(cid) != search.get(cid)]
         removed = [cid for cid in self._snapshot if cid not in rows]
         self._snapshot = rows
+        self._snapshot_search = dict(search)
         self.rev += 1
         # The config travels with every change, not only with the full `board` event: the gear
         # rewrites the section list without touching a card, and a pane that only ever learned
@@ -1141,12 +1356,71 @@ class BoardCommands:
             event["write_id"] = write_id
         return event
 
+    def _emit_changed(self, write_id: str | None = None, rid=None) -> None:
+        """Send a `board_changed`, in batches when its upserts do not fit one message (#7M6E).
+
+        A cleanup, a `git pull` or an import can move every card on the board at once, and one
+        line of all of them is exactly what overflowed the GUI's read buffer on `board_open`.
+        The first batch rides on the `board_changed` itself — so `removed`, `problems` and
+        `config` are never delayed — and the rest follow as `board_cards`, which the pane patches
+        in the same way.
+        """
+        event = self._changed(write_id)
+        if rid is not None:
+            event["id"] = rid
+        batches = _row_batches(event.get("upserts") or [])
+        if len(batches) <= 1:
+            self.emit(event)
+            return
+        self.emit({**event, "upserts": batches[0], "more": True})
+        for index, batch in enumerate(batches[1:], 1):
+            self._send({"event": "board_cards", "id": event.get("id"), "rev": event.get("rev"),
+                        "cards": batch, "more": index < len(batches) - 1})
+
     def _problems(self) -> list[dict]:
+        """The board's format problems, from what `_rows()` already parsed (#7M6E).
+
+        This ran a second full `board.check()` — 72 of the 179 ms a `board_refresh` cost at 337
+        cards, and every millisecond of it a re-read of files `_rows()` had just read.  The
+        per-file half comes out of the parse cache now; only the two answers that depend on the
+        board as a whole are recomputed, and neither reads a file.  With no cache yet (nobody has
+        asked for rows) it falls back to the full walk, which is what `check()` has always been.
+        """
         try:
+            board = self._need().board
+            if self._check_state is None:
+                problems = board.check()
+            else:
+                cached, by_id, thread_paths = self._check_state
+                ids = set(by_id)
+                problems = list(cached)
+                for name in thread_paths:
+                    problems.extend(board.check_thread_name(Path(name), ids))
+                problems.extend(board.check_whole_board(by_id))
+                problems.sort(key=lambda p: (p.path, p.code))
             return [{"code": p.code, "path": p.path, "message": p.message, "severity": p.severity}
-                    for p in self._need().board.check()][:100]
+                    for p in problems][:100]
         except (B.BoardError, OSError) as exc:                  # pragma: no cover - unreadable tree
             return [{"code": "check_failed", "path": "", "message": str(exc), "severity": "error"}]
+
+    def _search(self, request: dict, rid) -> None:
+        """The pane's filter bar, answered over the snapshot this worker already holds (#7M6E).
+
+        The owner's rule stands (2026-09-19: "switchboard filter bar should be full text
+        search"), and so do its semantics — every word must match, case does not matter, and a
+        word matches the row's own fields *or* the card's body and thread.  What changed is where
+        it runs: each card's text used to ride on every row for this one substring test, which
+        was 92.6 % of `board`'s bytes and 30–80 ms of GUI thread per keystroke.  Only the words
+        come here and only the matching ids go back; the pane still decides `status:`, `label:`,
+        `folder:`, `@` and `#` itself, from the row, so those cost nothing and never wait.
+        """
+        query = request.get("query")
+        if query is not None and not isinstance(query, str):
+            raise ValueError("board_search query must be text.")
+        terms = str(query or "").lower().split()
+        ids = [card_id for card_id, parts in self._search_index.items()
+               if all(any(term in part for part in parts) for term in terms)]
+        self._send({"event": "board_search", "id": rid, "query": query or "", "ids": sorted(ids)})
 
     # ---- dispatch -------------------------------------------------------------
     def dispatch(self, request: dict) -> bool:
@@ -1157,21 +1431,35 @@ class BoardCommands:
         if kind == "board_open":
             tools = self._need()
             self._snapshot = self._rows()
+            self._snapshot_search = dict(self._search_index)
             self.rev += 1
+            # The rows in batches, the first with the `board` event itself (#7M6E): one line of
+            # every card overflowed the GUI's 8 MiB read buffer at about 1,160 cards and killed
+            # the worker, and the pane showed "Loading the Switchboard…" for ever.
+            batches = _row_batches(list(self._snapshot.values()))
             self._send({"event": "board", "id": rid, "rev": self.rev,
                         "root": str(tools.board.root), "workspace": str(tools.board.repo),
                         "project": tools.project, "state": tools.state, "exists": tools.exists(),
-                        "config": self._config(), "cards": list(self._snapshot.values()),
+                        "config": self._config(), "cards": batches[0] if batches else [],
+                        "cards_total": len(self._snapshot), "more": len(batches) > 1,
                         "problems": self._problems(), "chat": self.chat.state()})
+            for index, batch in enumerate(batches[1:], 1):
+                self._send({"event": "board_cards", "id": rid, "rev": self.rev,
+                            "cards": batch, "more": index < len(batches) - 1})
             # A board `board_init` just created gets the survey as the page agent's opening turn
             # (19.18): the marker file is what makes it fresh, so an old board is never surveyed.
             self._maybe_survey(tools)
         elif kind == "board_refresh":
-            self.emit({**self._changed(), "id": rid})
+            self._emit_changed(rid=rid)
+        elif kind == "board_search":
+            self._search(request, rid)
         elif kind == "board_check":
             section = request.get("section")
             if section is not None and not isinstance(section, str):
                 raise ValueError("board_check section must be a column id.")
+            # Against the tree as it is now: `_problems` reads what `_rows` leaves behind, and a
+            # Check pressed long after the last refresh must not answer from a stale parse.
+            self._rows()
             items = self._problems()
             if section:
                 items = [p for p in items if self._problem_section(p) == section]
@@ -1194,7 +1482,7 @@ class BoardCommands:
             except BoardToolError as exc:
                 raise ValueError(str(exc)) from exc
             self._send({"event": "board_undone", **result, "card_id": result["id"], "id": rid})
-            self.emit(self._changed())
+            self._emit_changed()
         elif kind == "board_ask":
             self._ask(request, rid)
         elif kind == "board_chat":
@@ -1363,7 +1651,7 @@ class BoardCommands:
             return
         self._send({"event": "board_written", **result, "card_id": result.get("id"),
                     "id": rid, "kind": kind})
-        self.emit(self._changed(result.get("write_id")))
+        self._emit_changed(result.get("write_id"))
 
     def _ask_to_initialize(self, kind: str, request: dict, rid) -> None:
         """A write reached a project with no Switchboard: ask the user, and park the write.
@@ -1532,6 +1820,8 @@ class BoardCommands:
         """
         if tools is None or self.chat.surveyed or self.chat.busy():
             return
+        from . import board_import as I
+        from . import project_probe as PP
         if board_chat.survey_state(tools.board) != "pending":
             return
         board_chat.mark_survey(tools.board, "running")
@@ -1629,7 +1919,7 @@ class BoardCommands:
             log.changelog = ""       # a run that changed nothing leaves no file behind
         self._send({"event": "board_cleanup_summary", "id": rid, **log.summary_event()})
         try:
-            self.emit(self._changed())
+            self._emit_changed()
         except (B.BoardError, OSError):                     # pragma: no cover - unreadable tree
             pass
 

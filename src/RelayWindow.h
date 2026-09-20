@@ -5388,8 +5388,21 @@ public:
                     tool->board()->handleEvent(event);
             guard->deliverToHelperPanels(page, event);
         };
-        worker->onStatus = [guard](const QString &text) {
-            if (guard) guard->statusBar()->showMessage(text, 9000);
+        // What the worker says about *itself* — it would not start, it exited, its pipe
+        // overflowed. The status bar is not shown in this layout, so until 2026-09-20 a
+        // Switchboard whose worker died sat on "Loading the Switchboard…" for ever with the
+        // explanation written somewhere nobody can see (#7M6E). It goes to the tab's board panes
+        // as well, which put it where the loading line was, with a Retry.
+        worker->onStatus = [guard, tab](const QString &text) {
+            if (!guard) return;
+            guard->statusBar()->showMessage(text, 9000);
+            QWidget *page = guard->pageOfTabId(tab);
+            if (!page) return;
+            const QJsonObject status{{QStringLiteral("event"), QStringLiteral("board_worker_status")},
+                                     {QStringLiteral("text"), text}};
+            for (QWidget *leaf : leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
+                    tool->board()->handleEvent(status);
         };
         return worker;
     }
