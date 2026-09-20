@@ -29,8 +29,9 @@ Measured with the stub provider on spark (Python 3.12) and sphinxpad (3.14). Det
 4. Import those four modules where they are used.
 
 ## Outcome
-Findings 1, 2 and 3 landed (`722e0f1a`, `925af7fa`). Finding 4 is `board_protocol.py`, which the
-#7M6E implementer owns; it is theirs to do and is not in these commits.
+Findings 1, 2 and 3 landed (`722e0f1a`, `925af7fa`, and `7f74ee5f` for the transaction guard).
+Finding 4 is `board_protocol.py`, which the #7M6E implementer owns: they landed it in `682e8f7a`
+and recorded the measurement in this card's thread, so it is done but not in these commits.
 
 1. `provider.shared_opener()` builds the opener once per process behind a lock. Every caller that
    built its own asks for it now: `ChatProvider.complete` (and the title/summary side calls through
