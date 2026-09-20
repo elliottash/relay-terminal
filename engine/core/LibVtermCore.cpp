@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -126,6 +127,16 @@ struct LibVtermCore::Impl {
     std::vector<uint8_t> dirty;
     bool allDirty = true;
     bool decorDirty = false;
+    // #3H5T: the vertical shift seen since the last frame, so a phone can move its rows instead
+    // of being sent all of them — a streamed reply was 166 whole-screen snapshots of 7.7 kB
+    // against 86 diffs of 375 B. `scrollBy` is rows moved up inside [scrollTop, scrollBottom);
+    // zero means nothing describable moved. `pushedLine` is what used to set `allDirty` from
+    // sb_pushline: it still makes the frame full, but it is kept apart so updateFrame() can tell
+    // "full because output scrolled" from "full because the whole screen really changed".
+    int scrollBy = 0;
+    int scrollTop = 0;
+    int scrollBottom = 0;
+    bool pushedLine = false;
     quint64 changeCounter = 0;
 
     CursorState cursor;
@@ -377,7 +388,10 @@ struct LibVtermCore::Impl {
         ++d->pushed;
         if (d->scrollOffset > 0 && !d->resizing)
             d->scrollOffset = std::min<int>(d->scrollOffset + 1, int(d->count));
-        d->allDirty = true;
+        // The frame is still full — the viewport moved over the ring and the desktop's own view
+        // repaints it whole, as it always has. `pushedLine` rather than `allDirty` only so that
+        // updateFrame() can still recognise the frame as a plain scroll (#3H5T).
+        d->pushedLine = true;
         return 1;
     }
 
@@ -624,6 +638,56 @@ struct LibVtermCore::Impl {
         pushed = first + qint64(count);
     }
 
+    // Fold one moverect into this frame's scroll description (#3H5T). True when it was a plain
+    // vertical shift of whole rows that fits what is already recorded; false for a partial-width
+    // move, a second region in the same frame, or a shift that turns its region over completely —
+    // none of which is worth describing, and all of which the caller damages instead.
+    bool noteScroll(VTermRect dest, VTermRect src)
+    {
+        if (dest.start_col != 0 || src.start_col != 0 || dest.end_col != colsN || src.end_col != colsN)
+            return false;
+        if (dest.end_row - dest.start_row != src.end_row - src.start_row)
+            return false;
+        const int by = src.start_row - dest.start_row;   // rows the content moved up
+        if (by == 0)
+            return true;                                 // nothing moved; nothing to damage either
+        const int top = std::min(dest.start_row, src.start_row);
+        const int bottom = std::max(dest.end_row, src.end_row);
+        if (top < 0 || bottom > rowsN || bottom - top <= 0)
+            return false;
+        if (scrollBy != 0 && (top != scrollTop || bottom != scrollBottom))
+            return false;
+        if (std::abs(scrollBy + by) >= bottom - top)
+            return false;
+        scrollTop = top;
+        scrollBottom = bottom;
+        scrollBy += by;
+        shiftDirty(top, bottom, by);
+        return true;
+    }
+
+    // `dirty` is in viewport rows, so a shift has to move it with the content: a row damaged
+    // before the scroll is still damaged where it lands, and the rows the shift vacated are new.
+    void shiftDirty(int top, int bottom, int by)
+    {
+        top = std::max(0, top);
+        bottom = std::min(bottom, int(dirty.size()));
+        if (bottom <= top)
+            return;
+        const int n = std::abs(by);
+        if (n >= bottom - top) {
+            std::fill(dirty.begin() + top, dirty.begin() + bottom, uint8_t(1));
+            return;
+        }
+        if (by > 0) {
+            std::move(dirty.begin() + top + n, dirty.begin() + bottom, dirty.begin() + top);
+            std::fill(dirty.begin() + bottom - n, dirty.begin() + bottom, uint8_t(1));
+        } else {
+            std::move_backward(dirty.begin() + top, dirty.begin() + bottom - n, dirty.begin() + bottom);
+            std::fill(dirty.begin() + top, dirty.begin() + top + n, uint8_t(1));
+        }
+    }
+
     // ---------------------------------------------------------------- libvterm callbacks
     static int onDamage(VTermRect r, void *user)
     {
@@ -632,8 +696,20 @@ struct LibVtermCore::Impl {
             d->dirty[size_t(row)] = 1;
         return 1;
     }
-    static int onMoveRect(VTermRect dest, VTermRect, void *user)
+    static int onMoveRect(VTermRect dest, VTermRect src, void *user)
     {
+        auto *d = static_cast<Impl *>(user);
+        // #3H5T: libvterm reports a scroll as one moverect (VTERM_DAMAGE_SCROLL merges the cell
+        // damage around it), so the rows that moved can be described to a remote client rather
+        // than resent. Anything that does not fit that description is damaged the way it always
+        // was; if a shift had already been folded into `dirty` this frame, the bookkeeping can no
+        // longer say which rows are current, so the whole screen goes.
+        if (d->noteScroll(dest, src))
+            return 1;
+        if (d->scrollBy != 0) {
+            d->scrollBy = 0;
+            d->allDirty = true;
+        }
         return onDamage(dest, user);
     }
     static int onMoveCursor(VTermPos pos, VTermPos old, int visible, void *user)
@@ -1086,19 +1162,33 @@ bool LibVtermCore::updateFrame(ViewportFrame *frame, bool force)
 {
     const bool sizeChanged = frame->rows != d->rowsN || frame->columns != d->colsN;
     const bool anyRow = std::find(d->dirty.begin(), d->dirty.end(), 1) != d->dirty.end();
-    if (!force && !sizeChanged && !d->allDirty && !d->decorDirty && !anyRow)
+    if (!force && !sizeChanged && !d->allDirty && !d->decorDirty && !d->pushedLine && !anyRow)
         return false;
-    const bool full = force || sizeChanged || d->allDirty || d->decorDirty || d->scrollOffset > 0;
+    const bool full = force || sizeChanged || d->allDirty || d->decorDirty || d->pushedLine
+        || d->scrollOffset > 0;
+    // #3H5T: the frame is a plain scroll when the only thing that moved is one shift — output
+    // pushing lines off the top, or an application scrolling a margin. Then `dirty` names exactly
+    // the rows the shift could not carry over, and a remote client can move the rest itself. A
+    // repaint the viewport did not ask for (force, a resize, a colour or decoration change, or a
+    // viewport sitting back in the scrollback, where a push moves nothing) is not that.
+    const bool scrolled = d->scrollBy != 0 && !force && !sizeChanged && !d->allDirty
+        && !d->decorDirty && d->scrollOffset == 0;
     frame->rows = d->rowsN;
     frame->columns = d->colsN;
     frame->lines.resize(size_t(d->rowsN));
     frame->dirty.assign(size_t(d->rowsN), 0);
     frame->full = full;
+    frame->scrolledBy = scrolled ? d->scrollBy : 0;
+    frame->scrollTop = scrolled ? d->scrollTop : 0;
+    frame->scrollBottom = scrolled ? d->scrollBottom : 0;
     const qint64 top = d->topVisibleId();
     for (int row = 0; row < d->rowsN; ++row) {
         if (!full && !d->dirty[size_t(row)])
             continue;
-        frame->dirty[size_t(row)] = 1;
+        // Every row is still filled when the frame is full, so nothing downstream sees less than
+        // it did; `dirty` keeps telling the truth about which of them actually changed, which is
+        // what makes the scroll description usable.
+        frame->dirty[size_t(row)] = uint8_t(scrolled ? d->dirty[size_t(row)] : 1);
         Line &line = frame->lines[size_t(row)];
         const qint64 id = top + row;
         if (!d->lineAt(id, &line))
@@ -1118,6 +1208,8 @@ bool LibVtermCore::updateFrame(ViewportFrame *frame, bool force)
     std::fill(d->dirty.begin(), d->dirty.end(), 0);
     d->allDirty = false;
     d->decorDirty = false;
+    d->pushedLine = false;
+    d->scrollBy = 0;
     return true;
 }
 

@@ -380,6 +380,98 @@ class ScreenTests(unittest.TestCase):
         run(main())
 
 
+class ScrollTests(unittest.TestCase):
+    """#3H5T: output scrolling the screen is a shift, not a new screen.
+
+    A 20 000-character reply watched on the owner's Pixel 8 was 166 `screen_snapshot` of 7 747 B
+    against 86 diffs of 375 B, and 82 % of one core in Chrome, because every scrolled frame was
+    sent whole (docs/qa_evidence/2026-09-20-perf-fixes/phone/RESULTS.md).
+    """
+
+    @staticmethod
+    def source_with_four_rows():
+        source = gui_host.GuiPaneSource([].append)
+        source.set_pane({"id": "p1", "title": "t", "rows": 4, "cols": 20, "status": "idle"})
+        source.set_frame({"pane": "p1", "full": True, "rows": 4, "cols": 20, "alt": False,
+                          "cursor": {"row": 3, "col": 0, "visible": True},
+                          "base": 0, "history": 0,
+                          "lines": [{"row": n, "segs": [[f"row-{n}", 0, 0, 0]]}
+                                    for n in range(4)]})
+        return source
+
+    @staticmethod
+    def scrolled_frame(by=1, lines=(("row-4", 3),)):
+        return {"pane": "p1", "full": False, "base": by, "history": by,
+                "cursor": {"row": 3, "col": 0, "visible": True},
+                "scroll": {"top": 0, "bottom": 4, "by": by},
+                "lines": [{"row": row, "segs": [[text, 0, 0, 0]]} for text, row in lines]}
+
+    def test_a_scroll_moves_the_kept_screen_instead_of_replacing_it(self):
+        source = self.source_with_four_rows()
+        sent: list[dict] = []
+        source.on_screen(lambda pane, message: sent.append(message))
+        source.set_frame(self.scrolled_frame())
+        # The sidecar holds the screen a late joiner is answered from, so it has to move with the
+        # diffs it forwards or the two stop agreeing.
+        self.assertEqual([line["segs"][0][0] for line in source.screens["p1"]["lines"]],
+                         ["row-1", "row-2", "row-3", "row-4"])
+        self.assertEqual([line["segs"][0][0]
+                          for line in source.screen_snapshot("p1")["lines"]],
+                         ["row-1", "row-2", "row-3", "row-4"])
+        # And what goes out is the shift and the one row that entered, not four rows.
+        self.assertEqual(sent[-1]["t"], "screen_diff")
+        self.assertEqual(sent[-1]["scroll"], {"top": 0, "bottom": 4, "by": 1})
+        self.assertEqual([line["row"] for line in sent[-1]["lines"]], [3])
+
+    def test_a_scroll_the_other_way_moves_the_kept_screen_down(self):
+        source = self.source_with_four_rows()
+        source.set_frame({"pane": "p1", "full": False, "base": 0, "history": 0,
+                          "cursor": {"row": 0, "col": 0, "visible": True},
+                          "scroll": {"top": 0, "bottom": 4, "by": -1},
+                          "lines": [{"row": 0, "segs": [["new", 0, 0, 0]]}]})
+        self.assertEqual([line["segs"][0][0] for line in source.screens["p1"]["lines"]],
+                         ["new", "row-0", "row-1", "row-2"])
+
+    def test_a_client_that_cannot_shift_its_rows_is_sent_the_whole_screen(self):
+        """`remote/client.py` asks for nothing, which is what an older page looks like."""
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await client.expect("screen_snapshot")
+                harness.source.set_frame({"pane": "p1", "full": False, "base": 1, "history": 1,
+                                          "cursor": {"row": 23, "col": 0, "visible": True},
+                                          "scroll": {"top": 0, "bottom": 24, "by": 1},
+                                          "lines": [{"row": 23,
+                                                     "segs": [["fresh", 0, 0, 0]]}]})
+                message = await client.expect("screen_snapshot")
+                self.assertNotIn("scroll", message)
+                self.assertEqual(len(message["lines"]), 24)
+                self.assertEqual(message["lines"][23]["segs"][0][0], "fresh")
+                await client.close()
+        run(main())
+
+    def test_a_client_that_asked_for_the_primitive_gets_the_shift(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "hello", "client": "relay-web/1", "proto": 1,
+                                   "supports": ["screen_scroll"]})
+                await client.expect("welcome")
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await client.expect("screen_snapshot")
+                harness.source.set_frame({"pane": "p1", "full": False, "base": 1, "history": 1,
+                                          "cursor": {"row": 23, "col": 0, "visible": True},
+                                          "scroll": {"top": 0, "bottom": 24, "by": 1},
+                                          "lines": [{"row": 23,
+                                                     "segs": [["fresh", 0, 0, 0]]}]})
+                message = await client.expect("screen_diff")
+                self.assertEqual(message["scroll"], {"top": 0, "bottom": 24, "by": 1})
+                self.assertEqual([line["row"] for line in message["lines"]], [23])
+                await client.close()
+        run(main())
+
+
 if __name__ == "__main__":
     unittest.main()
 

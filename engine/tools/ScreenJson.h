@@ -74,10 +74,20 @@ inline QJsonObject rowOf(const Line &line, int row)
 // rows stop and the live block begins: output pushes lines off the screen into the scrollback, the
 // live block starts further down, and the rows in between belong to neither — a hole in the middle
 // of the column (docs/REMOTE-PROTOCOL.md section 6.5).
+// A scroll goes out as the shift itself plus the rows it could not carry over: `scroll` is
+// `{top, bottom, by}` — rows `[top, bottom)` of the frame before this one moved up by `by`, a
+// negative `by` moving them down — and `lines` holds only the rows that really changed. A
+// streamed reply that was 166 snapshots of 7,747 B becomes 166 diffs of a row or two (#3H5T).
+//
+// `full` — a caller asking for everything, a resize, a clear, a colour change — always wins: a
+// scroll is only ever an alternative to a repaint nobody needed. A client that does not
+// understand `scroll` must never be sent one; that is negotiated once, in `hello`
+// (docs/REMOTE-PROTOCOL.md section 6.5), and the hub sends such a client snapshots instead.
 inline QJsonObject frameOf(const ViewportFrame &frame, bool full)
 {
     QJsonArray lines;
-    const bool everything = full || frame.full;
+    const bool scrolled = !full && frame.scrolledBy != 0;
+    const bool everything = full || (frame.full && !scrolled);
     for (int row = 0; row < int(frame.lines.size()); ++row) {
         if (!everything && row < int(frame.dirty.size()) && !frame.dirty[size_t(row)]) continue;
         lines.append(rowOf(frame.lines[size_t(row)], row));
@@ -89,6 +99,11 @@ inline QJsonObject frameOf(const ViewportFrame &frame, bool full)
     message["base"] = frame.viewportTop;
     message["history"] = frame.historyRows;
     message["lines"] = lines;
+    if (scrolled) {
+        message["scroll"] = QJsonObject{{"top", frame.scrollTop},
+                                        {"bottom", frame.scrollBottom},
+                                        {"by", frame.scrolledBy}};
+    }
     if (everything) {
         message["rows"] = frame.rows;
         message["cols"] = frame.columns;

@@ -307,11 +307,18 @@ class TerminalPaneSource(panes_mod.PaneSource):
         self._changed()
 
     def _screenUpdate(self, pane: TerminalPane, message: dict, *, full: bool) -> None:
+        scroll = message.get("scroll") if not full else None
         if full:
             pane.rows = int(message.get("rows") or pane.rows)
             pane.cols = int(message.get("cols") or pane.cols)
             pane.alt = bool(message.get("alt"))
             pane.lines = {}
+        elif scroll:
+            # The bridge describes a scroll rather than resending the screen (#3H5T); this state
+            # is what a late joiner's snapshot is built from, so it has to move with it.
+            moved = wire.apply_scroll([{"row": row, "segs": pane.lines.get(row, [])}
+                                       for row in range(pane.rows)], scroll, pane.rows)
+            pane.lines = {row["row"]: row["segs"] for row in moved}
         for row in message.get("lines", []):
             pane.lines[int(row.get("row", 0))] = row.get("segs", [])
         pane.cursor = message.get("cursor", pane.cursor)
@@ -325,6 +332,7 @@ class TerminalPaneSource(panes_mod.PaneSource):
                                "base": pane.base, "history": pane.history_rows,
                                **({"rows": pane.rows, "cols": pane.cols, "alt": pane.alt}
                                   if full else {}),
+                               **({"scroll": scroll} if scroll else {}),
                                "lines": message.get("lines", [])})
 
     # ---- input -------------------------------------------------------------------------------

@@ -608,6 +608,13 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
     frame->lines.resize(rows);
     frame->dirty.assign(rows, full ? 1 : 0);
     frame->full = full;
+    // This core does not describe a scroll yet, and the frame is reused between calls, so the
+    // fields are cleared rather than left holding another frame's shift (#3H5T). Ghostty's
+    // dirty-tracking has the information (GHOSTTY_RENDER_STATE_DIRTY_*); wiring it up needs a
+    // machine that builds this core, which spark is not.
+    frame->scrolledBy = 0;
+    frame->scrollTop = 0;
+    frame->scrollBottom = 0;
 
     GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
     ghostty_render_state_get(d->rs, GHOSTTY_RENDER_STATE_DATA_COLORS, &colors);

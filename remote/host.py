@@ -233,6 +233,10 @@ class Channel:
         self.client_static: bytes | None = None
         self.subscribed: set[str] = set()
         self.visible = True
+        # Does this client know how to apply a screen `scroll` (section 6.5)? It says so in its
+        # `hello`, and until it does the answer is no: a client that ignored the field would
+        # shift nothing and paint the new rows over rows that had moved (#3H5T).
+        self.screen_scroll = False
         self.dedupe = wire.Deduplicator()
         # Encrypting and writing must happen as one step: a Noise cipherstate is a counter, so two
         # concurrent senders can encrypt in one order and reach the socket in another, and the
@@ -941,8 +945,21 @@ class Host:
     def _screen_event(self, pane: str, message: dict) -> None:
         # Screen frames are large and only interesting to whoever is looking at that pane, so they
         # are not kept in a long ring: a client that falls behind asks for a fresh snapshot.
+        if message.get("scroll") and not self.scroll_clients():
+            # One client that cannot shift its own rows is enough to take the primitive away from
+            # everybody: the ring is shared, so a scroll diff it replayed on resume would paint
+            # rows in the wrong places. It costs what it cost before the primitive existed, which
+            # is the point of negotiating it rather than versioning the whole protocol (#3H5T).
+            try:
+                message = self.source.screen_snapshot(pane)
+            except wire.WireError:
+                return                  # the pane went away between the frame and this line
         stream = self.stream(f"screen:{pane}", limit=8)
         self._fan_out(stream.add(message), needed=wire.VIEW, pane=pane)
+
+    def scroll_clients(self) -> bool:
+        """Can every client attached right now apply a screen `scroll` (section 6.5)?"""
+        return all(channel.screen_scroll for channel in self.channels.values())
 
     def _agent_event(self, pane: str, event: dict) -> None:
         name = event.get("event", "")
@@ -1529,6 +1546,10 @@ class Host:
     # -- session ---------------------------------------------------------------------------------
 
     async def _on_hello(self, channel: Channel, message: dict) -> None:
+        # What this client can be sent that RRP/1 did not have. Read before the participant
+        # branch, because a guest's page is the same page (#3H5T, section 6.5).
+        supports = message.get("supports")
+        channel.screen_scroll = isinstance(supports, list) and "screen_scroll" in supports
         if channel.participant_id is not None:
             await self._welcome_participant(channel)
             return
@@ -1581,6 +1602,12 @@ class Host:
             missed = stream.since(seq)
             if missed is None:
                 replayed[str(name)] = -1        # too old: the client must take a fresh snapshot
+                continue
+            if not channel.screen_scroll and any(item.get("scroll") for item in missed):
+                # A scroll diff reached the ring while a client that understands it was the only
+                # one attached. This one cannot replay it, and a screen it cannot rebuild is the
+                # same as a screen it fell behind on (#3H5T).
+                replayed[str(name)] = -1
                 continue
             replayed[str(name)] = len(missed)
             for item in missed:
@@ -1806,6 +1833,10 @@ class Host:
             raise wire.WireError("not_permitted", "this channel is already known here.")
         if not channel.room:
             raise wire.WireError("not_permitted", "a knock needs an invite link.")
+        # A guest admitted from a knock never sends `hello` on this session, so this is where
+        # their page says what it can render (#3H5T).
+        supports = message.get("supports")
+        channel.screen_scroll = isinstance(supports, list) and "screen_scroll" in supports
         invite = self.guests.invite_by_room(channel.room)
         if invite is None:
             raise wire.WireError("not_permitted", "that invite has expired or been revoked.")

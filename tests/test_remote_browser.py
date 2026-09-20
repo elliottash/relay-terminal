@@ -97,6 +97,22 @@ class ScrollbackSource(panes_mod.DemoPaneSource):
             callback(pane, message)
         return self.total
 
+    def scroll(self, pane: str, count: int) -> int:
+        """The same `count` lines of output, described the way a real desktop describes it.
+
+        Rows `[0, rows)` moved up by `count` and only the rows that entered at the bottom go on
+        the wire — `advance` above is the old shape, every row every time (#3H5T, section 6.5).
+        """
+        self.total += count
+        message = {"t": "screen_diff", "pane": pane, "cursor": self._cursor(),
+                   "base": self.total, "history": self.total,
+                   "scroll": {"top": 0, "bottom": self.rows, "by": count},
+                   "lines": [self._row(n, self.total + n)
+                             for n in range(self.rows - count, self.rows)]}
+        for callback in list(self._screen_callbacks):
+            callback(pane, message)
+        return self.total
+
     async def history(self, pane: str, before_row: int, count: int) -> dict:
         end = self.total if before_row < 0 else max(0, min(before_row, self.total))
         want = min(count, end)
@@ -554,6 +570,68 @@ class BrowserClientTests(unittest.TestCase):
                         "(() => { const w = document.getElementById('screen-wrap');"
                         " return w.scrollWidth - w.clientWidth; })()"), 0,
                         "the terminal grid is wider than its container")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_a_scrolled_screen_is_painted_exactly_as_a_snapshot_would_paint_it(self):
+        """#3H5T: a scroll reaches the phone as a shift, and the shift has to be free of charge.
+
+        The one thing that could go wrong is the arithmetic: a delta that disagrees with the
+        desktop leaves the phone showing rows that are not there. So the same output is sent both
+        ways — as the shift, then as the whole screen — and the painted rows are compared. They
+        must be identical, and the shift must not have cost a snapshot's worth of bytes.
+        """
+        async def main():
+            async with Harness(capability=wire.VIEW, source=ScrollbackSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                live = ("(() => [...document.querySelectorAll('.screen-grid > .screen-row')]"
+                        ".map(n => n.textContent.trim()))()")
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate(
+                        "document.querySelector('[data-pane-id=\"pane-1\"]').click()")
+                    await browser.wait_for(shown('screen-thread'))
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    await browser.wait_for(
+                        "[...document.querySelectorAll('#screen-wrap .screen-row')]"
+                        ".some(n => n.textContent.includes('row-'))", timeout=20)
+
+                    # Output, as shifts: a line at a time, then several at once, then a scroll
+                    # that turns over all but one row.
+                    for count in (1, 1, 1, 5, 13):
+                        harness.source.scroll("pane-1", count)
+                    await browser.wait_for(
+                        f"{live}.includes('row-{harness.source.total + harness.source.rows - 1}')",
+                        timeout=20)
+                    shifted = await browser.evaluate(live)
+
+                    # The same screen, sent whole. A snapshot rebuilds the grid, so the arrival is
+                    # watched for as a new first row node rather than as a change of text — there
+                    # must not be one.
+                    await browser.evaluate(
+                        "window.__firstRow = document.querySelector('.screen-grid > .screen-row')")
+                    harness.source.redraw("pane-1")
+                    await browser.wait_for(
+                        "document.querySelector('.screen-grid > .screen-row') !== window.__firstRow",
+                        timeout=20)
+                    self.assertEqual(await browser.evaluate(live), shifted)
+                    self.assertEqual(
+                        shifted,
+                        [f"row-{harness.source.total + n}" for n in range(harness.source.rows)])
+
+                    # And the shift really was cheaper: the hub forwarded one row per line of
+                    # output, not fourteen.
+                    sent = [m for m in harness.host.streams["screen:pane-1"].ring
+                            if m.get("scroll")]
+                    self.assertEqual([len(m["lines"]) for m in sent], [1, 1, 1, 5, 13])
 
                     problems = [line for line in browser.console
                                 if "EXCEPTION" in line or "error:" in line.lower()]

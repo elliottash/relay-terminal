@@ -156,6 +156,16 @@ struct ViewportFrame {
     std::vector<Line> lines;    // one per viewport row
     std::vector<uint8_t> dirty; // one per viewport row
     bool full = true;           // every row changed (scroll, resize, colours)
+    // The vertical shift this frame can be replayed as instead of repainted: rows
+    // [scrollTop, scrollBottom) of the *previous* frame moved up by `scrolledBy` rows (negative
+    // moves them down), and every row the shift could not carry over is named in `dirty`.
+    // `scrolledBy == 0` means there is nothing to replay and the frame reads exactly as it did
+    // before — `full`, then `dirty`. When it is set, `full` may still be true, because the
+    // desktop's own view repaints a scroll wholesale and always did; a consumer that ignores
+    // these three fields is therefore still correct, only more expensive (#3H5T).
+    int scrolledBy = 0;
+    int scrollTop = 0;
+    int scrollBottom = 0;
     CursorState cursor;         // viewport coordinates; visible=false when off-viewport
     bool cursorInViewport = true;
     int historyRows = 0;        // scrollback lines above the active screen

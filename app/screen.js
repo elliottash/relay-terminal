@@ -232,6 +232,9 @@ export class ScreenView {
       if (broke) this.resetHistory();
       this.fit();
     }
+    // A scroll first, then the rows the desktop could not carry over. Order matters: the frame's
+    // own lines are what the screen looks like *after* the shift (#3H5T, section 6.5).
+    if (message.scroll) this.shiftRows(message.scroll);
     for (const line of message.lines || []) {
       this.lines.set(line.row, line.segs || []);
     }
@@ -247,6 +250,50 @@ export class ScreenView {
       this.setBehind(true);
     }
     this.requestIfNeeded();
+  }
+
+  // Rows `[top, bottom)` moved up by `by` — a negative `by` moves them down — which is what the
+  // desktop sends instead of a whole screen when output scrolls (#3H5T). A streamed reply was
+  // 166 snapshots of 7,747 B and a grid rebuilt 166 times; it is now a diff of a row or two and
+  // this, which moves `by` row nodes and repaints none of them.
+  //
+  // The nodes are moved rather than repainted because their content did not change: row r shows
+  // what row r + by showed. The rows the shift left empty are always in the frame's `lines`, so
+  // paint() overwrites them a moment later and their stale nodes are never seen.
+  shiftRows(scroll) {
+    const by = Math.trunc(scroll.by || 0);
+    const top = Math.max(0, Math.trunc(scroll.top || 0));
+    const bottom = Math.min(this.rows, Math.trunc(scroll.bottom ?? this.rows));
+    const height = bottom - top;
+    if (!by || height <= 0) return;
+
+    const moved = new Map();
+    for (let row = top; row < bottom; row++) {
+      const from = row + by;
+      moved.set(row, from >= top && from < bottom ? (this.lines.get(from) || []) : []);
+    }
+    for (const [row, segs] of moved) this.lines.set(row, segs);
+
+    // The cursor is painted into its row's node, and that node has just moved. paint() repaints
+    // wherever it thinks the old one is, so it has to be told, or a second cursor is left behind.
+    if (this.lastCursorRow !== undefined && this.lastCursorRow >= top && this.lastCursorRow < bottom) {
+      const landed = this.lastCursorRow - by;
+      this.lastCursorRow = landed >= top && landed < bottom ? landed : undefined;
+    }
+
+    // A shift that empties the region leaves nothing to move; the frame repaints all of it.
+    if (Math.abs(by) >= height || this.rowNodes.length < bottom) return;
+    const region = this.rowNodes.slice(top, bottom);
+    const cut = by > 0 ? by : height + by;
+    const rotated = region.slice(cut).concat(region.slice(0, cut));
+    // Only the nodes that wrapped round move in the DOM; the rest are already in order.
+    const before = this.rowNodes[bottom] || null;
+    if (by > 0) {
+      for (const node of region.slice(0, cut)) this.grid.insertBefore(node, before);
+    } else {
+      for (const node of region.slice(cut)) this.grid.insertBefore(node, region[0]);
+    }
+    this.rowNodes.splice(top, height, ...rotated);
   }
 
   // ---- scrollback ---------------------------------------------------------------------------

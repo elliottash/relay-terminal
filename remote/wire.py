@@ -574,3 +574,32 @@ class Deduplicator:
         self.seen.append(msg_id)
         self._set.add(msg_id)
         return True
+
+
+# ---- screen frames --------------------------------------------------------------------------
+
+
+def apply_scroll(rows: list[dict], scroll: dict | None, height: int) -> list[dict]:
+    """Move a held screen the way a frame's ``scroll`` says it moved (section 6.5).
+
+    ``rows`` is one ``{row, segs}`` per viewport row; the answer is the same list with rows
+    ``[top, bottom)`` shifted up by ``by`` — a negative ``by`` shifts them down — and the rows the
+    shift vacated blank. The frame's own ``lines`` are applied on top, and they are exactly the
+    rows the desktop could not carry over, which is what turns a whole-screen snapshot into a
+    diff of a row or two while output streams (#3H5T).
+    """
+    if not scroll:
+        return rows
+    by = int(scroll.get("by", 0))
+    top = max(0, int(scroll.get("top", 0)))
+    bottom = min(height, int(scroll.get("bottom", height)))
+    if by == 0 or bottom <= top:
+        return rows
+    held = {int(row.get("row", -1)): row.get("segs", []) for row in rows}
+    # In place, so the walk has to run away from the rows it has already written: up the screen
+    # when the content moved up, down it when the content moved down.
+    order = range(top, bottom) if by > 0 else reversed(range(top, bottom))
+    for row in order:
+        source = row + by
+        held[row] = held.get(source, []) if top <= source < bottom else []
+    return [{"row": row, "segs": held.get(row, [])} for row in range(height)]

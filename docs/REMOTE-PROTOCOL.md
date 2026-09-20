@@ -311,7 +311,7 @@ On demand, mirroring the worker's own requests: `turn_transcript_get {pane, turn
 | Type | Direction | Body |
 |---|---|---|
 | `screen_snapshot` | desktop → client | `{pane, seq, rows, cols, alt, cursor, base, history, lines: [<row>]}` — every row |
-| `screen_diff` | desktop → client | `{pane, seq, cursor, base, history, lines: [<row>]}` — only rows that changed |
+| `screen_diff` | desktop → client | `{pane, seq, cursor, base, history, lines: [<row>], scroll?}` — only rows that changed, and how the rest moved |
 | `screen_get` | client → desktop | `{pane}` — ask for a fresh snapshot after a reconnect |
 | `history_get` | client → desktop | `{pane, id, before_row, count}` (`count` ≤ 200) |
 | `history` | desktop → client | `{pane, id, from_row, total, lines: [...], more}` |
@@ -345,6 +345,29 @@ omitting it: the desktop's own viewport may be sitting back in its scrollback, a
 would then overlap what is already on the client's screen.
 
 The host never sends scrollback unasked, and asking never changes what the desktop shows.
+
+**A scroll is a shift, not a new screen.** A `screen_diff` may carry
+`scroll: {top, bottom, by}`: rows `[top, bottom)` of the frame before it moved **up** by `by`
+rows, a negative `by` moving them down, and `lines` then holds only the rows the shift could not
+carry over — the ones that entered at the far end, and anything the program changed in the same
+frame. The client shifts its own rows and paints `lines` on top, in that order. A frame that is
+not describable that way — a resize, a clear or reset, the alternate screen, a colour change, a
+first frame, or a client that fell behind — is a `screen_snapshot` as it always was, and a
+snapshot never carries `scroll`. `by` is never zero and never as large as `bottom - top`.
+
+It exists because the common case was the expensive one: a line of streamed output at the bottom
+of the screen scrolls the viewport, and that used to be sent as every row. A 20 000-character
+reply watched on a phone was 166 snapshots of 7 747 B against 86 diffs of 375 B — 1.50 MB for
+20 KB of text, and 82 % of one core in Chrome (#3H5T,
+`docs/qa_evidence/2026-09-20-perf-fixes/phone/RESULTS.md`).
+
+**A client asks for it; it is not assumed.** `hello` (and a guest's `knock`) carries
+`supports: ["screen_scroll"]`. A client that did not ask is sent snapshots, because one that
+ignored the field would paint the new rows over rows that had moved. The screen stream's replay
+ring is shared, so **one** attached client that did not ask takes the primitive away from all of
+them until it leaves, and a resume that would replay a `scroll` to such a client is answered
+`-1` — take a fresh snapshot — instead. `supports` never widens what a client may *do*: that is
+the capability ladder, and it is granted by the owner, never asked for.
 
 A `<row>` is `{row, segs: [[text, fg, bg, attrs], ...]}`: runs of identical style. The client needs
 no index arithmetic — a run carries its own text — and no second emulator. `fg` and `bg` are packed

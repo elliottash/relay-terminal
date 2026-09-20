@@ -273,6 +273,10 @@ class GuiPaneSource(panes_mod.PaneSource):
             return
         full = bool(message.get("full"))
         lines = message.get("lines", [])
+        # A scroll is applied here too, not only on the phone: `self.screens` is what a late
+        # joiner and a `screen_get` are answered from, so it has to hold the screen the diffs
+        # describe (#3H5T).
+        scroll = message.get("scroll")
         state = self.screens.get(pane_id)
         if full or state is None:
             state = {"rows": message.get("rows", self.panes[pane_id]["rows"]),
@@ -283,7 +287,8 @@ class GuiPaneSource(panes_mod.PaneSource):
             state["lines"] = [{"row": row, "segs": rows.get(row, [])}
                               for row in range(state["rows"])]
         else:
-            rows = {line["row"]: line.get("segs", []) for line in state["lines"]}
+            held = wire.apply_scroll(state["lines"], scroll, state["rows"])
+            rows = {line["row"]: line.get("segs", []) for line in held}
             for line in lines:
                 rows[line["row"]] = line.get("segs", [])
             state["lines"] = [{"row": row, "segs": rows.get(row, [])}
@@ -298,6 +303,8 @@ class GuiPaneSource(panes_mod.PaneSource):
         out = {"t": "screen_snapshot" if full else "screen_diff", "pane": pane_id,
                "cursor": message.get("cursor", {}), "base": state["base"],
                "history": state["history"], "lines": lines}
+        if scroll and not full:
+            out["scroll"] = scroll
         if full:
             out.update({"rows": state["rows"], "cols": state["cols"], "alt": state["alt"]})
         for callback in list(self._screen_callbacks):

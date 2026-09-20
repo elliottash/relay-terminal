@@ -155,6 +155,14 @@ export async function forgetGuest() {
 
 // ---- the session ------------------------------------------------------------------------------
 
+// What this page can be sent that RRP/1 did not have, named in `hello` and in `knock`. A screen
+// `scroll` is the shift the desktop applies instead of resending the grid (section 6.5): a page
+// that did not ask for it is sent whole snapshots, because a page that ignored the field would
+// paint the new rows over rows that had moved. Nothing here widens what the page may *do* — the
+// capability ladder is the hub's and is not asked for.
+const SUPPORTS = ['screen_scroll'];
+
+
 export class Rrp extends EventTarget {
   constructor(origin = location.origin) {
     super();
@@ -384,6 +392,11 @@ export class Rrp extends EventTarget {
     if (!this.session || this.socket?.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('not connected.'));
     }
+    // Every `hello` and `knock` this page sends says what it can render, wherever it was sent
+    // from — a reconnect and a guest's first message included, since a hub that heard nothing
+    // sends snapshots (section 6.5). Here rather than at the three call sites so a fourth cannot
+    // forget.
+    if (message.t === 'hello' || message.t === 'knock') message = { ...message, supports: SUPPORTS };
     this.sending = (this.sending || Promise.resolve()).then(async () => {
       if (!this.session || this.socket?.readyState !== WebSocket.OPEN) {
         throw new Error('not connected.');

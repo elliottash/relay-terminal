@@ -882,6 +882,102 @@ private slots:
         QVERIFY(f.dirty[2]);
         QCOMPARE(f.lines[2].text(), QStringLiteral("x"));
     }
+
+    // #3H5T: output scrolling the screen is a shift plus the rows it could not carry over, not a
+    // whole new screen. A phone watching a streamed reply was sent 166 snapshots of 7,747 B for
+    // exactly this; the frame now says what moved so the wire can say it too.
+    void aScrollSaysWhatMoved()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 20);
+        ViewportFrame f;
+        h.feed("a\r\nb\r\nc\r\nd\r\ne");
+        QVERIFY(h.vt->updateFrame(&f, true));
+        h.feed("\r\nf");
+        QVERIFY(h.vt->updateFrame(&f, false));
+        if (f.scrolledBy == 0)
+            QSKIP("this core does not describe a scroll yet");
+        QCOMPARE(f.scrolledBy, 1);
+        QCOMPARE(f.scrollTop, 0);
+        QCOMPARE(f.scrollBottom, 5);
+        // Every row still arrives — the desktop's own view repaints a scroll whole — but `dirty`
+        // names only the rows a client that shifts its own copy has to be told about.
+        QCOMPARE(f.lines[3].text(), QStringLiteral("e"));
+        QCOMPARE(f.lines[4].text(), QStringLiteral("f"));
+        int dirtyRows = 0;
+        for (uint8_t bit : f.dirty)
+            dirtyRows += bit ? 1 : 0;
+        QVERIFY2(dirtyRows <= 2, qPrintable(QStringLiteral("a one-row scroll dirtied %1 rows")
+                                                .arg(dirtyRows)));
+        QVERIFY(f.dirty[4]);
+    }
+
+    // The reason the description has to be exact: a client that applies it must end up with the
+    // screen a full frame would have given it, row for row, after a run of ordinary output.
+    void aShiftedCopyMatchesAFullFrame()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 20);
+        ViewportFrame f;
+        QStringList held;                       // what a client that only shifts and patches holds
+        const auto follow = [&] {
+            if (!h.vt->updateFrame(&f, false)) return;
+            const bool shift = f.scrolledBy != 0;
+            if (!shift && f.full) {
+                held.clear();
+                for (int r = 0; r < f.rows; ++r) held << QString();
+            }
+            while (held.size() < f.rows) held << QString();
+            if (shift) {
+                const int by = f.scrolledBy;
+                QStringList moved = held;
+                for (int r = f.scrollTop; r < f.scrollBottom; ++r) {
+                    const int from = r + by;
+                    moved[r] = (from >= f.scrollTop && from < f.scrollBottom) ? held[from] : QString();
+                }
+                held = moved;
+            }
+            for (int r = 0; r < f.rows; ++r)
+                if (f.dirty[size_t(r)]) held[r] = f.lines[size_t(r)].text();
+        };
+        follow();
+        for (int i = 0; i < 40; ++i) {
+            h.feed(QByteArray("row") + QByteArray::number(i) + "\r\n");
+            follow();
+        }
+        h.feed("\x1b[2;3Hxy");                  // a plain in-place edit between the scrolls
+        follow();
+        h.feed("\x1b[H\x1b[2Jfresh");           // and a clear, which is never a scroll
+        follow();
+
+        ViewportFrame whole;
+        QVERIFY(h.vt->updateFrame(&whole, true));
+        QStringList expected;
+        for (int r = 0; r < whole.rows; ++r) expected << whole.lines[size_t(r)].text();
+        QCOMPARE(held, expected);
+    }
+
+    // A repaint that is not a scroll must not be dressed up as one, or a client would shift rows
+    // that did not move.
+    void aClearOrAResizeIsNeverAScroll()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 20);
+        ViewportFrame f;
+        h.feed("a\r\nb\r\nc\r\nd\r\ne");
+        QVERIFY(h.vt->updateFrame(&f, true));
+        h.feed("\x1b[H\x1b[2J");
+        QVERIFY(h.vt->updateFrame(&f, false));
+        // A clear damages every row without moving one; it went out as a diff of all five rows
+        // before this change and still does.
+        QCOMPARE(f.scrolledBy, 0);
+        for (int r = 0; r < f.rows; ++r)
+            QVERIFY(f.dirty[size_t(r)]);
+        h.vt->resize(7, 20, 8, 16);
+        QVERIFY(h.vt->updateFrame(&f, false));
+        QVERIFY(f.full);
+        QCOMPARE(f.scrolledBy, 0);
+    }
 };
 
 QObject *makeCoreTest()
