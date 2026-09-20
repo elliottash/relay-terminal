@@ -763,3 +763,71 @@ class AlwaysOnLinkTests(unittest.TestCase):
                 await harness.until(lambda: harness.host.devices_online() == 0,
                                     what="both gone")
         run(main(), timeout=90)
+
+
+class ConnectTokenTests(unittest.TestCase):
+    """Section 8 from the desktop's side: the token is minted at pairing, handed over in `paired`
+    and again in every `welcome`, stored with the record, and presented by the Python client —
+    which is what a laptop's Relay uses to open a shared pane."""
+
+    def test_pairing_hands_over_a_token_the_client_presents(self):
+        async def main():
+            async with Harness() as harness:
+                client, paired, _, _ = await harness.pair()
+                await client.close()
+                self.assertTrue(paired.connect_token)
+                device = harness.devices.devices[paired.device_id]
+                self.assertEqual(pairing.check_connect_token(
+                    harness.identity.connect_secret, harness.identity.desktop_id,
+                    paired.device_id, paired.connect_token), device.connect_token_id)
+                # The record round-trips through the file a viewer keeps.
+                self.assertEqual(client_mod.Paired.from_json(paired.to_json()).connect_token,
+                                 paired.connect_token)
+                again = client_mod.Client(harness.base)
+                self.assertIn("&ct=", again._url(desktop=harness.identity.desktop_id,
+                                                  device=paired.device_id,
+                                                  connect_token=paired.connect_token))
+                welcome = await again.connect(paired)
+                self.assertEqual(welcome["connect_token"], paired.connect_token)
+                await again.close()
+                # A record from before tokens existed — the same file without the field — is
+                # refused at the rendezvous exactly as a stranger is; there is no shim.
+                old = client_mod.Paired.from_json(json.dumps({
+                    key: value for key, value in json.loads(paired.to_json()).items()
+                    if key != "connect_token"}))
+                self.assertEqual(old.connect_token, "")
+                stale = client_mod.Client(harness.base)
+                with self.assertRaises(Exception):
+                    await stale.connect(old)
+                await stale.close()
+        run(main())
+
+    def test_a_rendezvous_that_restarted_learns_the_revoked_ids_again(self):
+        """Registration carries every revoked id, so a rendezvous with an empty database is
+        told what to refuse before the hub's next channel — including a device revoked while
+        the rendezvous was down, whose `/v1/revoke` never arrived."""
+        async def main():
+            async with Harness(reconnect=(0.05, 0.1)) as harness:
+                desktop_id = harness.identity.desktop_id
+                keep, kept, _, _ = await harness.pair(name="keep")
+                drop, dropped, _, _ = await harness.pair(name="drop")
+                await keep.close()
+                await drop.close()
+                await harness.rendezvous_restarts()
+                # Revoked while the registry is empty: the rendezvous cannot be told now.
+                harness.devices.revoke(dropped.device_id)
+                token_id = harness.devices.devices[dropped.device_id].connect_token_id
+                await harness.until(lambda: harness.host.socket is not None
+                                    and harness.store.desktop_exists(desktop_id),
+                                    what="re-registration")
+                await harness.until(lambda: harness.store.token_revoked(desktop_id, token_id),
+                                    what="the revoked id after re-registration")
+                self.assertIsNotNone(harness.store.connect_secret(desktop_id))
+                stale = client_mod.Client(harness.base)
+                with self.assertRaises(Exception):
+                    await stale.connect(dropped)
+                await stale.close()
+                fresh = client_mod.Client(harness.base)
+                await fresh.connect(kept)
+                await fresh.close()
+        run(main())

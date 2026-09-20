@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import hmac
 import json
 import logging
@@ -33,7 +34,7 @@ from urllib.parse import urlsplit
 if __package__ in (None, ""):                      # running the file directly
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from remote import envelope, httpd, noise, push, ws
+from remote import envelope, httpd, noise, pairing, push, ws
 
 log = logging.getLogger("relay.rendezvous")
 
@@ -42,12 +43,18 @@ MAX_ROOM_TTL = 7 * 86400    # an invite may live up to a week (section 10)
 METADATA_DAYS = 7
 MAX_ROOMS_PER_HOUR = 20
 MAX_CHANNELS_PER_DESKTOP = 32
-# Section 8 wants the concurrent-socket limit counted **per device**, so that "anyone who learns a
-# `desktop_id` [cannot] open every slot and keep the owner's own phone out". Per-device connect
-# tokens do not exist yet — they would have to be minted here and delivered inside the pairing
-# session — so until they do, the budget is also capped per peer address. It does not make the
-# per-device rule true; it means one address cannot be the whole of the denial.
+# Section 8 counts the concurrent-socket limit **per device**, so that "anyone who learns a
+# `desktop_id` [cannot] open every slot and keep the owner's own phone out". A device is named by
+# its connect token: minted by the desktop at pairing, delivered inside the Noise session, checked
+# here against the secret the desktop registered. Three sockets is a phone reconnecting over a
+# flaky link plus a tab it left open, and no more.
+MAX_CHANNELS_PER_TOKEN = 3
+# The per-address cap stays for the connections that carry no token because they cannot: a room
+# (a pairing link, an invite, a meeting code) is reached by whoever holds its id, and the desktop
+# is the thing that decides what that connection is worth.
 MAX_CHANNELS_PER_PEER = 8
+# What one registration may carry, matching `pairing.MAX_REVOKED_TOKENS` on the desktop side.
+MAX_REVOKED_TOKENS = 256
 MAX_PUSH_PER_HOUR = 600
 CHALLENGE_TTL = 120
 
@@ -127,7 +134,17 @@ CREATE TABLE IF NOT EXISTS desktops (
     static_pubkey TEXT NOT NULL,
     token_hash TEXT NOT NULL,
     created REAL NOT NULL,
-    last_seen REAL
+    last_seen REAL,
+    connect_secret TEXT
+);
+-- Connect-token ids the desktop has revoked (section 8). Ids only, never a token and never a
+-- MAC, and they are replaced wholesale at every registration, so they live exactly as long as
+-- the desktop's registration does. They are deliberately **not** in `events`: the seven-day
+-- metadata log holds no token id, so a copy of it says nothing about which devices a desktop has.
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    desktop_id TEXT NOT NULL,
+    token_id TEXT NOT NULL,
+    PRIMARY KEY (desktop_id, token_id)
 );
 CREATE TABLE IF NOT EXISTS rooms (
     room TEXT PRIMARY KEY,
@@ -176,6 +193,11 @@ class Store:
             os.chmod(path, 0o600)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        # A database written before connect tokens existed has the desktops table without the
+        # column; adding it here rather than recreating the table keeps every registration.
+        if "connect_secret" not in {row["name"] for row
+                                    in self.db.execute("PRAGMA table_info(desktops)")}:
+            self.db.execute("ALTER TABLE desktops ADD COLUMN connect_secret TEXT")
         self.db.commit()
         # Meeting codes, by code: (desktop_id, room, expires). In memory on purpose and never in
         # the database: the code → room map is kept for the code's own ten minutes and not a
@@ -188,11 +210,18 @@ class Store:
 
     # ---- desktops ----------------------------------------------------------------------------
 
-    def register(self, desktop_id: str, static_pubkey: str) -> str | None:
+    def register(self, desktop_id: str, static_pubkey: str,
+                 connect_secret: str | None = None) -> str | None:
         """Register or re-register. Returns a fresh bearer token, or None on a key mismatch.
 
         The caller has already proved possession of the private half (``consume_challenge``), and
         ``desktop_id`` is derived from the key, so an id cannot be squatted or rebound.
+
+        ``connect_secret`` turns per-device connect tokens on for this desktop (section 8): while
+        it is set, a client channel must present a token this secret verifies. It is written at
+        every registration, so a desktop that stops sending one turns them off again — and a
+        rendezvous that restarted has the secret back the moment the desktop re-registers, which
+        ``Host._register_again`` does before every reconnect.
         """
         row = self.db.execute("SELECT static_pubkey FROM desktops WHERE desktop_id = ?",
                               (desktop_id,)).fetchone()
@@ -201,14 +230,53 @@ class Store:
         token = secrets.token_urlsafe(32)
         now = time.time()
         if row:
-            self.db.execute("UPDATE desktops SET token_hash = ?, last_seen = ? WHERE desktop_id = ?",
-                            (token_hash(token), now, desktop_id))
+            self.db.execute("UPDATE desktops SET token_hash = ?, last_seen = ?, connect_secret = ?"
+                            " WHERE desktop_id = ?",
+                            (token_hash(token), now, connect_secret, desktop_id))
         else:
             self.db.execute(
-                "INSERT INTO desktops (desktop_id, static_pubkey, token_hash, created, last_seen)"
-                " VALUES (?, ?, ?, ?, ?)", (desktop_id, static_pubkey, token_hash(token), now, now))
+                "INSERT INTO desktops (desktop_id, static_pubkey, token_hash, created, last_seen,"
+                " connect_secret) VALUES (?, ?, ?, ?, ?, ?)",
+                (desktop_id, static_pubkey, token_hash(token), now, now, connect_secret))
         self.db.commit()
         return token
+
+    # ---- per-device connect tokens (section 8) -------------------------------------------------
+
+    def connect_secret(self, desktop_id: str) -> bytes | None:
+        """The secret to check this desktop's connect tokens against, or None if it has none."""
+        row = self.db.execute("SELECT connect_secret FROM desktops WHERE desktop_id = ?",
+                              (desktop_id,)).fetchone()
+        if not row or not row["connect_secret"]:
+            return None
+        try:
+            return base64.b64decode(row["connect_secret"], validate=True)
+        except Exception:
+            return None
+
+    def set_revoked_tokens(self, desktop_id: str, token_ids: list[str]) -> int:
+        """Replace this desktop's revoked-id set with the one it just sent."""
+        wanted = [str(token_id)[:64] for token_id in token_ids
+                  if token_id][:MAX_REVOKED_TOKENS]
+        self.db.execute("DELETE FROM revoked_tokens WHERE desktop_id = ?", (desktop_id,))
+        self.db.executemany("INSERT OR IGNORE INTO revoked_tokens (desktop_id, token_id)"
+                            " VALUES (?, ?)", [(desktop_id, token_id) for token_id in wanted])
+        self.db.commit()
+        return len(wanted)
+
+    def add_revoked_tokens(self, desktop_id: str, token_ids: list[str]) -> list[str]:
+        """Add ids to the set, for a revoke that must bite before the next registration."""
+        wanted = [str(token_id)[:64] for token_id in token_ids
+                  if token_id][:MAX_REVOKED_TOKENS]
+        self.db.executemany("INSERT OR IGNORE INTO revoked_tokens (desktop_id, token_id)"
+                            " VALUES (?, ?)", [(desktop_id, token_id) for token_id in wanted])
+        self.db.commit()
+        return wanted
+
+    def token_revoked(self, desktop_id: str, token_id: str) -> bool:
+        return bool(self.db.execute(
+            "SELECT 1 FROM revoked_tokens WHERE desktop_id = ? AND token_id = ?",
+            (desktop_id, token_id)).fetchone())
 
     def authenticate(self, desktop_id: str, token: str) -> bool:
         row = self.db.execute("SELECT token_hash FROM desktops WHERE desktop_id = ?",
@@ -455,6 +523,9 @@ class Hub:
     def __init__(self):
         self.desktops: dict[str, ws.WebSocket] = {}
         self.channels: dict[str, dict[bytes, ws.WebSocket]] = {}
+        # The connect token each channel was opened on, so the budget can be counted per device
+        # and a revoked token's live channels can be closed. Ids only, and in memory only.
+        self.tokens: dict[str, dict[bytes, str]] = {}
 
     def attach_desktop(self, desktop_id: str, socket: ws.WebSocket) -> ws.WebSocket | None:
         previous = self.desktops.get(desktop_id)
@@ -466,28 +537,48 @@ class Hub:
         if self.desktops.get(desktop_id) is not socket:
             return []
         self.desktops.pop(desktop_id, None)
+        self.tokens.pop(desktop_id, None)
         return list(self.channels.pop(desktop_id, {}).values())
 
-    def add_channel(self, desktop_id: str, channel: bytes, socket: ws.WebSocket) -> bool:
-        """Take a slot, if there is one for this desktop **and** one for this address.
+    def add_channel(self, desktop_id: str, channel: bytes, socket: ws.WebSocket,
+                    token_id: str = "") -> bool:
+        """Take a slot, if there is one for this desktop, this device and this address.
 
-        `/v1/connect` for a client carries no credential — the desktop is the thing that
-        authenticates, at the handshake — so the budget is all that stands between a stranger who
-        knows a `desktop_id` and the owner's own phone being unable to get a socket. A per-address
-        share of it means that stranger needs a distributed attack rather than a loop.
+        With a connect token the budget is counted **per device**, which is the rule section 8
+        states: a stranger who knows a `desktop_id` has no token, gets no channel at all, and
+        cannot reach the owner's share of the budget however many addresses they have. Without
+        one — a room, which is a pairing link, an invite or a meeting code — the per-address share
+        is what stops one client taking the desktop's whole budget with a loop.
         """
         channels = self.channels.setdefault(desktop_id, {})
+        tokens = self.tokens.setdefault(desktop_id, {})
         if len(channels) >= MAX_CHANNELS_PER_DESKTOP:
             return False
-        peer = peer_address(socket)
-        if peer and sum(1 for other in channels.values()
-                        if peer_address(other) == peer) >= MAX_CHANNELS_PER_PEER:
-            return False
+        if token_id:
+            if sum(1 for other in tokens.values()
+                   if other == token_id) >= MAX_CHANNELS_PER_TOKEN:
+                return False
+        else:
+            peer = peer_address(socket)
+            if peer and sum(1 for other in channels.values()
+                            if peer_address(other) == peer) >= MAX_CHANNELS_PER_PEER:
+                return False
         channels[channel] = socket
+        if token_id:
+            tokens[channel] = token_id
         return True
 
     def drop_channel(self, desktop_id: str, channel: bytes) -> ws.WebSocket | None:
+        self.tokens.get(desktop_id, {}).pop(channel, None)
         return self.channels.get(desktop_id, {}).pop(channel, None)
+
+    def channels_on_tokens(self, desktop_id: str,
+                           token_ids: set[str]) -> list[tuple[bytes, ws.WebSocket]]:
+        """The live channels a revoke has just killed — closed while the phone is mid-session."""
+        tokens = self.tokens.get(desktop_id, {})
+        channels = self.channels.get(desktop_id, {})
+        return [(channel, channels[channel]) for channel, token_id in list(tokens.items())
+                if token_id in token_ids and channel in channels]
 
     def client(self, desktop_id: str, channel: bytes) -> ws.WebSocket | None:
         return self.channels.get(desktop_id, {}).get(channel)
@@ -522,11 +613,62 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         if not store.consume_challenge(str(fields.get("challenge", "")), pubkey,
                                        str(fields.get("proof", ""))):
             return httpd.Response.error(401, "that challenge is unknown, spent or unproved.")
-        token = store.register(desktop_id, pubkey)
+        # Per-device connect tokens (section 8). The secret is what `/v1/connect` checks a
+        # client's token against; the ids are the tokens that must stop working. Both are sent at
+        # every registration, so this server has them again after a restart without a round trip
+        # of its own, and a desktop that sends neither is one with tokens off.
+        secret = fields.get("connect_secret")
+        connect_secret = None
+        if isinstance(secret, str) and secret:
+            try:
+                raw = base64.b64decode(secret, validate=True)
+            except Exception:
+                return httpd.Response.error(400, "connect_secret must be base64.")
+            if len(raw) != 32:
+                return httpd.Response.error(400, "connect_secret must be 32 bytes.")
+            connect_secret = secret
+        revoked = fields.get("revoked_tokens") or []
+        if not isinstance(revoked, list) or len(revoked) > MAX_REVOKED_TOKENS:
+            return httpd.Response.error(400, "revoked_tokens must be a list of at most "
+                                             f"{MAX_REVOKED_TOKENS} ids.")
+        token = store.register(desktop_id, pubkey, connect_secret)
         if token is None:
             return httpd.Response.error(409, "that desktop id belongs to a different key.")
-        store.note("register", desktop_id)
-        return httpd.Response.json({"desktop_id": desktop_id, "token": token})
+        store.set_revoked_tokens(desktop_id, [str(value) for value in revoked])
+        # Metadata is ids, counts and times (section 8). The count of revoked tokens is a count;
+        # the ids themselves are never written here, so the seven-day log names no device.
+        store.note("register", desktop_id, revoked=len(revoked), tokens=bool(connect_secret))
+        return httpd.Response.json({"desktop_id": desktop_id, "token": token,
+                                    "connect_tokens": bool(connect_secret)})
+
+    @server.route("POST", "/v1/revoke")
+    async def revoke(request: ws.Request, body: bytes) -> httpd.Response:
+        """A desktop says which connect-token ids are dead, and their channels close now.
+
+        Registration carries the whole list, but a device revoked at four in the afternoon must
+        stop working at four in the afternoon — including for a phone that is mid-session, whose
+        channel this closes — rather than at the desktop's next reconnect.
+        """
+        try:
+            fields = httpd.json_body(body)
+        except ValueError as error:
+            return httpd.Response.error(400, str(error))
+        desktop_id = str(fields.get("desktop_id", ""))
+        if not store.authenticate(desktop_id, str(fields.get("token", ""))):
+            return httpd.Response.error(401, "unknown desktop or bad token.")
+        ids = fields.get("token_ids") or []
+        if not isinstance(ids, list) or len(ids) > MAX_REVOKED_TOKENS:
+            return httpd.Response.error(400, "token_ids must be a list of at most "
+                                             f"{MAX_REVOKED_TOKENS} ids.")
+        added = store.add_revoked_tokens(desktop_id, [str(value) for value in ids])
+        closed = 0
+        for channel, socket in hub.channels_on_tokens(desktop_id, set(added)):
+            hub.drop_channel(desktop_id, channel)
+            closed += 1
+            with contextlib.suppress(Exception):
+                await socket.close(4403, "that device was revoked.")
+        store.note("revoke", desktop_id, count=len(added), closed=closed)
+        return httpd.Response.json({"revoked": len(added), "closed": closed})
 
     @server.route("POST", "/v1/rooms")
     async def rooms(request: ws.Request, body: bytes) -> httpd.Response:
@@ -751,13 +893,28 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         if not desktop_id or not store.desktop_exists(desktop_id):
             await socket.close(4404, "no such desktop or the pairing code expired.")
             return
+        # Per-device connect tokens (section 8). A desktop that registered a secret is one whose
+        # devices carry tokens, and a channel to it without a valid one is refused **with the
+        # same answer an unknown desktop gets**: a stranger holding a `desktop_id` computed from
+        # a link they once saw learns nothing from the refusal, and takes no slot on the way.
+        # A room carries no token by design — a pairing link, an invite or a meeting code is
+        # reached by whoever holds the room id, and the desktop decides what that is worth.
+        token_id = ""
+        if not room:
+            secret = store.connect_secret(desktop_id)
+            if secret is not None:
+                token_id = pairing.check_connect_token(
+                    secret, desktop_id, query.get("device", ""), query.get("ct", ""))
+                if not token_id or store.token_revoked(desktop_id, token_id):
+                    await socket.close(4404, "no such desktop or the pairing code expired.")
+                    return
         desktop = hub.desktops.get(desktop_id)
         if desktop is None:
             await socket.close(4404, "that desktop is offline.")
             return
 
         channel = envelope.new_channel()
-        if not hub.add_channel(desktop_id, channel, socket):
+        if not hub.add_channel(desktop_id, channel, socket, token_id):
             await socket.close(4429, "too many connections to that desktop.")
             return
         meta = {"room": room} if room else {"device": query.get("device", "")}

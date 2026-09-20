@@ -11,6 +11,7 @@ it asserts is unreadable a month later — the interesting part is always *why* 
 this was worth a rule.
 """
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -1070,8 +1071,9 @@ class PaneStateTests(unittest.TestCase):
 class RendezvousTests(unittest.TestCase):
     def test_one_address_cannot_take_every_channel_slot_on_a_desktop(self):
         """Section 8 counts sockets per device so that "anyone who learns a `desktop_id`" cannot
-        "open every slot and keep the owner's own phone out". Per-device connect tokens do not
-        exist yet; until they do, one peer address may not have the whole budget.
+        "open every slot and keep the owner's own phone out". A stranger has no connect token,
+        so since 2026-09-20 they get **no** slot at all; the per-address cap is what still bounds
+        a room (a pairing link, an invite), which carries no token by design.
         """
         async def main():
             async with Harness() as harness:
@@ -1099,8 +1101,9 @@ class RendezvousTests(unittest.TestCase):
         run(main())
 
     def test_a_desktop_id_alone_opens_nothing_that_can_be_read(self):
-        """The channel a stranger opens is real — the rendezvous cannot tell them apart — but it
-        dies at the handshake, because an unpinned static key is not a device."""
+        """A stranger with a `desktop_id` and no connect token is refused at the rendezvous, and
+        one who somehow had a channel would die at the handshake anyway, because an unpinned
+        static key is not a device. Either way the device store stays empty."""
         async def main():
             async with Harness() as harness:
                 stranger = client_mod.Client(harness.base)
@@ -1303,3 +1306,349 @@ class MeetingCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- 9. Per-device connect tokens (section 8) ---------------------------------------------------
+
+def connect_url(harness, desktop_id: str, device: str, token: str | None = None) -> str:
+    from urllib.parse import quote
+    url = (harness.base.replace("http://", "ws://")
+           + f"/v1/connect?desktop={desktop_id}&device={device}")
+    if token is not None:
+        url += "&ct=" + quote(token, safe="")
+    return url
+
+
+async def attach(harness, desktop_id: str, device: str, token: str | None = None):
+    """Open a raw client socket at the rendezvous and say what it did with it.
+
+    Returns ``(socket, closed)``: ``closed`` is the `ConnectionClosed` the rendezvous answered
+    with, or None when the socket is still open a second later — a channel was granted and the
+    desktop is waiting for a handshake nobody here will send.
+    """
+    socket = await ws.connect(connect_url(harness, desktop_id, device, token))
+    try:
+        await asyncio.wait_for(socket.recv(), 1.0)
+    except asyncio.TimeoutError:
+        return socket, None
+    except ws.ConnectionClosed as closed:
+        return socket, closed
+    raise AssertionError("the rendezvous sent a frame to a client that had not spoken")
+
+
+async def until(predicate, timeout=10.0, what="the condition"):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError(f"{what} was never reached")
+        await asyncio.sleep(0.02)
+
+
+class ConnectTokenTests(unittest.TestCase):
+    """Section 8: `/v1/connect` is authenticated per device by a token the desktop minted at
+    pairing and handed over inside the Noise session, so a `desktop_id` — which anyone who ever
+    held a link can compute — buys nothing on its own."""
+
+    def test_a_desktop_id_without_a_valid_token_is_refused_like_an_unknown_desktop(self):
+        async def main():
+            async with Harness() as harness:
+                desktop_id = harness.identity.desktop_id
+                client, record = await harness.paired()
+                device = harness.devices.devices[record.device_id]
+                secret = harness.identity.connect_secret
+                good = record.connect_token
+                self.assertTrue(good)
+                _, unknown = await attach(harness, "0" * 32, "x")
+                self.assertEqual(unknown.code, 4404)
+                attempts = {
+                    "no token": None,
+                    "garbage": "not-a-token",
+                    "empty mac": device.connect_token_id + ".",
+                    "wrong mac": device.connect_token_id + "." + "A" * 22,
+                    "another desktop's secret": pairing.mint_connect_token(
+                        pairing.connect_secret(b"\x07" * 32), desktop_id, record.device_id,
+                        device.connect_token_id),
+                }
+                for name, token in attempts.items():
+                    with self.subTest(name):
+                        socket, closed = await attach(harness, desktop_id, record.device_id, token)
+                        await socket.close()
+                        self.assertIsNotNone(closed, f"{name}: the rendezvous granted a channel")
+                        self.assertEqual((closed.code, closed.reason),
+                                         (unknown.code, unknown.reason),
+                                         f"{name}: the refusal differs from an unknown desktop's")
+                # A token is bound to the device id it was minted for: presented under another
+                # name it is a stranger's request, whoever holds it.
+                socket, closed = await attach(harness, desktop_id, "somebody-else", good)
+                await socket.close()
+                self.assertEqual((closed.code, closed.reason), (unknown.code, unknown.reason))
+                # ...and to the desktop: the same id at a desktop that does not exist is refused
+                # before any secret is looked at.
+                socket, closed = await attach(harness, "f" * 32, record.device_id, good)
+                await socket.close()
+                self.assertEqual(closed.code, 4404)
+                # None of that touched the owner's own device, nor the hub's registration socket.
+                socket, closed = await attach(harness, desktop_id, record.device_id, good)
+                self.assertIsNone(closed, "the real token was refused")
+                await socket.close()
+                # The check is stateless: the rendezvous holds the secret and a revoked-id list,
+                # not the issued ids, so a token under the real secret with an id the desktop
+                # never issued opens a channel. Only the desktop and the rendezvous hold that
+                # secret, and the rendezvous grants channels anyway — which is why handing it
+                # over costs nothing (section 8). Everything on that channel is still ciphertext
+                # the hub will not accept from an unpinned key.
+                unissued = pairing.mint_connect_token(secret, desktop_id, record.device_id,
+                                                      pairing.new_connect_token_id())
+                socket, closed = await attach(harness, desktop_id, record.device_id, unissued)
+                await socket.close()
+                self.assertIsNone(closed)
+                self.assertIsNotNone(harness.host.socket)
+                await client.send({"t": "pane_list"})
+                await client.close()
+        run(main())
+
+    def test_the_channel_budget_is_counted_per_device(self):
+        """Three sockets per token — a phone reconnecting over a flaky link plus a tab it left
+        open — and a fourth is refused; another device's token is unaffected, and the owner's
+        real session on that device still works."""
+        async def main():
+            async with Harness() as harness:
+                desktop_id = harness.identity.desktop_id
+                first, one = await harness.paired(name="Pixel 9")
+                second, two = await harness.paired(name="iPhone")
+                self.assertNotEqual(one.connect_token, two.connect_token)
+                sockets = []
+                try:
+                    # `first` already holds one channel on its token.
+                    for _ in range(rendezvous_mod.MAX_CHANNELS_PER_TOKEN - 1):
+                        socket, closed = await attach(harness, desktop_id, one.device_id,
+                                                      one.connect_token)
+                        sockets.append(socket)
+                        self.assertIsNone(closed)
+                    socket, closed = await attach(harness, desktop_id, one.device_id,
+                                                  one.connect_token)
+                    sockets.append(socket)
+                    self.assertIsNotNone(closed, "a fourth channel on one token was granted")
+                    self.assertEqual(closed.code, 4429)
+                    socket, closed = await attach(harness, desktop_id, two.device_id,
+                                                  two.connect_token)
+                    sockets.append(socket)
+                    self.assertIsNone(closed, "one device's budget kept another's phone out")
+                    await first.send({"t": "pane_list"})
+                    await second.send({"t": "pane_list"})
+                finally:
+                    for socket in sockets:
+                        with contextlib.suppress(Exception):
+                            await socket.close()
+                    await first.close()
+                    await second.close()
+        run(main())
+
+    def test_revoking_a_device_revokes_its_token_and_closes_its_live_channel(self):
+        async def main():
+            async with Harness() as harness:
+                desktop_id = harness.identity.desktop_id
+                client, record = await harness.paired()
+                device = harness.devices.devices[record.device_id]
+                token_id = device.connect_token_id
+                # A channel the rendezvous granted on this token and nobody has handshaken on:
+                # the hub cannot close it, so if it closes, the rendezvous did.
+                bystander, closed = await attach(harness, desktop_id, record.device_id,
+                                                 record.connect_token)
+                self.assertIsNone(closed)
+                harness.devices.revoke(record.device_id)
+                await client.expect("revoked")
+                await until(lambda: harness.store.token_revoked(desktop_id, token_id),
+                            what="the rendezvous learning of the revoke")
+                with self.assertRaises(ws.ConnectionClosed) as raised:
+                    await asyncio.wait_for(bystander.recv(), 5.0)
+                self.assertEqual(raised.exception.code, 4403)
+                await bystander.close()
+                socket, closed = await attach(harness, desktop_id, record.device_id,
+                                              record.connect_token)
+                await socket.close()
+                self.assertIsNotNone(closed, "a revoked device's token still opened a channel")
+                self.assertEqual(closed.code, 4404)
+                # The desktop keeps the id on its list, so a registration carries it again.
+                self.assertIn(token_id, harness.host.revoked_connect_tokens())
+                await client.close()
+        run(main())
+
+    def test_a_guest_holds_a_token_and_removal_revokes_it(self):
+        async def main():
+            async with Harness() as harness:
+                desktop_id = harness.identity.desktop_id
+                _, url = await harness.invite()
+                client, joined = await harness.guest(url)
+                await client.expect("panes")
+                self.assertTrue(joined.connect_token)
+                participant = harness.guests.participants[joined.participant]
+                token_id = participant.connect_token_id
+                self.assertEqual(pairing.check_connect_token(
+                    harness.identity.connect_secret, desktop_id, joined.participant,
+                    joined.connect_token), token_id)
+                # Without the token a participant id is as good as a stranger's guess.
+                socket, closed = await attach(harness, desktop_id, joined.participant)
+                await socket.close()
+                self.assertEqual(closed.code, 4404)
+                # With it, the same reconnect a phone makes after a drop.
+                await client.close()
+                again = client_mod.Client(harness.base)
+                await again.rejoin(joined)
+                await again.expect("panes")
+                await harness.host.participant_remove(joined.participant)
+                await until(lambda: harness.store.token_revoked(desktop_id, token_id),
+                            what="the rendezvous learning of the removal")
+                await again.close()
+                socket, closed = await attach(harness, desktop_id, joined.participant,
+                                              joined.connect_token)
+                await socket.close()
+                self.assertEqual(closed.code, 4404)
+                self.assertIn(token_id, harness.host.revoked_connect_tokens())
+        run(main())
+
+    def test_a_room_carries_no_token_and_a_pairing_room_still_works(self):
+        """A pairing link or an invite is reached by whoever holds the room id; the desktop
+        decides what that connection is worth, and the per-address cap bounds it."""
+        async def main():
+            async with Harness() as harness:
+                url, room = await harness.host.open_pairing()
+                socket = await ws.connect(harness.base.replace("http://", "ws://")
+                                          + f"/v1/connect?room={room.room}")
+                try:
+                    await asyncio.wait_for(socket.recv(), 1.0)
+                    self.fail("a frame arrived on a room channel nobody spoke on")
+                except asyncio.TimeoutError:
+                    pass                          # granted: the desktop awaits a handshake
+                finally:
+                    await socket.close()
+        run(main())
+
+    def test_token_ids_never_enter_the_metadata_log(self):
+        async def main():
+            async with Harness() as harness:
+                client, record = await harness.paired()
+                device = harness.devices.devices[record.device_id]
+                _, url = await harness.invite()
+                guest, joined = await harness.guest(url)
+                await guest.expect("panes")
+                participant = harness.guests.participants[joined.participant]
+                harness.devices.revoke(record.device_id)
+                await client.expect("revoked")
+                await harness.host.participant_remove(joined.participant)
+                await until(lambda: harness.store.token_revoked(
+                    harness.identity.desktop_id, participant.connect_token_id))
+                await client.close()
+                await guest.close()
+                # The desktop registers again, which carries the whole revoked list.
+                await harness.host.register(harness.base)
+                rows = harness.store.db.execute("SELECT kind, detail FROM events").fetchall()
+                self.assertTrue(rows)
+                secrets_ = [device.connect_token_id, participant.connect_token_id,
+                            record.connect_token, joined.connect_token,
+                            base64.b64encode(harness.identity.connect_secret).decode()]
+                for row in rows:
+                    text = f"{row['kind']} {row['detail'] or ''}"
+                    for value in secrets_:
+                        self.assertNotIn(value, text, f"{row['kind']} logged a token")
+                kinds = {row["kind"] for row in rows}
+                self.assertIn("revoke", kinds)
+                self.assertIn("register", kinds)
+        run(main())
+
+    def test_the_mac_binds_desktop_device_and_id(self):
+        secret = pairing.connect_secret(b"\x01" * 32)
+        other = pairing.connect_secret(b"\x02" * 32)
+        self.assertNotEqual(secret, other)
+        self.assertEqual(len(secret), 32)
+        token_id = pairing.new_connect_token_id()
+        token = pairing.mint_connect_token(secret, "desk", "dev", token_id)
+        self.assertEqual(token.count("."), 1)
+        self.assertEqual(pairing.check_connect_token(secret, "desk", "dev", token), token_id)
+        for name, args in {
+            "other desktop": (secret, "desk2", "dev", token),
+            "other device": (secret, "desk", "dev2", token),
+            "other secret": (other, "desk", "dev", token),
+            "swapped halves": (secret, "desk", "dev", ".".join(reversed(token.split(".")))),
+            "two dots": (secret, "desk", "dev", token + ".x"),
+            "no dot": (secret, "desk", "dev", token.replace(".", "")),
+            "not a string": (secret, "desk", "dev", None),
+            "long": (secret, "desk", "dev", "a" * 65 + "." + "b" * 65),
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(pairing.check_connect_token(*args), "")
+        # A separator inside a field cannot make two different triples read the same.
+        self.assertNotEqual(pairing.connect_mac(secret, "a\x00b", "c", token_id),
+                            pairing.connect_mac(secret, "a", "b\x00c", token_id))
+        self.assertEqual(pairing.mint_connect_token(secret, "desk", "dev", ""), "")
+
+    def test_a_record_from_before_tokens_is_given_an_id_at_load(self):
+        """A phone paired before 2026-09-20 has no token; the desktop mints its id at load so the
+        next `welcome` it reaches carries one. Reaching a `welcome` is the phone's problem: the
+        rendezvous refuses it until then, and pairing again is the answer."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "devices.json"
+            path.write_text(json.dumps({"devices": [
+                {"device_id": "old", "name": "Pixel", "platform": "Chrome",
+                 "public_key": pairing.b64(b"\x03" * 32), "capability": "full"},
+                {"device_id": "gone", "name": "Old", "platform": "Chrome",
+                 "public_key": pairing.b64(b"\x04" * 32), "capability": "full",
+                 "revoked": True}]}))
+            store = identity_mod.DeviceStore(Path(directory))
+            self.assertTrue(store.devices["old"].connect_token_id)
+            self.assertEqual(store.devices["gone"].connect_token_id, "")
+            again = identity_mod.DeviceStore(Path(directory))
+            self.assertEqual(again.devices["old"].connect_token_id,
+                             store.devices["old"].connect_token_id)
+
+
+@unittest.skipUnless(__import__("shutil").which("node"), "node is not installed")
+class ConnectTokenPeerTests(unittest.TestCase):
+    """The URL the web client opens is one the rendezvous accepts: the token survives the
+    browser's own encoding on a device URL and on a guest's, a room URL is left alone, and a
+    record from before tokens carries no `ct` at all."""
+
+    def test_the_web_client_presents_the_token_the_desktop_minted(self):
+        import shutil
+        import subprocess
+        from urllib.parse import parse_qs, urlsplit
+        secret = pairing.connect_secret(b"\x05" * 32)
+        desktop_id = "ab" * 16
+        device_token = pairing.mint_connect_token(secret, desktop_id, "dev1",
+                                                  pairing.new_connect_token_id())
+        guest_token = pairing.mint_connect_token(secret, desktop_id, "guest1",
+                                                 pairing.new_connect_token_id())
+        base = "wss://relay.test/v1/connect"
+        cases = [
+            {"url": f"{base}?desktop={desktop_id}&device=dev1",
+             "record": {"desktopId": desktop_id, "deviceId": "dev1",
+                        "connectToken": device_token}},
+            {"url": f"{base}?desktop={desktop_id}&device=guest1",
+             "record": {"desktopId": desktop_id, "participant": "guest1", "role": "viewer",
+                        "connectToken": guest_token}},
+            {"url": f"{base}?desktop={desktop_id}&device=dev1",
+             "record": {"desktopId": desktop_id, "deviceId": "dev1"}},
+            {"url": f"{base}?room=abcdef",
+             "record": {"desktopId": desktop_id, "deviceId": "dev1",
+                        "connectToken": device_token}},
+            {"url": f"{base}?desktop={desktop_id}&device=dev1", "record": None},
+        ]
+        done = subprocess.run(
+            [shutil.which("node"), str(Path(__file__).resolve().parent / "connect_token_peer.mjs"),
+             json.dumps(cases)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        results = json.loads(done.stdout)
+        self.assertTrue(all(result["ok"] for result in results), results)
+        queries = [parse_qs(urlsplit(result["url"]).query) for result in results]
+        self.assertEqual(pairing.check_connect_token(secret, desktop_id, "dev1",
+                                                     queries[0]["ct"][0]),
+                         device_token.split(".")[0])
+        self.assertEqual(pairing.check_connect_token(secret, desktop_id, "guest1",
+                                                     queries[1]["ct"][0]),
+                         guest_token.split(".")[0])
+        self.assertNotIn("ct", queries[2])
+        self.assertEqual(results[3]["url"], cases[3]["url"])
+        self.assertEqual(results[4]["url"], cases[4]["url"])
+        for query in queries[:3]:
+            self.assertEqual(query["desktop"], [desktop_id])

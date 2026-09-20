@@ -16,11 +16,23 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass, field
+from hashlib import sha256
 from urllib.parse import parse_qs, unquote, urlsplit
 
 SECRET_BYTES = 16          # 128 bits
 ROOM_TTL = 300             # five minutes
 MAX_ATTEMPTS = 5           # for the typed word code, section 5.2
+
+# ---- per-device connect tokens (docs/REMOTE-PROTOCOL.md section 8) -----------------------------
+# A `desktop_id` is SHA-256 of the static key, and that key is in the fragment of every pairing
+# and invite link, so anyone who ever held a link can compute the id and ask the rendezvous for a
+# channel to that desktop. A connect token is what makes `/v1/connect` answer *this device*
+# rather than *that desktop*: the desktop mints one per device inside the Noise session, the
+# rendezvous checks it with a secret the desktop registered, and channels are counted per token.
+CONNECT_TOKEN_CONTEXT = b"relay/connect-token/v1"
+CONNECT_TOKEN_ID_BYTES = 9      # 72 bits: an id, not a secret — the MAC is what authenticates
+CONNECT_MAC_BYTES = 16          # 128 bits of HMAC-SHA-256, truncated
+MAX_REVOKED_TOKENS = 256        # what one registration carries; see `Host.revoked_connect_tokens`
 
 
 def b64(data: bytes) -> str:
@@ -36,6 +48,61 @@ def fingerprint(public_key: bytes) -> str:
     from hashlib import sha256
     digest = sha256(public_key).hexdigest()[:12].upper()
     return " ".join(digest[i:i + 4] for i in range(0, 12, 4))
+
+
+def connect_secret(identity_private: bytes) -> bytes:
+    """The per-desktop secret connect tokens are keyed on, derived from the identity key.
+
+    Derived rather than stored, so it survives a restart, needs no new file beside the identity,
+    and is the same at whatever rendezvous this desktop registers with — which is what lets a
+    phone keep its token when the desktop moves from its own rendezvous to the hosted one
+    (`Host.rehome`). The rendezvous is handed this secret and can therefore mint tokens of its
+    own; that grants a channel slot and nothing else, and a rendezvous that wanted to deny its
+    own channels can simply refuse them. It is not a content key and opens no session: every byte
+    through a channel is still sealed to the pinned Noise static key.
+    """
+    return hmac.new(identity_private, CONNECT_TOKEN_CONTEXT, sha256).digest()
+
+
+def new_connect_token_id() -> str:
+    """A fresh token id, kept on the device (or participant) record so it can be revoked."""
+    return b64(secrets.token_bytes(CONNECT_TOKEN_ID_BYTES))
+
+
+def connect_mac(secret: bytes, desktop_id: str, device_id: str, token_id: str) -> str:
+    """HMAC over the three things a token is only ever valid for, each length-prefixed, so no
+    two different triples can read as the same message whatever characters they hold."""
+    message = b"".join(len(field).to_bytes(2, "big") + field
+                       for field in (str(desktop_id).encode()[:65535],
+                                     str(device_id).encode()[:65535],
+                                     str(token_id).encode()[:65535]))
+    return b64(hmac.new(secret, message, sha256).digest()[:CONNECT_MAC_BYTES])
+
+
+def mint_connect_token(secret: bytes, desktop_id: str, device_id: str, token_id: str) -> str:
+    """`<token id>.<mac>` — what the client presents as `ct` on `/v1/connect`."""
+    if not token_id:
+        return ""
+    return f"{token_id}.{connect_mac(secret, desktop_id, device_id, token_id)}"
+
+
+def check_connect_token(secret: bytes, desktop_id: str, device_id: str, token: str) -> str:
+    """The token id a valid token carries, or "" — which the caller must treat as no token.
+
+    The MAC covers the desktop, the device id the client is asking to be and the token id, so a
+    token minted for desktop A does not open desktop B, and one minted for a device cannot be
+    replayed under another device's name. Nothing here reads a database: the check is one HMAC
+    against the secret the desktop registered, so the rendezvous keeps no per-device state and
+    needs no round trip to the desktop at connect time.
+    """
+    if not isinstance(token, str) or token.count(".") != 1:
+        return ""
+    token_id, mac = token.split(".", 1)
+    if not token_id or not mac or len(token_id) > 64 or len(mac) > 64:
+        return ""
+    if not hmac.compare_digest(connect_mac(secret, desktop_id, device_id, token_id), mac):
+        return ""
+    return token_id
 
 
 def pair_url(app_base: str, desktop_public: bytes, secret: bytes, room: str) -> str:

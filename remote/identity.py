@@ -76,6 +76,16 @@ class Identity:
         from hashlib import sha256
         return sha256(self.public).hexdigest()[:32]
 
+    @property
+    def connect_secret(self) -> bytes:
+        """The secret per-device connect tokens are keyed on (section 8).
+
+        Derived from the identity key rather than stored, so it needs no second file and cannot
+        drift from the key the tokens are bound to. It is registered with the rendezvous; see
+        ``pairing.connect_secret`` for why handing it over grants nothing but a channel slot.
+        """
+        return pairing.connect_secret(self.private)
+
     # ---- storage -----------------------------------------------------------------------------
 
     @staticmethod
@@ -167,6 +177,10 @@ class Device:
     # under. "" is the desktop's own local rendezvous, which is also what a record written before
     # this field existed means (the local server's port changes each run, so it is not stored).
     origin: str = ""
+    # The id half of this device's connect token (section 8). The token itself is never stored:
+    # it is an HMAC over (desktop id, device id, this id) under the identity-derived secret, so
+    # it can be minted again whenever the device needs one. Revoking the device revokes the id.
+    connect_token_id: str = ""
 
     @property
     def key_bytes(self) -> bytes:
@@ -210,12 +224,23 @@ class DeviceStore:
             raw = json.loads(self.path.read_text())
         except ValueError:
             return
+        minted = False
         for entry in raw.get("devices", []):
             try:
                 device = Device(**entry)
             except TypeError:
                 continue
+            # A record written before connect tokens existed (section 8) gets its id here, so
+            # the token can be minted into the next `welcome` this device is sent. The phone
+            # still has to reach a `welcome` to receive it — a rendezvous that checks tokens
+            # refuses it until it pairs again — but one paired through a rendezvous that does
+            # not yet check them is carried over without a second pairing.
+            if not device.revoked and not device.connect_token_id:
+                device.connect_token_id = pairing.new_connect_token_id()
+                minted = True
             self.devices[device.device_id] = device
+        if minted:
+            self.save()
 
     def save(self) -> None:
         payload = {"devices": [asdict(device) for device in self.devices.values()]}
@@ -241,6 +266,16 @@ class DeviceStore:
     def live(self) -> list[Device]:
         return [d for d in self.devices.values() if not d.revoked]
 
+    def revoked_connect_tokens(self) -> list[str]:
+        """The token ids the rendezvous must stop honouring (section 8).
+
+        A revoked record is kept, so its id stays on this list for as long as the device is
+        remembered: the rendezvous is told the whole list at every registration, which is how a
+        rendezvous that restarted — and forgot everything — has it again before the next channel.
+        """
+        return [device.connect_token_id for device in self.devices.values()
+                if device.revoked and device.connect_token_id]
+
     # ---- changes -----------------------------------------------------------------------------
 
     def pair(self, public_key: bytes, name: str, platform: str, capability: str,
@@ -255,12 +290,15 @@ class DeviceStore:
                 # A subscription it already holds was made under its old origin's key, and keeps
                 # going out there until the phone subscribes again (which moves it).
                 existing.origin = origin
+            if not existing.connect_token_id:
+                existing.connect_token_id = pairing.new_connect_token_id()
             existing.last_seen = time.time()
             self.save()
             return existing
         device = Device(device_id=secrets.token_hex(8), name=clean_label(name),
                         platform=clean_label(platform, 24), public_key=pairing.b64(public_key),
-                        capability=capability, origin=origin)
+                        capability=capability, origin=origin,
+                        connect_token_id=pairing.new_connect_token_id())
         self.devices[device.device_id] = device
         self.save()
         return device

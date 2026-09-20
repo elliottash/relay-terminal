@@ -175,6 +175,10 @@ is a separate grant (§5.3).
    room is burned.
 3. The desktop shows **"Pixel 9 · Chrome wants access: View / Agent / Full"** with the client's
    fingerprint, and the user chooses. Nothing is pinned until the user allows.
+   The `paired` that follows carries the device's **connect token** (§8): minted by the desktop
+   for this device record, handed over inside the Noise session, stored with the record, and
+   presented to the rendezvous on every later `/v1/connect`. It is sent again in every
+   `welcome`, so a record that has none takes it from there.
 4. The secret is single-use and valid 5 minutes. **(security)** A second `pair_prove` for the same
    room **must** fail even if the first was refused by the user.
 
@@ -219,7 +223,7 @@ rather than disconnects.
 | Type | Direction | Body |
 |---|---|---|
 | `hello` | client → desktop | `{client: "relay-web/<version>", proto: 1, caps: [...], locale, tz}`. **(security)** `caps` is a feature hint only; the desktop's grant is authoritative and `caps` is never consulted at an enforcement point |
-| `welcome` | desktop → client | `{desktop: {id, name, fingerprint}, proto: 1, capability, password_entry, hub_epoch, features: [...], server_time}` |
+| `welcome` | desktop → client | `{desktop: {id, name, fingerprint}, proto: 1, capability, password_entry, connect_token, hub_epoch, features: [...], server_time}` |
 | `client_state` | client → desktop | `{visible}` — drives the frame-rate and notification presence rules |
 | `resume` / `resumed` | both | §7 |
 | `transport_switch` | both | §2 |
@@ -235,7 +239,7 @@ terminal tab instead of failing.
 | Type | Direction | Body |
 |---|---|---|
 | `pair_prove` | client → desktop | `{secret, name, platform, pubkey_fingerprint}` |
-| `paired` | desktop → client | `{device_id, capability}` — sent only after the user allows |
+| `paired` | desktop → client | `{device_id, capability, connect_token, desktop: {id, name, fingerprint}}` — sent only after the user allows; `connect_token` is §8's |
 | `revoked` | desktop → client | `{reason}` then close. The client wipes its stored keys |
 
 ### 6.3 Panes
@@ -552,9 +556,10 @@ or forge content. Its whole API is:
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/v1/challenge` | POST | → `{challenge, ephemeral_public}` for proof of possession |
-| `/v1/register` | POST | `{static_pubkey, challenge, proof}` → `{desktop_id, token}` |
+| `/v1/register` | POST | `{static_pubkey, challenge, proof, connect_secret, revoked_tokens}` → `{desktop_id, token, connect_tokens}`. `connect_secret` (32 bytes, base64) is what this desktop's devices' connect tokens are checked against and `revoked_tokens` the token ids that must stop working; both are sent at every registration |
+| `/v1/revoke` | POST | `{desktop_id, token, token_ids}` → `{revoked, closed}`. A device revoked now stops working now: the ids join the refused set and their live channels are closed |
 | `/v1/rooms` | POST | Open a room: `{desktop_id, token, ttl}` → `{room, expires_in}`. `expires_in` is the lifetime **granted** — the request's `ttl`, capped at 7 days — not a fixed five minutes, because an invite's room must outlive a pairing room (section 10.2) |
-| `/v1/connect` | WS | Both sides attach: `?room=` for pairing, `?desktop=` for a paired device. The server pairs up sockets and copies frames between them |
+| `/v1/connect` | WS | Both sides attach: `?room=` for pairing and invites, `?desktop=&device=&ct=` for a paired device or an admitted participant, `ct` being its connect token. The server pairs up sockets and copies frames between them |
 | `/v1/push/send` | POST | A desktop posts an opaque payload and the endpoint to deliver it to |
 | `/v1/ice` | GET | STUN/TURN credentials (P2) |
 
@@ -603,14 +608,63 @@ it per desktop lets anyone who learns a `desktop_id` open every slot and keep th
 out. The desktop applies its own handshake rate limit and timeout as well, because it cannot rely on
 the rendezvous to do it.
 
-**Not built (2026-09-18).** There are no per-device connect tokens: a client attaches with
-`?desktop=<id>` and nothing else, and the budget is `MAX_CHANNELS_PER_DESKTOP`. A `desktop_id` is
-`SHA-256` of the static key, which is in the fragment of every pairing and invite link, so anyone
-who has ever held a link can compute it and fill the budget — exactly the denial the paragraph
-above exists to forbid. Minting a token here and delivering it inside the pairing session is a
-change to §5 and to the web client's storage, so it is the owner's call rather than a review's.
-Until then the budget is also capped per peer address (`MAX_CHANNELS_PER_PEER`), which does not
-make the rule true: it means one address is not the whole of the denial.
+**Built 2026-09-20** (card #PH0N, Phase 1.3; `remote/pairing.py`, `remote/host.py`,
+`rendezvous/server.py`, `app/rrp.js`, `remote/client.py`; `tests/test_remote_security.py`
+`ConnectTokenTests`). A `desktop_id` is `SHA-256` of the static key, which is in the fragment of
+every pairing and invite link, so anyone who has ever held a link can compute it; what answers
+that is a token that names *this device*:
+
+* **The token** is `<token id>.<mac>`: a 72-bit random id kept on the device record (or the
+  participant record, §10), and 128 bits of `HMAC-SHA-256` over the length-prefixed triple
+  (`desktop_id`, channel id, token id) under the desktop's **connect secret** — 32 bytes derived
+  from the identity key (`HMAC(identity_private, "relay/connect-token/v1")`), never stored, and
+  therefore the same after a restart and at whichever rendezvous the desktop moves to. The
+  channel id is the device id for one of the owner's devices and the participant id for a guest,
+  so a token replayed under another name fails, and one minted for desktop A does not open B.
+* **Delivery** is inside the Noise session only: in `paired` (§6.2), in `admitted` (§10.2), and
+  again in every `welcome`, which is how a record written without one takes it. The rendezvous
+  sees a token for the first time when the device presents it as `ct` on `/v1/connect`.
+* **The check is stateless per device.** The desktop sends its connect secret with every
+  `/v1/register`, and the rendezvous verifies a `ct` with one HMAC against it: no table of issued
+  ids, no round trip to the desktop, and nothing to lose at a restart, because the hub registers
+  again before every reconnect (§8.1). An HMAC under a secret the rendezvous holds was chosen over
+  a signature under the registered key because it costs the rendezvous nothing it did not
+  already have: holding the secret lets it mint a token, which buys a channel slot, and the
+  rendezvous is the thing that grants channel slots. It is not a content key — every byte on a
+  channel is still sealed to the pinned Noise static key, and the hub closes a channel whose
+  handshake key it did not pin. A signature would have bought a stateless check at a rendezvous
+  that could not mint, which is no property this design needs, at the cost of an asymmetric
+  verify per connect and a second key to rotate.
+* **A missing or bad token is refused exactly as an unknown desktop is** — the same close code
+  (4404) and the same sentence, sent before the desktop's offline state or its budget is looked
+  at — so a stranger holding a `desktop_id` learns nothing from the refusal and takes no slot on
+  the way. A room (`?room=`) carries no token by design: a pairing link, an invite or a meeting
+  code is reached by whoever holds the room id, the desktop decides what that connection is worth,
+  and the per-address cap (`MAX_CHANNELS_PER_PEER`) bounds it.
+* **Channels are counted per token** — `MAX_CHANNELS_PER_TOKEN`, three: a phone reconnecting over
+  a flaky link plus a tab it left open. A fourth is refused with 4429, and no device's use of its
+  three touches another's. The per-desktop cap stays as the outer bound.
+* **Revoking a device revokes its token.** The id goes on the desktop's revoked list, which every
+  registration carries whole (`revoked_tokens`, at most 256, oldest dropped first), and is posted
+  at once to `/v1/revoke` at every rendezvous the hub holds a bearer token for; the rendezvous
+  refuses the id from then on and **closes its live channels** (4403), so a phone mid-session is
+  cut at the rendezvous as well as by the hub's own `revoked`. A device revoked while the
+  rendezvous is unreachable is caught by the next registration. Removing a guest revokes theirs
+  the same way (§10.5); the row is kept until its own expiry, and afterwards the participant it
+  names no longer exists, which the hub answers at `hello` as it answers a stranger.
+* **The hub's own registration socket is unaffected**: it attaches as a desktop with its bearer
+  token, on the other side of the relay.
+* **Token ids never enter the metadata log.** `events` records that a registration carried
+  tokens and how many ids were revoked, and that a `/v1/revoke` closed *n* channels — counts,
+  never ids — and the revoked ids live in their own table, replaced wholesale at every
+  registration, so a copy of seven days of metadata names no device.
+* **There is no compatibility shim.** A record without a token — the Python client's file, the
+  web client's IndexedDB row or a Relay viewer's record from before 2026-09-20 — gets the same
+  refusal a stranger does, and pairing again is the answer. Only the owner's own devices exist
+  today, so nothing is served by a rendezvous that lets a tokenless channel through. The one
+  concession is on the desktop: a device or participant record loaded without a token id is
+  given one at load, so a phone that reaches a `welcome` through a rendezvous not yet redeployed
+  is handed its token there and carries on once the rendezvous is.
 
 Implementation: Python (asyncio, `websockets`, SQLite) in `rendezvous/`, per the design's section 12
 decision — the same toolchain `backend/` already requires, so `ci.yml` tests it with the existing
@@ -618,7 +672,7 @@ pytest job and a self-hoster needs nothing new. Retention: 7 days of metadata (i
 counts), no content, no analytics.
 
 Rate limits: 20 pairing rooms/hour and 600 push sends/hour per desktop; concurrent sockets counted
-per device. In P2, `/v1/ice` defaults guests to **relay-only** candidates: direct ICE would reveal
+per device (three per connect token, 32 per desktop, eight per address for rooms). In P2, `/v1/ice` defaults guests to **relay-only** candidates: direct ICE would reveal
 the host's address to everyone holding an invite link. The owner's own devices may go peer to peer.
 
 **The hosted address.** The desktop's sidecar (`remote/gui_host.py`) runs its own in-memory
@@ -946,7 +1000,7 @@ list.
 |---|---|---|
 | `knock` | participant → desktop, first message after the handshake | `{invite: <base64url secret>, name, platform}` |
 | `knock_pending` | desktop → participant | `{code}`: the five-digit code of section 5, shown on both screens |
-| `admitted` | desktop → participant | `{participant, role, panes, desktop_name, expires, hub_epoch, code, desktop: {id, name, fingerprint}}`, followed by `panes` and `participants` |
+| `admitted` | desktop → participant | `{participant, role, panes, desktop_name, expires, hub_epoch, code, connect_token, desktop: {id, name, fingerprint}}`, followed by `panes` and `participants`. `connect_token` is §8's, minted for the participant id |
 | `error` `not_admitted` | desktop → participant | The owner refused, or did not answer in 2 minutes. The channel closes |
 
 A knock consumes nothing until it is admitted; admitting takes one use. On `admitted` the desktop
@@ -971,7 +1025,8 @@ store first, their next connection would have been that guest holding a *capabil
 role, with the pane scope gone. It needs the pairing secret, which is not the obstacle it sounds
 like: a guest watching a shared pane can read the QR the moment the owner opens it on that pane.
 
-**The reconnect.** A participant's `welcome` carries `{participant, role, panes, expires}` and
+**The reconnect.** A participant reaches `/v1/connect` with `?desktop=&device=<participant id>&ct=`
+exactly as a device does (§8). Their `welcome` carries `{participant, role, panes, expires, connect_token}` and
 deliberately **no `capability` and no `password_entry`** — those belong to a device record and a
 guest has none — followed by the scoped `panes` and a `participants` list for each pane. A guest
 whose record expired, who was removed, or whose share ended gets `bye {reason, discard: true}` and
@@ -1285,7 +1340,8 @@ against **real shells** — including Relay's own panes, from the share button i
 |---|---|---|
 | Noise `IK_25519_AESGCM_SHA256` | `remote/noise.py`, `app/noise.js` | Both halves, cross-checked against each other in `tests/test_remote_noise.py` under Node |
 | Framing and the relay envelope | `remote/envelope.py`, `remote/ws.py` | Done. WebSocket server and client are standard-library only |
-| Rendezvous | `rendezvous/server.py` | Registry with proof of possession, derived desktop ids, pairing rooms, the ciphertext relay, metadata with 7-day retention. `/v1/push/key` and a `/v1/push/send` that signs with VAPID and delivers bytes it cannot read; rooms may be opened with a `ttl` for invites |
+| Rendezvous | `rendezvous/server.py` | Registry with proof of possession, derived desktop ids, pairing rooms, the ciphertext relay, metadata with 7-day retention. `/v1/push/key` and a `/v1/push/send` that signs with VAPID and delivers bytes it cannot read; rooms may be opened with a `ttl` for invites. Per-device connect tokens checked statelessly on `/v1/connect`, counted per token, revoked by `/v1/revoke` and by the list every registration carries |
+| Per-device connect tokens (§8) | `remote/pairing.py`, `remote/host.py`, `remote/identity.py`, `remote/guests.py`, `rendezvous/server.py`, `app/rrp.js`, `remote/client.py` | Built 2026-09-20 (#PH0N 1.3). Minted at pairing and admission, handed over in `paired`/`admitted`/`welcome`, presented as `ct`; a missing or bad one is refused as an unknown desktop; three channels per token; a revoke or removal closes the live channel at the rendezvous. `tests/test_remote_security.py` (`ConnectTokenTests`, `ConnectTokenPeerTests` over `tests/connect_token_peer.mjs`), `tests/test_remote_host.py` (`ConnectTokenTests`). **The hosted rendezvous must be redeployed** (`rendezvous/deploy.sh`) before a phone paired against it can connect with one |
 | Desktop hub | `remote/host.py`, `remote/identity.py`, `remote/panes.py` | Pairing, capabilities, live revoke and downgrade, streams and resume, the event allow-list, rate limits. `PaneSource` is the seam the GUI will implement; `DemoPaneSource` stands in |
 | Web client | `app/` | Pairing with the confirmation code, inbox, thread, composer, plan blocks, reconnect. Installable; the service worker does not cache |
 | Guest web client (§10) | `app/guest.js`, `app/rrp.js`, `/join` | The invite link, the knock and its five digits, the shared pane with the same screen painter and scrollback, presence, the editor's ask-to-type and prompt box, pause, role changes and removal. A guest record stored apart from the paired-device one, so one browser can be an owner here and a guest there. `tests/test_remote_guest_browser.py` |
@@ -1298,7 +1354,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
 | Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers with a checkbox each on the phone, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
 | Audit log | `remote/audit.py` | Local, 0600 from creation, split by month and size. Records pairing, revoke, prompt detection and password use so far |
-| Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. What is **not** fixed is the per-device connect token of §8, which needs a change to §5 |
+| Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. The ninth, the per-device connect token of §8, was built on 2026-09-20 |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 | In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share button in the pane's chrome row, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |

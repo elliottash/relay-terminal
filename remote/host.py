@@ -596,6 +596,52 @@ class Host:
         """What a device paired or subscribed right now records as its origin: "" at home."""
         return "" if self.rendezvous == self.home else (self.rendezvous or "")
 
+    # ---- per-device connect tokens (section 8) -------------------------------------------------
+    # A `desktop_id` is SHA-256 of the static key, which is in the fragment of every pairing and
+    # invite link: anyone who ever held one can compute it and ask the rendezvous for a channel.
+    # What answers that is a token minted here, handed over **inside** the Noise session, and
+    # checked at `/v1/connect` against the secret this desktop registered. Nothing below talks to
+    # the rendezvous socket; minting is one HMAC and needs no round trip.
+
+    def connect_token(self, channel_id: str, token_id: str) -> str:
+        """The token a client presents to be given a channel as ``channel_id``."""
+        return pairing.mint_connect_token(self.identity.connect_secret,
+                                          self.identity.desktop_id, channel_id, token_id)
+
+    def device_connect_token(self, device: identity_mod.Device) -> str:
+        return self.connect_token(device.device_id, device.connect_token_id)
+
+    def participant_connect_token(self, participant: guests_mod.Participant) -> str:
+        return self.connect_token(participant.participant_id, participant.connect_token_id)
+
+    def revoked_connect_tokens(self) -> list[str]:
+        """Every token id the rendezvous must refuse: revoked devices and departed guests."""
+        ids = (self.devices.revoked_connect_tokens()
+               + self.guests.revoked_connect_tokens())
+        return ids[-pairing.MAX_REVOKED_TOKENS:]
+
+    async def _revoke_connect_tokens(self, token_ids: list[str]) -> None:
+        """Tell every rendezvous we hold a token for that these ids are dead, now.
+
+        Registration carries the whole list, but a device revoked at four in the afternoon has to
+        stop working at four in the afternoon — including for a phone that is mid-session, whose
+        channel the rendezvous closes on this call. Every rendezvous this hub registered with is
+        told, not only the current one, because a hub that rehomed is still registered at the
+        other and a device could come back there. A rendezvous that is down is not an error worth
+        raising: it forgot the registration anyway, and re-registering carries the list again.
+        """
+        token_ids = [token_id for token_id in token_ids if token_id]
+        if not token_ids:
+            return
+        for base, token in list(self.tokens.items()):
+            try:
+                await self._post("/v1/revoke", {"desktop_id": self.identity.desktop_id,
+                                                "token": token, "token_ids": token_ids},
+                                 base=base)
+            except Exception as error:
+                log.info("telling %s about %d revoked connect token(s) failed: %s",
+                         base, len(token_ids), error)
+
     async def _register_at(self, base: str) -> str:
         """Challenge and register at ``base``; the token. Changes nothing on the hub, so a
         rendezvous that refuses leaves the one already in use untouched (see ``rehome``)."""
@@ -604,7 +650,12 @@ class Host:
         proof = hmac.new(shared, body["challenge"].encode(), sha256).hexdigest()
         reply = await self._post("/v1/register", {
             "static_pubkey": base64.b64encode(self.identity.public).decode(),
-            "challenge": body["challenge"], "proof": proof}, base=base)
+            "challenge": body["challenge"], "proof": proof,
+            # Per-device connect tokens (section 8): the secret this desktop's tokens are checked
+            # against, and the ids that must stop working. Sent at **every** registration, so a
+            # rendezvous that restarted — and forgot both — has them back before the next dial.
+            "connect_secret": base64.b64encode(self.identity.connect_secret).decode(),
+            "revoked_tokens": self.revoked_connect_tokens()}, base=base)
         if reply["desktop_id"] != self.identity.desktop_id:
             raise wire.WireError("internal", "the rendezvous derived a different desktop id.")
         return reply["token"]
@@ -1478,6 +1529,8 @@ class Host:
                 continue
             if participant is None or not participant.live:
                 self._spawn(self._drop_participant(channel))
+        if participant is not None and not participant.live and participant.connect_token_id:
+            self._spawn(self._revoke_connect_tokens([participant.connect_token_id]))
         # Removed, expired or demoted to viewer: they hold no keyboard and no prompt of theirs
         # runs. Sections 10.3 and 10.4 both say this, and `expire_pending` is the same rule on a
         # timer for the case nothing announced — an expiry.
@@ -1518,6 +1571,11 @@ class Host:
     def _device_changed(self, device_id: str) -> None:
         """A revoke or a downgrade must reach live sessions now, not at the next handshake."""
         device = self.devices.devices.get(device_id)
+        # The connect token dies with the device (section 8), connected or not: a phone that is
+        # off the network when it is revoked must find the rendezvous already refusing it, rather
+        # than take a channel slot the hub then closes at `hello`.
+        if device is not None and device.revoked and device.connect_token_id:
+            self._spawn(self._revoke_connect_tokens([device.connect_token_id]))
         for channel in list(self.channels.values()):
             if channel.device_id != device_id:
                 continue
@@ -1564,6 +1622,7 @@ class Host:
             "proto": wire.PROTOCOL_VERSION,
             "capability": device.capability,
             "password_entry": device.password_entry,
+            "connect_token": self.device_connect_token(device),
             "hub_epoch": self.epoch,
             "features": (["panes", "agent", "compose", "voice"]
                          + (["screen", "takeover"] if self.screens else [])
@@ -1666,6 +1725,9 @@ class Host:
         log.info("paired %s (%s) as %s", device.name, device.fingerprint, capability)
         await channel.send({"t": "paired", "device_id": device.device_id,
                             "capability": capability, "code": code,
+                            # Section 8: minted here and handed over inside the Noise session, so
+                            # the rendezvous never sees it before the device presents it.
+                            "connect_token": self.device_connect_token(device),
                             "desktop": {"id": self.identity.desktop_id, "name": self.name,
                                         "fingerprint": self.identity.fingerprint}})
 
@@ -1918,6 +1980,7 @@ class Host:
                             "panes": list(participant.panes),
                             "expires": round(participant.expires, 3),
                             "hub_epoch": self.epoch, "code": code,
+                            "connect_token": self.participant_connect_token(participant),
                             "features": self.guest_features(),
                             "desktop": {"id": self.identity.desktop_id, "name": self.name,
                                         "fingerprint": self.identity.fingerprint}})
@@ -1944,6 +2007,7 @@ class Host:
             "panes": list(participant.panes),
             "expires": round(participant.expires, 3),
             "hub_epoch": self.epoch,
+            "connect_token": self.participant_connect_token(participant),
             # No `capability` and no `password_entry`: those belong to a device record, and a
             # guest has none. A client that looks for them finds nothing, which is the point.
             "features": self.guest_features(),

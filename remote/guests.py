@@ -137,6 +137,10 @@ class Participant:
     last_seen: float = 0.0
     removed: bool = False
     tab: str = ""                       # copied from the invite: this scope grows with the tab
+    # The id half of this guest's connect token (section 8). A participant reaches the rendezvous
+    # with `?desktop=&device=<participant id>` exactly as a device does, so it needs a token for
+    # exactly the same reason; removing them revokes it.
+    connect_token_id: str = ""
 
     @property
     def key_bytes(self) -> bytes:
@@ -212,13 +216,22 @@ class GuestStore:
             except TypeError:
                 continue                 # not an invite row; never guessed at
             self.invites[invite.invite_id] = invite
+        from . import pairing
+        minted = False
         for entry in raw.get("participants", []):
             try:
                 participant = Participant(**entry)
             except TypeError:
                 continue                 # a device row cannot become a participant here
+            if participant.live and not participant.connect_token_id:
+                # Admitted before connect tokens existed (section 8): the id is minted here and
+                # the token reaches them in their next `welcome`, as for a device.
+                participant.connect_token_id = pairing.new_connect_token_id()
+                minted = True
             self.participants[participant.participant_id] = participant
         self.prune()
+        if minted:
+            self.save()
 
     def save(self) -> None:
         payload = {"invites": [asdict(invite) for invite in self.invites.values()],
@@ -424,7 +437,8 @@ class GuestStore:
                                   platform=identity_mod.clean_label(platform, 24),
                                   guest_key=stored, role=role, panes=list(invite.panes),
                                   invite=invite.invite_id, tab=invite.tab,
-                                  expires=min(invite.expires, time.time() + MAX_EXPIRY))
+                                  expires=min(invite.expires, time.time() + MAX_EXPIRY),
+                                  connect_token_id=pairing.new_connect_token_id())
         self.participants[participant.participant_id] = participant
         self.save()
         return participant
@@ -449,6 +463,18 @@ class GuestStore:
         from . import pairing
         wanted = pairing.b64(public_key)
         return next((p for p in self.participants.values() if p.guest_key == wanted), None)
+
+    def revoked_connect_tokens(self) -> list[str]:
+        """The token ids of participants who may no longer open a channel (section 8).
+
+        A removed row is kept until its own expiry passes and :meth:`prune` drops it, so its id
+        is on this list for as long as the token could still be presented by somebody who kept
+        it. Once the row is forgotten the token buys a channel the desktop closes at `hello`,
+        because the participant it names does not exist — which is the same answer a stranger
+        gets, and is why this list does not have to grow for ever.
+        """
+        return [participant.connect_token_id for participant in self.participants.values()
+                if participant.connect_token_id and not participant.live]
 
     def live(self) -> list[Participant]:
         return [p for p in self.participants.values() if p.live]

@@ -13,6 +13,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from . import noise, pairing, wire, ws
 
@@ -30,19 +31,24 @@ class Paired:
     capability: str
     static_private: bytes
     desktop_id: str = ""
+    # The connect token this device presents at `/v1/connect` (section 8). Minted by the desktop
+    # and handed over inside the Noise session, so the rendezvous never sees it before it is used.
+    connect_token: str = ""
 
     def to_json(self) -> str:
         return json.dumps({"desktop_public": pairing.b64(self.desktop_public),
                            "device_id": self.device_id, "capability": self.capability,
                            "static_private": pairing.b64(self.static_private),
-                           "desktop_id": self.desktop_id})
+                           "desktop_id": self.desktop_id,
+                           "connect_token": self.connect_token})
 
     @classmethod
     def from_json(cls, text: str) -> "Paired":
         raw = json.loads(text)
         return cls(desktop_public=pairing.un64(raw["desktop_public"]), device_id=raw["device_id"],
                    capability=raw["capability"], static_private=pairing.un64(raw["static_private"]),
-                   desktop_id=raw.get("desktop_id", ""))
+                   desktop_id=raw.get("desktop_id", ""),
+                   connect_token=raw.get("connect_token", ""))
 
 
 @dataclass
@@ -60,13 +66,15 @@ class Joined:
     expires: float
     static_private: bytes
     desktop_id: str = ""
+    connect_token: str = ""            # section 8, exactly as a device's
 
     def to_json(self) -> str:
         return json.dumps({"desktop_public": pairing.b64(self.desktop_public),
                            "participant": self.participant, "role": self.role,
                            "panes": list(self.panes), "expires": self.expires,
                            "static_private": pairing.b64(self.static_private),
-                           "desktop_id": self.desktop_id})
+                           "desktop_id": self.desktop_id,
+                           "connect_token": self.connect_token})
 
     @classmethod
     def from_json(cls, text: str) -> "Joined":
@@ -75,7 +83,8 @@ class Joined:
                    participant=raw["participant"], role=raw["role"],
                    panes=list(raw.get("panes", [])), expires=float(raw.get("expires", 0)),
                    static_private=pairing.un64(raw["static_private"]),
-                   desktop_id=raw.get("desktop_id", ""))
+                   desktop_id=raw.get("desktop_id", ""),
+                   connect_token=raw.get("connect_token", ""))
 
 
 class Client:
@@ -90,11 +99,15 @@ class Client:
         self._reader: asyncio.Task | None = None
         self.auth_code: str = ""
 
-    def _url(self, *, room: str = "", desktop: str = "", device: str = "") -> str:
+    def _url(self, *, room: str = "", desktop: str = "", device: str = "",
+             connect_token: str = "") -> str:
         base = self.rendezvous.replace("https://", "wss://").replace("http://", "ws://")
         if room:
             return f"{base}/v1/connect?room={room}"
-        return f"{base}/v1/connect?desktop={desktop}&device={device}"
+        url = f"{base}/v1/connect?desktop={desktop}&device={device}"
+        if connect_token:
+            url += f"&ct={quote(connect_token, safe='')}"
+        return url
 
     # ---- connecting --------------------------------------------------------------------------
 
@@ -132,12 +145,14 @@ class Client:
         reply = await self.expect("paired", timeout=120)
         return Paired(desktop_public=link["desktop_public"], device_id=reply["device_id"],
                       capability=reply["capability"], static_private=self.static_private,
-                      desktop_id=reply.get("desktop", {}).get("id", ""))
+                      desktop_id=reply.get("desktop", {}).get("id", ""),
+                      connect_token=str(reply.get("connect_token", "")))
 
     async def connect(self, paired: Paired) -> dict:
         """Reconnect as an already-paired device, refusing any key but the pinned one."""
         return await self._reconnect(paired.static_private, paired.desktop_public,
-                                     paired.desktop_id, paired.device_id)
+                                     paired.desktop_id, paired.device_id,
+                                     paired.connect_token)
 
     async def knock(self, url: str, *, name: str, platform: str) -> Joined:
         """Follow an invite link: connect to its room, knock, and wait to be let in.
@@ -157,7 +172,8 @@ class Client:
                       role=reply["role"], panes=list(reply.get("panes", [])),
                       expires=float(reply.get("expires", 0)),
                       static_private=self.static_private,
-                      desktop_id=reply.get("desktop", {}).get("id", ""))
+                      desktop_id=reply.get("desktop", {}).get("id", ""),
+                      connect_token=str(reply.get("connect_token", "")))
 
     async def knock_admitted(self, url: str, *, name: str,
                              platform: str) -> tuple[Joined, dict]:
@@ -178,7 +194,8 @@ class Client:
                         role=reply["role"], panes=list(reply.get("panes", [])),
                         expires=float(reply.get("expires", 0)),
                         static_private=self.static_private,
-                        desktop_id=reply.get("desktop", {}).get("id", ""))
+                        desktop_id=reply.get("desktop", {}).get("id", ""),
+                        connect_token=str(reply.get("connect_token", "")))
         return joined, reply
 
     async def join_with_code(self, code: str, pin: str, *, app_base: str = "",
@@ -263,7 +280,8 @@ class Client:
         """Reconnect as an admitted participant. An expired or removed one gets a `bye` carrying
         ``discard``, which is the client's cue to forget this record rather than retry."""
         return await self._reconnect(joined.static_private, joined.desktop_public,
-                                     joined.desktop_id, joined.participant)
+                                     joined.desktop_id, joined.participant,
+                                     joined.connect_token)
 
     async def rejoin_reply(self, joined: Joined, timeout: float = 20.0) -> dict:
         """:meth:`rejoin`, except that the desktop's goodbye is returned rather than raised.
@@ -277,7 +295,8 @@ class Client:
         self.static_private = joined.static_private
         self.static_public = noise.public_of(self.static_private)
         desktop_id = joined.desktop_id or _derive_desktop_id(joined.desktop_public)
-        self.socket = await ws.connect(self._url(desktop=desktop_id, device=joined.participant))
+        self.socket = await ws.connect(self._url(desktop=desktop_id, device=joined.participant,
+                                                 connect_token=joined.connect_token))
         try:
             await self._handshake(joined.desktop_public)
         except noise.NoiseError as error:
@@ -299,11 +318,12 @@ class Client:
                 raise wire.WireError(message.get("code", "error"), message.get("message", ""))
 
     async def _reconnect(self, private: bytes, desktop_public: bytes, desktop_id: str,
-                         channel_id: str) -> dict:
+                         channel_id: str, connect_token: str = "") -> dict:
         self.static_private = private
         self.static_public = noise.public_of(self.static_private)
         desktop_id = desktop_id or _derive_desktop_id(desktop_public)
-        self.socket = await ws.connect(self._url(desktop=desktop_id, device=channel_id))
+        self.socket = await ws.connect(self._url(desktop=desktop_id, device=channel_id,
+                                                 connect_token=connect_token))
         try:
             await self._handshake(desktop_public)
         except noise.NoiseError as error:

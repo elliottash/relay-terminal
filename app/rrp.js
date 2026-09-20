@@ -220,6 +220,11 @@ export class Rrp extends EventTarget {
       capability: reply.capability,
       desktopId: reply.desktop?.id || '',
       desktopName: reply.desktop?.name || 'desktop',
+      // The per-device connect token (protocol section 8): minted by the desktop, handed over
+      // inside the Noise session, and what `/v1/connect` is shown from now on. It is the thing
+      // that makes the rendezvous answer *this device* rather than anyone who computed the
+      // desktop id from a link; without one the rendezvous refuses the channel outright.
+      connectToken: typeof reply.connect_token === 'string' ? reply.connect_token : '',
       pairedAt: Date.now(),
     };
     await saveDevice(record);
@@ -267,6 +272,7 @@ export class Rrp extends EventTarget {
       expires: Number(admitted.expires) || 0,
       desktopId: admitted.desktop?.id || '',
       desktopName: admitted.desktop_name || admitted.desktop?.name || 'their desktop',
+      connectToken: typeof admitted.connect_token === 'string' ? admitted.connect_token : '',
       guestName: name,
       joinedAt: Date.now(),
     };
@@ -312,8 +318,11 @@ export class Rrp extends EventTarget {
     return welcome;
   }
 
+  // A `?desktop=` URL — a paired device or an admitted participant coming back — carries the
+  // record's connect token (protocol section 8) as `ct`. A `?room=` URL is a pairing link or an
+  // invite, reached by whoever holds the room id, and carries none by design.
   async #open(url) {
-    this.socket = new WebSocket(url);
+    this.socket = new WebSocket(Rrp.withConnectToken(url, this.record));
     this.socket.binaryType = 'arraybuffer';
     await new Promise((resolve, reject) => {
       this.socket.onopen = resolve;
@@ -361,6 +370,19 @@ export class Rrp extends EventTarget {
     return String(value).padStart(5, '0');
   }
 
+  // `welcome` carries the connect token again (section 8): a record that has none — one written
+  // before tokens existed, reaching a `welcome` through a rendezvous that does not check them
+  // yet — or an older one takes it and is saved, so the token the desktop mints today is the one
+  // presented next time. Nothing waits on the write: the session is live either way.
+  #keepConnectToken(welcome) {
+    const record = this.record;
+    const token = typeof welcome.connect_token === 'string' ? welcome.connect_token : '';
+    if (!record || !token || token === record.connectToken) return;
+    record.connectToken = token;
+    const save = isGuestRecord(record) ? saveGuest : saveDevice;
+    save(record).catch(() => {});
+  }
+
   async #frame(bytes) {
     let plaintext;
     try {
@@ -380,6 +402,7 @@ export class Rrp extends EventTarget {
     if (typeof message.seq === 'number' && message.t) {
       this.streams.set(Rrp.streamOf(message), message.seq);
     }
+    if (message.t === 'welcome') this.#keepConnectToken(message);
     this.emit('message', message);
     this.emit(message.t, message);
   }
@@ -435,6 +458,16 @@ export class Rrp extends EventTarget {
       this.addEventListener(kind, onMessage, { once: true });
       this.addEventListener('error', onError, { once: true });
     });
+  }
+
+  // The connect token (section 8) on a `/v1/connect?desktop=` URL: `&ct=<token>`, from the
+  // record's `connectToken`. A record without one — written before tokens existed — sends
+  // none, gets the refusal a stranger gets, and pairing again is the answer. A room URL and a
+  // URL for anything but `/v1/connect` are returned as they are.
+  static withConnectToken(url, record) {
+    const token = record && typeof record.connectToken === 'string' ? record.connectToken : '';
+    if (!token || !/\/v1\/connect\?desktop=/.test(url)) return url;
+    return `${url}&ct=${encodeURIComponent(token)}`;
   }
 
   // The hub's own stream names (remote/host.py): `panes`, `agent:<pane>` and `screen:<pane>`.
