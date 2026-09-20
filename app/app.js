@@ -40,6 +40,12 @@ let features = [];
 let screenView = null;
 let historySeq = 0;
 let historyRequest = null;
+// Every `history_get` sent and not yet answered or refused, by id. The view keeps one in flight,
+// so this normally holds one — but a reset (a clear, a pane change) can leave one orphaned on the
+// wire, and matching only the newest id is what put "too many of those; slow down." under the
+// composer while the agent was merely typing (#3H5T). An answer that arrives late is still rows
+// the desktop really printed, and a refusal is still ours to swallow.
+const historyAsked = new Set();
 let tab = 'agent';
 let driving = false;
 let myDevice = '';          // this device's own id, from the pairing record
@@ -706,6 +712,9 @@ function ensureScreen() {
       if (!current) { screenView.pending = false; return; }
       historySeq += 1;
       historyRequest = `h${historySeq}`;
+      historyAsked.add(historyRequest);
+      // A handful at most: the orphans above, not a log.
+      while (historyAsked.size > 4) historyAsked.delete(historyAsked.values().next().value);
       const message = { t: 'history_get', pane: current, count, id: historyRequest };
       if (beforeRow !== null) message.before_row = beforeRow;
       rrp.send(message).catch(() => { screenView.pending = false; });
@@ -723,7 +732,8 @@ function onScreen(message) {
 // is dropped rather than painted above somebody else's screen.
 function onHistory(message) {
   if (!screenView || message.pane !== current) return;
-  if (message.id && message.id !== historyRequest) return;
+  if (message.id && !historyAsked.has(message.id)) return;
+  historyAsked.delete(message.id);
   screenView.applyHistory(message);
 }
 
@@ -1545,9 +1555,13 @@ rrp.addEventListener('error', (event) => {
   const detail = event.detail || {};
   if (voiceRequest && detail.id === voiceRequest) { voiceFailed(detail.message); return; }
   // A refused page must not leave the view waiting for one for ever; a later drag asks again.
-  if (screenView && detail.id && detail.id === historyRequest) {
-    screenView.pending = false;
-    screenView.more = false;
+  // It must not reach the reader either: `rate_limited` on a `history_get` means this client
+  // asked faster than the desktop's budget, which is a bug here and nothing the person can do
+  // anything about. It goes to the console, the view backs off, and the composer stays clean.
+  if (screenView && detail.id && historyAsked.has(detail.id)) {
+    historyAsked.delete(detail.id);
+    console.warn(`history_get refused (${detail.code || 'error'})`);
+    screenView.refused(detail.code);
     return;
   }
   // A refused `queue_edit` belongs to the pane view: it has the row and the keys typed on it, and

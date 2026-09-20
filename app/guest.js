@@ -29,6 +29,9 @@ let features = [];
 let screenView = null;
 let historySeq = 0;
 let historyRequest = null;
+// Sent and not yet answered, by id — one normally, but a reset can orphan one on the wire, and a
+// refusal matched only against the newest id turns up under the composer instead (#3H5T).
+const historyAsked = new Set();
 let holder = '';          // the `control` broadcast's holder: owner | agent | participant:<id>
 let holderName = '';
 let driving = false;
@@ -612,6 +615,8 @@ function ensureScreen() {
     }
     historySeq += 1;
     historyRequest = `h${historySeq}`;
+    historyAsked.add(historyRequest);
+    while (historyAsked.size > 4) historyAsked.delete(historyAsked.values().next().value);
     const message = { t: 'history_get', pane, count, id: historyRequest };
     if (beforeRow !== null) message.before_row = beforeRow;
     rrp.send(message).catch(() => { screenView.pending = false; });
@@ -658,7 +663,8 @@ function onScreen(message) {
 
 function onHistory(message) {
   if (!screenView || message.pane !== pane) return;
-  if (message.id && message.id !== historyRequest) return;
+  if (message.id && !historyAsked.has(message.id)) return;
+  historyAsked.delete(message.id);
   screenView.applyHistory(message);
 }
 
@@ -1127,9 +1133,12 @@ function onAgent(message) {
 
 function onError(detail) {
   const code = String(detail.code || '');
-  if (screenView && detail.id && detail.id === historyRequest) {
-    screenView.pending = false;
-    screenView.more = false;
+  // A refused page is the client's own business: `rate_limited` means this one asked faster than
+  // the desktop's budget, and a guest has no more to do about it than the owner does (#3H5T).
+  if (screenView && detail.id && historyAsked.has(detail.id)) {
+    historyAsked.delete(detail.id);
+    console.warn(`history_get refused (${code || 'error'})`);
+    screenView.refused(code);
     return;
   }
   const at = sent.findIndex((item) => item.id && item.id === detail.id);
