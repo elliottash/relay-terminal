@@ -1,12 +1,13 @@
 ---
 id: DPJB
 type: work
-status: inbox
+status: needs-verification
 labels: [feature, switchboard]
+implemented_by: deepseek/deepseek-v4.1-flash
 rank: zzzzzzzzzzzzzzzw
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [], evidence: [], related: [VKFV], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-card-page-priority-flag/], related: [VKFV], github: null}
 ---
 # Priority flags on the card page: shift them by clicking, and let agents set priority
 
