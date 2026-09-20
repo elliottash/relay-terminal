@@ -1029,7 +1029,11 @@ class ChatProvider:
         conversation afterwards, and "carry on" has something to carry on from."""
         if calls or not message.get("content"):
             return None
-        partial = {"role": "assistant", "content": message["content"]}
+        from . import localtext
+        content = localtext.strip_tool_fragments(message["content"])
+        if not content.strip():                     # it was all leaked call JSON, no answer
+            return None
+        partial = {"role": "assistant", "content": content}
         if message.get("reasoning_content"):
             partial["reasoning_content"] = message["reasoning_content"]
         if message.get("reasoning"):
@@ -1208,6 +1212,13 @@ class ChatProvider:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
         if self.config.local:
             message = self._tidy_local(message, tools, finish_reason)
+        if message.get("content"):
+            # A gateway that gave up on a tool call mid-arguments can stream the rest of it as
+            # content (card #VN69): the JSON would ride the answer into the conversation history
+            # and, on a card turn, onto the card's thread. The deltas already shown stay as they
+            # streamed — this cleans what is stored and replayed.
+            from . import localtext
+            message["content"] = localtext.strip_tool_fragments(message["content"])
         return self._normalize(message)
 
 

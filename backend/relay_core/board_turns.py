@@ -36,6 +36,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import localtext
+
 #: Card conversations kept for a follow-up.  Each is an `Agent` holding its messages, so this is
 #: a memory ceiling, not a policy: past it the least recently used card reseeds from its file.
 #: A *running* card's session is never dropped, however many are running.
@@ -252,7 +254,10 @@ class CardTurns:
         if name in TERMINAL:
             session.ended = True
             if name == "done":
-                answer = "".join(session.text).strip()
+                # A provider that broke a tool call can have streamed part of it as content
+                # (#VN69): the fragment rides the deltas into `session.text` and would land on
+                # the card's thread as if the model had written it. Cut it before the write.
+                answer = localtext.strip_tool_fragments("".join(session.text)).strip()
                 session.text = []
                 session.brief_mode = session.mode
                 if answer and self._on_answer is not None:

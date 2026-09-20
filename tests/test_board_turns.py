@@ -154,6 +154,29 @@ class RunningTests(PoolTest):
         self.wait_idle()
         self.assertEqual(len(self.answers), 5)
 
+    def test_a_leaked_tool_call_never_reaches_the_card_thread(self):
+        """Card #VN69: a provider that broke a `board_update_card` call streamed part of it as
+        content; the deltas ride `session.text`, and what `_card_answer` wrote to the thread was
+        the whole join. The join is stripped before it reaches the thread now."""
+        self.hold("AAAA")
+        self.pool.start("AAAA", "discuss", "record this")
+        self.wait_running()
+        agent = self.agents["AAAA"]
+        agent.answer = [
+            "Recording the decisions on the card:\n\n",
+            '{"type": "tool_use", "id": "toolu_bdrk_01FnV1wBKtgZ6ggKyUqNuqbB",\n',
+            ' "name": "board_update_card", "input": {"id": "AAAA"}}\n\n',
+            "The decisions are on the card.",
+        ]
+        self.gates["AAAA"].set()
+        self.wait_idle()
+        self.assertEqual(len(self.answers), 1)
+        text = self.answers[0][2]
+        self.assertNotIn("toolu_bdrk", text)
+        self.assertNotIn('"tool_use"', text)
+        self.assertIn("Recording the decisions on the card:", text)
+        self.assertIn("The decisions are on the card.", text)
+
     def test_the_scope_is_opened_for_the_turn_and_closed_after_it(self):
         self.pool.start("AAAA", "plan", "one")
         self.wait_idle()

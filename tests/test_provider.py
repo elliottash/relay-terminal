@@ -90,6 +90,31 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(caught.exception.partial['role'], 'assistant')
         self.assertEqual(caught.exception.partial['reasoning_content'], 'some thinking')
 
+    def test_a_leaked_tool_call_is_cut_from_the_stored_answer_but_its_real_calls_survive(self):
+        # A gateway that gave up on a tool call mid-arguments streamed the rest as content
+        # (card #VN69). The deltas went out as they streamed; what is stored is clean.
+        data = event({'content': 'Recording the decisions:\n'})
+        data += event({'content': '{"type": "tool_use", "id": "toolu_bdrk_01", "name": "x",\n'})
+        data += event({'content': ' "input": {"id": "Y2JW"}}\n'})
+        data += event({'tool_calls': [{'index': 0, 'id': 'call1', 'type': 'function',
+                                       'function': {'name': 'board_read', 'arguments': '{"id": "VN69"}'}}]})
+        result = self.parse(data + event(finish='tool_calls') + b'data: [DONE]\n\n')
+        self.assertEqual(result['content'], 'Recording the decisions:')
+        self.assertNotIn('toolu_bdrk', result['content'])
+        self.assertEqual(result['tool_calls'][0]['function']['name'], 'board_read')
+
+    def test_a_cut_off_step_keeps_no_leaked_json_in_its_partial(self):
+        data = event({'content': 'Half an answer\n'})
+        data += event({'content': '{"type": "tool_use", "id": "toolu_1", "name": "x"}'})
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(data + event(finish='length') + b'data: [DONE]\n\n')
+        self.assertEqual(caught.exception.partial['content'], 'Half an answer')
+        # A cut-off step that was nothing but the leak keeps no partial at all.
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(event({'content': '{"type": "tool_use", "id": "toolu_1"}'})
+                       + event(finish='length') + b'data: [DONE]\n\n')
+        self.assertIsNone(caught.exception.partial)
+
     def test_reasoning_alone_is_not_produced_and_a_filtered_response_reads_differently(self):
         with self.assertRaises(ProviderTruncated) as caught:
             self.parse(event({'reasoning_content': 'only thinking'}) + event(finish='length') + b'data: [DONE]\n\n')

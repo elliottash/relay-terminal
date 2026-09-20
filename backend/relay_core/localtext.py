@@ -253,3 +253,79 @@ def recover_tool_calls(content: str, tools: list[dict]) -> list[dict] | None:
         return None
     return _calls([_from_json(body) if body.startswith("{") else _from_xml(body, schemas)
                    for body in bodies[:MAX_RECOVERED + 1]], schemas)
+
+
+# ----- tool-call JSON a provider leaked into prose (any endpoint) ------------------------------
+# A hosted model that breaks a tool call mid-arguments can have the rest of it arrive as content:
+# the gateway gives up on the call channel and streams the JSON as text (card #VN69, glm-5.3, an
+# Anthropic-style `{"type": "tool_use", "id": "toolu_bdrk_…"}` block cut off inside a string).
+# `_stream` concatenates content verbatim, so the fragment rides the answer into the conversation
+# and — for a card turn — into the card's thread.  These anchors *start* a leak; they are shapes
+# only a tool call takes, so an answer that merely mentions JSON in prose is never touched.
+_LEAK_ANCHOR = re.compile(
+    r'"(?:type"\s*:\s*"tool_use'                       # Anthropic content block
+    r'|tool_use_id"'                                   # …its result/reference blocks
+    r'|id"\s*:\s*"toolu_'                              # Anthropic-style ids (toolu_, toolu_bdrk_…)
+    r'|function"\s*:\s*\{)'                            # OpenAI envelope
+)
+_LEAK_KEY = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')       # "key":  — a JSON key at the line's head
+_LEAK_STRING = re.compile(r'"(?:[^"\\]|\\.)*"\s*,?$')  # "value", — a bare string on its own line
+
+
+def _leak_line(line: str) -> bool:
+    """Whether one line still reads as JSON debris rather than resumed prose."""
+    stripped = line.strip()
+    if not stripped:
+        return True                                     # blank: the leak may continue after it
+    if stripped[0] in "{[}]":
+        return True
+    if stripped.startswith('"'):
+        return bool(_LEAK_KEY.match(stripped) or _LEAK_STRING.match(stripped))
+    try:
+        json.loads(stripped.rstrip(","))
+    except ValueError:
+        return False
+    return True
+
+
+def strip_tool_fragments(content: str) -> str:
+    """Tool-call JSON a model leaked into its answer as text, cut out; the prose around it stays.
+
+    The opposite bet from ``recover_tool_calls``: that one must see the *whole* message as call
+    blocks before it dares run one, while this only ever deletes, so it works inside prose.  A
+    leak starts at an anchor and runs while its lines stay JSON-shaped; the first prose line ends
+    it.  Only bare JSON is handled — a fenced block or a ``<tool_call>`` tag in an answer may be
+    the model showing the user something on purpose, and stays (recovery, above, still owns the
+    whole-message case).  What preceded the anchor on the same line can be the tail of a string
+    the model broke mid-word, and survives: one stray half-word reads as the truncated sentence
+    it is, and guessing backwards where it began would eat real prose.
+    """
+    if not content or not _LEAK_ANCHOR.search(content):
+        return content
+    out: list[str] = []
+    leaking = False
+    fenced = False
+    for line in content.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            leaking = False
+            out.append(line)
+            continue
+        if fenced:
+            out.append(line)                            # shown to the user on purpose: never cut
+            continue
+        anchor = _LEAK_ANCHOR.search(line)
+        if anchor:
+            leaking = True
+            # A fragment that opened cleanly put its bare `{` on the line before the anchor's.
+            if out and out[-1].strip() and not re.search(r"\w", out[-1]):
+                out.pop()
+            head = line[:anchor.start()]
+            if re.search(r"\w", head):                  # a word: prose (or a broken string's tail —
+                out.append(head)                        # it survives; JSON punctuation does not)
+            continue
+        if leaking and _leak_line(line):
+            continue                                    # still inside the leak: drop the line
+        leaking = False
+        out.append(line)
+    return "\n".join(out)

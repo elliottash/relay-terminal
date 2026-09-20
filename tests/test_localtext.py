@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from relay_core.localtext import ThinkSplitter, recover_tool_calls, split_reasoning
+from relay_core.localtext import ThinkSplitter, recover_tool_calls, split_reasoning, strip_tool_fragments
 
 
 def tool(name, **properties):
@@ -161,6 +161,54 @@ class RecoverToolCallsTests(unittest.TestCase):
         self.assertIsNone(recover_tool_calls(f'<tool_call>{call}</tool_call>', []))   # no tools offered
         many = '\n'.join(f'<tool_call>{call}</tool_call>' for _ in range(17))
         self.assertIsNone(recover_tool_calls(many, TOOLS))
+
+
+class StripTests(unittest.TestCase):
+    """Tool-call JSON a provider streamed as content is cut from the answer (card #VN69)."""
+
+    MEASURED = ('The Decisions text got truncated by a stray quote — fixing the section:'
+                '_resolver: fe"tool_use_id": "toolu_bdrk_01FnV1wBKtgZ6ggKyUqNuqbB"\n'
+                '{\n'
+                '  "type": "tool_use",\n'
+                '  "id": "toolu_bdrk_01FnV1wBKtgZ6ggKyUqNuqbB",\n'
+                '  "name": "board_update_card",\n'
+                '  "input": {"id": "Y2JW", "section": "Decisions"}\n'
+                '}\n'
+                '\n'
+                'Redoing the section fix properly. The decisions are on the card.')
+
+    def test_the_measured_leak_is_cut_and_the_prose_around_it_stays(self):
+        out = strip_tool_fragments(self.MEASURED)
+        self.assertNotIn('toolu_bdrk', out)
+        self.assertNotIn('"type": "tool_use"', out)
+        self.assertNotIn('"name": "board_update_card"', out)
+        self.assertIn('fixing the section:', out)          # prose before the anchor stays
+        self.assertIn('Redoing the section fix properly. The decisions are on the card.', out)
+        self.assertNotIn('{', out)                         # the fragment's bare opener went too
+
+    def test_a_message_that_is_nothing_but_leaked_call_json_is_emptied(self):
+        self.assertEqual(strip_tool_fragments(
+            '{"type": "tool_use", "id": "toolu_1", "name": "x", "input": {}}'), '')
+        self.assertEqual(strip_tool_fragments(self.MEASURED[self.MEASURED.index('{'):]
+                                              .split('\n\nRedoing')[0]), '')
+
+    def test_an_openai_envelope_leak_is_cut(self):
+        out = strip_tool_fragments('Calling now.\n'
+                                   '{"function": {"name": "board_read", "arguments": "{}"}},\n'
+                                   'Done.')
+        self.assertEqual(out, 'Calling now.\nDone.')
+
+    def test_prose_that_merely_mentions_json_is_untouched(self):
+        prose = ('The tool takes {"section": "Decisions"} as its argument, per the schema. '
+                 'A JSON "type" field names the block.')
+        self.assertEqual(strip_tool_fragments(prose), prose)
+        self.assertEqual(strip_tool_fragments('plain answer, no JSON at all'),
+                         'plain answer, no JSON at all')
+        self.assertEqual(strip_tool_fragments(''), '')
+
+    def test_a_fenced_block_stays_because_it_may_be_shown_on_purpose(self):
+        fenced = 'Here is what I would send:\n```json\n{"type": "tool_use", "id": "toolu_9"}\n```'
+        self.assertEqual(strip_tool_fragments(fenced), fenced)
 
 
 if __name__ == '__main__':
