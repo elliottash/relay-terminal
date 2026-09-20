@@ -3607,11 +3607,17 @@ void BoardModelTests::aHelperOpensAsOneRowThatExpandsIntoTheWholePanel()
     QVERIFY(panel.collapsed());
     auto *ask = panel.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
     auto *body = panel.findChild<QWidget *>(QStringLiteral("boardChatBody"));
-    auto *keys = panel.findChild<QLabel *>(QStringLiteral("boardChatAskKeys"));
-    QVERIFY(ask && body && keys);
+    auto *row = panel.findChild<QWidget *>(QStringLiteral("boardChatAskRow"));
+    QVERIFY(ask && body && row);
     QVERIFY(ask->isVisible());
     QVERIFY(!body->isVisible());
-    QCOMPARE(keys->text(), QStringLiteral("Ctrl+/"));       // the key line says how to get here
+    // The row says what it opens and how, in one button (owner, 2026-09-20: "make the button say
+    // Helper Agent (Alt+Q)"), with a question mark beside the words, at the pane's bottom right.
+    QCOMPARE(ask->text(), QStringLiteral("Helper Agent (Ctrl+/)"));
+    QVERIFY(!ask->icon().isNull());
+    QVERIFY2(ask->geometry().center().x() > row->width() / 2,
+             qPrintable(QStringLiteral("ask at x=%1 in a %2 px row")
+                            .arg(ask->geometry().center().x()).arg(row->width())));
     QCOMPARE(panel.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
              QStringLiteral("Options helper"));
 

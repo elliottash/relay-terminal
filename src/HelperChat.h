@@ -25,9 +25,10 @@
 // survey word is part of the head's clock line and the forge look is disabled while a turn runs —
 // so the seam would be three virtuals and a handful of protected members to save two `if`s.
 //
-// **Outside the Switchboard it opens collapsed** (owner, 2026-09-20): a single "Ask about this
-// pane" row with the key that focuses it, because "the Switchboard's 320 px of log plus composer
-// is most of a small pane". Clicking the row — or anything giving the composer focus — expands it,
+// **Outside the Switchboard it opens collapsed** (owner, 2026-09-20): a single row at the pane's
+// bottom right — a question mark and "Helper Agent (Alt+Q)", the live key in the button's own
+// text — because "the Switchboard's 320 px of log plus composer is most of a small pane".
+// Clicking the row — or anything giving the composer focus — expands it,
 // and a small control on the head row folds it back. The expanded log is then sized to the pane
 // it is in (at most ~40 % of the pane's height, never less than three lines) rather than to the
 // list page's fixed 320.
@@ -202,7 +203,7 @@ private:
 
     // ---- collapsed / expanded ---------------------------------------------------------------
     void applyCollapsed();                   // show the ask row or the panel, never both
-    void updateAskRow();                     // "Ask about this pane · Ctrl+/"
+    void updateAskRow();                     // "Helper Agent (Alt+Q)", in the live key's wording
     void updateLogHeight();                  // ~40 % of the pane, at least three lines
 
     // ---- the queue (19.18: worker-side and authoritative; this only draws it) -------------

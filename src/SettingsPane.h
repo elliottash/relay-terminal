@@ -252,9 +252,9 @@ public:
     //
     // "When you are in options, actions, or sessions, you have a helper agent, same as the
     // switchboard agent" (owner). It is the Switchboard's own panel, at the foot of the pane and
-    // collapsed to one "Ask about this pane" row, asking the **tab's** helper worker with
-    // `pane: "options"` or `pane: "actions"` — whichever mode the pane is in, since Options and
-    // Actions are one widget and the panel follows setMode().
+    // collapsed to one "Helper Agent (Alt+Q)" row at its bottom right, asking the **tab's** helper
+    // worker with `pane: "options"` or `pane: "actions"` — whichever mode the pane is in, since
+    // Options and Actions are one widget and the panel follows setMode().
     //
     // The seam is the Sessions pane's, name for name (src/Conversations.h), so the window wires
     // both panes with the same lines. The pane itself never talks to a worker: what the panel

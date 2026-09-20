@@ -367,6 +367,35 @@ static QIcon micIcon(const QColor &ink)
     return QIcon(pixmap);
 }
 
+// The collapsed row's mark (owner, 2026-09-20: "it should have a question mark icon next to it").
+// Painted rather than typed for the same reason the microphone is: a glyph from the button's font
+// is whatever the desktop's font has at 14 px, which on this row is a "?" a third of the height
+// of the word beside it. A ringed question mark reads as "ask" at that size and keeps its weight.
+static QIcon askIcon(const QColor &ink)
+{
+    constexpr int kSize = 14;
+    QPixmap pixmap(kSize * 2, kSize * 2);        // 2x, so it stays crisp on a scaled desktop
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(ink, 1.2);
+    pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QRectF(1.2, 1.2, 11.6, 11.6));
+    // The hook and the dot. Three strokes: an arc over the top, the stem down to the middle, and
+    // the point under it — a "?" at 14 px is that and nothing else survives the scaling.
+    painter.drawArc(QRectF(4.3, 3.4, 5.4, 4.6), 200 * 16, -250 * 16);
+    painter.drawLine(QPointF(7.0, 7.4), QPointF(7.0, 9.0));
+    QPen dot(ink, 1.6);
+    dot.setCapStyle(Qt::RoundCap);
+    painter.setPen(dot);
+    painter.drawPoint(QPointF(7.0, 10.8));
+    painter.end();
+    return QIcon(pixmap);
+}
+
 HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     : QWidget(parent), m_pane(pane.isEmpty() ? helperpane::switchboard() : pane)
 {
@@ -394,27 +423,23 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
         auto *askLine = new QHBoxLayout(m_askRow);
         askLine->setContentsMargins(10, 6, 10, 6);
         askLine->setSpacing(6);
+        // At the **bottom right** of the pane, not the left (owner, 2026-09-20: "it should be at
+        // the bottom right rather than bottom left"), so the stretch goes in front of the button.
+        askLine->addStretch(1);
         m_ask = new QToolButton(m_askRow);
         m_ask->setObjectName(QStringLiteral("boardChatAsk"));
-        m_ask->setText(QStringLiteral("Ask about this pane"));
+        // One button that says what it opens and how (owner, 2026-09-20: "make the button say
+        // Helper Agent (Alt+Q)"). The key is inside the button's own text rather than on a muted
+        // label beside it: two widgets for one offer read as a label with a stray key after it,
+        // and the key is part of what the button is. updateAskRow() writes the live wording.
+        m_ask->setIcon(askIcon(theme::TextMuted));
+        m_ask->setIconSize(QSize(14, 14));
+        m_ask->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_ask->setCursor(Qt::PointingHandCursor);
         m_ask->setFocusPolicy(Qt::StrongFocus);
         m_ask->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         m_ask->installEventFilter(this);
         askLine->addWidget(m_ask, 0);
-        auto *askKeys = new QLabel(m_askRow);
-        askKeys->setObjectName(QStringLiteral("boardChatAskKeys"));
-        // The key line wears the head's muted ink, set here rather than in the stylesheet: the
-        // qss hooks for this panel live in src/Theme.cpp, which this library deliberately does
-        // not carry (see micIcon above for the same trade), and one label is not worth that edge.
-        QPalette muted = askKeys->palette();
-        muted.setColor(QPalette::WindowText, theme::TextMuted);
-        askKeys->setPalette(muted);
-        QFont small = askKeys->font();
-        small.setPointSizeF(qMax(theme::FloorPt, small.pointSizeF() * 0.9));
-        askKeys->setFont(small);
-        askLine->addWidget(askKeys, 0);
-        askLine->addStretch(1);
         outer->addWidget(m_askRow);
         QObject::connect(m_ask, &QToolButton::clicked, this, [this] { expand(); });
 
@@ -724,15 +749,20 @@ void HelperChatPanel::applyCollapsed()
         updateLogHeight();
 }
 
+// "Helper Agent (Alt+Q)" — the name of what the row opens, with the live key in parentheses
+// (owner, 2026-09-20: "make the button say Helper Agent (Alt+Q)"). One widget: the key rides in
+// the button's own text, so an unbound key simply leaves the name alone rather than leaving an
+// empty label behind. It is the same wording in Options, Actions and Sessions, because it is one
+// helper and one panel; where you are is the head's job, not this row's.
 void HelperChatPanel::updateAskRow()
 {
     if (m_ask == nullptr)
         return;
+    m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
+                                       : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
     m_ask->setToolTip(m_askKeys.isEmpty()
         ? QStringLiteral("Ask the helper agent about this pane.")
         : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
-    if (auto *keys = findChild<QLabel *>(QStringLiteral("boardChatAskKeys")))
-        keys->setText(m_askKeys);
 }
 
 // The log is sized to the pane it is in, not to the board's list page (#FEJQ): at most ~40 % of
