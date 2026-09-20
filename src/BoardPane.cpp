@@ -330,7 +330,15 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
     QHash<QString, int> widths;
     QList<QPair<board::Badge, int>> measured;
     for (const board::Badge &badge : board::badges(card, showStatus, sessionLive)) {
-        const int w = qMin(cap, badgeMetrics.horizontalAdvance(badge.text) + 12);
+        // The claim chip is exempt (#R9G7). The cap is there for a badge whose text came out of
+        // the card file and could be a sentence; this one is the glyph, eight characters and at
+        // most " closed", so it cannot eat the row however narrow the pane is — and elided to
+        // "37fa10…" it names nobody, which is the whole of what it is for. It fits whole, or
+        // fitBadges drops it and the tooltip still says who holds the card.
+        const bool bounded = badge.kind == board::Badge::Session
+                             || badge.kind == board::Badge::SessionClosed;
+        const int full = badgeMetrics.horizontalAdvance(badge.text) + 12;
+        const int w = bounded ? full : qMin(cap, full);
         widths.insert(badge.text, w);
         measured << qMakePair(badge, w);
     }
