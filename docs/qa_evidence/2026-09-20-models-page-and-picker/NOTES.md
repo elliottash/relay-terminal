@@ -1,0 +1,20 @@
+# Models page and picker — implementer evidence (2026-09-20)
+
+Xvfb, isolated profile, two literal non-key strings in the environment so two presets are "stored";
+no prompt is ever submitted. `drive.sh [build-dir]` reproduces every shot.
+
+| shot | what it shows |
+|---|---|
+| implementer-a-box-open.png | the pane's model box open: `glm-5.3 (main)` / `glm-5.3-flash (flash)` role rows, then one row per catalog model in rank order, lower-case, `model · provider`; then `more models…` and `⚙ customize…` |
+| implementer-b-picker.png | Ctrl+Shift+M: the picker — filter, sort menu (priority), columns model · provider · reasoning · intelligence · tok/s · left; the current row bold and selected; the reasoning buttons (low · high · max) for it; ☆ favorite, customize…, use, cancel |
+| implementer-c-picker-filter.png | `flash` typed: one flat list of the two matching rows, the first selected |
+| implementer-d-picker-sort.png | the sort menu open (priority, a to z, intelligence, speed, most used, subscription left) |
+| implementer-e-options.png | `/models`: Options › Models — the providers group with status and add key… / replace key… / test |
+| implementer-g-options-checklist.png | the checklist group: `relay free` and `kimi code · k3` with one toggle per model, and under `k3` the unchecked per-model switch "↳ when it fails, continue on openrouter's moonshotai/kimi-k3" (owner: off by default, on per model) |
+| implementer-f-options-down.png | the same page at the end of the priority list (↑ ↓ per row, reset) and the defaults group |
+
+Seen and left as is: the box shows every model of every usable provider until the user un-checks
+some on the page (eighteen rows here, with Claude Code and Codex installed on this machine); the
+`glm-5.3-flash (flash)` role row and the `glm-5.3 flash · z.ai (glm)` entry both exist, because
+the first is the Flash *agent role* (Alt+F, keeps the pane's main model) and the second switches
+the pane's main model.
