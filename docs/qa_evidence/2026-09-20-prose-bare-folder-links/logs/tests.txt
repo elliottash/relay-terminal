@@ -1,0 +1,12 @@
+== ctest -R outputlinks (build/)
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.01 sec
+
+== relay-engine-tests ViewTest (offscreen, both cores)
+QWARN  : ViewTest::proseBareFolderWordsAreNotLinks(libvterm) This plugin does not support propagateSizeHints()
+QWARN  : ViewTest::proseBareFolderWordsAreNotLinks(libvterm) This plugin does not support propagateSizeHints()
+QWARN  : ViewTest::proseBareFolderWordsAreNotLinks(libvterm) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::proseBareFolderWordsAreNotLinks(libvterm)
+Totals: 41 passed, 0 failed, 0 skipped, 0 blacklisted, 8824ms
+exit=0
