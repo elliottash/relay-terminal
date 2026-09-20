@@ -112,6 +112,23 @@ prompt, a compaction and a wiped `entries` table each end with byte-for-byte wha
 rebuild writes; FTS5's own `integrity-check` runs after every case; the v4 → v5 migration is in
 place and asks for no re-index.
 
+## Live, in a real worker
+
+The 300-turn `turnbench` runs above are real `backend/worker.py` processes with the index on, so
+the index each left behind is the fix working end to end rather than a unit test. Both runs wrote
+into the same isolated `$XDG_DATA_HOME`, so the after run also migrated a database with the before
+run's rows in it, in place:
+
+```
+schema 5, FTS5 integrity-check ok
+  3ee68650  turns 300  entry_count   0  digest  0 chars  602 rows   <- before (clean export)
+  9e41a649  turns 300  entry_count 600  digest 64 chars  602 rows   <- after
+```
+
+600 body rows (a prompt and a reply for each of the 300 turns) plus the title and the summary. The
+before row keeps `entry_count 0`, which is what a conversation indexed by an older Relay looks like
+until its next save.
+
 ## What was copied, and what was not
 
 The owner's `~/.local/share/relay` was never opened for writing and never read for content. The
