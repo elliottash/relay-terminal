@@ -32,6 +32,13 @@ cards by Check.  Its path is a parameter everywhere; `default_path()` is only th
 * **source_hash** — asv's per-benchmark version stamp.  When a test's source changes, the
   executions recorded under the old hash describe a *different* test, so they are dropped from
   every statistic; the verdict `edited` says so until the test runs again.
+* **tree_digest** — what `commit` alone cannot say (signals research R2, card #AQ6X step 1).
+  Several sessions share this checkout, so an execution's commit names the last thing that
+  *landed*, not the code that ran: two failures "at the same commit" may be two different trees.
+  `tree_digest` is empty when the working tree equals `commit`, and otherwise
+  `TREE_DIGEST_CHARS` (12) hex of sha256 over `git diff HEAD` — paths and hunks, so the same
+  uncommitted edit digests the same on every run.  Nothing here reads it; `signals.py` does, to
+  tell Datadog's same-commit flake (a pass and a fail on *one* tree) from two trees disagreeing.
 
 ## Retention
 
@@ -71,6 +78,8 @@ SLOW_DECILE = 90.0              # "top decile" = p95 at or above the suite's 90t
 SLOW_REGRESSION = 0.5           # …or a recent p95 more than +50% over the trailing median
 SLOW_RECENT = 5                 # how many executions count as "recent" for that comparison
 MAX_STORE_BYTES = 256 * 1024 * 1024   # a store past this is read up to the cap, never wholly
+TREE_DIGEST_CHARS = 12          # hex characters of sha256(`git diff HEAD`) kept on an execution
+TREE_DIGEST_TIMEOUT = 20.0      # seconds `git diff HEAD` may take before the digest is left empty
 
 #: Results, as they travel on the wire.  Anything else a parser sees becomes `"error"`.
 RESULTS = ("pass", "fail", "skip", "error", "timeout")
@@ -104,8 +113,9 @@ class Execution:
     """One test, one run: the only thing this module ever writes.
 
     `message`/`excerpt` are carried for a failure so a card can show *what* broke without the
-    log, and `source_hash` so a later fold can tell which executions describe today's test.  Both
-    are optional extras beside the wire contract's eight fields, which ignore unknown keys.
+    log, `source_hash` so a later fold can tell which executions describe today's test, and
+    `tree_digest` which *tree* it ran on (`tree_digest_of()` below).  All four are optional extras
+    beside the wire contract's eight fields, which ignore unknown keys.
     """
     ts: str
     id: str
@@ -118,12 +128,13 @@ class Execution:
     message: str = ""
     excerpt: str = ""
     source_hash: str = ""
+    tree_digest: str = ""
 
     def to_dict(self) -> dict:
         out = {"ts": self.ts, "run_id": self.run_id, "id": self.id, "runner": self.runner,
                "result": self.result, "duration": round(float(self.duration), 6),
                "commit": self.commit, "host": self.host}
-        for key in ("message", "excerpt", "source_hash"):
+        for key in ("message", "excerpt", "source_hash", "tree_digest"):
             value = getattr(self, key)
             if value:
                 out[key] = value
@@ -144,7 +155,8 @@ class Execution:
                    run_id=str(data.get("run_id") or ""), commit=str(data.get("commit") or ""),
                    host=str(data.get("host") or ""), message=str(data.get("message") or ""),
                    excerpt=str(data.get("excerpt") or ""),
-                   source_hash=str(data.get("source_hash") or ""))
+                   source_hash=str(data.get("source_hash") or ""),
+                   tree_digest=str(data.get("tree_digest") or ""))
 
 
 def _as_executions(rows: Iterable) -> list[Execution]:
@@ -314,14 +326,17 @@ def _junit_id(runner: str, case: ET.Element) -> str:
 def ingest_junit(path_or_bytes, runner: str = P.RUNNER_UNITTEST, commit: str = "",
                  run_id: str = "", host: str | None = None, *,
                  ts: str | None = None,
-                 source_hashes: dict[str, str] | None = None) -> list[Execution]:
+                 source_hashes: dict[str, str] | None = None,
+                 tree_digest: str = "") -> list[Execution]:
     """JUnit XML → executions, for both `ctest --output-junit` and `relay_core.junit_runner`.
 
     Takes a path, bytes or a string of XML.  Both document shapes are accepted: a `<testsuites>`
     root and CTest's bare `<testsuite>` root.  Malformed XML is an empty list, never an
     exception — an unreadable report must not take a pane down.  `source_hashes` maps a test id to
     its source hash at the moment of the run, which is what lets a later fold reset a test's
-    history when it is edited; pass `test_probe`'s discovery for it.
+    history when it is edited; pass `test_probe`'s discovery for it.  `tree_digest` names the
+    working tree the run happened on when it was not `commit`'s (`tree_digest_of()`); every
+    execution of one report carries the same one, because one report is one run.
     """
     if isinstance(path_or_bytes, (bytes, bytearray)):
         data = bytes(path_or_bytes)
@@ -355,7 +370,8 @@ def ingest_junit(path_or_bytes, runner: str = P.RUNNER_UNITTEST, commit: str = "
             out.append(Execution(ts=stamp, id=test_id, result=result, duration=duration,
                                  runner=runner, run_id=run_id, commit=commit, host=machine,
                                  message=message, excerpt=excerpt,
-                                 source_hash=hashes.get(test_id, "")))
+                                 source_hash=hashes.get(test_id, ""),
+                                 tree_digest=str(tree_digest or "")))
     return out
 
 
@@ -395,6 +411,34 @@ def _hostname() -> str:
         return socket.gethostname()
     except OSError:                                      # pragma: no cover - nameless host
         return ""
+
+
+def tree_digest_of(repo: str | os.PathLike) -> str:
+    """`""` when the working tree is `HEAD`, else a short digest of `git diff HEAD` (#AQ6X step 1).
+
+    Several sessions edit this one checkout, so an execution's `commit` names what last landed
+    rather than the code that ran: "the same commit" is not the same tree, and the flake rule
+    that Datadog states over commits (`_same_commit_flake`) needs the tree to be honest about a
+    pass and a fail.  The digest is over `git diff HEAD` — the unstaged *and* staged text, so an
+    edit that is merely `git add`ed still counts — which makes it stable for as long as nobody
+    types: two runs of one broken edit digest alike, and the next keystroke gives a new digest.
+
+    Only `--no-ext-diff --no-color` and the repo's own path go on the command line, and every
+    failure (no git, not a repository, a timeout, a binary blob it cannot spell) is the empty
+    string: an execution with no digest says "not known", which is what the store held before
+    this field existed and what every remote producer will keep saying.
+    """
+    import subprocess
+    try:
+        done = subprocess.run(["git", "-C", str(repo), "diff", "HEAD",
+                               "--no-ext-diff", "--no-color"],
+                              capture_output=True, timeout=TREE_DIGEST_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if done.returncode != 0 or not done.stdout.strip():
+        return ""
+    import hashlib
+    return hashlib.sha256(done.stdout).hexdigest()[:TREE_DIGEST_CHARS]
 
 
 # --------------------------------------------------------------------------- statistics
