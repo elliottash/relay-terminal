@@ -16,6 +16,7 @@
 #include <QStyle>
 
 #include <algorithm>
+#include <functional>
 
 class CurrentTextComboBox final : public QComboBox {
 public:
@@ -24,7 +25,13 @@ public:
     // A squeeze clips the text, as it always has in a narrow pane: the strip's Ignored policy
     // keeps the box off the pane's own minimum width (#G152).
     QSize minimumSizeHint() const override { return hintFor(QStringLiteral("MM")); }
+    // Called just before the list is drawn, so a box whose rows depend on something that may
+    // still be arriving can put them right first (#PK5Q: a helper panel's box borrows the
+    // catalog from a terminal pane until its own worker has spoken). Refilling here is safe —
+    // nothing is shown yet.
+    std::function<void()> onBeforePopup;
     void showPopup() override {
+        if (onBeforePopup) onBeforePopup();
         view()->setMinimumWidth(std::max(width(), view()->sizeHintForColumn(0)
             + 2 * view()->frameWidth() + view()->verticalScrollBar()->sizeHint().width()));
         QComboBox::showPopup();

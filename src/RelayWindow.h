@@ -1339,13 +1339,21 @@ private:
                 return helperSlashCommand(name, args);
             };
 
+        // The tab's helper is started at the first ask, so the catalog a box is lent may itself
+        // still be arriving when the panel is built. Asking again as the list is about to be drawn
+        // costs nothing and means a box is never opened on four rows and a gear.
+        box->onBeforePopup = [this, guard, state, fillBox] {
+            if (!state->presets.isEmpty() || !guard) return;
+            *state = helperModelState(pageOf(guard));
+            if (!state->presets.isEmpty()) fillBox();
+        };
         QTimer::singleShot(0, this, [this, guard, viewGuard, state, fillBox] {
             QWidget *page = guard ? pageOf(guard) : nullptr;
             if (!page || !viewGuard) return;
             // What the tab's worker has already said about its model. A helper that has been
             // answering the Switchboard for an hour says `configured` again only at the next
             // reconfigure, so a panel opened now would otherwise show an empty box until then.
-            *state = m_helperModels.value(tabIdOf(page));
+            *state = helperModelState(page);
             fillBox();
             listenToHelper(page, guard, [viewGuard, state, fillBox](const QJsonObject &event) {
                 if (!viewGuard) return;
@@ -1421,11 +1429,28 @@ private:
         return true;
     }
 
+    // What a helper's box knows about models, for the tab a widget is in. The tab's worker is
+    // started at the **first ask** and never merely to fill a box (owner decision 5, §30.7), so a
+    // panel opened in a tab nobody has asked anything has heard nothing at all — and a box with no
+    // models in it is not the box a terminal pane has, which is the whole of card #PK5Q. The
+    // catalog is the machine's rather than any one worker's, so a terminal pane's `presets` is the
+    // same list: it is lent to the box until the helper speaks for itself, and the tiers and the
+    // current row follow the moment it does.
+    relay::helpermodel::State helperModelState(QWidget *page) {
+        relay::helpermodel::State state = m_helperModels.value(tabIdOf(page));
+        if (!state.presets.isEmpty()) return state;
+        const QList<Pane *> panes = panesIn(page ? page : m_tabs->currentWidget());
+        for (Pane *pane : panes)
+            if (!pane->presets().isEmpty()) { state.presets = pane->presets(); return state; }
+        if (m_active) state.presets = m_active->presets();
+        return state;
+    }
+
     // "more models…" on a helper's box: the same dialog Ctrl+Alt+M opens over a terminal pane —
     // the same catalog, the same favourites and recents, the same reasoning level remembered per
     // model — with its answer applied to the helper's role rather than to a pane's own model.
     void openHelperModelPicker() {
-        const relay::helpermodel::State &state = m_helperModels[tabIdOf(m_tabs->currentWidget())];
+        const relay::helpermodel::State state = helperModelState(m_tabs->currentWidget());
         const relay::modelrows::Context rows = relay::helpermodel::context(state);
         relay::ModelPicker::Context context;
         context.catalog = rows.catalog;
@@ -1448,7 +1473,7 @@ private:
     // Empty words open the dialog, exactly as they do in a pane.
     void helperModelCommand(const QString &args) {
         if (args.trimmed().isEmpty()) { openHelperModelPicker(); return; }
-        const relay::helpermodel::State &state = m_helperModels[tabIdOf(m_tabs->currentWidget())];
+        const relay::helpermodel::State state = helperModelState(m_tabs->currentWidget());
         const QString key = relay::modelrows::resolve(relay::helpermodel::context(state).catalog, args);
         if (key.isEmpty()) {
             notice(QStringLiteral("No model matches “%1”. /model opens the picker.").arg(args.trimmed()));
