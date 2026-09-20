@@ -192,6 +192,19 @@ private Q_SLOTS:
         QVERIFY(back.list()->topLevelItem(2)->foreground(0).style() == Qt::NoBrush);
     }
 
+    void levelsAreShownInTheProvidersWords() {
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("max"));
+        for (Entry &entry : ctx.catalog.entries)
+            if (entry.key == QStringLiteral("glm-coding|glm-5.3")) entry.effortLabels.insert(QStringLiteral("max"), QStringLiteral("xhigh"));
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("xhigh"));   // the column
+        QStringList buttons;
+        for (QAbstractButton *button : picker.effortGroup()->buttons()) buttons << button->text();
+        QCOMPARE(buttons, (QStringList{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")}));
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                   // Relay's level is what is returned
+    }
+
     void customizeClosesAndOpensThePage() {
         ModelPicker picker(context());
         bool opened = false;

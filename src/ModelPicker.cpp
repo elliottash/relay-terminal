@@ -165,7 +165,7 @@ QTreeWidgetItem *ModelPicker::addRow(const Entry &entry) {
     const double speed = curation::speed(entry.key);
     QStringList columns{(curation::isFavorite(entry.key) ? QStringLiteral("★ ") : QString()) + entry.label,
                         entry.provider + (entry.plan.isEmpty() ? QString() : QStringLiteral(" · ") + entry.plan),
-                        reasoning,
+                        reasoning.isEmpty() ? QString() : entry.effortLabel(reasoning),
                         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
                         speed > 0 ? QString::number(qRound(speed)) : QString(),
                         percent(percentLeft(m_context.catalog, entry.preset))};
@@ -260,7 +260,7 @@ void ModelPicker::onRowChanged() {
                              : entry->efforts.contains(m_context.currentEffort) ? m_context.currentEffort : entry->efforts.last();
         for (const QString &level : entry->efforts) {
             auto *button = new QToolButton;
-            button->setText(level);
+            button->setText(entry->effortLabel(level));   // the provider's own word (xhigh), the level underneath
             button->setCheckable(true);
             button->setAutoRaise(false);
             button->setProperty("level", level);
