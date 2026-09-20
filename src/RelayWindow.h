@@ -34,6 +34,8 @@
 #include "AgentInternalsView.h"   // the Activity pane beside a terminal (#QT8C)
 #include "SettingsPane.h"
 #include "AppCommands.h"   // the agent drives the app: the catalog, the executor, the change log (#FEJQ, §30)
+#include "HelperModelBox.h"   // the helper panels' model box: one set of rows for all four (#BRD3, #FEJQ)
+#include "CurrentTextComboBox.h"   // the box itself, as the Switchboard and the terminal panes build it
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
 #include "LocalModelsSettings.h"
@@ -1101,6 +1103,7 @@ private:
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
+        else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
         else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
         else if (id == QStringLiteral("project.pick")) openProjectPicker(m_active, QString());
         else if (id == QStringLiteral("palette.open")) toggleSettingsPane(true);
@@ -1237,6 +1240,128 @@ private:
         tool->setProperty("paneType", actions ? QStringLiteral("actions") : QStringLiteral("options"));
     }
 
+    // ----- the helper panels in Options, Actions and Sessions (card #FEJQ, protocol §30.7) ------
+    //
+    // "When you are in options, actions, or sessions, you have a helper agent, same as the
+    // switchboard agent" (owner). Those three panes carry the Switchboard's own panel and ask the
+    // **tab's** helper worker, so the window is what joins them: where the panel's messages go,
+    // where its answers come from, what its links open, and the model box in its composer.
+    //
+    // They keep one seam, name for name (src/SettingsPane.h, src/Conversations.h), so this is a
+    // template rather than two copies of a dozen callbacks that would drift the first time one of
+    // them grew a thirteenth.
+    //
+    // `leaf` is the ToolPane the view is hosted in. It is not in a tab while its creator runs —
+    // insertBeside comes after — so everything that needs the page waits a turn of the event
+    // loop, the way the Switchboard's own `board_open` does.
+    template <typename View>
+    void wireHelperPanel(View *view, QWidget *leaf, const QString &hintId,
+                         const QString &accessibleName) {
+        QPointer<QWidget> guard(leaf);
+        QPointer<View> viewGuard(view);
+        view->onHelperSend = [guard](const QJsonObject &message) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            // The panel tags its own messages with the pane it is, and in Options that tag
+            // follows the mode, so the window names no pane of its own: which brief the turn
+            // gets is the panel's to say (§30.7).
+            w->sendToHelper(w->pageOf(guard), QString(), message);
+        };
+        // The panel's messages need ids the worker's answers can be told by. One counter per
+        // panel behind one minted prefix: two Options panes in two tabs share a worker only by
+        // accident of the same project, and must never share a request id.
+        auto seq = std::make_shared<int>(0);
+        const QString prefix = QLatin1Char('h')
+            + QUuid::createUuid().toString(QUuid::Id128).left(6) + QLatin1Char('-');
+        view->nextHelperRequestId = [seq, prefix] { return prefix + QString::number(++*seq); };
+        view->onHelperOpenCard = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); }
+        };
+        view->onHelperOpenFile = [guard](const QString &path) {
+            if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
+        };
+        view->onHelperHint = [guard](const QString &id, const QString &keys) {
+            auto *w = windowOf(guard);
+            if (w && !keys.isEmpty()) w->hint(id, relay::ShortcutHints::nextTime(keys));
+        };
+        // The live key, not a written one (WARP.md's standing rule): the collapsed row says it
+        // and the hint a mouse click teaches quotes it.
+        view->setHelperShortcut(hintId, Keymap::instance().shortcutText(QStringLiteral("helper.ask")));
+
+        // The model box in the panel's composer (#BRD3): the same rows the Switchboard's carries,
+        // over the same `switchboard` role, so a pick in any of the four writes one setting and
+        // reconfigures one worker.
+        auto *box = new CurrentTextComboBox;
+        box->setObjectName(QStringLiteral("statusPicker"));
+        box->setAccessibleName(accessibleName);
+        box->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        box->setFocusPolicy(Qt::TabFocus);
+        auto state = std::make_shared<relay::helpermodel::State>();
+        QPointer<CurrentTextComboBox> boxGuard(box);
+        const auto fillBox = [boxGuard, state] {
+            if (!boxGuard) return;
+            const QSignalBlocker blocker(boxGuard.data());
+            boxGuard->setToolTip(relay::helpermodel::fill(boxGuard.data(), *state));
+            boxGuard->updateGeometry();   // the collapsed box is as wide as the model it names
+        };
+        connect(box, QOverload<int>::of(&QComboBox::activated), box, [this, boxGuard, fillBox](int index) {
+            if (!boxGuard) return;
+            const QString data = boxGuard->itemData(index).toString();
+            // The gear is not a choice: put the box back on the live row at once. A real pick
+            // stays showing until the reconfigure's `configured` redraws it on the new role.
+            if (data == QStringLiteral("gear")) fillBox();
+            pickHelperModel(data);
+        });
+        view->addHelperComposerWidget(box);
+
+        QTimer::singleShot(0, this, [this, guard, viewGuard, state, fillBox] {
+            QWidget *page = guard ? pageOf(guard) : nullptr;
+            if (!page || !viewGuard) return;
+            // What the tab's worker has already said about its model. A helper that has been
+            // answering the Switchboard for an hour says `configured` again only at the next
+            // reconfigure, so a panel opened now would otherwise show an empty box until then.
+            *state = m_helperModels.value(tabIdOf(page));
+            fillBox();
+            listenToHelper(page, guard, [viewGuard, state, fillBox](const QJsonObject &event) {
+                if (!viewGuard) return;
+                const QString type = event.value(QStringLiteral("type")).toString();
+                viewGuard->helperEvent(type, event);
+                // The `presets` rows are the composer microphone's too (the "voice needs an
+                // OpenRouter key" offer), which is why the panel is given them as well.
+                if (type == QStringLiteral("presets"))
+                    viewGuard->setHelperPresets(event.value(QStringLiteral("presets")).toArray());
+                if (state->take(type, event)) fillBox();
+            });
+        });
+    }
+
+    // A pick in any helper model box (#BRD3, §30.7). It writes the persisted `switchboard` role
+    // — the same keys the roles dialog's Advanced row writes, through the same helpers — and
+    // reconfigures the board workers, because only a configure moves a running agent. The gear row
+    // is the roles dialog itself.
+    void pickHelperModel(const QString &data) {
+        if (data == QStringLiteral("gear")) { runAction(QStringLiteral("agent.modelRoles")); return; }
+        if (data.startsWith(QStringLiteral("tier:")))
+            relay::RolesDialog::writeRoleTier(QStringLiteral("switchboard"), data.mid(5));
+        else if (data.startsWith(QStringLiteral("preset:")))
+            relay::RolesDialog::writeRolePreset(QStringLiteral("switchboard"), data.mid(7));
+        else return;
+        reconfigureBoardWorkers();
+    }
+
+    // The ask key (Keymap `helper.ask`): open the helper of the pane the keyboard is in and put
+    // the cursor in its composer. One key for all of them, because it is one helper — the tab's
+    // — wherever it is asked; the Switchboard's list page keeps its bare `a` (#8YQ9), which it can
+    // have because that list takes no typing.
+    void focusHelperOfActiveLeaf() {
+        auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
+        if (tool && tool->settings()) { tool->settings()->focusHelper(); return; }
+        if (tool && tool->board()) { tool->board()->focusChat(); return; }
+        if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
+        notice(QStringLiteral("The helper agent is in Options, Actions, Sessions and the "
+                              "Switchboard — open one of those and ask it there."), 5000);
+    }
+
     ToolPane *createSettingsPane(relay::SettingsPane::Mode mode) {
         auto *view = new relay::SettingsPane(mode, [this] { return settingsSections(); }, [this] { return searchableActions(); });
         auto *tool = new ToolPane(view, m_manager->workspace());
@@ -1259,6 +1384,13 @@ private:
         };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
+        // The helper agent's panel at the foot of the pane (#FEJQ). `option:` links resolve inside
+        // the pane itself; a `session:` one is the manager's, and opens it on that conversation.
+        wireHelperPanel(view, tool, QStringLiteral("options.ask"),
+                        QStringLiteral("Options helper model"));
+        view->onHelperOpenSession = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openSessions(QString(), id);
+        };
         return tool;
     }
 
@@ -1515,6 +1647,10 @@ private:
         std::function<void(const QJsonObject &)> handle;
     };
     QList<HelperListener> m_helperListeners;
+    // What each tab's helper last said about its own model (#BRD3): `configured`, `model_roles`
+    // and `presets`. A panel opened into a tab whose worker has been running for an hour would
+    // otherwise show an empty box until the next reconfigure, because those events are sent once.
+    QHash<QString, relay::helpermodel::State> m_helperModels;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -4147,6 +4283,23 @@ public:
             relay::theme::polishWindow(tool);
             for (const SessionsTab &extra : sessionsTabs())
                 if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
+            // The helper agent's panel at the foot of the pane (#FEJQ). Wired before the pane is
+            // shown, because the panel is hidden until it has somewhere to send. A `session:`
+            // link is the manager's own business; an `option:` one belongs to Options.
+            wireHelperPanel(view, tool, QStringLiteral("sessions.ask"),
+                            QStringLiteral("Sessions helper model"));
+            {
+                QPointer<ToolPane> toolGuard(tool);
+                view->onHelperOpenOption = [toolGuard](const QString &section, const QString &row) {
+                    auto *w = windowOf(toolGuard);
+                    if (!w) return;
+                    w->openSettingsPane(relay::SettingsPane::Mode::Options, section);
+                    if (ToolPane *pane = w->settingsPaneIn(w->m_tabs->currentWidget(),
+                                                           relay::SettingsPane::Mode::Options);
+                        pane && pane->settings())
+                        pane->settings()->revealOption(section, row);
+                };
+            }
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
@@ -5017,6 +5170,9 @@ public:
                 }));
                 return;
             }
+            // What this worker says about its own model is kept for the panels that are not
+            // open yet: it is said on configure and not again (#BRD3).
+            guard->m_helperModels[tab].take(event.value(QStringLiteral("type")).toString(), event);
             QWidget *page = guard->pageOfTabId(tab);
             if (!page) return;
             for (QWidget *leaf : leavesIn(page))
@@ -5098,6 +5254,7 @@ public:
         if (!page) return;
         const QString tab = page->property("relayTabId").toString();
         if (tab.isEmpty()) return;                       // nothing ever asked: no worker to stop
+        m_helperModels.remove(tab);                      // what it said about its model goes with it
         if (relay::BoardWorker *worker = m_boardWorkers.take(tab).data()) {
             worker->onEvent = nullptr;
             worker->onStatus = nullptr;
@@ -5223,18 +5380,7 @@ public:
         // — and reconfigures the board workers, because only a configure moves the running
         // agent. The gear row is the roles dialog itself.
         view->onModelPick = [guard](const QString &data) {
-            auto *w = windowOf(guard);
-            if (!w) return;
-            if (data == QStringLiteral("gear")) {
-                w->runAction(QStringLiteral("agent.modelRoles"));
-                return;
-            }
-            if (data.startsWith(QStringLiteral("tier:")))
-                relay::RolesDialog::writeRoleTier(QStringLiteral("switchboard"), data.mid(5));
-            else if (data.startsWith(QStringLiteral("preset:")))
-                relay::RolesDialog::writeRolePreset(QStringLiteral("switchboard"), data.mid(7));
-            else return;
-            w->reconfigureBoardWorkers();
+            if (auto *w = windowOf(guard)) w->pickHelperModel(data);
         };
         // A Switchboard put away no longer stops the worker: it is the tab's helper, and the tab's
         // Options, Actions and Sessions panes go on asking it (§30.7). Closing the tab is what

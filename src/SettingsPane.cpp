@@ -284,6 +284,9 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
     m_helper->onOpenFile = [this](const QString &path) {
         if (onHelperOpenFile) onHelperOpenFile(path);
     };
+    m_helper->onOpenSession = [this](const QString &id) {
+        if (onHelperOpenSession) onHelperOpenSession(id);
+    };
     m_helper->setAskShortcut(QStringLiteral("options.ask"), QString());
     layout->addWidget(m_helper, 0);
     applyMode();

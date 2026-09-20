@@ -251,6 +251,7 @@ public:
     // here; a card and a file belong to the window, which wires these.
     std::function<void(const QString &cardId)> onHelperOpenCard;
     std::function<void(const QString &path)> onHelperOpenFile;
+    std::function<void(const QString &sessionId)> onHelperOpenSession;
     std::function<void(const QString &id, const QString &keys)> onHelperHint;   // shortcut hints
 
     // A worker event for the panel: the `chat: true` turn events and the `board_chat_*` answers.
