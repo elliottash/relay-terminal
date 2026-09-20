@@ -1,10 +1,16 @@
 ---
 id: BRD3
 type: work
-status: inbox
+status: needs-qa-llm
+labels: [feature, switchboard]
+component: [gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: agent
+implemented_by: glm/glm-5.3
 rank: zzzzzzzzzr
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: ['0a7a43d7'], evidence: [docs/qa_evidence/2026-09-20-switchboard-model-box/], related: [], github: null}
 ---
 # show the model selector in the switchboad agent
 
@@ -42,3 +48,20 @@ show the model selector in the switchboad agent (so i can pick a different model
 
 - `./scripts/test.sh` and `ctest --test-dir build`, including the new `boardmodel_test.cpp` cases.
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`: open the Switchboard (Ctrl+Shift+S) — the box shows the live model; pick Flash — the box shows the Flash model and a Discuss turn answers on it (worker's `configured` event, `agent_role: switchboard`); pick a provider with no stored key — the box falls back to Main with the warning tooltip; the box is disabled while a Plan turn runs; the roles modal's "Switchboard card threads" row agrees with the pick in both directions.
+
+## QA checklist
+
+- [ ] Open the Switchboard (Ctrl+Shift+S): the page agent's composer row ends with the model
+      box naming the live model — "Follow Main — <model>" by default — left of the microphone.
+- [ ] Open the box: "Follow Main — <model>", then Flash and Lite with their live models, then
+      one row per usable provider (stored key, Relay Free, local servers — never a guest row),
+      then "⚙ Model roles…" last. Collapsed, it is only as wide as the model it names.
+- [ ] Pick Flash: the box shows the Flash model and a Discuss turn answers on it (the worker's
+      `configured` event, `agent_role: switchboard`). A freshly opened Switchboard agrees.
+- [ ] Pick a provider with no stored key: the box falls back to Main with the warning in its
+      tooltip.
+- [ ] While a Discuss, Plan or cleanup turn runs the box is disabled; it comes back after.
+- [ ] The gear row opens Model roles; its Advanced row "Switchboard card threads" agrees with
+      the box in both directions.
+- [ ] The pick is global across every open board (matches the roles modal): a pick in one
+      Switchboard moves them all.
