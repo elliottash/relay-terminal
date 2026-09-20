@@ -1,10 +1,12 @@
 ---
 id: SDXE
 type: work
-status: planned
+status: needs-verification
+assignee: agent
+implemented_by: anthropic/claude-opus-5
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [b2461d52a248e366353b2b63295f4a5b88800cf3], evidence: [docs/qa_evidence/2026-09-20-pane-width-jiggle/], related: [], github: null}
 ---
 # bug: pane sizes jiggle in response to content
 
@@ -39,3 +41,15 @@ when agents / shells are working and content is coming into panes, they can beco
 **Verify**
 - `ctest --test-dir build -R panelayout` (and any new widget test).
 - Live under Xvfb, isolated `XDG_CONFIG_HOME`: three panes, one running an agent with subagents and heavy output, one a busy shell (`yes` / a build). Record splitter `sizes()` over 60 s of streaming: no pane width changes except by user drag. Capture before/after numbers as evidence under `docs/qa_evidence/`.
+
+## QA checklist
+Landed in `b2461d52` and verified by the implementer under Xvfb (`docs/qa_evidence/2026-09-20-pane-width-jiggle/README.md`, with the driver `measure.py` and the before/after logs beside it). A verifier re-checks on a fresh build:
+
+- [ ] Three panes in one tab, a busy shell (`yes > /dev/null`) in one of them: no divider moves while the usage meter is up and its reading changes. `RELAY_LAYOUT_LOG=1 build/relay` prints each pane's width and minimum once a second if you want the numbers.
+- [ ] The same pane renamed (`/rename <a long sentence>`) and renamed back: the pane keeps its width, the title elides or wraps as before.
+- [ ] An agent turn with subagents running: the badge appears and counts up without moving any divider, and it is never drawn half-width — it is whole or absent.
+- [ ] An ssh pane (`ssh localhost`) in a narrow column: the chip gives way down the ladder (user@host → host → "⇄ …") and the pane does not widen when the chip appears or its host is long.
+- [ ] A shared pane (the share button, so the phone chip shows): the chip appears without widening the pane.
+- [ ] The narrowest layouts still read well: three panes plus the Switchboard in one tab — the title keeps its 80 px floor, the meter drops rather than squeezing anything, nothing is clipped mid-glyph.
+- [ ] `ctest --test-dir build -R panes` passes (`tests/panelayout_test.cpp` reproduces the incident and pins the rule).
+- [ ] Known and left: a pane's minimum still moves by 8 px — one row gap — when the usage chip appears, because a QHBoxLayout spends its spacing between every visible item. It cannot move a pane wider than its minimum (296 px against 278 px in the measured scene), and closing it means re-spacing every pane header by hand, which is the owner's call.
