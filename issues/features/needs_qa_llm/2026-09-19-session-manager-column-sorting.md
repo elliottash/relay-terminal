@@ -48,3 +48,6 @@ Implementer evidence: `docs/qa_evidence/2026-09-19-session-manager-column-sortin
 - [ ] Tree shape survives: Continue band first, group rows keep their order (rows sort within them), thread rows keep started order under an owner; Qt's tree sort stays off.
 - [ ] Paging: "Show more" continues in the clicked order (worker-side sort + offset).
 - [ ] Live sweep: Ctrl+Shift+Y, click each header, watch the arrow and the order, page with "Show more".
+
+## Verdict
+QA (codex, independent of the GLM implementer, 2026-09-20; `docs/qa_evidence/2026-09-19-session-manager-column-sorting/qa-codex-2026-09-20.md`): **PASS.** Backend orders, header clicks, click-is-the-user's-sort, tree shape and paging all PASS (implementer's unittest selection green, `headerClickSortsByThatColumn` 36/36 offscreen, source wiring confirmed: `setSortingEnabled(false)` only, click through the combo's `currentIndexChanged` chain, worker-side `c.pinned DESC, {order}`). Live sweep PARTIAL: under bare Xvfb the seeded 103-session listing matched the worker's `recent` order, but synthetic header clicks never registered, so click/toggle/arrow/paging are covered by the offscreen test against the real widgets rather than observed live.

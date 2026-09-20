@@ -1,0 +1,23 @@
+still      1789867905.093002892  first      Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867906.631868113  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867908.187473206  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867909.735727504  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867911.266656553  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867912.812367524  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867914.339597295  identical  Oo pj(2)- cpu30%-mem05% =~ +
+still      1789867915.890446771  identical  Oo pj(2)- cpu30%-mem05% =~ +
+halved     1789867917.399346109  first      Oo pj(2)- cpu30%-mem05% =~ +
+halved     1789867918.954226299  CHANGED    O pj(2)- cpu29%-mem05% x +4
+halved     1789867920.484913775  identical  O pj(2)- cpu29%-mem05% x +4
+halved     1789867922.008389960  identical  O pj(2)- cpu29%-mem05% x +4
+halved     1789867923.555060587  CHANGED    Oo pj(2)- cpu15%-mem05% * +
+halved     1789867925.085757852  identical  Oo pj(2)- cpu15%-mem05% * +
+halved     1789867926.611433296  identical  Oo pj(2)- cpu15%-mem05% * +
+halved     1789867928.123995520  identical  Oo pj(2)- cpu15%-mem05% * +
+halved     1789867929.657728715  identical  Oo pj(2)- cpu15%-mem05% * +
+halved     1789867931.185962091  identical  Oo pj(2)- cpu15%-mem05% * +
+width    trimmed label region: still-7=500px Oo pj(2)- cpu30%-mem05% =~ + last=500px Oo pj(2)- cpu15%-mem05% * +
+idle       1789867946.714980326  reading    Oo pj(2)- cpu00%-mem00% = +
+off        1789867951.391251706  reading    ° pi(2) * +
+on         1789867959.064055082  reading    Oo pj(2)- cpu00%-mem00% = +
+one        1789867963.775360805  reading    

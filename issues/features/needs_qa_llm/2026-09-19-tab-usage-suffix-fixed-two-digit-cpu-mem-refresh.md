@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 rank: zzzzzzzz
 created: '2026-09-19'
 source: pane 1, 2026-09-20
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-tab-usage-fixed-width/], related: [], github: null}
+links: {plans: [], commits: ['0bbb4b6c', e932c7ab], evidence: [docs/qa_evidence/2026-09-19-tab-usage-fixed-width/], related: [], github: null}
 ---
 # Tab usage suffix: fixed two-digit cpu/mem, refreshed every 5 s from the 5 s average
 
@@ -57,3 +57,6 @@ Evidence: `docs/qa_evidence/2026-09-19-tab-usage-fixed-width/` (implementer shot
       (`rg labelShouldFollow src/ tests/` → only historical evidence/qa_evidence mentions).
 - [ ] A tab with no terminal pane (Sessions only) carries no usage suffix; turning
       `appearance/pane_usage` off clears it; both recover when panes/meters return.
+
+## Verdict
+QA (codex, independent of the GLM implementer, 2026-09-20; `docs/qa_evidence/2026-09-19-tab-usage-fixed-width/qa-codex-2026-09-20.md`): **PASS, 7/7.** 24/24 paneusage tests; live Xvfb run: idle keeps `cpu 00% · mem 00%` while the chip disappears, the label stepped 30 → 29 → 15 on a ≥5 s clock showing the window's mean (not the pane's instant 15), the chip/Sessions tag/tooltips are unchanged, `labelShouldFollow`/`kLabelStep`/`kLabelHoldMs` are gone, `pane_usage` off clears the suffix and on restores it. Includes follow-up `e932c7ab` (owner, 2026-09-20: tab header "title (pane count) · cpu mem" — count now in parens, still only when a tab has more than one pane), verified live: `pj (2) · cpu 30% · mem 05%` → single pane back to no "(1)", label width pixel-stable across 30/29/15/00.
