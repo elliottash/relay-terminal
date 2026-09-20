@@ -177,8 +177,14 @@ public:
         m_questions = questions;
         if (!sameCount) {
             while (QLayoutItem *item = m_chips->takeAt(0)) {
-                if (QWidget *widget = item->widget())
+                if (QWidget *widget = item->widget()) {
+                    // Out of the layout is not off the screen: a deleteLater()d child keeps its
+                    // old geometry and goes on painting there until the event loop gets round to
+                    // it, which drew a ghost chip across this row's title. Disown it now.
+                    widget->hide();
+                    widget->setParent(nullptr);
                     widget->deleteLater();
+                }
                 delete item;
             }
             m_buttons.clear();

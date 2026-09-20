@@ -254,6 +254,9 @@ private slots:
         QCOMPARE(row->chipLabels().size(), 3);
         QCOMPARE(row->chipLabels().at(2), QStringLiteral("Turn 1"));
         QCOMPARE(row->draftAt(2), relay::askrow::turnQuestion(1, QStringLiteral("fix the build")));
+        // The chips the count changed away from are gone, not merely out of the layout: a child
+        // waiting for deleteLater() goes on painting where it was, over this row's own title.
+        QCOMPARE(row->findChildren<QToolButton *>().size(), 3);
     }
 
     void aNoteIsSaidOnce() {
