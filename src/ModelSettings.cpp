@@ -451,6 +451,20 @@ void RolesDialog::writeRolePreset(const QString &role, const QString &presetId) 
     }
 }
 
+void RolesDialog::writeRoleEntry(const QString &role, const QString &presetId, const QString &model,
+                                 const QString &effort) {
+    writeRolePreset(role, presetId);   // the endpoint, and the tier it is exclusive with, first
+    QSettings settings;
+    if (presetId.isEmpty() || model.trimmed().isEmpty())
+        settings.remove(roleSetting(role, QStringLiteral("model")));
+    else
+        settings.setValue(roleSetting(role, QStringLiteral("model")), model.trimmed());
+    // An empty level is "whatever this model does by default", which is the absence of the key —
+    // not a stored empty string, which `rolesObject` would drop anyway but a reader might not.
+    if (effort.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("effort")));
+    else settings.setValue(roleSetting(role, QStringLiteral("effort")), effort);
+}
+
 RolesDialog::RolesDialog(QWidget *parent) : QDialog(parent) {
     setObjectName(QStringLiteral("rolesDialog"));
     setWindowTitle(QStringLiteral("Relay · per-job models"));

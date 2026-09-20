@@ -63,10 +63,13 @@ public:
 
     // ---- wiring
     std::function<void(const QJsonObject &)> onSend;         // a worker protocol message (board_*, presets, …)
-    // The model box's pick (#BRD3): "tier:" (follow Main), "tier:flash", "tier:lite",
-    // "preset:<id>" or "gear" (the Model roles dialog). The view holds no QSettings: the window
-    // writes the `switchboard` role and reconfigures the board workers.
-    std::function<void(const QString &data)> onModelPick;
+    // The model box's pick (#BRD3, #PK5Q): the terminal pane's own words, because the box draws
+    // the terminal pane's own rows — "role:main", "role:flash", "role:local",
+    // "entry:<preset>|<model>", "gear:picker" (the model picker dialog) or "gear:modelOptions".
+    // The view holds no QSettings: the window writes the `switchboard` role and reconfigures the
+    // board workers. It answers true when the box should go back to the row the helper is on —
+    // a gear row, or a pick it refused — and false when a real pick is now on its way.
+    std::function<bool(const QString &data)> onModelPick;
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
     // The two link schemes the helper answers with that are not the board's (#FEJQ, §30.4):

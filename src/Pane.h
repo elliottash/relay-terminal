@@ -12,6 +12,7 @@
 #include "CurrentTextComboBox.h"
 #include "ModelCatalog.h"
 #include "ModelPicker.h"
+#include "ModelRows.h"
 #include "Keymap.h"
 #include "Isolation.h"
 
@@ -8124,16 +8125,11 @@ private:
                     }
                 }
                 // A catalog entry (owner, 2026-09-20): its key, its model id, or words of its
-                // label and provider — the same match the picker's filter makes, shown rows first.
+                // label and provider — the same match the picker's filter makes, shown rows
+                // first. relay::modelrows::resolve is that match, so /model in a helper agent's
+                // composer answers the same word with the same model (#PK5Q).
                 const relay::models::Catalog catalog = modelCatalog();
-                const QList<relay::models::Entry> rows = relay::models::shown(catalog);
-                auto exact = [&](const relay::models::Entry &entry) {
-                    return entry.key.compare(args, Qt::CaseInsensitive) == 0 || entry.model.compare(args, Qt::CaseInsensitive) == 0
-                        || entry.label.compare(args, Qt::CaseInsensitive) == 0;
-                };
-                for (const auto &entry : rows) if (exact(entry)) { selectEntry(entry.key); return; }
-                for (const auto &entry : catalog.entries) if (entry.usable && exact(entry)) { selectEntry(entry.key); return; }
-                for (const auto &entry : rows) if (relay::models::matches(entry, args)) { selectEntry(entry.key); return; }
+                if (const QString key = relay::modelrows::resolve(catalog, args); !key.isEmpty()) { selectEntry(key); return; }
                 for (const auto &model : std::as_const(m_stored)) {
                     if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) {
                         leaveGuest([this, id = model.first] { selectModel(id); });
@@ -11296,11 +11292,24 @@ private:
     // role in parentheses — "glm-5.3 (main)". The main role's model is the pane's own preset;
     // with no preset picked yet it is the model id the pane last heard, and before anything is
     // heard the row is the role's name alone. The pane_state menu uses the same text.
-    QString roleRowText(const QString &role) const {
+    QString roleRowModel(const QString &role) const {
         QString model = role == QStringLiteral("main")
             ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : roleModelText(role);
         if (role == QStringLiteral("main") && model.isEmpty()) model = m_model;
-        return model.isEmpty() ? roleLabel(role) : QStringLiteral("%1 (%2)").arg(model, role);
+        return model;
+    }
+    // The wording is relay::modelrows' (#PK5Q), so a helper agent's box says it the same way.
+    QString roleRowText(const QString &role) const {
+        return relay::modelrows::roleRowText(role, roleRowModel(role));
+    }
+    // The role rows this pane offers, in order. The Local agent only when this machine serves
+    // something (card #JH22): a row that always resolved back to Main would be a promise the pane
+    // cannot keep. A role a restored session put the pane on keeps its row whatever the list says.
+    QStringList paneRoleRows() const {
+        QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
+        if (hasLocalEndpoint()) roles << QStringLiteral("local");
+        if (!roles.contains(m_agentRole)) roles << m_agentRole;
+        return roles;
     }
 
     void refreshPickers() {
@@ -11315,39 +11324,18 @@ private:
                                        .arg(Keymap::instance().shortcutText(QStringLiteral("input.toggle")),
                                             m_routeLabel ? m_routeLabel->toolTip() : QString()).trimmed());
         }
-        m_modelBox->clear();
-        // One flat list, roles first (owner direction, 2026-09-19): "model (main)", "model
-        // (flash)", "model (local)" when this machine serves one, then the other presets — no
-        // separate Main / Flash / Local section and no ticks: the collapsed box is the live row,
-        // which says it already. Owner report, 2026-09-18: "the main use case for that is going
-        // to be swapping between the main and flash models". Picking a preset below still puts
-        // the pane back on the main agent.
-        QStringList paneRoles{QStringLiteral("main"), QStringLiteral("flash")};
-        // The Local agent only when this machine serves something (card #JH22): a row that always
-        // resolved back to Main would be a promise the pane cannot keep.
-        if (hasLocalEndpoint()) paneRoles << QStringLiteral("local");
-        if (!paneRoles.contains(m_agentRole)) paneRoles << m_agentRole;   // a role a session restored
-        int liveIndex = -1;
-        for (const QString &role : std::as_const(paneRoles)) {
-            m_modelBox->addItem(roleRowText(role), QStringLiteral("role:") + role);
-            if (role == m_agentRole) liveIndex = m_modelBox->count() - 1;
-        }
-        // The catalog's shown entries follow the role rows, in rank order (owner, 2026-09-20): one
-        // row per model, not per provider, so "glm-5.3 flash" sits beside "glm-5.3". The pane's
-        // own entry is the main row already, so it is not repeated. A guest the worker cannot run
-        // headless is not an entry here: its Tier B row comes below.
-        {
-            const relay::models::Catalog catalog = modelCatalog();
-            const QString currentKey = currentEntryKey();
-            for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
-                if (entry.key == currentKey) continue;
-                if (entry.guest && !guestHarnessUsable(guestOfPreset(entry.preset))) continue;
-                // An exhausted subscription keeps its row, marked, and the priority skips it.
-                m_modelBox->addItem(entry.displayName() + (relay::models::exhausted(catalog, entry.preset) ? QStringLiteral(" · exhausted") : QString()),
-                                    QStringLiteral("entry:") + entry.key);
-            }
-        }
-        if (liveIndex >= 0) m_modelBox->setCurrentIndex(liveIndex);
+        // The rows are relay::modelrows' (src/ModelRows.h, card #PK5Q): the role rows, then the
+        // catalog's shown entries in rank order, then "more models…" and the gear. The helper
+        // agent's four boxes draw the same list from the same builder, because the owner asked
+        // for exactly that on 2026-09-20 — "can you have the picker be the same as in the main
+        // terminal". What is decided here is only what this pane alone knows: which role it is
+        // on, the guest running as a TUI in its shell, and the model serving this one turn.
+        relay::modelrows::Context rows;
+        rows.catalog = modelCatalog();
+        rows.now = QDateTime::currentSecsSinceEpoch();
+        rows.roles = paneRoleRows();
+        for (const QString &role : std::as_const(rows.roles)) rows.roleModel.insert(role, roleRowModel(role));
+        rows.mainKey = currentEntryKey();   // the Main row names it already; never twice
         // Guest agents (26.9): Claude Code and Codex, when installed, as rows like any model — no
         // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
         // is the box's current item while that guest is in the pane's foreground (picked or typed
@@ -11356,24 +11344,16 @@ private:
         // harness preset, that preset *is* the row — it sits with the models above, and a second
         // row here would be the same tool offered twice. Only the guest actually running as a TUI
         // in this pane keeps its row either way (tierBGuests).
-        QStringList guests = tierBGuests();
+        rows.guests = tierBGuests();
         const QString liveGuest = m_guestLeaving ? QString() : m_guest.isEmpty() ? m_guestWanted : m_guest;
-        if (!liveGuest.isEmpty() && !guests.contains(liveGuest)) guests << liveGuest;   // run by a path
-        if (!guests.isEmpty()) {
-            m_modelBox->insertSeparator(m_modelBox->count());
-            for (const QString &id : std::as_const(guests)) {
-                const QString model = id == m_guest && !m_guestModel.isEmpty() ? QStringLiteral(" · ") + m_guestModel : QString();
-                m_modelBox->addItem(guestDisplayName(id) + model, QStringLiteral("guest:") + id);
-                if (id == liveGuest) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
-            }
+        if (!liveGuest.isEmpty() && !rows.guests.contains(liveGuest)) rows.guests << liveGuest;   // run by a path
+        for (const QString &id : std::as_const(rows.guests)) {
+            const QString model = id == m_guest && !m_guestModel.isEmpty() ? QStringLiteral(" · ") + m_guestModel : QString();
+            rows.guestText.insert(id, guestDisplayName(id) + model);
         }
-        // Last: the picker (every model with filter, sort and reasoning level — the same dialog
-        // Ctrl+Shift+M opens) and Options › Models (providers, the checklist, the order). Both stay
-        // reachable with no stored key, which is exactly when they are needed most.
-        m_modelBox->insertSeparator(m_modelBox->count());
-        m_modelBox->addItem(QStringLiteral("more models…"), QStringLiteral("gear:picker"));
-        m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  customize…"),
-                            QStringLiteral("gear:modelOptions"));
+        rows.current = !liveGuest.isEmpty() && rows.guests.contains(liveGuest)
+            ? QStringLiteral("guest:") + liveGuest : QStringLiteral("role:") + m_agentRole;
+        relay::modelrows::fill(m_modelBox, rows);
         m_modelBox->setEnabled(true);
         // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
         // planning model, an image turn's vision model, or the provider a failover moved to. One
@@ -11844,9 +11824,7 @@ public:
         // the pane's own preset is the main row already. Not the gear (desktop settings) and not
         // the "this turn" image row, which is not a choice.
         in.modelLabel = m_modelBox ? m_modelBox->currentText() : m_model;
-        QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
-        if (hasLocalEndpoint()) roles << QStringLiteral("local");
-        if (!roles.contains(m_agentRole)) roles << m_agentRole;
+        const QStringList roles = paneRoleRows();
         for (const QString &role : std::as_const(roles))
             in.choices << relay::panestate::Choice{QStringLiteral("role:") + role, roleRowText(role),
                                                    role == m_agentRole};
@@ -14735,11 +14713,16 @@ private:
     // The name a person reads. An id the table does not know — including the empty one, which is
     // what a guest running inside tmux gives, since the pane cannot see it — is "the guest agent"
     // rather than a guess at Claude Code (review of 51587e3).
+    //
+    // Public because a guest is a row in *every* model box since #PK5Q, and the window says its
+    // name when a helper's box refuses one (#GH5T). It reads nothing of a pane.
+public:
     static QString guestDisplayName(const QString &guest) {
         for (const GuestSpec &candidate : guestSpecs())
             if (guest == QLatin1String(candidate.id)) return QString::fromLatin1(candidate.name);
         return QStringLiteral("The guest agent");
     }
+private:
 
     // The guest `argv` runs, or empty. The CLI may be the native binary or a script a launcher
     // runs (`node …/bin/codex` for the shebang install, `npx -y claude`, `node …/claude-code/cli.js`

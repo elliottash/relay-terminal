@@ -91,6 +91,14 @@ public:
     // and an endpoint exclusive.
     static void writeRoleTier(const QString &role, const QString &tier);
     static void writeRolePreset(const QString &role, const QString &presetId);
+    // A provider *and* one of its models, with the level that model runs at (#PK5Q). The helper
+    // agent's box lists the per-model catalog the terminal pane's box lists, so a pick there is a
+    // pair, not a provider — which the role value has always been able to carry (protocol 13.7:
+    // `preset` plus `model` plus `effort`); `writeRolePreset` simply never wrote the pair, because
+    // the only caller before this could only name a provider. An empty `model` means that
+    // provider's own default, which is exactly what a value written before today means.
+    static void writeRoleEntry(const QString &role, const QString &presetId, const QString &model,
+                               const QString &effort = QString());
 
 private:
     void rebuild();

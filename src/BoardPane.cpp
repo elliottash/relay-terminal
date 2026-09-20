@@ -4524,15 +4524,13 @@ void BoardView::buildCardModelBox()
     m_detail->setModelBox(m_cardModelBox);
 }
 
-// One pick, whichever box it came from. The gear is not a choice: put both boxes back on the live
-// row at once. A real pick stays showing until the reconfigure's `configured` event redraws them
-// on the new role.
+// One pick, whichever box it came from. A gear row is not a choice and a refused one is not
+// either: the window says so and both boxes go back to the live row at once. A real pick stays
+// showing until the reconfigure's `configured` event redraws them on the new role.
 void BoardView::pickModel(const QString &data)
 {
-    if (data == QStringLiteral("gear"))
+    if (onModelPick && onModelPick(data))
         rebuildModelBox();
-    if (onModelPick)
-        onModelPick(data);
 }
 
 void BoardView::rebuildModelBox()

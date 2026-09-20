@@ -77,6 +77,41 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(table["flash"]["model"], "m")
         self.assertEqual(table["switchboard"]["model"], "google/gemini-3.8-flash")
 
+    # The helper agent's model box lists a provider's models one by one since card #PK5Q, so a
+    # role value routinely names a provider *and* a model *and* a level. It always could —
+    # protocol 13.7 has carried all three since the roles modal — and this is the proof that it
+    # still means what it meant when it named only a provider.
+    def test_a_role_may_name_a_provider_a_model_and_a_level(self):
+        table = validate_roles({"switchboard": {"preset": "glm-coding", "model": "glm-5.3-flash",
+                                                "effort": "low"}})
+        self.assertEqual(table["switchboard"],
+                         {"preset": "glm-coding", "model": "glm-5.3-flash", "effort": "low"})
+        made = resolver("kimi", {"switchboard": {"preset": "glm-coding", "model": "glm-5.3-flash",
+                                                 "effort": "low"}}, keys=("kimi", "glm-coding"))
+        helper = made.resolve("switchboard")
+        self.assertEqual((helper.preset_id, helper.model, helper.source),
+                         ("glm-coding", "glm-5.3-flash", "configured"))
+        self.assertEqual(helper.config.extra.get("reasoning_effort"), "low")
+
+    def test_a_pinned_model_runs_that_models_own_request(self):
+        # presets.model_extra: the extras of the tier row that names the model, not the preset's.
+        # Kimi's high-speed model carries no effort field at all, so a level asked of it is not
+        # sent — the same rule a tier *list* entry has always followed.
+        made = resolver("glm-coding", {"switchboard": {"preset": "kimi-code",
+                                                       "model": "kimi-for-coding-highspeed",
+                                                       "effort": "max"}},
+                        keys=("glm-coding", "kimi-code"))
+        helper = made.resolve("switchboard")
+        self.assertEqual(helper.model, "kimi-for-coding-highspeed")
+        self.assertNotIn("reasoning_effort", helper.config.extra)
+
+    def test_a_role_naming_only_a_provider_still_means_its_own_model(self):
+        # The value every helper box wrote before #PK5Q. Nothing about it may have changed.
+        made = resolver("kimi", {"switchboard": {"preset": "glm-coding"}}, keys=("kimi", "glm-coding"))
+        helper = made.resolve("switchboard")
+        self.assertEqual((helper.preset_id, helper.model), ("glm-coding", PRESETS["glm-coding"].model))
+        self.assertEqual(helper.config.extra, dict(PRESETS["glm-coding"].extra))
+
     def test_rejects_bad_tables(self):
         for bad in ({"nope": {"preset": "glm"}}, {"main": {"preset": "glm"}}, {"flash": {"preset": "nope"}},
                     {"flash": {"model": "m"}}, {"flash": {"effort": "turbo"}}, {"flash": {"extra": 3}},

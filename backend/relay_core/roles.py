@@ -531,10 +531,26 @@ class RoleResolver:
             return self._tier(role, entry["tier"], "configured", entry.get("effort"))
         preset = _preset(entry.get("preset"))
         base_url = entry.get("base_url") or (preset.base_url if preset else "")
-        model = entry.get("model") or (preset.model if preset else "")
-        extra = entry.get("extra") if entry.get("extra") is not None else (dict(preset.extra) if preset else {})
+        chosen = entry.get("model") or ""
+        model = chosen or (preset.model if preset else "")
+        if entry.get("extra") is not None:
+            extra = entry["extra"]
+        elif preset is not None and chosen and chosen != preset.model and preset.id in PRESETS:
+            # A role pinned to one of a provider's *other* models runs the request that model runs
+            # wherever it is ranked (presets.model_extra) — GLM's Flash model at low reasoning,
+            # Kimi's high-speed one with no effort field at all — which is the rule a tier list
+            # entry already followed. The helper agent's model box lists a provider's models one by
+            # one since card #PK5Q, so this is now the ordinary way a role names a model, not the
+            # roles modal's free-text box alone. A value naming no model, or the preset's own, is
+            # untouched: it means exactly what it meant before.
+            extra = model_extra(preset.id, chosen)
+        else:
+            extra = dict(preset.extra) if preset else {}
         preset_id = preset.id if preset else (match_preset(base_url, model).id if match_preset(base_url, model) else None)
-        return self._build(role, preset_id, base_url, model, extra, entry.get("effort"), "configured")
+        effort = entry.get("effort")
+        if effort is not None and model_efforts(preset_id, model) == []:
+            effort = None           # a model with no effort knob (Kimi's high-speed ones): not sent
+        return self._build(role, preset_id, base_url, model, extra, effort, "configured")
 
     # ----- tiers (protocol 13.7) ---------------------------------------------------------
     def _list_target(self, entry: dict, tier: str) -> tuple[str | None, str, str, dict, str | None]:

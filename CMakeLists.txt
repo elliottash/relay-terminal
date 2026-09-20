@@ -584,6 +584,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelpicker-tests PRIVATE relay-modelpicker ${RELAY_QT}::Test)
     add_test(NAME modelpicker COMMAND relay-modelpicker-tests)
     set_tests_properties(modelpicker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The helper agent's box over that list (#PK5Q): what its worker's events make of it, and
+    # that the rows come out the same as a terminal pane's.
+    add_executable(relay-helpermodelbox-tests tests/helpermodelbox_test.cpp)
+    target_link_libraries(relay-helpermodelbox-tests PRIVATE relay-helperchat ${RELAY_QT}::Test)
+    add_test(NAME helpermodelbox COMMAND relay-helpermodelbox-tests)
+    set_tests_properties(helpermodelbox PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.
     add_executable(relay-modelrows-tests tests/modelrows_test.cpp)
     target_link_libraries(relay-modelrows-tests PRIVATE relay-modelrows ${RELAY_QT}::Test)

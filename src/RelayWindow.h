@@ -1315,10 +1315,9 @@ private:
         connect(box, QOverload<int>::of(&QComboBox::activated), box, [this, boxGuard, fillBox](int index) {
             if (!boxGuard) return;
             const QString data = boxGuard->itemData(index).toString();
-            // The gear is not a choice: put the box back on the live row at once. A real pick
-            // stays showing until the reconfigure's `configured` redraws it on the new role.
-            if (data == QStringLiteral("gear")) fillBox();
-            pickHelperModel(data);
+            // A gear row, or a pick the window refused: put the box back on the live row at once.
+            // A real pick stays showing until the reconfigure's `configured` redraws it.
+            if (pickHelperModel(data)) fillBox();
         });
         view->addHelperComposerWidget(box);
 
@@ -1353,13 +1352,92 @@ private:
     // — the same keys the roles dialog's Advanced row writes, through the same helpers — and
     // reconfigures the board workers, because only a configure moves a running agent. The gear row
     // is the roles dialog itself.
-    void pickHelperModel(const QString &data) {
-        if (data == QStringLiteral("gear")) { runAction(QStringLiteral("agent.modelRoles")); return; }
-        if (data.startsWith(QStringLiteral("tier:")))
-            relay::RolesDialog::writeRoleTier(QStringLiteral("switchboard"), data.mid(5));
-        else if (data.startsWith(QStringLiteral("preset:")))
-            relay::RolesDialog::writeRolePreset(QStringLiteral("switchboard"), data.mid(7));
-        else return;
+    // The rows are a terminal pane's rows since #PK5Q, so the words a pick arrives in are the
+    // pane's too: `role:<tier>`, `entry:<preset>|<model>`, `gear:picker`, `gear:modelOptions`.
+    // Each one does to the helper's role what the pane's handler does to the pane.
+    // True when the box that was clicked should be put back on the row the helper is actually on:
+    // the two gear rows are not choices, and a refused guest row is not one either. A real pick
+    // stays showing until the reconfigure's `configured` event redraws every box on the new role.
+    bool pickHelperModel(const QString &data) {
+        if (data == QStringLiteral("gear:modelOptions")) {
+            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
+            hint(QStringLiteral("helper.model.options.mouse"),
+                 QStringLiteral("Tip: /models opens Options › Models from a helper's prompt box"));
+            return true;
+        }
+        if (data == QStringLiteral("gear:picker")) { openHelperModelPicker(); return true; }
+        if (data.startsWith(QStringLiteral("role:"))) {
+            // The Main row is the role's built-in default tier rather than a stored "main": with
+            // nothing stored the helper follows the pane's own model wherever it goes, which is
+            // what "Follow Main" meant before the rows were shared.
+            const QString role = data.mid(5);
+            relay::RolesDialog::writeRoleTier(relay::helpermodel::kRole(),
+                                              role == QStringLiteral("main") ? QString() : role);
+            hint(QStringLiteral("helper.model.role.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.modelBox")),
+                                                QStringLiteral("a helper's model box")));
+        } else if (data.startsWith(QStringLiteral("entry:"))) {
+            if (!applyHelperEntry(data.mid(6), QString())) return true;
+            relay::models::curation::noteUse(data.mid(6));
+            hint(QStringLiteral("helper.model.mouse"),
+                 QStringLiteral("Tip: /model switches the helper's model from its prompt box"));
+        } else {
+            return true;
+        }
+        reconfigureBoardWorkers();
+        return false;
+    }
+
+    // One catalog entry onto the helper's role. False when nothing was written, so the caller
+    // leaves the worker alone: a guest harness is a row like any other (the owner asked for the
+    // same list) but never a helper's model, so picking one says why instead (card #GH5T).
+    bool applyHelperEntry(const QString &key, const QString &effort) {
+        QString preset, model;
+        if (!relay::models::Catalog::splitKey(key, &preset, &model)) return false;
+        if (const QString guest = Pane::guestOfPreset(preset); !guest.isEmpty()) {
+            notice(relay::helpermodel::guestRefusal(Pane::guestDisplayName(guest)), 8000);
+            return false;
+        }
+        relay::RolesDialog::writeRoleEntry(relay::helpermodel::kRole(), preset, model,
+                                           effort.isEmpty() ? relay::models::curation::effortFor(key) : effort);
+        return true;
+    }
+
+    // "more models…" on a helper's box: the same dialog Ctrl+Alt+M opens over a terminal pane —
+    // the same catalog, the same favourites and recents, the same reasoning level remembered per
+    // model — with its answer applied to the helper's role rather than to a pane's own model.
+    void openHelperModelPicker() {
+        const relay::helpermodel::State &state = m_helperModels[tabIdOf(m_tabs->currentWidget())];
+        const relay::modelrows::Context rows = relay::helpermodel::context(state);
+        relay::ModelPicker::Context context;
+        context.catalog = rows.catalog;
+        QString current = relay::helpermodel::currentRow(state);
+        if (current.startsWith(QStringLiteral("entry:"))) context.currentKey = current.mid(6);
+        else context.currentKey = rows.mainKey;
+        context.currentEffort = state.roles.value(relay::helpermodel::kRole()).toObject()
+                                    .value(QStringLiteral("effort")).toString();
+        context.now = QDateTime::currentSecsSinceEpoch();
+        const relay::ModelPick pick = relay::pickModel(this, context, [this] {
+            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
+        });
+        if (!pick.accepted) return;
+        if (!applyHelperEntry(pick.key, pick.effort)) return;
+        relay::models::curation::noteUse(pick.key);
+        reconfigureBoardWorkers();
+    }
+
+    // `/model <words>` in a helper's composer, the same match the pane's own composer makes.
+    // Empty words open the dialog, exactly as they do in a pane.
+    void helperModelCommand(const QString &args) {
+        if (args.trimmed().isEmpty()) { openHelperModelPicker(); return; }
+        const relay::helpermodel::State &state = m_helperModels[tabIdOf(m_tabs->currentWidget())];
+        const QString key = relay::modelrows::resolve(relay::helpermodel::context(state).catalog, args);
+        if (key.isEmpty()) {
+            notice(QStringLiteral("No model matches “%1”. /model opens the picker.").arg(args.trimmed()));
+            return;
+        }
+        if (!applyHelperEntry(key, QString())) return;
+        relay::models::curation::noteUse(key);
         reconfigureBoardWorkers();
     }
 
@@ -6211,7 +6289,8 @@ public:
         // — and reconfigures the board workers, because only a configure moves the running
         // agent. The gear row is the roles dialog itself.
         view->onModelPick = [guard](const QString &data) {
-            if (auto *w = windowOf(guard)) w->pickHelperModel(data);
+            auto *w = windowOf(guard);
+            return w != nullptr && w->pickHelperModel(data);
         };
         // A Switchboard put away no longer stops the worker: it is the tab's helper, and the tab's
         // Options, Actions and Sessions panes go on asking it (§30.7). Closing the tab is what

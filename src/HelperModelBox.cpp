@@ -1,36 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HelperModelBox.h"
 
+#include "ModelRows.h"
+
+#include <QDateTime>
+
 namespace relay::helpermodel {
 
 namespace {
 
-// One row per preset the helper agent could actually run on: a stored key, Relay Free (usable on
-// this machine), or a local model server. Guest rows are harnesses, not endpoints —
-// roles.validate_roles would refuse their ids — so they are never offered.
-bool usable(const QJsonObject &preset)
+// The model a tier landed on right now, for its role row. A tier whose provider has no key steps
+// towards Main — its `using` says so — and then the row names the role alone, with the tier's note
+// as the row's own tooltip, exactly as a terminal pane's Local row does when nothing is served.
+QString tierModel(const QJsonObject &tiers, const QString &tier)
 {
-    if (preset.value(QStringLiteral("group")).toString() == QStringLiteral("guest"))
-        return false;
-    return preset.value(QStringLiteral("has_stored_key")).toBool()
-           || preset.value(QStringLiteral("local")).toBool()
-           || (preset.value(QStringLiteral("hosted")).toBool()
-               && preset.value(QStringLiteral("available")).toBool());
+    const QJsonObject entry = tiers.value(tier).toObject();
+    if (entry.isEmpty()) return {};
+    if (tier != QStringLiteral("main")
+        && entry.value(QStringLiteral("using")).toString() != tier) return {};
+    return entry.value(QStringLiteral("model")).toString();
 }
 
-// A provider row's text, in the pane's model box's words (Pane::conciseModel): the service for
-// Relay Free, whose gateway model ids name nothing a person recognises; the model id otherwise,
-// with "· local" for a server on this machine.
-QString modelText(const QJsonObject &preset)
+QString tierNote(const QJsonObject &tiers, const QString &tier)
 {
-    const QString label = preset.value(QStringLiteral("label")).toString();
-    if (preset.value(QStringLiteral("hosted")).toBool())
-        return label;
-    const QString model = preset.value(QStringLiteral("model")).toString();
-    if (model.isEmpty())
-        return label;
-    return model.section(QLatin1Char('/'), -1).toLower()
-           + (preset.value(QStringLiteral("local")).toBool() ? QStringLiteral(" · local") : QString());
+    return tiers.value(tier).toObject().value(QStringLiteral("note")).toString();
+}
+
+// Whether this machine serves a model at all: a `presets` row with `local: true` (card #24XJ).
+// The Local row is offered only then, for the reason a pane offers it only then — a row that
+// always resolved back to Main would be a promise the box cannot keep.
+bool hasLocalEndpoint(const QJsonArray &presets)
+{
+    for (const QJsonValue &value : presets)
+        if (value.toObject().value(QStringLiteral("local")).toBool()) return true;
+    return false;
 }
 
 }  // namespace
@@ -49,81 +52,66 @@ bool State::take(const QString &type, const QJsonObject &event)
     return false;
 }
 
+QString currentRow(const State &state)
+{
+    // A tiered role reports the preset its tier landed on (`preset` is where it answered, not what
+    // was picked), so the tier wins; only a role with no tier and a preset of its own is pinned to
+    // a provider and a model. Everything else follows Main.
+    const QJsonObject role = state.roles.value(kRole()).toObject();
+    const QString tier = role.value(QStringLiteral("tier")).toString();
+    if (tier == QStringLiteral("flash") || tier == QStringLiteral("local"))
+        return QStringLiteral("role:") + tier;
+    if (tier.isEmpty() && role.value(QStringLiteral("source")).toString() == QStringLiteral("configured")) {
+        const QString preset = role.value(QStringLiteral("preset")).toString();
+        const QString model = role.value(QStringLiteral("model")).toString();
+        if (!preset.isEmpty() && !model.isEmpty())
+            return QStringLiteral("entry:") + models::Catalog::keyFor(preset, model);
+    }
+    return QStringLiteral("role:main");
+}
+
+modelrows::Context context(const State &state)
+{
+    modelrows::Context rows;
+    rows.catalog = models::catalogFrom(state.presets);
+    rows.now = QDateTime::currentSecsSinceEpoch();
+    if (hasLocalEndpoint(state.presets)) rows.roles << QStringLiteral("local");
+    for (const QString &role : std::as_const(rows.roles)) {
+        rows.roleModel.insert(role, tierModel(state.tiers, role));
+        rows.roleNote.insert(role, tierNote(state.tiers, role));
+    }
+    // The entry the Main row names — the model the helper's Main tier landed on. A terminal pane
+    // passes its own model here for the same reason: the row above says it, so the catalog below
+    // does not say it again.
+    const QJsonObject main = state.tiers.value(QStringLiteral("main")).toObject();
+    const QString mainPreset = main.value(QStringLiteral("preset")).toString();
+    const QString mainModel = main.value(QStringLiteral("model")).toString();
+    if (!mainPreset.isEmpty() && !mainModel.isEmpty())
+        rows.mainKey = models::Catalog::keyFor(mainPreset, mainModel);
+    // No guest rows: a guest agent can be a *pane's* own agent, never the helper's. The helper
+    // works through Relay's own `board_*` and `app_*` tools, which a guest does not take (#GH5T,
+    // #4NXH). A guest harness the worker offers as a preset is still in the catalog above, and
+    // still a row — the owner asked for the same list — but picking it is refused with the
+    // sentence guest_harness_provider.helper_refusal writes, rather than quietly missing.
+    rows.current = currentRow(state);
+    return rows;
+}
+
 QString fill(QComboBox *box, const State &state)
 {
-    if (box == nullptr)
-        return {};
-    box->clear();
-    // The role as the worker last resolved it decides the current row, and its warning or note
-    // rides in the tooltip (a picked provider with no stored key falls back to Main, 13.7).
-    const QJsonObject role = state.roles.value(QStringLiteral("switchboard")).toObject();
-    const QString main = state.tiers.value(QStringLiteral("main")).toObject()
-                             .value(QStringLiteral("model")).toString();
-    box->addItem(main.isEmpty() ? QStringLiteral("Follow Main")
-                                : QStringLiteral("Follow Main — %1").arg(main),
-                 QStringLiteral("tier:"));
-    // Flash and Lite, with the model each lands on right now. A tier whose provider has no key
-    // steps towards Main — its `using` says so — and its row names the tier alone, with the
-    // tier's note as the row's own tooltip.
-    for (const QString &tier : {QStringLiteral("flash"), QStringLiteral("lite")}) {
-        const QJsonObject entry = state.tiers.value(tier).toObject();
-        if (entry.isEmpty())
-            continue;
-        const QString name = tier.left(1).toUpper() + tier.mid(1);
-        const QString model = entry.value(QStringLiteral("model")).toString();
-        const bool fellBack = entry.value(QStringLiteral("using")).toString() != tier;
-        box->addItem(fellBack || model.isEmpty() ? name
-                                                 : QStringLiteral("%1 — %2").arg(name, model),
-                     QStringLiteral("tier:") + tier);
-        const QString note = entry.value(QStringLiteral("note")).toString();
-        if (!note.isEmpty())
-            box->setItemData(box->count() - 1, note, Qt::ToolTipRole);
-    }
-    bool separated = false;
-    for (const QJsonValue &value : state.presets) {
-        const QJsonObject preset = value.toObject();
-        if (!usable(preset))
-            continue;
-        if (!separated) {
-            box->insertSeparator(box->count());
-            separated = true;
-        }
-        box->addItem(modelText(preset),
-                     QStringLiteral("preset:") + preset.value(QStringLiteral("id")).toString());
-    }
-    // The Model roles dialog, where this same role is a row (its Advanced list) with an effort
-    // and a model id of its own — reachable with no provider at all, when it is needed most.
-    box->insertSeparator(box->count());
-    box->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model roles…"),
-                 QStringLiteral("gear"));
-
-    // Which row is current: a tiered role reports the preset its tier landed on (`preset` is
-    // where it answered, not what was picked), so the tier wins; only a role with no tier and a
-    // preset of its own is pinned to a provider. Everything else follows Main.
-    QString wanted = QStringLiteral("tier:");
-    const QString preset = role.value(QStringLiteral("preset")).toString();
-    const QString tier = role.value(QStringLiteral("tier")).toString();
-    if (tier == QStringLiteral("flash") || tier == QStringLiteral("lite"))
-        wanted = QStringLiteral("tier:") + tier;
-    else if (tier.isEmpty()
-             && role.value(QStringLiteral("source")).toString() == QStringLiteral("configured")
-             && !preset.isEmpty())
-        wanted = QStringLiteral("preset:") + preset;
-    if (box->findData(wanted) < 0)
-        wanted = QStringLiteral("tier:");
-    box->setCurrentIndex(qMax(0, box->findData(wanted)));
+    if (box == nullptr) return {};
+    modelrows::fill(box, context(state));
 
     QString tip = QStringLiteral("The model the helper agent runs on — the Switchboard's agent "
                                  "and the helpers in Options, Actions and Sessions are one worker "
                                  "per tab. A pick writes the switchboard role, the same setting "
                                  "the Model roles dialog edits, and reconfigures every open "
                                  "board's worker.");
+    const QJsonObject role = state.roles.value(kRole()).toObject();
     const QString warning = role.value(QStringLiteral("warning")).toString();
     const QString note = role.value(QStringLiteral("note")).toString();
-    if (!warning.isEmpty())
-        tip += QStringLiteral("\n\n") + warning;
-    if (!note.isEmpty())
-        tip += QStringLiteral("\n\n") + note;
+    if (!warning.isEmpty()) tip += QStringLiteral("\n\n") + warning;
+    if (!note.isEmpty()) tip += QStringLiteral("\n\n") + note;
     return tip;
 }
 
@@ -131,6 +119,15 @@ QString busyNote()
 {
     return QStringLiteral("\n\nDisabled while the agent is working — a pick reconfigures its "
                           "worker, which cannot move mid-turn.");
+}
+
+QString guestRefusal(const QString &name)
+{
+    // The sentence backend/relay_core/guest_harness_provider.helper_refusal writes, said here
+    // instead — the pick is refused before it is stored, so the worker never has to raise it.
+    return QStringLiteral("The helper agent cannot run on %1. Add a provider under Options › "
+                          "Models, or pick a model for the helper in its model box.")
+        .arg(name.isEmpty() ? QStringLiteral("a guest session") : name);
 }
 
 }  // namespace relay::helpermodel
