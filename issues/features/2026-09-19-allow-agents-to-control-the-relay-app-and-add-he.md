@@ -1,7 +1,8 @@
 ---
 id: FEJQ
 type: work
-status: discussing
+status: executing
+assignee: agent
 priority: 1
 rank: zzzzzzzzzzy
 created: '2026-09-19'
@@ -45,11 +46,13 @@ Owner's original wording (2026-09-19): "allow agents to control the relay app, a
 8. **Info and Activity "Ask" rows (`src/SessionInfo.{h,cpp}`, `src/AgentInternalsView.{h,cpp}`).** One row each that prefills the owning pane's composer with a question about what is on screen and focuses it. No agent in these panes.
 9. **Shortcut hints and docs (WARP.md standing rule).** Hints for the ask key in every pane that gets one; the role label question for the owner.
 
-**Risks / decisions for the owner.**
-- **Which options an agent may set.** Recommend: Toggle/Choice/Number/Text rows marked settable, never API-key/secret rows, never Button rows. Needs the owner's call on the default set.
-- **Which actions are `agent_safe`.** Recommend opt-in per action; delete/reset/pairing actions stay off until the owner says otherwise.
-- Whether the main pane agent gets `app_option_set`/`app_action_run` by default or behind an Options › Agent toggle (recommend: on, with a toggle).
-- Whether the `switchboard` role's label becomes "Helper agent" once it serves Options, Actions and Sessions too.
+**Decided by the owner, 2026-09-20 ("yes to all, go").**
+1. **Settable options:** every value row — Toggle, Choice, Number, Text — except secrets (API keys, anything the keyring holds), which no agent may set. Button rows are not values; they are actions (item 2). The catalog carries `settable` so a row can be excluded later with one line.
+2. **`agent_safe` actions:** opt-in per action, starting with the reversible ones — open/reveal anything, test a key, refresh/detect local servers, copy this page, reorder models, undo. Off until the owner says otherwise: reset to defaults, remove a key or a server, delete a session, pairing/sharing, quit/restart. The line is "undoable in one click".
+3. **Main pane agent gets the write tools on by default**, behind one toggle in Options › Agent ("Agents may change options and run actions") that gates the helper and the pane agent together.
+4. **The `switchboard` role is relabelled "Helper agent"** — label only; the internal name, settings, protocol and model box are untouched. Each panel's header says where it is ("Switchboard agent", "Options helper", "Sessions helper").
+5. **The per-tab helper starts on the first ask**, not when the tab opens.
+6. **Every change an agent makes is visible and undoable in one step** (owner: "it should be clear what's changed / done and reversion / undo should be easy"). A write emits an `app_change` the GUI shows as "Agent changed <label>: <before> → <after> · Undo" (a notification with an Undo action, and the tool result in the transcript says the same); the GUI keeps the change log and performs the undo itself, so Undo works with no agent involved; `app_changes` / `app_undo` let the agent list and revert its own changes; an option row changed by an agent carries a marker until the person touches it.
 
 **Verify.**
 - Backend: new `tests/test_app_tools.py` (catalog validation, set/open/run emit the right `app_command` and honour the result round-trip, sessions search against a stub index, secrets refused, `helper_ask` routed by pane, `session_info`/`activity` bounded) and protocol tests for the `configure` block and `app_catalog` refresh, run as `pytest tests/test_app_tools.py` plus the touched protocol test subsets.

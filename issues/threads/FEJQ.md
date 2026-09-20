@@ -59,3 +59,9 @@ Correction (owner, 2026-09-20): the helper worker is **per tab**, not per window
 
 <!-- relay:entry 20260920T141302Z-ar author=agent kind=decision pane=switchboard -->
 Owner, 2026-09-20: the same project in two tabs gets two Switchboards with two separate agents. So the helper worker is keyed by the **tab**, not the workspace (`boardWorker(workspace)` today would share one worker and one conversation between them): tab → worker, each configured with its tab's project, board files shared, conversation and queue the tab's own, persisted per (project, tab) under the tab's persistent id. Decisions and step 6 updated.
+
+<!-- relay:entry 20260920T141732Z-wn author=agent kind=event pane=switchboard -->
+- ✦ agent moved this card · Discussing → Executing · assignee agent
+
+<!-- relay:entry 20260920T141732Z-wo author=agent kind=decision pane=switchboard -->
+Owner, 2026-09-20: all five recommendations taken as written (settable = every value row but secrets; agent_safe opt-in starting with the reversible ones; main pane agent gets the write tools behind one Options › Agent toggle; `switchboard` relabelled "Helper agent", label only; per-tab helper starts on first ask) plus a sixth requirement: **it should be clear what's changed / done, and reversion / undo should be easy** — every agent write is shown as before → after with a one-click Undo the GUI performs itself, agents can list and undo their own changes, and a changed row carries a marker. Written into the card under "Decided by the owner". Execution starts now with Opus subagents, one per area, each landing its own files through scripts/land.py.
