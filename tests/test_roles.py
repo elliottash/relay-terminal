@@ -15,7 +15,7 @@ from unittest import mock
 from relay_core import roles as model_roles
 from relay_core import route_assist
 from relay_core.agent import Agent
-from relay_core.presets import PRESETS
+from relay_core.presets import PRESETS, tier_default
 from relay_core.provider import ProviderConfig
 from relay_core.roles import RoleResolver, validate_roles
 from relay_core.subagents import SubagentFactory
@@ -103,15 +103,16 @@ class DefaultTests(unittest.TestCase):
                 continue
             self.assertTrue(made.resolve(role).is_main, role)
             self.assertEqual(made.resolve(role).model, "house-model")
-        # Plan mode is the one role that is never "same as the main agent" by default: its default
-        # is the main model pushed to max reasoning (owner, 2026-09-19). An endpoint Relay cannot
-        # name has no preset, so effort_style falls back to "kimi" and the knob does move.
+        # Plan mode is the one role that is never "same as the main agent" by default: it follows
+        # the High tier, the main model pushed to max reasoning (owner, 2026-09-19 / 2026-09-20).
+        # An endpoint Relay cannot name has no preset, so effort_style falls back to "kimi" and the
+        # knob does move. The tier reads "high" (it was "main" before High existed as a tier).
         planning = made.resolve("planning")
         self.assertFalse(planning.is_main)
         self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
                          ("house-model", "https://example.invalid/v1", "k"))
         self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
-        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "main", "max"))
+        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "high", "max"))
 
     def test_chores_prefers_openrouter_then_the_fast_agent(self):
         with_or = resolver("kimi", keys=("kimi", "openrouter")).resolve("chores")
@@ -185,14 +186,16 @@ class DefaultTests(unittest.TestCase):
 
 # ----- plan mode (owner, 2026-09-19) --------------------------------------------------------------
 class PlanRoleTests(unittest.TestCase):
-    """The planning role: a plan-mode turn runs on the main model pushed to max reasoning."""
+    """The planning role: a plan-mode turn runs on the High tier, by default the main model pushed
+    to max reasoning (owner, 2026-09-19; High became a tier of its own on 2026-09-20)."""
 
-    def plan_resolver(self, preset="kimi", extra=None, roles=None, keys=("kimi",)):
+    def plan_resolver(self, preset="kimi", extra=None, roles=None, keys=("kimi",), tiers=None):
         endpoint = PRESETS[preset]
         store = {name: f"{name}-key" for name in keys}
         config = ProviderConfig(endpoint.base_url, endpoint.model, f"{preset}-key", dict(extra or {}), 8192)
         return RoleResolver(config, preset, validate_roles(roles),
-                            key_lookup=lambda pid: store.get(pid, ""), main_effort="high")
+                            key_lookup=lambda pid: store.get(pid, ""), main_effort="high",
+                            tiers=model_roles.validate_tiers(tiers))
 
     def test_the_default_is_the_main_model_at_max_reasoning(self):
         made = self.plan_resolver("kimi", extra={})
@@ -201,8 +204,73 @@ class PlanRoleTests(unittest.TestCase):
         self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
                          ("kimi-k3", "https://api.moonshot.ai/v1", "kimi-key"))
         self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
-        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "main", "max"))
+        # The tier is "high", not "main", since 2026-09-20: the same Resolved as before, now
+        # produced by the High tier rather than a planning special case.
+        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "high", "max"))
         self.assertIs(made.planning_target(), planning)
+
+    def test_the_high_tier_is_the_main_model_at_max_by_default(self):
+        made = self.plan_resolver("kimi", extra={})
+        high = made.resolve("planning")
+        summary = made.tier_summary()["high"]
+        self.assertEqual((summary["model"], summary["preset"], summary["effort"], summary["source"],
+                          summary["using"]), ("kimi-k3", "kimi", "max", "default", "high"))
+        self.assertNotIn("note", summary)
+        self.assertEqual((high.model, high.preset_id, high.effort, high.tier), ("kimi-k3", "kimi", "max", "high"))
+        # And it needs no per-provider row: nothing in the tier table names a "high" model.
+        for provider in PRESETS:
+            self.assertIsNone(tier_default(provider, "high"), provider)
+
+    def test_planning_follows_the_high_tier(self):
+        self.assertEqual(model_roles.ROLE_TIERS["planning"], "high")
+        made = self.plan_resolver("kimi", extra={})
+        planning = made.resolve("planning")
+        probe = made._tier("planning", "high", "default")
+        self.assertEqual((planning.model, planning.config.extra, planning.effort, planning.tier),
+                         (probe.model, probe.config.extra, probe.effort, probe.tier))
+        self.assertEqual(model_roles.action_catalog()[1]["role"], "planning")
+        self.assertEqual(model_roles.action_catalog()[1]["tier"], "high")
+
+    def test_a_high_override_resolves_like_flash_and_lite_do(self):
+        made = self.plan_resolver("kimi", extra={}, keys=("kimi", "glm"),
+                                  tiers={"high": {"preset": "glm", "model": "glm-5.3", "effort": "high"}})
+        planning = made.resolve("planning")
+        self.assertEqual((planning.preset_id, planning.model, planning.source, planning.tier, planning.effort),
+                         ("glm", "glm-5.3", "default", "high", "high"))
+        self.assertEqual(planning.config.api_key, "glm-key")
+        self.assertEqual(planning.config.extra["reasoning_effort"], "high")
+        self.assertIs(made.planning_target(), planning)
+        summary = made.tier_summary()["high"]
+        self.assertEqual((summary["model"], summary["preset"], summary["source"], summary["using"]),
+                         ("glm-5.3", "glm", "configured", "high"))
+
+    def test_a_high_override_naming_only_a_provider_takes_its_main_model(self):
+        # No provider has a High row, so "High on Z.AI" is Z.AI's Main model (provider_tier_model).
+        made = self.plan_resolver("kimi", extra={}, keys=("kimi", "glm"), tiers={"high": {"preset": "glm"}})
+        planning = made.resolve("planning")
+        self.assertEqual((planning.preset_id, planning.model, planning.tier), ("glm", "glm-5.3", "high"))
+
+    def test_a_high_override_without_a_key_falls_back_to_main(self):
+        made = self.plan_resolver("kimi", extra={}, keys=("kimi",), tiers={"high": {"preset": "glm"}})
+        planning = made.resolve("planning")
+        self.assertTrue(planning.is_main)
+        self.assertEqual((planning.tier, planning.model), ("main", "kimi-k3"))
+        self.assertIn("No stored key for the High model; using Main.", planning.note)
+        self.assertIsNone(made.planning_target())
+        self.assertEqual(made.warnings, [])            # a step-down, not a misconfiguration
+        self.assertEqual(made.tier_summary()["high"]["using"], "main")
+
+    def test_a_planning_role_pinned_to_another_tier_still_wins(self):
+        made = self.plan_resolver("kimi", extra={}, roles={"planning": {"tier": "flash"}})
+        planning = made.resolve("planning")
+        self.assertEqual((planning.model, planning.tier, planning.source),
+                         ("kimi-k2.7-code-highspeed", "flash", "configured"))
+        self.assertIs(made.planning_target(), planning)
+        # And a role may follow High explicitly, with its own effort in place of max.
+        made = self.plan_resolver("kimi", extra={}, roles={"subagent": {"tier": "high", "effort": "high"}})
+        subagent = made.resolve("subagent")
+        self.assertEqual((subagent.model, subagent.tier, subagent.effort, subagent.config.extra),
+                         ("kimi-k3", "high", "high", {"reasoning_effort": "high"}))
 
     def test_the_default_raises_whatever_effort_the_pane_already_has(self):
         # Kimi's "high" and "max" are different requests, so the pane's own effort is the floor.
@@ -213,7 +281,7 @@ class PlanRoleTests(unittest.TestCase):
         made = self.plan_resolver("kimi", extra={"reasoning_effort": "max"})
         planning = made.resolve("planning")
         self.assertTrue(planning.is_main)
-        self.assertEqual(planning.source, "main")
+        self.assertEqual((planning.source, planning.tier), ("main", "high"))
         self.assertIsNone(made.planning_target())
 
     def test_a_provider_with_no_effort_knob_stays_on_the_main_agent(self):
@@ -476,10 +544,12 @@ class TierTests(unittest.TestCase):
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
             if role == "planning":
-                continue   # not tiered: the main model at max reasoning (see DefaultTests)
+                continue   # the High tier: the main model at max reasoning (see DefaultTests)
             self.assertTrue(made.resolve(role).is_main, role)
         self.assertEqual(made.warnings, [])
-        self.assertEqual(made.resolve("planning").tier, "main")
+        # Was "main" until High became a tier (2026-09-20): the same model at max, now labelled
+        # with the tier that asked for it.
+        self.assertEqual(made.resolve("planning").tier, "high")
 
     def test_minimax_flash_is_its_own_highspeed_model(self):
         made = self.tiered("kimi", ("minimax",))
@@ -525,8 +595,9 @@ class TierTests(unittest.TestCase):
     def test_tier_summary_reports_models_notes_and_no_keys(self):
         made = self.tiered("kimi", ("kimi",))
         summary = made.tier_summary()
-        self.assertEqual(sorted(summary), ["flash", "lite", "local", "main"])
+        self.assertEqual(sorted(summary), ["flash", "high", "lite", "local", "main"])
         self.assertEqual(summary["main"]["model"], "kimi-k3")
+        self.assertEqual((summary["high"]["model"], summary["high"]["effort"]), ("kimi-k3", "max"))
         self.assertEqual(summary["flash"]["model"], "kimi-k2.7-code-highspeed")
         self.assertEqual(summary["lite"]["using"], "flash")
         self.assertIn("using Flash", summary["lite"]["note"])
@@ -543,6 +614,9 @@ class TierTests(unittest.TestCase):
         self.assertEqual(model_roles.validate_tiers({"flash": None}), {})
         self.assertEqual(model_roles.validate_tiers({"lite": {"preset": "openrouter", "effort": "low"}}),
                          {"lite": {"preset": "openrouter", "effort": "low"}})
+        self.assertEqual(model_roles.validate_tiers({"high": {"preset": "glm", "model": "glm-5.3"}}),
+                         {"high": {"preset": "glm", "model": "glm-5.3"}})
+        self.assertEqual(model_roles.validate_tiers({"high": None}), {})
         for bad in ({"main": {"preset": "glm"}}, {"turbo": {"preset": "glm"}}, {"flash": {"preset": "nope"}},
                     {"flash": {"model": "m"}}, {"flash": {"zzz": 1}}, {"flash": 3}, [1]):
             with self.assertRaises(ValueError):

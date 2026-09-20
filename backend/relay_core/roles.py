@@ -53,8 +53,9 @@ def _preset(preset_id):
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
 # "local" (2026-09-18) is the pane role /local switches to, the way "flash" is the one /flash
 # switches to: a role a pane runs, not a job some side call does.
-# "planning" (2026-09-19) serves plan-mode turns: by default the main model pushed to max
-# reasoning, so a plan is investigated harder without switching the pane's own model.
+# "planning" (2026-09-19) serves plan-mode turns. Since 2026-09-20 it follows the High tier, whose
+# default is the main model pushed to max reasoning, so a plan is investigated harder without
+# switching the pane's own model.
 ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "planning",
          "summaries", "suggestions", "chores", "audit", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
@@ -80,7 +81,7 @@ def canonical_role(role):
 # after the job rather than the protocol id (owner, 2026-09-17). The GUI mirrors this table.
 ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
-    ("planning", "Plan mode", "investigating and writing plans; max reasoning by default"),
+    ("planning", "Plan mode", "investigating and writing plans; the High tier by default"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
     ("flash", "New panes (Flash agent)", "panes that open on the Flash agent"),
@@ -99,15 +100,16 @@ MAX_MODEL = 200
 MAX_URL = 400
 
 # --- built-in defaults (issues/features/2026-09-17-model-roles-and-fast-agent.md) -------------------
-# Roles are grouped into three tiers (presets.TIER_DEFAULTS, protocol 13.7): a role either follows the
-# pane's own model ("main") or takes the provider's Flash or Lite model.
+# Roles are grouped into tiers (presets.TIERS, protocol 13.7): a role either follows the pane's own
+# model ("main"), the High tier above it (main at max reasoning unless `tiers.high` picks a model;
+# owner, 2026-09-20), or takes the provider's Flash or Lite model.
 ROLE_TIERS: dict[str, str | None] = {
+    "planning": "high",
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
     "chores": "lite", "audit": "lite", "local": "local",
-    # Vision and route assist are not tiered: they have their own fixed defaults below. Plan mode
-    # is not tiered either: its default is the pane's own model at max reasoning (_default below).
-    "vision": None, "route_assist": None, "planning": None,
+    # Vision and route assist are not tiered: they have their own fixed defaults below.
+    "vision": None, "route_assist": None,
 }
 # Vision turns on presets without image support: GLM-5.3 Flash for GLM, unset elsewhere.
 VISION_DEFAULTS: dict[str, tuple[str, str, dict]] = {
@@ -129,8 +131,10 @@ def tier_catalog() -> dict:
     """The per-provider tier table for the roles modal, sent with the ``presets`` event.
 
     Data only: labels, hints, the recommended pairings and, per provider, the model each tier picks.
-    ``providers`` covers the three provider tiers only; the Local tier belongs to no provider, and
-    the endpoints it can name are the ``presets`` rows with ``local: true`` in the same event.
+    ``tiers`` is in display order, High first. ``providers`` covers the three provider tiers only:
+    the High tier has no per-provider row (its default is the pane's own model at max reasoning),
+    and the Local tier belongs to no provider — the endpoints it can name are the ``presets`` rows
+    with ``local: true`` in the same event.
     """
     from .presets import RECOMMENDED, TIER_DEFAULTS, TIER_HINTS
     return {
@@ -191,7 +195,7 @@ def validate_roles(raw) -> dict[str, dict]:
             continue
         entry: dict = {}
         if value.get("tier") is not None:
-            # A tiered role takes the provider's Main/Flash/Lite model (protocol 13.7). It is exclusive
+            # A tiered role takes the High/Main/Flash/Lite model (protocol 13.7). It is exclusive
             # with a hand-picked endpoint, so the two can never disagree.
             if any(value.get(field) is not None for field in ("preset", "base_url", "model", "extra")):
                 raise ValueError(f"roles.{name}: give a tier or an endpoint, not both.")
@@ -228,9 +232,10 @@ def validate_roles(raw) -> dict[str, dict]:
 def validate_tiers(raw) -> dict[str, dict]:
     """Normalize the ``tiers`` object from configure / set_agent_options (protocol 13.7).
 
-    Each of ``flash`` and ``lite`` may name a preset (with an optional model, extra and effort) or a
-    custom ``base_url``/``model``. ``main`` is rejected: it is the pane's own model, set with
-    ``configure`` / ``set_model``. ``null`` restores the provider's built-in default for that tier.
+    Each of ``high``, ``flash``, ``lite`` and ``local`` may name a preset (with an optional model,
+    extra and effort) or a custom ``base_url``/``model``. ``main`` is rejected: it is the pane's own
+    model, set with ``configure`` / ``set_model``. ``null`` restores the built-in default for that
+    tier — for ``high``, the pane's own model at max reasoning.
     """
     if raw is None:
         return {}
@@ -298,7 +303,7 @@ class Resolved:
     effort: str | None
     source: str                      # main | configured | default | fallback
     warning: str | None = None       # a configured role that could not be used; surfaced in model_roles
-    tier: str | None = None          # the Main/Flash/Lite tier this role came from, when tiered
+    tier: str | None = None          # the High/Main/Flash/Lite/Local tier this role came from, when tiered
     note: str | None = None          # an expected tier step-down, shown inline; never a protocol warning
 
     @property
@@ -427,10 +432,32 @@ class RoleResolver:
         preset_id, model, extra = entry
         return preset_id, PRESETS[preset_id].base_url, model, dict(extra), None
 
+    def _high_default(self, role: str, source: str, effort: str | None = None) -> Resolved:
+        """The High tier with no ``tiers.high`` override: the pane's own model pushed to max reasoning
+        (owner, 2026-09-19 for plan mode; a tier of its own since 2026-09-20).
+
+        The main config is reused as it is — same endpoint, key and preset, whether or not Relay can
+        name the preset — with only the effort raised. When the knob cannot move — the provider has
+        no effort parameter, or the pane's effort is already there — there is nothing to swap, so
+        the role is the main agent, still marked as the High tier.
+        """
+        effort = "max" if effort is None else effort
+        style = effort_style(_preset(self.main_preset_id), self.main_config.extra,
+                             self.main_config.base_url)
+        raised, _ = apply_effort(self.main_config.extra, style, effort)
+        if raised != self.main_config.extra:
+            return Resolved(role, replace(self.main_config, extra=raised), self.main_preset_id,
+                            effort, source, tier="high")
+        return self._main(role, tier="high")
+
     def _tier(self, role: str, tier: str, source: str, effort: str | None = None) -> Resolved:
         """A tier's model for one role. A tier whose provider has no stored key steps one tier towards
-        Main (Lite → Flash → Main); the Main tier is the pane's own model, so this never hard-fails."""
+        Main (Lite → Flash → Main); the Main tier is the pane's own model, so this never hard-fails.
+        High with no override is the main model at max reasoning (_high_default); with one it is
+        resolved like any other tier, and a missing key steps straight down to Main."""
         validate_tier(tier)
+        if tier == "high" and not self.tiers.get("high"):
+            return self._high_default(role, source, effort)
         for candidate in tier_fallbacks(tier):
             if candidate == "main":
                 break
@@ -459,18 +486,9 @@ class RoleResolver:
     def _default(self, role: str) -> Resolved:
         tier = ROLE_TIERS.get(role)
         if tier is not None:
+            # Plan mode follows the High tier: the main model at max reasoning unless `tiers.high`
+            # names a model (owner, 2026-09-19 and 2026-09-20). That is decided in _tier, once.
             return self._main(role, tier="main") if tier == "main" else self._tier(role, tier, "default")
-        if role == "planning":
-            # Owner, 2026-09-19: plan-mode turns run on the main model pushed to max reasoning.
-            # When the knob cannot move — the provider has no effort parameter, or the pane's
-            # effort is already max — there is nothing to swap, so the role is the main agent.
-            style = effort_style(_preset(self.main_preset_id), self.main_config.extra,
-                                 self.main_config.base_url)
-            raised, _ = apply_effort(self.main_config.extra, style, "max")
-            if raised != self.main_config.extra:
-                return Resolved(role, replace(self.main_config, extra=raised),
-                                self.main_preset_id, "max", "default", tier="main")
-            return self._main(role)
         if role == "vision":
             candidates = [VISION_DEFAULTS.get(self.main_preset_id or "")]
         elif role == "route_assist":
@@ -519,6 +537,8 @@ class RoleResolver:
         nothing left to opt into, and its caller passes True.
         """
         tier = validate_tier(tier)
+        # High has no per-provider row: it is every other provider's Main model at max reasoning.
+        effort = "max" if tier == "high" else None
         skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
         skip_hosts |= {(h or "").lower() for h in hosts}
         skip_hosts.discard("")
@@ -532,14 +552,14 @@ class RoleResolver:
                 continue
             model, extra = ((preset.model, dict(preset.extra)) if tier == "main"
                             else provider_tier_model(preset_id, tier))
-            resolved = self._build("main", preset_id, preset.base_url, model, extra, None,
+            resolved = self._build("main", preset_id, preset.base_url, model, extra, effort,
                                    "failover", tier)
             if resolved.source != "fallback":
                 out.append(resolved)
         if allow_hosted and PRESETS[hosted.PRESET_ID].id not in exclude and hosted.available():
             preset = PRESETS[hosted.PRESET_ID]
             model, extra = provider_tier_model(preset.id, tier)
-            resolved = self._build("main", preset.id, preset.base_url, model, extra, None,
+            resolved = self._build("main", preset.id, preset.base_url, model, extra, effort,
                                    "failover", tier)
             if resolved.source != "fallback":
                 out.append(resolved)
@@ -563,9 +583,9 @@ class RoleResolver:
     def planning_target(self) -> Resolved | None:
         """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).
 
-        None means plan turns stay on the pane's own model: nothing is configured, and the default
-        (the main model at max reasoning) either cannot move the provider's effort knob or the
-        pane's effort is already max.
+        None means plan turns stay on the pane's own model: nothing is configured, and the High
+        tier's default (the main model at max reasoning) either cannot move the provider's effort
+        knob or the pane's effort is already max.
         """
         resolved = self.resolve("planning")
         return None if resolved.is_main else resolved
@@ -597,7 +617,7 @@ class RoleResolver:
         self.warnings.clear()
 
     def set_tiers(self, tiers: dict) -> None:
-        """Replace the Flash/Lite tier overrides (protocol 13.7); applies from the next call."""
+        """Replace the High/Flash/Lite/Local tier overrides (protocol 13.7); applies from the next call."""
         self.tiers = dict(tiers or {})
         self._cache.clear()
         self.warnings.clear()
@@ -612,8 +632,8 @@ class RoleResolver:
     def tier_summary(self) -> dict:
         """What each tier resolves to right now, for the roles modal. No key material.
 
-        The Main tier is always the pane's own model. Flash and Lite report the provider and model
-        they land on, whether they fell back and the note the GUI shows inline.
+        The Main tier is always the pane's own model. High, Flash, Lite and Local report the
+        provider and model they land on, whether they fell back and the note the GUI shows inline.
         """
         out: dict[str, dict] = {}
         for tier in TIERS:
@@ -648,5 +668,5 @@ class RoleResolver:
         return copy.deepcopy(self.roles)
 
     def stored_tiers(self) -> dict:
-        """The Flash/Lite overrides as sent by the GUI (for `agent_options`)."""
+        """The High/Flash/Lite/Local overrides as sent by the GUI (for `agent_options`)."""
         return copy.deepcopy(self.tiers)

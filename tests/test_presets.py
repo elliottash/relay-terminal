@@ -227,11 +227,26 @@ class TierTableTests(unittest.TestCase):
         self.assertEqual(P.tier_fallbacks("lite"), ("lite", "flash", "main"))
         self.assertEqual(P.tier_fallbacks("flash"), ("flash", "main"))
         self.assertEqual(P.tier_fallbacks("main"), ("main",))
+        self.assertEqual(P.tier_fallbacks("high"), ("high", "main"))
         with self.assertRaises(ValueError):
             P.tier_fallbacks("turbo")
 
+    def test_high_is_a_tier_above_main_with_no_provider_row(self):
+        # Owner, 2026-09-20: "a 'high' default on top of main, used by the planner by default".
+        self.assertEqual(P.TIERS, ("high", "main", "flash", "lite", "local"))
+        self.assertEqual(P.PROVIDER_TIERS, ("main", "flash", "lite"))
+        self.assertEqual(P.TIER_LABELS["high"], "High")
+        self.assertIn("max reasoning", P.TIER_HINTS["high"])
+        self.assertEqual(P.validate_tier("high"), "high")
+        for provider in P.TIER_DEFAULTS:
+            self.assertNotIn("high", P.TIER_DEFAULTS[provider], provider)
+            self.assertIsNone(P.tier_default(provider, "high"), provider)
+            # Naming a provider for High means its Main model: there is no bigger one to pick.
+            self.assertEqual(P.provider_tier_model(provider, "high"), P.provider_tier_model(provider, "main"))
+
     def test_role_tiers_cover_every_role(self):
         self.assertEqual(sorted(model_roles.ROLE_TIERS), sorted(model_roles.ROLES))
+        self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "high"], ["planning"])
         self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "main"],
                          ["main", "subagent", "switchboard"])
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "flash"),
@@ -255,7 +270,11 @@ class TierTableTests(unittest.TestCase):
         catalog = model_roles.tier_catalog()
         json.dumps(catalog)
         self.assertEqual([t["id"] for t in catalog["tiers"]], list(P.TIERS))
+        # High is drawn first, above Main, and carries its label and hint like every other row.
+        self.assertEqual(catalog["tiers"][0], {"id": "high", "label": "High", "hint": P.TIER_HINTS["high"]})
         self.assertEqual(sorted(catalog["providers"]), sorted(P.PRESETS))
+        for provider, table in catalog["providers"].items():
+            self.assertEqual(sorted(table), sorted(P.PROVIDER_TIERS), provider)
 
 
 class ModelCatalogTests(unittest.TestCase):

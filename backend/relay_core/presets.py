@@ -241,10 +241,15 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
 # roles.RoleResolver._tier). Tier ids are also used by the GUI's roles modal.
 # "local" is a fourth tier and is NOT one of these three: it belongs to no provider, so it has no
 # row in TIER_DEFAULTS. It resolves from the local-endpoint registry instead (roles._tier_entry).
+# "high" (owner, 2026-09-20: "a 'high' default on top of main, used by the planner by default") is
+# a fifth, listed first: with no `tiers.high` override it is the pane's own model pushed to max
+# reasoning (roles.RoleResolver._high_default), so it has no TIER_DEFAULTS row either — no provider
+# has an obvious "bigger" model to name — and an override resolves the way Flash and Lite do.
 PROVIDER_TIERS = ("main", "flash", "lite")
-TIERS = ("main", "flash", "lite", "local")
-TIER_LABELS = {"main": "Main", "flash": "Flash", "lite": "Lite", "local": "Local"}
-TIER_HINTS = {"main": "the pane's agent and subagents",
+TIERS = ("high", "main", "flash", "lite", "local")
+TIER_LABELS = {"high": "High", "main": "Main", "flash": "Flash", "lite": "Lite", "local": "Local"}
+TIER_HINTS = {"high": "plan mode and the hardest turns; main at max reasoning unless you pick a model",
+              "main": "the pane's agent and subagents",
               "flash": "terminal use and quick turns",
               "lite": "titles, labels, duplicate checks",
               "local": "a model served on this machine. No key, nothing leaves it"}
@@ -401,7 +406,7 @@ def catalog_rows(preset_id) -> list[dict]:
 
 def validate_tier(tier) -> str:
     if tier not in TIERS:
-        raise ValueError("tier must be one of main, flash, lite, local.")
+        raise ValueError("tier must be one of high, main, flash, lite, local.")
     return tier
 
 
@@ -434,10 +439,11 @@ def tier_fallbacks(tier: str) -> tuple[str, ...]:
 
     Local is not a step on that ladder — it is a different machine's worth of trade-off, not a
     smaller model of the same provider — so a Local tier with nothing set up goes straight to Main
-    rather than through Lite and Flash.
+    rather than through Lite and Flash. High sits above Main, so the only step down from it is
+    Main itself.
     """
-    if validate_tier(tier) == "local":
-        return ("local", "main")
+    if validate_tier(tier) in ("high", "local"):
+        return (tier, "main")
     order = PROVIDER_TIERS[:PROVIDER_TIERS.index(tier) + 1]
     return tuple(reversed(order))
 

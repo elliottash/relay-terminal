@@ -59,7 +59,8 @@ class Empty(Case):
 # ----- the tier table ------------------------------------------------------------------------
 class TierTableTests(unittest.TestCase):
     def test_local_is_a_tier_but_belongs_to_no_provider(self):
-        self.assertEqual(P.TIERS, ('main', 'flash', 'lite', 'local'))
+        # High was added above Main on 2026-09-20; like Local it has no per-provider row.
+        self.assertEqual(P.TIERS, ('high', 'main', 'flash', 'lite', 'local'))
         self.assertEqual(P.PROVIDER_TIERS, ('main', 'flash', 'lite'))
         self.assertEqual(P.TIER_LABELS['local'], 'Local')
         self.assertTrue(P.TIER_HINTS['local'])
@@ -142,7 +143,7 @@ class ResolveTests(Case):
 
     def test_tier_summary_reports_the_local_row(self):
         summary = self.resolver().tier_summary()
-        self.assertEqual(sorted(summary), ['flash', 'lite', 'local', 'main'])
+        self.assertEqual(sorted(summary), ['flash', 'high', 'lite', 'local', 'main'])
         self.assertEqual(summary['local']['model'], 'bonsai-2-27b')
         self.assertEqual((summary['local']['label'], summary['local']['source'], summary['local']['using']),
                          ('Local', 'default', 'local'))
@@ -209,10 +210,11 @@ class AgentRoleTests(Case):
         self.assertTrue(actions['local']['settable'])
         self.assertIn('/local', actions['local']['label'])
 
-    def test_the_catalog_lists_four_tiers(self):
+    def test_the_catalog_lists_the_local_tier_last(self):
         catalog = model_roles.tier_catalog()
-        self.assertEqual([t['id'] for t in catalog['tiers']], ['main', 'flash', 'lite', 'local'])
-        self.assertEqual(catalog['tiers'][3]['label'], 'Local')
+        # High joined the list above Main on 2026-09-20; Local stays last.
+        self.assertEqual([t['id'] for t in catalog['tiers']], ['high', 'main', 'flash', 'lite', 'local'])
+        self.assertEqual(catalog['tiers'][-1]['label'], 'Local')
         # The Local tier has no per-provider row; the GUI lists the `presets` rows with local: true.
         for table in catalog['providers'].values():
             self.assertNotIn('local', table)
