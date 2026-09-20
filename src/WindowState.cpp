@@ -467,5 +467,20 @@ QStringList sidecars(const QString &sessionDir, const QString &id) {
     return found;
 }
 
+int turnStart(const QStringList &lines, const QString &prompt) {
+    static const QString marker = QStringLiteral("✦ ");   // the ✦ a turn's first line wears
+    const QString first = prompt.section(QLatin1Char('\n'), 0, 0).trimmed();
+    if (first.isEmpty()) return -1;
+    for (int i = lines.size() - 1; i >= 0; --i) {
+        if (!lines.at(i).startsWith(marker)) continue;
+        // The printed line is the prompt cut at the pane's width, so it is a prefix of it — and
+        // the pane's other ✦ lines ("✦ the command finished …") are not, which is what keeps them
+        // from being mistaken for a turn.
+        const QString shown = lines.at(i).mid(marker.size()).trimmed();
+        if (!shown.isEmpty() && first.startsWith(shown)) return i;
+    }
+    return -1;
+}
+
 }  // namespace sessiontext
 }  // namespace relay

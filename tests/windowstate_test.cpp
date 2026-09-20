@@ -608,6 +608,40 @@ private slots:
         QCOMPARE(st::read(st::rewoundPath(root, id, 2)), QStringList{QStringLiteral("undone twice")});
         QVERIFY(st::sidecars(root, QStringLiteral("bad")).isEmpty());
     }
+
+    // What a rewind undid starts at the turn's own first line — the ✦ the pane printed the prompt
+    // behind — and the pane's other ✦ lines are not turns.
+    void turnStartFindsThePromptLine() {
+        const QStringList lines{QStringLiteral("✦ first question"),
+                                QStringLiteral("an answer"),
+                                QStringLiteral("✦ the command finished · its result went to the agent"),
+                                QStringLiteral("▸ ran pytest"),
+                                QStringLiteral("✦ second question"),
+                                QStringLiteral("another answer")};
+        QCOMPARE(st::turnStart(lines, QStringLiteral("second question")), 4);
+        QCOMPARE(st::turnStart(lines, QStringLiteral("first question")), 0);
+        // A multi-line prompt is anchored by its first line, which is all the pane printed there.
+        QCOMPARE(st::turnStart(lines, QStringLiteral("second question\nand more of it")), 4);
+        // Not in the text: scrolled away, or sent from a client with no terminal.
+        QCOMPARE(st::turnStart(lines, QStringLiteral("never asked")), -1);
+        QCOMPARE(st::turnStart(lines, QString()), -1);
+        QCOMPARE(st::turnStart({}, QStringLiteral("anything")), -1);
+    }
+
+    // The printed line is the prompt cut at the pane's width, so it is a prefix of it; and a turn
+    // asked twice is rewound at its latest telling, not its first.
+    void turnStartTakesTheWrappedAndLatestLine() {
+        const QString prompt = QStringLiteral("rewrite the parser so that it stops on the first bad token");
+        const QStringList lines{QStringLiteral("✦ rewrite the parser so that it"),
+                                QStringLiteral("a first attempt"),
+                                QStringLiteral("✦ rewrite the parser so that it"),
+                                QStringLiteral("a second attempt")};
+        QCOMPARE(st::turnStart(lines, prompt), 2);
+        // A line longer than the prompt is some other output, not this turn.
+        QCOMPARE(st::turnStart({QStringLiteral("✦ rewrite the parser so that it stops on the first bad token and more")},
+                               prompt),
+                 -1);
+    }
 };
 
 QTEST_MAIN(WindowStateTest)

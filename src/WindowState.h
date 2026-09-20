@@ -231,5 +231,14 @@ QStringList read(const QString &path, int maxLines = windowstate::kScrollbackMax
 // take with it, and what a test asserts over.
 QStringList sidecars(const QString &sessionDir, const QString &id);
 
+// Where in a pane's saved lines the turn whose prompt was `prompt` began — what a rewind of that
+// turn undid, from there to the end. Relay prints a turn's first line as `✦ <prompt>`, wrapped at
+// the pane's width, so the anchor is the *last* line that is that marker followed by the start of
+// the prompt's own first line; a turn asked twice is rewound at its latest telling. -1 when there
+// is no such line: the turn has scrolled out of the engine's history, or the prompt was sent from
+// somewhere with no terminal at all (the phone), and then nothing in the text can say where the
+// turn began. Pure, so tests/windowstate_test.cpp can pin the wrapped and repeated cases.
+int turnStart(const QStringList &lines, const QString &prompt);
+
 }  // namespace sessiontext
 }  // namespace relay

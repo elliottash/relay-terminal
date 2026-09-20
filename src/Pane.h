@@ -987,6 +987,9 @@ public:
         m_sessionTextSource = source;
         m_sessionTextGuestId = guestId;
         m_sessionTextMark = paneTextLines(kSessionTextScan).size();
+        // A forked guest names itself only once it is running, and this is where that id lands:
+        // the pane it forked from stashed its text, and the fork takes it from here (#0TJ9).
+        if (relay::sessiontext::isGuestSource(source) && !guestId.isEmpty()) adoptForkText(source);
     }
     void syncSessionText() { adoptSessionText(m_sessionId, m_sessionDir, sessionTextSource(), m_guestSession); }
 
@@ -997,14 +1000,62 @@ public:
     // whose shell is live, and a busy shell has to finish first. The once-only latch is released
     // here rather than at start-up: a pane that opens one conversation after another replays each.
     // False when there is nothing saved, which is what sends the caller to the transcript.
-    bool queueSessionTextReplay(const QString &path) {
-        const QStringList lines = relay::sessiontext::read(path);
+    bool queueSessionTextReplay(const QString &path) { return queueTextReplay(relay::sessiontext::read(path)); }
+    bool queueTextReplay(const QStringList &lines) {
         if (lines.isEmpty()) return false;
         m_restoredScrollback = lines;
         m_restoredIsSessionText = true;
         m_scrollbackReplayed = false;
         QTimer::singleShot(0, this, [this] { replayRestoredScrollback(); });
         return true;
+    }
+
+    // ----- a fork carries the text (#0TJ9) ----------------------------------------------------
+    //
+    // The worker mints a fork's session id in the *new* pane, when it loads the state, so the pane
+    // that forked cannot name the file and the pane that receives it has no text of its own: the
+    // two halves of the handover happen in different panes a moment apart, and this is what
+    // crosses between them. One fork is in flight at a time — it is a single click — and a stash
+    // nobody claims is dropped rather than attaching itself to the next unrelated load.
+    // `guest` is the source a guest fork is waiting for (`claude`, `codex`), empty for a Relay
+    // one, so a guest arriving in another pane cannot walk off with a Relay fork's text.
+    struct ForkText { QStringList lines; QDateTime at; QString guest; };
+    static ForkText &pendingForkText() { static ForkText text; return text; }
+    static constexpr int kForkTextSeconds = 60;
+
+    // The fork's new id has just arrived here. What its parent was holding is written under that
+    // id and replayed into this pane, so the fork opens showing what it was forked from and its
+    // own file keeps it; the parent's file is not touched by any of this.
+    void adoptForkText(const QString &guest = QString()) {
+        if (pendingForkText().guest != guest) return;   // a fork of the other kind, or none at all
+        const ForkText stash = pendingForkText();
+        pendingForkText() = ForkText{};
+        if (!stash.at.isValid() || stash.at.secsTo(QDateTime::currentDateTimeUtc()) > kForkTextSeconds) return;
+        const QString path = sessionTextPath();
+        if (stash.lines.isEmpty() || path.isEmpty()) return;
+        relay::sessiontext::write(path, stash.lines);
+        queueTextReplay(stash.lines);
+    }
+
+    // What a rewind undid, kept beside the conversation before the screen scrolls it away
+    // (protocol 5, `rewound_n`). A chat rewind unprints nothing, so the branch is still in the
+    // pane: it runs from the rewound turn's own first line to the end. `n` is the worker's record
+    // number and names the file; without one — an older worker, or a rewind that wrote no record —
+    // there is nothing to name a file after and nothing is written.
+    void saveRewoundText(int n, const QString &prompt) {
+        const QString path = relay::sessiontext::rewoundPath(m_sessionTextDir, m_sessionTextId, n);
+        if (path.isEmpty()) return;
+        const QStringList lines = sessionTextLines();
+        const int from = relay::sessiontext::turnStart(lines, prompt);
+        // No anchor: the turn's prompt has scrolled out of the engine's history, or it was sent
+        // from a client with no terminal, and nothing in the text can say where the turn began.
+        // The conversation's whole text is kept instead — a superset of the branch — because the
+        // record this file belongs to already says which turn it was cut at.
+        QStringList branch = lines;
+        if (from > 0) branch = branch.mid(from);
+        QString error;
+        if (!relay::sessiontext::write(path, branch, &error) && !error.isEmpty())
+            fprintf(stderr, "relay: could not save what the rewind undid: %s\n", qPrintable(error));
     }
 
     // No saved text: every conversation from before this store existed, one whose Relay was killed
@@ -6977,6 +7028,10 @@ private:
             return true;
         }
         if (type == QStringLiteral("rewound")) {
+            // Before anything else prints: what the rewind undid is still on the screen, and the
+            // lines below would land inside the block that is being kept (#0TJ9).
+            saveRewoundText(event.value(QStringLiteral("rewound_n")).toInt(),
+                            event.value(QStringLiteral("prompt")).toString());
             const QJsonArray restored = event.value(QStringLiteral("restored_files")).toArray();
             const QJsonArray conflicts = event.value(QStringLiteral("conflicts")).toArray();
             ensureLineStart();
@@ -7005,6 +7060,10 @@ private:
         if (type == QStringLiteral("fork_state")) {
             if (!m_forkPending) return true;
             m_forkPending = false;
+            // The fork takes this conversation's terminal text with it (#0TJ9). Stashed here
+            // because the fork's own session id is not minted until the new pane loads the state;
+            // that pane picks it up at its `state_loaded`. This pane's file is untouched.
+            pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc()};
             const QJsonObject state = event.value(QStringLiteral("state")).toObject();
             const QString title = state.value(QStringLiteral("title")).toString();
             if (onForkState) QTimer::singleShot(0, this, [this, state, title] { if (onForkState) onForkState(state, title); });
@@ -7019,6 +7078,9 @@ private:
         if (type == QStringLiteral("state_loaded")) {
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
+            // A fork's id exists only now: the text its parent stashed is written under it and
+            // replayed here, so the fork opens showing what it was forked from (#0TJ9).
+            if (m_forkLoadPending) adoptForkText();
             m_turnsCompleted = event.value(QStringLiteral("turns")).toInt();
             // A resumed session whose last turn never ended: the pane may offer to continue it (#SXF1).
             m_turnCutOff = event.value(QStringLiteral("turn_open")).toBool();
@@ -7441,6 +7503,9 @@ public:
         const QStringList extra = words.mid(1);
         const QString cwd = relay::conversations::guestCwd(item);
         if (newPane) {
+            // A guest fork names itself only once it is running, so its text is stashed here and
+            // claimed by the pane the fork comes up in, as a Relay fork's is (#0TJ9).
+            if (fork) pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc(), source};
             if (onOpenGuestPane) { onOpenGuestPane(source, extra, cwd); return; }
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
