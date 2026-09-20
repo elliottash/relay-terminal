@@ -236,7 +236,8 @@ void RemoteShare::handle(const QJsonObject &message)
                           message.value(QStringLiteral("code")).toString(),
                           message.value(QStringLiteral("peer")).toString());
     } else if (kind == QLatin1String("devices")) {
-        emit devicesChanged(message.value(QStringLiteral("items")).toArray());
+        m_devices = message.value(QStringLiteral("items")).toArray();
+        emit devicesChanged(m_devices);
     } else if (kind == QLatin1String("input")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -709,6 +710,8 @@ void RemoteShare::poll()
 }
 
 void RemoteShare::requestPairing() { send({{"t", "pair"}}); }
+
+void RemoteShare::requestDevices() { send({{"t", "devices"}}); }
 
 void RemoteShare::useAddress(const QString &address)
 {
@@ -1227,12 +1230,17 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
             m_status->setText(QStringLiteral("Scan this with your phone's camera."));
             m_note->setText(share.note());
             share.requestPairing();
+            share.requestDevices();
         }
     });
     if (share.running()) {
         m_status->setText(QStringLiteral("Scan this with your phone's camera."));
         m_note->setText(share.note());
+        // The phones paired before this window existed — at launch, with remote control on —
+        // from the list RemoteShare kept, then a fresh one from the sidecar.
+        showDevices(share.devices());
         share.requestPairing();
+        share.requestDevices();
     }
 }
 

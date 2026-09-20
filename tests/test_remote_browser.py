@@ -227,6 +227,37 @@ class Harness:
 
 @unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
 class BrowserClientTests(unittest.TestCase):
+    def test_a_paired_phone_reopening_its_pairing_tab_lands_in_the_inbox(self):
+        """After pairing the page sits at the app's root, and a refresh of `/pair` with no code
+        connects the stored device instead of asking for the QR code again (#PH0N).
+
+        A phone keeps the tab it scanned the code in, and Safari reopens a tab where it was. The
+        hosted drive of 2026-09-21 reloaded that tab and was told "this pairing link arrived
+        without its code — scan again", while the pairing was fine.
+        """
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                root = url.split("/pair#", 1)[0] + "/"
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    self.assertEqual(await browser.evaluate("location.href"), root,
+                                     "after pairing the tab is at the app's root")
+                    # The tab refreshed at /pair, as an older client left it: no code in the URL.
+                    await browser.navigate(root + "pair")
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    self.assertEqual(await browser.evaluate("location.href"), root)
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('link-status').textContent"), "connected")
+                    self.assertEqual(len(harness.requests), 1, "no second pairing was asked for")
+                finally:
+                    await browser.stop()
+
+        asyncio.run(main())
+
     def test_pair_and_drive_a_pane_from_the_browser(self):
         async def main():
             async with Harness() as harness:

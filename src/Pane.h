@@ -6375,7 +6375,13 @@ public:
         auto *dialog = new relay::RemoteShareDialog(m_token, window());
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setTab(tab, tabPanes);
-        connect(&share, &relay::RemoteShare::sharingChanged, dialog, [this] { updateShareChip(); });
+        // The dialog is the window's child and this pane is a splitter's, so at quit the pane dies
+        // first while the dialog — and this connection — is still alive: the next pane's share
+        // ending then reached a freed Pane through `this` (SIGSEGV under ~WindowManager, the
+        // hosted drive of 2026-09-21, with the share window left open). Guarded, not re-contexted:
+        // the connection should still go with the dialog, not outlive it on the pane.
+        QPointer<Pane> self(this);
+        connect(&share, &relay::RemoteShare::sharingChanged, dialog, [self] { if (self) self->updateShareChip(); });
         dialog->show();
     }
 
@@ -6524,10 +6530,13 @@ public:
         if (facts.programAsking || facts.handoffWaiting || facts.questionOpen)
             return QStringLiteral("waiting_input");
         if (facts.processBusy || facts.agentBusy) return QStringLiteral("running");
-        // The last turn failed and nothing has happened since. Cleared when the pane is used
-        // again (a new turn, a command), so a phone is told about a failure once rather than
-        // wearing it for the rest of the session.
+        // The last turn failed, or finished, and nothing has happened since. Cleared when the
+        // pane is used again (a new turn, a command), so a phone is told about a failure once
+        // rather than wearing it for the rest of the session — and sees "finished" on the panes
+        // with an answer waiting, which is what the inbox's chip is for (#PH0N; the hosted drive
+        // found every finished turn reported as `idle`, the same word as a pane never used).
         if (m_shareFailed) return QStringLiteral("failed");
+        if (m_shareFinished) return QStringLiteral("finished");
         return QStringLiteral("idle");
     }
 
@@ -10175,7 +10184,7 @@ private:
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
             m_idleRecap.stop(); m_idleSince.invalidate();   // a running turn is not idle work to recap
-            m_shareFailed = false;      // the pane is in use again; the last failure is history
+            m_shareFailed = m_shareFinished = false;   // the pane is in use again; the last turn is history
             startTurnClock();
             m_currentItem = event.value(QStringLiteral("id")).toString();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
@@ -10226,6 +10235,7 @@ private:
             // (remote/notify.py's `failed` trigger). "cancelled" is the user stopping their own
             // turn, which is not news to them.
             m_shareFailed = outcome == QStringLiteral("error");
+            m_shareFinished = outcome == QStringLiteral("done");
             // "Asked" also covers a command the agent left in the prompt box and waits on.
             m_lastAsked = outcome == QStringLiteral("done")
                           && (relay::panestatus::endsWithQuestion(m_turnText) || (m_handoffOffered && m_handoffPrefill));
@@ -13035,7 +13045,7 @@ private:
     }
 
     void submitTerminal(const QString &text, bool watch, bool natural = false, bool handoff = false) {
-        m_shareFailed = false;          // the pane is in use again (shareStatus, protocol 6.3)
+        m_shareFailed = m_shareFinished = false;   // the pane is in use again (shareStatus, protocol 6.3)
         if (m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
             m_handoffNext = handoff;
             if (!runInTerminal(text, watch, 0, natural)) m_handoffNext = false;
@@ -16173,6 +16183,7 @@ private:
     // The last agent turn ended in an error and nothing has happened in the pane since: the
     // `failed` of the protocol's pane status (shareStatus), and remote/notify.py's trigger.
     bool m_shareFailed = false;
+    bool m_shareFinished = false;   // the last turn ended well and nothing has used the pane since
     bool m_captureForAgent = false, m_remoteSubmit = false;
     int m_handoffChain = 0;
     // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request

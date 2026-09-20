@@ -166,7 +166,10 @@ async function startPairing(link) {
   $('pair-device').textContent = name;
   try {
     const record = await rrp.pair(link, { name, platform });
-    history.replaceState(null, '', location.pathname);
+    // The app's root, not `/pair` with its fragment cut off: this tab is the one a phone keeps
+    // open, and reopened or refreshed at `/pair` it was told to scan the code again — while its
+    // pairing was fine (found by the hosted drive, docs/qa_evidence/2026-09-21-ph0n-hosted-drive).
+    history.replaceState(null, '', appRoot());
     $('pair-state').textContent = 'Paired.';
     await afterConnect(record);
   } catch (error) {
@@ -186,6 +189,12 @@ async function afterConnect(record) {
   setStatus('connected', 'ok');
   show('inbox');
   updateNotifyRow().catch(() => {});
+}
+
+// Where the app lives, for a URL a paired phone can come back to: the manifest's start_url is
+// './', so it is `/pair` and `/join` with the last segment taken off.
+function appRoot() {
+  return location.pathname.replace(/\/(pair|join)\/?$/, '/');
 }
 
 async function connectStored() {
@@ -1749,12 +1758,21 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Opened as a pairing link, but the part after '#' — the one-time code — is gone. The usual
   // cause is the certificate warning: after "visit this website" some browsers reload the page
-  // without the fragment. The code is still valid, so scanning again is the whole fix.
+  // without the fragment. The code is still valid, so scanning again is the whole fix — unless
+  // this device is already paired, in which case the page is a paired phone's tab coming back
+  // (a refresh, the app switcher) and belongs in the inbox, not at a note about scanning.
   if (!location.hash.includes('v=1') && /\/pair\/?$/.test(location.pathname)) {
-    show('welcome');
-    $('welcome-note').textContent = 'This pairing link arrived without its code — usually because '
-      + 'the browser reloaded the page after the certificate warning. Scan the QR code on your '
-      + 'desktop again; it stays valid for five minutes.';
+    loadDevice().then((record) => {
+      if (record) {
+        history.replaceState(null, '', appRoot());
+        connectStored();
+        return;
+      }
+      show('welcome');
+      $('welcome-note').textContent = 'This pairing link arrived without its code — usually because '
+        + 'the browser reloaded the page after the certificate warning. Scan the QR code on your '
+        + 'desktop again; it stays valid for five minutes.';
+    });
     return;
   }
 

@@ -138,6 +138,14 @@ public:
     void setPaneTab(const QString &paneId, const QString &tab);
 
     void requestPairing();
+    // The paired devices, as the sidecar last reported them (`devices`), and a request for the
+    // list again. The sidecar reports the list when a device pairs, is revoked or has its
+    // password switch moved, and once at `start` — with remote control on (#PH0N) that is at
+    // launch, long before any share window exists to hear it, so a window opened later read
+    // an empty list for a phone that was connected the whole time (found by the hosted drive,
+    // docs/qa_evidence/2026-09-21-ph0n-hosted-drive). The window now opens on the cached list.
+    QJsonArray devices() const { return m_devices; }
+    void requestDevices();
     // Which of this machine's addresses the pairing link points at. A phone on the same Wi-Fi
     // needs the network address; a phone on the tailnet needs the tailnet one, and only the
     // person knows which the phone is on.
@@ -279,6 +287,7 @@ private:
     QString m_base;
     QString m_note;
     QJsonArray m_addresses;
+    QJsonArray m_devices;
     remotesettings::State m_remoteState;
     sharing::Model m_sharing;
     QTimer *m_second = nullptr;
