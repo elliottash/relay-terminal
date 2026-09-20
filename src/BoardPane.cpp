@@ -3157,25 +3157,23 @@ void BoardView::syncLabelChecks()
 // pair of identical "…", they drop to a line of their own under the filter.
 void BoardView::layoutListTools()
 {
-    if (!m_toolsWrap || !m_add || !m_cleanup)
+    if (!m_toolsWrap || !m_add)
         return;
     const int inset = m_head && m_head->isHidden() ? m_rightInset : 0;
     const int room = m_listPane->width() - 16 - inset;
-    // The filter is owed a legible width before either button may sit beside it.
-    const int need = m_count->sizeHint().width() + 150 + m_add->sizeHint().width()
-                     + m_cleanup->sizeHint().width() + 24;
+    // The filter is owed a legible width before the button may sit beside it. Only "+ New card"
+    // is in this row now — Clean up went down to the page agent's button row and the model box
+    // into its composer row (#8YQ9) — so only its width is counted. Reserving theirs as well
+    // wrapped the row a good 150 px earlier than it had to.
+    const int need = m_count->sizeHint().width() + 150 + m_add->sizeHint().width() + 24;
     const bool wrap = room < need;
     if (wrap == m_toolsWrapped)
         return;
     m_toolsWrapped = wrap;
     QHBoxLayout *from = wrap ? m_listTools : m_toolsWrap;
     QHBoxLayout *to = wrap ? m_toolsWrap : m_listTools;
-    // Only "+ New card" wraps now: Clean up moved down into the page agent's button row
-    // (#8YQ9, owner 2026-09-19) and is no longer part of this row's width problem.
-    for (QToolButton *button : {m_add}) {
-        from->removeWidget(button);
-        to->addWidget(button);
-    }
+    from->removeWidget(m_add);
+    to->addWidget(m_add);
     m_toolsWrapRow->setVisible(wrap);
 }
 
@@ -3772,14 +3770,6 @@ void BoardView::handleEvent(const QJsonObject &event)
                        .arg(event.value(QStringLiteral("card_id")).toString()), false);
         return;
     }
-    // The provider rows the composer's microphone reads before it offers to store an OpenRouter
-    // key (protocol 16). The event carries on rather than being consumed: whoever else wants the
-    // same rows — the model box of #BRD3 — still gets them. Nothing in this pane asks for them
-    // yet, and until something does the microphone assumes a key is stored and lets the worker
-    // answer `ok: false` with the reason, which is exactly what a terminal pane does before its
-    // own `presets` arrives.
-    if (type == QStringLiteral("presets") && m_chat)
-        m_chat->setPresets(event.value(QStringLiteral("presets")).toArray());
     // The page agent's events (19.18) before everything else: they are tagged `chat: true` with a
     // turn id and no card id, and an open card's thread must never see one of them — the same
     // rule, and the same shape, as a cleanup's below.

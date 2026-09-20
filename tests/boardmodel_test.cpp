@@ -10,12 +10,14 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFocusEvent>
 #include <QFrame>
 #include <QKeyEvent>
 #include <QSplitter>
 #include <QJsonArray>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -200,6 +202,7 @@ private slots:
     void thePageAgentsEventsNeverReachACardThread();
     void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
     void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
+    void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -3041,6 +3044,50 @@ void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
     auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
     QVERIFY(keys);
     QVERIFY(keys->text().contains(QStringLiteral("ask the agent")));
+}
+
+// Composer parity with the main panes (#8YQ9 `t:6m`): the composer row carries the model box
+// (#BRD3), the microphone and the context-left chip, the three things a terminal pane's composer
+// row has. The box is built with the list tools — it must exist before this panel does — and
+// reparented into the row, so the filter row above must no longer be reserving its width.
+void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(900, 700);
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    QWidget *panel = chatPanel(view);
+    auto *box = view.findChild<QComboBox *>(QStringLiteral("statusPicker"));
+    QPlainTextEdit *composer = composerOf(view);
+    auto *mic = view.findChild<QToolButton *>(QStringLiteral("boardChatMic"));
+    auto *context = view.findChild<QLabel *>(QStringLiteral("boardChatContext"));
+    QVERIFY(panel && box && composer && mic && context);
+
+    // All three in the panel, and the model box out of the filter row it was built in.
+    QVERIFY(panel->isAncestorOf(box));
+    QVERIFY(panel->isAncestorOf(mic));
+    QVERIFY(panel->isAncestorOf(context));
+    QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
+    QVERIFY(tools && !tools->isAncestorOf(box));
+
+    // One row, in the pane's order: what is typed, then the model, then the microphone. The row
+    // is a layout inside the panel, not a widget of its own, so it is found by what it holds.
+    QCOMPARE(box->parentWidget(), composer->parentWidget());
+    QCOMPARE(mic->parentWidget(), composer->parentWidget());
+    QLayout *layout = nullptr;
+    for (QLayout *candidate : panel->findChildren<QLayout *>())
+        if (candidate->indexOf(composer) >= 0)
+            layout = candidate;
+    QVERIFY(layout);
+    QVERIFY(layout->indexOf(composer) < layout->indexOf(box));
+    QVERIFY(layout->indexOf(box) < layout->indexOf(mic));
+
+    // A pick still goes out the way #BRD3 wired it: the view writes no settings itself.
+    QString picked;
+    view.onModelPick = [&picked](const QString &data) { picked = data; };
+    box->setCurrentIndex(0);
+    emit box->activated(0);
+    QVERIFY(!picked.isEmpty());
 }
 
 QTEST_MAIN(BoardModelTests)
