@@ -86,7 +86,12 @@ inline QJsonObject rowOf(const Line &line, int row)
 inline QJsonObject frameOf(const ViewportFrame &frame, bool full)
 {
     QJsonArray lines;
-    const bool scrolled = !full && frame.scrolledBy != 0;
+    // Only worth describing when the shift carried rows over that would otherwise be resent. A
+    // scroll that turns the whole screen over — 50 MB of `cat` does one of those per frame — has
+    // nothing to carry, and saying so costs the 35 bytes of the `scroll` object for nothing.
+    int dirtyRows = 0;
+    for (uint8_t bit : frame.dirty) dirtyRows += bit ? 1 : 0;
+    const bool scrolled = !full && frame.scrolledBy != 0 && dirtyRows < int(frame.lines.size());
     const bool everything = full || (frame.full && !scrolled);
     for (int row = 0; row < int(frame.lines.size()); ++row) {
         if (!everything && row < int(frame.dirty.size()) && !frame.dirty[size_t(row)]) continue;
