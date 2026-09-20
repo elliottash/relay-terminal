@@ -7,7 +7,7 @@ assignee: claude-code
 rank: zzzzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: 'owner, in a Claude Code session, 2026-09-20'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-usage-limits-picker/], related: [DC4J, YJG7], github: null}
+links: {plans: [], commits: [e8220208], evidence: [docs/qa_evidence/2026-09-20-usage-limits-picker/], related: [DC4J, YJG7], github: null}
 ---
 # Usage limits reach the picker live; an exhausted subscription is greyed and skipped in the priority until it resets
 
