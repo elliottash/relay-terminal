@@ -60,7 +60,12 @@ ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "p
          "summaries", "suggestions", "chores", "audit", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
-          "switchboard": "Switchboard agent", "flash": "Flash agent", "local": "Local agent",
+          # "switchboard" keeps its protocol name — settings, the model box (#BRD3), its Options ›
+          # Models row and its Main default are untouched — and is labelled "Helper agent" since
+          # card #FEJQ (owner decision 4, 2026-09-20): one helper worker per tab now serves the
+          # Switchboard *and* the Options, Actions and Sessions panes, so the label names the job
+          # rather than the one pane it started in (protocol 30.7).
+          "switchboard": "Helper agent", "flash": "Flash agent", "local": "Local agent",
           "planning": "Plan mode", "summaries": "Summaries", "suggestions": "Suggestions",
           "chores": "Chores", "audit": "Request audit", "vision": "Vision",
           "route_assist": "Route assist"}
@@ -89,7 +94,8 @@ ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("suggestions", "Next-command and next-prompt suggestions",
      "sends recent command output, so it stays on your own provider"),
     ("summaries", "Summaries, compaction and recaps", "condensing the conversation"),
-    ("switchboard", "Switchboard card threads", "stored now; used when the Switchboard lands"),
+    ("switchboard", "Helper agent", "the Switchboard's agent, and the helper in Options, "
+     "Actions and Sessions"),
     ("chores", "Chores: duplicate checks, labels, titles, note scans", "small structured judgements"),
     ("audit", "Request audit", "flags asks that may be unaddressed after a turn"),
     ("vision", "Images and vision turns", "used when the main model cannot read images"),

@@ -1353,6 +1353,12 @@ class BoardCommands:
         text = request.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
             raise ValueError(f"board_chat text must be 1-{MAX_ASK_TEXT} characters.")
+        # Which pane asked (protocol 30.7). It picks the brief and tags every event of the turn;
+        # absent means the Switchboard, so every client from before 30.7 is unchanged.
+        pane = board_chat.validate_pane(request.get("pane"))
+        context = request.get("context")
+        if context is not None and not isinstance(context, str):
+            raise ValueError("board_chat context must be text.")
         model = request.get("model")
         if model is not None:
             if not isinstance(model, str) or (model and model not in model_roles.SETTABLE):
@@ -1363,9 +1369,10 @@ class BoardCommands:
             return self._maybe_survey(self._need(), rid)   # one path: the survey is a chat turn
         if not self.chat.busy() and self._busy_error(rid, "the page agent's prompt"):
             return
-        what, ident = self.chat.ask(text.strip(), rid)
+        what, ident = self.chat.ask(text.strip(), rid, pane=pane,
+                                    context=(context or "")[:board_chat.MAX_PANE_CONTEXT])
         if what == "turn":
-            self._send({"event": "board_chat_started", "id": rid, "turn_id": ident,
+            self._send({"event": "board_chat_started", "id": rid, "turn_id": ident, "pane": pane,
                         "model": self.chat.model or "switchboard", "chat": self.chat.state()})
 
     def _problem_section(self, problem: dict) -> str | None:

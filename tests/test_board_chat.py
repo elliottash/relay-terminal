@@ -165,6 +165,91 @@ class BriefTest(unittest.TestCase):
         self.assertIn("the owner's answer is the confirmation", prompt)
 
 
+class PaneTest(ChatTestBase):
+    """`board_chat {pane}`: one conversation, four panes (protocol 30.7, card #FEJQ)."""
+
+    def test_the_pane_defaults_to_the_switchboard(self):
+        self.assertEqual(board_chat.validate_pane(None), "switchboard")
+        self.assertEqual(board_chat.validate_pane(""), "switchboard")
+        self.assertEqual(board_chat.validate_pane("options"), "options")
+        for bad in ("info", "activity", 3, True):
+            with self.assertRaises(ValueError):
+                board_chat.validate_pane(bad)
+
+    def test_an_options_turn_gets_the_options_brief_and_no_roster(self):
+        self.chat.ask("is dark mode on?", pane="options")
+        self.agent.gate.set()
+        self.wait_idle()
+        prompt = self.agent.prompts[0]
+        self.assertTrue(prompt.startswith("[Options helper]"))
+        self.assertIn("app_option_list", prompt)
+        self.assertIn("Undo", prompt)
+        self.assertNotIn("#ABCD", prompt)          # the board is not this pane's context
+        self.assertTrue(prompt.endswith("is dark mode on?"))
+
+    def test_the_brief_goes_in_once_per_pane_and_again_when_the_pane_changes(self):
+        for pane, text in (("options", "first"), ("options", "second"),
+                           ("sessions", "third"), ("options", "fourth")):
+            self.chat.ask(text, pane=pane)
+        self.agent.gate.set()
+        self.wait_idle()
+        first, second, third, fourth = self.agent.prompts
+        self.assertIn("app_option_list", first)
+        self.assertNotIn("app_option_list", second)          # same pane: the header alone
+        self.assertTrue(second.startswith("[Options helper]"))
+        self.assertIn("app_sessions_search", third)          # a new pane: its brief
+        self.assertNotIn("app_option_list", fourth)          # back to a pane it has been in
+
+    def test_what_is_on_screen_rides_with_the_prompt(self):
+        self.chat.ask("what did I find?", pane="sessions", context="query: keybinding rewrite")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertIn("On screen now: query: keybinding rewrite", self.agent.prompts[0])
+
+    def test_one_conversation_spans_the_panes(self):
+        self.chat.ask("about the board")
+        self.chat.ask("about the settings", pane="options")
+        self.agent.gate.set()
+        self.wait_idle()
+        # Two turns of the same agent, not two conversations.
+        self.assertEqual(len(self.agent.prompts), 2)
+        self.assertTrue(self.agent.prompts[0].startswith("[Switchboard page agent]"))
+        self.assertTrue(self.agent.prompts[1].startswith("[Options helper]"))
+
+    def test_every_event_of_a_turn_carries_its_pane(self):
+        self.chat.ask("is dark mode on?", pane="options")
+        self.agent.gate.set()
+        self.wait_idle()
+        tagged = [e for e in self.events if e.get("chat") is True]
+        self.assertTrue(tagged)
+        self.assertTrue(all(e.get("pane") == "options" for e in tagged), tagged)
+        self.assertEqual(self.of("board_chat_state")[-1]["pane"], "options")
+        self.assertEqual(self.chat.state()["pane"], "options")
+
+    def test_a_queued_prompt_keeps_its_pane(self):
+        self.chat.ask("about the board")
+        self.chat.ask("about the settings", pane="options")
+        self.assertEqual(self.of("board_chat_queued")[0]["pane"], "options")
+        self.assertEqual(self.chat.state()["queue"][0]["pane"], "options")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertIn("app_option_list", self.agent.prompts[1])
+
+    def test_a_helper_with_no_board_still_answers_its_pane(self):
+        # A tab with no project attached gets a board-less helper (30.7): the app tools and no
+        # board tools at all. Nothing in a pane turn may assume the board is there.
+        chat = board_chat.PageAgent(self.events.append, self.build_boardless)
+        self.addCleanup(chat.drop)
+        chat.ask("what is this setting?", pane="options")
+        self.boardless.gate.set()
+        wait_idle(chat)
+        self.assertIn("app_option_list", self.boardless.prompts[0])
+
+    def build_boardless(self, emit):
+        self.boardless = FakeAgent(emit)
+        return self.boardless, None
+
+
 class QueueTest(ChatTestBase):
     def test_a_prompt_starts_a_turn_and_streams_tagged_events(self):
         what, ident = self.chat.ask("How many cards are in Inbox?")

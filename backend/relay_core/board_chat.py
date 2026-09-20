@@ -1,5 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard *page* agent: one conversation about the whole board (protocol 19.18).
+"""The helper agent: one conversation, four panes (protocol 19.18 and 30.7).
+
+Since card #FEJQ (owner, 2026-09-20) this is not the Switchboard page's agent alone but the
+helper of the whole tab: Options, Actions and Sessions embed the same panel and ask this same
+worker, so a prompt carries the `pane` it came from and that pane picks the brief in front of
+the turn (`PANE_BRIEFS`).  The conversation is one — a question in Options and the next one on
+the board are consecutive turns of the same agent — and the events carry the pane so the panel
+that asked draws the answer and the others do not.  What follows is the Switchboard's half,
+which is unchanged.
+
+The Switchboard *page* agent: one conversation about the whole board (protocol 19.18).
 
 The board worker already runs three kinds of agent turn: a pane's own turns, a card's Discuss
 or Plan (19.16, one agent per card) and the whole-board cleanup (19.9).  This is the fourth:
@@ -59,6 +69,81 @@ TERMINAL = ("done", "error", "cancelled")
 #: from before the survey existed (or one whose survey ran): never surveyed again. Only
 #: `board_init` writes `pending`.
 SURVEY_FILE = "survey-state.json"
+
+
+# ---------------------------------------------------------------------------------------------
+# The helper's panes (protocol 30.7, card #FEJQ).  This agent is no longer the Switchboard
+# page's alone: Options, Actions and Sessions embed the same panel and ask the same worker, so
+# every prompt carries the pane it came from and the pane picks the brief that goes in front of
+# the turn.  The conversation is one — a question in Options and the next one on the board are
+# consecutive turns of the same agent, which is the point of a single helper.
+
+#: What `board_chat {pane}` may say.  "switchboard" is the default and what a client that does
+#: not send the field means, so every caller from before 30.7 keeps its behaviour exactly.
+PANES = ("switchboard", "options", "actions", "sessions")
+
+#: What each panel's header says (owner decision 4, 2026-09-20), and what the prompt is headed
+#: with so the agent knows which pane it is answering in.
+PANE_TITLES = {"switchboard": "Switchboard agent", "options": "Options helper",
+               "actions": "Actions helper", "sessions": "Sessions helper"}
+
+#: How much of "what is on screen" a pane may send with a prompt (its search box, the section
+#: being read).  It is a hint, not a context dump: the agent reads the rest with the app tools.
+MAX_PANE_CONTEXT = 2000
+
+#: One paragraph per pane: what the pane shows, what can be done there, and the rule that makes
+#: a write safe to offer — the person sees it and can undo it in one click (30.6).  The
+#: Switchboard's own brief is `board_chat_brief.md` and is unchanged; these three are here
+#: because they are about the app, not about the board.
+PANE_BRIEFS = {
+    "options": (
+        "You are the helper agent in Relay's Options pane. It lists every setting Relay has, in "
+        "sections, and the person is looking at it now. Read the rows with app_option_list and "
+        "app_option_get rather than remembering what Relay's settings are, and answer about the "
+        "values they actually have. app_option_set changes one for them and app_action_run runs "
+        "one of Relay's own actions; both are shown to the person at once as \"Agent changed "
+        "<row>: <before> → <after> · Undo\", so a change you make is never silent and is one "
+        "click to take back. Change only what was asked for and say what you changed. API keys "
+        "are secret: you cannot read or set them, so point at the row instead. When a setting "
+        "is easier shown than described, app_open puts the pane on it."),
+    "actions": (
+        "You are the helper agent in Relay's Actions pane — the palette of everything Relay can "
+        "do, with its keyboard shortcut beside it. app_action_list is that list; `agent_safe` "
+        "says which ones you may run yourself (the ones the person can undo in a click) and the "
+        "rest are for you to find and describe, with the shortcut, so they can run them. "
+        "app_action_run runs one, and the person sees that it ran. When someone asks \"how do I "
+        "…\", name the action and its shortcut, and app_open the palette at it."),
+    "sessions": (
+        "You are the helper agent in Relay's Sessions pane — every past conversation and "
+        "terminal session Relay has indexed. app_sessions_search is that index: it takes the "
+        "pane's own query language (project:, file:, model:, branch:, before:, after:, is:, and "
+        "-word to exclude) and answers from inside Relay, so nothing is sent anywhere. Search "
+        "before you answer \"which session was that in\" — do not guess from memory — and "
+        "app_open the pane at the search you used, so the person lands on the rows you are "
+        "talking about."),
+}
+
+
+def validate_pane(value) -> str:
+    """The `pane` of a `board_chat` (30.7).  Absent means the Switchboard, as it always did."""
+    if value is None or value == "":
+        return "switchboard"
+    if not isinstance(value, str) or value not in PANES:
+        raise ValueError("board_chat pane must be one of " + ", ".join(PANES) + ".")
+    return value
+
+
+def pane_prompt(pane: str, text: str, context: str = "") -> str:
+    """The opening prompt for a turn asked from Options, Actions or Sessions (30.7).
+
+    The Switchboard's opening prompt carries the whole board because the board is what the
+    conversation is about (`chat_prompt`).  These three carry no catalog: the app tools read it
+    live, and a settings list pasted into a prompt is stale the moment the person changes a row.
+    """
+    head = [f"[{PANE_TITLES.get(pane, pane)}]", "", PANE_BRIEFS.get(pane, ""), ""]
+    if context:
+        head += [f"On screen now: {str(context)[:MAX_PANE_CONTEXT]}", ""]
+    return "\n".join(head + [text.strip()])
 
 
 def survey_path(board: B.Board) -> Path:
@@ -209,6 +294,13 @@ class PageAgent:
         self.built_model_id = None
         self.turn_id = None
         self.request_id = None
+        #: Which pane the running (or last) turn was asked from (30.7): it tags every event of
+        #: the turn, so the panel that asked draws the answer and the others do not.
+        self.pane = "switchboard"
+        #: Panes whose brief has already gone into this conversation. The brief is repeated when
+        #: the person moves to another pane and not otherwise: the agent needs to be told where
+        #: it is, once per place, and a paragraph per turn would be the conversation.
+        self.pane_seeded: set[str] = set()
         self.thread = None
         self.active = False
         self.ended = False
@@ -236,16 +328,21 @@ class PageAgent:
         """What a page needs to draw the panel: the turn, the queue, the recent conversation."""
         with self._lock:
             return {"running": self.active, "turn_id": self.turn_id, "model": self.model,
+                    "pane": self.pane,
                     "survey": self.survey and self.active, "seconds": round(self.seconds(), 1),
-                    "queue": [{"id": item["id"], "text": item["text"]} for item in self.queue],
+                    "queue": [{"id": item["id"], "text": item["text"],
+                               "pane": item.get("pane", "switchboard")} for item in self.queue],
                     "history": list(self.history[-MAX_HISTORY:])}
 
     def _announce_state(self, **extra) -> None:
-        self._emit({"event": "board_chat_state", "chat": self.state(), **extra})
+        # `pane` at the top level as well as inside `chat`: 30.7 says every one of these events
+        # carries it, and a panel routes on the field without having to read the state block.
+        self._emit({"event": "board_chat_state", "pane": self.pane, "chat": self.state(), **extra})
 
     # ---- prompts -----------------------------------------------------------------
     def ask(self, text: str, request_id=None, *, prompt: str | None = None,
-            readonly: bool = False, survey: bool = False) -> str:
+            readonly: bool = False, survey: bool = False, pane: str = "switchboard",
+            context: str = "") -> str:
         """Send `text`. Starts a turn, or joins the back of the queue while one runs.
 
         Returns the turn id when it started, or the queued item's id. Raises when the queue is
@@ -257,18 +354,19 @@ class PageAgent:
             if self.active:
                 if len(self.queue) >= MAX_QUEUE:
                     raise ValueError(f"The page agent's queue already holds {MAX_QUEUE} prompts.")
-                item = {"id": self._next_id(), "text": text, "request_id": request_id}
+                item = {"id": self._next_id(), "text": text, "request_id": request_id,
+                        "pane": pane, "context": context}
                 self.queue.append(item)
                 self._emit({"event": "board_chat_queued", "id": item["id"],
-                            "position": len(self.queue), "text": text,
+                            "position": len(self.queue), "text": text, "pane": pane,
                             "request_id": request_id, "chat": True})
                 self._announce_state()
                 return "queued", item["id"]
             return "turn", self._start(text, request_id, prompt=prompt, readonly=readonly,
-                                       survey=survey)
+                                       survey=survey, pane=pane, context=context)
 
     def _start(self, text: str, request_id, *, prompt: str | None, readonly: bool,
-               survey: bool) -> str:
+               survey: bool, pane: str = "switchboard", context: str = "") -> str:
         """Begin a turn now. The caller holds the lock and has checked `active`."""
         if self.agent is None or self._built_model != self.model:
             messages = None
@@ -286,17 +384,30 @@ class PageAgent:
             self._built_model = self.model
             self.built_model_id = getattr(getattr(self.agent, "config", None), "model", None)
         # The opening turn carries the board; every later one is the owner's words alone, the
-        # conversation being the context (the card sessions' seeding rule).
+        # conversation being the context (the card sessions' seeding rule). A turn asked from
+        # one of the other panes carries that pane's brief instead, the first time it is asked
+        # from there (30.7) — the agent has to be told where it now is, and once is enough.
+        self.pane = pane if pane in PANES else "switchboard"
         if prompt is None:
-            prompt = text if self.seeded else chat_prompt(self.tools, text)
+            if self.pane == "switchboard":
+                prompt = text if self.seeded else chat_prompt(self.tools, text)
+            elif self.pane in self.pane_seeded and not context:
+                prompt = f"[{PANE_TITLES[self.pane]}]\n\n{text.strip()}"
+            else:
+                prompt = pane_prompt(self.pane, text, context)
+        self.pane_seeded.add(self.pane)
         turn_id = f"chat-{secrets.token_hex(3)}"
         self.turn_id, self.request_id = turn_id, request_id
         self.active, self.ended = True, False
         self.started = time.time()
         self.readonly, self.survey = readonly, survey
         agent, tools = self.agent, self.tools
-        tools.begin_turn(turn_id)
-        tools.begin_chat_turn(readonly=readonly)
+        # A helper in a tab with no project attached has no board tools at all (30.7): the app
+        # tools and nothing else. Only the Switchboard pane needs a board, and it cannot be
+        # asked from without one.
+        if tools is not None:
+            tools.begin_turn(turn_id)
+            tools.begin_chat_turn(readonly=readonly)
         self.history.append({"role": "owner", "text": text[:4000], "time": time.time()})
         self.thread = threading.Thread(target=self._run, args=(prompt, turn_id, agent, tools),
                                        name="relay-board-chat", daemon=True)
@@ -333,6 +444,7 @@ class PageAgent:
             self.queue = []
             self.history = []
             self.seeded = self.surveyed = False
+            self.pane, self.pane_seeded = "switchboard", set()
             self.active = False
             self._built_model = object()
             self.built_model_id = None
@@ -381,7 +493,8 @@ class PageAgent:
                         "text": f"The Switchboard page agent's turn failed ({type(exc).__name__})."})
         finally:
             try:
-                tools.end_chat_turn()
+                if tools is not None:
+                    tools.end_chat_turn()
             finally:
                 with self._lock:
                     survey = self.survey
@@ -411,9 +524,14 @@ class PageAgent:
                 return
             item = self.queue.pop(0)
             text = item["text"]
-            prompt = text if self.seeded else None
+            pane = item.get("pane", "switchboard")
+            context = item.get("context", "")
+            # A queued prompt from another pane still needs that pane's brief, so only the
+            # Switchboard's own "the conversation is the context" shortcut applies here.
+            prompt = text if (self.seeded and pane == "switchboard") else None
         try:
-            self._start(text, item.get("request_id"), prompt=prompt, readonly=False, survey=False)
+            self._start(text, item.get("request_id"), prompt=prompt, readonly=False, survey=False,
+                        pane=pane, context=context)
         except Exception as exc:                            # pragma: no cover - build failure
             self._emit({"event": "error", "chat": True, "text":
                         f"The queued prompt could not start ({type(exc).__name__})."})
@@ -430,7 +548,9 @@ class PageAgent:
         def tagged(event: dict, emit=emit) -> None:
             name = event.get("event")
             if name in CHAT_TAGGED:
-                event = {**event, "chat": True}
+                # 30.7: every `chat: true` event carries the pane that asked, so one tab's
+                # Options panel never draws the answer meant for its Switchboard.
+                event = {**event, "chat": True, "pane": self.pane}
                 if self.turn_id:
                     event = {**event, "turn_id": self.turn_id}
                 if name in ("delta", "answer") and isinstance(event.get("text"), str):
