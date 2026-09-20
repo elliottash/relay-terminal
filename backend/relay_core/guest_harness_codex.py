@@ -1323,12 +1323,12 @@ def _diff_counts(diff: str) -> tuple[int, int]:
 
 
 def _approval_detail(method: str, params: dict, item: dict | None = None) -> str:
-    """What the guest wants to do, in its own words, for the card the pane draws (29.3).
+    """What the guest wants to do, in its own words, for the ask the pane draws (29.3).
 
     `item` is what the adapter has recorded about the item the approval is about. It matters for a
     file change: v1's `applyPatchApproval` carried a `changes` map, but v2's
     `item/fileChange/requestApproval` carries only `itemId`, `reason` and `grantRoot`, so without
-    the item the card could only quote codex's reason ("command failed; retry without sandbox?")
+    the item the ask could only quote codex's reason ("command failed; retry without sandbox?")
     and never say which file was about to be written. The user is deciding whether to let a guest
     write outside its sandbox; which file is the thing they need to know.
     """

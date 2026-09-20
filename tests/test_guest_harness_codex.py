@@ -1094,12 +1094,12 @@ class RobustnessTest(HarnessCase):
 
 
 class ApprovalDetail(unittest.TestCase):
-    """What the card says a file change is about (protocol 29.3).
+    """What the ask says a file change is about (protocol 29.3).
 
     v1's `applyPatchApproval` carried the paths; v2's `item/fileChange/requestApproval` carries
-    only `itemId`, `reason` and `grantRoot`, so a card built from the request alone could only
+    only `itemId`, `reason` and `grantRoot`, so an ask built from the request alone could only
     quote codex's reason — "command failed; retry without sandbox?" — and never name the file the
-    guest was about to write. Seen live on 2026-09-19 (`approval-drive.py`): the card read "Apply
+    guest was about to write. Seen live on 2026-09-19 (`approval-drive.py`): the ask read "Apply
     edit · command failed; retry without sandbox?". The paths come from the item instead, which
     the adapter already records from `item/started` and `patchUpdated` for the diff.
     """

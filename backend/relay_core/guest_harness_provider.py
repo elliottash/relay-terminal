@@ -676,7 +676,7 @@ class HarnessProvider:
 
     # ----- the question round trip ------------------------------------------------------------
     def resolve_question(self, message: dict) -> bool:
-        """The pane's `question_answer` for a card this provider put up. False when the id is not
+        """The pane's `question_answer` for an ask this provider put up. False when the id is not
         one of ours, which is the worker's signal to hand it to the agent's own `ask_user`."""
         return self._asker.resolve(message)
 
@@ -883,11 +883,11 @@ class _Turn:
 
     # ----- questions and approvals -----------------------------------------------------------
     def _on_approval(self, data: dict) -> None:
-        """An approval the guest raised under `permissions: "ask"`: a protocol 27 card with the
+        """An approval the guest raised under `permissions: "ask"`: a protocol 27 ask with the
         APPROVAL_CHOICES options, and the answer goes back through `harness.answer` (29.3)."""
         request_id = str(data.get("id") or "")
-        card = approval_card(str(data.get("kind") or "other"), data.get("detail"))
-        answers = self.provider._asker.ask(card, self.turn_id, self.emit, self.cancel)
+        ask = approval_ask(str(data.get("kind") or "other"), data.get("detail"))
+        answers = self.provider._asker.ask(ask, self.turn_id, self.emit, self.cancel)
         picked = str(answers[0][0]).strip() if answers and answers[0] else ""
         decision = approval_decision(picked)
         if decision["behavior"] != "allow":
@@ -897,8 +897,8 @@ class _Turn:
 
     def _on_question(self, data: dict) -> None:
         request_id = str(data.get("id") or "")
-        card = clean_questions(data.get("questions"))
-        answers = self.provider._asker.ask(card, self.turn_id, self.emit, self.cancel)
+        ask = clean_questions(data.get("questions"))
+        answers = self.provider._asker.ask(ask, self.turn_id, self.emit, self.cancel)
         self._answer(request_id, {"answers": answers if answers is not None else []})
 
     def _answer(self, request_id: str, decision: dict) -> None:
@@ -908,11 +908,11 @@ class _Turn:
             _log.debug("guest harness answer failed: %s", exc)
 
 
-# What the pane offers on an approval card, and the `harness.answer()` decision each option is
+# What the pane offers on an approval ask, and the `harness.answer()` decision each option is
 # (GT7X task t:a3). Four rather than two because both guests can say more than allow/deny:
 # `scope: "session"` is codex's `acceptForSession` and claude's session-scoped permission rule,
 # and `scope: "stop"` is codex's `cancel` and claude's `deny` with `interrupt: true`. The pane
-# needs no change to draw them — a protocol 27 card renders the options it is handed — and an
+# needs no change to draw them — a protocol 27 ask renders the options it is handed — and an
 # answer this table does not know is a plain deny, which is what an unanswered approval is too.
 APPROVAL_CHOICES = (
     ("Allow", "Let it go ahead, this once.", {"behavior": "allow", "scope": "once"}),
@@ -924,7 +924,7 @@ APPROVAL_CHOICES = (
 
 
 def approval_decision(label) -> dict:
-    """The decision one APPROVAL_CHOICES label means. Anything else — a stopped card, a pane that
+    """The decision one APPROVAL_CHOICES label means. Anything else — a stopped ask, a pane that
     sent a word this build does not know — is a deny for this one action."""
     picked = " ".join(str(label or "").split()).casefold()
     for name, _description, decision in APPROVAL_CHOICES:
@@ -933,31 +933,31 @@ def approval_decision(label) -> dict:
     return {"behavior": "deny", "scope": "once"}
 
 
-def approval_card(kind: str, detail) -> list[dict]:
-    """One approval as a protocol 27 card: what the guest wants to do, and APPROVAL_CHOICES.
+def approval_ask(kind: str, detail) -> list[dict]:
+    """One approval as a protocol 27 ask: what the guest wants to do, and APPROVAL_CHOICES.
 
-    Through `questions.validate` like any other card, so the pane is handed exactly the shape it
+    Through `questions.validate` like any other ask, so the pane is handed exactly the shape it
     already draws (whitespace collapsed, every field capped) and a guest that sends something odd
-    gets a plain card rather than a failed turn.
+    gets a plain ask rather than a failed turn.
     """
     header = {"command": "Run command", "patch": "Apply edit", "tool": "Use tool"}.get(kind, "Approve")
     text = " ".join(str(detail or "").replace("\x00", " ").split()) or "Let the guest do this?"
-    card = [{"header": header, "question": text[:questions_mod.MAX_QUESTION],
-             "options": [{"label": name, "description": description}
-                         for name, description, _decision in APPROVAL_CHOICES],
-             "multiple": False}]
+    ask = [{"header": header, "question": text[:questions_mod.MAX_QUESTION],
+            "options": [{"label": name, "description": description}
+                        for name, description, _decision in APPROVAL_CHOICES],
+            "multiple": False}]
     try:
-        return questions_mod.validate({"questions": card})
+        return questions_mod.validate({"questions": ask})
     except ValueError:                              # pragma: no cover - cleaned above already
-        card[0]["question"] = "Let the guest do this?"
-        return questions_mod.validate({"questions": card})
+        ask[0]["question"] = "Let the guest do this?"
+        return questions_mod.validate({"questions": ask})
 
 
-# ----- the round trip a card needs -------------------------------------------------------------
+# ----- the round trip an ask needs -------------------------------------------------------------
 
 
 class _Asker:
-    """The `question` → `question_answer` round trip for a guest's cards.
+    """The `question` → `question_answer` round trip for a guest's asks.
 
     Its own, rather than the agent's `executor.questions`: that one collapses each answer to the
     text a model reads, and protocol 27.3 wants the raw per-question lists back so they can be
@@ -971,7 +971,7 @@ class _Asker:
         self._hooked: set[int] = set()
 
     def ask(self, items: list[dict], turn_id, emit, cancel: threading.Event) -> list | None:
-        """Draw the card and block until the pane answers. Returns the per-question answer lists,
+        """Draw the ask and block until the pane answers. Returns the per-question answer lists,
         or None when the turn was stopped under it."""
         hooked = self._hook(cancel)
         if cancel.is_set():
@@ -1022,7 +1022,7 @@ class _Asker:
             slot[0].set()
 
     def _hook(self, cancel: threading.Event) -> bool:
-        """Wake every waiting card when Stop is pressed, once per cancel event."""
+        """Wake every waiting ask when Stop is pressed, once per cancel event."""
         key = id(cancel)
         if key in self._hooked:
             return True
