@@ -607,7 +607,11 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         line->enableDrag();
     }
     auto *box = new QHBoxLayout(line);
-    box->setContentsMargins(10 + 28 * qMax(0, row.indent), 6, 10, 6);
+    // A row under a group's own row is single-spaced (owner, 2026-09-20: "make them single
+    // spaced within a provider"): the models of one provider read as one list, not as cards.
+    const bool nested = row.indent > 0;
+    if (nested) line->setProperty("nested", true);
+    box->setContentsMargins(10 + 28 * qMax(0, row.indent), nested ? 0 : 6, 10, nested ? 0 : 6);
     box->setSpacing(12);
     if (!row.dragGroup.isEmpty()) {
         // A grip, so a row that can be dragged looks like one (owner, 2026-09-20: the priority
@@ -651,6 +655,7 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         info->setFocusPolicy(Qt::NoFocus);
         info->setToolTip(QStringLiteral("About this: %1").arg(row.infoUrl));
         info->setAccessibleName(QStringLiteral("About %1").arg(row.label));
+        if (row.indent > 0) info->setFixedHeight(18);   // the link must not make a nested row taller than its text
         connect(info, &QToolButton::clicked, this, [url = row.infoUrl] { QDesktopServices::openUrl(QUrl(url)); });
         box->addWidget(info);
     }

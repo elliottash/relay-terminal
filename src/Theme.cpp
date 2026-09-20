@@ -462,6 +462,8 @@ QLabel#settingsHeading { color: @text; font-size: 11pt; font-weight: 700; paddin
 QLabel#settingsSubheading { color: @text; font-size: 10pt; font-weight: 600; }
 QFrame#settingsRow { background: transparent; border: 1px solid transparent; border-radius: 8px; }
 QFrame#settingsRow:hover { background: @surface; }
+QFrame#settingsRow[nested="true"] { border-radius: 4px; }
+QToolButton#settingsInfoLink { padding: 0 2px; border: none; }
 QLabel#settingsRowLabelStrong { font-weight: 600; }
 QLabel#settingsGrip { color: @muted; font-size: 13pt; padding: 0 2px; }
 QFrame#settingsRow[dropTarget="true"] { border-top: 2px solid @accent; }
