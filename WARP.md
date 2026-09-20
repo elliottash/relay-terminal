@@ -36,6 +36,27 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   no per-action tool approvals; BYOK first (Relay Free is an included, quota-limited hosted
   provider since 2026-09-18, `docs/RELAY-FREE.md`); no telemetry. See `docs/ROADMAP.md`.
 
+## Words
+
+"card" had grown eight meanings, two of them inside one parenthesis in `src/Pane.h`, so the word is
+now spent where it is listed here and nowhere else.
+
+- **card** is a Switchboard record, of any of its four types (`CARD_TYPES = ("work", "plan",
+  "memory", "alias")`, `backend/relay_core/board.py`). Say *work card*, *plan card*, *memory card*
+  or *alias card* when the type matters. It is not narrowed to issue cards: that would leave the
+  other three types with no noun.
+- **ask** is what the agent puts up when a turn blocks on a question or an approval (`ask_user`,
+  protocol 27, approvals 27.6). It is not a card and never was — it draws no surface, it is inline
+  terminal text in `Ink::Ask`, and the code around it already says `m_ask`, `ask_user`,
+  `approvals_ask`. Not "prompt", which is the prompt box; not "question", because approvals are not
+  questions.
+- **popup** is a floating panel over a pane: the help cheat-sheet `?` shows, the notifications list.
+- **turn** is what the phone thread view renders. Not a "turn card".
+- **model card** is the vendor's documentation page for a model, and is always written in full.
+- A spec citation is `card #ID`, written in full every time and never shortened to "the card" in a
+  later sentence — `app/meet.js` and `remote/cpace.py` did that, and the word then points at
+  nothing.
+
 ## Shortcut hints (standing rule)
 
 Relay teaches shortcuts Superhuman-style: when the user does something the slow way (mouse,

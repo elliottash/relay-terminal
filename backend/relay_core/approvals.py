@@ -40,7 +40,7 @@ NETWORK = "network"
 
 CAPABILITIES = (EDIT, CREATE, DELETE_OR_MOVE, READ_OUTSIDE, TERMINAL, PROGRAM, NETWORK)
 
-# What each row says it is for, one line, reused by the card and by the settings row so the two
+# What each row says it is for, one line, reused by the ask and by the settings row so the two
 # cannot drift into describing different things.
 LABELS = {
     EDIT: "change a file that already exists",
@@ -54,7 +54,7 @@ LABELS = {
 
 # Before the first-launch choice is answered, these ask. Not allow-everything: "you have to
 # explicitly pick that" only means something if not picking is different. `create` and `network`
-# stay out of it so a fresh Relay can still do the ordinary thing without a card on every step.
+# stay out of it so a fresh Relay can still do the ordinary thing without an ask on every step.
 CAUTIOUS = (EDIT, DELETE_OR_MOVE, READ_OUTSIDE, TERMINAL, PROGRAM)
 
 # Programs that delete or move. `chmod`/`chown` are here only in their recursive form, which is
@@ -80,7 +80,7 @@ class Policy:
 
 ALLOW_ALL = Policy(ask=frozenset(), chosen=True)
 
-# What the card offers (protocol 27.6), in the order the pane prints them. `once` allows this one
+# What the ask offers (protocol 27.6), in the order the pane prints them. `once` allows this one
 # call, `turn` the rest of the turn, `always` also unticks the row in Options › Security, and `deny`
 # refuses the call and tells the model — the turn carries on.
 DECISIONS = ("once", "turn", "always", "deny")
@@ -178,7 +178,7 @@ def needed(policy: Policy, tool: str, arguments: dict, *, exists: bool = False,
 
 
 def prompt(capability: str, subject: str) -> tuple[str, str]:
-    """The card's header and question. `subject` is the file or the command it is about."""
+    """The ask's header and question. `subject` is the file or the command it is about."""
     return LABELS[capability].capitalize(), f"Allow the agent to {LABELS[capability]}?\n{subject}"
 
 

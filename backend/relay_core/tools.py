@@ -49,8 +49,8 @@ SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.
 
 
 def _subject(payload: dict) -> str:
-    """What a type_into_program approval card shows (card #K2FV): the intent line, then the text
-    or key it would type, so the card is about the actual keystrokes and not their excuse."""
+    """What a type_into_program approval ask shows (card #K2FV): the intent line, then the text
+    or key it would type, so the ask is about the actual keystrokes and not their excuse."""
     typed = payload["text"] if "text" in payload else f"<{payload.get('key', '')}>"
     return f"{payload.get('intent', '')} · {typed}"
 
@@ -311,8 +311,8 @@ class Prepared:
     # which is what `path` above being a real local Path still means.
     host: str | None = None
     remote_path: str | None = None
-    # Card #K2FV: the capabilities this call already drew its approval card for, so the re-check at
-    # execution time asks only about what the policy added since — one card per action.
+    # Card #K2FV: the capabilities this call already drew its approval ask for, so the re-check at
+    # execution time asks only about what the policy added since — one ask per action.
     approved: tuple[str, ...] = ()
 
 
@@ -405,8 +405,8 @@ class ToolExecutor:
         # Allow-all unless the pane says otherwise: the cautious set belongs to a fresh install's
         # first-launch choice, which the GUI's configure always carries (approvals_chosen: false).
         self.approvals = approvals.ALLOW_ALL
-        # Whether a card may be drawn at all. Distinct from `can_ask` on purpose: a subagent cannot
-        # ask a question (nobody knows it exists) but its actions still draw approval cards in the
+        # Whether an ask may be drawn at all. Distinct from `can_ask` on purpose: a subagent cannot
+        # ask a question (nobody knows it exists) but its actions still draw approval asks in the
         # pane it belongs to, named as the subagent's.
         self.may_approve = True
         # Skill folders are read only through the index, which confines paths to each skill.
@@ -424,7 +424,7 @@ class ToolExecutor:
         # Asking the user a question and waiting for the answer; see relay_core/questions.py.
         # Offered in both modes (owner, 2026-09-19: "let the non-plan agent use the questions as
         # well (like warp / claude)"); `can_ask` is off for a subagent's executor, which cannot see
-        # the pane the card would be drawn in.
+        # the pane the ask would be drawn in.
         self.questions = Questions(emit, cancel)
         self.can_ask = True
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
@@ -441,10 +441,10 @@ class ToolExecutor:
 
     def _approval(self, name: str, args: dict, *, exists: bool = False, outside_workspace: bool = False,
                   subject: str = "", already: tuple[str, ...] = ()) -> tuple[str, ...]:
-        """Card #K2FV: put the approval card up for a call the checklist asks about.
+        """Card #K2FV: put the approval ask up for a call the checklist asks about.
 
-        Checked while preparing, so nothing has run when the card goes up — and again at execution
-        for run_command, whose policy may change while a card sits unanswered. A capability already
+        Checked while preparing, so nothing has run when the ask goes up — and again at execution
+        for run_command, whose policy may change while an ask sits unanswered. A capability already
         approved for this call (`already`) or for the rest of the turn is not asked for again. Deny
         raises the refusal the model reads and carries on; Stop still stops the turn, exactly as it
         does under a question (questions.ask_approval shares the round trip).
@@ -581,7 +581,7 @@ class ToolExecutor:
             # not unevadable — see relay_core/security.py.
             if rule := security.denied_command(self.policy, command):
                 raise ValueError(security.refusal(rule))
-            # Card #K2FV: the card goes up while preparing, before anything runs.
+            # Card #K2FV: the ask goes up while preparing, before anything runs.
             approved = self._approval(name, args, subject=command)
             background = args.get("background", False)
             if not isinstance(background, bool):
@@ -670,7 +670,7 @@ class ToolExecutor:
         user = session.get("user")
         header = f"Host: {f'{user}@{host}' if user else host} (over the user's ssh connection)\n"
         if name == "read_file":
-            # No read_outside card here: that row is about the folders Options › Security adds for
+            # No read_outside ask here: that row is about the folders Options › Security adds for
             # reads on this machine (#3KB7). On the host there are no extra folders — anything the
             # user's account can read there is the read tools' stated contract (card #S5SH).
             return Prepared(name, args, f"READ FILE ON {host}\n\n{header}{path}", host=host, remote_path=path)
@@ -684,8 +684,8 @@ class ToolExecutor:
             content, replacements = self._edited(args, old)
         else:
             content, replacements = self._text(args, "content"), 0
-        # The edit/create card (card #K2FV) travels: a file on the ssh host is still a file the
-        # user may want asked about, and the card names the host in its subject line.
+        # The edit/create ask (card #K2FV) travels: a file on the ssh host is still a file the
+        # user may want asked about, and the ask names the host in its subject line.
         self._approval(name, args, exists=existed, subject=f"{path} on {host}")
         return self._write_prepared(name, args, path, old, content, existed, replacements, host=host,
                                     header=header + "\n")
@@ -821,7 +821,7 @@ class ToolExecutor:
             return self.program.execute(args)
         if name == "run_in_terminal":
             return self.terminal.execute(args)
-        # `ask_user` is not here: `Agent._execute` runs it itself, because the card has to carry
+        # `ask_user` is not here: `Agent._execute` runs it itself, because the ask has to carry
         # the turn it belongs to (`turn_id`) and nothing else in a Prepared does. A copy here
         # could only ever be reached by a caller that had bypassed the agent, and would drop it.
         if name == "set_keybinding":
@@ -842,7 +842,7 @@ class ToolExecutor:
             # since prepare, and a path may have become a symlink.
             if rule := security.denied_command(self.policy, args["command"]):
                 raise ValueError(security.refusal(rule))
-            # Card #K2FV: the checklist may have changed while the card sat unanswered; the
+            # Card #K2FV: the checklist may have changed while the ask sat unanswered; the
             # capabilities approved at prepare are not asked for again (Prepared.approved).
             self._approval("run_command", args, subject=args["command"], already=prepared.approved)
             cwd = self.workspace.resolve(args.get("cwd", "."))

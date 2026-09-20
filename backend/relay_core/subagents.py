@@ -84,8 +84,8 @@ class RestrictedExecutor(ToolExecutor):
         # It has no pane, and the user has no idea it is running: it cannot ask them anything
         # (#MQ9C). A definition that lists ask_user gets the same refusal as any unknown tool.
         self.can_ask = False
-        # An approval card is different (card #K2FV): it is the pane's to answer, not the
-        # subagent's to ask, so `may_approve` stays on and its actions draw cards there.
+        # An approval ask is different (card #K2FV): it is the pane's to answer, not the
+        # subagent's to ask, so `may_approve` stays on and its actions draw asks there.
 
     def tools(self) -> list[dict]:
         return [tool for tool in super().tools() if tool["function"]["name"] in self.allowed]
@@ -214,7 +214,7 @@ class SubagentFactory:
                       max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
                       preset_id=preset_id, roles=self.roles, **self.failover_options())
         agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)
-        # A subagent's actions draw their approval cards in the pane it belongs to (card #K2FV), so
+        # A subagent's actions draw their approval asks in the pane it belongs to (card #K2FV), so
         # it inherits the pane's checklist at spawn; the manager walks the live ones on a change.
         # The pane's agent is read as `failover_options` reads it, getattr by getattr: the pane's
         # Agent always carries an executor, but a factory outside the worker, or a double that
@@ -384,16 +384,16 @@ class SubagentManager:
 
     def set_approvals(self, policy) -> None:
         """The pane's approval checklist changed (card #K2FV): running subagents follow it, since
-        their actions draw cards against the same pane."""
+        their actions draw asks against the same pane."""
         with self._lock:
             subs = [s for s in self._agents.values() if s.agent is not None]
         for sub in subs:
             sub.agent.executor.approvals = policy
 
     def resolve_question(self, message: dict) -> bool:
-        """Route a `question_answer` to the subagent whose card it answers (card #K2FV).
+        """Route a `question_answer` to the subagent whose ask it answers (card #K2FV).
 
-        An approval card a subagent's action drew is forwarded to the pane named as the
+        An approval ask a subagent's action drew is forwarded to the pane named as the
         subagent's, so its answer has to find its way back. The ids are uuids, so at most one
         executor holds one pending; an id nobody holds is the user's click landing late.
         """
@@ -988,10 +988,10 @@ class SubagentManager:
             if progress and sub.status == "running":
                 self._progress_locked(sub)
             if kind in ("question", "question_closed"):
-                # An approval card a subagent's action drew (card #K2FV) goes to the pane with the
-                # subagent named on it — the same pane the main agent's cards are drawn in, and the
+                # An approval ask a subagent's action drew (card #K2FV) goes to the pane with the
+                # subagent named on it — the same pane the main agent's asks are drawn in, and the
                 # one question_answer routes back through (resolve_question). Not in FORWARDED:
-                # those are wrapped for subscribers; a card must be drawn whoever is watching.
+                # those are wrapped for subscribers; an ask must be drawn whoever is watching.
                 self._emit({**event, "subagent": sub.description, "agent_id": sub.id})
             if sub.subscribed and kind in FORWARDED:
                 # Protocol names the wrapped object "event", which collides with the envelope's "event" key.

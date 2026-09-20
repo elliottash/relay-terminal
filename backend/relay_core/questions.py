@@ -2,11 +2,11 @@
 """`ask_user`: the agent asks the user a question and waits for the answer.
 
 Card #MQ9C. Plan mode had no way to reach the user between "investigate" and `write_plan`, so a
-planner that was unsure guessed. Every other harness asks during planning (the card quotes
+planner that was unsure guessed. Every other harness asks during planning (card #MQ9C quotes
 opencode's and Warp's shapes word for word); this is Relay's.
 
 Like `type_into_program` (`program_input.py`) it is a round trip, because the worker cannot draw
-anything: the worker emits `question`, the pane draws the card, the user answers, the pane replies
+anything: the worker emits `question`, the pane draws the ask, the user answers, the pane replies
 `question_answer` and the waiting turn thread wakes. The turn loop and the protocol loop are
 different threads (`backend/worker.py`), so blocking one is safe.
 
@@ -28,7 +28,7 @@ options to satisfy a schema asks a worse question than one that just asks.
 Both modes carry it (owner, 2026-09-19: "let the non-plan agent use the questions as well (like
 warp / claude)"), which is what opencode does for its `build` and `plan` agents and what Warp does
 with a per-profile permission. A subagent never gets the tool itself: it cannot see the pane and the
-user has no idea it exists (`subagents.RestrictedExecutor`). An **approval card** (card #K2FV,
+user has no idea it exists (`subagents.RestrictedExecutor`). An **approval ask** (card #K2FV,
 `ask_approval` below) is a second *kind* of question on the same round trip rather than a second
 mechanism — and a subagent's actions do draw one, named as the subagent's, because it is the same
 worker and the same pane.
@@ -47,7 +47,7 @@ from .provider import Cancelled
 MAX_QUESTIONS = 4          # one screenful; a model that needs more should ask again after the answers
 MAX_OPTIONS = 5
 MIN_OPTIONS = 2            # one option is not a question
-MAX_HEADER = 30            # the chip over the card, e.g. "Scope"
+MAX_HEADER = 30            # the chip over the ask, e.g. "Scope"
 MAX_QUESTION = 300
 MAX_LABEL = 60
 MAX_DESCRIPTION = 200
@@ -59,8 +59,8 @@ UNANSWERED = "Unanswered"
 SKIP_WORD = "/skip"        # what the pane types to leave a question unanswered
 
 def _call_id() -> str:
-    """A card's id. Random rather than counted: a counter restarts at `q-1` in every worker
-    process, so a pane that outlived a worker could answer a new card with an old card's id and be
+    """An ask's id. Random rather than counted: a counter restarts at `q-1` in every worker
+    process, so a pane that outlived a worker could answer a new ask with an old ask's id and be
     believed. Nothing reads the number, so there is nothing to lose by it being unguessable."""
     return f"q-{uuid.uuid4().hex}"
 
@@ -189,7 +189,7 @@ def validate(args) -> list[dict]:
 
 
 def preview(questions: list[dict]) -> str:
-    """The tool-call preview the pane prints before the card, like every other tool's."""
+    """The tool-call preview the pane prints before the ask, like every other tool's."""
     lines = []
     for question in questions:
         lines.append(f"{question['header']}: {question['question']}")
@@ -221,7 +221,7 @@ def answer_text(answers) -> str:
 def wake_on_set(event: threading.Event, callback: Callable[[], None]) -> bool:
     """Run `callback` whenever `event` is set, and say whether that could be arranged.
 
-    A card has no deadline, so the wait under it is the one wait in the worker that can last hours.
+    An ask has no deadline, so the wait under it is the one wait in the worker that can last hours.
     `threading.Event` has no way to register a waiter and the cancel event is the agent's own
     (`Agent.cancel_event`), so the alternative is a timer: the first version of this file woke
     twenty times a second for as long as a question was on screen, to ask an event that had not
@@ -271,7 +271,7 @@ class Questions:
         self._approved.clear()
 
     def end_turn(self) -> None:
-        """A turn cannot end with a card still up: the user would be answering nobody."""
+        """A turn cannot end with an ask still up: the user would be answering nobody."""
         self.asks = 0
         self.fail_pending("cancelled")
 
@@ -298,8 +298,8 @@ class Questions:
             self._pending[call_id] = [done, None]
             self.asks += 1
         self.emit({"event": "question", "id": call_id, "turn_id": turn_id, "questions": questions})
-        # Stop between the check at the top of this method and the card being registered above
-        # would otherwise be a Stop that woke nothing: the hook ran when there was no card yet.
+        # Stop between the check at the top of this method and the ask being registered above
+        # would otherwise be a Stop that woke nothing: the hook ran when there was no ask yet.
         if self.cancel.is_set():
             self.fail_pending("cancelled")
         # No deadline: the user may be away, and a timeout would report "failed" for "still thinking".
@@ -313,7 +313,7 @@ class Questions:
                     self.fail_pending("cancelled")
         reply = self._take(call_id) or {}
         if reply.get("code") == "cancelled":
-            # Stop, or the turn ending under the card: the pane takes it down either way, so it is
+            # Stop, or the turn ending under the ask: the pane takes it down either way, so it is
             # never left up for a turn that no longer exists.
             self.emit({"event": "question_closed", "id": call_id, "reason": "cancelled"})
             raise Cancelled("Stopped.")
@@ -344,7 +344,7 @@ class Questions:
             return capability in self._approved
 
     def ask_approval(self, capability: str, subject: str) -> str:
-        """Put the approval card up and wait for the decision (protocol 27.6).
+        """Put the approval ask up and wait for the decision (protocol 27.6).
 
         The same round trip as `execute` — same event, same reply shape, same Stop semantics — so
         an approval needs no second mechanism: the turn blocks until the user answers, and only
@@ -383,12 +383,12 @@ class Questions:
 
     # ----- replies from the GUI ----------------------------------------------------------------
     def handles(self, call_id) -> bool:
-        """Whether a card with this id is waiting here (the worker routes replies by it, #K2FV)."""
+        """Whether an ask with this id is waiting here (the worker routes replies by it, #K2FV)."""
         with self._lock:
             return call_id in self._pending
 
     def resolve(self, message: dict) -> None:
-        """The pane's `question_answer`. Unknown ids are ignored: a card answered after its turn
+        """The pane's `question_answer`. Unknown ids are ignored: an ask answered after its turn
         was stopped is the user's click landing late, not an error to report."""
         if not isinstance(message, dict):
             raise ValueError("question_answer must be an object.")
