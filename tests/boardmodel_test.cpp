@@ -147,7 +147,8 @@ private slots:
     void upAndDownWalkTheCardsAcrossSectionBreaks();
     void theViewRendersOneListFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
-    void theSortMenuOrdersTheListAndReordersOnlyOnManual();
+    void theColumnHeaderSortsTheListWithinASection();
+    void theColumnsNameTheOrdersAClickGoesThrough();
     void arrowsFoldASectionAndTheFoldIsSaved();
     void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
     void theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack();
@@ -320,6 +321,10 @@ void BoardModelTests::timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip()
     QCOMPARE(ids(relay::board::Sort::NewestFirst), (QStringList{"BBB2", "CCC3", "AAA1"}));
     QCOMPARE(ids(relay::board::Sort::OldestFirst), (QStringList{"AAA1", "CCC3", "BBB2"}));
     QCOMPARE(ids(relay::board::Sort::RecentlyUpdated), (QStringList{"BBB2", "CCC3", "AAA1"}));
+    QCOMPARE(ids(relay::board::Sort::OldestUpdated), (QStringList{"AAA1", "CCC3", "BBB2"}));
+    // The card's own column, which is the title, and both ways round.
+    QCOMPARE(ids(relay::board::Sort::TitleAsc), (QStringList{"AAA1", "BBB2", "CCC3"}));
+    QCOMPARE(ids(relay::board::Sort::TitleDesc), (QStringList{"CCC3", "BBB2", "AAA1"}));
 
     // Done is newest first under Manual, as it always was, and follows the chosen sort otherwise.
     QJsonObject older = row("OLD1", "done", "features", "a"), newer = row("NEW1", "done", "features", "z");
@@ -341,7 +346,10 @@ void BoardModelTests::timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip()
     // The layout node's ids round-trip, and anything unknown reads as Manual.
     const QList<relay::board::Sort> sorts{relay::board::Sort::Manual, relay::board::Sort::NewestFirst,
                                           relay::board::Sort::OldestFirst,
-                                          relay::board::Sort::RecentlyUpdated};
+                                          relay::board::Sort::RecentlyUpdated,
+                                          relay::board::Sort::OldestUpdated,
+                                          relay::board::Sort::TitleAsc,
+                                          relay::board::Sort::TitleDesc};
     for (relay::board::Sort sort : sorts)
         QCOMPARE(relay::board::sortFromId(relay::board::sortId(sort)), sort);
     QCOMPARE(relay::board::sortFromId(QStringLiteral("nonsense")), relay::board::Sort::Manual);
@@ -769,7 +777,11 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
     QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_open"));
 }
 
-void BoardModelTests::theSortMenuOrdersTheListAndReordersOnlyOnManual()
+// The list's column header is the sort (owner, 2026-09-19: "change switchboard sorting from a sort
+// button to adding header columns that you click on ... and sorting is within section"): a click on
+// a cell orders the cards inside every section by that column, a second click turns it round, a
+// third gives the board its own drag order back.
+void BoardModelTests::theColumnHeaderSortsTheListWithinASection()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     QList<QJsonObject> sent;
@@ -777,22 +789,59 @@ void BoardModelTests::theSortMenuOrdersTheListAndReordersOnlyOnManual()
     QJsonObject a = row("AAA1", "ready", "features", "a"), z = row("ZZZ9", "ready", "features", "z");
     a.insert(QStringLiteral("created"), QStringLiteral("2026-09-01"));
     z.insert(QStringLiteral("created"), QStringLiteral("2026-09-10"));
-    view.handleEvent(opened({a, z}));
+    // A second section, so what is tested is the order *within* a section, not the whole list.
+    QJsonObject b = row("BBB2", "inbox", "features", "i");
+    b.insert(QStringLiteral("created"), QStringLiteral("2026-09-20"));
+    view.handleEvent(opened({a, z, b}));
     view.setCollapsedSections(QJsonArray{});   // unfold: the cards themselves are on the list
+
+    QVERIFY(view.findChild<QWidget *>(QStringLiteral("boardColumnHeader")));
+    auto *card = view.findChild<QToolButton *>(QStringLiteral("boardHeaderCard"));
+    auto *created = view.findChild<QToolButton *>(QStringLiteral("boardHeaderCreated"));
+    auto *updated = view.findChild<QToolButton *>(QStringLiteral("boardHeaderUpdated"));
+    QVERIFY(card && created && updated);
+    // The button that used to be the sort is gone, and with nothing sorted there is no arrow.
+    QVERIFY(!view.findChild<QToolButton *>(QStringLiteral("boardSort")));
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+    QVERIFY(!created->property("active").toBool());
     QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
              (QStringList{"AAA1", "ZZZ9"}));
+    QVERIFY(created->toolTip().contains(QStringLiteral("newest first")));
 
-    // The toolbar button names what is on, and a saved pane's id puts the same sort back.
-    auto *sort = view.findChild<QToolButton *>(QStringLiteral("boardSort"));
-    QVERIFY(sort != nullptr);
-    QVERIFY(sort->text().contains(QStringLiteral("Manual")));
-    view.setSortOrder(QStringLiteral("newest"));
+    // Newest first, then oldest first, then back to the board's own order.
+    created->click();
     QCOMPARE(view.sortOrder(), QStringLiteral("newest"));
-    QVERIFY(sort->text().contains(QStringLiteral("Newest first")));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"ZZZ9", "AAA1"}));
+    QVERIFY(created->property("active").toBool());
+    QVERIFY(created->text().contains(QStringLiteral("▼")));
+    created->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("oldest"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"AAA1", "ZZZ9"}));
+    QVERIFY(created->text().contains(QStringLiteral("▲")));
+    created->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+    QVERIFY(!created->property("active").toBool());
+
+    // A click on another column starts that column's own cycle rather than turning this one round,
+    // and the card's own column sorts by title.
+    created->click();                          // newest first again
+    card->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("title"));
+    QVERIFY(card->text().contains(QStringLiteral("▲")));     // A→Z points up
+    card->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("title-desc"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"ZZZ9", "AAA1"}));
+    updated->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("updated"));
+    // Neither card has an `updated`, so both fall back to their `created` and the order is the same
+    // as Newest first's.
     QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
              (QStringList{"ZZZ9", "AAA1"}));
 
-    // A time sort takes the manual reorder off: Alt+Shift+↑ is refused with a notice and nothing
+    // A column sort takes the manual reorder off: Alt+Shift+↑ is refused with a notice and nothing
     // is sent (a rank nobody can see is a rank nobody can write).
     view.selectCard(QStringLiteral("AAA1"));
     QTest::keyPress(listOf(view), Qt::Key_Up, Qt::AltModifier | Qt::ShiftModifier);
@@ -800,13 +849,57 @@ void BoardModelTests::theSortMenuOrdersTheListAndReordersOnlyOnManual()
     QVERIFY(view.notice().contains(QStringLiteral("sorted")));
 
     // Back on Manual the same key writes the rank again.
-    view.setSortOrder(QStringLiteral("manual"));
-    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
-             (QStringList{"AAA1", "ZZZ9"}));
+    updated->click();                          // updated -> updated-oldest
+    updated->click();                          // updated-oldest -> manual
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
     QTest::keyPress(listOf(view), Qt::Key_Down, Qt::AltModifier | Qt::ShiftModifier);
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_move"));
     QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("AAA1"));
+}
+
+// What each column's header is and what a click on it goes through: the pure half of the header, so
+// the cycle back to the board's own drag order is pinned down without a widget.
+void BoardModelTests::theColumnsNameTheOrdersAClickGoesThrough()
+{
+    using namespace relay::board;
+    QCOMPARE(columnTitle(SortColumn::Card), QStringLiteral("Card"));
+    QCOMPARE(columnTitle(SortColumn::Created), QStringLiteral("Created"));
+    QCOMPARE(columnTitle(SortColumn::Updated), QStringLiteral("Updated"));
+
+    QCOMPARE(nextColumnSort(SortColumn::Created, Sort::Manual), Sort::NewestFirst);
+    QCOMPARE(nextColumnSort(SortColumn::Created, Sort::NewestFirst), Sort::OldestFirst);
+    QCOMPARE(nextColumnSort(SortColumn::Created, Sort::OldestFirst), Sort::Manual);
+    QCOMPARE(nextColumnSort(SortColumn::Updated, Sort::Manual), Sort::RecentlyUpdated);
+    QCOMPARE(nextColumnSort(SortColumn::Updated, Sort::RecentlyUpdated), Sort::OldestUpdated);
+    QCOMPARE(nextColumnSort(SortColumn::Updated, Sort::OldestUpdated), Sort::Manual);
+    QCOMPARE(nextColumnSort(SortColumn::Card, Sort::Manual), Sort::TitleAsc);
+    QCOMPARE(nextColumnSort(SortColumn::Card, Sort::TitleAsc), Sort::TitleDesc);
+    QCOMPARE(nextColumnSort(SortColumn::Card, Sort::TitleDesc), Sort::Manual);
+    // A click on a column that is not the one sorting starts that column's own cycle.
+    QCOMPARE(nextColumnSort(SortColumn::Card, Sort::RecentlyUpdated), Sort::TitleAsc);
+    QCOMPARE(nextColumnSort(SortColumn::Created, Sort::TitleDesc), Sort::NewestFirst);
+
+    QCOMPARE(sortColumnIndex(Sort::Manual), -1);
+    QCOMPARE(sortColumnIndex(Sort::TitleDesc), 0);
+    QCOMPARE(sortColumnIndex(Sort::OldestFirst), 1);
+    QCOMPARE(sortColumnIndex(Sort::OldestUpdated), 2);
+    QVERIFY(sortAscending(Sort::OldestFirst));
+    QVERIFY(sortAscending(Sort::OldestUpdated));
+    QVERIFY(sortAscending(Sort::TitleAsc));
+    QVERIFY(!sortAscending(Sort::NewestFirst));
+    QVERIFY(!sortAscending(Sort::RecentlyUpdated));
+    QVERIFY(!sortAscending(Sort::Manual));
+
+    // A date column shows the date part of either spelling the worker sends, and nothing at all for
+    // a field that holds nothing date-like.
+    QCOMPARE(dateCell(QStringLiteral("2026-09-19")), QStringLiteral("2026-09-19"));
+    QCOMPARE(dateCell(QStringLiteral("2026-09-19T21:13:58Z")), QStringLiteral("2026-09-19"));
+    QVERIFY(dateCell(QString()).isEmpty());
+    QVERIFY(dateCell(QStringLiteral("someday")).isEmpty());
+    QVERIFY(dateCell(QStringLiteral("2026-9-19")).isEmpty());
+    // The date part of a longer stamp, which is what an ISO timestamp is.
+    QCOMPARE(dateCell(QStringLiteral("2026-09-19-ish")), QStringLiteral("2026-09-19"));
 }
 
 void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()

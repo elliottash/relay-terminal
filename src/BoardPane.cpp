@@ -68,6 +68,13 @@ constexpr int kBadgeGap = 5;
 constexpr int kIdGap = 8;
 constexpr int kTitleMin = 80;        // the title never shrinks past this; badges go instead
 constexpr int kAddWidth = 22;        // the `+` at the right of a section header
+// The date columns at the right of a row (owner, 2026-09-19: "add a 'created' and 'updated'
+// column"): the gap between the two and before the badges, and the room an `#ID` is owed when
+// deciding whether the pane can carry the columns at all. That room is a constant rather than the
+// card's own id width, so the header over the list can answer the same question the rows do — a
+// header whose labels had gone while the cells were still drawn would be worse than no header.
+constexpr int kDateGap = 8;
+constexpr int kIdRoom = 52;
 // Below this width the open card takes the whole pane instead of squeezing the list.
 constexpr int kStackedWidth = 900;
 
@@ -163,12 +170,43 @@ QColor glyphInk(const QString &status)
     return theme::TextMuted;
 }
 
+// The room the list keeps at its right: its frame plus the width a vertical scrollbar takes,
+// whether or not one is showing.
+int rowReserve(const QListWidget *list)
+{
+    return list->verticalScrollBar()->sizeHint().width() + 2 + 2 * list->frameWidth();
+}
+
+// The width a row's content is drawn in. The column header over the list measures with this too,
+// so a header cell sits exactly over the column of cells below it.
+int rowContentWidth(const QListWidget *list)
+{
+    return qMax(120, list->width() - rowReserve(list));
+}
+
+// One date column's width: "0000-00-00" in the row's own date font, so both columns are the same
+// width, every row lines up with the next, and the header's label is measured over the same cell.
+int dateColumnWidth(const QFont &font)
+{
+    return QFontMetrics(monoFont(font, 0.85)).horizontalAdvance(QStringLiteral("0000-00-00")) + 6;
+}
+
+// Whether a row `width` px wide can carry the two date columns at all: the glyph, an `#ID` and the
+// title's floor are owed their room first, and only then does the table get its right-hand columns.
+bool dateColumnsFit(const QFont &font, int width)
+{
+    const int keep = kRowPadX + kGlyphWidth + 4 + kTitleMin + kIdRoom + kDateGap
+                     + 2 * dateColumnWidth(font) + kDateGap + kRowPadX;
+    return width >= keep;
+}
+
 // Where everything on one card row goes, relative to the row's top-left corner. The badges that
 // do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
 // narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QRect glyphRect, titleRect, idRect;
-    QString title;
+    QRect glyphRect, titleRect, idRect, createdRect, updatedRect;
+    QString title, created, updated;
+    bool dates = false;                 // the two date columns are on this row
     QList<QPair<board::Badge, QRect>> badges;
     int height = 0;
 };
@@ -185,7 +223,22 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
     int x = kRowPadX;
     shape.glyphRect = QRect(x, 0, kGlyphWidth, shape.height);
     x += kGlyphWidth + 4;
-    const int available = qMax(40, width - x - kRowPadX);
+
+    // The table's right-hand columns first: the badges and the title are what give way to them,
+    // and the badges that no longer fit are dropped by board::fitBadges — a narrow pane loses
+    // decoration before it loses meaning.
+    shape.dates = dateColumnsFit(font, width);
+    int contentRight = width - kRowPadX;
+    if (shape.dates) {
+        const int column = dateColumnWidth(font);
+        shape.updatedRect = QRect(contentRight - column, 0, column, shape.height);
+        shape.createdRect = QRect(shape.updatedRect.left() - kDateGap - column, 0, column,
+                                  shape.height);
+        shape.created = board::dateCell(card.created);
+        shape.updated = board::dateCell(card.updated);
+        contentRight = shape.createdRect.left() - kDateGap;
+    }
+    const int available = qMax(40, contentRight - x);
 
     // No single badge may eat the row. A card whose `assignee` holds a sentence is a mistake in
     // the file, but the row still has to be readable, so a badge is capped at a quarter of the
@@ -207,7 +260,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
 
     // Right to left from the row's right edge, prepending, so the order on screen ends up the
     // reading order board::rowBadges returned.
-    int right = width - kRowPadX;
+    int right = contentRight;
     for (int i = int(kept.size()) - 1; i >= 0; --i) {
         const int w = widths.value(kept.at(i).text);
         const int h = badgeMetrics.height() + 2;
@@ -215,7 +268,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
         shape.badges.prepend(qMakePair(kept.at(i), QRect(right, (shape.height - h) / 2, w, h)));
         right -= kBadgeGap;
     }
-    const int titleEnd = shape.badges.isEmpty() ? width - kRowPadX : right + kBadgeGap - 10;
+    const int titleEnd = shape.badges.isEmpty() ? contentRight : right + kBadgeGap - 10;
     const int titleZone = qMax(30, titleEnd - x);
     const int titleWidth = qMax(30, titleZone - idWidth);
     shape.title = metrics.elidedText(card.title.isEmpty() ? QStringLiteral("(untitled)") : card.title,
@@ -264,11 +317,7 @@ public:
     // The row's width comes from the list with room for its scrollbar kept whether or not the
     // scrollbar is showing: measured at one width and painted at another, the elision would be
     // computed for a row wider than the one drawn.
-    int rowWidth() const
-    {
-        const int reserve = m_list->verticalScrollBar()->sizeHint().width() + 2;
-        return qMax(120, m_list->width() - 2 * m_list->frameWidth() - reserve);
-    }
+    int rowWidth() const { return rowContentWidth(m_list); }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
@@ -414,6 +463,15 @@ private:
         painter->drawText(shape.idRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
                           card->reference());
 
+        // The two date columns, in the same mono as the id: a column of dates reads as a column.
+        // A cell the card has nothing to say in stays blank rather than wrong (board::dateCell).
+        if (shape.dates) {
+            painter->drawText(shape.createdRect.translated(origin),
+                              Qt::AlignLeft | Qt::AlignVCenter, shape.created);
+            painter->drawText(shape.updatedRect.translated(origin),
+                              Qt::AlignLeft | Qt::AlignVCenter, shape.updated);
+        }
+
         const QFont badgeFont = smaller(option.font, 0.85);
         painter->setFont(badgeFont);
         for (const auto &placed : shape.badges) {
@@ -501,6 +559,158 @@ private:
 };
 
 }  // namespace
+
+// The header row over the list (owner, 2026-09-19: "change switchboard sorting from a sort
+// button to adding header columns that you click on", then "add a 'created' and 'updated'
+// column"): three cells — Card, Created, Updated — each one a sort of the cards *inside* every
+// section, with the arrow on the one that is on. A cell is placed with the same measurements the
+// row delegate draws its columns with, so a label sits exactly over the cells it names; the two
+// date cells and their labels go together when the pane is too narrow to carry them.
+class ColumnHeader final : public QWidget {
+public:
+    explicit ColumnHeader(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("boardColumnHeader"));
+        m_layout = new QHBoxLayout(this);
+        m_layout->setSpacing(kDateGap);
+        const QList<board::SortColumn> columns{board::SortColumn::Card, board::SortColumn::Created,
+                                               board::SortColumn::Updated};
+        for (const board::SortColumn column : columns) {
+            auto *cell = new QToolButton(this);
+            cell->setObjectName(column == board::SortColumn::Card
+                                    ? QStringLiteral("boardHeaderCard")
+                                : column == board::SortColumn::Created
+                                    ? QStringLiteral("boardHeaderCreated")
+                                    : QStringLiteral("boardHeaderUpdated"));
+            cell->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            cell->setCursor(Qt::PointingHandCursor);
+            cell->setFocusPolicy(Qt::NoFocus);      // the arrows stay with the list
+            cell->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+            connect(cell, &QToolButton::clicked, this, [this, column] {
+                if (onSort)
+                    onSort(column);
+            });
+            m_cell[int(column)] = cell;
+            m_layout->addWidget(cell);
+            // The stretch sits between the card's own label and the two date columns, which are
+            // the table's right-hand columns.
+            if (column == board::SortColumn::Card)
+                m_layout->addStretch(1);
+        }
+        layoutCells();
+        updateCells();
+    }
+
+    // Which column was clicked: the pane turns it into the sort that is on.
+    std::function<void(board::SortColumn)> onSort;
+
+    // The list the cells line up with: its width decides where they sit and whether the two date
+    // columns fit at all (the rows ask the same question of the same width, so a header whose
+    // labels had gone while the cells were still drawn cannot happen).
+    void setList(QListWidget *list)
+    {
+        m_list = list;
+        layoutCells();
+    }
+
+    // The sort that is on, as the list's own (board::Sort): the arrow follows it.
+    void setSort(board::Sort sort)
+    {
+        if (m_ready && sort == m_sort)
+            return;
+        m_sort = sort;
+        m_ready = true;
+        updateCells();
+    }
+
+protected:
+    // The cells' places depend on the width and on the font, so both are re-read when either
+    // changes — a theme switch can change the font under a pane that is not resized.
+    void resizeEvent(QResizeEvent *) override { layoutCells(); }
+    void changeEvent(QEvent *event) override
+    {
+        QWidget::changeEvent(event);
+        if (event->type() == QEvent::FontChange)
+            layoutCells();
+    }
+
+private:
+    // Where the cells sit and which of them are on the page: measured from the list, whose width
+    // this header shares, keeping the same reserve at the right that the rows keep for the
+    // scrollbar and the same left margin the rows' titles start at.
+    void layoutCells()
+    {
+        const int frame = m_list ? m_list->frameWidth() : 0;
+        const int reserve = m_list ? rowReserve(m_list) : 0;
+        const int rowWidth = m_list ? rowContentWidth(m_list) : width();
+        m_layout->setContentsMargins(frame + kRowPadX + kGlyphWidth + 4, 3,
+                                     qMax(0, reserve - frame) + kRowPadX, 3);
+        const QFont base = font();
+        const bool dates = dateColumnsFit(base, rowWidth);
+        const int column = dateColumnWidth(base);
+        for (int i = 0; i < 3; ++i) {
+            QToolButton *cell = m_cell[i];
+            if (cell == nullptr)
+                continue;
+            // The font is set here and never in the stylesheet, so sizeHint() measures what paints.
+            QFont cellFont = monoFont(base, 0.85);
+            cellFont.setLetterSpacing(QFont::PercentageSpacing, 106);
+            cell->setFont(cellFont);
+            cell->setMinimumHeight(QFontMetrics(cellFont).height() + 6);
+            const bool date = i != int(board::SortColumn::Card);
+            if (date)
+                cell->setFixedWidth(column);
+            cell->setVisible(!date || dates);
+        }
+    }
+
+    // What each cell says: its name, and its arrow when it is the sort that is on.
+    void updateCells()
+    {
+        const int active = board::sortColumnIndex(m_sort);
+        for (int i = 0; i < 3; ++i) {
+            QToolButton *cell = m_cell[i];
+            if (cell == nullptr)
+                continue;
+            const board::SortColumn column = board::SortColumn(i);
+            QString text = board::columnTitle(column).toUpper();
+            if (active == i)
+                text += board::sortAscending(m_sort) ? QStringLiteral(" ▲") : QStringLiteral(" ▼");
+            cell->setText(text);
+            cell->setToolTip(cellTooltip(column, m_sort));
+            cell->setProperty("active", active == i);
+            cell->style()->unpolish(cell);
+            cell->style()->polish(cell);
+        }
+    }
+
+    // The tip: what the column is and the orders a click walks through, in the order it walks
+    // through them — so the cycle back to the board's own drag order is written where it happens.
+    static QString cellTooltip(board::SortColumn column, board::Sort current)
+    {
+        const board::Sort first = board::nextColumnSort(column, board::Sort::Manual);
+        const board::Sort second = board::nextColumnSort(column, first);
+        const QString what = column == board::SortColumn::Card
+                                 ? QStringLiteral("the card's title")
+                             : column == board::SortColumn::Created
+                                 ? QStringLiteral("when the card was created")
+                                 : QStringLiteral("when the card last changed");
+        if (board::sortColumnIndex(current) == int(column))
+            return QStringLiteral("Sorted by %1 — %2. Click again for %3, or once more for the "
+                                  "board's own order.")
+                .arg(what, board::sortTitle(current).toLower(),
+                     board::sortTitle(board::nextColumnSort(column, current)).toLower());
+        return QStringLiteral("Order the cards inside each section by %1: %2, then %3, then the "
+                              "board's own order — the one drag and drop writes.")
+            .arg(what, board::sortTitle(first).toLower(), board::sortTitle(second).toLower());
+    }
+
+    QHBoxLayout *m_layout = nullptr;
+    QToolButton *m_cell[3] = {nullptr, nullptr, nullptr};
+    QListWidget *m_list = nullptr;
+    board::Sort m_sort = board::Sort::Manual;
+    bool m_ready = false;
+};
 
 // The one list: section headers and cards in a single vertical scroll. It reports a drop instead
 // of moving the row itself — the card only moves once the worker has written the file and sent
@@ -2227,7 +2437,15 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     buildListTools(listLayout);
     buildCleanupPanel(listLayout);
     buildQuickAdd(listLayout);
+    // The list's column header, between the tools and the rows: the sort lives here now (owner,
+    // 2026-09-19). It measures against the list, so it is wired once the list is up.
+    m_columnHeader = new ColumnHeader(m_listPane);
+    m_columnHeader->onSort = [this](board::SortColumn column) {
+        setSortOrder(board::sortId(board::nextColumnSort(column, m_model.sort())));
+    };
+    listLayout->addWidget(m_columnHeader);
     m_list = new RowList(&m_rows, m_listPane);
+    m_columnHeader->setList(m_list);
     auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
     delegate->adds = [this](const QString &columnId) { return sectionTakesNewCards(columnId); };
     delegate->turnMode = [this](const QString &cardId) {
@@ -2292,6 +2510,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         openSelected();
     });
     m_list->installEventFilter(this);
+    syncColumnHeader();
     listLayout->addWidget(m_list, 1);
     m_splitter->addWidget(m_listPane);
 
@@ -2484,35 +2703,9 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_filter->setClearButtonEnabled(true);
     m_filter->setMinimumWidth(60);      // it gives way to the buttons rather than pushing them out
     m_listTools->addWidget(m_filter, 1);
-    // The order of the cards inside each section (owner, 2026-09-19: "add sorting options,
-    // especially by time"). A menu button rather than a fourth always-on control: the choice is
-    // made once and read all day, and the button names what is on — "Sort: Newest first".
-    m_sort = new QToolButton(tools);
-    m_sort->setObjectName(QStringLiteral("boardSort"));
-    m_sort->setPopupMode(QToolButton::InstantPopup);
-    m_sort->setCursor(Qt::PointingHandCursor);
-    m_sort->setFocusPolicy(Qt::NoFocus);
-    m_sort->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    m_sort->setToolTip(QStringLiteral("How the cards inside each section are ordered. Manual is "
-                                      "the order drag and drop writes; the time sorts reorder "
-                                      "every section and take manual reordering off."));
-    auto *sortMenu = new QMenu(m_sort);
-    const QList<QPair<QString, QString>> choices{
-        {QStringLiteral("manual"), QStringLiteral("Manual (drag order)")},
-        {QStringLiteral("newest"), QStringLiteral("Newest first")},
-        {QStringLiteral("oldest"), QStringLiteral("Oldest first")},
-        {QStringLiteral("updated"), QStringLiteral("Recently updated")}};
-    for (const auto &choice : choices) {
-        QAction *action = sortMenu->addAction(choice.second);
-        action->setCheckable(true);
-        action->setData(choice.first);
-        action->setChecked(board::sortFromId(choice.first) == m_model.sort());
-        const QString id = choice.first;
-        connect(action, &QAction::triggered, this, [this, id] { setSortOrder(id); });
-    }
-    m_sort->setMenu(sortMenu);
-    syncSortButton();
-    m_listTools->addWidget(m_sort);
+    // There is no sort control in this row any more (owner, 2026-09-19: "change switchboard
+    // sorting from a sort button to adding header columns that you click on"): the order is the
+    // list's own column header, built with the list under these tools.
     m_add = new QToolButton(tools);
     m_add->setObjectName(QStringLiteral("boardAddButton"));
     m_add->setText(QStringLiteral("+  New card (n)"));
@@ -2663,14 +2856,14 @@ void BoardView::layoutListTools()
     const int room = m_listPane->width() - 16 - inset;
     // The filter is owed a legible width before either button may sit beside it.
     const int need = m_count->sizeHint().width() + 150 + m_add->sizeHint().width()
-                     + m_cleanup->sizeHint().width() + m_sort->sizeHint().width() + 24;
+                     + m_cleanup->sizeHint().width() + 24;
     const bool wrap = room < need;
     if (wrap == m_toolsWrapped)
         return;
     m_toolsWrapped = wrap;
     QHBoxLayout *from = wrap ? m_listTools : m_toolsWrap;
     QHBoxLayout *to = wrap ? m_toolsWrap : m_listTools;
-    for (QToolButton *button : {m_add, m_sort, m_cleanup}) {
+    for (QToolButton *button : {m_add, m_cleanup}) {
         from->removeWidget(button);
         to->addWidget(button);
     }
@@ -3475,8 +3668,8 @@ void BoardView::closeSections()
 }
 
 // A section folds and unfolds; which sections are folded is saved with the window's layout.
-// The sort menu's choice (and a restored pane's saved one): set the model, name it on the
-// button, redraw. Safe on a board that has not opened yet — the rows are empty until the first
+// A click on a column header (and a restored pane's saved sort): set the model, show it on the
+// header, redraw. Safe on a board that has not opened yet — the rows are empty until the first
 // `board` event, and the order is waiting for them.
 void BoardView::setSortOrder(const QString &id)
 {
@@ -3484,10 +3677,7 @@ void BoardView::setSortOrder(const QString &id)
     if (sort == m_model.sort())
         return;
     m_model.setSort(sort);
-    syncSortButton();
-    if (m_sort)
-        for (QAction *action : m_sort->menu()->actions())
-            action->setChecked(action->data().toString() == id);
+    syncColumnHeader();
     rebuild();
     // The selection may have moved out from under the card: stand on it where it landed.
     const int at = board::rowOfCard(m_rows, m_selected);
@@ -3495,12 +3685,12 @@ void BoardView::setSortOrder(const QString &id)
         selectRow(at);
 }
 
-// The button names what is on; the menu's tick follows the same source, so a restored pane opens
-// with both right.
-void BoardView::syncSortButton()
+// The header shows what is on: the cell that wears the arrow. A restored pane opens with it
+// right, because the sort rides the layout node and the header reads the model.
+void BoardView::syncColumnHeader()
 {
-    if (m_sort)
-        m_sort->setText(QStringLiteral("Sort: %1").arg(board::sortTitle(m_model.sort())));
+    if (m_columnHeader)
+        m_columnHeader->setSort(m_model.sort());
 }
 
 void BoardView::toggleSection(QString columnId)
@@ -3659,8 +3849,8 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
     const QString status = m_model.dropStatus(columnId);
     const bool sameSection = moving && m_model.sectionOf(*moving) == columnId;
     if (sameSection && m_model.sort() != board::Sort::Manual) {
-        showNotice(QStringLiteral("The list is sorted by %1, so reordering is off. Sort by "
-                                  "Manual to drag cards around.")
+        showNotice(QStringLiteral("The list is sorted by %1, so reordering is off. Click that "
+                                  "column's header again for the board's own order.")
                        .arg(board::sortTitle(m_model.sort()).toLower()),
                    true);
         return;

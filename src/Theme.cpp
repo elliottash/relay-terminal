@@ -674,6 +674,15 @@ QToolButton#boardBack:hover { color: @text; border-color: @border; background: @
    font is set here and in no pseudo-state rule, so sizeHint() measures what actually paints. */
 QCheckBox#boardSectionCheck { color: @muted; font-family: "@mono"; font-size: 9pt; spacing: 5px; padding: 0; }
 QCheckBox#boardSectionCheck::indicator { width: 11px; height: 11px; border-radius: 3px; }
+/* The list's column header (owner, 2026-09-19: "change switchboard sorting from a sort button to
+   adding header columns that you click on"): the Card, Created and Updated cells a click sorts by.
+   Engraved like the section headers they sit above — mono, upper case, letter-spaced, and the font
+   is set in code so sizeHint() measures what paints — muted until the pointer or the sort is on
+   them. The sort that is on wears the accent and its arrow. */
+QWidget#boardColumnHeader { background: transparent; }
+QToolButton#boardHeaderCard, QToolButton#boardHeaderCreated, QToolButton#boardHeaderUpdated { color: @muted; background: transparent; border: none; border-radius: 4px; padding: 0; }
+QToolButton#boardHeaderCard:hover, QToolButton#boardHeaderCreated:hover, QToolButton#boardHeaderUpdated:hover { color: @text; }
+QToolButton#boardHeaderCard[active="true"], QToolButton#boardHeaderCreated[active="true"], QToolButton#boardHeaderUpdated[active="true"] { color: @accent; }
 QListWidget#boardList { background: transparent; border: none; }
 QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
 QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }

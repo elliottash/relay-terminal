@@ -1,18 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BoardSections.h"
 
+#include "Theme.h"
+
+#include <QApplication>
 #include <QCheckBox>
+#include <QDrag>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDropEvent>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
+
+#include <utility>
 
 namespace relay {
 namespace board {
@@ -26,7 +39,130 @@ QString joinTitles(const QStringList &statuses)
     return out.join(QStringLiteral(", "));
 }
 
+// The MIME type a section is dragged under: Relay's own, so a drop from another program — a file,
+// a URL, a selection — is never mistaken for a section.
+const char kSectionMime[] = "application/x-relay-board-section";
+
+// Where an event happened, whichever Qt this is built against (`position()` from 6 on).
+QPoint eventPoint(QMouseEvent *event)
+{
+#if QT_VERSION_MAJOR >= 6
+    return event->position().toPoint();
+#else
+    return event->pos();
+#endif
+}
+
+QPoint eventPoint(QDropEvent *event)
+{
+#if QT_VERSION_MAJOR >= 6
+    return event->position().toPoint();
+#else
+    return event->pos();
+#endif
+}
+
+QPoint eventPoint(QDragMoveEvent *event)
+{
+#if QT_VERSION_MAJOR >= 6
+    return event->position().toPoint();
+#else
+    return event->pos();
+#endif
+}
+
+// Whether this drop is a section, and not the one this row already is.
+bool isSectionDrop(QDropEvent *event, const QString &id)
+{
+    return event->mimeData()->hasFormat(kSectionMime)
+           && QString::fromUtf8(event->mimeData()->data(kSectionMime)) != id;
+}
+
 }  // namespace
+
+SectionRow::SectionRow(const QString &id, QWidget *parent) : QWidget(parent), m_id(id)
+{
+    setObjectName(QStringLiteral("boardSectionRow"));
+    setAcceptDrops(true);
+}
+
+void SectionRow::dropHere(const QString &id, int y)
+{
+    if (id.isEmpty() || id == m_id)
+        return;
+    m_hover = false;
+    update();
+    if (onDrop)
+        onDrop(id, y < height() / 2);
+}
+
+void SectionRow::mousePressEvent(QMouseEvent *event)
+{
+    if (draggable && event->button() == Qt::LeftButton)
+        m_press = eventPoint(event);
+    QWidget::mousePressEvent(event);
+}
+
+void SectionRow::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!draggable || m_press.isNull() || !(event->buttons() & Qt::LeftButton))
+        return;
+    if ((eventPoint(event) - m_press).manhattanLength() < QApplication::startDragDistance())
+        return;
+    m_press = QPoint();
+    auto *drag = new QDrag(this);
+    auto *mime = new QMimeData;
+    mime->setData(kSectionMime, m_id.toUtf8());
+    drag->setMimeData(mime);
+    drag->setPixmap(grab());            // the row itself, as the thing being carried
+    drag->exec(Qt::MoveAction);
+}
+
+void SectionRow::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (isSectionDrop(event, m_id))
+        event->acceptProposedAction();
+}
+
+void SectionRow::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (!isSectionDrop(event, m_id)) {
+        event->ignore();
+        return;
+    }
+    m_above = eventPoint(event).y() < height() / 2;
+    m_hover = true;
+    update();
+    event->acceptProposedAction();
+}
+
+void SectionRow::dragLeaveEvent(QDragLeaveEvent *)
+{
+    m_hover = false;
+    update();
+}
+
+void SectionRow::dropEvent(QDropEvent *event)
+{
+    if (!isSectionDrop(event, m_id)) {
+        event->ignore();
+        return;
+    }
+    const int y = eventPoint(event).y();
+    event->setDropAction(Qt::IgnoreAction);
+    event->accept();
+    dropHere(QString::fromUtf8(event->mimeData()->data(kSectionMime)), y);
+}
+
+void SectionRow::paintEvent(QPaintEvent *)
+{
+    if (!m_hover)
+        return;
+    QPainter painter(this);
+    painter.setPen(QPen(theme::Accent, 2));
+    const int y = m_above ? 1 : height() - 2;
+    painter.drawLine(0, y, width(), y);
+}
 
 // --------------------------------------------------------------------------- the plan
 
@@ -178,6 +314,86 @@ void SectionPlan::merge(const QString &from, const QString &into)
     m_columns.removeAll(from);
     m_changes << QStringLiteral("%1 merged into %2").arg(was, keeps);
     m_dirty = true;
+}
+
+// `columns:` in the order the list draws. Everything the board configures that the plan has a row
+// for moves with it; a configured section with no row — `done`, which the list keeps as its last
+// section whatever the file says — keeps its place in the file, at the end.
+void SectionPlan::syncColumns()
+{
+    QStringList out;
+    for (const Row &row : std::as_const(m_rows))
+        if (m_columns.contains(row.id) && !out.contains(row.id))
+            out << row.id;
+    for (const QString &id : std::as_const(m_columns))
+        if (!out.contains(id))
+            out << id;
+    m_columns = out;
+}
+
+QString SectionPlan::whyNotMove(const QString &id, int delta) const
+{
+    const Row *found = row(id);
+    if (found == nullptr)
+        return QStringLiteral("no such section");
+    if (found->fixed)
+        return QStringLiteral("Verified and Done are always the last two sections");
+    const int at = indexOf(id);
+    const int target = at + delta;
+    if (target < 0)
+        return QStringLiteral("this is the first section");
+    if (target >= m_rows.size() || m_rows.at(target).fixed)
+        return QStringLiteral("this is the last section before Verified and Done");
+    return QString();
+}
+
+bool SectionPlan::canMove(const QString &id, int delta) const
+{
+    return whyNotMove(id, delta).isEmpty();
+}
+
+void SectionPlan::move(const QString &id, int delta)
+{
+    if (!canMove(id, delta))
+        return;
+    const int at = indexOf(id);
+    const QString other = m_rows.at(at + delta).title();
+    const Row row = m_rows.takeAt(at);
+    m_rows.insert(at + delta, row);
+    syncColumns();
+    m_changes << QStringLiteral("%1 moved %2 %3")
+                     .arg(row.title(), delta < 0 ? QStringLiteral("above") : QStringLiteral("below"),
+                          other);
+    m_dirty = true;
+}
+
+bool SectionPlan::moveBefore(const QString &id, const QString &beforeId)
+{
+    const int at = indexOf(id);
+    if (at < 0 || m_rows.at(at).fixed)
+        return false;
+    // The two that are always last stay last: a drop at or under them lands just above them, which
+    // is what the row's own drag line shows while the section is held there.
+    int limit = m_rows.size();
+    while (limit > 0 && m_rows.at(limit - 1).fixed)
+        --limit;
+    int target = beforeId.isEmpty() ? limit : indexOf(beforeId);
+    if (target < 0)
+        return false;
+    target = qBound(0, target, limit);
+    if (target == at || target == at + 1)
+        return false;                      // it is already where it was dropped
+    const Row row = m_rows.takeAt(at);
+    if (target > at)
+        --target;                          // the row left before the insertion point
+    m_rows.insert(target, row);
+    syncColumns();
+    m_changes << QStringLiteral("%1 moved %2")
+                     .arg(row.title(),
+                          target == 0 ? QStringLiteral("to the top")
+                                      : QStringLiteral("below %1").arg(m_rows.at(target - 1).title()));
+    m_dirty = true;
+    return true;
 }
 
 QString SectionPlan::idFor(const QString &name)
@@ -413,11 +629,41 @@ void SectionEditor::rebuild()
     }
     const QList<SectionPlan::Row> rows = m_plan.rows();
     for (const SectionPlan::Row &row : rows) {
-        auto *line = new QWidget(m_rowsHost);
-        line->setObjectName(QStringLiteral("boardSectionRow"));
+        auto *line = new SectionRow(row.id, m_rowsHost);
+        // Verified and Done stay last: they cannot be dragged, and their buttons are off.
+        line->draggable = !row.fixed;
+        line->onDrop = [this, section = row.id](const QString &dragged, bool above) {
+            // Where the section goes: in front of this row, or in front of the one under it.
+            const QList<SectionPlan::Row> order = m_plan.rows();
+            QString before;
+            for (int i = 0; i < order.size(); ++i) {
+                if (order.at(i).id != section)
+                    continue;
+                const int next = above ? i : i + 1;
+                before = next < order.size() ? order.at(next).id : QString();
+                break;
+            }
+            if (m_plan.moveBefore(dragged, before))
+                // Not from inside the drop: the rebuild deletes the row the drop landed on, which
+                // Qt's drag machinery is still holding.
+                QTimer::singleShot(0, this, [this] { rebuild(); });
+            else
+                updateFooter();
+        };
         auto *cells = new QHBoxLayout(line);
         cells->setContentsMargins(0, 0, 0, 0);
         cells->setSpacing(6);
+
+        // The handle: press it and drag to move the section. A QLabel takes no press of its own, so
+        // the row underneath starts the drag.
+        auto *handle = new QLabel(QStringLiteral("⠿"), line);
+        handle->setObjectName(QStringLiteral("boardSectionHandle"));
+        handle->setCursor(Qt::OpenHandCursor);
+        handle->setToolTip(row.fixed
+                               ? QStringLiteral("Verified and Done are always the last two sections")
+                               : QStringLiteral("Drag this section to move it, or use ▲ and ▼"));
+        handle->setVisible(!row.fixed);
+        cells->addWidget(handle);
 
         auto *name = new QLineEdit(row.title(), line);
         name->setObjectName(QStringLiteral("boardSectionName"));
@@ -468,6 +714,26 @@ void SectionEditor::rebuild()
             merge->setMenu(menu);
         }
         cells->addWidget(merge);
+
+        // Moving the section in the list (owner, 2026-09-19: "with up and down buttons for moving
+        // them"): the same verb as the drag, for a short move and for the keyboard.
+        for (const int delta : {-1, 1}) {
+            auto *button = new QToolButton(line);
+            button->setObjectName(delta < 0 ? QStringLiteral("boardSectionUp")
+                                            : QStringLiteral("boardSectionDown"));
+            button->setText(delta < 0 ? QStringLiteral("▲") : QStringLiteral("▼"));
+            button->setEnabled(m_plan.canMove(row.id, delta));
+            button->setToolTip(m_plan.canMove(row.id, delta)
+                                   ? QStringLiteral("Move this section %1 one place")
+                                         .arg(delta < 0 ? QStringLiteral("up")
+                                                        : QStringLiteral("down"))
+                                   : m_plan.whyNotMove(row.id, delta));
+            connect(button, &QToolButton::clicked, this, [this, id, delta] {
+                m_plan.move(id, delta);
+                rebuild();
+            });
+            cells->addWidget(button);
+        }
 
         auto *remove = new QToolButton(line);
         remove->setObjectName(QStringLiteral("boardSectionRemove"));

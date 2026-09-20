@@ -36,6 +36,7 @@ class RichEditor;
 namespace relay {
 
 class CardDetail;
+class ColumnHeader;
 class RowList;
 
 class BoardView : public QWidget {
@@ -91,8 +92,9 @@ public:
     void setHiddenSections(const QJsonArray &state);
 
     // The order of the cards inside each section (board::Sort), as the id the layout node keeps:
-    // "manual", "newest", "oldest" or "updated". Saved and restored with the folded set above, so
-    // a pane keeps its sort across restarts. Unknown ids read as Manual.
+    // "manual", "newest", "oldest", "updated", "updated-oldest", "title" or "title-desc". Saved
+    // and restored with the folded set above, so a pane keeps its sort across restarts. Unknown
+    // ids read as Manual.
     QString sortOrder() const { return board::sortId(m_model.sort()); }
     void setSortOrder(const QString &id);
 
@@ -165,8 +167,8 @@ private:
     // the two buttons drop to a line of their own rather than eliding to "…".
     void layoutListTools();
     void updateCounts();
-    // The toolbar button and its menu name the sort that is on (board::Sort).
-    void syncSortButton();
+    // The list's column header says what is on (board::Sort): which cell wears the arrow.
+    void syncColumnHeader();
     void refill();
     void moveCard(const QString &id, const QString &columnId, const QString &beforeId,
                   const QString &afterId);
@@ -236,8 +238,9 @@ private:
     QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
     QHBoxLayout *m_toolsWrap = nullptr;
     QToolButton *m_add = nullptr, *m_cleanup = nullptr;
-    // The toolbar's sort menu (board::Sort): which order the cards inside a section come in.
-    QToolButton *m_sort = nullptr;
+    // The list's own column header (board::Sort): the Card, Created and Updated cells a click
+    // sorts by, over the rows and under the tools.
+    ColumnHeader *m_columnHeader = nullptr;
     bool m_toolsWrapped = false;
     QWidget *m_checks = nullptr;        // the section checkboxes, wrapping in a narrow pane
     QLayout *m_checksLayout = nullptr;

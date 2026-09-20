@@ -234,10 +234,20 @@ So one list really does hold every open card whatever its type. A header carries
 and its count, folds on a click (or Left/Right), and has a `+` on hover that adds into it; which
 sections are folded is saved with the window's layout (`{"board": {"workspace", "collapsed"}}`).
 A checkbox at the top of the page (4.7) takes a whole section off the list, which is a different
-thing from folding it.
+thing from folding it. **The order of the sections is the board's own** and is set in the gear
+(owner, 2026-09-19: "we do need sorting of sections though. enable those to be dragged and
+dropped, with up and down buttons for moving them, in the section settings modal"): each row of
+the section list has a drag handle and ▲ ▼ buttons, moving one is one rewrite of `columns:` in the
+new order, and Verified and Done stay the last two — nothing moves past them and they do not move
+themselves (`SectionPlan::move` / `moveBefore`).
 
 **A row.** Status glyph, title (elided), `#ID`, then labels / `✦ agent` or assignee /
-`waiting: …` / `☑ done/total` / `✎ thread` / age, right-aligned. The title is owed 45% of the row
+`waiting: …` / `☑ done/total` / `✎ thread` / age, right-aligned. The table's two right-hand
+columns are **Created** and **Updated** (owner, 2026-09-19: "add a 'created' and 'updated'
+column"), each a fixed mono cell holding the date part of the card's `created`/`updated`
+(`2026-09-19`), with the badges to their left and the header's labels over them; a cell a card has
+nothing to say in stays blank, and both columns go when the pane is too narrow for them (the same
+question the header asks, so a label never outlives its cells). The title is owed 45% of the row
 (80–280 px) before a badge may have anything, no single badge may take more than a quarter of the
 width, and the badges that do not fit are dropped in order — labels, thread count, age, tasks,
 assignee, agent, private, status, `waiting:` — so a narrow pane loses decoration before it loses
@@ -246,16 +256,23 @@ wrapping. The glyph set: `○` inbox/draft, `◇` discussing, `◆` ready/approv
 `◐` a Waiting lane, `◉` a QA lane, `◌` deferred/retired, `✓` done, `✗` dropped, coloured by
 family (accent for running, warning for waiting, the agent violet for QA).
 
-**Sorting.** A `Sort` menu beside the filter box (owner, 2026-09-19: "add sorting options,
-especially by time") picks the order of the cards *inside* every section: **Manual** — the
-board's own rank, the order drag and drop and Alt+Shift+↑↓ write, with Done and Verified newest
-first as they always were — **Newest first**, **Oldest first** (by `created`) and **Recently
-updated** (by the row's `updated`, the card file's or its thread file's mtime, whichever is
-later; an older worker sends none and that sort falls back to `created`). A time sort takes over
-every section alike and takes the manual reorder off — a drop inside the card's own section and
-Alt+Shift+↑↓ answer with a notice saying why, while drops *between* sections still move, because
-they write a status and not a place. The choice is saved with the window's layout
-(`{"board": {"workspace", "collapsed", "hidden", "sort"}}`) and each pane keeps its own.
+**Sorting.** The list's own column header (owner, 2026-09-19: "change switchboard sorting from a
+sort button to adding header columns that you click on ... and sorting is within section"): a row
+of cells over the list — **Card**, **Created**, **Updated** — each one a click. A click orders the
+cards *inside every section* by that column, a second click turns that column round, and a third
+gives the board its own order back, so the drag order is always one click away and no control has
+to say which order is on: the cell that is on wears the arrow (`▲` for oldest first, A→Z and least
+recently updated; `▼` for the other way). The orders are **Manual** — the board's own rank, the
+order drag and drop and Alt+Shift+↑↓ write, with Done and Verified newest first as they always
+were — **Newest first** and **Oldest first** (by `created`), **Recently updated** and **Least
+recently updated** (by the row's `updated`, the card file's or its thread file's mtime, whichever
+is later; an older worker sends none and those sorts fall back to `created`), and **Title A→Z** and
+**Title Z→A**. Any order but Manual takes the manual reorder off — a drop inside the card's own
+section and Alt+Shift+↑↓ answer with a notice pointing back at the header, while drops *between*
+sections still move, because they write a status and not a place. The choice is saved with the
+window's layout (`{"board": {"workspace", "collapsed", "hidden", "sort"}}`) and each pane keeps its
+own. The two date cells are the row's right-hand columns (below), and they go, labels and all,
+when the pane is too narrow to carry them.
 
 **Keyboard.** Up/Down walk the card rows of the whole list, stepping over the headers; PageUp/Down
 and Home/End likewise; Enter opens; Left folds the selection's section and stands on the nearest

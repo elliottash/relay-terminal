@@ -72,18 +72,43 @@ QString statusTitle(const QString &status);
 // ---- sorting -----------------------------------------------------------------
 //
 // How the cards inside each section are ordered (owner, 2026-09-19: "add sorting options,
-// especially by time"). `Manual` is the board's own rank — the order drags and Alt+Shift+↑↓
-// write — and the closed sections stay newest first under it, as they always were. The three
-// time sorts take over *every* section alike and take the manual reorder off (a rank nobody can
-// see is a rank nobody can write), so what is on screen and what a drag would say never disagree.
-enum class Sort { Manual, NewestFirst, OldestFirst, RecentlyUpdated };
-// The id the pane's layout node keeps ("manual", "newest", "oldest", "updated") and back; an
-// unknown id reads as Manual, so a saved pane survives a sort being renamed away.
+// especially by time"; then 2026-09-19: "change switchboard sorting from a sort button to adding
+// header columns that you click on ... and sorting is within section"). The sort is the list's
+// column header (below): a click on Card, Created or Updated orders the cards *inside every
+// section* by that column. `Manual` is the board's own rank — the order drags and Alt+Shift+↑↓
+// write — and the closed sections stay newest first under it, as they always were. Any other
+// order takes the manual reorder off (a rank nobody can see is a rank nobody can write), so what
+// is on screen and what a drag would say never disagree.
+enum class Sort { Manual, NewestFirst, OldestFirst, RecentlyUpdated, OldestUpdated, TitleAsc,
+                  TitleDesc };
+// The id the pane's layout node keeps ("manual", "newest", "oldest", "updated", "updated-oldest",
+// "title", "title-desc") and back; an unknown id reads as Manual, so a saved pane survives a sort
+// being renamed away.
 QString sortId(Sort sort);
 Sort sortFromId(const QString &id);
-// "Manual", "Newest first", "Oldest first", "Recently updated" — the menu's entries and the
-// toolbar button's word for what is on.
+// "Manual", "Newest first", "Oldest first", "Recently updated", "Least recently updated",
+// "Title A→Z", "Title Z→A" — the word for what is on, in a notice or a tooltip.
 QString sortTitle(Sort sort);
+
+// ---- the list's columns (owner, 2026-09-19: "add a 'created' and 'updated' column") ----------
+//
+// The header row over the list, left to right: the card itself, then when it was created and when
+// it last changed. Each is a sort, and a click cycles that column's own orders and then back to
+// Manual, so the board's drag order is always one click away.
+enum class SortColumn { Card, Created, Updated };
+// "Card", "Created", "Updated" — the header's word for a column.
+QString columnTitle(SortColumn column);
+// The order a click on this column's header puts the list in, given the sort that is on.
+Sort nextColumnSort(SortColumn column, Sort current);
+// Which column is showing its arrow, or -1 when the list is in Manual (no column is active).
+int sortColumnIndex(Sort sort);
+// Whether a sort runs ascending — oldest first, A→Z, least recently updated — so its arrow points
+// up. Manual has no arrow and answers false.
+bool sortAscending(Sort sort);
+// A date column's text: the date part of a card's `created` or `updated`, so an ISO timestamp and
+// a bare date both read "2026-09-19", and empty when the field holds nothing that looks like a
+// date — the cell is then blank rather than wrong.
+QString dateCell(const QString &stamp);
 
 // What a section collects when `board.yaml` does not override it (`column_statuses:`), which is
 // `board.COLUMN_STATUSES` on the worker's side. The gear writes an override only where the board

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The section editor behind the gear at the end of the Switchboard's section checkboxes: the four
-// things it offers (add, remove, merge, rename), what it refuses, and the one `board_sections`
-// message it produces. `SectionPlan` holds no widgets, so none of this needs the pane.
+// The section editor behind the gear at the end of the Switchboard's section checkboxes: the five
+// things it offers (add, remove, merge, rename, move), what it refuses, and the one
+// `board_sections` message it produces. `SectionPlan` holds no widgets, so none of this needs the
+// pane.
 //
 // The property every test here is really about: **a section is a view of the statuses**. No edit
 // moves a card or changes one, and no edit can lose a card — a status the edit leaves uncollected
@@ -12,6 +13,7 @@
 
 #include <QCheckBox>
 #include <QJsonArray>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QToolButton>
@@ -94,6 +96,8 @@ private slots:
     void theLastTwoSectionsCanBeRenamedButNeverTakenAway();
     void mergingPutsBothSetsOfStatusesInOneSection();
     void aNewSectionNeedsANameAndStatusesNobodyElseCollects();
+    void movingASectionRewritesColumnsAndNeverACard();
+    void theRowsMoveWithTheButtonsAndTheDropLandsWhereItWasDropped();
     void theFolderRowOffersToHideOrShowTheBoardsFolder();
     void theMessageWritesOnlyWhatDiffersFromTheDefault();
     void anUntouchedPlanHasNothingToSay();
@@ -253,6 +257,145 @@ void BoardSectionsTests::aNewSectionNeedsANameAndStatusesNobodyElseCollects()
                  .value(QStringLiteral("parked")).toString(), QStringLiteral("Parked"));
     // And its name cannot be taken twice.
     QVERIFY(!plan.addRefusal(QStringLiteral("Parked"), {QStringLiteral("dropped")}).isEmpty());
+}
+
+// Moving a section (owner, 2026-09-19: "we do need sorting of sections though. enable those to be
+// dragged and dropped, with up and down buttons for moving them, in the section settings modal"):
+// the order is `columns:`, so a move is one rewrite of the section list and no card moves at all.
+void BoardSectionsTests::movingASectionRewritesColumnsAndNeverACard()
+{
+    const Model model = board();
+    SectionPlan plan = SectionPlan::from(model);
+    QCOMPARE(ids(plan), (QStringList{"inbox", "discussing", "ready", "in-progress", "waiting",
+                                     "needs-qa", "verified", "done"}));
+
+    // One place up, and `columns:` follows the list the sections are drawn in.
+    QVERIFY(plan.canMove(QStringLiteral("ready"), -1));
+    plan.move(QStringLiteral("ready"), -1);
+    QCOMPARE(ids(plan), (QStringList{"inbox", "ready", "discussing", "in-progress", "waiting",
+                                     "needs-qa", "verified", "done"}));
+    QCOMPARE(arrayOf(plan.message(), QStringLiteral("columns")),
+             (QStringList{"inbox", "ready", "discussing", "in-progress", "waiting", "needs-qa",
+                          "done"}));
+    QVERIFY(plan.summary().contains(QStringLiteral("Ready to start moved above Discussing")));
+
+    // Verified and Done are always the last two: nothing moves past them, and they do not move.
+    QVERIFY(!plan.canMove(QStringLiteral("inbox"), -1));
+    QVERIFY(!plan.canMove(QStringLiteral("needs-qa"), 1));
+    QVERIFY(!plan.canMove(QStringLiteral("verified"), -1));
+    QVERIFY(!plan.canMove(QStringLiteral("done"), -1));
+    QVERIFY(plan.whyNotMove(QStringLiteral("done"), -1).contains(QStringLiteral("always")));
+    QVERIFY(plan.whyNotMove(QStringLiteral("inbox"), -1).contains(QStringLiteral("first")));
+
+    // A drag: `waiting` dropped in front of the first section goes to the top, and a drop that
+    // would write the same file writes nothing at all.
+    QVERIFY(plan.moveBefore(QStringLiteral("waiting"), QStringLiteral("inbox")));
+    QCOMPARE(ids(plan).first(), QStringLiteral("waiting"));
+    QVERIFY(!plan.moveBefore(QStringLiteral("waiting"), QStringLiteral("inbox")));   // already there
+    // A drop at or under the two that are last lands just above them.
+    QVERIFY(plan.moveBefore(QStringLiteral("waiting"), QStringLiteral("verified")));
+    QCOMPARE(ids(plan).at(5), QStringLiteral("waiting"));
+    QCOMPARE(ids(plan).at(6), QStringLiteral("verified"));
+    QCOMPARE(ids(plan).last(), QStringLiteral("done"));
+
+    // A section that is only there because a card carries that status moves like any other, and is
+    // simply not written into `columns:` — it has no line in the file to move.
+    Model withCard = board();
+    withCard.reset(QJsonArray{QJsonObject{{"id", "DEF1"}, {"title", "Deferred card"},
+                                          {"type", "work"}, {"status", "deferred"},
+                                          {"tab", "features"}, {"rank", "i"},
+                                          {"path", "issues/features/DEF1.md"}}});
+    SectionPlan extra = SectionPlan::from(withCard);
+    QVERIFY(ids(extra).contains(QStringLiteral("deferred")));
+    QVERIFY(!extra.row(QStringLiteral("deferred"))->configured);
+    QVERIFY(extra.moveBefore(QStringLiteral("deferred"), QStringLiteral("inbox")));
+    QCOMPARE(ids(extra).first(), QStringLiteral("deferred"));
+    QVERIFY(!arrayOf(extra.message(), QStringLiteral("columns"))
+                 .contains(QStringLiteral("deferred")));
+}
+
+// The same verb from the page: the ▲ ▼ buttons, the drag handle, and a section dropped on a row.
+void BoardSectionsTests::theRowsMoveWithTheButtonsAndTheDropLandsWhereItWasDropped()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened());
+    view.findChild<QToolButton *>(QStringLiteral("boardSectionGear"))->click();
+    auto *page = view.findChild<QWidget *>(QStringLiteral("boardSectionEditor"));
+    auto *save = page->findChild<QPushButton *>(QStringLiteral("boardSectionEditorSave"));
+    const auto names = [page] {
+        QStringList out;
+        for (QLineEdit *name : page->findChildren<QLineEdit *>(QStringLiteral("boardSectionName")))
+            out << name->text();
+        return out;
+    };
+
+    // One handle and one ▲ ▼ per section, in the order the list draws them; the two that are always
+    // last cannot be dragged and their buttons are off.
+    const QList<QLabel *> handles =
+        page->findChildren<QLabel *>(QStringLiteral("boardSectionHandle"));
+    QCOMPARE(handles.size(), view.model().sections().size());
+    QVERIFY(!handles.first()->isHidden());
+    QVERIFY(handles.at(handles.size() - 2)->isHidden());    // Verified
+    QVERIFY(handles.last()->isHidden());                    // Done
+    const QList<QToolButton *> ups =
+        page->findChildren<QToolButton *>(QStringLiteral("boardSectionUp"));
+    const QList<QToolButton *> downs =
+        page->findChildren<QToolButton *>(QStringLiteral("boardSectionDown"));
+    QCOMPARE(ups.size(), view.model().sections().size());
+    QCOMPARE(downs.size(), view.model().sections().size());
+    QVERIFY(!ups.first()->isEnabled());                     // Inbox is already first
+    QVERIFY(ups.at(2)->isEnabled());                        // Ready can move up
+    QVERIFY(!ups.at(ups.size() - 2)->isEnabled());          // Verified is the last movable one
+    QVERIFY(!downs.last()->isEnabled());                    // Done is the last section
+
+    // ▲ on Ready: the rows are redrawn in the new order, and nothing is written until Save.
+    ups.at(2)->click();
+    QVERIFY(sent.isEmpty());
+    QVERIFY(save->isEnabled());
+    QCOMPARE(names().at(0), QStringLiteral("Inbox"));
+    QCOMPARE(names().at(1), QStringLiteral("Ready to start"));
+    QVERIFY(page->findChild<QLabel *>(QStringLiteral("boardSectionEditorSummary"))->text()
+                .contains(QStringLiteral("moved above")));
+
+    // A drop: a section dropped on the top half of a row goes in front of that row's section. Qt
+    // delivers a real drop only through its own drag machinery, so the row's own entry point is
+    // what is driven here — the half of the row the pointer is in is the row's decision.
+    const auto rowAt = [page](int index) {
+        return dynamic_cast<relay::board::SectionRow *>(
+            page->findChildren<QWidget *>(QStringLiteral("boardSectionRow")).at(index));
+    };
+    auto *first = rowAt(0);
+    QVERIFY(first);
+    first->resize(first->width(), 40);          // the page is not shown: give the row a height
+    first->dropHere(QStringLiteral("in-progress"), 2);
+    QTest::qWait(1);                           // the rebuild is deferred out of the drop itself
+    QCOMPARE(names().first(), QStringLiteral("In progress"));
+    // Dropping a section on its own row changes nothing, and the bottom half of a row means under
+    // it: `In progress` lands after Inbox.
+    first = rowAt(0);
+    QVERIFY(first);
+    first->resize(first->width(), 40);
+    first->dropHere(QStringLiteral("in-progress"), 2);      // its own row: nothing to do
+    QTest::qWait(1);
+    QCOMPARE(names().first(), QStringLiteral("In progress"));
+    auto *second = rowAt(1);
+    QVERIFY(second);
+    second->resize(second->width(), 40);
+    second->dropHere(QStringLiteral("in-progress"), 38);
+    QTest::qWait(1);
+    QCOMPARE(names().first(), QStringLiteral("Inbox"));
+    QCOMPARE(names().at(1), QStringLiteral("In progress"));
+
+    // Save writes the section list in that order, and nothing about a card.
+    save->click();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.first().value(QStringLiteral("type")).toString(), QStringLiteral("board_sections"));
+    QCOMPARE(arrayOf(sent.first(), QStringLiteral("columns")),
+             (QStringList{"inbox", "in-progress", "ready", "discussing", "waiting", "needs-qa",
+                          "done"}));
+    QVERIFY(!view.sectionsOpen());
 }
 
 void BoardSectionsTests::theMessageWritesOnlyWhatDiffersFromTheDefault()

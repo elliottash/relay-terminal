@@ -171,6 +171,12 @@ QString sortId(Sort sort)
         return QStringLiteral("oldest");
     case Sort::RecentlyUpdated:
         return QStringLiteral("updated");
+    case Sort::OldestUpdated:
+        return QStringLiteral("updated-oldest");
+    case Sort::TitleAsc:
+        return QStringLiteral("title");
+    case Sort::TitleDesc:
+        return QStringLiteral("title-desc");
     case Sort::Manual:
         break;
     }
@@ -185,6 +191,12 @@ Sort sortFromId(const QString &id)
         return Sort::OldestFirst;
     if (id == QStringLiteral("updated"))
         return Sort::RecentlyUpdated;
+    if (id == QStringLiteral("updated-oldest"))
+        return Sort::OldestUpdated;
+    if (id == QStringLiteral("title"))
+        return Sort::TitleAsc;
+    if (id == QStringLiteral("title-desc"))
+        return Sort::TitleDesc;
     return Sort::Manual;
 }
 
@@ -197,10 +209,88 @@ QString sortTitle(Sort sort)
         return QStringLiteral("Oldest first");
     case Sort::RecentlyUpdated:
         return QStringLiteral("Recently updated");
+    case Sort::OldestUpdated:
+        return QStringLiteral("Least recently updated");
+    case Sort::TitleAsc:
+        return QStringLiteral("Title A→Z");
+    case Sort::TitleDesc:
+        return QStringLiteral("Title Z→A");
     case Sort::Manual:
         break;
     }
     return QStringLiteral("Manual");
+}
+
+QString columnTitle(SortColumn column)
+{
+    switch (column) {
+    case SortColumn::Card:
+        return QStringLiteral("Card");
+    case SortColumn::Created:
+        return QStringLiteral("Created");
+    case SortColumn::Updated:
+        return QStringLiteral("Updated");
+    }
+    return QString();
+}
+
+Sort nextColumnSort(SortColumn column, Sort current)
+{
+    switch (column) {
+    case SortColumn::Card:
+        if (current == Sort::TitleAsc)
+            return Sort::TitleDesc;
+        return current == Sort::TitleDesc ? Sort::Manual : Sort::TitleAsc;
+    case SortColumn::Created:
+        if (current == Sort::NewestFirst)
+            return Sort::OldestFirst;
+        return current == Sort::OldestFirst ? Sort::Manual : Sort::NewestFirst;
+    case SortColumn::Updated:
+        if (current == Sort::RecentlyUpdated)
+            return Sort::OldestUpdated;
+        return current == Sort::OldestUpdated ? Sort::Manual : Sort::RecentlyUpdated;
+    }
+    return Sort::Manual;
+}
+
+int sortColumnIndex(Sort sort)
+{
+    switch (sort) {
+    case Sort::TitleAsc:
+    case Sort::TitleDesc:
+        return 0;
+    case Sort::NewestFirst:
+    case Sort::OldestFirst:
+        return 1;
+    case Sort::RecentlyUpdated:
+    case Sort::OldestUpdated:
+        return 2;
+    case Sort::Manual:
+        break;
+    }
+    return -1;
+}
+
+bool sortAscending(Sort sort)
+{
+    return sort == Sort::OldestFirst || sort == Sort::OldestUpdated || sort == Sort::TitleAsc;
+}
+
+QString dateCell(const QString &stamp)
+{
+    const QString text = stamp.trimmed();
+    if (text.size() < 10)
+        return QString();
+    for (int i = 0; i < 10; ++i) {
+        const QChar character = text.at(i);
+        if (i == 4 || i == 7) {
+            if (character != QLatin1Char('-'))
+                return QString();
+        } else if (!character.isDigit()) {
+            return QString();
+        }
+    }
+    return text.left(10);
 }
 
 QString issueHeading()
@@ -1075,15 +1165,32 @@ const Card *Model::card(const QString &id) const
 
 namespace {
 
-// The time a sort keys on: RecentlyUpdated wants the card's own `updated` (falling back to
+// The time a sort keys on: the two updated sorts want the card's own `updated` (falling back to
 // `created` when the worker sent none, so an old worker still gets a sensible order — the two
-// spellings compare lexicographically, a date sorting before that day's timestamps); the other
-// sorts want `created` outright.
+// spellings compare lexicographically, a date sorting before that day's timestamps); the created
+// sorts and the title ones want `created` and the title.
 QString sortTime(const Card &card, Sort sort)
 {
-    if (sort == Sort::RecentlyUpdated && !card.updated.isEmpty())
+    if ((sort == Sort::RecentlyUpdated || sort == Sort::OldestUpdated) && !card.updated.isEmpty())
         return card.updated;
     return card.created;
+}
+
+// Where `a` goes relative to `b` under one column sort: -1 before, 1 after, 0 when the two are
+// equal on that key — and then the board's own rank breaks the tie, so an order never wobbles
+// between rebuilds.
+int sortCompare(const Card &a, const Card &b, Sort sort)
+{
+    if (sort == Sort::TitleAsc || sort == Sort::TitleDesc) {
+        const int byTitle = QString::compare(a.title, b.title, Qt::CaseInsensitive);
+        if (byTitle == 0)
+            return 0;
+        return sort == Sort::TitleAsc ? byTitle : -byTitle;
+    }
+    const QString at = sortTime(a, sort), bt = sortTime(b, sort);
+    if (at == bt)
+        return 0;
+    return (at < bt) == sortAscending(sort) ? -1 : 1;
 }
 
 }  // namespace
@@ -1091,12 +1198,12 @@ QString sortTime(const Card &card, Sort sort)
 QList<Card> Model::sorted(QList<Card> cards, bool closedSection) const
 {
     std::sort(cards.begin(), cards.end(), [this, closedSection](const Card &a, const Card &b) {
-        // A time sort is the whole order, in every section alike; Manual is the board's own rank,
-        // with the closed sections newest first as they always have been.
+        // A column sort is the whole order, inside every section alike; Manual is the board's own
+        // rank, with the closed sections newest first as they always have been.
         if (m_sort != Sort::Manual) {
-            const QString at = sortTime(a, m_sort), bt = sortTime(b, m_sort);
-            if (at != bt)
-                return m_sort == Sort::OldestFirst ? at < bt : at > bt;
+            const int byColumn = sortCompare(a, b, m_sort);
+            if (byColumn != 0)
+                return byColumn < 0;
         } else if (closedSection && a.created != b.created) {
             return a.created > b.created;
         }
