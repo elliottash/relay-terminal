@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTest>
@@ -1279,6 +1280,72 @@ private slots:
         const int before = calls;
         bar.setTerminalSearchable(true);
         QCOMPARE(calls, before);   // the label alone does not re-search
+    }
+
+    // ----- the helper agent's panel (#FEJQ) -----------------------------------------------------
+    //
+    // "When you are in options, actions, or sessions, you have a helper agent, same as the
+    // switchboard agent" (owner). In this pane it is the Switchboard's own panel, embedded at the
+    // bottom and collapsed to one row, asking the tab's helper worker with `pane: "sessions"`.
+    void theHelperPanelSitsAtTheBottomCollapsedAndAsksAsTheSessionsPane() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        QList<QJsonObject> sent;
+        manager.onHelperSend = [&sent](const QJsonObject &message) { sent << message; };
+        manager.nextHelperRequestId = [] { return QStringLiteral("sessions-1"); };
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+
+        // One row, and the pane's own list is still the pane.
+        auto *panel = manager.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
+        auto *ask = manager.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
+        auto *body = manager.findChild<QWidget *>(QStringLiteral("boardChatBody"));
+        QVERIFY(panel && ask && body);
+        QVERIFY(ask->isVisible());
+        QVERIFY(!body->isVisible());
+        QCOMPARE(manager.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
+                 QStringLiteral("Sessions helper"));
+
+        // Asking: the row opens, the cursor lands in the box, and the message goes out tagged.
+        ask->click();
+        QVERIFY(body->isVisible());
+        auto *composer = manager.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+        QVERIFY(composer);
+        QVERIFY(composer->hasFocus());
+        composer->setPlainText(QStringLiteral("which sessions touched Pane.h?"));
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(composer, &enter);
+        QCOMPARE(sent.size(), 1);
+        QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_chat"));
+        QCOMPARE(sent.last().value(QStringLiteral("pane")).toString(), QStringLiteral("sessions"));
+        QCOMPARE(sent.last().value(QStringLiteral("text")).toString(),
+                 QStringLiteral("which sessions touched Pane.h?"));
+        QCOMPARE(sent.last().value(QStringLiteral("id")).toString(), QStringLiteral("sessions-1"));
+
+        // The answer streams back through the pane, and the board's own does not.
+        manager.helperEvent(QStringLiteral("delta"),
+                            QJsonObject{{QStringLiteral("chat"), true},
+                                        {QStringLiteral("pane"), QStringLiteral("switchboard")},
+                                        {QStringLiteral("turn_id"), QStringLiteral("t1")},
+                                        {QStringLiteral("text"), QStringLiteral("84 open cards.")}});
+        manager.helperEvent(QStringLiteral("delta"),
+                            QJsonObject{{QStringLiteral("chat"), true},
+                                        {QStringLiteral("pane"), QStringLiteral("sessions")},
+                                        {QStringLiteral("turn_id"), QStringLiteral("t2")},
+                                        {QStringLiteral("text"), QStringLiteral("Four of them.")}});
+        auto *log = manager.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+        QVERIFY(log);
+        QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("Four of them.")));
+        QVERIFY(!log->toPlainText().contains(QStringLiteral("84 open cards.")));
+
+        // A `session:` link in an answer selects that row rather than asking the window for it.
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("Index work")),
+                                        sessionItem(QStringLiteral("b"), QStringLiteral("Voice work"))}}});
+        emit log->anchorClicked(QUrl(QStringLiteral("session:b")));
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree && tree->currentItem());
+        QCOMPARE(tree->currentItem()->text(0), QStringLiteral("Voice work"));
     }
 };
 

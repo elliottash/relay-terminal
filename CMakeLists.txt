@@ -239,9 +239,10 @@ target_compile_options(relay-screen PRIVATE -Wall -Wextra -Wpedantic)
 # thread, searchable), the Ctrl+F find bar and the ⓘ conversation info view. The worker does the
 # searching (docs/AGENT-SESSIONS-PROTOCOL.md sections 14 and 25); these are the views and helpers.
 add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h
-    src/SessionInfo.cpp src/SessionInfo.h src/PaneView.h)
+    src/SessionInfo.cpp src/SessionInfo.h src/PaneView.h src/AskRow.h)
 target_include_directories(relay-conversations PUBLIC src)
-target_link_libraries(relay-conversations PUBLIC ${RELAY_QT}::Widgets)
+# relay-helperchat: the Sessions pane carries the helper agent's panel, collapsed (#FEJQ).
+target_link_libraries(relay-conversations PUBLIC relay-helperchat ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
 
 # Notification centre: the list behind the bell in the window header. Plain QtCore so the

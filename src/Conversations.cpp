@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Conversations.h"
 #include "CopyOnSelect.h"
+#include "HelperChat.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
@@ -835,9 +836,41 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_inset->setFixedSize(0, 1);
     m_tabs->setCornerWidget(m_inset, Qt::TopRightCorner);
 
+    // The helper agent's panel, at the bottom of the pane and collapsed to one row (#FEJQ): the
+    // same panel the Switchboard carries, asking the same per-tab worker with `pane: "sessions"`.
+    // Below the tabs rather than inside the list, because the helper is about the pane and every
+    // tab of it — "when you are in options, actions, or sessions, you have a helper agent, same
+    // as the switchboard agent" (owner).
+    m_helper = new HelperChatPanel(helperpane::sessions());
+    m_helper->onSend = [this](const QJsonObject &message) {
+        if (onHelperSend) onHelperSend(message);
+    };
+    m_helper->nextRequestId = [this] {
+        return nextHelperRequestId ? nextHelperRequestId() : QString();
+    };
+    m_helper->onHint = [this](const QString &id, const QString &keys) {
+        if (onHelperHint) onHelperHint(id, keys);
+    };
+    m_helper->onStatus = [this](const QString &text) {
+        m_note = text;          // the one-off line, cleared by the next row or query
+        updateStatus();
+    };
+    m_helper->onOpenSession = [this](const QString &id) { revealSession(id); };
+    m_helper->onOpenOption = [this](const QString &section, const QString &row) {
+        if (onHelperOpenOption) onHelperOpenOption(section, row);
+    };
+    m_helper->onOpenCard = [this](const QString &id) {
+        if (onHelperOpenCard) onHelperOpenCard(id);
+    };
+    m_helper->onOpenFile = [this](const QString &path) {
+        if (onHelperOpenFile) onHelperOpenFile(path);
+    };
+    m_helper->setAskShortcut(QStringLiteral("sessions.ask"), QStringLiteral("Ctrl+/"));
+
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
-    outer->addWidget(m_tabs);
+    outer->addWidget(m_tabs, 1);
+    outer->addWidget(m_helper, 0);
 
     m_debounce = new QTimer(this);
     m_debounce->setSingleShot(true);
@@ -947,6 +980,52 @@ QString SessionManager::paneTitle() const { return QStringLiteral("Sessions"); }
 void SessionManager::focusView() {
     if (currentTab() == QLatin1String("sessions")) focusSearch();
     else if (m_tabs->currentWidget()) m_tabs->currentWidget()->setFocus(Qt::OtherFocusReason);
+}
+
+// ----- the helper agent's panel (#FEJQ) ---------------------------------------------------
+//
+// The manager holds no worker of its own: what the panel sends goes out through `onHelperSend`
+// and what the worker answers comes back through `helperEvent`, the same shape the session search
+// already has. Every message the panel sends already carries `pane: "sessions"`, and it takes only
+// the events tagged with it, so handing it the whole stream is safe.
+
+void SessionManager::helperEvent(const QString &type, const QJsonObject &event) {
+    if (m_helper) m_helper->handleEvent(type, event);
+}
+
+void SessionManager::setHelperPresets(const QJsonArray &presets) {
+    if (m_helper) m_helper->setPresets(presets);
+}
+
+void SessionManager::addHelperComposerWidget(QWidget *widget) {
+    if (m_helper) m_helper->addComposerWidget(widget);
+}
+
+void SessionManager::setHelperShortcut(const QString &hintId, const QString &keys) {
+    if (m_helper) m_helper->setAskShortcut(hintId, keys);
+}
+
+void SessionManager::focusHelper() {
+    if (m_helper) m_helper->expand();
+}
+
+void SessionManager::helperDraft(const QString &text) {
+    if (m_helper) m_helper->prefill(text);
+}
+
+// `session:<id>` in an answer. The row is usually on screen already — the helper was asked about
+// what is in the list — and then this is a selection and nothing else. When the query in force
+// does not draw it, searching for the id is what a person would do next, and `m_pendingSelect`
+// picks the row out when the results land.
+void SessionManager::revealSession(const QString &sessionId) {
+    if (sessionId.isEmpty()) return;
+    if (QTreeWidgetItem *row = m_rows.value(sessionId)) {
+        m_tree->setCurrentItem(row);
+        m_tree->scrollToItem(row);
+        return;
+    }
+    m_pendingSelect = sessionId;
+    setQuery(sessionId);
 }
 
 void SessionManager::setHeaderRightInset(int pixels) {

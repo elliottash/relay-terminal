@@ -34,6 +34,10 @@ class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
+namespace relay {
+class HelperChatPanel;   // the helper agent's panel, embedded at the bottom of the pane (#FEJQ)
+}
+
 namespace relay::conversations {
 
 // ----- pure helpers (unit tested in tests/conversations_test.cpp) -------------------------
@@ -129,6 +133,12 @@ QString compactTokens(double tokens);
 // It was a modal dialog (/conversations) and a resume picker (/resume) until 2026-09-18; it is now
 // one pane, opened by /resume, Ctrl+Shift+M, /conversations and the palette. Other features can add
 // tabs beside the list (addTab), e.g. recently closed windows, tabs and panes.
+//
+// At the bottom of it sits the **helper agent's panel** (#FEJQ), collapsed to one "Ask about this
+// pane" row: the same panel the Switchboard carries, asking the same per-tab worker with
+// `pane: "sessions"`. The manager still never talks to a worker itself — the panel's messages
+// leave through `onHelperSend` and its answers arrive through `helperEvent`, exactly as the list's
+// own search goes out through `onQuery` — so the pane is testable without one.
 class SessionManager : public QWidget, public relay::PaneView {
     Q_OBJECT
 public:
@@ -189,6 +199,36 @@ public:
     // being rebuilt or the worker asked again. Public so a test can tick it by hand.
     void refreshClosedAges();
 
+    // ----- the helper agent's panel (#FEJQ) ---------------------------------------------------
+    // Where the panel's messages go: `board_chat` and the rest, each already carrying
+    // `pane: "sessions"`. The window hands them to the tab's helper worker.
+    std::function<void(const QJsonObject &message)> onHelperSend;
+    // The request-id prefix of whatever is carrying the traffic, so the worker's answers are told
+    // from another pane's. Unset simply means the messages carry no id.
+    std::function<QString()> nextHelperRequestId;
+    // An answer's links into the app. A session is this pane's own business and is resolved here;
+    // an option row and a card belong to the window, which wires these.
+    std::function<void(const QString &sectionId, const QString &rowId)> onHelperOpenOption;
+    std::function<void(const QString &cardId)> onHelperOpenCard;
+    std::function<void(const QString &path)> onHelperOpenFile;
+    std::function<void(const QString &id, const QString &keys)> onHelperHint;   // shortcut hints
+
+    // A worker event for the panel: the `chat: true` turn events and the `board_chat_*` answers.
+    // The panel takes only the ones tagged with its own pane, so handing it everything is safe.
+    void helperEvent(const QString &type, const QJsonObject &event);
+    // The provider rows the `presets` event carries, for the composer's microphone offer.
+    void setHelperPresets(const QJsonArray &presets);
+    // The model box, built by the window (it reads the catalog and the settings) and reparented
+    // into the panel's composer strip, exactly as the Switchboard's is.
+    void addHelperComposerWidget(QWidget *widget);
+    // The key that opens the panel, in the window's live Keymap wording, for the collapsed row's
+    // key line and the hint a mouse click teaches (WARP.md's standing rule).
+    void setHelperShortcut(const QString &hintId, const QString &keys);
+    // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
+    // does. `helperDraft` prefills it without sending, the Check-finding pattern.
+    void focusHelper();
+    void helperDraft(const QString &text);
+
     void focusSearch();
     QString query() const;
     void setQuery(const QString &text);
@@ -242,6 +282,9 @@ private:
     QString scopeId() const;
     QString selectedId() const;
     QJsonObject selectedItem() const;
+    // The `session:<id>` link in a helper's answer: select that row, or search for it when the
+    // query in force does not draw it.
+    void revealSession(const QString &sessionId);
     void rename();
     void togglePin();
     void remove();
@@ -249,6 +292,7 @@ private:
     bool eventFilter(QObject *object, QEvent *event) override;
 
     QTabWidget *m_tabs = nullptr;
+    relay::HelperChatPanel *m_helper = nullptr;
     QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;
     QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr,
