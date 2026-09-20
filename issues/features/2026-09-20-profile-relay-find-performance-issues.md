@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20'
-links: {plans: [], commits: [ccb31a8e, d2923c9b], evidence: [docs/qa_evidence/2026-09-20-perf-profile/REPORT.md], related: [9MYY, 7BM4, 7M6E, TZWF, 057J, 6W0Z, MDSG, PPR4, N5JJ], github: null}
+links: {plans: [], commits: [ccb31a8e, d2923c9b, 34b5175e], evidence: [docs/qa_evidence/2026-09-20-perf-profile/REPORT.md], related: [9MYY, 7BM4, 7M6E, TZWF, 057J, 6W0Z, MDSG, PPR4, N5JJ], github: null}
 ---
 # Profile Relay on spark and sphinxpad: performance issues and improvements
 
