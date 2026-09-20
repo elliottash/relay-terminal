@@ -880,11 +880,11 @@ def check_dismissal(reason, comment, until, *, by_agent: bool, now=None) -> dict
     reason = str(reason or "").strip().lower()
     allowed = AGENT_DISMISS_REASONS if by_agent else DISMISS_REASONS
     if reason not in allowed:
+        rest = ", ".join(r for r in DISMISS_REASONS if r not in allowed)
         raise SignalError(
             f"A dismissal's reason is one of {', '.join(allowed)}"
-            + (f" — {', '.join(r for r in DISMISS_REASONS if r not in allowed)} "
-               "is the owner's call, so say why in a comment and leave it open." if by_agent
-               else ".") + ("" if by_agent else ""),
+            + (f" — {rest} is the owner's call, so say why in a comment and leave it open."
+               if by_agent else "."),
             code="signal_reason")
     text = str(comment or "").strip()
     if not text:

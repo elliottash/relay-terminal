@@ -2778,13 +2778,13 @@ class SignalToolTests(BoardToolsTest):
     def test_the_signal_section_is_rewritten_in_place_not_stacked_up(self):
         self.fail()
         promoted = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
+        # The claim changes what the section says, so the write refreshes the card itself: the
+        # machine's paragraph on a card a person reads is never a state behind its signal.
         self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
-        signals = self.S.state(self.repo, self.root)
-        self.assertTrue(self.S.rewrite_section(self.board, signals["ctest:panelayout"]))
         body = self.board.card_by_id(promoted["card"]).body
         self.assertEqual(body.count(f"## {self.S.SIGNAL_HEADING}"), 1)
         self.assertIn("claimed by session", body)
-        # Idempotent: nothing to write the second time.
+        # Idempotent: nothing to write a second time.
         signals = self.S.state(self.repo, self.root)
         self.assertFalse(self.S.rewrite_section(self.board, signals["ctest:panelayout"]))
         self.assertEqual([str(p) for p in self.board.check()], [])

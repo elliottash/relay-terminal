@@ -2573,7 +2573,11 @@ class BoardTools:
         """
         if self._tests_commands is None:
             from . import tests_protocol as TP
-            self._tests_commands = TP.TestsCommands(self.board.repo, self.board.root)
+            # The pane token goes with it (#AQ6X §32.8): every run leaves a `run` line naming the
+            # pane whose it was, and that is the only thing that can tell a signal *this* card's
+            # work opened from one that was already failing. Without it the gate blocks nothing.
+            self._tests_commands = TP.TestsCommands(self.board.repo, self.board.root,
+                                                   pane_token=self.pane_token)
         return self._tests_commands
 
     def _tests_check(self, args: dict) -> dict:
@@ -2659,6 +2663,7 @@ class BoardTools:
         if not key:
             raise BoardToolError(f"board_signals {action} needs `key`: the signal's key, as "
                                  "`list` gives it (e.g. ctest:panelayout).")
+        refresh = key
         signal = signals.get(key)
         if signal is None or signal.state in ("resolved", "removed"):
             raise BoardToolError(
@@ -2666,13 +2671,31 @@ class BoardTools:
                 "what is open — a signal resolves by its check passing, so one that is gone was "
                 "fixed.", code="signal_not_found", key=key)
         path = S.default_path(self.board.repo, self.board.root)
-        if action == "claim":
-            return self._signal_claim(S, signal, path, bool(force))
-        if action == "release":
-            return self._signal_release(S, signal, path, args.get("reason"))
-        if action == "dismiss":
-            return self._signal_dismiss(S, signal, path, args)
-        return self._signal_promote(S, signals, signal, path, "by hand")
+        try:
+            if action == "claim":
+                return self._signal_claim(S, signal, path, bool(force))
+            if action == "release":
+                return self._signal_release(S, signal, path, args.get("reason"))
+            if action == "dismiss":
+                return self._signal_dismiss(S, signal, path, args)
+            return self._signal_promote(S, signals, signal, path, "by hand")
+        finally:
+            self._refresh_signal_card(S, refresh)
+
+    def _refresh_signal_card(self, S, key: str) -> None:
+        """Put the promoted card's `## Signal` section back in step with the signal.
+
+        A claim, a release and a dismissal all change what that section says, and the section is
+        the machine's paragraph on a card a person reads — so it is refolded and rewritten here
+        rather than waiting for the next test run.  A signal with no card, or a board that cannot
+        be written, is nothing to do.
+        """
+        try:
+            signal = S.state(self.board.repo, self.board.root).get(key)
+            if signal is not None and signal.card:
+                S.rewrite_section(self.board, signal)
+        except Exception:                                  # pragma: no cover - defensive
+            pass
 
     def _signals_list(self, S, signals: dict) -> dict:
         """What `list` answers with: the open rows in R11's order, plus the two counts."""
