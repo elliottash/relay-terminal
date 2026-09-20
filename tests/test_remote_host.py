@@ -6,6 +6,7 @@ real relay — so what is tested is the thing that ships, not a stub of it.
 """
 import asyncio
 import base64
+import contextlib
 import json
 import tempfile
 import time
@@ -27,10 +28,13 @@ def run(coroutine, timeout=30):
 class Harness:
     """A rendezvous, a desktop and whatever clients a test wants."""
 
-    def __init__(self, capability=wire.AGENT, approve=True):
+    def __init__(self, capability=wire.AGENT, approve=True, reconnect=None):
         self.capability = capability
         self.approve = approve
         self.requests = []
+        # (min, max) seconds for the hub's reconnect back-off, shrunk so a test that drops the
+        # link does not wait the real first second out.
+        self.reconnect = reconnect
 
     async def __aenter__(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -51,6 +55,12 @@ class Harness:
         self.host = host_mod.Host(self.identity, self.devices, self.source,
                                   app_base="https://app.example", approver=approver,
                                   name="test desktop")
+        if self.reconnect is not None:
+            self.host.reconnect_min, self.host.reconnect_max = self.reconnect
+        self.links: list[tuple[bool, str]] = []
+        self.host.on_link(lambda online, reason: self.links.append((online, reason)))
+        self.counts: list[int] = []
+        self.host.on_devices(self.counts.append)
         await self.host.register(self.base)
         self.serving = asyncio.create_task(self.host.serve())
         for _ in range(100):                       # wait for the outbound socket to attach
@@ -73,6 +83,35 @@ class Harness:
         client = client_mod.Client(self.base)
         paired = await client.pair(url, name=name, platform=platform)
         return client, paired, url, room
+
+    async def rendezvous_restarts(self):
+        """What a rendezvous restart looks like from this end: the registry no longer holds this
+        desktop, so the token it was issued is refused, and the link drops.
+
+        The registry is emptied rather than the process replaced. Replacing it means binding the
+        same port again, and an established socket survives its listener closing — so the desktop
+        can reconnect to the server that is on its way out and sit there, connected to nobody,
+        which is a property of the test and not of the code under it.
+        """
+        self.store.db.execute("DELETE FROM desktops")
+        self.store.db.commit()
+        if self.host.socket is not None:
+            await self.host.socket.close()
+
+    async def until(self, predicate, timeout=20.0, what="the condition"):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while not predicate():
+            if loop.time() > deadline:
+                raise AssertionError(f"{what} was never reached")
+            await asyncio.sleep(0.02)
+
+    async def desktops(self) -> int:
+        import urllib.request
+        def go():
+            with urllib.request.urlopen(f"{self.base}/v1/health", timeout=10) as answer:
+                return json.loads(answer.read())["desktops"]
+        return await asyncio.to_thread(go)
 
 
 class PairingTests(unittest.TestCase):
@@ -627,3 +666,86 @@ class TransportSwitchTests(unittest.TestCase):
                 self.assertGreaterEqual(effective, 2)
                 await client.close()
         run(main())
+
+
+class AlwaysOnLinkTests(unittest.TestCase):
+    """The rendezvous link, held open for a working day (§8.1).
+
+    Always-on turns one outbound socket into the thing the phone depends on all day, so the two
+    ways it used to stop coming back are pinned here: a rendezvous that restarted has forgotten
+    the token it issued, and a loop that kept dialing with that token would be refused 4401 until
+    the app was restarted; and nothing outside the hub could tell whether the link was up, so the
+    GUI had nothing to show but a share button.
+    """
+
+    def test_a_rendezvous_that_forgot_this_desktop_is_registered_with_again(self):
+        async def main():
+            async with Harness(reconnect=(0.05, 0.2)) as harness:
+                client, paired, _, _ = await harness.pair()
+                await client.close()
+                first = harness.host.token
+                self.assertEqual(harness.links[-1], (True, ""))
+
+                await harness.rendezvous_restarts()
+                self.assertFalse(
+                    harness.store.authenticate(harness.identity.desktop_id, first),
+                    "the token it holds is not one the rendezvous knows any more")
+                await harness.until(lambda: harness.host.token != first,
+                                    what="a fresh token")
+                await harness.until(lambda: harness.host.socket is not None,
+                                    what="the socket back up")
+                await harness.until(lambda: harness.links[-1][0], what="the link reported up")
+
+                # It was reported down, with one sentence, and then up again.
+                self.assertIn(False, [online for online, _ in harness.links])
+                down = [reason for online, reason in harness.links if not online][-1]
+                self.assertTrue(down and down.endswith("."), down)
+                self.assertEqual(harness.links[-1], (True, ""))
+                # It never moved: the desktop is at the same rendezvous, not at some fallback.
+                self.assertEqual(harness.host.rendezvous, harness.base)
+                self.assertEqual(harness.host.tokens[harness.base], harness.host.token)
+                for _ in range(200):          # the upgrade lands before the attach does
+                    if await harness.desktops() == 1:
+                        break
+                    await asyncio.sleep(0.05)
+                self.assertEqual(await harness.desktops(), 1)
+                self.assertTrue(harness.store.authenticate(harness.identity.desktop_id,
+                                                           harness.host.token))
+
+                # And the phone paired before the restart still reaches it.
+                again = client_mod.Client(harness.base)
+                await again.connect(paired)
+                await again.expect("panes")
+                await again.close()
+        run(main(), timeout=90)
+
+    def test_the_owners_devices_are_counted_while_they_are_connected(self):
+        async def main():
+            async with Harness(reconnect=(0.05, 0.2)) as harness:
+                self.assertEqual(harness.host.devices_online(), 0)
+                first, record, _, _ = await harness.pair()
+                await first.close()
+                phone = client_mod.Client(harness.base)
+                await phone.connect(record)
+                await phone.expect("panes")
+                await harness.until(lambda: harness.host.devices_online() == 1,
+                                    what="the phone counted")
+
+                # A second paired device is a second connection, and the same device twice is
+                # still one device: the count is of devices, not of channels.
+                tablet_pairing, tablet, _, _ = await harness.pair(name="iPad", platform="Safari")
+                await tablet_pairing.close()
+                second = client_mod.Client(harness.base)
+                await second.connect(tablet)
+                await second.expect("panes")
+                await harness.until(lambda: harness.host.devices_online() == 2,
+                                    what="both devices counted")
+
+                await phone.close()
+                await harness.until(lambda: harness.host.devices_online() == 1,
+                                    what="the phone dropped")
+                self.assertEqual(harness.counts[-1], 1)
+                await second.close()
+                await harness.until(lambda: harness.host.devices_online() == 0,
+                                    what="both gone")
+        run(main(), timeout=90)

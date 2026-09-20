@@ -8,9 +8,15 @@ out of this process as a `compose` for the pane.
 """
 import asyncio
 import contextlib
+import functools
+import json
+import os
+import socket
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
+from unittest import mock
 
 from remote import client as client_mod
 from remote import gui_host, host as host_mod, identity as identity_mod, \
@@ -20,11 +26,28 @@ from rendezvous.server import Store, build
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
 
+def closed_port() -> int:
+    """A loopback port nothing is listening on."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+async def desktops(base: str) -> int:
+    """How many desktops a rendezvous has attached right now."""
+    def go() -> int:
+        with urllib.request.urlopen(f"{base}/v1/health", timeout=10) as answer:
+            return json.loads(answer.read())["desktops"]
+    return await asyncio.to_thread(go)
+
+
 class Harness:
     """A hub over a GuiPaneSource, with the GUI's side of the pipe as a list of messages."""
 
-    def __init__(self, capability=wire.FULL):
+    def __init__(self, capability=wire.FULL, panes=("p1",), admit=False):
         self.capability = capability
+        self.panes = panes
+        self.admit = admit
         self.to_gui: list[dict] = []
 
     async def __aenter__(self):
@@ -38,17 +61,18 @@ class Harness:
         self.identity = identity_mod.Identity.create(directory)
         self.devices = identity_mod.DeviceStore(directory)
         self.source = gui_host.GuiPaneSource(self.to_gui.append)
-        self.source.set_pane({"id": "p1", "title": "relay-terminal", "cwd": "/home/elliott",
-                              "rows": 24, "cols": 80, "status": "idle"})
-        self.source.set_frame({"pane": "p1", "full": True, "rows": 24, "cols": 80, "alt": False,
-                               "cursor": {"row": 0, "col": 2, "visible": True, "shape": 0},
-                               "lines": [{"row": 0, "segs": [["$ ", 0, 0, 0]]}]})
+        for pane in self.panes:
+            self.add_pane(pane)
 
         async def approver(request):
             return True, self.capability
 
+        async def knock_approver(request):
+            return self.admit, request.role
+
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
-                                  approver=approver, name="test desktop")
+                                  approver=approver, knock_approver=knock_approver,
+                                  name="test desktop")
         await self.host.register(self.base)
         self.serving = asyncio.create_task(self.host.serve())
         for _ in range(100):
@@ -66,6 +90,22 @@ class Harness:
         self.store.close()
         self.temporary.cleanup()
 
+    def add_pane(self, pane: str) -> None:
+        """What the GUI does for every pane while always-on is on: publish it, unasked."""
+        self.source.set_pane({"id": pane, "title": "relay-terminal", "cwd": "/home/elliott",
+                              "rows": 24, "cols": 80, "status": "idle"})
+        self.source.set_frame({"pane": pane, "full": True, "rows": 24, "cols": 80, "alt": False,
+                               "cursor": {"row": 0, "col": 2, "visible": True, "shape": 0},
+                               "lines": [{"row": 0, "segs": [["$ ", 0, 0, 0]]}]})
+
+    async def guest(self, panes, role=wire.VIEWER, name="alice"):
+        """An invite to `panes`, knocked on and admitted: a connected participant."""
+        self.admit = True
+        _, url = await self.host.invite_create(list(panes), role)
+        client = client_mod.Client(self.base)
+        joined = await client.knock(url, name=name, platform="Chrome")
+        return client, joined
+
     async def paired_client(self):
         url, _ = await self.host.open_pairing()
         pairing = client_mod.Client(self.base)
@@ -73,7 +113,9 @@ class Harness:
         await pairing.close()
         client = client_mod.Client(self.base)
         await client.connect(record)
-        await client.expect("panes")
+        # The list that follows `welcome`, kept: a device that connects while the desktop has no
+        # panes yet must be sent an empty list, and a test cannot tell "[]" from "nothing".
+        self.first_panes = await client.expect("panes")
         return client, record
 
     def sent(self, kind: str) -> list[dict]:
@@ -562,3 +604,288 @@ class HistoryTests(unittest.TestCase):
             self.assertIn("in time", caught.exception.message)
             self.assertEqual(source._history, {}, "the pending page must not be left behind")
         run(main())
+
+
+# ---- every pane, to the owner's own devices only (§8.1) -------------------------------------------
+
+class AutoPublishTests(unittest.TestCase):
+    """Always-on publishes **every** pane, with no share button pressed, so the two rules that
+    used to be a side effect of "only what you shared exists" have to hold on their own: a guest
+    sees the panes of their invite and no others, and a device that arrives before there is
+    anything to see gets an empty list rather than nothing at all."""
+
+    def test_a_guest_sees_only_the_panes_of_their_invite(self):
+        async def main():
+            async with Harness(panes=("p1", "p2", "p3")) as harness:
+                device, _ = await harness.paired_client()
+                guest, joined = await harness.guest(("p2",))
+                self.assertEqual(joined.panes, ["p2"])
+                welcome = await guest.expect("panes")
+                self.assertEqual([item["id"] for item in welcome["items"]], ["p2"],
+                                 "three panes are published; the invite names one")
+                # And a pane opened afterwards does not appear either.
+                harness.add_pane("p4")
+                await asyncio.sleep(0.3)
+                await guest.send({"t": "panes_get"})
+                later = await guest.expect("panes")
+                self.assertEqual([item["id"] for item in later["items"]], ["p2"])
+                # The owner's own device sees all four, and the guest is not counted as a device.
+                await device.send({"t": "panes_get"})
+                mine = await device.expect("panes")
+                self.assertEqual(sorted(item["id"] for item in mine["items"]),
+                                 ["p1", "p2", "p3", "p4"])
+                self.assertEqual(harness.host.devices_online(), 1,
+                                 "a guest is a participant, never one of the owner's devices")
+                await guest.close()
+                await device.close()
+        run(main())
+
+    def test_a_device_that_connects_with_no_panes_gets_an_empty_list_and_then_the_updates(self):
+        async def main():
+            async with Harness(panes=()) as harness:
+                client, _ = await harness.paired_client()
+                # `paired_client` already took the `panes` that follows `welcome`.
+                self.assertEqual(harness.first_panes["items"], [],
+                                 "an empty list, not silence")
+                harness.add_pane("p7")
+                message = await client.expect("panes")
+                self.assertEqual([item["id"] for item in message["items"]], ["p7"])
+                harness.source.drop_pane("p7")
+                gone = await client.expect("panes")
+                self.assertEqual(gone["items"], [])
+                await client.close()
+        run(main())
+
+
+# ---- always on: the switch, the address and `remote_state` (§8.1) -------------------------------
+
+class Always:
+    """The sidecar as Options › Remote's switch starts it: `start` with `always` and an address.
+
+    A second local rendezvous stands in for https://join.relay-terminal.ai through
+    RELAY_HOSTED_RENDEZVOUS, as `tests/test_remote_hosted_address.py` does. Identity, device store
+    and tailnet detection are all patched before `start` runs: it loads the identity with no
+    directory, which on this machine is the owner's real profile and keyring.
+    """
+
+    def __init__(self, *, address="relay-terminal.ai", always=True, hosted_up=True,
+                 tailnet=""):
+        self.address, self.always, self.hosted_up = address, always, hosted_up
+        self.tailnet = tailnet          # a tailnet name `tailscale serve` would publish under
+
+    async def __aenter__(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+        (self.directory / "xdg").mkdir()
+        self.patches = contextlib.ExitStack()
+
+        self.hosted_store = Store(":memory:")
+        self.hosted_server = build(self.hosted_store, static_root=APP_DIR)
+        await self.hosted_server.start("127.0.0.1", 0)
+        self.hosted_port = self.hosted_server.port
+        self.hosted = (f"http://127.0.0.1:{self.hosted_port}" if self.hosted_up
+                       else f"http://127.0.0.1:{closed_port()}")
+
+        state = self.directory
+        self.patches.enter_context(mock.patch.dict(os.environ, {
+            "RELAY_HOSTED_RENDEZVOUS": self.hosted,
+            "XDG_DATA_HOME": str(self.directory / "xdg"),
+            "RELAY_KEYRING": "off"}))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.identity_mod.Identity, "load_or_create",
+            classmethod(lambda cls, directory=None: identity_mod.Identity.create(state))))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.identity_mod, "DeviceStore",
+            functools.partial(identity_mod.DeviceStore, state)))
+        found = (gui_host.tailnet_mod.Tailnet(name=self.tailnet, ready=True) if self.tailnet
+                 else gui_host.tailnet_mod.Tailnet(reason="tailscale is not installed."))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.tailnet_mod, "probe", lambda: found))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.tailnet_mod, "publish",
+            lambda port: (f"https://{self.tailnet}", "") if self.tailnet else (None, "no.")))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.tailnet_mod, "unpublish", lambda: None))
+        self.patches.enter_context(mock.patch.object(
+            gui_host.email_mod, "notify_joined", lambda *a, **k: (True, "")))
+
+        self.side = gui_host.Sidecar()
+        self.out: list[dict] = []
+        self.side.emit = self.out.append
+        self.side.source.send = self.out.append
+        self.side.retry_min, self.side.retry_max = 0.05, 0.2
+        await self.side.start({"port": 0, "tls": False, "name": "test desktop",
+                               "always": self.always, "address": self.address})
+        if self.side.host is not None:
+            self.side.host.reconnect_min, self.side.host.reconnect_max = 0.05, 0.2
+        self.local = self.side.local
+        return self
+
+    async def __aexit__(self, *exc):
+        try:
+            await self.side.stop()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.hosted_server.close(), 5)
+            self.hosted_store.close()
+        finally:
+            self.patches.close()
+            self.temporary.cleanup()
+
+    def states(self) -> list[dict]:
+        return [message for message in self.out if message.get("t") == "remote_state"]
+
+    def state(self) -> dict:
+        return self.states()[-1]
+
+    async def until(self, predicate, timeout=20.0, what="the condition"):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while not predicate():
+            if loop.time() > deadline:
+                raise AssertionError(f"{what} was never reached; states={self.states()}")
+            await asyncio.sleep(0.02)
+
+    async def restart_hosted(self):
+        """relay-terminal.ai restarts: it forgets every desktop, and the link drops.
+
+        The registry is emptied rather than the process replaced, which is the half that matters
+        here — the token this desktop holds stops being one the server knows, so dialing again
+        with it is refused 4401 for ever. `tests/test_remote_host.py` restarts the listener too.
+        """
+        self.hosted_store.db.execute("DELETE FROM desktops")
+        self.hosted_store.db.commit()
+        if self.side.host is not None and self.side.host.socket is not None:
+            await self.side.host.socket.close()
+
+    async def phone(self):
+        """Pair one of the owner's devices through the hosted origin and connect it."""
+        await self.side.pair()
+        url = [m for m in self.out if m.get("t") == "pairing"][-1]["url"]
+        asks = len([m for m in self.out if m.get("t") == "ask"])
+        pairing = client_mod.Client(self.hosted)
+        task = asyncio.create_task(pairing.pair(url, name="iPhone", platform="Safari"))
+        await self.until(lambda: len([m for m in self.out if m.get("t") == "ask"]) > asks,
+                         what="the pairing dialog")
+        ask = [m for m in self.out if m.get("t") == "ask"][-1]
+        await self.side.handle({"t": "answer", "id": ask["id"], "allow": True,
+                                "capability": wire.FULL})
+        record = await asyncio.wait_for(task, 20)
+        await pairing.close()
+        client = client_mod.Client(self.hosted)
+        await client.connect(record)
+        await client.expect("panes")
+        return client, record
+
+
+class AlwaysOnTests(unittest.TestCase):
+    """Gap A of card #PH0N: "nothing is shared until the share button is pressed, in this Relay
+    session". With `always`, `start` alone brings the service up at the remembered address, keeps
+    it registered there across a rendezvous restart, and reports every change as `remote_state`."""
+
+    def test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous(self):
+        async def main():
+            async with Always() as h:
+                await h.until(lambda: h.state()["online"], what="online at the hosted rendezvous")
+                state = h.state()
+                self.assertEqual(state, {"t": "remote_state", "on": True,
+                                         "address": "relay-terminal.ai", "base": h.hosted,
+                                         "online": True, "devices": 0, "reason": ""})
+                self.assertTrue(h.side.served_by_hosted)
+                self.assertEqual(h.side.host.rendezvous, h.hosted)
+                # No share was asked for: a pane published now is simply there for the phone.
+                await h.side.handle({"t": "pane", "id": "p1", "title": "relay-terminal",
+                                     "cwd": "/tmp", "rows": 24, "cols": 80, "status": "idle"})
+                client, _ = await h.phone()
+                await h.until(lambda: h.state()["devices"] == 1, what="the phone counted")
+                self.assertTrue(h.state()["online"])
+                await client.send({"t": "panes_get"})
+                listed = await client.expect("panes")
+                self.assertEqual([item["id"] for item in listed["items"]], ["p1"])
+                await client.close()
+                await h.until(lambda: h.state()["devices"] == 0, what="the phone gone")
+        run(main(), timeout=90)
+
+    def test_a_rendezvous_restart_flips_online_false_then_true(self):
+        async def main():
+            async with Always() as h:
+                await h.until(lambda: h.state()["online"], what="online")
+                first = h.side.host.token
+                before = len(h.states())
+                await h.restart_hosted()
+                # The whole outage can be over before the next poll, so it is the record of
+                # states the GUI was sent that is asserted on, not whatever the tail says now.
+                await h.until(lambda: any(not state["online"] for state in h.states()[before:]),
+                              what="an outage the GUI can see")
+                offline = [state for state in h.states()[before:] if not state["online"]][-1]
+                self.assertTrue(offline["reason"].endswith("."), offline["reason"])
+                self.assertTrue(offline["on"], "the switch is still on while the link is down")
+                self.assertEqual(offline["address"], "relay-terminal.ai",
+                                 "it never falls back to another address on its own")
+
+                await h.until(lambda: h.state()["online"], what="back online")
+                self.assertNotEqual(h.side.host.token, first, "it registered again")
+                self.assertEqual(h.side.host.rendezvous, h.hosted)
+                self.assertEqual(h.state()["reason"], "")
+        run(main(), timeout=90)
+
+    def test_a_hosted_rendezvous_that_is_down_says_why_and_keeps_trying(self):
+        async def main():
+            async with Always(hosted_up=False) as h:
+                await h.until(lambda: any("did not answer" in state["reason"]
+                                          for state in h.states()),
+                              what="a state saying why it is not up")
+                state = [s for s in h.states() if "did not answer" in s["reason"]][-1]
+                self.assertTrue(state["on"], "the switch is on; it simply is not there yet")
+                self.assertFalse(state["online"])
+                self.assertTrue(state["reason"].endswith("."), "one sentence")
+                self.assertFalse(h.side.served_by_hosted)
+                # It never quietly became a local-only desktop: the hub is still at its own
+                # rendezvous because that is where it starts, and the wish is unchanged.
+                self.assertEqual(h.side.wish, "relay-terminal.ai")
+                self.assertTrue(h.side.always)
+                # And it is still trying: the loop is alive, not finished.
+                self.assertFalse(h.side._bringing.done())
+        run(main(), timeout=90)
+
+    def test_stop_turns_the_service_off_and_says_so(self):
+        async def main():
+            async with Always() as h:
+                await h.until(lambda: h.state()["online"], what="online")
+                await h.side.handle({"t": "stop"})
+                state = h.state()
+                self.assertEqual(state["on"], False)
+                self.assertEqual(state["online"], False)
+                self.assertEqual(state["devices"], 0)
+                self.assertEqual(state["reason"], "remote control is off.")
+                self.assertFalse(h.side.always)
+                self.assertIsNone(h.side.host)
+                self.assertEqual(await desktops(h.hosted), 0, "the registration is dropped")
+        run(main(), timeout=90)
+
+    def test_the_switch_can_come_on_over_a_share_that_is_already_running(self):
+        """Options › Remote turned on while a pane was already shared: one hub, a new address."""
+        async def main():
+            async with Always(always=False, address="") as h:
+                self.assertFalse(h.state()["on"])
+                self.assertFalse(h.side.served_by_hosted)
+                await h.side.handle({"t": "start", "always": True,
+                                     "address": "relay-terminal.ai"})
+                await h.until(lambda: h.state()["online"] and h.state()["on"],
+                              what="always-on at the hosted rendezvous")
+                self.assertTrue(h.side.served_by_hosted)
+                self.assertEqual(h.state()["base"], h.hosted)
+        run(main(), timeout=90)
+
+    def test_tailscale_is_the_word_the_switch_remembers_not_this_machines_name(self):
+        """Options › Remote stores the picker's kind, because the tailnet name is this machine's
+        and the setting outlives the machine. The sidecar resolves it, and reports the word back
+        so the chrome line reads "Remote control on · your tailnet"."""
+        async def main():
+            async with Always(address="tailscale", tailnet="spark.tail0.ts.net") as h:
+                await h.until(lambda: h.state()["online"], what="online over the tailnet")
+                state = h.state()
+                self.assertEqual(state["address"], "tailscale")
+                self.assertEqual(state["base"], "https://spark.tail0.ts.net")
+                self.assertTrue(h.side.served_by_tailscale)
+                self.assertFalse(h.side.served_by_hosted, "the hosted entry was not chosen")
+        run(main(), timeout=90)

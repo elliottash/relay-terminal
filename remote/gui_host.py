@@ -6,7 +6,14 @@ here. The two halves talk line JSON over stdio, the same shape the agent worker 
 the GUI never links a crypto library and this process never touches a widget.
 
   GUI → here
-    {"t":"start","tls":true,"address":"...","port":0}       bring the service up
+    {"t":"start","tls":true,"address":"...","port":0,"always":false}   bring the service up.
+                                          `always` is Options › Remote's switch (section 8.1):
+                                          the service comes up at `address` with no share having
+                                          been asked for, stays registered there, and every
+                                          change of state comes back as `remote_state`. `address`
+                                          is what the picker sends — "relay-terminal.ai" for the
+                                          hosted rendezvous, "tailscale" (or the tailnet name)
+                                          for the tailnet, or one of this machine's addresses
     {"t":"pane","id":"p1","title":"...","cwd":"...","rows":R,"cols":C,"status":"idle","tab":"t3"}
                                           `tab` only when the pane's tab is shared whole: its
                                           guests gain the pane now, and lose it when it leaves
@@ -70,7 +77,13 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"pairing","url":"...","qr":[[0,1,...],...],"expires":N}
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
-    {"t":"devices","items":[...]}     {"t":"connected","count":N}
+    {"t":"devices","items":[...]}
+    {"t":"remote_state","on":bool,"address":"...","base":"...","online":bool,"devices":N,
+     "reason":"..."}                      the always-on service, whenever any field changes:
+                                          `on` the service is up, `online` registered with the
+                                          socket up at the chosen address, `devices` how many of
+                                          the owner's own devices are connected right now,
+                                          `reason` one sentence while not online, else ""
     {"t":"input","pane":"p1","bytes":"<base64>"}             keys from a phone
     {"t":"secret_input","pane":"p1","bytes":"<base64>"}      a password line, nonce already checked
     {"t":"compose","pane":"p1","text":"...","route":bool,"origin":"remote:<id>"}   a prompt
@@ -534,6 +547,20 @@ class Sidecar:
         # window is not the focused one, which is the safe default: a missed push is worse than
         # one you did not need.
         self.window_active = False
+        # Always on (section 8.1). `always` is Options › Remote's switch: the service is up
+        # because the owner said so, not because a pane was shared, and it goes to `wish` — the
+        # address the picker last sent — and stays there. `reason` is one sentence about why it
+        # is not there yet; `_last_state` is the `remote_state` the GUI has already been told, so
+        # only a change is sent.
+        self.always = False
+        self.wish = ""
+        self.reason = ""
+        self._last_state: dict | None = None
+        self._bringing: asyncio.Task | None = None
+        # The sidecar's own retry bounds, for getting *to* the chosen address; the hub has its
+        # own for holding the socket there (host_mod.RECONNECT_*). A test shrinks both.
+        self.retry_min = host_mod.RECONNECT_MIN
+        self.retry_max = host_mod.RECONNECT_MAX
 
     # ---- stdio ---------------------------------------------------------------------------------
 
@@ -585,7 +612,14 @@ class Sidecar:
         elif kind == "pair":
             await self.pair()
         elif kind == "address":
-            await self.set_address(str(message.get("value", "")))
+            value = str(message.get("value", ""))
+            # While the switch is on, the address the picker sends *is* the new wish: the service
+            # has to stay there, not drift back at the next drop.
+            if self.always and value:
+                self.wish = value
+            await self.set_address(value)
+            if self.always and not self.at_wish():
+                self.start_bring_up()      # it refused or was down: keep trying, and say so
             await self.pair()
         elif kind == "answer":
             future = self.asks.pop(int(message.get("id", -1)), None)
@@ -679,9 +713,22 @@ class Sidecar:
 
     async def start(self, message: dict) -> None:
         if self.host is not None:
+            # Already up. A second `start` is the always-on switch coming on over a share that was
+            # already running — the GUI re-sends the same line — or the remembered address
+            # changing. Take the new wish rather than build a second hub.
+            self.adopt_wish(message)
+            # `addresses` is not optional here: `RemoteShare::handle` assigns the whole list from
+            # every `started`, so one without it empties the address picker (src/RemoteShare.cpp).
             self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
-                       "note": self.note})
+                       "note": self.note, "addresses": self.address_list()})
+            self.publish_state()
             return
+        wish = str(message.get("address") or "")
+        self.wish, self.always = wish, bool(message.get("always"))
+        # Said now, not when the bring-up task first runs: the hub reports its link the moment
+        # `serve` attaches below, and a `remote_state` emitted then would otherwise read "the
+        # rendezvous link is down" about a link that is up but at the wrong address.
+        self.reason = self.connecting_reason(wish) if self.always else ""
         self.identity = identity_mod.Identity.load_or_create()
         self.devices = identity_mod.DeviceStore()
         # On disk, not in memory: the registry holds the VAPID key phones subscribe with, and a
@@ -711,12 +758,15 @@ class Sidecar:
             listener = await self.server.start("0.0.0.0", int(message.get("tls_port") or 0),
                                                ssl_context=devtls.context(identity_mod.state_dir()))
             self.tls_port = self.server.port_of(listener)
-            self.address = message.get("address") or devtls.preferred_address()
+            # Only one of this machine's own addresses belongs on the TLS listener's URL:
+            # "relay-terminal.ai" and "tailscale" name a rendezvous and a route, and putting
+            # either in `https://<address>:<port>` would print a link that reaches nothing.
+            self.address = wish if self.machine_address(wish) else devtls.preferred_address()
             self.base = f"https://{self.address}:{self.tls_port}"
             self.note = self.self_signed_note()
         # A real certificate beats a warning, so it is what the QR gets whenever there is one. An
         # address the GUI remembered is honoured instead: the person chose it last time.
-        if self.found.ready and not message.get("address"):
+        if self.found.ready and not wish:
             await self.use_tailnet()
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
@@ -732,6 +782,11 @@ class Sidecar:
              "device_name": self.host.control.holder(pane).name}))
         self.host.on_share_state(lambda pane, paused, reason: self.emit(
             {"t": "share_state", "pane": pane, "paused": paused, "reason": reason}))
+        # Both halves of `remote_state` that the hub owns: whether the rendezvous link is up, and
+        # how many of the owner's own devices are connected. Wired before `serve` starts, or the
+        # first "connected" would land before anyone was listening for it.
+        self.host.on_link(lambda online, reason: self.publish_state())
+        self.host.on_devices(lambda count: self.publish_state())
         self.host.codes.on_state(self.code_state)
         # One `window_active` signal, two readers: the notification presence rule of section 9 and
         # "guests can act only while I am present" (10.5). The hub passes it on to the notifier.
@@ -745,6 +800,132 @@ class Sidecar:
         self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
                    "note": self.note, "addresses": self.address_list()})
         self.report_devices()
+        # Always on: go to the chosen address in the background. It is two network round trips —
+        # a health probe and a registration — and the stdio reader has to go on carrying panes and
+        # frames while they happen, so the GUI is never waiting on the rendezvous to draw a pane.
+        if self.always and not self.at_wish():
+            self.start_bring_up()
+        self.publish_state(force=True)
+
+    # ---- always on (section 8.1) ---------------------------------------------------------------
+
+    def adopt_wish(self, message: dict) -> None:
+        """A `start` for a hub that is already up: take its `always` and `address`."""
+        wish = str(message.get("address") or "") or self.wish
+        always = bool(message.get("always"))
+        moved = always and (wish != self.wish or not self.always)
+        self.wish, self.always = wish, always
+        if not always:
+            self.reason = ""
+            return
+        if moved or not self.at_wish():
+            self.start_bring_up()
+
+    def wants_hosted(self, wish: str) -> bool:
+        return bool(wish) and wish in (self.HOSTED_VALUE, hosted_origin())
+
+    def wants_tailnet(self, wish: str) -> bool:
+        """The picker's tailnet entry. It sends the tailnet **name**; Options › Remote remembers
+        the kind, "tailscale", because the name is not known until the probe has run."""
+        return wish == "tailscale" or (bool(wish) and wish == self.found.name)
+
+    def machine_address(self, wish: str) -> bool:
+        """One of this machine's own addresses — not a rendezvous, a route or a tunnel."""
+        return bool(wish) and not self.wants_hosted(wish) and not self.wants_tailnet(wish) \
+            and wish != self.CLOUDFLARE_VALUE
+
+    def at_wish(self) -> bool:
+        """Is the service where the switch asked for it?"""
+        if self.wants_hosted(self.wish):
+            return self.served_by_hosted
+        if self.wants_tailnet(self.wish):
+            return self.served_by_tailscale
+        if self.wish == self.CLOUDFLARE_VALUE:
+            return self.served_by_cloudflare
+        return True                        # a machine address: `start` already put it there
+
+    def connecting_reason(self, wish: str) -> str:
+        where = ("relay-terminal.ai" if self.wants_hosted(wish) else
+                 "your tailnet" if self.wants_tailnet(wish) else wish or "this machine")
+        return f"connecting to {where}."
+
+    def start_bring_up(self) -> None:
+        if self._bringing is not None and not self._bringing.done():
+            self._bringing.cancel()
+        self.reason = self.connecting_reason(self.wish)
+        self._bringing = asyncio.create_task(self._bring_up(self.wish))
+
+    async def _reach(self, wish: str) -> bool:
+        """One attempt at putting the service at ``wish``. True when it is there."""
+        if self.wants_hosted(wish):
+            if await self.use_hosted():
+                return True
+            self.reason = self.hosted_reason or ("relay-terminal.ai would not register this "
+                                                 "desktop right now.")
+            return False
+        if self.wants_tailnet(wish):
+            if await self.use_tailnet():
+                return True
+            self.reason = self.found.reason or "tailscale would not serve this machine."
+            return False
+        await self.set_address(wish)       # a machine address, or the public link
+        return True
+
+    async def _bring_up(self, wish: str) -> None:
+        """Keep trying to reach ``wish`` while the switch is on, and say where we are as it goes.
+
+        It **never falls back to another address on its own**. A desktop told to be at
+        relay-terminal.ai that quietly became reachable only on its own LAN is a desktop the phone
+        cannot find, with nothing on either screen saying so; this says why, in one sentence, and
+        tries again — from a second, doubling to a minute, jittered, forever.
+        """
+        delay = self.retry_min
+        while self.always and self.host is not None:
+            self.publish_state()
+            try:
+                reached = await self._reach(wish)
+            except Exception as error:                 # a probe, a DNS answer, a TLS handshake
+                log.info("bringing the service up at %s failed: %s", wish, error)
+                reached = False
+                self.reason = "that address could not be reached just now; still trying."
+            if reached:
+                self.reason = ""
+                self.announce()
+                return
+            self.publish_state()
+            await asyncio.sleep(host_mod.jittered(delay))
+            delay = min(delay * 2, self.retry_max)
+
+    def remote_state(self) -> dict:
+        """What the GUI's Options › Remote row and the chrome indicator are drawn from.
+
+        `address` is the **picker's** value, not this machine's resolved name: the switch was set
+        to "tailscale" or "relay-terminal.ai" and that is what Options › Remote and the chrome
+        line say it is at — including while it is not there yet, where the sentence to read is
+        "Remote control on · relay-terminal.ai · offline: <reason>".
+        """
+        online = self.host is not None and self.host.link_online and self.at_wish()
+        return {"t": "remote_state",
+                "on": self.always and self.host is not None,
+                "address": (self.wish or self.address) if self.always else self.address,
+                "base": self.base,
+                "online": online,
+                "devices": self.host.devices_online() if self.host is not None else 0,
+                "reason": "" if online else self.offline_reason()}
+
+    def offline_reason(self) -> str:
+        if self.host is None:
+            return "remote control is off."
+        return (self.reason or self.host.link_reason
+                or "the rendezvous link is down; reconnecting.")
+
+    def publish_state(self, *, force: bool = False) -> None:
+        """Emit `remote_state`, but only when something in it moved."""
+        state = self.remote_state()
+        if not force and state == self._last_state:
+            return
+        self._last_state = state
+        self.emit(state)
 
     def self_signed_note(self) -> str:
         return ("The certificate is self-signed, so your phone warns once. Its SHA-256 "
@@ -823,6 +1004,9 @@ class Sidecar:
             self.host.app_base = self.base
         self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
                    "note": self.note, "addresses": self.address_list()})
+        # Every address change goes through here, and each one moves `address`, `base` and
+        # usually `online`, so this is the one place `remote_state` has to follow it from.
+        self.publish_state()
 
     async def use_tailnet(self) -> bool:
         """Put the app behind `tailscale serve`, and point the pairing link at that origin.
@@ -1189,6 +1373,14 @@ class Sidecar:
             for device in self.devices.live()]})
 
     async def stop(self) -> None:
+        # The switch is off from here on: the bring-up loop must not put the service back up
+        # while the hub it would register is being torn down underneath it.
+        self.always = False
+        if self._bringing is not None:
+            self._bringing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._bringing
+            self._bringing = None
         # Before anything else: a `tailscale serve` route left behind would go on answering for a
         # port nothing is listening on.
         await self.drop_tailnet()
@@ -1204,6 +1396,10 @@ class Sidecar:
         if self.store is not None:
             self.store.close()
         self.host = self.server = self.store = self.serving = None
+        self.served_by_hosted = False
+        self.reason = ""
+        if self._last_state is not None:
+            self.publish_state()           # on:false, online:false, devices:0, and why
         self.emit({"t": "stopped"})
 
 

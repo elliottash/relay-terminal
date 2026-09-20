@@ -24,6 +24,7 @@ import contextlib
 import hmac
 import json
 import logging
+import random
 import secrets
 import time
 from dataclasses import dataclass
@@ -50,6 +51,18 @@ DEFAULT_HISTORY_ROWS = 60
 # stack trace does not take the keyboard off whoever is typing.
 PRESENCE_GRACE = 20.0
 HOUSEKEEPING = 1.0                 # how often lapsed prompts and control requests are swept
+# The rendezvous link's back-off (section 8.1, "always on"). A desktop that is meant to be
+# reachable all day has to survive a rendezvous restart, a laptop lid and a network that comes
+# back on another address, so `serve` retries **forever** rather than giving up after a few goes:
+# from one second, doubling to a minute, and jittered so a rendezvous that restarts does not take
+# every desktop's retry in the same tick.
+RECONNECT_MIN = 1.0
+RECONNECT_MAX = 60.0
+
+
+def jittered(delay: float) -> float:
+    """``delay`` with a quarter of jitter either way, never negative."""
+    return max(0.0, delay * random.uniform(0.75, 1.25))
 
 # Per-device inbound budget: (messages, seconds). Everything not named gets DEFAULT_LIMIT.
 LIMITS = {
@@ -357,6 +370,9 @@ class Channel:
             self.host.devices.touch(self.device_id)
         if self.participant_id:
             self.host.guests.touch(self.participant_id)
+        # The handshake is where a channel stops being anonymous, so it is where "one of the
+        # owner's devices is connected" becomes true (section 8.1). The hub counts, not us.
+        self.host.channel_identified(self)
 
     async def _messages(self) -> None:
         while not self.closed:
@@ -525,6 +541,17 @@ class Host:
         self.token: str | None = None
         self.rendezvous: str | None = None
         self._rehomed = False
+        # The rendezvous link as something to watch (section 8.1). `serve` reports every change
+        # to the watchers, so the sidecar can tell the GUI "online" or one sentence saying why
+        # not, without polling `socket`. The back-off bounds are per hub so a test can shrink them.
+        self.reconnect_min = RECONNECT_MIN
+        self.reconnect_max = RECONNECT_MAX
+        self._link_watchers: list[Callable[[bool, str], None]] = []
+        self._link_state: tuple[bool, str] = (False, "not connected yet.")
+        # How many of the owner's **own** devices hold a live channel. Guests are never counted:
+        # a participant's channel carries a `participant_id` and no `device_id`.
+        self._device_watchers: list[Callable[[int], None]] = []
+        self._devices_reported = 0
         # Per-device push origins (section 9). `home` is the first rendezvous this hub registered
         # with — the sidecar's own — and is what a device origin of "" means. `tokens` keeps a
         # token for every rendezvous registered with, so a phone subscribed under the local
@@ -625,15 +652,29 @@ class Host:
         return f"{base}/v1/connect?desktop={self.identity.desktop_id}&token={self.token}"
 
     async def serve(self) -> None:
-        """Hold the rendezvous socket open, reconnecting until ``stop`` is called."""
+        """Hold the rendezvous socket open, reconnecting until ``stop`` is called.
+
+        This loop is what "always on" rests on (section 8.1). Three rules, each of them a way a
+        desktop stopped being reachable for the rest of the day:
+
+        * it **retries forever**, from one second and doubling to a minute, with jitter, so a
+          rendezvous that restarts is not met by every desktop's retry in the same tick;
+        * it **registers again before each retry**. A rendezvous that restarted has no record of
+          this desktop, so the token it issued is refused (4401) — and a loop that kept dialing
+          with the same token would be refused identically until the app was restarted;
+        * it **never moves the hub**. A link that will not come up stays a link that will not come
+          up, reported as such; falling back to the local rendezvous on its own would quietly
+          change which address every phone has to reach, without anybody choosing it.
+        """
         self._running = True
         if self._housekeeping is None:
             # A parked prompt and a parked control request both lapse (10.4, 10.3) and somebody
             # has to notice; the queues' clocks are injected, so a test calls `expire_pending`
             # instead of waiting ten minutes.
             self._housekeeping = asyncio.create_task(self._housekeep())
-        delay = 1.0
+        delay = self.reconnect_min
         while self._running:
+            reason = "the rendezvous link is down."
             try:
                 url = self.socket_url()
                 self.socket = await ws.connect(url)
@@ -643,25 +684,112 @@ class Host:
                     continue
                 self._rehomed = False
                 log.info("connected to the rendezvous as %s", self.identity.desktop_id[:8])
-                delay = 1.0
+                delay = self.reconnect_min
+                self._link_changed(True, "")
                 await self._read_socket()
             except (ws.WebSocketError, OSError) as error:
+                reason = self._link_reason(error)
                 log.info("rendezvous link down (%s); retrying in %.0fs", error, delay)
             finally:
                 self.socket = None
                 for channel in list(self.channels.values()):
                     await channel.close("the link went down")
                 self.channels.clear()
+                self._devices_changed()
             if not self._running:
                 break
             if self._rehomed:              # moved on purpose (``rehome``): no back-off
                 self._rehomed = False
                 continue
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 30.0)
+            self._link_changed(False, reason)
+            await asyncio.sleep(jittered(delay))
+            delay = min(delay * 2, self.reconnect_max)
+            await self._register_again()
+        self._link_changed(False, "remote control is off.")
+
+    @staticmethod
+    def _link_reason(error: Exception) -> str:
+        """One sentence for the GUI: why the link is down, with no host or path in it."""
+        text = str(error)
+        if "4401" in text:
+            return "the rendezvous no longer knows this desktop; registering again."
+        if isinstance(error, OSError):
+            return "the rendezvous cannot be reached from this machine; still trying."
+        return "the rendezvous closed the link; reconnecting."
+
+    async def _register_again(self) -> None:
+        """Take a fresh token at the rendezvous we are pointed at, before the next dial.
+
+        It is the same challenge and proof of possession `register` does and it changes nothing
+        else: ``rendezvous`` is not read from the reply and is never moved here. A rendezvous that
+        is still down simply fails, which is the state we are already in — so the failure is
+        logged and the loop backs off again rather than ending.
+        """
+        base = self.rendezvous
+        if not base:
+            return
+        try:
+            token = await self._register_at(base)
+        except Exception as error:                 # down, refusing, TLS, not JSON: all "not yet"
+            log.info("re-registering at the rendezvous failed: %s", error)
+            self._link_changed(False, "the rendezvous is not answering yet; still trying.")
+            return
+        self.tokens[base] = token
+        if self.rendezvous == base:                # not rehomed while we were registering
+            self.token = token
+
+    # ---- what the GUI watches: the link, and the owner's connected devices ---------------------
+
+    def on_link(self, callback: Callable[[bool, str], None]) -> None:
+        """Be told ``(online, reason)`` every time the rendezvous link changes state."""
+        self._link_watchers.append(callback)
+
+    @property
+    def link_online(self) -> bool:
+        return self._link_state[0]
+
+    @property
+    def link_reason(self) -> str:
+        return self._link_state[1]
+
+    def _link_changed(self, online: bool, reason: str) -> None:
+        if (online, reason) == self._link_state:
+            return
+        self._link_state = (online, reason)
+        for callback in list(self._link_watchers):
+            with contextlib.suppress(Exception):
+                callback(online, reason)
+
+    def on_devices(self, callback: Callable[[int], None]) -> None:
+        """Be told how many of the owner's own devices are connected, when it changes."""
+        self._device_watchers.append(callback)
+
+    def devices_online(self) -> int:
+        """The owner's own paired devices holding a live channel right now.
+
+        Counted by device id, not by channel: a phone that reconnects before its old channel has
+        finished closing is one device, not two. Guests are not devices and are never counted.
+        """
+        return len({channel.device_id for channel in self.channels.values()
+                    if channel.device_id and not channel.closed})
+
+    def channel_identified(self, channel: Channel) -> None:
+        """A channel's handshake named a device or a participant (``Channel._handshake``)."""
+        if channel.device_id:
+            self._devices_changed()
+
+    def _devices_changed(self) -> None:
+        count = self.devices_online()
+        if count == self._devices_reported:
+            return
+        self._devices_reported = count
+        for callback in list(self._device_watchers):
+            with contextlib.suppress(Exception):
+                callback(count)
 
     async def stop(self) -> None:
         self._running = False
+        self._link_changed(False, "remote control is off.")
         if self._housekeeping is not None:
             self._housekeeping.cancel()
             self._housekeeping = None
@@ -725,6 +853,7 @@ class Host:
                 self.source.release_device(channel.device_id)
             if channel.participant_id:
                 await self._participant_left(channel)
+            self._devices_changed()
 
     async def _send_envelope(self, kind: int, channel: bytes, payload: bytes) -> None:
         if self.socket is None:

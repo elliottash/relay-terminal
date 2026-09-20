@@ -589,6 +589,59 @@ burned at the old rendezvous with the old token), and channels on the old socket
 invite links work again only if their rendezvous is chosen again. Nothing about the protocol
 changes: the hosted server sees what any rendezvous sees, which is ciphertext.
 
+### 8.1 Always on
+
+Until 2026-09-20 nothing was reachable until a share button was pressed, on one pane, in the Relay
+session that happened to be running: the sidecar started on demand, the address was chosen per
+share and forgotten afterwards, and the hosted registration went with the process. A phone paired
+yesterday that opened the app after a desktop restart saw nothing (card #PH0N, gap A).
+
+**The switch.** Options › Remote holds one on/off, remembered across restarts, and the address it
+was last pointed at. Every `start` carries `"always": true|false`, and `"address": <value>` when
+one is remembered: `relay-terminal.ai` for the hosted rendezvous, the word `tailscale` for the
+tailnet — the word, because the tailnet name belongs to the machine and the setting outlives it,
+and the sidecar resolves it against its own probe — or one of this machine's own addresses from
+the `addresses` list. `cloudflare` is never an always-on address. The same `start` line arrives
+again, verbatim, when the switch is turned on over a sidecar that was already running for an
+ordinary share: that is the service coming up, not a re-announcement. On the way down the GUI
+sends `unpane` for every pane and then `stop`.
+
+With `always`, the sidecar brings the service up **there**, with no share having been asked for:
+
+* it **publishes every pane**. The GUI sends the `pane` and `unpane` lines it already sends, for
+  every pane with a screen rather than for the one that was shared. Guests are untouched: a
+  participant's every message goes through `Host.guest_view`, which cuts a `panes` list down to
+  the panes of their invite and drops anything naming a pane they are not on, so publishing more
+  shows a guest nothing more. A device that connects while there is nothing open is sent an empty
+  `panes` list and then the updates, rather than silence;
+* it **stays registered**. The hub's outbound socket reconnects for ever — one second, doubling to
+  a minute, jittered — and **registers again before each retry**, because a rendezvous that
+  restarted has forgotten the token it issued and would refuse the same token, identically, until
+  the app was restarted (`Host.serve`, `Host._register_again`);
+* it **never falls back on its own**. A desktop told to be at relay-terminal.ai that quietly
+  became reachable only on its own LAN is a desktop the phone cannot find, with nothing on either
+  screen saying so. A rendezvous that is down is reported as down, in one sentence, and tried
+  again.
+
+**`remote_state`** is what the desktop draws its indicator from. The sidecar emits it whenever any
+field changes, and it is the only message about the service as a whole:
+
+```json
+{"t":"remote_state","on":true,"address":"relay-terminal.ai","base":"https://join.relay-terminal.ai",
+ "online":true,"devices":1,"reason":""}
+```
+
+`on` — the always-on service is up. `address` — the **picker's** value, not this machine's
+resolved name: a switch set to `tailscale` reads back as `tailscale`, including while the service
+is still on its way there, because that is what the person chose and the tailnet name belongs to
+the machine rather than to the setting. `base` — the origin every new link carries. `online` —
+registered *and* the socket up *at the chosen address*; a hub that is still at its own rendezvous
+because the hosted one refused is on, and not online. `devices` — how many of the owner's own
+paired devices hold a live channel right now, counted by device rather than by channel, and never
+counting guests. `reason` — one sentence while `online` is false, and `""` while it is true.
+`stop` turns the service off, drops the registration and emits a last `remote_state` with
+`on:false`.
+
 ## 9. Notifications
 
 The desktop decides; the rendezvous only forwards. Triggers, all off-by-default-configurable:
@@ -1202,6 +1255,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 | In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share button in the pane's chrome row, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |
+| Always on (§8.1) | `remote/gui_host.py`, `remote/host.py` | `start` with `"always"` and an `"address"` brings the service up with no share asked for, and keeps it there: the hub's socket reconnects for ever with a jittered back-off and **registers again before each retry**, so a rendezvous restart is survived rather than ending the day's reachability, and it never moves to another address on its own. `remote_state` reports `on`, `address`, `base`, `online`, `devices` and one sentence of `reason` whenever any of them changes. `tests/test_remote_gui_host.py` (`AlwaysOnTests`, `AutoPublishTests`), `tests/test_remote_host.py` (`AlwaysOnLinkTests`). The desktop's half — the Options › Remote switch, the chrome indicator and "Disconnect all" — is card #PH0N's Phase 1.1 |
 | How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
 
