@@ -66,6 +66,10 @@ def _preset(preset_id):
 # switching the pane's own model.
 ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "planning",
          "summaries", "suggestions", "chores", "audit", "loop_check", "vision", "route_assist")
+# The role the helper worker runs (protocol 30.7): one per tab, serving the Switchboard and the
+# Options, Actions and Sessions panes. Named because it is the one role that may not run on a
+# guest harness (`leave_guest`, card #GH5T) — its whole job is Relay's own tools.
+HELPER_ROLE = "switchboard"
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
           # "switchboard" keeps its protocol name — settings, the model box (#BRD3), its Options ›
@@ -356,12 +360,17 @@ class RoleResolver:
         self.main_effort = main_effort
         self._cache: dict[str, Resolved] = {}
         self.warnings: list[str] = []
+        # Why the main model is not the one the window names (card #GH5T): the helper worker left
+        # a guest harness for a model off the priority list. Shown inline, on the Main tier and on
+        # every role that follows it, the way a tier's step-down note is — an expected fallback the
+        # user should be able to read, not a protocol warning. None for every ordinary resolver.
+        self.main_note: str | None = None
 
     # ----- helpers ----------------------------------------------------------------------
     def _main(self, role: str, source: str = "main", warning: str | None = None,
               tier: str | None = None, note: str | None = None) -> Resolved:
         return Resolved(role, self.main_config, self.main_preset_id, self.main_effort, source, warning,
-                        tier, note)
+                        tier, note or self.main_note)
 
     def _key_for(self, preset_id: str | None) -> str:
         if localmodels.is_local_id(preset_id) or _hosted(preset_id):
@@ -608,6 +617,37 @@ class RoleResolver:
             return None
         return None if resolved.source == "fallback" else resolved
 
+    # ----- the helper agent may not run on a guest (card #GH5T) --------------------------
+    def leave_guest(self, fallbacks, guest_name: str) -> Resolved | None:
+        """Move this resolver off a guest harness onto a model it can actually build.
+
+        The helper agent (``HELPER_ROLE``) works through Relay's own ``board_*`` and ``app_*``
+        tools, which a guest does not take (#4NXH), so a helper worker whose Main is Claude Code
+        or Codex has to run somewhere else. *Where* is not a new question: it is the Options ›
+        Models priority list, walked in the user's own order on exactly the terms a failover walks
+        it (``fallback_candidate``) — a guest row, an entry whose key has gone and Relay Free
+        unless the list names it and this machine can use it are all skipped.
+
+        The first entry that can take a turn becomes this resolver's main model, so "Follow Main",
+        every tier, the subagent factory and the helper's own role land on it instead of on the
+        harness; ``main_note`` then says why, and rides into the model box's tooltip.
+
+        Returns what it landed on, or None when the list holds nothing usable — the resolver is
+        then left on the guest, still with a note, and the caller says the one sentence
+        ``guest_harness_provider.helper_refusal`` gives it.
+        """
+        for entry in (fallbacks or []):
+            spare = self.fallback_candidate(entry, "main", ())
+            if spare is None:
+                continue
+            self.rebase(spare.config, spare.preset_id, spare.effort)
+            self.main_note = (f"Main is {guest_name}, a guest session the helper agent cannot run "
+                              f"on, so it fell back to {spare.config.model}.")
+            return spare
+        self.main_note = (f"Main is {guest_name}, a guest session the helper agent cannot run on, "
+                          "and the Options › Models priority list has nothing else it can use.")
+        return None
+
     # ----- api --------------------------------------------------------------------------
     def resolve(self, role: str) -> Resolved:
         role = validate_role(role)   # also translates the pre-2026-09-18 name "fast"
@@ -652,6 +692,7 @@ class RoleResolver:
         self.main_effort = main_effort
         self._cache.clear()
         self.warnings.clear()
+        self.main_note = None       # a new main model: whatever was said about the old one is spent
 
     def set_roles(self, roles: dict) -> None:
         """Replace the configured role table (set_agent_options); applies from the next call."""
@@ -685,6 +726,10 @@ class RoleResolver:
                 out[tier] = {"tier": tier, "label": label, "model": self.main_config.model,
                              "preset": self.main_preset_id, "base_url": self.main_config.base_url,
                              "effort": self.main_effort, "source": "main"}
+                if self.main_note:
+                    # A helper worker that left a guest (leave_guest): the Main tier is not the
+                    # model the window names, and the row says so where the roles modal shows it.
+                    out[tier]["note"] = self.main_note
                 continue
             # Resolved against a throwaway role so tier probing never pollutes the role cache.
             resolved = self._tier("main", tier, "default")

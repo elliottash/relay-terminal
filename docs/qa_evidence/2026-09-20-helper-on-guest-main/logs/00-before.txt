@@ -1,0 +1,17 @@
+The failure as reported (owner, 2026-09-20), reproduced before anything was changed. The same
+driver and the same fixture board as drive.sh, at 318beedb (the commit before the fix), with the
+helper's `configure` carrying the window's preset `guest:claude` and `agent_role: "switchboard"`:
+
+  $ python3 run-worker.py < 00-before-request.ndjson
+  {"event": "ready"}
+  {"event": "configured", "model": "claude-fake", "agent_role": "main", "guest": "claude", ...}
+  {"event": "error", "text": "Base URL must be an HTTPS URL without credentials, query, or fragment."}
+  guest harness starts: 1
+
+Two things wrong in four lines: a guest process was started for a worker that can never use one
+(`guest harness starts: 1`), and the first `board_chat` died where `BoardCommands._build_page_agent`
+handed `harness://claude` to `ChatProvider`, five frames down in `ProviderConfig.validate`. The
+worker log of that run said the same:
+
+  ERROR relay.worker pane=- protocol_error kind=board_chat error=ValueError
+        msg="Base URL must be an HTTPS URL without credentials, query, or fragment."

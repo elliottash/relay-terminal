@@ -412,6 +412,32 @@ class ProtocolChatTest(unittest.TestCase):
         request = {"type": "board_chat", "id": "r1", "text": text, **extra}
         self.commands.dispatch(request)
 
+    def test_a_guest_config_is_refused_in_a_sentence_not_an_endpoint_error(self):
+        """Card #GH5T. A guest harness is not an endpoint: `harness://claude` is the pane agent's
+        base URL because the guest *process* is its provider, and there is no second one to give a
+        page or card turn. Building one anyway is what the owner saw on 2026-09-20 — "The
+        Switchboard agent could not answer: Base URL must be an HTTPS URL without credentials,
+        query, or fragment", from five frames down in `ProviderConfig.validate`. The helper worker
+        no longer configures itself on a guest at all; this is the backstop, in the same words.
+        """
+        from relay_core.agent import Agent
+        from relay_core.guest_harness_provider import UnavailableProvider, helper_refusal
+        from relay_core.provider import ProviderConfig
+
+        config = ProviderConfig("harness://claude", "", "", {}, 32_768)
+        # Exactly how a helper worker with nothing to fall back on is built: no guest started, and
+        # a stand-in that is never called, so the Agent exists and the Switchboard still opens.
+        main = Agent(config, str(self.repo), lambda event: None,
+                     provider=UnavailableProvider(config, helper_refusal("Claude Code")))
+        self.commands.turns.agent = main
+        for build in (lambda: self.commands._build_page_agent(lambda e: None),
+                      lambda: self.commands._build_card_agent("ABCD", lambda e: None)):
+            with self.assertRaises(ValueError) as caught:
+                build()
+            self.assertIn("cannot run on Claude Code", str(caught.exception))
+            self.assertIn("Options", str(caught.exception))
+            self.assertNotIn("Base URL", str(caught.exception))
+
     def test_a_prompt_starts_a_turn_with_the_board_as_context(self):
         self.ask("What is ready?")
         self.assertTrue(self.of("board_chat_started"))
@@ -802,6 +828,7 @@ class BoardlessHelperTest(unittest.TestCase):
             # No board repository to stand in for it: the workspace is the pane agent's own.
             self.assertEqual(str(agent.executor.workspace.root),
                              str(main.executor.workspace.root))
+
 
 
 class FakeConfig:

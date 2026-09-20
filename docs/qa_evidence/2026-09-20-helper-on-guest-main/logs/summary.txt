@@ -1,0 +1,28 @@
+=== 1. helper on a guest Main, priority list with a keyed provider ===
+--- 01-priority-list: guest harness starts: 0
+    configured model='kimi-k3' agent_role=main guest=None
+    roles.switchboard = {"role": "switchboard", "model": "kimi-k3", "preset": "kimi", "base_url": "https://api.moonshot.ai/v1", "effort": null, "source": "main", "label": "Helper agent", "tier": "main", "note": "Main is Claude Code, a guest session the helper agent cannot run on, so it fell back to kimi-k3."}
+    tiers.main        = {"tier": "main", "label": "Main", "model": "kimi-k3", "preset": "kimi", "base_url": "https://api.moonshot.ai/v1", "effort": null, "source": "main", "note": "Main is Claude Code, a guest session the helper agent cannot run on, so it fell back to kimi-k3."}
+=== 2. helper on a guest Main, nothing on the list is usable ===
+--- 02-nothing-usable: guest harness starts: 0
+    configured model='' agent_role=main guest=None
+    roles.switchboard = {"role": "switchboard", "model": "", "preset": null, "base_url": "harness://claude", "effort": null, "source": "main", "label": "Helper agent", "tier": "main", "note": "Main is Claude Code, a guest session the helper agent cannot run on, and the Options \u203a Models priority list has nothing else it can use."}
+    tiers.main        = {"tier": "main", "label": "Main", "model": "", "preset": null, "base_url": "harness://claude", "effort": null, "source": "main", "note": "Main is Claude Code, a guest session the helper agent cannot run on, and the Options \u203a Models priority list has nothing else it can use."}
+    error                {"text": "The helper agent cannot run on Claude Code. Add a provider under Options \u203a Models, or pick a model for the helper in its model box."}
+=== 3. a role pick in the helper's model box, under a guest window preset ===
+--- 03-role-pick: guest harness starts: 0
+    configured model='glm-5.3' agent_role=switchboard guest=None
+    roles.switchboard = {"role": "switchboard", "model": "glm-5.3", "preset": "glm-coding", "base_url": "https://api.z.ai/api/coding/paas/v4", "effort": null, "source": "configured", "label": "Helper agent", "tier": null}
+    tiers.main        = {"tier": "main", "label": "Main", "model": "", "preset": null, "base_url": "harness://claude", "effort": null, "source": "main", "note": "Main is Claude Code, a guest session the helper agent cannot run on, and the Options \u203a Models priority list has nothing else it can use."}
+=== 4. a PANE on the same guest preset is unchanged ===
+--- 04-pane-unchanged: guest harness starts: 1
+    configured model='claude-fake' agent_role=main guest=claude
+    roles.switchboard = {"role": "switchboard", "model": "claude-fake", "preset": null, "base_url": "harness://claude", "effort": null, "source": "main", "label": "Helper agent", "tier": "main"}
+    tiers.main        = {"tier": "main", "label": "Main", "model": "claude-fake", "preset": null, "base_url": "harness://claude", "effort": null, "source": "main"}
+=== 5. live: the helper answers a board question on the fallback endpoint ===
+--- 05-live: guest harness starts: 0
+    configured model='stub-model' guest=None
+    note: Main is Claude Code, a guest session the helper agent cannot run on, so it fell back to stub-model.
+    delta  The board has one card: **#FX01 — A fixture card for the helper-on-guest repro**, in Inbox. I am the helper agent, answering on the stub local endpoint.
+
+transcripts in /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-helper-on-guest-main/logs

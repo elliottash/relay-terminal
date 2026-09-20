@@ -98,6 +98,65 @@ def config_guest_id(config) -> str | None:
     return name if name in HARNESS_GUESTS else None
 
 
+def guest_name(preset_or_config) -> str:
+    """How a guest is named to a person — "Claude Code", "Codex" — from a preset id or a config.
+
+    Empty for anything that is not a guest, so a caller can write the name straight into a
+    sentence without asking twice which of the two it is holding.
+    """
+    guest_id = (preset_guest_id(preset_or_config)
+                if isinstance(preset_or_config, str) else config_guest_id(preset_or_config))
+    return guest.spec(guest_id).name if guest_id else ""
+
+
+def helper_refusal(name: str) -> str:
+    """What the helper agent says when the only model it has is a guest harness (card #GH5T).
+
+    The helper — the Switchboard's agent and the one the Options, Actions and Sessions panes ask
+    (protocol 30.7) — works through Relay's own `board_*` and `app_*` tools, which a guest does
+    not take (#4NXH). So it cannot run on one, and when the Options › Models priority list holds
+    nothing else usable there is nothing to fall back to. This is the sentence the user sees then,
+    in place of the endpoint error a guest's `harness://` base URL used to raise deep inside the
+    agent builder (owner report, 2026-09-20: "The Switchboard agent could not answer: Base URL
+    must be an HTTPS URL without credentials, query, or fragment").
+    """
+    return (f"The helper agent cannot run on {name or 'a guest session'}. Add a provider under "
+            "Options › Models, or pick a model for the helper in its model box.")
+
+
+class UnavailableProvider:
+    """The stand-in a helper worker is built on when it has no model at all (card #GH5T).
+
+    Its Main is a guest harness, which the helper may not run on, and the priority list holds
+    nothing else — so there is no endpoint to build. The worker is still configured, because the
+    Switchboard is files: the pane opens, its cards are read and its model box says what is wrong.
+    Nothing is started and nothing is ever sent; a turn that reaches a provider at all gets
+    `helper_refusal` back, the same sentence the agent builder raises before it gets that far.
+    """
+
+    serves_side_calls = False       # a side call would be a model call too
+
+    def __init__(self, config: ProviderConfig, text: str):
+        self.config = config
+        self.text = text
+        self.stall_timeout = DEFAULT_STALL_TIMEOUT
+
+    def complete(self, *args, **kwargs):
+        raise ProviderError(self.text)
+
+    def cancel(self) -> None:
+        pass
+
+    def set_stall_timeout(self, seconds) -> None:
+        self.stall_timeout = seconds
+
+    def response_open(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        pass
+
+
 def config_for_preset(preset_id: str, request: dict) -> ProviderConfig:
     """The ProviderConfig for `configure`/`set_model` naming a guest preset.
 

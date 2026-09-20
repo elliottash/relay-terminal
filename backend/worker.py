@@ -211,13 +211,27 @@ def main():
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),
                                                     tiers=tier_table)
+                # Card #GH5T (owner report, 2026-09-20: "The Switchboard agent could not answer:
+                # Base URL must be an HTTPS URL without credentials, query, or fragment"). The
+                # helper worker is configured with the *window's* preset, so a Main on Claude Code
+                # made it a guest worker — and the helper's whole job is Relay's own `board_*` and
+                # `app_*` tools, which a guest does not take (#4NXH). So it never starts one: the
+                # resolver is moved off the harness onto the Options › Models priority list before
+                # any role is resolved, which is what makes "Follow Main", the tiers and a role
+                # pick in the helper's model box all name a model that can actually answer. A
+                # *pane* on a guest preset is untouched; this is the helper role and nothing else.
+                helper_on_guest = is_guest and agent_role == model_roles.HELPER_ROLE
+                spare = (resolver.leave_guest(options.get("fallbacks"),
+                                              guest_harness_provider.guest_name(request.get("preset")))
+                         if helper_on_guest else None)
                 pane_role = resolver.resolve(agent_role)
                 # The guest starts here: every field of the request has been accepted, and a guest
                 # that cannot start is one `error` with the pane left on the model it had (29.3).
                 # `config` is filled in rather than replaced, so the resolver holds the same object
                 # and its summary names the model the guest reports.
                 guest_provider = (guest_harness_provider.start_provider(
-                    request.get("preset"), request, workspace, config=config) if is_guest else None)
+                    request.get("preset"), request, workspace, config=config)
+                    if is_guest and not helper_on_guest else None)
                 if guest_provider is not None:
                     # A guest pane's agent *is* the guest: no role may put another model's config
                     # under the harness (the provider would stay the guest's and the pane would
@@ -227,14 +241,27 @@ def main():
                     config, options["preset_id"] = pane_role.config, pane_role.preset_id
                 else:
                     agent_role = "main"   # the role follows the main agent, or fell back to it
+                    if spare is not None:
+                        # The helper follows Main and Main was a guest: it follows where the
+                        # resolver landed instead (#GH5T).
+                        config, options["preset_id"] = spare.config, spare.preset_id
                 state["agent_role"] = agent_role
+                # Nothing on the list could take it either, so this worker has no model at all. It
+                # is still configured — the Switchboard is files, so the pane opens, reads its
+                # cards and shows in its model box why it cannot answer — on a provider that is
+                # never called: a turn gets the sentence, not an endpoint error (#GH5T).
+                stand_in = (guest_harness_provider.UnavailableProvider(
+                    config, guest_harness_provider.helper_refusal(
+                        guest_harness_provider.guest_name(config)))
+                    if helper_on_guest and spare is None else None)
                 # --- end model roles ---
                 # A configure replaces the pane's agent, so a guest harness the old one held has
                 # nobody left to close it (protocol 29.3). Idle by now: configure refuses mid-turn.
                 if turns.agent is not None:
                     guest_harness_provider.detach(turns.agent)
                 try:
-                    agent = Agent(config, workspace, turns.agent_emit, provider=guest_provider,
+                    agent = Agent(config, workspace, turns.agent_emit,
+                                  provider=guest_provider or stand_in,
                                   keybindings=catalog, skills=skill_index, roles=resolver, **options)
                 except Exception:
                     if guest_provider is not None:

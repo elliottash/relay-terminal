@@ -980,6 +980,74 @@ class WorkerProtocolTests(unittest.TestCase):
                          {"type": "shutdown"}], second)
         self.assertTrue(second.closed)
 
+    # ----- the helper worker never starts a guest (card #GH5T) --------------------------------
+    def helper(self, harness, *, fallbacks=None, roles=None, keys=None):
+        """One `configure` as the tab's helper worker: the window's guest preset, the
+        `switchboard` role, and the Options › Models priority list the GUI sends with it."""
+        request = {"type": "configure", "preset": "guest:claude", "workspace": str(ROOT),
+                   "agent_role": "switchboard", "use_stored_key": True, "api_key": "",
+                   "fallbacks": fallbacks if fallbacks is not None else []}
+        if roles is not None:
+            request["roles"] = roles
+        with mock.patch.dict(os.environ, keys or {}):
+            events = self.run_worker([request, {"type": "shutdown"}], harness)
+        return events
+
+    def test_the_helper_worker_follows_the_priority_list_instead_of_starting_a_guest(self):
+        """Owner report, 2026-09-20: Main is Claude Code, and every helper turn answered "Base URL
+        must be an HTTPS URL without credentials, query, or fragment". The helper's tools are
+        Relay's own, which a guest does not take (#4NXH), so it runs on the first model of the
+        priority list that can take a turn — and starts no guest process it could never use."""
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.helper(harness,
+                             fallbacks=[{"preset": "guest:codex", "model": ""},
+                                        {"preset": "kimi", "model": "kimi-k3"}],
+                             keys={"RELAY_KIMI_API_KEY": "k"})
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(harness.starts, [])              # nothing was started
+        self.assertEqual(configured[0]["model"], "kimi-k3")
+        self.assertNotIn("guest", configured[0])
+        role = configured[0]["roles"]["switchboard"]
+        self.assertEqual(role["preset"], "kimi")
+        # What the model box says: "Follow Main — kimi-k3", and why, in its tooltip.
+        self.assertEqual(configured[0]["tiers"]["main"]["model"], "kimi-k3")
+        self.assertIn("Claude Code", role["note"])
+        self.assertIn("kimi-k3", role["note"])
+
+    def test_a_role_pick_is_honoured_under_a_guest_window_preset(self):
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.helper(harness, roles={"switchboard": {"preset": "glm-coding"}},
+                             keys={"RELAY_GLM_CODING_API_KEY": "k"})
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(harness.starts, [])
+        self.assertEqual(configured[0]["agent_role"], "switchboard")
+        self.assertEqual(configured[0]["roles"]["switchboard"]["preset"], "glm-coding")
+
+    def test_with_nothing_usable_it_configures_anyway_and_a_turn_says_why(self):
+        """The Switchboard is files, so the pane still opens and browses its cards; what it cannot
+        do is answer, and it says so in a sentence instead of the endpoint error."""
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.helper(harness, fallbacks=[{"preset": "kimi", "model": "kimi-k3"}])
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(harness.starts, [])
+        self.assertIn("nothing else it can use",
+                      configured[0]["roles"]["switchboard"]["note"])
+
+    def test_a_pane_on_the_same_preset_still_starts_the_guest(self):
+        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
+        events = self.run_worker([
+            {"type": "configure", "preset": "guest:claude", "workspace": str(ROOT),
+             "fallbacks": [{"preset": "kimi", "model": "kimi-k3"}]},
+            {"type": "shutdown"}], harness)
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(len(harness.starts), 1)
+        self.assertEqual(configured[0]["guest"], "claude")
+        self.assertEqual(configured[0]["model"], "claude-fake")
+
     def test_a_guest_that_cannot_start_is_one_error(self):
         harness = FakeHarness([], start_error=HarnessNotAvailable("codex is not installed here."))
         events = self.run_worker([

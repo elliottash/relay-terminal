@@ -680,5 +680,80 @@ class TierTests(unittest.TestCase):
         self.assertIn("preset", events[1]["text"])
 
 
+# ----- the helper agent leaves a guest (card #GH5T) -------------------------------------------
+class LeaveGuestTests(unittest.TestCase):
+    """`RoleResolver.leave_guest`: a helper worker whose Main is a guest harness walks the
+    Options › Models priority list for a model it can actually build.
+
+    Owner report, 2026-09-20: his Main is Claude Code, so the tab's helper worker was configured
+    on `harness://claude` and every card and page turn died in `ProviderConfig.validate` —
+    "Base URL must be an HTTPS URL without credentials, query, or fragment".
+    """
+
+    def guest(self, keys=("kimi",)):
+        store = {name: f"{name}-key" for name in keys}
+        return RoleResolver(ProviderConfig("harness://claude", "", "", {}, 32_768), "guest:claude",
+                            key_lookup=lambda pid: store.get(pid, ""))
+
+    def test_the_first_usable_entry_becomes_main_and_the_helper_follows_it(self):
+        made = self.guest()
+        spare = made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
+        self.assertIsNotNone(spare)
+        self.assertEqual(spare.preset_id, "kimi")
+        self.assertEqual(made.main_config.model, "kimi-k3")
+        self.assertEqual(made.main_preset_id, "kimi")
+        helper = made.resolve(model_roles.HELPER_ROLE)
+        self.assertEqual(helper.config.model, "kimi-k3")
+        self.assertEqual(helper.config.base_url, CONFIGS["kimi"][0])
+        # The model box reads the reason out of the role's note and the Main tier's.
+        self.assertIn("Claude Code", helper.note)
+        self.assertIn("kimi-k3", helper.note)
+        self.assertIn("Claude Code", made.tier_summary()["main"]["note"])
+        self.assertEqual(made.tier_summary()["main"]["model"], "kimi-k3")
+        self.assertFalse(made.warnings)          # an expected fallback, not a protocol warning
+
+    def test_a_guest_row_and_an_entry_with_no_key_are_skipped_in_the_users_order(self):
+        made = self.guest(keys=("glm-coding",))
+        spare = made.leave_guest([{"preset": "guest:codex", "model": ""},
+                                  {"preset": "kimi", "model": "kimi-k3"},
+                                  {"preset": "glm-coding", "model": "glm-5.3"}], "Claude Code")
+        self.assertEqual(spare.preset_id, "glm-coding")
+        self.assertEqual(made.main_config.model, "glm-5.3")
+
+    def test_relay_free_is_a_target_only_when_the_list_names_it_and_it_works(self):
+        made = self.guest(keys=())
+        with mock.patch.object(model_roles.hosted, "available", return_value=False):
+            self.assertIsNone(made.leave_guest([{"preset": "relay-free", "model": ""}], "Claude Code"))
+        with mock.patch.object(model_roles.hosted, "available", return_value=True):
+            spare = self.guest(keys=()).leave_guest([{"preset": "relay-free", "model": ""}], "Claude Code")
+        self.assertIsNotNone(spare)
+        self.assertEqual(spare.preset_id, "relay-free")
+
+    def test_nothing_usable_leaves_the_resolver_on_the_guest_and_says_so(self):
+        made = self.guest(keys=())
+        self.assertIsNone(made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code"))
+        self.assertEqual(made.main_config.base_url, "harness://claude")
+        self.assertIn("nothing else it can use", made.resolve(model_roles.HELPER_ROLE).note)
+        self.assertIsNone(made.leave_guest([], "Claude Code"))
+
+    def test_a_role_pick_still_wins_over_where_the_resolver_landed(self):
+        store = {"kimi": "kimi-key", "glm-coding": "glm-key"}
+        made = RoleResolver(ProviderConfig("harness://claude", "", "", {}, 32_768), "guest:claude",
+                            validate_roles({"switchboard": {"preset": "glm-coding"}}),
+                            key_lookup=lambda pid: store.get(pid, ""))
+        made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
+        helper = made.resolve(model_roles.HELPER_ROLE)
+        self.assertEqual(helper.preset_id, "glm-coding")
+        self.assertEqual(helper.source, "configured")
+        self.assertIsNone(helper.note)            # it was picked, so nothing fell back
+
+    def test_a_later_set_model_clears_the_note(self):
+        made = self.guest()
+        made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
+        made.rebase(main_config("glm"), "glm")
+        self.assertIsNone(made.main_note)
+        self.assertIsNone(made.resolve(model_roles.HELPER_ROLE).note)
+
+
 if __name__ == "__main__":
     unittest.main()

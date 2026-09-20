@@ -25,6 +25,7 @@ from . import board_import as I
 from . import board_turns
 from . import forge_github as GH
 from . import forge_sync as F
+from . import guest_harness_provider as GHP
 from . import logs
 from . import project_probe as PP
 from . import roles as model_roles
@@ -477,6 +478,23 @@ class BoardCommands:
             self.init.cancel = cancel
         agent.refresh_system_prompt()
 
+    @staticmethod
+    def _usable_config(config):
+        """The config a helper turn may be built on, or the one sentence saying why there is none.
+
+        A guest harness is not an endpoint: its ``harness://claude`` base URL is the pane agent's
+        because the *guest process* is that agent's provider, and there is no second one to give a
+        card or page turn. Building one anyway is what the owner saw on 2026-09-20 — "The
+        Switchboard agent could not answer: Base URL must be an HTTPS URL without credentials,
+        query, or fragment", raised five frames down in ``ProviderConfig.validate`` (card #GH5T).
+        The helper worker no longer configures itself on a guest at all (`worker.py`, `configure`);
+        this is the backstop, and it says the same thing that worker does.
+        """
+        name = GHP.guest_name(config)
+        if name:
+            raise ValueError(GHP.helper_refusal(name))
+        return config
+
     def _build_card_agent(self, card_id: str, emit):
         """Build the agent one card's turns run on (19.16): the pane's provider, its own rest.
 
@@ -500,7 +518,7 @@ class BoardCommands:
             raise ValueError("The Switchboard agent has no board tools here "
                              "(this project has no board.yaml, or its autonomy is off).")
         workspace = str(tools.board.repo)
-        agent = Agent(main.config, workspace, emit,
+        agent = Agent(self._usable_config(main.config), workspace, emit,
                       max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
                       skills=getattr(main.executor, "skills", None),
                       preset_id=main.preset.id if main.preset else None,
@@ -555,6 +573,7 @@ class BoardCommands:
         if resolved is not None:
             config, preset_id = resolved.config, resolved.preset_id
             effort = resolved.effort or effort
+        config = self._usable_config(config)
         # The tab's helper keeps its conversation on disk, keyed by (workspace, tab) — 30.7.
         # The directory is outside `relay/sessions/`, the one tree that is indexed, so nothing
         # here is listed as one of the person's own conversations. No tab (a GUI from before

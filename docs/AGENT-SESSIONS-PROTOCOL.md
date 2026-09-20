@@ -749,7 +749,10 @@ after the deterministic detector has already fired (12.10), never on a timer; ro
 role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and
 Sessions alike (section 30), so naming it after one of its panes had stopped being true. The
 protocol name, the stored settings, the model box and its Main default are unchanged — the label is
-the only thing that moved.
+the only thing that moved. It is also the one role that **cannot follow Main onto a guest harness**:
+its tools are Relay's own, which a guest does not take, so a helper worker whose Main is a `guest:`
+preset resolves off it onto the Options › Models priority list instead of starting a guest
+(card `#GH5T`, 30.7).
 
 `switchboard` is **labelled "Helper agent"** in the UI since 2026-09-20 (card `#FEJQ`, owner): the
 role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and
@@ -5205,7 +5208,9 @@ what the test proved, so a `presets` after "change login" and "test" is current 
 
 **Configuring one.** `configure {preset: "guest:claude", guest: {model?, resume?, fork?,
 permissions?}}` (and `set_model {preset: "guest:…", guest: {…}}` from any other preset) builds a
-`HarnessProvider` in place of the chat provider: it satisfies the `ChatProvider` surface the Agent
+`HarnessProvider` in place of the chat provider — in a **pane's** worker; a helper worker
+(`agent_role: "switchboard"`) never starts one and resolves off the guest instead, because its
+tools are Relay's own (30.7, card `#GH5T`). It satisfies the `ChatProvider` surface the Agent
 uses — `complete(messages, tools, emit, cancel)`, `config`, `cancel()` — so the ordinary `Agent`,
 its transcript, its request ledger, titles, summaries and the sessions index are unchanged. On
 `complete` the provider takes the last user message (its text and its images), runs one harness
@@ -5704,6 +5709,26 @@ generalised, not a sibling of it:
   `board_chat_state` and every `chat: true` turn event now also carry `pane`, so the panel that
   asked draws the answer and the others do not. Queueing, stop and the queue ops of 19.18 are
   unchanged and are the worker's, not the panel's.
+- **The helper never runs on a guest harness, and never starts one** (card `#GH5T`, owner report
+  2026-09-20: "The Switchboard agent could not answer: Base URL must be an HTTPS URL without
+  credentials, query, or fragment"). The helper worker is configured with the *window's*
+  `provider/preset`, so a Main on Claude Code or Codex made it a guest worker (29.3) — and the
+  helper's whole job is Relay's own `board_*` and `app_*` tools, which a guest does not take
+  (`#4NXH`). Every card and page turn then died in `ProviderConfig.validate`, because
+  `harness://claude` is not an endpoint. So when `agent_role` is `switchboard` and the preset is a
+  `guest:` one, the worker starts no guest: before any role is resolved it walks the Options ›
+  Models priority list (the `fallbacks` option, the same order and the same terms a failover walks
+  it — guest rows, entries whose key has gone and Relay Free unless the list names it and
+  `hosted.available()` are all skipped) and the first entry that can take a turn becomes the
+  resolver's Main. "Follow Main", the tiers, the subagent factory and a pick in the helper's model
+  box then all name that model, and `configured.roles.switchboard.note` (and `tiers.main.note`)
+  says why, which is what the model box shows in its tooltip: *"Main is Claude Code, a guest
+  session the helper agent cannot run on, so it fell back to kimi-k3."* A role pick of a real
+  provider or tier still wins over it. When the list holds nothing usable the worker is still
+  configured — the Switchboard is files, so the pane opens and its cards are read — on a provider
+  that is never called, and a turn answers one sentence: "The helper agent cannot run on Claude
+  Code. Add a provider under Options › Models, or pick a model for the helper in its model box."
+  A **pane** on a guest preset is untouched by all of this: 29.3 stands exactly as written.
 
 The `switchboard` role keeps its protocol name — settings, the model box (#BRD3), its Options ›
 Models row and its Main default are untouched — and is **labelled "Helper agent"** in the UI (owner
