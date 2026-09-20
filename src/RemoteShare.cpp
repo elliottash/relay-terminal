@@ -610,12 +610,15 @@ void RemoteShare::sendPane(const QString &paneId)
     const QString title = it->hooks.title ? it->hooks.title() : paneId;
     const QString cwd = it->hooks.cwd ? it->hooks.cwd() : QString();
     const QString status = it->hooks.status ? it->hooks.status() : QStringLiteral("idle");
+    if (it->statusSince == 0 || status != it->lastStatus)
+        it->statusSince = QDateTime::currentSecsSinceEpoch();
     it->lastTitle = title;
     it->lastCwd = cwd;
     it->lastStatus = status;
     const ViewportFrame &frame = it->hooks.view->frame();
     QJsonObject message{{"t", "pane"}, {"id", paneId}, {"title", title}, {"cwd", cwd},
-                         {"status", status}, {"rows", frame.rows}, {"cols", frame.columns}};
+                         {"status", status}, {"rows", frame.rows}, {"cols", frame.columns},
+                         {"updated", static_cast<double>(it->statusSince)}};
     if (!it->tab.isEmpty()) message["tab"] = it->tab;
     if (it->hooks.shellPid) message["pid"] = static_cast<double>(it->hooks.shellPid());
     if (it->hooks.foregroundPid)

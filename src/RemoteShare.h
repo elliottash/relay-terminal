@@ -265,6 +265,7 @@ private:
         QString lastStatus;
         QString lastTitle;
         QString lastCwd;
+        qint64 statusSince = 0;   // epoch seconds when `status` last changed: the phone's "running · 3m"
         QString tab;              // the tab it is shared under, or "" for a pane on its own
         bool needFull = true;
     };
