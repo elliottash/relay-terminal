@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Set a machine up for Relay's test-suites and profiling tooling (card #7BM4), or say what is
-# missing. It is the same script on every runner: spark (aarch64, Ubuntu 24.04) and sphinxpad
-# (x86_64, Ubuntu 26.04) were both set up with it, over ssh for the second:
+# missing. It is the same script on every runner — it was written against an aarch64 desktop and
+# an x86_64 laptop, and it is run on a second machine over ssh:
 #
 #   scripts/relay-tooling-setup                 # check only: a table, then the smoke tests
 #   scripts/relay-tooling-setup --install       # install what is missing, then check
-#   ssh sphinxpad.local 'bash -s -- --install' < scripts/relay-tooling-setup
+#   ssh laptop.local 'bash -s -- --install' < scripts/relay-tooling-setup
 #
 # What it installs, and nothing else:
 #   apt (needs passwordless sudo; skipped with a sentence when sudo asks for a password):

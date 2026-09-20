@@ -3,15 +3,15 @@
 #
 # Build and test one commit on another machine, and bring the results back (card #7BM4).
 #
-#   scripts/relay-remote-tests                          # main, on sphinxpad.local, Qt auto
+#   scripts/relay-remote-tests --host laptop.local      # main, on that machine, Qt auto
 #   scripts/relay-remote-tests --qt 6                   # the Qt the 26.04 .deb ships
 #   scripts/relay-remote-tests --rev 3825b994 -R board  # one commit, only ctest names matching
 #   scripts/relay-remote-tests --build-only             # just the build and its .ninja_log
-#   scripts/relay-remote-tests --host other.local --jobs 4
+#   RELAY_REMOTE_HOST=laptop.local scripts/relay-remote-tests --jobs 4   # the host from the environment
 #
-# Why it exists: this desktop is aarch64, Ubuntu 24.04, g++ 13 and Qt 5; the laptop is x86_64,
-# Ubuntu 26.04, g++ 15 / clang and both Qts — the platform the package is built for. A test that
-# is green here says nothing about there. Every execution the Test suites pane stores carries a
+# Why it exists: a second machine is a second platform — another architecture, distro, compiler
+# or Qt — and a test that is green here says nothing about there. The machine is yours to name
+# (`--host`, or RELAY_REMOTE_HOST); nothing in this repository knows one. Every execution the Test suites pane stores carries a
 # `host`, so both machines' runs sit side by side in one history.
 #
 # What it does, in order:
@@ -32,7 +32,7 @@
 set -uo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-host=sphinxpad.local rev=main qt=AUTO regex= jobs=1 build_only=0 out=
+host=${RELAY_REMOTE_HOST:-} rev=main qt=AUTO regex= jobs=1 build_only=0 out=
 while [[ $# -gt 0 ]]; do
     case $1 in
         --host) host=$2; shift 2 ;;
@@ -46,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         *) echo "relay-remote-tests: unknown argument $1" >&2; exit 2 ;;
     esac
 done
+[[ -n $host ]] || { echo "relay-remote-tests: name the machine with --host <host> or RELAY_REMOTE_HOST" >&2; exit 2; }
 [[ $qt =~ ^(AUTO|auto|5|6)$ ]] || { echo "relay-remote-tests: --qt is 5, 6 or auto" >&2; exit 2; }
 qt=${qt^^}
 [[ $jobs =~ ^[0-9]+$ && $regex != *\'* ]] || { echo "relay-remote-tests: bad --jobs or -R" >&2; exit 2; }

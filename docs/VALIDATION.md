@@ -33,8 +33,8 @@ truth for pass/fail.
 row → Tests): it discovers every ctest and unittest test in the checkout in about half a second
 (`relay_core.test_probe`), shows each one's runs, reliability, p50/p95 and last failure from the
 execution store `issues/.private/tests/history.jsonl` (`relay_core.test_history`, gitignored),
-and lists the cards that name it. `scripts/relay-remote-tests --qt 6` runs a committed revision
-on sphinxpad and its JUnit XML lands in the same store with `host: sphinxpad`. The tables below
+and lists the cards that name it. `scripts/relay-remote-tests --host <machine> --qt 6` runs a
+committed revision on another machine and its JUnit XML lands in the same store with that `host`. The tables below
 are the last hand-taken snapshot and are kept for the record; the pane, `./scripts/test.sh` and
 `ctest --test-dir build` are the source of truth.
 

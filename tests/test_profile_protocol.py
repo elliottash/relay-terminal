@@ -176,6 +176,21 @@ class ProfileRunTests(unittest.TestCase):
         self.assertIn("build-remote", message)
         self.assertIn("app", message)
 
+    def test_build_remote_needs_a_host_named_by_the_user(self):
+        self.h.commands.dispatch({"type": "profile_run", "target": "build-remote"})
+        self.assertIn("host", self.h.wait("error")["message"])
+        self.h.commands.dispatch({"type": "profile_run", "target": "build-remote",
+                                  "host": "not a host!"})
+        errors = [e for e in self.h.events if e.get("state") == "error"]   # wait() finds the first
+        self.assertEqual(len(errors), 2)
+        self.assertIn("not a hostname", errors[-1]["message"])
+        self.h.commands.dispatch({"type": "profile_run", "target": "build-remote",
+                                  "host": "laptop.local"})
+        started = self.h.wait("started")
+        self.assertIn("--host laptop.local", started["command"])
+        # Nothing in the module names a machine: the host is the request's or the environment's.
+        self.assertNotIn("sphinx", open(PP.__file__).read())
+
     def test_arguments_are_checked_by_name(self):
         self.assertEqual(PP.ProfileCommands._extra(["--stop-after", "30"]), ["--stop-after", "30"])
         self.assertEqual(PP.ProfileCommands._extra(["--time-trace"]), ["--time-trace"])

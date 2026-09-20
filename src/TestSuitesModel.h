@@ -40,7 +40,7 @@ struct Execution {
     QString runner;
     QString result;    // "pass" | "fail" | "skip" | "error" | "timeout" | ""
     QString commit;
-    QString host;      // socket.gethostname(): spark and sphinxpad are distinguishable
+    QString host;      // socket.gethostname(): runs from two machines are distinguishable
     double duration = 0;
     bool hasDuration = false;
     QString durationText() const;

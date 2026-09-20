@@ -11,7 +11,7 @@ Relay itself is `docs/qa_evidence/2026-09-20-perf-profile/REPORT.md` (#PF4K).
 ```
 scripts/relay-tooling-setup                 # check: a table of tools, then five smoke tests
 scripts/relay-tooling-setup --install       # install what is missing, then check
-ssh sphinxpad.local 'bash -s -- --install' < scripts/relay-tooling-setup
+ssh laptop.local 'bash -s -- --install' < scripts/relay-tooling-setup     # any second machine
 ```
 
 Idempotent, and the same script on every runner. It installs `perf`, `hotspot`, `heaptrack`,
@@ -21,9 +21,12 @@ ClangBuildAnalyzer. Its smoke tests prove whole paths rather than that a binary 
 write JUnit XML; py-spy records a Python child into speedscope JSON; `cProfile` works;
 `sudo -n perf record` → `chown` → `perf script` → folded stacks; `clang -ftime-trace` writes a trace.
 
-Both runners pass all five (2026-09-20):
+Nothing in the repository names a machine: the second runner is whatever `--host` or
+`RELAY_REMOTE_HOST` says, and the Profile menu asks for it once and remembers it in the settings
+(`tests/remote_host`). The two machines it was written against both pass all five smoke tests
+(2026-09-20):
 
-| | spark (this desktop) | sphinxpad (laptop) |
+| | the desktop (aarch64) | the laptop (x86_64) |
 |---|---|---|
 | Platform | aarch64, Ubuntu 24.04, 20 cores | x86_64, Ubuntu 26.04, 12 cores |
 | Compilers | g++ 13.3, clang 18 | g++ 15.2, clang |
@@ -49,7 +52,7 @@ Two traps the smoke tests were written around:
 ## 2. The second runner
 
 ```
-scripts/relay-remote-tests --qt 6                  # main, on sphinxpad.local
+scripts/relay-remote-tests --host laptop.local --qt 6      # main, on that machine
 scripts/relay-remote-tests --rev <sha> -R board    # one commit, ctest names matching
 scripts/relay-remote-tests --build-only            # just the build and its .ninja_log
 ```
@@ -59,8 +62,8 @@ It exports the **committed** tree (`git archive`, never the shared working tree)
 configures once with Ninja, builds, runs ctest with `--output-junit` and the Python suite with
 `scripts/test.sh --junit`, and fetches the results into `<board>/.private/tests/incoming/<host>-<run>/`
 (`ctest.xml`, `unittest.xml`, `meta.json`, `ninja_log`, logs). That folder is gitignored; the
-history store ingests from it, and every execution carries its `host`, so the pane shows spark's
-and sphinxpad's runs of the same test side by side. Remote tests run with `RELAY_KEYRING=off`,
+history store ingests from it, and every execution carries its `host`, so the pane shows both
+machines' runs of the same test side by side. Remote tests run with `RELAY_KEYRING=off`,
 `QT_QPA_PLATFORM=offscreen` and every XDG dir and `TMPDIR` under a short fresh `/tmp/rci-*`
 (the 108-byte socket limit), so they touch nothing of the owner's.
 
@@ -79,7 +82,7 @@ ClangBuildAnalyzer --start /tmp/relay-tt && cmake --build /tmp/relay-tt --target
 ClangBuildAnalyzer --stop /tmp/relay-tt /tmp/relay-tt/cba.bin && ClangBuildAnalyzer --analyze /tmp/relay-tt/cba.bin
 ```
 
-First measurement (2026-09-20, sphinxpad, cold Qt 6 build of `c8b0a8d2`, 12 cores): 240 s wall,
+First measurement (2026-09-20, the laptop, cold Qt 6 build of `c8b0a8d2`, 12 cores): 240 s wall,
 904 steps, and `src/main.cpp.o` alone is 181 s — three quarters of the wall time is the one
 translation unit, with `tests/boardmodel_test.cpp.o` (68 s) and `tests/conversations_test.cpp.o`
 (56 s) next. That table is what the build target shows.

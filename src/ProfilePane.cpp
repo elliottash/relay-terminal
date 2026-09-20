@@ -51,9 +51,9 @@ const QVector<ProfileTarget> &profileTargets() {
         {QStringLiteral("build"), QStringLiteral("Build (this machine)"),
          QStringLiteral("Per-target compile times, from a Ninja build of its own — never the "
                         "build directory the sessions share. Minutes cold, seconds warm.")},
-        {QStringLiteral("build-remote"), QStringLiteral("Build (sphinxpad)"),
-         QStringLiteral("The same table for the committed tree, built on the second runner. "
-                        "About four minutes cold.")},
+        {QStringLiteral("build-remote"), QStringLiteral("Build (another machine)"),
+         QStringLiteral("The same table for the committed tree, built on a machine you name as "
+                        "ssh knows it — asked once, then remembered. About four minutes cold.")},
         {QStringLiteral("tests"), QStringLiteral("Python tests"),
          QStringLiteral("py-spy over the unittest suite, or cProfile where py-spy is missing. "
                         "As long as the tests take.")},

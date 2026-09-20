@@ -6399,7 +6399,7 @@ Execution      one line of the JSONL store, and one history cell
   {ts, run_id, id, runner, result, duration, commit, host}
 ```
 
-`host` is `socket.gethostname()`, so a run from spark and a run from sphinxpad of the same test
+`host` is `socket.gethostname()`, so runs of the same test from two machines
 sit side by side in one history. The store is `<board>/.private/tests/history.jsonl`, gitignored:
 a store, not source. The numbers that matter are committed into cards by Check.
 

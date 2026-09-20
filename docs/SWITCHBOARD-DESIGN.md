@@ -825,16 +825,16 @@ becomes a menu.
   trimmed to reliability, p50, p95, runs, last run and cards; nextest's summary line
   (`68 tests · 64 passed (2 slow, 1 flaky) · 3 never run · 12.4 s`); sort by flake score, p95,
   name, last failure or last run; the filter takes `is:slow is:flaky is:failed is:never is:stale`.
-  A row's detail holds its history (result, duration, commit, **host** — spark's and sphinxpad's
-  runs sit side by side), the last failure's excerpt, the file and the cards naming it. Row
+  A row's detail holds its history (result, duration, commit, **host** — two machines' runs
+  sit side by side), the last failure's excerpt, the file and the cards naming it. Row
   actions: Run, Rerun until fail, Open source, **Make a card** (Trunk's one-issue-per-flaky-test,
   filed in the bugs tab with a `## Tests` section) and Attach to card. As the pane narrows the grid
   gives up cells and then p50, Runs, Cards, Last run and p95 leave, so a name never elides first.
   Execution history is a store, not source: `<board>/.private/tests/history.jsonl`, gitignored,
   fed by every run and by `scripts/relay-remote-tests`' fetched JUnit; the numbers that matter are
   what Check writes into the card.
-- **Profile.** One button that **asks** — Build (this machine), Build (sphinxpad), Python tests,
-  The app — because "profile the project" is three different things here, and the build ships
+- **Profile.** One button that **asks** — Build (this machine), Build (another machine, which it
+  asks you to name once and remembers), Python tests, The app — because "profile the project" is three different things here, and the build ships
   first (one translation unit is three quarters of a cold build). `scripts/relay-profile` does the
   work and writes the snapshot under `docs/qa_evidence/<date>-profile-<target>/`; the result is a
   transient pane with the **table before any flame graph** (every profiling product's order), an

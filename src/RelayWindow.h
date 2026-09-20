@@ -4834,13 +4834,29 @@ public:
             notice(QStringLiteral("This tab is not attached to a project, so there is nothing to profile."), 9000);
             return;
         }
+        QJsonObject request{{QStringLiteral("type"), QStringLiteral("profile_run")},
+                            {QStringLiteral("target"), target}};
+        if (target == QLatin1String("build-remote")) {
+            // The machine is the user's to name, never the app's: asked once, kept in the
+            // settings, and offered back as the default the next time.
+            QSettings settings;
+            const QString remembered = settings.value(QStringLiteral("tests/remote_host")).toString();
+            bool ok = false;
+            const QString host = QInputDialog::getText(
+                this, QStringLiteral("Build on another machine"),
+                QStringLiteral("Machine to build on, as ssh names it (host, or user@host).\n"
+                               "It needs passwordless ssh, cmake and ninja, and the project's build "
+                               "dependencies; scripts/relay-tooling-setup checks a machine."),
+                QLineEdit::Normal, remembered, &ok).trimmed();
+            if (!ok || host.isEmpty()) return;
+            settings.setValue(QStringLiteral("tests/remote_host"), host);
+            request.insert(QStringLiteral("host"), host);
+        }
         relay::profile::ProfilePane *view = openProfilePane();
         if (!view) return;
         view->startWaitingFor(target);
         updateTitles();
-        sendToHelper(page, QString(),
-                     {{QStringLiteral("type"), QStringLiteral("profile_run")},
-                      {QStringLiteral("target"), target}});
+        sendToHelper(page, QString(), request);
     }
 
     relay::profile::ProfilePane *openProfilePane() {

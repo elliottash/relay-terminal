@@ -27,6 +27,7 @@ import json
 import os
 import shlex
 import threading
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -47,10 +48,11 @@ TARGETS: dict[str, dict] = {
         "args": ["build"],
     },
     "build-remote": {
-        "label": "Build (sphinxpad)",
-        "detail": "The same table for the committed tree built on the second runner, through "
-                  "scripts/relay-remote-tests --build-only. About four minutes cold.",
-        "args": ["build", "--host", "sphinxpad.local"],
+        "label": "Build (another machine)",
+        "detail": "The same table for the committed tree, built on a machine you name as ssh "
+                  "knows it — asked once, then remembered — through scripts/relay-remote-tests "
+                  "--build-only. About four minutes cold.",
+        "args": ["build"],
     },
     "tests": {
         "label": "Python tests",
@@ -72,6 +74,9 @@ TARGETS: dict[str, dict] = {
 EVIDENCE_ROOT = "docs/qa_evidence"
 
 MAX_ARGS = 24                   # extra arguments one request may carry
+#: `build-remote` needs a `host` on the request (or RELAY_REMOTE_HOST in the worker's
+#: environment): the machine is the user's to name, never this file's.  A hostname, or user@host.
+HOST_PATTERN = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]{1,253}$")
 MAX_ARG_LENGTH = 200
 RUN_TIMEOUT = 3 * 3600.0        # seconds one profile may take before it is stopped
 MAX_ROWS = 25                   # rows of the summary the `finished` event carries
@@ -153,7 +158,8 @@ class ProfileCommands:
             return False
         try:
             if kind == "profile_run":
-                self.start(request.get("target"), request.get("args"), rid=request.get("id"))
+                self.start(request.get("target"), request.get("args"),
+                           host=request.get("host"), rid=request.get("id"))
             else:
                 self.stop()
         except ProfileError as exc:
@@ -209,12 +215,21 @@ class ProfileCommands:
             out.append(value)
         return out
 
-    def start(self, target, args=None, *, rid=None) -> _Run:
+    def start(self, target, args=None, *, host=None, rid=None) -> _Run:
         name = str(target or "").strip()
         if name not in TARGETS:
             raise ProfileError("profile_run `target` is one of "
                                + ", ".join(sorted(TARGETS)) + ".")
         extra = self._extra(args)
+        if name == "build-remote":
+            machine = str(host or os.environ.get("RELAY_REMOTE_HOST") or "").strip()
+            if not machine:
+                raise ProfileError("`build-remote` needs `host`: the machine to build on, as ssh "
+                                   "names it. The Profile menu asks for it once; a worker can "
+                                   "also read RELAY_REMOTE_HOST.")
+            if not HOST_PATTERN.match(machine):
+                raise ProfileError(f"`host` {machine!r} is not a hostname.")
+            extra = ["--host", machine, *extra]
         script = self.script()
         if not script.is_file():
             raise ProfileError(f"There is no {script} to run; this project has no profiler.")

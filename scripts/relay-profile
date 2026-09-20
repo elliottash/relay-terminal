@@ -4,7 +4,7 @@
 # Profile this project, in the three senses that phrase has here (card #7BM4, design item (c)).
 #
 #   scripts/relay-profile build                    per-target compile times, this machine
-#   scripts/relay-profile build --host sphinxpad.local --rev main
+#   scripts/relay-profile build --host laptop.local --rev main
 #   scripts/relay-profile build --build-dir /tmp/x  an existing Ninja directory's .ninja_log
 #   scripts/relay-profile tests tests.test_board   py-spy over the Python suite
 #   scripts/relay-profile app --stop-after 30      the app under perf, stopped after 30 s
