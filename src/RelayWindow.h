@@ -4784,15 +4784,15 @@ public:
         // prompt. The launch flags themselves are the guest module's and are not touched here.
         view->onVerifyCard = [guard, workspace](const QString &card, const QString &runner, const QString &task) {
             auto *w = windowOf(guard);
-            if (!w) return;
+            if (!w) return QString();
             const bool guest = runner.startsWith(QStringLiteral("guest:"));
             const QString runnerId = runner.section(QLatin1Char(':'), 1);
-            if (runnerId.isEmpty()) return;
+            if (runnerId.isEmpty()) return QString();
             QJsonObject spec{{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}};
             if (!guest) spec.insert(QStringLiteral("preset"), runnerId);
             Pane *pane = nullptr;
             try { pane = w->createPane(spec); }
-            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
+            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return QString(); }
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
             w->setActive(pane);
             focusLeaf(pane);
@@ -4801,6 +4801,7 @@ public:
             if (guest) pane->startGuestBoardTask(runnerId, task, card);
             else pane->startBoardTask(task, card);
             w->updateTitles();
+            return pane->sessionToken();
         };
         // A card turn ended (#NQP9): a Plan that finished or failed gets one bell entry, so the
         // user can leave the board alone — posting only, never a focus move, which is the card's

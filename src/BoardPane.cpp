@@ -4991,21 +4991,29 @@ void BoardView::verifyCard(const QString &note)
     const QString label = board::verifyLabel(qa);
     const QString why = qa.value(QStringLiteral("recommended")).toObject()
                             .value(QStringLiteral("why")).toString();
-    QString text = QStringLiteral("Verify · handed to a new terminal pane on %1").arg(label);
-    if (!why.isEmpty())
-        text += QStringLiteral(" · ") + why;
-    if (!note.isEmpty())
-        text += QStringLiteral("\n\n") + note;
-    send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
-          {QStringLiteral("kind"), QStringLiteral("progress")}, {QStringLiteral("text"), text}});
     // The canonical signature is the `qa` block's; the card's own field is the fallback for a
     // worker that sends no `qa` (and then there is no runner either, so this is belt and braces).
     QString implementedBy = qa.value(QStringLiteral("implemented_by")).toString();
     if (implementedBy.isEmpty())
         implementedBy = m_detail->front().value(QStringLiteral("implemented_by")).toString();
-    onVerifyCard(card, runner,
-                 board::verifyTask(card, m_detail->title(), label, implementedBy,
-                                   m_detail->status(), note));
+    // The pane opens before the note is sent (#HKAP), because the note carries its session
+    // token — the same treatment as Execute's entry: "Verifying (<first 8 characters>) · …"
+    // links to the verifier's pane. Without a token, the plain Verify wording stays.
+    const QString paneToken = onVerifyCard(card, runner,
+                                           board::verifyTask(card, m_detail->title(), label, implementedBy,
+                                                             m_detail->status(), note));
+    QString text = paneToken.isEmpty()
+            ? QStringLiteral("Verify · handed to a new terminal pane on %1").arg(label)
+            : QStringLiteral("Verifying (%1) · handed to a new terminal pane on %2")
+                      .arg(paneToken.left(8), label);
+    if (!why.isEmpty())
+        text += QStringLiteral(" · ") + why;
+    if (!note.isEmpty())
+        text += QStringLiteral("\n\n") + note;
+    send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
+          {QStringLiteral("kind"), QStringLiteral("progress")},
+          {QStringLiteral("pane_token"), paneToken},
+          {QStringLiteral("text"), text}});
 }
 
 void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)

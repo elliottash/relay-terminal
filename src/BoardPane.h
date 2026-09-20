@@ -78,7 +78,9 @@ public:
     // Verify (`v`, #T71W): open a terminal pane beside the board on `runner` — "guest:codex",
     // "guest:claude" or "preset:<id>", the verifier the worker recommends for this card — and hand
     // it `task`, the QA brief. The card keeps its QA status: only the verifier's verdict moves it.
-    std::function<void(const QString &id, const QString &runner, const QString &task)> onVerifyCard;
+    // Returns the pane's session token — empty when no pane could be opened — so the hand-off
+    // note can name and link it (#HKAP).
+    std::function<QString(const QString &id, const QString &runner, const QString &task)> onVerifyCard;
     // A card turn ended (protocol 19.16): `id` the card, `mode` "discuss" or "plan", `outcome`
     // "done", "error" or "cancelled". The window turns the outcomes worth a bell into a
     // notification (#NQP9); the view itself never moves focus, and a cleanup run never gets here

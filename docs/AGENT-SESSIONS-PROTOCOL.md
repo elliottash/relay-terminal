@@ -2368,7 +2368,10 @@ entry attr (at most 64 characters, no whitespace or `>`), and the thread draws t
 line as a link on it: clicking `Executing (xxxxxxxx)` reveals the pane with that token in whatever
 window it lives in, and does nothing when no pane has it — closed, or another machine's board.
 When no pane could be opened the entry keeps the plain `Execute · …` wording and carries no
-`pane_token`. The task text
+`pane_token`. Verify's hand-off note takes the same shape (#HKAP): `Verifying (<first 8 of the
+verifier pane's token>) · handed to a new terminal pane on <runner>` carrying that pane's
+`pane_token` — a link to the verifier's pane — and without one the plain `Verify · …` wording.
+The task text
 (`relay::board::executeTask`) names the card, says to set `implemented_by`, to put `#ID` in every
 commit message and add each commit's hash to `links.commits` with `board_update_card`, to post
 progress with `board_comment`, and, where the plan carries an Orchestration block, to follow it

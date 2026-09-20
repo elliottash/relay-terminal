@@ -2598,6 +2598,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
         handedCard = id;
         handedRunner = runner;
         handedTask = task;
+        return QStringLiteral("pane-session-token-0002");
     };
     QString hintId, hintKeys;
     view.onHint = [&](const QString &id, const QString &keys) { hintId = id; hintKeys = keys; };
@@ -2633,8 +2634,11 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.at(0).value("type").toString(), QStringLiteral("board_comment"));
     QCOMPARE(sent.at(0).value("kind").toString(), QStringLiteral("progress"));
+    // Same treatment as Execute (#HKAP): the hand-off names the pane it landed in — its
+    // session token rides on the note, the first line reads "Verifying (<its first 8 characters>)".
+    QCOMPARE(sent.at(0).value("pane_token").toString(), QStringLiteral("pane-session-token-0002"));
     QVERIFY2(sent.at(0).value("text").toString().startsWith(
-                 QStringLiteral("Verify · handed to a new terminal pane on Codex · first in the ranking")),
+                 QStringLiteral("Verifying (pane-ses) · handed to a new terminal pane on Codex · first in the ranking")),
              qPrintable(sent.at(0).value("text").toString()));
     // A click is the slow path, so it says its key once (WARP.md hint rule).
     QCOMPARE(hintId, QStringLiteral("board.verify"));
@@ -2652,6 +2656,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QCOMPARE(handedRunner, QStringLiteral("guest:codex"));
     QVERIFY(handedTask.endsWith(QStringLiteral("The owner adds, verbatim:\nwatch the Xvfb run")));
     QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.at(0).value("pane_token").toString(), QStringLiteral("pane-session-token-0002"));
     QVERIFY(sent.at(0).value("text").toString().endsWith(QStringLiteral("\n\nwatch the Xvfb run")));
 
     // `v` from the list opens the selected card and verifies it, as `x` executes it.
