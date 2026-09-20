@@ -284,6 +284,8 @@ private slots:
     // The panel outside the Switchboard (#FEJQ): one worker, four panels.
     void aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents();
     void aHelperOpensAsOneRowThatExpandsIntoTheWholePanel();
+    void everyHelperPanelDrawsTheQueueAndCanStopItsOwnTurn();
+    void aHelperWorkerThatDiedPutsThePanelBack();
     void anAnswersOptionAndSessionLinksResolveIntoThePane();
 };
 
@@ -4273,6 +4275,97 @@ void BoardModelTests::aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEven
     QVERIFY(board.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
     QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
     QVERIFY(!panel.findChild<QWidget *>(QStringLiteral("boardChatSurvey")));
+}
+
+// The queue is the worker's and serves every panel, so every panel draws it (owner, 2026-09-20:
+// "message queue isn't working in the sessions helper, i can't interrupt"). Until now only the
+// Switchboard built the rows, while the composer in Options, Actions and Sessions went on
+// promising that a second prompt queues — it did queue, in the worker, with nothing on screen to
+// say so and no way to take one out again.
+void BoardModelTests::everyHelperPanelDrawsTheQueueAndCanStopItsOwnTurn()
+{
+    relay::HelperChatPanel panel(relay::helperpane::sessions());
+    QList<QJsonObject> sent;
+    panel.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    panel.expand();
+    panel.resize(460, 320);
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel));
+
+    // A turn of this pane's is running…
+    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_started"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"},
+                                          {"turn_id", "chat-1"}}));
+    QVERIFY(panel.running());
+    // …and the second prompt queues, which the panel now shows.
+    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_queued"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"}, {"id", "c1"},
+                                          {"position", 1}, {"text", "and the one about panes?"}}));
+    auto *queue = panel.findChild<QWidget *>(QStringLiteral("boardChatQueue"));
+    QVERIFY2(queue, "the Sessions helper has no queue box");
+    QTRY_VERIFY(queue->isVisible());
+    QVERIFY(panel.findChild<QLabel *>(QStringLiteral("boardChatQueueHead")));
+    auto *row = panel.findChild<QWidget *>(QStringLiteral("boardChatQueueRow"));
+    QVERIFY(row);
+    // …and can be taken out again, from here.
+    auto *drop = row->findChild<QToolButton *>(QStringLiteral("boardChatQueueDrop"));
+    QVERIFY(drop);
+    drop->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_queue_remove"));
+    QCOMPARE(sent.last().value("item").toString(), QStringLiteral("c1"));
+    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
+
+    // ✕ Stop is this panel's too, and it says which pane pressed it so the answer comes back here.
+    auto *stop = panel.findChild<QToolButton *>(QStringLiteral("boardChatStop"));
+    QVERIFY(stop);
+    stop->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
+    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
+    // The worker's answer, addressed to the panel that asked (§30.3): the turn settles here.
+    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_cancelled"),
+                              QJsonObject{{"pane", "sessions"}, {"stopped", true},
+                                          {"chat", QJsonObject{{"running", false},
+                                                               {"queue", QJsonArray{}},
+                                                               {"history", QJsonArray{}}}}}));
+    QVERIFY(!panel.running());
+    QTRY_VERIFY(!queue->isVisible());
+}
+
+// A helper worker that died mid-turn is the window's `error` with `worker_gone` on it
+// (RelayWindow::helperWorkerGone, #H6VQ): the panel that was waiting goes back to idle, says so
+// where the answer would have been, and drops a queue no worker holds any more.
+void BoardModelTests::aHelperWorkerThatDiedPutsThePanelBack()
+{
+    relay::HelperChatPanel panel(relay::helperpane::sessions());
+    panel.expand();
+    panel.resize(460, 320);
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel));
+    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_started"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"},
+                                          {"turn_id", "chat-1"}}));
+    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_queued"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"}, {"id", "c1"},
+                                          {"position", 1}, {"text", "the other one"}}));
+    QVERIFY(panel.running());
+
+    QVERIFY(panel.handleEvent(QStringLiteral("error"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"},
+                                          {"worker_gone", true},
+                                          {"text", "The helper stopped before it answered. Your "
+                                                   "message is kept — ask again and a fresh "
+                                                   "helper starts."}}));
+    QVERIFY(!panel.running());
+    auto *queue = panel.findChild<QWidget *>(QStringLiteral("boardChatQueue"));
+    QVERIFY(queue);
+    QTRY_VERIFY(!queue->isVisible());
+    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+    QVERIFY(log);
+    QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("The helper stopped before it answered")));
+    // And the composer takes the next prompt, which is what starts a fresh worker.
+    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+    QVERIFY(composer);
+    QVERIFY(composer->isEnabled());
 }
 
 // Collapsed by default outside the Switchboard (owner, 2026-09-20): the board's 320 px of log

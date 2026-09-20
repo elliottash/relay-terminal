@@ -617,21 +617,22 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     });
 
     // ---- the queue (19.18): worker-side, in delivery order ------------------------------------
-    // The board's box (#FEJQ). The FIFO itself is the worker's and serves every panel — a second
-    // ask from any pane queues exactly as it always did — but the rows that *reorder* it are a
-    // page the board has room for, and a helper folded to one row has nowhere to draw them. A
-    // helper's queued ask is reported on the pane's status line instead, from `board_chat_queued`.
+    // In every pane, not only on the board (owner, 2026-09-20: "message queue isn't working in
+    // the sessions helper"). The FIFO is the worker's and always served every panel — a second
+    // ask from any pane queued exactly as it always did — but only the Switchboard drew the
+    // rows, so in Options, Actions and Sessions the composer's own placeholder promised that "a
+    // second prompt queues" and then nothing appeared: no row, no count, no way to take one out.
+    // The rows live inside the folding body here, so a panel folded to one row still has nowhere
+    // to draw them and needs none — expanding it shows the queue as it stands.
     // Above the prompt box and outside it: the box holds this turn's text, not the waiting ones.
-    if (isBoard()) {
-        m_queueBox = new QWidget(this);
-        m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
-        m_queueBox->setAttribute(Qt::WA_StyledBackground);
-        m_queueLayout = new QVBoxLayout(m_queueBox);
-        m_queueLayout->setContentsMargins(0, 0, 0, 0);
-        m_queueLayout->setSpacing(2);
-        m_queueBox->hide();
-        layout->addWidget(m_queueBox);
-    }
+    m_queueBox = new QWidget(this);
+    m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
+    m_queueBox->setAttribute(Qt::WA_StyledBackground);
+    m_queueLayout = new QVBoxLayout(m_queueBox);
+    m_queueLayout->setContentsMargins(0, 0, 0, 0);
+    m_queueLayout->setSpacing(2);
+    m_queueBox->hide();
+    layout->addWidget(m_queueBox);
 
     // ---- the prompt box: one frame, the shape a terminal pane's has -------------------------
     //
@@ -2343,6 +2344,13 @@ bool HelperChatPanel::handleEvent(const QString &type, const QJsonObject &event)
         if (!text.trimmed().isEmpty())
             m_history.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("error")},
                                          {QStringLiteral("text"), text}});
+        // The worker itself has gone (`RelayWindow::helperWorkerGone`, #H6VQ), so its queue went
+        // with it: the rows here would otherwise go on offering prompts that no worker holds and
+        // that no ✕ could take out. The next ask starts a fresh worker with an empty queue.
+        if (event.value(QStringLiteral("worker_gone")).toBool()) {
+            m_queue.clear();
+            rebuildQueue();
+        }
         settleTurn(QStringLiteral("error"));
         if (onStatus && !text.trimmed().isEmpty())
             onStatus(text);

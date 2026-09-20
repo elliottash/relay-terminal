@@ -6522,6 +6522,9 @@ public:
             const QJsonObject event{{QStringLiteral("event"), QStringLiteral("error")},
                                     {QStringLiteral("chat"), true},
                                     {QStringLiteral("pane"), pane},
+                                    // The worker's queue went with the worker, so the panel drops
+                                    // its rows rather than offering prompts nobody holds.
+                                    {QStringLiteral("worker_gone"), true},
                                     {QStringLiteral("text"), text}};
             for (QWidget *leaf : leavesIn(page))
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
