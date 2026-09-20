@@ -1,13 +1,12 @@
 ---
 id: PH0N
 type: work
-status: discussing
+status: executing
 labels: [feature, remote]
 component: [gui, remote]
 milestone: beta
 workstream: remote
 assignee: claude-code
-waiting_on: owner
 rank: 6c
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session'
@@ -31,6 +30,15 @@ research how other systems do this, eg the codex / claude apps, to build the bes
 browser app would be great, but i am fine to build an iphone app for this if it will be the best solution.
 
 i want to be able to access my computer and run stuff all day from work / the bus / etc.
+
+## Decisions
+
+- Owner, 2026-09-20: "kick it off with efficient orchestration on opus subagents". The eight
+  recommendations in Planning notes are taken as the working assumptions (always-on off by
+  default and on for the owner's machine; every pane with a screen published to the owner's own
+  devices; PWA first, Capacitor shell only if Phase 3 says so; connect tokens in Phase 1; WebAuthn
+  dropped; `full` devices admit, decide and grant; diff view later; one origin) until the owner
+  says otherwise.
 
 ## Planning notes
 

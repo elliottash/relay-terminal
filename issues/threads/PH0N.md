@@ -23,3 +23,11 @@ Eight questions, each with a recommendation, in the card's Planning notes:
 
 Answers here or in the terminal go into `## Decisions`; Phase 1.1, 1.2 and 1.4 need none of them
 and can start on a word.
+
+<!-- relay:entry 20260920T220900Z-b1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 22:09
+Owner: "kick it off with efficient orchestration on opus subagents". Taken as go on the plan under
+the eight recommendations (recorded in `## Decisions`); the card moves to executing. Wave 1: four
+Opus subagents on disjoint files — desktop always-on (C++), sidecar always-on (Python), deploy and
+icons, phone inbox/offline queue/notification switches. Wave 2 after they land: connect tokens,
+and the pane view's Stop / Recap / question rows / admit-from-phone. Wave 3: the headless drive.
