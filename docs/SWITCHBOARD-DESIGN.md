@@ -721,6 +721,15 @@ and its model box, and is labelled **"Helper agent"**; each panel's header says 
 
 ### 6.2 Policy (system prompt block, versioned in `backend/relay_core/board_policy.md` so evals can pin it)
 
+The numbered list below is the design's own v1. The shipped policy is that file, now at v5 (#GMCF,
+prompt-distillation decision 8): it is tiered the way the workflow is, so what has to be read
+*before* a board tool is called is in the prompt and the rest is read where it is already stated —
+the landing detail and the `## Tests` section in the bundled `deliver` skill, the stamps and the
+close-a-QA-card rule in `board_move_card`, rewriting the user's text in `board_update_card`,
+labelling in `board_create_card`'s `labels`. No rule was dropped, and `<board>/POLICY.md` —
+generated from the policy plus that skill plus the file-edit appendix — still carries every
+sentence for a guest that has no `board_*` tools.
+
 1. **Capture.** Every distinct request not finished within the turn becomes a card or updates the matching one (search
    first); multi-request prompts split into one card each. Trivial or fully answered asks get no card.
 2. **Questions** for the owner go on the card (`kind: question`, numbered, with a recommendation), status `discussing`,

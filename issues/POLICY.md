@@ -17,61 +17,38 @@ editing files, which is how you will make all of them.
 
 Switchboard rules (the `board_*` tools write to the repository's `issues/` tracker, in git):
 
-1. **Capture.** Every distinct request the user makes that you do not finish inside this turn becomes
-   a card, or updates the card that already covers it. Call `board_list` with a query first, and read
-   the candidate before you create a second card for the same thing. A prompt with several requests
-   becomes one card per request. Something you answered fully in the turn, or a trivial ask, gets no
-   card: do not turn your own working steps into cards (that is what `update_todos` is for).
-   **Work goes through a card, sized to the work.** *Small* — finished in this turn, verified by you
-   (built, a test run, or seen working), no design choice, no question for the user — gets no card;
-   the commit is the record. *Medium* — more than one turn or more than two files, but no decision
-   needed and a test proves it — is started only after you have checked it is not already done and
-   claimed the card that asks for it (`board_claim`, on the card you found or the one you just
-   created), and you close it yourself when it lands. *Large* — needs a plan, a decision from the
-   user, or changes UI — goes through the full workflow. `/deliver` makes any request large; "just
-   do it" or "no card" makes it small. Load the `deliver` skill for the procedure.
+1. **Capture, and work through a card sized to the work.** Every distinct request the user makes
+   that you do not finish inside this turn becomes a card, or updates the card that already covers
+   it: `board_list` with a query first, one card per request, and never a card for your own working
+   steps (that is `update_todos`). *Small* — finished in this turn, verified by you (built, a test
+   run, or seen working), no design choice, no question for the user — gets no card; the commit is
+   the record. *Medium* (more than one turn or more than two files, no decision needed, a test
+   proves it) and *large* (needs a plan, a decision from the user, or changes UI) are started only
+   after you have checked the work is not already done and claimed the card that asks for it
+   (`board_claim`, on the card you found or the one you just created). Load the **`deliver`** skill
+   for the procedure; `/deliver` makes any request large, "just do it" or "no card" makes it small.
 2. **The user's words are the record.** `request` is what they wrote, verbatim — do not paraphrase,
-   correct or tidy it. The title is yours. `source` says where it came from.
-3. **Questions** for the user go on the card as a `question` comment: numbered, each with your
-   recommendation. Set the card to `discussing` with `waiting_on: owner`, and in your reply name the
-   card rather than burying the questions in the terminal or the board page's chat — wherever you
-   ask, the card is where the question waits.
+   correct or tidy it. The title is yours.
+3. **Questions** for the user go on the card as a `question` comment, and the card goes to
+   `discussing` with `waiting_on: owner`. Name the card in your reply rather than burying the
+   questions in the terminal or the board page's chat — wherever you ask, the card is where
+   the question waits.
 4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
    their own words in quotation marks, and into the card's `## Decisions` section.
-5. **Work.** When a card is handed over, Relay moves it to `executing` with `assignee: agent`; your
-   own `board_claim` does the same and records the `session` that is this pane, so a card in
-   Executing with another `session` is that session's work — comment on it, and claim it only when
-   the user says to take it over.
-   When it lands: a *medium* card goes straight to `done` with the commits in `links.commits` and
-   the test that proves it as the evidence line, in the same commit as the change; a *large* card
-   moves to `needs-verification` with the evidence path and a `## QA checklist` section in the
-   body, in the same commit as the change, and the verifier then moves it on to a QA lane, or back
-   to an earlier stage. Relay stamps `implemented_by` with your provider/model itself,
-   and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the
-   verifier's verdict in the body — any pane may flip it once that is there (owner, 2026-09-20) —
-   and the card's `qa` recommendation still names the best verifier.
-6. **Tests.** List the tests that prove a card in its `## Tests` section, one invocation per line
-   (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
-   `manual: <evidence path>`). Run `tests_check` on the card before you move it to
-   `needs-verification`, and fix what it names.
-7. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
+5. **Work.** `board_claim` records the `session` that is this pane, so a card in Executing with
+   another `session` is that session's work — comment on it, and claim it only when the user says
+   to take it over. It lands in the same commit as the change: a *medium* card you move to `done`
+   yourself, a *large* one to `needs-verification` with its evidence path and a `## QA checklist`.
+   The skill has the detail.
+6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
-8. **Other people's cards:** comment, never reassign and never rewrite what they wrote.
-9. **You may rewrite the user's own text** (a request, a title, an intake note) when they ask or when
-   it is plainly wrong, and the old and the new text are recorded in the card's thread automatically,
-   so the change is visible and reversible. Say in your reply that you did it.
-10. **Nothing is deleted.** There is no delete tool: a card is closed by moving it to `done` or
-    `dropped` with a reason. The thread is append-only. The owner may delete a card from the GUI
-    (a confirmed, undoable `board_delete`); you never can.
-11. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
-    writing and summarize the rest of the requests in your reply.
-12. **Labels.** You label the card; the user never has to. Every work card carries exactly one of
-    `bug` or `feature`, chosen from your reading of the request: `bug` when something that already
-    works is behaving wrongly, `feature` when something new or changed is being asked for. Add the
-    obvious area labels (`voice`, `remote`, `switchboard`, …) alongside it, and say nothing about
-    labelling in your reply.
-13. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
-    about the change, so the user can find it.
+7. **Other people's cards:** comment, never reassign and never rewrite what they wrote. **Nothing
+   is deleted** and there is no delete tool: a card is closed by moving it to `done` or `dropped`
+   with a reason, and the thread is append-only. Only the owner can delete a card, from the GUI.
+8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
+   writing and summarize the rest of the requests in your reply.
+9. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
+   about the change, so the user can find it.
 
 ## Deliver a request through the Switchboard
 
@@ -122,6 +99,15 @@ a title match is not a match.
   else.
 - **Nothing** → create the card, then claim it.
 
+You label the card; the user never has to, and you say nothing about labelling in your reply:
+exactly one of `bug` (something built behaves wrongly) or `feature` (something new or changed is
+asked for), from your reading of the request, plus the obvious area labels (`voice`, `remote`,
+`switchboard`, …).
+
+You may rewrite the user's own text — a request, a title, an intake note — when they ask or when it
+is plainly wrong. The old and the new text are recorded in the card's thread, so the change is
+visible and reversible; say in your reply that you did it.
+
 ### 3. Claim it
 
 ```
@@ -151,13 +137,21 @@ working). Anything smaller: go straight to work.
   blocked — not a running commentary.
 - A fault you find on the way that is not this card's: a new card in the bugs tab with the
   measured evidence, never a silent fix and never a detour.
+- The tests that prove the card go in its `## Tests` section, one invocation per line
+  (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
+  `manual: <evidence path>`). Run `tests_check` on the card before you move it to
+  `needs-verification`, and fix what it names.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
   - **Large:** `board_move_card` to `needs-verification` with the evidence path, and a
-    `## QA checklist` section in the body; the verifier takes it from there.
-  Relay stamps `implemented_by` itself — never type it, and never type `session` either.
+    `## QA checklist` section in the body; the verifier then moves it on to a QA lane, or back to
+    an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
+    body — any pane may flip it once that is there — and the card's `qa` block still names the
+    best verifier.
+  Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
+  card, so never type either — and never type `session`.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 

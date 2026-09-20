@@ -170,13 +170,16 @@ MAX_TEST_TIMEOUT = 1800
 
 TOOL_SPECS = [
     spec("board_list",
-         "List Switchboard cards: the project's own tracker, in its Switchboard folder "
-         "(`.switchboard/`, which a ripgrep search of the project skips, so this tool — not `rg` — "
-         "is how you find cards). One row per card: id, title, type, status, tab, labels, "
-         "assignee, waiting_on and thread size. Search here before creating a card, so a request "
-         "that already has one updates it instead.",
+         "List Switchboard cards: the project's own tracker, in a folder a ripgrep search of the "
+         "project skips, so this tool — not `rg` — is how you find cards. One row per card: id, "
+         "title, type, status, tab, labels, assignee, waiting_on and thread size. Search here "
+         "before creating a card, so a request that already has one updates it instead.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
-          "status": {"type": "string", "description": "Exact status, e.g. inbox, ready, in-progress, needs-qa-llm, done."},
+          # The stage statuses this board's columns actually collect (#3XZV). The examples used to
+          # be `ready`, `in-progress`, `needs-qa-llm` — legal statuses, but not ones any column of
+          # a board written since #3XZV shows, so the example sent the model at empty lanes (#GMCF).
+          "status": {"type": "string", "description": "Exact status, e.g. inbox, discussing, planning, "
+                                                      "executing, needs-verification, done."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default view), memory or alias."},
           "labels": {"type": "array", "items": {"type": "string"},
                      "description": "Every label must be present, e.g. ['bug'] for the fault list."},
@@ -192,37 +195,42 @@ TOOL_SPECS = [
          ["id"]),
     spec("board_create_card",
          "Create a card for a request that is not finished within this turn. `request` must be the "
-         "user's own words, verbatim; the title is yours. Search with board_list first: if a card "
-         "already covers the request, update that one instead. A fuzzy duplicate check can refuse the "
-         "creation and return possible_duplicates; repeat the call with not_duplicate_of to override it.",
+         "user's own words, verbatim; the title is yours. Search with board_list first: a request "
+         "that already has a card updates that one. A fuzzy duplicate check can refuse the create "
+         "and return possible_duplicates; repeat the call with not_duplicate_of to override it.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml (features, bugs, design, marketing, planning)."},
           "status": {"type": "string", "description": "inbox for raw capture, discussing when you need an answer, ready when agreed."},
           "section": {"type": "string", "description": "Park the new card in this manual section (a "
-                                                    "column that collects nothing), instead of its "
-                                                    "status's own section."},
+                                                    "column that collects nothing) instead of its "
+                                                    "status's own."},
           "title": {"type": "string", "description": "One line, your words; becomes the card's `# ` heading."},
           "request": {"type": "string", "description": "The user's words verbatim. Do not paraphrase or tidy them."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), memory or alias."},
+          # Policy rule 12 until v5 (#GMCF): the rule is read exactly when a card is being
+          # created, so it is stated here rather than on every turn's system prompt.
           "labels": {"type": "array", "items": {"type": "string"},
-                     "description": "You choose these, not the user. Always exactly one of 'bug' "
-                                    "(something built behaves wrongly) or 'feature' (something new "
-                                    "or changed is asked for), decided from your understanding of "
-                                    "the request, plus any obvious area labels."},
+                     "description": "You label the card; the user never has to, and you say "
+                                    "nothing about labelling in your reply. Always exactly one of "
+                                    "'bug' (something built behaves wrongly) or 'feature' "
+                                    "(something new or changed is asked for), decided from your "
+                                    "understanding of the request, plus the obvious area labels "
+                                    "('voice', 'remote', 'switchboard', ...)."},
           "source": {"type": "string", "description": "Where the request came from, e.g. 'pane 2, 2026-09-17'."},
           "related": {"type": "array", "items": {"type": "string"}, "description": "Ids of related cards."},
           "not_duplicate_of": {"type": "array", "items": {"type": "string"},
                                "description": "Ids the duplicate check flagged that you have checked and rejected."}},
          ["tab", "status", "title", "request"]),
     spec("board_update_card",
-         "Change a card's front matter fields or its body sections. Pass the `hash` from board_read as "
-         "base_hash; the write is refused if the file changed meanwhile. id, type, status, rank, created, "
+         "Change a card's front matter fields or its body sections. `base_hash` is board_read's `hash`; "
+         "the write is refused if the file changed meanwhile. id, type, status, rank, created, "
          "source and private are never writable here (status and rank move; the rest are the record). "
          "`fields` carries the rest of the front matter — labels, assignee, waiting_on, milestone, "
-         "component and the like — and it is how a card's priority flag is set: `{\"priority\": 1}` is "
-         "an integer −1…+3 with 0 clearing the flag (#VKFV/#DPJB), the same flag the owner clicks on the "
-         "row and the card page. "
-         "Rewriting text the user wrote is allowed, and the old and the new text are recorded in the "
-         "card's thread so the change can be reverted.",
+         "component, and `priority`, an integer −1…+3 with 0 clearing the flag (#VKFV/#DPJB). "
+         # Policy rule 9 until v5 (#GMCF): a rewrite of the user's own text happens through this
+         # tool and nowhere else, so the permission and the "say you did it" are stated here.
+         "Rewriting text the user wrote (a request, a title, an intake note) is allowed when they "
+         "ask or when it is plainly wrong: the old and the new text are recorded in the card's "
+         "thread so the change can be reverted, and you say in your reply that you did it.",
          {"id": _ID_ARG,
           "base_hash": {"type": "string", "description": "The `hash` returned by board_read."},
           "fields": {"type": "object", "description": "Front matter fields to set; null removes one.",
@@ -241,38 +249,40 @@ TOOL_SPECS = [
                         "item_id": {"type": "string", "description": "Keep an existing item's id (two characters)."},
                         "card": {"type": "string", "description": "Id of a card that mirrors this item."},
                         "blocked_by": {"type": "array", "description": "What has to happen first: the "
-                                       "1-based number of another task in this same list, an existing "
-                                       "item id, or #CARD. Replaces this item's markers.",
+                                       "1-based number of another task in this list, an item id, or "
+                                       "#CARD. Replaces this item's markers.",
                                        "items": {"type": ["integer", "string"]}}},
                         "required": ["text"], "additionalProperties": False}}},
          ["id", "base_hash"]),
     spec("board_move_card",
          "Move a card to another status (column), another tab (category) or another position. `reason` is "
-         "required and goes into the thread. Moving into needs-qa-llm or needs-qa-human requires an "
-         "evidence path. Relay stamps `implemented_by` and `verified_by` with the pane's own "
-         "provider/model, so you do not type them. Closing a card that is in a QA lane requires a "
-         "verdict section in the body — any pane may flip it once the verdict is there; Relay Free still may not.",
+         "required and goes into the thread. Landing work is a move to `done` (medium) or to "
+         "`needs-verification` (large), from where the verifier takes it on to a QA lane or back to an "
+         "earlier stage; moving into needs-qa-llm or needs-qa-human requires an evidence path. Relay "
+         "stamps `implemented_by` and `verified_by` with the pane's own provider/model, so you do not "
+         "type them. Closing a card that is in a QA lane requires a verdict section in the body — any "
+         "pane may flip it once the verdict is there; Relay Free still may not, and the card's `qa` "
+         "block still names the best verifier.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
           "section": {"type": "string", "description": "Park the card in this manual section (a column "
-                                                      "that collects nothing) and leave its status "
-                                                      "alone; an empty string takes it out. The "
-                                                      "board's stage moves never touch it."},
+                                                      "that collects nothing), leaving its status "
+                                                      "alone; an empty string takes it out."},
           "tab": {"type": "string", "description": "Target tab id; the file moves into that category folder."},
           "before": {"type": "string", "description": "Id of the card this one should sit before in the column."},
           "after": {"type": "string", "description": "Id of the card this one should sit after in the column."},
           "reason": {"type": "string", "description": "Why, in one line. Recorded in the thread."},
           "evidence": {"type": "string", "description": "Evidence path, e.g. docs/qa_evidence/2026-09-17-slug/."},
           "implemented_by": {"type": "string",
-                             "description": "Only when Relay cannot know it (a guest CLI writing "
-                                            "through the bridge): the model that implemented the "
-                                            "change. Relay's own stamp wins."}},
+                             "description": "Only when Relay cannot know it (a guest CLI through "
+                                            "the bridge): the model that implemented the change. "
+                                            "Relay's own stamp wins."}},
          ["id", "reason"]),
     spec("board_import_items",
          "Create Switchboard cards from tracking the project already has — a TODO.md, a backlog/ "
-         "folder, a GitHub-style issues list, spec files — through the same import the Switchboard "
-         "page uses, so every card carries a `source` key and is never imported twice. Call it "
-         "only after the owner said yes: it writes. Returns what each key became.",
+         "folder, an issues list, spec files — through the Switchboard page's own import, so every "
+         "card carries a `source` and is never imported twice. Only after the owner said yes: it "
+         "writes. Returns what each key became.",
          {"keys": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000,
                     "description": "Source keys of the items to import, from `board_import_propose` "
                                    "or the survey's proposals."},
@@ -281,8 +291,8 @@ TOOL_SPECS = [
     spec("board_comment",
          "Append one entry to a card's thread: a note, a question for the user, a decision they made, "
          "evidence, or progress. A question is numbered and carries your recommendation. A decision "
-         "quotes the user's own words in quotation marks. The thread is the card's discussion history "
-         "and is append-only; nothing you write here is ever rewritten.",
+         "quotes the user's own words in quotation marks. The thread is append-only; nothing you "
+         "write here is ever rewritten.",
          {"id": _ID_ARG,
           "kind": {"type": "string", "enum": list(COMMENT_KINDS)},
           "text": {"type": "string"},
@@ -293,14 +303,13 @@ TOOL_SPECS = [
                                         "characters, no whitespace or '>'."}},
          ["id", "kind", "text"]),
     spec("board_claim",
-         "Take a card: say that this terminal pane is the session working on it. One call does "
-         "what the Switchboard's Execute button does — assignee agent, status executing, the "
-         "card's `session` set to this pane's token, and a progress entry that links back to this "
-         "pane — and returns the whole card, so you have its front matter, body, tasks and recent "
-         "thread from here on without a second read. Claim before you change any code, and only a "
-         "card whose request is the one you are working on. A card another session already holds "
-         "is refused with board_claimed_elsewhere: read its thread, comment, and ask the user "
-         "before you pass force.",
+         "Take a card: this terminal pane is the session working on it. One call does what the "
+         "Switchboard's Execute button does — assignee agent, status executing, the card's "
+         "`session` set to this pane's token, a progress entry that links back to this pane — and "
+         "returns the whole card (front matter, body, tasks, recent thread), so you need no second "
+         "read. Claim before you change any code, and only a card whose request is the one you are "
+         "working on. A card another session holds is refused with board_claimed_elsewhere: read "
+         "its thread, comment, and ask the user before you pass force.",
          {"id": _ID_ARG,
           "note": {"type": "string",
                    "description": "One or two lines on what you are about to do; appended to the "
@@ -315,16 +324,17 @@ TOOL_SPECS = [
          "history, and answers only what moved: a listed test that is gone, one that has never "
          "run here, one skipped in every run, one whose source changed, one that is flaky or "
          "slow, or a card whose commits touched files no listed test is named after. It is "
-         "silent when nothing is wrong. Call it before you move a card to needs-verification, "
-         "and when it names a card with no `## Tests` section, write one.",
+         "silent when nothing is wrong. Call it before you move a card to needs-verification and "
+         "fix what it names; when it names a card with no `## Tests` section, write one — one "
+         "invocation per line.",
          {"card": _ID_ARG}, ["card"]),
     spec("tests_run",
          "Run named tests and wait for the verdicts: a per-test table of result and duration, "
          "with the failure message for anything that did not pass. Ids are a test's stable key, "
          "as a card's `## Tests` section or tests_check gives them — `ctest:<name>` or "
          f"`unittest:<module>.<Class>.<test>` — at most {MAX_AGENT_TEST_IDS} of them. There is "
-         "no way to ask for the whole suite: that is `scripts/test.sh` or `ctest` at the "
-         "terminal, where you can watch it. One run at a time, per project.",
+         "no whole-suite run here: that is `scripts/test.sh` or `ctest` at the terminal, where you "
+         "can watch it. One run at a time, per project.",
          {"ids": {"type": "array", "items": {"type": "string"}, "minItems": 1,
                   "maxItems": MAX_AGENT_TEST_IDS,
                   "description": "The tests to run, each `<runner>:<invocation>`."},
@@ -2270,7 +2280,7 @@ class BoardTools:
         """The owner's confirmed delete (protocol 19.3 ``board_delete``, card #CYM9).
 
         Not a `run()` tool, like `set_priority` above it: an agent closes a card by moving it to
-        `done` or `dropped` (`board_policy.md` rule 9), and this is the owner at the keyboard
+        `done` or `dropped` (`board_policy.md`, "Nothing is deleted"), and this is the owner at the keyboard
         asking for the file to go — the same standing as editing the card file by hand.  The
         card file and its thread are unlinked from disk, and the bytes ride the write record
         like any other write, so the GUI's Undo puts both back for `UNDO_SECONDS`; after that

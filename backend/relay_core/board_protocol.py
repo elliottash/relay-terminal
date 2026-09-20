@@ -1634,7 +1634,7 @@ class BoardCommands:
             elif kind == "board_delete":
                 # The trash button and the Delete key (card #CYM9): the owner's confirmed delete,
                 # with the same standing as the flag click — no base_hash, no run() budget, and
-                # never offered to the agent (board_policy.md rule 9). Refused while anything
+                # never offered to the agent (board_policy.md, "Nothing is deleted"). Refused while anything
                 # that could be writing this card runs: a turn on it, a cleanup, the page agent,
                 # a sync — deleting under a running writer would race it.
                 try:

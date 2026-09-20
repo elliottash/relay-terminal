@@ -53,6 +53,15 @@ a title match is not a match.
   else.
 - **Nothing** → create the card, then claim it.
 
+You label the card; the user never has to, and you say nothing about labelling in your reply:
+exactly one of `bug` (something built behaves wrongly) or `feature` (something new or changed is
+asked for), from your reading of the request, plus the obvious area labels (`voice`, `remote`,
+`switchboard`, …).
+
+You may rewrite the user's own text — a request, a title, an intake note — when they ask or when it
+is plainly wrong. The old and the new text are recorded in the card's thread, so the change is
+visible and reversible; say in your reply that you did it.
+
 ## 3. Claim it
 
 ```
@@ -82,13 +91,21 @@ working). Anything smaller: go straight to work.
   blocked — not a running commentary.
 - A fault you find on the way that is not this card's: a new card in the bugs tab with the
   measured evidence, never a silent fix and never a detour.
+- The tests that prove the card go in its `## Tests` section, one invocation per line
+  (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
+  `manual: <evidence path>`). Run `tests_check` on the card before you move it to
+  `needs-verification`, and fix what it names.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
   - **Large:** `board_move_card` to `needs-verification` with the evidence path, and a
-    `## QA checklist` section in the body; the verifier takes it from there.
-  Relay stamps `implemented_by` itself — never type it, and never type `session` either.
+    `## QA checklist` section in the body; the verifier then moves it on to a QA lane, or back to
+    an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
+    body — any pane may flip it once that is there — and the card's `qa` block still names the
+    best verifier.
+  Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
+  card, so never type either — and never type `session`.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 
