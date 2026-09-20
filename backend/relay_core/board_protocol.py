@@ -1527,7 +1527,8 @@ class BoardCommands:
         from . import signal_threads as ST
         try:
             sub = manager.spawn({"subagent_type": ST.THREAD_AGENT_TYPE, "background": False,
-                                 "description": description, "prompt": task})
+                                 "description": description, "prompt": task},
+                                signal=description)
         except (ValueError, TypeError, OSError):
             return None                      # not configured, or too many already live
         return sub.thread_id, sub.id, sub.owner_session or "", sub.done

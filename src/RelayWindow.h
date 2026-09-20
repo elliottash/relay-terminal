@@ -3106,6 +3106,36 @@ private:
             agent.rows << hiddenFolder;
         }
         {
+            // Signals (#AQ6X decision 9, owner: "i think yes by default, but its optional"). The
+            // flag itself lives in the *board's* `board.yaml` (`signals: {auto_work: …}`), because
+            // it is a property of a project and not of this installation — a checkout whose tests
+            // are expected to be red does not want threads started on them. So the row writes
+            // through the tab's Switchboard worker (`signals_config`, protocol §32.2) and keeps a
+            // copy in the settings, which is what it can draw itself from: Options is built before
+            // any worker has answered, and a row that showed nothing until one did would read as
+            // off. A tab with no project attached has no board to write to and says so.
+            relay::SettingRow work =
+                toggleRow(QStringLiteral("board/signals_auto_work"),
+                          QStringLiteral("Work signals unasked"),
+                          QStringLiteral("A failing test nobody is on starts its own agent thread; "
+                                         "you get a notification that opens it, and it is listed "
+                                         "in Sessions."),
+                          true, [this](bool on) {
+                QWidget *page = m_tabs ? m_tabs->currentWidget() : nullptr;
+                if (!page) return;
+                if (relay::projects::boardDirOf(boardWorkspaceOfTab(page)).isEmpty()) {
+                    notice(QStringLiteral("This tab has no project attached, so there is no "
+                                          "Switchboard to set that on."), 6000);
+                    return;
+                }
+                sendToHelper(page, QString(), {{QStringLiteral("type"), QStringLiteral("signals_config")},
+                                               {QStringLiteral("auto_work"), on}});
+            });
+            work.aliases = QStringLiteral("signals signal thread unasked auto work failing test fix "
+                                          "agent switchboard board");
+            agent.rows << work;
+        }
+        {
             // The personal inbox board was dropped 2026-09-19 (#916B): a card filed in a tab with
             // no project attached now goes here if it is set, else through the project picker.
             relay::SettingRow defaultProject =

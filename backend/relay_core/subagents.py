@@ -313,6 +313,10 @@ class Subagent:
     started_at: float = 0.0             # wall clock, for the thread file
     runs: int = 0
     task: str = ""
+    #: The signal key this thread was started on (#AQ6X decision 9), for a *signal thread* and
+    #: nothing else.  It rides into the thread file, so the Sessions manager and the ⓘ view can
+    #: say which fault a thread is working rather than only naming the agent.
+    signal: str = ""
 
     @property
     def tokens(self) -> int:
@@ -552,7 +556,8 @@ class SubagentManager:
         raise ValueError("Unknown tool or unexpected argument.")
 
     # ----- lifecycle --------------------------------------------------------------------
-    def spawn(self, args: dict, *, call_id=None, parent_thread: str | None = None) -> Subagent:
+    def spawn(self, args: dict, *, call_id=None, parent_thread: str | None = None,
+              signal: str = "") -> Subagent:
         if not isinstance(args, dict):
             raise ValueError("Tool arguments must be an object.")
         if set(args) - {"description", "prompt", "subagent_type", "background", "model", "effort", "todo_id"}:
@@ -596,6 +601,9 @@ class SubagentManager:
             agent.inbox = _SubInbox(self, sub)
             sub.agent, sub.model = agent, model_label
             sub.todo_id = todo_id
+            # A signal thread (#AQ6X): not reachable through the `agent` tool — the keyword is the
+            # board worker's, and the fault's key is what makes the thread findable afterwards.
+            sub.signal = str(signal or "")[:200]
             self._bind_thread(sub, prompt, call_id, parent_thread)
             self._agents[agent_id] = sub
             event = {"event": "subagent_started", "id": agent_id, "type": sub.type, "description": sub.description,
@@ -658,6 +666,7 @@ class SubagentManager:
                 "models": session_files.models_with(getattr(agent, "models_used", []), sub.model),
                 "usage": dict(getattr(agent, "usage_totals", None) or session_files.empty_usage()),
                 "created": sub.started_at, "updated": time.time(), "runs": sub.runs, "task": sub.task,
+                **({"signal": sub.signal} if sub.signal else {}),
                 "effort": sub.effort, "result_preview": (sub.result or "")[:SUMMARY_CHARS],
                 "tools": sub.tools, "messages": messages}
 

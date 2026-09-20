@@ -215,7 +215,9 @@ private slots:
         QCOMPARE(asked.value(QStringLiteral("sources")).toArray(),
                  (QJsonArray{QStringLiteral("agent"), QStringLiteral("terminal"),
                              QStringLiteral("claude"), QStringLiteral("codex")}));
-        QVERIFY(!asked.contains(QStringLiteral("include_threads")));   // threads are off by default
+        // Threads are always asked for (#AQ6X): the unticked box drops the *user's* own from the
+        // tree, but a signal thread is Relay's and is listed whatever the box says.
+        QVERIFY(asked.value(QStringLiteral("include_threads")).toBool());
         QJsonObject item{{QStringLiteral("session_id"), QString(32, QLatin1Char('a'))},
                          {QStringLiteral("source"), QStringLiteral("agent")},
                          {QStringLiteral("title"), QStringLiteral("Relay engine")},
@@ -326,6 +328,72 @@ private slots:
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), thread);
         QVERIFY(!resumed);
+    }
+
+    // A signal thread (#AQ6X decision 9): Relay started it, so it is listed whether or not the
+    // "Subagent threads" box is ticked, under its project rather than under the board worker's
+    // session, marked, titled with the signal's key, and opened by Enter like any thread.
+    void signalThreadsAreListedUnderTheProjectWithoutTheBox() {
+        SessionManager manager;
+        QJsonObject asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked = request; };
+        manager.show();
+        auto *box = manager.findChild<QCheckBox *>(QStringLiteral("sessionsThreads"));
+        QVERIFY(box);
+        QVERIFY(!box->isChecked());
+        // Threads are asked for even so: a pickup nobody could see would not be "visible".
+        QVERIFY(asked.value(QStringLiteral("include_threads")).toBool());
+
+        const QString owner(32, QLatin1Char('a')), mine(32, QLatin1Char('b')), theirs(32, QLatin1Char('c'));
+        auto thread = [&owner](const QString &id, const QString &type, const QString &title) {
+            return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("subagent")},
+                               {QStringLiteral("title"), title}, {QStringLiteral("project"), QStringLiteral("relay")},
+                               {QStringLiteral("owner_session"), owner},
+                               {QStringLiteral("owner_title"), QStringLiteral("Switchboard worker")},
+                               {QStringLiteral("agent_id"), QStringLiteral("a1")},
+                               {QStringLiteral("agent_type"), type},
+                               {QStringLiteral("status"), QStringLiteral("running")},
+                               {QStringLiteral("workspace"), QStringLiteral("/home/u/relay")},
+                               {QStringLiteral("updated"), 1.0e9}};
+        };
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            thread(mine, QStringLiteral("signal"), QStringLiteral("ctest:panelayout")),
+            thread(theirs, QStringLiteral("general"), QStringLiteral("Find it"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree);
+        QTreeWidgetItem *group = tree->topLevelItem(0);
+        QVERIFY(group);
+        QCOMPARE(group->text(0), QStringLiteral("relay"));
+        // One row: the user's own thread is dropped by the unticked box, the signal thread is not,
+        // and it hangs straight under the project — no muted owner row for a session nobody resumes.
+        QCOMPARE(group->childCount(), 1);
+        QTreeWidgetItem *row = group->child(0);
+        QCOMPARE(row->text(0), QStringLiteral("⚑ signal · ctest:panelayout"));
+        QVERIFY(row->toolTip(0).contains(QStringLiteral("Relay started this thread itself")));
+        QVERIFY(row->toolTip(0).contains(QStringLiteral("ctest:panelayout")));
+
+        // Enter opens its history, exactly as for one of the user's own threads.
+        QJsonObject opened;
+        bool resumed = false;
+        manager.onOpenThread = [&opened](const QJsonObject &item) { opened = item; };
+        manager.onResume = [&resumed](const QJsonObject &, bool) { resumed = true; };
+        tree->setCurrentItem(row);
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), mine);
+        QCOMPARE(opened.value(QStringLiteral("agent_type")).toString(), QStringLiteral("signal"));
+        QVERIFY(!resumed);
+
+        // Ticking the box adds the user's own beside it, under their owner; the signal thread
+        // keeps its place in the project group.
+        box->setChecked(true);
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            thread(mine, QStringLiteral("signal"), QStringLiteral("ctest:panelayout")),
+            thread(theirs, QStringLiteral("general"), QStringLiteral("Find it"))}}});
+        group = tree->topLevelItem(0);
+        QCOMPARE(group->childCount(), 2);
+        QCOMPARE(group->child(0)->text(0), QStringLiteral("⚑ signal · ctest:panelayout"));
+        QCOMPARE(group->child(1)->text(0), QStringLiteral("Switchboard worker"));   // the owner row
+        QCOMPARE(rowChildren(group->child(1)).size(), 1);
     }
 
     void extraTabsAndEscape() {

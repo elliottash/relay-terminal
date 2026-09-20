@@ -698,7 +698,28 @@ private slots:
         }
     }
 
-    // ----- Settings › Local models (card #24XJ) -------------------------------------------------
+    // Options › Agent › Switchboard gains "Work signals unasked" (#AQ6X decision 9). The row needs
+    // a whole window to build, so it is read as text like the two above; what it writes —
+    // `signals_config` into the board's own `board.yaml` — is covered headless in
+    // tests/test_signal_threads.py.
+    void workSignalsUnaskedSitsUnderSwitchboardAndSaysWhatItDoes() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int heading = text.indexOf(QStringLiteral("headingRow(QStringLiteral(\"Switchboard\"))"));
+        QVERIFY2(heading > 0, "the Switchboard heading is gone from Options \u203a Agent");
+        const int row = text.indexOf(QStringLiteral("\"Work signals unasked\""), heading);
+        QVERIFY2(row > heading, "the Work signals unasked row is not under the Switchboard heading");
+        // The explanation is the one the card asks for, and it is on by default.
+        QVERIFY(text.mid(row, 900).contains(QStringLiteral("A failing test nobody is on starts its own agent thread")));
+        QVERIFY(text.mid(row, 900).contains(QStringLiteral("it is listed ")));
+        QVERIFY(text.mid(row, 900).contains(QStringLiteral("signals_config")));
+        // The next section starts after it, so the row really is on this page.
+        const int next = text.indexOf(QStringLiteral("sections << agent;"), row);
+        QVERIFY(next > row);
+    }
+
+    // ----- Settings \u203a Local models (card #24XJ) -------------------------------------------------
 
     // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to
     // run; read it as text, the way tests/test_presets.py reads the preset mirror.

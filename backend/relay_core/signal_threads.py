@@ -62,11 +62,13 @@ MAX_SIGNAL_THREADS = 3
 #: failure — and a regression inside the window is a different failure and is not held back.
 GAVE_UP_HOURS = 24
 
-#: The subagent definition a signal thread runs on.  `general` is the catalog's default and has
-#: `agents_defs.SUBAGENT_TOOLS` — files, commands and skills — which is what a fix needs; the
-#: `board_*` tools are the pane's and a subagent never has them, so the thread reaches the board
-#: through `scripts/relay-board.py`, exactly as a guest session does (`<board>/POLICY.md`).
-THREAD_AGENT_TYPE = "general"
+#: The subagent definition a signal thread runs on (`agents_defs.BUILTINS`).  Its own rather than
+#: `general`, so the Sessions manager can tell a pickup from one of the user's own subagents by
+#: `agent_type` and list it without being asked to.  Its tools are `agents_defs.SUBAGENT_TOOLS` —
+#: files, commands and skills — which is what a fix needs; the `board_*` tools are the pane's and a
+#: subagent never has them, so the thread reaches the board through `scripts/relay-board.py`,
+#: exactly as a guest session does (`<board>/POLICY.md`).
+THREAD_AGENT_TYPE = "signal"
 
 #: `state` of the `signal_thread` event (protocol §32.4).
 STATES = ("started", "finished")
@@ -100,8 +102,12 @@ def with_auto_work(config: dict | None, on: bool) -> dict:
 
 
 def description(signal: "S.Signal") -> str:
-    """The subagent's one-line description, which is also the thread's title in Sessions."""
-    return f"signal {signal.key}"[:200]
+    """The subagent's one-line description — and the thread's **title** in the Sessions manager.
+
+    The key alone, because that is what the row has to say: "signal ctest:panelayout" would read as
+    "signal signal ctest:panelayout" beside the row's own `signal` mark.
+    """
+    return signal.key[:200]
 
 
 def task_text(signal: "S.Signal", *, project: str, board_folder: str = "",

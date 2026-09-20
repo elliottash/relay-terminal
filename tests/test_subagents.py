@@ -575,7 +575,7 @@ class WorkerOptionTests(unittest.TestCase):
             self.assertIn({'event': 'agents_status', 'items': []}, events)
             self.assertTrue(any(e['event'] == 'error' and 'Unknown subagent' in e['text'] for e in events))
             configured = next(e for e in events if e['event'] == 'configured')
-            self.assertEqual(configured['agents'], 2)
+            self.assertEqual(configured['agents'], 3)   # explore, general, signal (#AQ6X)
 
 
 class FactoryTests(unittest.TestCase):

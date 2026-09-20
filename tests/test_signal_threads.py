@@ -220,7 +220,7 @@ class StartTests(unittest.TestCase):
                                                         board_folder=".switchboard",
                                                         thread_id="th1"))
         task, description = manager.spawn.calls[0]
-        self.assertEqual(description, "signal ctest:panelayout")
+        self.assertEqual(description, "ctest:panelayout")   # the row's title is the key
         self.assertIn("ctest:panelayout", task)
         self.assertIn("Assertion failed: rows == 3", task)
         self.assertIn("card #K7Q2", task)

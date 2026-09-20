@@ -473,6 +473,15 @@ QTextDocument *RichTextCache::document(const QString &html, int width, const QFo
 
 namespace {
 bool isThread(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("subagent"); }
+// A **signal thread** (#AQ6X decision 9): the agent Relay started itself on a failing check nobody
+// claimed. It is a subagent thread like any other, but it is not one of the user's — nobody asked
+// for it — so it is listed whether or not "Subagent threads" is ticked, under its project rather
+// than under the board worker's session (which is not a session anyone resumes), and marked. Its
+// `agent_type` is the definition it runs on (`agents_defs.BUILTINS`, "signal"); its title is the
+// signal's key.
+bool isSignalThread(const QJsonObject &item) {
+    return isThread(item) && item.value(QStringLiteral("agent_type")).toString() == QLatin1String("signal");
+}
 bool isTerminal(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("terminal"); }
 
 QString escaped(const QString &text) { return text.simplified().toHtmlEscaped(); }
@@ -1160,7 +1169,11 @@ QJsonObject SessionManager::queryRequest() const {
                    kind.isEmpty() ? QJsonArray{QStringLiteral("agent"), QStringLiteral("terminal"),
                                                QStringLiteral("claude"), QStringLiteral("codex")}
                                   : QJsonArray{kind});
-    if (m_threads->isChecked()) request.insert(QStringLiteral("include_threads"), true);
+    // Threads are always asked for, and the *unticked* box drops the user's own again below
+    // (`rebuildTree`): a signal thread is Relay's, not theirs, and decision 9 says it is listed.
+    // Asking only when the box is ticked would mean a pickup was invisible until somebody found a
+    // checkbox for a feature they had never heard of.
+    request.insert(QStringLiteral("include_threads"), true);
     // The "Project" chooser (#916B). Either field makes the worker answer across all projects
     // whatever `scope` says, and it reports that scope back, which the menu then follows.
     const QString project = m_projectFilter->currentData().toString();
@@ -1313,7 +1326,12 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
 
     QString title = item.value(QStringLiteral("title")).toString();
     if (title.isEmpty()) title = QStringLiteral("Untitled");
-    if (thread) {
+    if (isSignalThread(item)) {
+        // The mark says whose thread it is, and the title is the signal's key (#AQ6X decision 9).
+        // No `↳ a3 signal ·` prefix: it hangs under the project, not under a session, and the
+        // agent id would be the only part of that prefix the reader could not act on.
+        title = QStringLiteral("⚑ signal · %1").arg(title);
+    } else if (thread) {
         const QString agent = item.value(QStringLiteral("agent_id")).toString();
         const QString type = item.value(QStringLiteral("agent_type")).toString();
         title = QStringLiteral("↳ %1%2 · %3").arg(agent, type.isEmpty() ? QString() : QLatin1Char(' ') + type, title);
@@ -1337,7 +1355,11 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
                                                  m_liveUsage.value(sessionId)));
 
     QString tip = item.value(QStringLiteral("workspace")).toString();
-    if (thread)
+    if (isSignalThread(item))
+        tip = QStringLiteral("Relay started this thread itself on the failing check %1, which no "
+                             "pane had claimed. Enter opens its history.\n%2")
+                  .arg(item.value(QStringLiteral("title")).toString(), tip);
+    else if (thread)
         tip = QStringLiteral("Subagent thread %1 (%2) of “%3”%4\n%5")
                   .arg(item.value(QStringLiteral("agent_id")).toString(), item.value(QStringLiteral("agent_type")).toString(),
                        item.value(QStringLiteral("owner_title")).toString(),
@@ -1451,12 +1473,31 @@ void SessionManager::rebuildTree(const QString &keep) {
         note(addSessionRow(parent, item), item);
     }
     auto rowsById = m_rows;   // the sessions placed so far: a thread hangs under its owner
+    // A signal thread goes straight into its project group (#AQ6X decision 9, "those go into the
+    // sessions manger"). Its owner is the board worker's own session, which nobody resumes and
+    // which would otherwise draw a muted placeholder row above it saying nothing.
+    for (const auto &value : std::as_const(m_items)) {
+        const QJsonObject item = value.toObject();
+        if (!isSignalThread(item)) continue;
+        ++threads;
+        matches += item.value(QStringLiteral("match_count")).toInt();
+        QTreeWidgetItem *parent = grouping == QLatin1String("date")
+                ? groupFor(dateGroup(item.value(QStringLiteral("updated")).toDouble(), now))
+                : groupFor(item.value(QStringLiteral("project")).toString());
+        note(addSessionRow(parent, item), item);
+    }
+    rowsById = m_rows;
     // Threads: under their parent thread, else under their owner session, else in the project
     // group with the owner named on the row. A thread whose parent is still to be placed waits a
     // round; once a round places nothing, the rest go under their owners.
+    //
+    // The user's own, so the unticked "Subagent threads" box drops them here — the request always
+    // asks for threads, because a signal thread is listed whatever the box says.
     QList<QJsonObject> pending;
-    for (const auto &value : std::as_const(m_items))
-        if (isThread(value.toObject())) pending << value.toObject();
+    if (m_threads->isChecked())
+        for (const auto &value : std::as_const(m_items))
+            if (isThread(value.toObject()) && !isSignalThread(value.toObject()))
+                pending << value.toObject();
     // Under one owner, threads read in the order they were started (a1 before a2), like the
     // owner's history does; the sessions themselves stay newest first.
     std::stable_sort(pending.begin(), pending.end(), [](const QJsonObject &a, const QJsonObject &b) {
@@ -1541,7 +1582,9 @@ void SessionManager::updateStatus() {
     if (!m_note.isEmpty()) { m_status->setText(m_note); return; }
     const QString scope = scopeId() == QLatin1String("project") ? QStringLiteral("this project")
                                                                 : QStringLiteral("all projects");
-    const QString counted = m_threads->isChecked()
+    // `m_threadCount` is what was *drawn*, signal threads included: they are listed whether or
+    // not the box is ticked (#AQ6X), so a count that ignored them would disagree with the list.
+    const QString counted = (m_threads->isChecked() || m_threadCount > 0)
         ? QStringLiteral("%1 session(s), %2 thread(s)").arg(m_sessions).arg(m_threadCount)
         : QStringLiteral("%1 session(s)").arg(m_sessions);
     QString text = m_search->text().trimmed().isEmpty()
@@ -1622,7 +1665,10 @@ void SessionManager::selectionChanged() {
     const bool same = id == m_previewFor;
     m_preview->setHtml(same ? m_previewHtml : html.isEmpty() ? QStringLiteral("<p>Loading…</p>") : html);
     QString sub = item.value(QStringLiteral("workspace")).toString().toHtmlEscaped();
-    if (isThread(item))
+    if (isSignalThread(item))
+        sub = QStringLiteral("Signal thread — Relay started it on a failing check nobody claimed"
+                             "<br>%1").arg(sub);
+    else if (isThread(item))
         sub = QStringLiteral("Subagent thread of “%1”<br>%2")
                   .arg(item.value(QStringLiteral("owner_title")).toString().toHtmlEscaped(), sub);
     m_header->setText(QStringLiteral("<b>%1</b><br>%2").arg(item.value(QStringLiteral("title")).toString().toHtmlEscaped(), sub));

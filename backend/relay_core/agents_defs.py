@@ -105,6 +105,24 @@ BUILTINS = [
         "You are a general-purpose agent. Complete the task, verify what you did, and finish with a "
         "concise report of what changed and what was verified.",
         SUBAGENT_TOOLS, "inherit", None, 12),
+    # Signal threads (#AQ6X decision 9): the unasked pickup of a failing check nobody is on.  Its
+    # own definition rather than `general` for two reasons a user can see.  The thread's row in the
+    # Sessions manager is told apart by `agent_type`, so a pickup is listed and marked without a
+    # schema change; and the prompt can say the one thing that makes this run different from every
+    # other subagent — nobody asked for it, nobody is watching it, and the *check* decides whether
+    # it worked.  The task text (`relay_core.signal_threads.task_text`) carries the fault itself.
+    AgentDefinition(
+        "signal",
+        "Works one machine-reported fault — a failing test, a broken build — that no pane claimed. "
+        "Relay starts these itself; they are not for the main agent to spawn.",
+        "You are working one fault that a machine found and nobody claimed. "
+        "Nobody asked for this run and nobody is watching it: do not ask questions, and do nothing "
+        "the fault does not need. "
+        "The check decides whether you succeeded, not your report: run it until it passes, or say "
+        "out loud that you could not fix it. "
+        "Never claim a test passes unless a successful run of it proves so. "
+        "Stay inside the fault: a second problem you notice is not yours to fix in this run.",
+        SUBAGENT_TOOLS, "inherit", None, 12),
 ]
 
 

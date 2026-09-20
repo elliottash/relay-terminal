@@ -279,13 +279,13 @@ class WorkerAgentsListTests(unittest.TestCase):
             self.assertEqual(len(lists), 2, events)
             for listing in lists:
                 names = [item["name"] for item in listing["items"]]
-                self.assertEqual(names, ["reviewer", "explore", "general"])
+                self.assertEqual(names, ["reviewer", "explore", "general", "signal"])
                 self.assertEqual(listing["items"][0]["tools"], ["read_file"])
                 self.assertEqual(listing["duplicates"][0]["name"], "reviewer")
                 for key in ("name", "description", "source", "model", "tools"):
                     self.assertIn(key, listing["items"][0])
             configured = next(e for e in events if e["event"] == "configured")
-            self.assertEqual(configured["agents"], 3)
+            self.assertEqual(configured["agents"], 4)   # reviewer, explore, general, signal
 
 
 if __name__ == "__main__":
