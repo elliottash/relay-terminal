@@ -3074,6 +3074,18 @@ from `configure`, so a card cannot be taken by typing a token into a patch — a
 `executing` (or `in-progress`) with a `session` is **held** by that pane. The Switchboard draws it
 on the card as a link that reveals the pane; a card that has moved on keeps the field as a record.
 
+**The claim is released on `done`, on `dropped` and when the pane closes** (owner, 2026-09-20).
+Any write that leaves a work card closed drops its `session` in the same write and says so in that
+write's own thread entry: `board_move_card` and the `board_move` message share `_move`, and the two
+writes that close a card without it — a merge's sources, a `board_split_card` with `close` — do it
+too. `BoardTools.release_claims(reason)` is the other half: it drops this pane's `session` from
+every card it holds in `executing`/`in-progress`, leaves `status` and `assignee` alone (the work is
+in flight, only the pane is gone) and appends an `event` entry reading
+`Released (<first 8 of the token>) · <reason>`. The worker calls it in its `shutdown` branch, inside
+the 1.5 s a closing pane waits for it, and `set_board` calls it for the board it is leaving; it
+never raises and does nothing for a worker with no pane token. The Switchboard pane is drawn by
+another worker and picks the release up from its own folder watcher, like any other pane's write.
+
 **`board_claim {id, note?, force?}`** is the agent tool, offered wherever the board tools are (not
 in a Discuss, Plan or page-agent turn: those have no pane of their own). One call, in Execute's
 order: `assignee` → `agent` if it is not already; status → `executing` (reason "Claimed by a

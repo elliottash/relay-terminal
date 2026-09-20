@@ -537,6 +537,11 @@ def main():
             elif board.handles(kind):
                 board.dispatch(request)
             elif kind == "shutdown":
+                # The pane is closing (`Pane::~Pane` sends `cancel` then this, and waits 1.5 s):
+                # the cards it claimed are nobody's, so its `session` comes off them before the
+                # loop ends (protocol 19.19, #R9G7). Bounded, never raises, and the cards stay in
+                # Executing — the work is in flight, only the pane that held it has gone.
+                board.release_claims("the pane closed")
                 break
             else:
                 raise ValueError("Unknown protocol message.")

@@ -37,6 +37,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -381,6 +382,11 @@ CLAIMED_STATUSES = ("executing", "in-progress")
 #: are what the GUI draws as the link, exactly as Execute's `Executing (xxxxxxxx) · …` does.
 CLAIM_LINE = "Claimed ({short}) · working on it from a terminal pane"
 CLAIM_LINE_NO_TOKEN = "Claimed · working on it from a terminal pane"
+
+#: What `release_claims` writes as the first line of its entry when the pane goes (#R9G7): the
+#: same eight characters the claim named, so a thread reads `Claimed (xxxxxxxx) …` and then
+#: `Released (xxxxxxxx) …` and it is obvious which pane let go of the card.
+RELEASE_LINE = "Released ({short}) · {reason}"
 
 #: Said in the result when this worker has no pane token: the Switchboard worker, a test, or a
 #: GUI too old to send one.  The claim still happens; it just cannot be linked to a pane.
@@ -2096,6 +2102,11 @@ class BoardTools:
             card.set("section", section_arg)
 
         card.set("status", status)
+        # Auto-release (#R9G7, owner 2026-09-20): a card that lands in `done` or `dropped` drops
+        # its claim in the same write. This is the one place a status change goes through — the
+        # `board_move_card` tool, the Switchboard's `board_move` message (19.3) and the close out
+        # of a QA lane above are all here — so no closing path can forget it.
+        released = self._release_on_close(card, status)
         rank = self._rank_for(card, status, args.get("before"), args.get("after"))
         if rank is not None:
             card.set("rank", rank)
@@ -2120,6 +2131,8 @@ class BoardTools:
             parts.append(f"tab {old_tab} → {tab}")
         if rank is not None and not parts:
             parts.append("reordered")
+        if released:
+            parts.append(f"session {released[:8]} released")
         summary = ", ".join(parts) or "unchanged"
         line = f"- ✦ {self.context.actor} moved this card · {summary} · {reason}"
         if args.get("evidence"):
@@ -2404,6 +2417,87 @@ class BoardTools:
                 **({} if token else {"warning": NO_TOKEN_NOTE}),
                 "card": card_block(self.board, card)}
 
+    # ---- releasing a claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed") ----
+    def _release_on_close(self, card: B.Card, status: str) -> str:
+        """Drop the card's `session` when the write about to happen leaves it closed.
+
+        A `session` means "this pane is working on it" (19.19), and a `done` or `dropped` card is
+        nobody's: the work is over, so a claim left behind can only tell the next session a card
+        is taken when it is not. A pane token is a fresh uuid per pane that no resume restores, so
+        it cannot usefully outlive the card's own lifetime either.
+
+        Called on the in-memory card *before* it is written, so the drop rides the same write and
+        the same undo record as the status change; the caller names the release in its own thread
+        entry rather than appending a second one. Returns the token released, or "".
+        """
+        if status not in B.CLOSED_ITEM_STATUSES:
+            return ""
+        held = str(card.front.get("session") or "").strip()
+        if not held:
+            return ""
+        card.drop("session")
+        if card.id in self.claimed:
+            self.claimed = [c for c in self.claimed if c != card.id]
+        return held
+
+    def release_claims(self, reason: str = "the pane closed") -> list[str]:
+        """Drop every claim this pane holds: the pane that held them has gone (19.19).
+
+        Called from the worker's `shutdown` — a pane's destructor sends `cancel` then `shutdown`
+        and waits 1.5 s — and from `BoardCommands._repoint` when this worker is pointed at another
+        board, where the tools holding these claims are about to be thrown away.
+
+        Only `session` goes. Status and `assignee` are left exactly as they are: the work is still
+        in flight and the card still belongs in Executing, it is just not held by a live pane any
+        more, so the next session finds it where it was and may claim it without `force`.
+
+        It runs inside a closing pane's grace period, so it is deliberately cheap: one pass over
+        the card files, a write only for the cards that name this token, no model, no network and
+        no undo record (there is no window left to undo in). It never raises — a card it cannot
+        read or write is skipped and the others are still released — and it does nothing at all
+        for a worker with no pane token: the Switchboard's own, or a test's.
+
+        Nothing is announced on the pipe: the Switchboard pane is drawn by a different worker and
+        already learns of another pane's writes from its `QFileSystemWatcher` on the board folder
+        (`BoardView::watchIssues`), which debounces 400 ms and then asks its own worker for a
+        `board_refresh` — a fresh read of every card file, so the dropped field is simply there.
+
+        Returns the ids it released.
+        """
+        token = (self.pane_token or "").strip()
+        released: list[str] = []
+        if not token:
+            return released
+        try:
+            paths = self.board.card_paths()
+        except OSError:
+            return released
+        for path in paths:
+            try:
+                card = B.Card.load(path)
+                if (card.id is None or card.type != "work"
+                        or card.status not in CLAIMED_STATUSES
+                        or str(card.front.get("session") or "").strip() != token):
+                    continue
+                card.drop("session")
+                self.board.save(card)
+                self._append(card, RELEASE_LINE.format(short=token[:8], reason=reason),
+                             kind="event")
+                released.append(card.id)
+            except Exception as exc:      # a card this cannot read is not worth a failed shutdown
+                self._log_release_failure(path, exc)
+        if released:
+            self.claimed = [c for c in self.claimed if c not in released]
+        return released
+
+    def _log_release_failure(self, path: Path, exc: BaseException) -> None:
+        """One line on stderr for a card `release_claims` could not release.  Never raises."""
+        try:
+            print(f"board: release_claims skipped {path.name}: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        except Exception:
+            pass
+
     # ---- cleanup-only writes ----------------------------------------------------
     def _merge(self, args: dict) -> dict:
         """`board_merge_cards`: fold redundant cards into one, losing nothing (protocol 19.9)."""
@@ -2431,6 +2525,9 @@ class BoardTools:
                                      f"{into.type} card; merge like with like.")
 
         size = self._thread_size(into)
+        # `B.merge_cards` writes every source as `dropped` itself, so the release rides that write
+        # rather than `_move`'s (#R9G7): a merged-away card is closed and nobody's.
+        released = {src.id: self._release_on_close(src, "dropped") for src in sources}
         result = B.merge_cards(self.board, into, sources, reason=reason,
                                category_of=lambda card: self.board.category_of(card.path))
         self.writes_this_turn += 1
@@ -2441,7 +2538,9 @@ class BoardTools:
                      kind="event")
         for merged, src in zip(result["merged"], sources):
             self._append(src, f"- ✦ {self.context.actor} merged this card into #{into_id} · {reason} · "
-                              "its text is kept here and copied there; this card stays as the record",
+                              "its text is kept here and copied there; this card stays as the record"
+                              + (f" · session {released[src.id][:8]} released"
+                                 if released.get(src.id) else ""),
                          kind="event")
         write_id = self._record("merge", into, summary, result["into_before"], size,
                                 others=result["others"],
@@ -2482,13 +2581,17 @@ class BoardTools:
         category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
                     else self.board.category_of(card.path))
         size = self._thread_size(card)
+        # `close` is `B.split_card` writing this card as `dropped` itself, the other path that does
+        # not go through `_move` (#R9G7): every piece moved out, so the claim goes with it.
+        released = self._release_on_close(card, "dropped") if args.get("close") else ""
         result = B.split_card(self.board, card, clean, reason=reason, category=category,
                               close=bool(args.get("close")), tab_category=self._category_for_tab)
         self.creates_this_turn += len(clean)
         self.writes_this_turn += 1
         summary = ("split into " + ", ".join(f"#{c['id']} {c['title']}" for c in result["children"]))[:400]
         self._append(card, f"- ✦ {self.context.actor} {summary} · {reason}"
-                           + (" · this card is closed; every piece moved out" if result["closed"] else ""),
+                           + (" · this card is closed; every piece moved out" if result["closed"] else "")
+                           + (f" · session {released[:8]} released" if released else ""),
                      kind="event")
         for child in result["children"]:
             self.board.append_thread(child["id"], f"- ✦ {self.context.actor} split this card out of "

@@ -1171,6 +1171,278 @@ class ClaimMessageTests(BoardToolsTest):
             self.commands({"pane_token": "not a token"})
 
 
+# ------------------------------------------------------------------------- release
+
+class ReleaseOnCloseTests(BoardToolsTest):
+    """Closing a card drops its claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed").
+
+    The release sits in `_move`, the one function both the `board_move_card` tool and the
+    Switchboard's `board_move` message go through, so neither can close a card and leave it held.
+    """
+
+    class Turns:
+        agent = None
+        busy = False
+
+        def now_or_later(self, now, later):
+            return now()
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+        self.tools.run("board_claim", {"id": self.card_id})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["session"], self.pane_token)
+
+    def move(self, status, **extra):
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": status,
+                                                   "reason": "closing it", **extra})
+        self.assertNotIn("error", result, result)
+        return result
+
+    def test_moving_a_claimed_card_to_done_drops_the_session(self):
+        result = self.move("done")
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "done")
+        self.assertNotIn("session", card.front)
+        # One write, one thread entry: the move's own line says the claim went with it.
+        self.assertIn(f"session {self.pane_token[:8]} released", result["summary"])
+        entries = [e for e in self.board.thread(self.card_id) if e.kind == "event"]
+        self.assertIn(f"session {self.pane_token[:8]} released", entries[-1].text)
+        self.assertEqual(self.tools.claimed, [])
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_moving_a_claimed_card_to_dropped_drops_the_session(self):
+        self.move("dropped")
+        self.assertNotIn("session", self.board.card_by_id(self.card_id).front)
+        self.assertEqual(self.tools.claimed, [])
+
+    def test_a_move_that_does_not_close_the_card_keeps_the_session(self):
+        # `needs-verification` is work handed on, not work over: the pane that did it stays
+        # recorded, which is what `implemented_by` and the row's chip are read from.
+        result = self.move("needs-verification", evidence="docs/qa_evidence/2026-09-20-x/")
+        self.assertEqual(self.board.card_by_id(self.card_id).front["session"], self.pane_token)
+        self.assertNotIn("released", result["summary"])
+        self.assertEqual(self.tools.claimed, [self.card_id])
+
+    def test_the_gui_move_message_drops_it_too(self):
+        commands = P.BoardCommands(self.Turns(), self.events.append)
+        commands.configure(str(self.repo), {"pane_token": self.pane_token})
+        self.addCleanup(commands.cards.drop)
+        self.events.clear()
+        commands.dispatch({"type": "board_move", "id": "m1", "card": self.card_id,
+                           "status": "done", "reason": "dragged to Done"})
+        written = [e for e in self.events if e["event"] == "board_written"]
+        self.assertEqual(len(written), 1, self.events)
+        self.assertIn(f"session {self.pane_token[:8]} released", written[0]["summary"])
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "done")
+        self.assertNotIn("session", card.front)
+
+    def test_a_closed_card_that_was_never_claimed_is_unchanged(self):
+        other = self.create(title="Nobody holds this", request="an unclaimed second ask")
+        result = self.tools.run("board_move_card", {"id": other, "status": "dropped",
+                                                   "reason": "not doing it"})
+        self.assertNotIn("released", result["summary"])
+        self.assertEqual(result["summary"], "Inbox → Dropped")
+
+    def test_undo_puts_the_claim_back_with_the_status(self):
+        # The drop rides the move's own write, so it rides the move's own undo: Ctrl+Z on a
+        # mistaken close leaves the card held exactly as it was.
+        result = self.move("done")
+        self.tools.undo(result["write_id"])
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "executing")
+        self.assertEqual(card.front["session"], self.pane_token)
+
+    def test_merging_a_claimed_card_away_releases_it(self):
+        # `board_merge_cards` writes each source as `dropped` itself, bypassing the move.
+        into = self.create(title="The card that survives", request="the surviving ask")
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_merge_cards", {"into": into, "cards": [self.card_id],
+                                                     "reason": "the same work"})
+        self.assertNotIn("error", result, result)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "dropped")
+        self.assertNotIn("session", card.front)
+        entries = [e for e in self.board.thread(self.card_id) if e.kind == "event"]
+        self.assertIn(f"session {self.pane_token[:8]} released", entries[-1].text)
+
+    def test_splitting_a_claimed_card_closed_releases_it(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_split_card", {
+            "id": self.card_id, "reason": "two unrelated things", "close": True,
+            "parts": [{"title": "The first piece", "request": "the first half of the ask"},
+                      {"title": "The second piece", "request": "the second half of the ask"}]})
+        self.assertNotIn("error", result, result)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "dropped")
+        self.assertNotIn("session", card.front)
+        entries = [e for e in self.board.thread(self.card_id) if e.kind == "event"]
+        self.assertIn(f"session {self.pane_token[:8]} released", entries[-1].text)
+
+    def test_a_split_that_leaves_the_card_open_keeps_the_claim(self):
+        self.tools.begin_cleanup("c-1")
+        self.tools.run("board_split_card", {
+            "id": self.card_id, "reason": "two unrelated things",
+            "parts": [{"title": "The first piece", "request": "the first half of the ask"},
+                      {"title": "The second piece", "request": "the second half of the ask"}]})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["session"], self.pane_token)
+
+
+class ReleaseClaimsTests(BoardToolsTest):
+    """`BoardTools.release_claims`: the pane closed, so what it held is nobody's (#R9G7, 19.19)."""
+
+    other_token = "9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33"
+
+    def other_tools(self):
+        tools = T.BoardTools(self.board, autonomy="auto",
+                            context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                            state_path=self.repo / ".relay" / "other.json",
+                            pane_token=self.other_token)
+        tools.begin_turn("t-other")
+        return tools
+
+    def test_it_releases_this_panes_executing_cards_and_says_so_on_the_thread(self):
+        mine = self.create(title="Mine to do", request="the ask this pane claimed")
+        self.tools.run("board_claim", {"id": mine})
+        released = self.tools.release_claims("the pane closed")
+        self.assertEqual(released, [mine])
+        card = self.board.card_by_id(mine)
+        self.assertNotIn("session", card.front)
+        # Status and assignee stay: the work is in flight, only the pane that held it has gone.
+        self.assertEqual(card.status, "executing")
+        self.assertEqual(card.front["assignee"], "agent")
+        entry = self.board.thread(mine)[-1]
+        self.assertEqual(entry.kind, "event")
+        self.assertEqual(entry.text.splitlines()[0],
+                         f"Released ({self.pane_token[:8]}) · the pane closed")
+        self.assertEqual(self.tools.claimed, [])
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_an_in_progress_card_is_released_as_well(self):
+        # `in-progress` is the same thing on a board configured before the stage statuses.
+        card_id = self.create(title="On an older board", request="a card in the older column")
+        self.tools.run("board_claim", {"id": card_id})
+        self.tools.run("board_move_card", {"id": card_id, "status": "in-progress",
+                                           "reason": "the older column"})
+        self.assertEqual(self.tools.release_claims("the pane closed"), [card_id])
+        self.assertNotIn("session", self.board.card_by_id(card_id).front)
+
+    def test_another_sessions_claim_is_left_alone(self):
+        theirs = self.create(title="Theirs to do", request="the ask the other pane claimed")
+        self.other_tools().run("board_claim", {"id": theirs})
+        self.assertEqual(self.tools.release_claims("the pane closed"), [])
+        self.assertEqual(self.board.card_by_id(theirs).front["session"], self.other_token)
+        # Nothing was appended to a card this pane never held.
+        self.assertNotIn("Released", self.thread_text(theirs))
+
+    def test_a_card_that_is_not_executing_keeps_the_session_as_the_record(self):
+        # Past `executing` the field is history, not a claim (19.19), and history is not dropped:
+        # `needs-verification` and a closed card both record which pane did the work.
+        landed = self.create(title="Already landed", request="the ask that is landed")
+        self.tools.run("board_claim", {"id": landed})
+        self.tools.run("board_move_card", {"id": landed, "status": "needs-verification",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        self.assertEqual(self.tools.release_claims("the pane closed"), [])
+        self.assertEqual(self.board.card_by_id(landed).front["session"], self.pane_token)
+
+    def test_it_releases_every_card_this_pane_holds(self):
+        first = self.create(title="The first one", request="the first ask this pane claimed")
+        second = self.create(title="The second one", request="a second, different ask claimed here")
+        for card_id in (first, second):
+            self.tools.run("board_claim", {"id": card_id})
+        self.assertEqual(sorted(self.tools.release_claims("the pane closed")),
+                         sorted([first, second]))
+        for card_id in (first, second):
+            self.assertNotIn("session", self.board.card_by_id(card_id).front)
+
+    def test_a_worker_with_no_pane_token_does_nothing(self):
+        card_id = self.create()
+        self.tools.run("board_claim", {"id": card_id})
+        tools = T.BoardTools(self.board, autonomy="auto",
+                            context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                            state_path=self.repo / ".relay" / "none.json")
+        self.assertEqual(tools.release_claims("the pane closed"), [])
+        self.assertEqual(self.board.card_by_id(card_id).front["session"], self.pane_token)
+
+    def test_a_card_it_cannot_read_is_skipped_and_the_rest_are_released(self):
+        # A closing pane has 1.5 s and one job: one bad file must not cost the other cards their
+        # release.  `broken.md` sorts before the claimed card's folder, so the failure comes first.
+        mine = self.create(title="Mine to do", request="the ask this pane claimed")
+        self.tools.run("board_claim", {"id": mine})
+        (self.root / "features" / "broken.md").mkdir(parents=True)
+        with unittest.mock.patch("sys.stderr") as err:
+            released = self.tools.release_claims("the pane closed")
+        (self.root / "features" / "broken.md").rmdir()
+        self.assertEqual(released, [mine])
+        self.assertNotIn("session", self.board.card_by_id(mine).front)
+        self.assertIn("broken.md", "".join(str(c.args[0]) for c in err.write.call_args_list
+                                          if c.args))
+
+    def test_a_board_with_no_cards_is_a_no_op(self):
+        self.assertEqual(self.tools.release_claims("the pane closed"), [])
+
+
+class ReleaseOnPaneCloseTests(BoardToolsTest):
+    """`BoardCommands.release_claims`: what the worker's `shutdown` and a `set_board` call (19.19)."""
+
+    class Turns:
+        agent = None
+        busy = False
+
+        def now_or_later(self, now, later):
+            return now()
+
+    def commands(self, request=None):
+        commands = P.BoardCommands(self.Turns(), self.events.append)
+        commands.configure(str(self.repo), request or {"pane_token": self.pane_token})
+        self.addCleanup(commands.cards.drop)
+        return commands
+
+    def test_the_workers_release_goes_through_the_owner_side_tools(self):
+        card_id = self.create()
+        commands = self.commands()
+        commands.tools.context.actor = "agent"
+        commands.tools.run("board_claim", {"id": card_id})
+        self.assertEqual(commands.release_claims("the pane closed"), [card_id])
+        self.assertNotIn("session", self.board.card_by_id(card_id).front)
+
+    def test_a_worker_with_no_board_releases_nothing_and_does_not_raise(self):
+        commands = P.BoardCommands(self.Turns(), self.events.append)
+        self.assertEqual(commands.release_claims("the pane closed"), [])
+
+    def test_a_failing_release_never_fails_the_shutdown(self):
+        commands = self.commands()
+        with unittest.mock.patch.object(commands.tools, "release_claims",
+                                        side_effect=OSError("disk gone")):
+            self.assertEqual(commands.release_claims("the pane closed"), [])
+
+    def test_set_board_to_another_project_releases_what_this_pane_held_here(self):
+        # Protocol 19.11: the tools holding the claim are thrown away, so the claim goes first.
+        card_id = self.create()
+        commands = self.commands()
+        commands.tools.context.actor = "agent"
+        commands.tools.run("board_claim", {"id": card_id})
+        elsewhere = self.repo / "other"
+        (elsewhere / "issues").mkdir(parents=True)
+        (elsewhere / "issues" / B.BOARD_CONFIG).write_text(self.config, encoding="utf-8")
+        commands.set_board({"id": "s1", "board": {"dir": str(elsewhere / "issues")}})
+        self.assertEqual(commands.tools.board.root, elsewhere / "issues")
+        card = self.board.card_by_id(card_id)
+        self.assertNotIn("session", card.front)
+        self.assertEqual(card.status, "executing")
+        self.assertEqual(self.board.thread(card_id)[-1].text.splitlines()[0],
+                         f"Released ({self.pane_token[:8]}) · the pane moved to another project")
+
+    def test_pointing_the_worker_at_the_same_board_again_keeps_the_claim(self):
+        card_id = self.create()
+        commands = self.commands()
+        commands.tools.context.actor = "agent"
+        commands.tools.run("board_claim", {"id": card_id})
+        commands.set_board({"id": "s2", "board": {"dir": str(self.root)}})
+        self.assertEqual(self.board.card_by_id(card_id).front["session"], self.pane_token)
+
+
 class PaneTokenTests(unittest.TestCase):
     def test_a_token_the_entry_marker_cannot_hold_is_refused(self):
         for bad in ("a b", "a>b", "x" * 65):

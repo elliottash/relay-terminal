@@ -325,6 +325,27 @@ class BoardCommands:
         tools.on_created = self._board_became_ready
         return tools
 
+    def release_claims(self, reason: str = "the pane closed") -> list[str]:
+        """Drop this pane's claims on the board it is on (19.19, #R9G7; owner 2026-09-20).
+
+        The worker's `shutdown` calls this: the pane that held the cards has closed, and a pane
+        token is a fresh uuid per pane that no session resume brings back, so a `session` left on
+        a card would tell the next pane it is taken by something that no longer exists. `_repoint`
+        calls it for the same reason when this worker is pointed at another board.
+
+        The owner-side tools are the ones asked, because they exist whenever this pane has a board
+        at all, while the agent's are rebuilt by every `configure`; both halves carry the same
+        `pane_token`, so it is the same set of cards either way. Never raises — a shutdown must not
+        fail over the board — and does nothing for a worker with no board or no pane token.
+        """
+        tools = self.tools
+        if tools is None:
+            return []
+        try:
+            return tools.release_claims(reason)
+        except Exception:
+            return []
+
     def state_block(self) -> dict | None:
         """The `board` block: what `configured`, `board_state` and `board_init` all answer with."""
         if self.tools is None:
@@ -348,6 +369,11 @@ class BoardCommands:
         current = self.tools.board.root if self.tools is not None else None
         if root is not None and root == current:
             return
+        # The claims this pane holds on the board it is leaving (19.19, #R9G7). `session` says a
+        # live pane is working on the card; this pane is about to be somewhere else, and the tools
+        # that hold the claim are thrown away below, so they are dropped here while they still can
+        # be. The cards stay in Executing: the work is in flight, only the claim is stale.
+        self.release_claims("the pane moved to another project")
         # The card conversations belong to the board we are leaving, and their agents hold that
         # board's tools: stop them and forget them rather than let them write into it (19.16).
         self.cards.drop()

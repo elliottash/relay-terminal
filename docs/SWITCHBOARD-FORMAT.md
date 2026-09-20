@@ -179,7 +179,12 @@ outside the range is clamped on every write.
   the card as a link that reveals that pane, and the claim's `progress` entry carries the same
   token in its attributes (`pane_token`, section 3) so the thread links there too. A card that has
   moved on keeps the field as a record of who did the work; it stops meaning "taken" the moment
-  the status leaves `executing`/`in-progress`.
+  the status leaves `executing`/`in-progress`. It is **dropped** on the two events that make it
+  meaningless (owner, 2026-09-20): any write that leaves the card `done` or `dropped` — a move, a
+  merge's sources, a split that closes the card — drops it in the same write, and the pane closing
+  (or moving to another project) drops it from every card it holds in `executing`/`in-progress`,
+  leaving the status and `assignee` alone and writing `Released (<first eight>) · <why>` on the
+  thread. So a `session` on an open card always names a pane that was live when it was written.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching
