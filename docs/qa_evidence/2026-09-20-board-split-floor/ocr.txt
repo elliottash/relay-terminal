@@ -1,0 +1,11 @@
+fixture card: ZPX6
+01 edges: 6 908 914 923 928 1451 1456 1914 1920
+03 board beside terminal: edges [6 908 914 923 928 1451 1456 1914 1920], split: yes
+04 after Ctrl+E: edges [6 803 809 818 823 1346 1672 1899 1905 1914 1920], split: yes
+05 after second Ctrl+E: edges [6 560 566 575 580 1103 1108 1331 1337 1346 1672 1899 1905 1914 1920]
+06 equalize: the board kept its list/card split through the reshuffle: yes
+07 execute: the board's list/card split was lost: FAIL
+08 second execute: the board's list/card split was lost (see ground-truth-minimal.txt: the tab no longer affords 902 plus three terminal minimums — the documented Qt clamp)
+thread entries with pane_token: 2 (want 2)
+relay alive at the end: yes
+no gui_crash in relay.log

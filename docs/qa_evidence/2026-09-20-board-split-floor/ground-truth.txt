@@ -1,0 +1,33 @@
+fixture card: B8G1
+== board open, card open ==
+  h [1272, 636] (sum 1908)
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    BOARD cwd=
+== after two Ctrl+E ==
+  h [1127, 282, 322, 282] (sum 2013)
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    BOARD cwd=
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+== after Ctrl+Alt+0 (equalize) ==
+  h [1127, 282, 322, 282] (sum 2013)
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    BOARD cwd=
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+== after first Execute (x) ==
+  h [271, 269, 799, 400, 271] (sum 2010)
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    BOARD cwd=
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+== after second Execute (x) ==
+  h [240, 240, 643, 322, 322, 240] (sum 2007)
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    BOARD cwd=
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+    pane cwd=/tmp/rl-bxcn-gt.gElt/home/project
+relay alive at the end: yes
