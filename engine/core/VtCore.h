@@ -116,6 +116,22 @@ public:
     // ---- hit testing (viewport coordinates)
     virtual QString hyperlinkAt(int row, int col) const = 0; // OSC 8 URI or empty
 
+    // The URI behind an OSC 8 link id — Cell::link, which every cell of every
+    // painted row already carries (0 = no link). Painting a row used to ask
+    // hyperlinkAt(row, col) for it, which converts the whole row to hand back
+    // an id the caller was already holding: `vterm_state_convert_color_to_rgb`
+    // was the top self symbol of a streaming profile because of that (#6W0Z).
+    // `row` and `col` say where the id was read, so a core that keeps no
+    // id -> URI table can still answer the old way — which is what this default
+    // does, so a core that has not been taught the lookup stays correct and
+    // compiles unchanged (GhosttyCore, which builds on neither machine this was
+    // measured on, takes it).
+    virtual QString hyperlinkUri(uint32_t id, int row, int col) const
+    {
+        (void)id;
+        return hyperlinkAt(row, col);
+    }
+
     // One run of cells carrying the same OSC 8 hyperlink, in absolute
     // scrollback rows (0 = the oldest line: the coordinates
     // scrollViewportToRow() and historyRows() use). A run that soft-wrapped
@@ -132,7 +148,10 @@ public:
     // hangs under, including anchors far outside the viewport, and finds it
     // again after a resize (both cores reflow) or after the scrollback was
     // trimmed. It walks the scrollback, so callers use it on resize, trim and
-    // clear, never per frame.
+    // clear, never per frame. A core may answer from a cache of its own as long
+    // as the answer is the one the walk would give (LibVtermCore re-walks only
+    // the rows pushed since the last call and the screen, #PPR4); one that does
+    // not is correct, only slower.
     virtual std::vector<HyperlinkRun> hyperlinkRuns(const QString &prefix) const = 0;
 
     // ---- selection (viewport coordinates; the core keeps it attached to content)

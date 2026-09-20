@@ -39,6 +39,15 @@ namespace relay {
 
 namespace {
 
+// Frame pacing (scheduleFrame). A frame that follows another within
+// kStreamingGapMs is part of a stream and is held to one display frame; the
+// first one after a quieter moment goes out in kEchoFrameMs, which is what
+// keystroke echo rides on. The gap is longer than the streaming interval, so a
+// steady stream stays a stream.
+constexpr int kEchoFrameMs = 4;
+constexpr int kStreamingFrameMs = 16;
+constexpr int kStreamingGapMs = 50;
+
 bool isRegionalIndicator(char32_t c)
 {
     return c >= 0x1F1E6 && c <= 0x1F1FF;
@@ -447,11 +456,21 @@ void TerminalView::applyGeometry()
 
 void TerminalView::scheduleFrame()
 {
-    // Typing echo should appear within one frame; a flood repaints at ~30 fps so
-    // painting (and the X server) never becomes the bottleneck.
-    const quint64 bytes = m_session->bytesReceived();
-    const bool flooding = bytes - m_bytesAtFrame > 512 * 1024;
-    const int wanted = flooding ? 33 : 4;
+    // Typing echo should appear within one frame; output that keeps coming
+    // repaints at display rate, so painting (and the X server) never becomes
+    // the bottleneck.
+    //
+    // The pace is taken from the clock, not from the byte count. "More than
+    // 512 KiB since the last frame" needed over 128 MiB/s at a 4 ms interval,
+    // and the core delivers 26-37, so the cap never engaged and the view
+    // painted ~150 times a second during a flood — a whole core spent on frames
+    // no 60 Hz display shows (#6W0Z). It is also a latch: the oftener it
+    // frames, the less each frame accumulates. Here the *first* frame after a
+    // quiet moment still goes out in 4 ms, which is what keystroke echo rides
+    // on (10.6 ms p50, measured end to end), and only a frame that follows
+    // another one closely is held to one display frame.
+    const bool streaming = m_sinceFrame.isValid() && m_sinceFrame.elapsed() < kStreamingGapMs;
+    const int wanted = streaming ? kStreamingFrameMs : kEchoFrameMs;
     // A slower frame may already be pending -- the fold layer's anchor
     // heartbeat uses this same timer -- and must not hold up this one.
     if (m_frameTimer.isActive() && m_frameTimer.interval() <= wanted)
@@ -463,16 +482,28 @@ void TerminalView::pullFrame()
 {
     const bool force = m_forceFull;
     m_forceFull = false;
-    m_bytesAtFrame = m_session->bytesReceived();
+    m_sinceFrame.restart();
+    // Both of these are resolved at most once per frame, lazily, by the rows
+    // that need them: the pane's directory (a readlink and a stat of
+    // /proc/<pid>/cwd, plus the core's own mutex) and the URI behind a link id.
+    // restLinkColumns() asked for both per painted row, which was most of the
+    // GUI thread's syscalls during output (#6W0Z). Neither can change within
+    // one frame; a `cd` shows up on the next one, 4-16 ms later.
+    m_frameCwdValid = false;
+    m_frameProse.clear();
     // Anchors are re-read before the frame, so the rows the fold layer works
-    // with belong to the same content the frame will show.
-    if (m_foldAnchorsDirty || (m_folds.active() && m_foldResolveAt.elapsed() > 250))
+    // with belong to the same content the frame will show. The heartbeat only
+    // has something to find when content has moved under the anchors since the
+    // last walk — output, trimming — so an idle pane with a fold open resolves
+    // nothing (#PPR4).
+    if (m_foldAnchorsDirty || (m_folds.active() && m_contentMoved && m_foldResolveAt.elapsed() > 250))
         resolveFoldAnchors();
     bool changed = false;
     m_session->withCore([&](VtCore &c) {
         changed = c.updateFrame(&m_frame, force);
         syncFoldViewport(c, &changed);
     });
+    m_contentMoved = m_contentMoved || changed;
     // While a fold is open the anchors are re-read on a slow heartbeat, which
     // is what notices the scrollback trimming its oldest lines away underneath
     // them. Nothing runs when no fold is open.
@@ -490,27 +521,47 @@ void TerminalView::pullFrame()
         setCursor(Qt::IBeamCursor);
     }
 
-    if (m_frame.full || force || foldsVisible()) {
-        // With a fold open every row below it may have moved, so the dirty-row
-        // fast path only applies while the layer is empty (or an alt-screen
-        // program owns the grid), which is also the throughput path.
+    const bool folds = foldsVisible();
+    if (m_frame.full || force || m_visualTopMoved) {
+        // Everything on screen moved: the frame is a full one, something asked
+        // for a full paint, or the visual window scrolled under the fold layer.
         update();
     } else {
+        // A dirty row still only costs its own row, with a fold layer or
+        // without one: the layer splices whole blocks in at fixed places, so
+        // the row a real row is painted on is a lookup (#6W0Z). Anything that
+        // *moves* a block — a fold opening or shutting, its content, a resize,
+        // a scroll — sets m_frame.full or m_forceFull and takes the branch
+        // above, so the mapping used here is the one the last paint used.
+        // Before this, one anchored fold anywhere made an agent pane repaint
+        // every content row for every frame of streaming output.
+        const auto rowRect = [this](int screenRow) {
+            return QRect(0, m_padding + screenRow * m_ch, width(), m_ch);
+        };
+        const auto screenOf = [this, folds](int frameRow) {
+            return folds ? screenRowOfReal(m_frame.viewportTop + frameRow) : frameRow;
+        };
         QRegion region;
         for (int r = 0; r < m_frame.rows && r < int(m_frame.dirty.size()); ++r) {
-            if (m_frame.dirty[size_t(r)])
-                region += QRect(0, m_padding + r * m_ch, width(), m_ch);
+            if (!m_frame.dirty[size_t(r)])
+                continue;
+            const int screenRow = screenOf(r);
+            if (screenRow >= 0 && screenRow < m_rows)
+                region += rowRect(screenRow);
         }
         const bool cursorMoved = m_paintedCursor.row != m_frame.cursor.row || m_paintedCursor.col != m_frame.cursor.col
             || m_paintedCursor.visible != m_frame.cursor.visible || m_paintedCursor.shape != m_frame.cursor.shape
             || m_paintedCursorInViewport != m_frame.cursorInViewport;
         if (cursorMoved) {
-            region += QRect(0, m_padding + m_paintedCursor.row * m_ch, width(), m_ch);
-            region += QRect(0, m_padding + m_frame.cursor.row * m_ch, width(), m_ch);
+            for (const int screenRow : {screenOf(m_paintedCursor.row), screenOf(m_frame.cursor.row)}) {
+                if (screenRow >= 0 && screenRow < m_rows)
+                    region += rowRect(screenRow);
+            }
         }
         if (!region.isEmpty())
             update(region);
     }
+    m_visualTopMoved = false;
     if (m_frame.cursor.row != m_paintedCursor.row || m_frame.cursor.col != m_paintedCursor.col)
         m_blinkOn = true;
     m_paintedCursor = m_frame.cursor;
@@ -615,6 +666,7 @@ bool plainInk(const QColor &c)
 
 void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
 {
+    ++m_rowPaints;
     const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
     const int y = m_padding + row * m_ch;
     const int baseline = y + m_ascent;
@@ -1621,8 +1673,25 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     setCursor(m_hoverRow >= 0 ? Qt::PointingHandCursor : Qt::IBeamCursor);
 }
 
+// The directory this frame's rows are scanned against. One resolution per
+// frame: currentDirectory() takes the core's mutex — the same one the pty
+// thread holds while it feeds each chunk — and then makes a filesystem round
+// trip, and restLinkColumns() wanted it for every painted row, which was 91 %
+// of the GUI thread's `statx` during output and ~4 400 lock acquisitions a
+// second (#6W0Z). Invalidated at the top of every pullFrame(), and by
+// linkProbeUpdated() when the host changes what a path resolves against.
+const QString &TerminalView::frameDirectory()
+{
+    if (!m_frameCwdValid) {
+        m_frameCwd = currentDirectory();
+        m_frameCwdValid = true;
+    }
+    return m_frameCwd;
+}
+
 QString TerminalView::currentDirectory() const
 {
+    ++m_cwdResolves;
     // A pane logged into another machine resolves the output's relative paths against the folder
     // the remote shell is in, not the one this process happens to be in (#S5SH).
     if (m_linkDirectory) {
@@ -1674,6 +1743,7 @@ void TerminalView::linkProbeUpdated()
     // keeps its place — answers arrive while they are stepping through it.
     m_hoverCellRow = m_hoverCellCol = -2;
     m_restLinks.clear();
+    m_frameCwdValid = false;   // the host may have changed what paths resolve against
     m_forceFull = true;
     update();
     if (!m_linkCursor.active())
@@ -1823,6 +1893,20 @@ void TerminalView::setLinksColouredAtRest(bool on)
     update();
 }
 
+// Is this link id a prose anchor (#R2WQ)? Memoised for the frame: the rows of
+// one block all carry the same id, so a screenful of prose costs one lookup.
+bool TerminalView::proseLink(uint32_t link, int frameRow, int col)
+{
+    for (const std::pair<uint32_t, bool> &known : m_frameProse) {
+        if (known.first == link)
+            return known.second;
+    }
+    const bool prose = FoldLayer::isProseUri(
+        m_session->withCore([&](VtCore &core) { return core.hyperlinkUri(link, frameRow, col); }));
+    m_frameProse.push_back({link, prose});
+    return prose;
+}
+
 void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
 {
     cols->clear();
@@ -1849,13 +1933,17 @@ void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
     // link-bearing line there is.
     bool prose = false;
     for (int col = 0; col < int(line.cells.size()); ++col) {
-        if (!line.cells[size_t(col)].link)
+        const uint32_t link = line.cells[size_t(col)].link;
+        if (!link)
             continue;
-        prose = FoldLayer::isProseUri(m_session->withCore(
-            [&](VtCore &core) { return core.hyperlinkAt(frameRow, col); }));
+        // The id is already here, on the cell: ask for its URI rather than for
+        // the row's, which converted every cell of the row to hand back this
+        // same id (#6W0Z). An id's URI cannot change, so one lookup per link id
+        // per frame answers every row of a prose block.
+        prose = proseLink(link, frameRow, col);
         break;
     }
-    const QString cwd = currentDirectory();
+    const QString &cwd = frameDirectory();
     // The mode is part of the key: the same text is a link on a program row and plain on a
     // prose one, and the cache must not carry the answer of one to the other.
     const QString key = (prose ? QStringLiteral("prose\n") : QStringLiteral("out\n")) + cwd + QLatin1Char('\n')
@@ -2094,6 +2182,7 @@ int TerminalView::screenRowOfReal(int realRow) const
 void TerminalView::resolveFoldAnchors()
 {
     m_foldAnchorsDirty = false;
+    m_contentMoved = false;
     m_foldResolveAt.restart();
     const QString prefix = m_folds.prefix();
     if (m_folds.folds().empty())
@@ -2119,19 +2208,24 @@ void TerminalView::resolveFoldAnchors()
         runs.insert(runs.end(), prose.begin(), prose.end());
     }
 
-    QVector<QString> seen;
+    // One batch: the anchors, then the folds to keep, then a single rebuild of
+    // the layout (#PPR4 — this used to rebuild once per anchor and test
+    // membership against a list).
+    QSet<QString> seen;
+    std::vector<FoldLayer::AnchorRows> anchors;
+    anchors.reserve(runs.size());
     const int before = m_folds.visualRows();
     for (const VtCore::HyperlinkRun &r : runs) {
         if (m_folds.known(r.uri)) {
-            m_folds.setAnchor(r.uri, r.startRow, r.endRow);
-            seen << r.uri;
+            anchors.push_back(FoldLayer::AnchorRows{r.uri, r.startRow, r.endRow});
+            seen.insert(r.uri);
         }
     }
     for (const FoldLayer::Fold &f : m_folds.folds()) {
-        if (f.anchorStartRow < 0 && !seen.contains(f.uri))
-            seen << f.uri; // never anchored: the line may still be on its way
+        if (f.anchorStartRow < 0)
+            seen.insert(f.uri); // never anchored: the line may still be on its way
     }
-    m_folds.retainAnchored(seen);
+    m_folds.applyAnchors(anchors, seen);
     // The anchors, and with them the visual rows every fold match sits on, may
     // have moved (output, trimming, a dropped fold). Recomputing is lazy and
     // costs nothing while no needle is set; the match list itself usually comes
@@ -2188,8 +2282,11 @@ void TerminalView::syncFoldViewport(VtCore &core, bool *changed)
         core.updateFrame(&m_frame, true);
         *changed = true;
     }
-    if (m_visualTop != m_paintedVisualTop)
+    if (m_visualTop != m_paintedVisualTop) {
         *changed = true;
+        // Every screen row now shows something else: this frame repaints whole.
+        m_visualTopMoved = true;
+    }
     m_paintedVisualTop = m_visualTop;
 }
 

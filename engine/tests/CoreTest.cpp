@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Screen-model tests: feed byte sequences into every available VtCore and
 // assert cells, text, modes and events.
+#include "core/LibVtermCore.h"
 #include "core/VtCore.h"
 
 #include <QtTest>
@@ -644,6 +645,229 @@ private slots:
         h.feed("\x1b[?25l");
         f = h.frame();
         QVERIFY(!f.cursor.visible);
+    }
+
+
+    // #6W0Z: a scrolled-out line is converted up to its last real cell, not to
+    // the grid width, and it does not keep a grid-width allocation afterwards.
+    // What counts as "real" is unchanged: a blank cell wearing a background or
+    // reverse video is content and stays.
+    void aStoredLineStopsAtItsLastRealCell()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 120);
+        auto *lib = dynamic_cast<LibVtermCore *>(h.vt.get());
+        if (!lib)
+            QSKIP("work counters are libvterm's");
+        // Push ten 9-character lines out of a 120-column grid.
+        const quint64 before = lib->storedCells();
+        for (int i = 0; i < 10; ++i)
+            h.feed("nine char\r\n");
+        for (int i = 0; i < 4; ++i)
+            h.feed("\r\n");
+        const quint64 converted = lib->storedCells() - before;
+        // 10 lines x 9 cells, plus the blank lines that pushed them: far below
+        // the 1 200 cells the grid width would have cost.
+        QVERIFY2(converted <= 120, qPrintable(QStringLiteral("converted %1 cells").arg(converted)));
+
+        std::vector<Line> lines;
+        h.vt->historyLines(0, h.vt->historyRows(), &lines);
+        int nine = -1;
+        for (int i = 0; i < int(lines.size()); ++i) {
+            if (lines[size_t(i)].text() == QStringLiteral("nine char"))
+                nine = i;
+        }
+        QVERIFY(nine >= 0);
+        QCOMPARE(int(lines[size_t(nine)].cells.size()), 9);
+    }
+
+    void aTrailingColouredSpaceIsNotABlank()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 40);
+        h.vt->setColors(0xd8d8d8, 0x1c1e24, nullptr);
+        // Erase to end of line under a background: cells with no character in
+        // them that are nonetheless ink, right out to the grid width.
+        h.feed("red\x1b[48;2;200;0;0m\x1b[K\r\n");
+        // The same under a reverse pen: libvterm resolves the swap as it
+        // erases, so what reaches the cell is a ground either way — ink, not a
+        // blank, and the trim keeps it.
+        h.feed("\x1b[0mrev\x1b[7m\x1b[48;2;0;0;200m\x1b[K\r\n");
+        // Written spaces are characters, not blanks, and were never trimmed.
+        h.feed("spaces    \r\n");
+        // Nothing but the word: the rest of the row is blank and goes.
+        h.feed("plain\r\n");
+        for (int i = 0; i < 4; ++i)
+            h.feed("\r\n");
+        std::vector<Line> lines;
+        h.vt->historyLines(0, h.vt->historyRows(), &lines);
+        const auto lineStarting = [&lines](const QString &prefix) {
+            for (const Line &l : lines) {
+                if (l.text().startsWith(prefix))
+                    return l;
+            }
+            return Line();
+        };
+        const Line red = lineStarting(QStringLiteral("red"));
+        QCOMPARE(int(red.cells.size()), 40);                      // the erased tail is kept
+        QCOMPARE(red.cells[39].bg, CellColor::rgb(200, 0, 0));
+        QCOMPARE(red.cells[39].ch, char32_t(0));
+        const Line rev = lineStarting(QStringLiteral("rev"));
+        QCOMPARE(int(rev.cells.size()), 40);
+        QVERIFY(CellColor::kind(rev.cells[39].bg) != CellColor::Default);
+        QCOMPARE(int(lineStarting(QStringLiteral("spaces")).cells.size()), 10);
+        QCOMPARE(int(lineStarting(QStringLiteral("plain")).cells.size()), 5);
+    }
+
+    // The trimmed line is what reflow reads back, so a resize after the
+    // scrollback has been trimmed still rewraps to the same text.
+    void aTrimmedScrollbackStillReflows()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 10);
+        h.vt->setScrollbackLines(8);
+        h.feed("0123456789abcdefghij\r\n");   // wraps into two rows of ten
+        h.feed("red\x1b[48;2;200;0;0m  \x1b[0m\r\n");
+        for (int i = 0; i < 4; ++i)
+            h.feed("line\r\n");
+        h.feed("end");
+        h.vt->resize(4, 20, 8, 16);
+        QStringList all = h.vt->historyText(100);
+        all += h.vt->screenText().split(QLatin1Char('\n'));
+        QVERIFY2(all.contains(QStringLiteral("0123456789abcdefghij")), qPrintable(all.join(QLatin1Char('|'))));
+        QVERIFY(all.contains(QStringLiteral("red")));
+        // The coloured blanks survived the round trip through libvterm.
+        std::vector<Line> lines;
+        h.vt->historyLines(0, h.vt->historyRows(), &lines);
+        for (const Line &l : lines) {
+            if (!l.text().startsWith(QStringLiteral("red")))
+                continue;
+            QCOMPARE(int(l.cells.size()), 5);
+            QCOMPARE(l.cells[4].bg, CellColor::rgb(200, 0, 0));
+        }
+    }
+
+    // #6W0Z: the URI behind a link id the caller already holds, without
+    // converting the row it sits on.
+    void hyperlinkUriByIdMatchesTheRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 20);
+        h.feed("a\x1b]8;;https://example.com/x\x1b\\link\x1b]8;;\x1b\\b\r\n");
+        ViewportFrame f = h.frame();
+        const uint32_t id = f.lines[0].cells[2].link;
+        QVERIFY(id != 0);
+        QCOMPARE(h.vt->hyperlinkUri(id, 0, 2), QStringLiteral("https://example.com/x"));
+        QCOMPARE(h.vt->hyperlinkUri(id, 0, 2), h.vt->hyperlinkAt(0, 2));
+        QCOMPARE(h.vt->hyperlinkUri(0, 0, 0), QString());          // an unlinked cell
+        QCOMPARE(f.lines[0].cells[0].link, uint32_t(0));
+    }
+
+    // #PPR4: a second walk costs the screen, not the whole scrollback, and
+    // answers exactly what a full walk would.
+    void hyperlinkRunsWalkOnlyWhatIsNew()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 40);
+        auto *lib = dynamic_cast<LibVtermCore *>(h.vt.get());
+        if (!lib)
+            QSKIP("work counters are libvterm's");
+        const QString prefix = QStringLiteral("relay://call/");
+        const auto anchor = [&h](int n) {
+            h.feed(QByteArray("\x1b]8;;relay://call/p/1/") + QByteArray::number(n) + "\x1b\\* ran it\x1b]8;;\x1b\\\r\n");
+        };
+        for (int i = 0; i < 40; ++i) {
+            anchor(i);
+            h.feed("plain output\r\n");
+        }
+        const std::vector<VtCore::HyperlinkRun> first = h.vt->hyperlinkRuns(prefix);
+        QCOMPARE(int(first.size()), 40);
+        // The scrollback is 80 rows deep; the first walk visited all of it.
+        const quint64 afterFirst = lib->linkRowsWalked();
+        QVERIFY2(afterFirst >= 80, qPrintable(QString::number(afterFirst)));
+
+        // Nothing has moved: the second walk visits the screen only, and says
+        // the same thing.
+        const std::vector<VtCore::HyperlinkRun> again = h.vt->hyperlinkRuns(prefix);
+        const quint64 secondWalk = lib->linkRowsWalked() - afterFirst;
+        QCOMPARE(int(secondWalk), h.vt->rows());
+        QCOMPARE(int(again.size()), int(first.size()));
+        for (int i = 0; i < int(first.size()); ++i) {
+            QCOMPARE(again[size_t(i)].uri, first[size_t(i)].uri);
+            QCOMPARE(again[size_t(i)].startRow, first[size_t(i)].startRow);
+            QCOMPARE(again[size_t(i)].endRow, first[size_t(i)].endRow);
+            QCOMPARE(again[size_t(i)].startCol, first[size_t(i)].startCol);
+        }
+
+        // Ten more rows of output, one of them a new anchor: the walk covers
+        // the new rows and the screen, and the rows every fold sits on have
+        // moved down by exactly what was printed.
+        const quint64 beforeThird = lib->linkRowsWalked();
+        for (int i = 0; i < 5; ++i)
+            h.feed("more output\r\n");
+        anchor(99);
+        h.feed("plain output\r\n");
+        const std::vector<VtCore::HyperlinkRun> third = h.vt->hyperlinkRuns(prefix);
+        QCOMPARE(int(third.size()), 41);
+        QVERIFY2(lib->linkRowsWalked() - beforeThird < 20,
+                 qPrintable(QString::number(lib->linkRowsWalked() - beforeThird)));
+        // Nothing was trimmed, so the anchors are where they were: absolute
+        // rows count from the oldest line the scrollback still holds.
+        for (int i = 0; i < 40; ++i) {
+            QCOMPARE(third[size_t(i)].uri, first[size_t(i)].uri);
+            QCOMPARE(third[size_t(i)].startRow, first[size_t(i)].startRow);
+        }
+    }
+
+    // The same answer as a full walk after the ring has been rewrapped, after
+    // it has been trimmed, and after it has been cleared — the three things the
+    // cache cannot see for itself.
+    void hyperlinkRunsSurviveResizeTrimAndClear()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 30);
+        const QString prefix = QStringLiteral("relay://call/");
+        for (int i = 0; i < 12; ++i) {
+            h.feed(QByteArray("\x1b]8;;relay://call/p/1/") + QByteArray::number(i)
+                   + "\x1b\\* a tool call line that is long enough to wrap when the grid narrows\x1b]8;;\x1b\\\r\n");
+            h.feed("plain\r\n");
+        }
+        const auto uris = [](const std::vector<VtCore::HyperlinkRun> &runs) {
+            QStringList out;
+            for (const VtCore::HyperlinkRun &r : runs)
+                out << QStringLiteral("%1@%2-%3").arg(r.uri).arg(r.startRow).arg(r.endRow);
+            return out;
+        };
+        const QStringList wide = uris(h.vt->hyperlinkRuns(prefix));
+        QCOMPARE(wide.size(), 12);
+
+        h.vt->resize(4, 14, 8, 16);
+        const QStringList narrow = uris(h.vt->hyperlinkRuns(prefix));
+        QCOMPARE(narrow.size(), 12);
+        // A fresh core fed the same bytes at the same width is the reference.
+        {
+            Harness ref(core, 4, 14);
+            for (int i = 0; i < 12; ++i) {
+                ref.feed(QByteArray("\x1b]8;;relay://call/p/1/") + QByteArray::number(i)
+                         + "\x1b\\* a tool call line that is long enough to wrap when the grid narrows\x1b]8;;\x1b\\\r\n");
+                ref.feed("plain\r\n");
+            }
+            QCOMPARE(uris(ref.vt->hyperlinkRuns(prefix)).size(), narrow.size());
+        }
+
+        // Trim: the oldest anchors leave the scrollback and the rest renumber.
+        h.vt->setScrollbackLines(6);
+        const std::vector<VtCore::HyperlinkRun> trimmed = h.vt->hyperlinkRuns(prefix);
+        QVERIFY(int(trimmed.size()) < 12);
+        for (const VtCore::HyperlinkRun &r : trimmed) {
+            QVERIFY(r.startRow >= 0);
+            QVERIFY(r.endRow >= r.startRow);
+        }
+        h.vt->clearScrollback();
+        for (const VtCore::HyperlinkRun &r : h.vt->hyperlinkRuns(prefix))
+            QVERIFY(r.startRow >= 0);
+        h.vt->reset();
+        QVERIFY(h.vt->hyperlinkRuns(prefix).empty());
     }
 
     void dirtyTracking()

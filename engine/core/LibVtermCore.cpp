@@ -147,6 +147,37 @@ struct LibVtermCore::Impl {
     bool resizing = false;
     size_t minCountDuringResize = 0;
 
+    // hyperlinkRuns() answers the scrollback half of its walk from here (#PPR4).
+    // A line in the ring never changes once it is pushed, so the rows walked
+    // for one prefix only have to be walked again when the ring itself is
+    // rewrapped, cleared or reset — `ringEpoch` counts exactly those. Runs are
+    // held in **push ids**, which trimming does not renumber, and turned into
+    // the absolute rows the interface promises when the answer is built.
+    struct CachedRun {
+        QString uri;
+        uint32_t link = 0; // the OSC 8 id the run was opened with
+        qint64 startId = 0;
+        int startCol = 0;
+        qint64 endId = 0;
+        int endCol = 0;
+    };
+    struct RunCache {
+        QString prefix;
+        std::vector<CachedRun> runs;
+        qint64 walkedTo = 0;  // push id the ring has been walked up to (exclusive)
+        uint32_t openId = 0;  // the run still open at walkedTo - 1, if any
+        quint64 epoch = 0;
+        bool valid = false;
+    };
+    std::vector<RunCache> runCaches;
+    quint64 ringEpoch = 0;
+
+    // What the work-counting tests read (#6W0Z, #PPR4): cells converted into
+    // stored scrollback lines, and rows visited by a hyperlink walk. Both are
+    // counted per line, never per cell, so nothing is added to the inner loops.
+    quint64 storedCells = 0;
+    mutable quint64 linkRowsWalked = 0;   // the walks themselves are const
+
     // Selection (line ids / columns, inclusive).
     struct Pos {
         qint64 line;
@@ -221,6 +252,20 @@ struct LibVtermCore::Impl {
         else if (vc.attrs.underline) a |= AttrUnderline;
         c->attrs |= a;
         c->link = vc.hyperlink;
+    }
+
+    // A blank cell as the stored-line rule sees it, read straight off
+    // libvterm's own cell so a line can be measured *before* it is converted:
+    // no character, no background of its own, no attribute and no hyperlink.
+    // The foreground is deliberately not part of it — a space keeps no ink —
+    // which is exactly what `isBlank() && attrs == 0` decided in pushLine's
+    // pop_back loop, cell by cell, after paying to convert all of them (#6W0Z).
+    static bool blankSourceCell(const VTermScreenCell &vc)
+    {
+        if (vc.chars[0] != 0 || vc.hyperlink != 0 || !VTERM_COLOR_IS_DEFAULT_BG(&vc.bg))
+            return false;
+        return !vc.attrs.bold && !vc.attrs.italic && !vc.attrs.blink && !vc.attrs.reverse
+            && !vc.attrs.conceal && !vc.attrs.strike && !vc.attrs.underline;
     }
 
     void readScreenRow(int row, Line *out) const
@@ -302,11 +347,29 @@ struct LibVtermCore::Impl {
         Line *l = d->pushSlot();
         if (l) {
             l->clear();
-            l->cells.resize(size_t(cols));
-            for (int i = 0; i < cols; ++i)
+            // Where the line really ends, found before anything is converted: a
+            // 99-character line in a 280-column grid used to pay the colour
+            // conversion and the cluster walk for 181 cells that were then
+            // popped off again (#6W0Z). Same cells kept, same cells dropped —
+            // blankSourceCell() is the pop_back loop's test, read off the
+            // source cell — so a styled blank (a background, reverse video)
+            // stays, as it always did.
+            int kept = cols;
+            while (kept > 0 && blankSourceCell(cells[kept - 1]))
+                --kept;
+            // The slot comes from the ring and clear() keeps its capacity, so a
+            // short line landing where a wide one was would hold the wide one's
+            // allocation for as long as it is in the scrollback: 2.8 kB a line
+            // at 132 columns against the ~1.7 kB the cells themselves need.
+            // Let that block go rather than carry it; a slot that keeps seeing
+            // lines of the same length keeps its allocation and allocates
+            // nothing.
+            if (l->cells.capacity() > size_t(kept) + 16)
+                std::vector<Cell>().swap(l->cells);
+            l->cells.resize(size_t(kept));
+            d->storedCells += quint64(kept);
+            for (int i = 0; i < kept; ++i)
                 d->convertCell(cells[i], l, &l->cells[size_t(i)]);
-            while (!l->cells.empty() && l->cells.back().isBlank() && l->cells.back().attrs == 0)
-                l->cells.pop_back();
             l->continuation = info->continuation;
             l->marks = uint8_t(info->relay_marks);
             l->wrapColumns = uint16_t(cols);
@@ -316,6 +379,97 @@ struct LibVtermCore::Impl {
             d->scrollOffset = std::min<int>(d->scrollOffset + 1, int(d->count));
         d->allDirty = true;
         return 1;
+    }
+
+    // Rows [fromId, toId) of one prefix's hyperlink walk, appended to `out`
+    // with the rule the whole-scrollback walk uses: the same link id on the
+    // same or the next row continues the run, anything else starts one.
+    // `openId` carries that state in and out, so the walk can be split into
+    // "the rows pushed since last time" and "the screen" and still produce
+    // exactly what one pass over both would have.
+    void walkLinkRows(const QString &prefix, qint64 fromId, qint64 toId, std::vector<CachedRun> *out,
+                      uint32_t *openId) const
+    {
+        Line tmp;
+        for (qint64 id = fromId; id < toId; ++id) {
+            ++linkRowsWalked;
+            const Line *l = peekLine(id, &tmp);
+            if (!l) {
+                *openId = 0;
+                continue;
+            }
+            bool onThisRow = false;
+            for (int col = 0; col < int(l->cells.size()); ++col) {
+                const uint32_t link = l->cells[size_t(col)].link;
+                if (link == 0 || link >= linkUris.size() || !linkUris[link].startsWith(prefix))
+                    continue;
+                if (*openId == link && !out->empty() && (out->back().endId == id || out->back().endId == id - 1)) {
+                    out->back().endId = id;
+                    out->back().endCol = col;
+                } else {
+                    out->push_back(CachedRun{linkUris[link], link, id, col, id, col});
+                    *openId = link;
+                }
+                onThisRow = true;
+            }
+            if (!onThisRow)
+                *openId = 0;
+        }
+    }
+
+    // The screen's own rows, read for their hyperlink ids alone: no colour
+    // conversion, no cluster walk and no Line copy, all of which
+    // peekLine()->readScreenRow() would do per row, and which is most of what
+    // this walk costs once the ring half of it is cached.
+    void walkLinkScreen(const QString &prefix, std::vector<CachedRun> *out, uint32_t *openId) const
+    {
+        VTermScreenCell vc;
+        for (int row = 0; row < rowsN; ++row) {
+            ++linkRowsWalked;
+            const qint64 id = pushed + row;
+            bool onThisRow = false;
+            for (int col = 0; col < colsN; ++col) {
+                if (!vterm_screen_get_cell(screen, VTermPos{row, col}, &vc))
+                    break;
+                const uint32_t link = vc.hyperlink;
+                if (link == 0 || link >= linkUris.size() || !linkUris[link].startsWith(prefix))
+                    continue;
+                if (*openId == link && !out->empty() && (out->back().endId == id || out->back().endId == id - 1)) {
+                    out->back().endId = id;
+                    out->back().endCol = col;
+                } else {
+                    out->push_back(CachedRun{linkUris[link], link, id, col, id, col});
+                    *openId = link;
+                }
+                onThisRow = true;
+            }
+            if (!onThisRow)
+                *openId = 0;
+        }
+    }
+
+    // The cache for one prefix, emptied when the ring it describes was rewrapped,
+    // trimmed away or cleared.
+    RunCache &runCacheFor(const QString &prefix)
+    {
+        for (RunCache &c : runCaches) {
+            if (c.prefix == prefix) {
+                if (!c.valid || c.epoch != ringEpoch || c.walkedTo > pushed) {
+                    c.runs.clear();
+                    c.walkedTo = firstId();
+                    c.openId = 0;
+                    c.epoch = ringEpoch;
+                    c.valid = true;
+                }
+                return c;
+            }
+        }
+        // Two prefixes are in use (fold anchors and prose blocks, #R2WQ); a
+        // third would be a new kind of anchor, not a new caller per frame.
+        if (runCaches.size() >= 8)
+            runCaches.erase(runCaches.begin());
+        runCaches.push_back(RunCache{prefix, {}, firstId(), 0, ringEpoch, true});
+        return runCaches.back();
     }
 
     void fillVtermCell(const Line &l, const Cell &c, VTermScreenCell *o, bool lastColumn) const
@@ -375,6 +529,7 @@ struct LibVtermCore::Impl {
         info->relay_marks = l.marks & 0xFF;
         --d->count;
         --d->pushed;
+        ++d->ringEpoch;
         if (d->resizing)
             d->minCountDuringResize = std::min(d->minCountDuringResize, d->count);
         d->scrollOffset = std::min<int>(d->scrollOffset, int(d->count));
@@ -389,6 +544,7 @@ struct LibVtermCore::Impl {
         d->head = 0;
         d->scrollOffset = 0;
         d->allDirty = true;
+        ++d->ringEpoch;
         return 1;
     }
 
@@ -873,6 +1029,9 @@ void LibVtermCore::resize(int rows, int cols, int, int)
     d->cursor.col = pos.col;
     d->dirty.assign(size_t(rows), 1);
     d->allDirty = true;
+    // Both halves of a resize rewrite the ring (rewrap, and libvterm popping
+    // lines back onto the screen), so every cached hyperlink walk goes.
+    ++d->ringEpoch;
     d->scrollOffset = 0;
     d->selActive = false;
     d->matches.clear();
@@ -898,6 +1057,7 @@ void LibVtermCore::setScrollbackLines(int lines)
     d->head = 0;
     d->count = d->ring.size();
     d->limit = lines;
+    ++d->ringEpoch;
     (void)first;
     d->scrollOffset = std::min<int>(d->scrollOffset, int(d->count));
     d->allDirty = true;
@@ -907,6 +1067,9 @@ bool LibVtermCore::atGround() const
 {
     return vterm_relay_parser_at_ground(d->vt);
 }
+
+quint64 LibVtermCore::storedCells() const { return d->storedCells; }
+quint64 LibVtermCore::linkRowsWalked() const { return d->linkRowsWalked; }
 
 void LibVtermCore::setReflow(bool enabled)
 {
@@ -1065,47 +1228,84 @@ QString LibVtermCore::hyperlinkAt(int row, int col) const
     return id < d->linkUris.size() ? d->linkUris[id] : QString();
 }
 
+// The id is the one the caller already read off the cell, so this is a table
+// lookup — no row to convert, no libvterm call (#6W0Z).
+QString LibVtermCore::hyperlinkUri(uint32_t id, int, int) const
+{
+    return id && id < d->linkUris.size() ? d->linkUris[id] : QString();
+}
+
 // Every run of cells whose OSC 8 URI starts with `prefix`, in absolute
 // scrollback rows. The ring holds the link id per cell, so this is a walk over
-// the scrollback and the screen with no libvterm call per cell: about 20 ms for
-// a 100 000-line history here, which is why callers only run it on resize,
-// trimming and clearing.
+// the scrollback and the screen with no libvterm call per cell — about 20 ms
+// for a 100 000-line history, which is why the interface tells callers to run
+// it on resize, trimming and clearing rather than per frame.
+//
+// Relay's fold layer asks for it far more often than that (once per agent
+// block, twice — one prefix for tool anchors, one for prose), and the cost grew
+// with the conversation: 65 ms of GUI CPU a turn at turn 25 against 86 ms at
+// turn 225 (#PPR4). So the scrollback half of the walk is cached: a pushed line
+// never changes, so only the rows pushed since the last call are walked, and
+// only the screen — which does change — is walked every time. The answer is
+// identical to the full walk's, the cache is dropped whenever the ring is
+// rewrapped, cleared or reset (Impl::ringEpoch), and trimming is handled by
+// holding the runs in push ids rather than rows.
 std::vector<VtCore::HyperlinkRun> LibVtermCore::hyperlinkRuns(const QString &prefix) const
 {
     std::vector<HyperlinkRun> out;
     if (prefix.isEmpty())
         return out;
-    const int total = int(d->count) + d->rowsN;
-    Line tmp;
-    uint32_t openId = 0;
-    for (int row = 0; row < total; ++row) {
-        const Line *l = d->peekLine(d->firstId() + row, &tmp);
-        if (!l) {
-            openId = 0;
-            continue;
-        }
-        bool onThisRow = false;
-        for (int col = 0; col < int(l->cells.size()); ++col) {
-            const uint32_t id = l->cells[size_t(col)].link;
-            if (id == 0 || id >= d->linkUris.size() || !d->linkUris[id].startsWith(prefix))
-                continue;
-            // The same id on the same or the next row continues the run; the
-            // same URI printed again later starts a new one.
-            if (openId == id && !out.empty() && (out.back().endRow == row || out.back().endRow == row - 1)) {
-                out.back().endRow = row;
-                out.back().endCol = col;
-            } else {
-                HyperlinkRun r;
-                r.uri = d->linkUris[id];
-                r.startRow = r.endRow = row;
-                r.startCol = r.endCol = col;
-                out.push_back(r);
-                openId = id;
+    Impl::RunCache &cache = d->runCacheFor(prefix);
+    const qint64 first = d->firstId();
+    // Rows pushed *and* trimmed between two calls were never walked and no
+    // longer exist; every row still in the ring has been walked or is about to
+    // be.
+    if (cache.walkedTo < first) {
+        cache.walkedTo = first;
+        cache.openId = 0;
+    }
+    d->walkLinkRows(prefix, cache.walkedTo, d->pushed, &cache.runs, &cache.openId);
+    cache.walkedTo = d->pushed;
+
+    // What the trim took: a run entirely gone, and — where it cut into one —
+    // the first surviving row and column, which is where a full walk starting
+    // at the oldest line would have opened it.
+    size_t gone = 0;
+    while (gone < cache.runs.size() && cache.runs[gone].endId < first)
+        ++gone;
+    if (gone > 0)
+        cache.runs.erase(cache.runs.begin(), cache.runs.begin() + long(gone));
+    for (Impl::CachedRun &r : cache.runs) {
+        if (r.startId >= first)
+            break;
+        r.startId = first;
+        r.startCol = 0;
+        Line tmp;
+        if (const Line *l = d->peekLine(first, &tmp)) {
+            for (int col = 0; col < int(l->cells.size()); ++col) {
+                if (l->cells[size_t(col)].link == r.link) {
+                    r.startCol = col;
+                    break;
+                }
             }
-            onThisRow = true;
         }
-        if (!onThisRow)
-            openId = 0;
+    }
+
+    // The screen's rows are rewritten under us, so they are walked every time,
+    // continuing whatever run the last ring row left open.
+    std::vector<Impl::CachedRun> all = cache.runs;
+    uint32_t openId = cache.openId;
+    d->walkLinkScreen(prefix, &all, &openId);
+
+    out.reserve(all.size());
+    for (const Impl::CachedRun &r : all) {
+        HyperlinkRun h;
+        h.uri = r.uri;
+        h.startRow = int(r.startId - first);
+        h.startCol = r.startCol;
+        h.endRow = int(r.endId - first);
+        h.endCol = r.endCol;
+        out.push_back(h);
     }
     return out;
 }
@@ -1302,12 +1502,14 @@ void LibVtermCore::clearScrollback()
     d->head = 0;
     d->scrollOffset = 0;
     d->allDirty = true;
+    ++d->ringEpoch;
 }
 
 void LibVtermCore::reset()
 {
     vterm_screen_relay_set_hyperlink(d->screen, 0);
     vterm_screen_reset(d->screen, 1);
+    ++d->ringEpoch;
     d->title.clear();
     if (d->alt) {
         d->alt = false;

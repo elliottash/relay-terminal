@@ -1094,6 +1094,134 @@ private slots:
         QCOMPARE(t.view->searchIndex(), 0);
     }
 
+
+    // #6W0Z: the pane's directory is a readlink and a stat of /proc/<pid>/cwd
+    // and an acquisition of the core's mutex, and restLinkColumns() wanted it
+    // for every painted row — 91 % of the GUI thread's statx during output.
+    // One frame, however many link-bearing rows it paints, resolves it once.
+    void theDirectoryIsResolvedOncePerFrameNotOncePerRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/cw-XXXXXX"));
+        QVERIFY(dir.isValid());
+        const QString file = dir.filePath(QStringLiteral("notes.txt"));
+        { QFile f(file); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("x"); }
+        t.backend->resizeTerminal(12, 100);
+        for (int i = 0; i < 10; ++i)
+            t.backend->writeToDisplay(("see " + file + "\r\n").toUtf8());
+        QVERIFY(t.waitScreen(QStringLiteral("notes.txt")));
+        QVERIFY(t.view->linksColouredAtRest());
+        t.grab();   // settle
+
+        // Five more such lines, each of which scrolls the screen and so
+        // repaints every row on it.
+        const quint64 before = t.view->directoryResolveCount();
+        const quint64 rowsBefore = t.view->rowPaintCount();
+        const quint64 paintsBefore = t.view->paintCount();
+        for (int i = 0; i < 5; ++i) {
+            t.backend->writeToDisplay(("see " + file + "\r\n").toUtf8());
+            QTest::qWait(60);
+        }
+        QTest::qWait(150);
+        const quint64 frames = t.view->paintCount() - paintsBefore;
+        const quint64 rows = t.view->rowPaintCount() - rowsBefore;
+        const quint64 resolves = t.view->directoryResolveCount() - before;
+        QVERIFY(frames > 0);
+        QVERIFY2(rows >= 4 * frames, qPrintable(QStringLiteral("%1 rows over %2 frames").arg(rows).arg(frames)));
+        QVERIFY2(resolves <= frames,
+                 qPrintable(QStringLiteral("%1 directory resolutions for %2 frames of %3 rows")
+                                .arg(resolves).arg(frames).arg(rows)));
+        // A repaint that pulls no new frame reuses the frame's answer.
+        const quint64 still = t.view->directoryResolveCount();
+        t.grab();
+        QCOMPARE(t.view->directoryResolveCount(), still);
+    }
+
+    // #6W0Z: a fold or a prose block on screen used to turn every frame into a
+    // repaint of every content row, because the row a real row is painted on
+    // was worked out by repainting all of them. An agent pane always carries
+    // anchors, so it never got the dirty-row path at all.
+    void aFoldOnScreenStillPaintsOnlyTheRowsThatChanged()
+    {
+        QFETCH_GLOBAL(QString, core);
+        // One character at a time into a pane with content on every row: the
+        // rows painted per frame, with the fold layer doing each of its jobs.
+        const auto rowsPerFrame = [](Term &t) {
+            QTest::qWait(150);
+            const quint64 paints = t.view->paintCount(), rows = t.view->rowPaintCount();
+            for (int i = 0; i < 8; ++i) {
+                t.backend->writeToDisplay("x");
+                QTest::qWait(40);
+            }
+            QTest::qWait(150);
+            const quint64 dp = t.view->paintCount() - paints;
+            return dp == 0 ? 0.0 : double(t.view->rowPaintCount() - rows) / double(dp);
+        };
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        const double shut = rowsPerFrame(t);
+        QVERIFY2(shut <= 2.5, qPrintable(QStringLiteral("shut: %1 rows per frame").arg(shut)));
+
+        // Open: the block's own rows are on screen and the rows below it have
+        // moved down, and a one-character write still costs its own row.
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("one"), QStringLiteral("two")}));
+        QTest::qWait(120);
+        QVERIFY(t.view->foldExpanded(uri));
+        const double open = rowsPerFrame(t);
+        QVERIFY2(open <= 3.0, qPrintable(QStringLiteral("open: %1 rows per frame").arg(open)));
+        // ... and the fold is still where it belongs, painted from its own rows.
+        QStringList rows = t.view->visibleRowsText();
+        const int anchor = rows.indexOf(QStringLiteral("* ran python"));
+        QVERIFY2(anchor >= 0, qPrintable(rows.join(QLatin1Char('|'))));
+        QCOMPARE(rows.value(anchor + 1).trimmed(), QStringLiteral("one"));
+        QCOMPARE(rows.value(anchor + 2).trimmed(), QStringLiteral("two"));
+
+        // A fold opening, shutting or moving still repaints everything: the
+        // rows below it are somewhere else afterwards.
+        QTest::qWait(150);
+        const quint64 rowsBefore = t.view->rowPaintCount();
+        t.view->setFoldExpanded(uri, false);
+        QTest::qWait(150);
+        QVERIFY2(t.view->rowPaintCount() - rowsBefore >= 5,
+                 "shutting a fold must repaint the rows it was covering");
+        rows = t.view->visibleRowsText();
+        QCOMPARE(rows.value(rows.indexOf(QStringLiteral("* ran python")) + 1), QStringLiteral("after"));
+    }
+
+    // The same for a prose block (#R2WQ) that has taken its rows over, which is
+    // what an agent pane looks like at any width but the one it printed at.
+    void aTakenOverProseBlockPaintsOnlyTheRowsThatChanged()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        for (int i = 0; i < 6; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        t.backend->writeToDisplay("\x1b]8;;relay://prose/p/1\x1b\\hello prose\x1b]8;;\x1b\\\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("hello prose")));
+        t.view->setProseBlock(QStringLiteral("relay://prose/p/1"), foldBody({QStringLiteral("hello prose")}),
+                              t.view->columns());
+        QTest::qWait(120);
+        // Narrower than it was printed at: the block is re-wrapped by the layer.
+        t.backend->resizeTerminal(12, 40);
+        QTest::qWait(200);
+        QVERIFY(t.view->visibleRowsText().join(QLatin1Char('|')).contains(QStringLiteral("hello prose")));
+
+        const quint64 paints = t.view->paintCount(), rows = t.view->rowPaintCount();
+        for (int i = 0; i < 8; ++i) {
+            t.backend->writeToDisplay("x");
+            QTest::qWait(40);
+        }
+        QTest::qWait(150);
+        const quint64 dp = t.view->paintCount() - paints;
+        QVERIFY(dp > 0);
+        const double perFrame = double(t.view->rowPaintCount() - rows) / double(dp);
+        QVERIFY2(perFrame <= 2.5, qPrintable(QStringLiteral("%1 rows per frame").arg(perFrame)));
+        QVERIFY(t.view->visibleRowsText().join(QLatin1Char('|')).contains(QStringLiteral("hello prose")));
+    }
+
     void hostShortcutFilter()
     {
         QFETCH_GLOBAL(QString, core);

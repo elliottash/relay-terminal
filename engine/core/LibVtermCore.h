@@ -45,6 +45,7 @@ public:
     bool scrollToPrompt(int direction) override;
 
     QString hyperlinkAt(int row, int col) const override;
+    QString hyperlinkUri(uint32_t id, int row, int col) const override;
     std::vector<HyperlinkRun> hyperlinkRuns(const QString &prefix) const override;
 
     void selectionBegin(int row, int col, SelectionUnit unit, bool rectangle) override;
@@ -72,6 +73,11 @@ public:
     void setClipboardWriteAllowed(bool allowed) override;
 
     // libvterm-specific knobs (tests)
+    // Work done, for the tests that assert on operation counts rather than on
+    // wall time (#6W0Z, #PPR4): cells converted into stored scrollback lines,
+    // and rows visited by hyperlinkRuns(). Both are counted a line at a time.
+    quint64 storedCells() const;
+    quint64 linkRowsWalked() const;
     void setReflow(bool enabled);
     void setGraphemeClusters(bool enabled);
 

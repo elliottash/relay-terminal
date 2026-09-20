@@ -40,6 +40,7 @@
 
 #include <QColor>
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -141,9 +142,22 @@ public:
     void setAnchor(const QString &uri, int startRow, int endRow);
     // Forget every anchor (after a resize, before the rows are resolved again).
     void clearAnchors();
+    // One anchor run, as the view read it out of the grid.
+    struct AnchorRows {
+        QString uri;
+        int startRow = -1;
+        int endRow = -1;
+    };
+    // A whole resolve in one call: every anchor the view found, then the drop
+    // of every fold whose URI is not in `seen` (its anchor left the
+    // scrollback). The layout is rebuilt **once**, at the end — setAnchor() per
+    // anchor rebuilt it per anchor, which with the linear `seen` scan made a
+    // resolve cost O(folds^2) in a conversation that grows one fold per tool
+    // row and one per prose block (#PPR4).
+    void applyAnchors(const std::vector<AnchorRows> &anchors, const QSet<QString> &seen);
     // Drop every fold whose URI is not in `seen` (its anchor left the
     // scrollback) and forget the anchors of the ones that are not.
-    void retainAnchored(const QVector<QString> &seen);
+    void retainAnchored(const QSet<QString> &seen);
 
     // ---- the visual-row model
     // True when at least one expanded fold has a resolved anchor and a height,
@@ -195,9 +209,16 @@ public:
     // Grid columns one grapheme cluster occupies (1 or 2).
     static int clusterWidth(const QString &cluster);
 
+    // How often the layout has been rebuilt. A resolve is one batch and costs
+    // one rebuild; the tests assert on that rather than on a clock (#PPR4).
+    quint64 rebuildCount() const { return m_rebuilds; }
+
 private:
     void layout(Fold *f) const;
     void rebuildAnchors();
+    // The anchor rows of one fold, without rebuilding the layout: applyAnchors()
+    // sets every anchor of a resolve and rebuilds once.
+    void setAnchorRows(const QString &uri, int startRow, int endRow);
     // A replacement fold has taken its rows over at the current width.
     bool takenOver(const Fold &f) const;
 
@@ -218,6 +239,7 @@ private:
     std::vector<Anchor> m_anchors; // expanded, resolved, non-empty; sorted by startRow
     QHash<int, int> m_anchorStarts; // real row -> fold index, for every resolved insertion fold
     int m_totalHeight = 0;
+    quint64 m_rebuilds = 0;
     int m_columns = 80;
     int m_indent = kFoldIndent;
 };

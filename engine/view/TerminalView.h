@@ -221,6 +221,10 @@ public:
 
     QString debugDump();
     quint64 paintCount() const { return m_paints; }
+    // Rows painted, and filesystem resolutions of the pane's directory: both
+    // are counters the performance tests assert on (#6W0Z).
+    quint64 rowPaintCount() const { return m_rowPaints; }
+    quint64 directoryResolveCount() const { return m_cwdResolves; }
     // The frame this view last pulled. Anything else that needs screen state — remote sharing,
     // for one — reads this instead of calling VtCore::updateFrame, which consumes the dirty
     // state and therefore tolerates exactly one consumer per session.
@@ -360,6 +364,11 @@ private:
     // row and set where the link colour applies. Scans are cached per logical line and directory
     // (m_restLinks), so an unchanged screen costs no probe.
     void restLinkColumns(int frameRow, std::vector<char> *cols);
+    // The directory the rows of *this frame* are scanned against, resolved once
+    // per frame instead of once per painted row (#6W0Z).
+    const QString &frameDirectory();
+    // Whether an OSC 8 link id is a prose anchor, memoised for the frame.
+    bool proseLink(uint32_t link, int frameRow, int col);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -394,8 +403,8 @@ private:
     QTimer m_frameTimer;
     QTimer m_geometryTimer;   // the grid follows the size the view still has once the layout settles
     QElapsedTimer m_sinceFrame;
-    quint64 m_bytesAtFrame = 0;
     quint64 m_paints = 0;
+    quint64 m_rowPaints = 0;
 
     int m_lastTop = -1;
     int m_lastHistory = -1;
@@ -408,8 +417,14 @@ private:
     int m_searchIndex = -1;
     int m_visualTop = 0;
     int m_paintedVisualTop = 0;
+    // The visual window moved in this frame, so every screen row shows
+    // something else and the dirty-row region cannot describe it.
+    bool m_visualTopMoved = false;
     bool m_followBottom = true;  // the view sits at the newest output
     bool m_foldAnchorsDirty = false;
+    // Content has moved under the anchors since the last resolve; nothing can
+    // have moved without it, so the heartbeat has nothing to find (#PPR4).
+    bool m_contentMoved = true;
     QElapsedTimer m_foldResolveAt;
     bool m_visualSelection = false;
     bool m_visualGesture = false;
@@ -450,6 +465,15 @@ private:
     bool m_linksAtRest = true;
     QHash<QString, QVector<QPair<int, int>>> m_restLinks;
     QElapsedTimer m_restLinksAge;
+    // Resolved once per frame and thrown away with it (#6W0Z): the pane's
+    // directory, and which link ids are prose anchors. Both cost a syscall or
+    // the core's mutex, and neither can change inside one frame.
+    QString m_frameCwd;
+    bool m_frameCwdValid = false;
+    std::vector<std::pair<uint32_t, bool>> m_frameProse;
+    // How many times the directory was really resolved (tests: it is once per
+    // frame, whatever the row count).
+    mutable quint64 m_cwdResolves = 0;
     Link m_pressedLink;        // the link a plain left press landed on
     QString m_pressedFold;     // the fold anchor a plain left press landed on
     int m_pressedRow = -1;

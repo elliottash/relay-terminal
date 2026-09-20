@@ -333,7 +333,7 @@ bool FoldLayer::takenOver(const Fold &f) const
 
 // ---------------------------------------------------------------- anchoring
 
-void FoldLayer::setAnchor(const QString &uri, int startRow, int endRow)
+void FoldLayer::setAnchorRows(const QString &uri, int startRow, int endRow)
 {
     const int i = indexOf(uri);
     if (i < 0)
@@ -341,7 +341,19 @@ void FoldLayer::setAnchor(const QString &uri, int startRow, int endRow)
     Fold &f = m_folds[size_t(i)];
     f.anchorStartRow = startRow;
     f.anchorRow = endRow;
+}
+
+void FoldLayer::setAnchor(const QString &uri, int startRow, int endRow)
+{
+    setAnchorRows(uri, startRow, endRow);
     rebuildAnchors();
+}
+
+void FoldLayer::applyAnchors(const std::vector<AnchorRows> &anchors, const QSet<QString> &seen)
+{
+    for (const AnchorRows &a : anchors)
+        setAnchorRows(a.uri, a.startRow, a.endRow);
+    retainAnchored(seen);   // rebuilds the layout once, for the whole batch
 }
 
 void FoldLayer::clearAnchors()
@@ -351,10 +363,12 @@ void FoldLayer::clearAnchors()
     rebuildAnchors();
 }
 
-void FoldLayer::retainAnchored(const QVector<QString> &seen)
+void FoldLayer::retainAnchored(const QSet<QString> &seen)
 {
     std::vector<Fold> kept;
     kept.reserve(m_folds.size());
+    // A QSet, not a list: with one fold per tool row and one per prose block
+    // this ran once per block close over every fold there had ever been (#PPR4).
     for (Fold &f : m_folds) {
         if (seen.contains(f.uri))
             kept.push_back(std::move(f));
@@ -368,6 +382,7 @@ void FoldLayer::retainAnchored(const QVector<QString> &seen)
 
 void FoldLayer::rebuildAnchors()
 {
+    ++m_rebuilds;
     m_anchors.clear();
     m_anchorStarts.clear();
     m_totalHeight = 0;

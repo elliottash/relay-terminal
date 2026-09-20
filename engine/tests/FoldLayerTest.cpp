@@ -238,6 +238,49 @@ private slots:
         QCOMPARE(f.visualOfReal(5), 6);
     }
 
+    // #PPR4: a resolve is one batch — every anchor the view found, then the
+    // folds it keeps — and costs one rebuild of the layout, whatever the
+    // conversation has accumulated. It used to cost one per anchor, over a
+    // membership list scanned per fold.
+    void oneResolveRebuildsTheLayoutOnce()
+    {
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        QSet<QString> seen;
+        std::vector<FoldLayer::AnchorRows> anchors;
+        for (int i = 0; i < 200; ++i) {
+            const QString uri = QStringLiteral("relay://call/p/1/%1").arg(i);
+            f.setContent(uri, lines({QStringLiteral("detail")}));
+            anchors.push_back(FoldLayer::AnchorRows{uri, i * 2, i * 2});
+            seen.insert(uri);
+        }
+        const quint64 before = f.rebuildCount();
+        f.applyAnchors(anchors, seen);
+        QCOMPARE(f.rebuildCount() - before, quint64(1));
+        QCOMPARE(int(f.folds().size()), 200);
+        QCOMPARE(f.expandedCount(), 200);
+        // Every anchor landed, so the blocks sit where the runs said.
+        QCOMPARE(f.visualOfReal(0), 0);
+        QCOMPARE(f.visualOfReal(1), 2);   // the first block's row sits between them
+        QCOMPARE(f.visualTotal(400), 600);
+
+        // The oldest hundred have left the scrollback: one rebuild again, and
+        // the folds that are gone go with them.
+        QSet<QString> kept;
+        std::vector<FoldLayer::AnchorRows> moved;
+        for (int i = 100; i < 200; ++i) {
+            const QString uri = QStringLiteral("relay://call/p/1/%1").arg(i);
+            moved.push_back(FoldLayer::AnchorRows{uri, (i - 100) * 2, (i - 100) * 2});
+            kept.insert(uri);
+        }
+        const quint64 second = f.rebuildCount();
+        f.applyAnchors(moved, kept);
+        QCOMPARE(f.rebuildCount() - second, quint64(1));
+        QCOMPARE(int(f.folds().size()), 100);
+        QVERIFY(!f.known(QStringLiteral("relay://call/p/1/0")));
+        QVERIFY(f.known(QStringLiteral("relay://call/p/1/199")));
+    }
+
     void removeAndClear()
     {
         FoldLayer f;
