@@ -6376,7 +6376,9 @@ public:
                 return remoteConversationOpen(session, name);
             };
             hooks.publishPaneState = [this] { m_paneState.publishNow(); };
-            hooks.recap = [this] { send({{"type", "recap_request"}, {"reason", "remote"}}); };
+            // "manual", not "remote": the worker takes three reasons — away, resume, manual — and
+            // refused this one, so the phone's Recap button has never produced a recap (#WMXN).
+            hooks.recap = [this] { send({{"type", "recap_request"}, {"reason", "manual"}}); };
             hooks.stopAgent = [this] { stopAgent(); };
             hooks.transcribe = [this](const QString &requestId, const QByteArray &audio,
                                       const QString &format) {
