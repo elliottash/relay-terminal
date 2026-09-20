@@ -485,6 +485,10 @@ private:
     QTimer *m_searchTimer = nullptr;
     QString m_searchRequest;        // the request id of the search in flight, or empty
     QString m_searchAsked;          // the words that request asks about
+    // False once a worker has refused `board_search` — one too old to know it. The filter then
+    // matches the row's own fields, which is what it did before the message existed, and the
+    // pane stops asking rather than collecting one refusal per burst of typing.
+    bool m_searchSupported = true;
     // What the worker last said about itself when it was not a card event: a crash, an overflow
     // or an exit. It goes in the pane's own empty area, with a Retry, when the board has never
     // loaded — the status bar it used to go to is not shown in this layout (#7M6E).

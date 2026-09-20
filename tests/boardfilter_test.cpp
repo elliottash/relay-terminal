@@ -127,6 +127,19 @@ void BoardFilterTests::theFilterAsksTheWorkerAboutItsPlainWords()
     QTest::qWait(250);
     QCOMPARE(searches().size(), 1);
     QCOMPARE(searches().last().value(QStringLiteral("query")).toString(), QStringLiteral("hotline"));
+
+    // A worker too old to know the message refuses it. That is not news — the filter goes on
+    // matching the row's own fields, which is all it could do before `board_search` existed — so
+    // the pane says nothing and stops asking, rather than collecting a notice per burst of typing.
+    QJsonObject refusal{{"event", "error"}, {"text", "Unknown protocol message."}};
+    refusal.insert(QStringLiteral("id"), searches().last().value(QStringLiteral("id")));
+    a.handleEvent(refusal);
+    QVERIFY(a.notice().isEmpty());
+    sent.clear();
+    filter->setText(QStringLiteral("hotline again"));
+    QTest::qWait(250);
+    QCOMPARE(searches().size(), 0);
+    QCOMPARE(a.model().openCount(), 0);   // and the fields still decide, as they always did
 }
 
 // `board_open` answers in batches so that no board size can overflow the worker pipe's read

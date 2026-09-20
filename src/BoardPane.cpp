@@ -4101,7 +4101,7 @@ void BoardView::startSearch()
 void BoardView::sendSearch()
 {
     const QString terms = board::Model::plainTerms(m_filter->text()).join(QLatin1Char(' '));
-    if (terms.isEmpty())
+    if (terms.isEmpty() || !m_searchSupported)
         return;
     // Asked again for the same words when the cards change, which is why the answer is not
     // cached here: a card file edited under a live filter has to join or leave the list.
@@ -4630,6 +4630,14 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_pendingNotes.remove(requestId);
         m_pendingDeletes.remove(requestId);
         const QString text = event.value(QStringLiteral("text")).toString();
+        // A worker too old to know `board_search` (#7M6E) refuses it, and it would refuse one per
+        // burst of typing. That is not news: the filter goes on matching the row's own fields,
+        // which is all it could do before the message existed. Stop asking, and say nothing.
+        if (!m_searchRequest.isEmpty() && requestId == m_searchRequest) {
+            m_searchRequest.clear();
+            m_searchSupported = false;
+            return;
+        }
         // The card was written by someone else between the read and the save. Nothing was
         // overwritten and nothing typed is lost: read the card again (which brings the new hash
         // and says what changed) and leave the text in the editor for a second Save.
