@@ -202,7 +202,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
   `/resume` (with a recap; `/sessions` is the same), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
-  (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
+  (switch provider), `/help` (the popup `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
 - **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/sessions`, `/conversations`, Actions ›
