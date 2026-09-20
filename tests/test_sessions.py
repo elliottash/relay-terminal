@@ -558,7 +558,17 @@ class RecapSpanTests(unittest.TestCase):
         start, end = local(2026, 9, 17, 9, 12), local(2026, 9, 17, 11, 47)
         fields = suggestions.span_fields([{'time': start, 'ended': end}], end)
         self.assertEqual(fields, {'span_start': start, 'span_end': end, 'span_seconds': 2 * 3600 + 35 * 60,
-                                  'span_text': '09:12 → 11:47 · 2h 35m'})
+                                  'span_text': '09:12 → 11:47 · 2h 35m', 'finished_text': '11:47'})
+        # Not today: the finish time is dated, like the span's start.
+        next_day = local(2026, 9, 18, 10, 0)
+        self.assertEqual(suggestions.span_fields([{'time': start, 'ended': end}], next_day)['finished_text'],
+                         f'17 {month(start)} 11:47')
+        # A turn still running gives the span its start but no "finished at" line: work that has
+        # not finished has no honest finish time (owner request, 2026-09-19, #MVGR).
+        running = suggestions.span_fields([{'time': start, 'ended': end},
+                                           {'time': local(2026, 9, 17, 12, 30)}], end)
+        self.assertEqual(running['span_end'], local(2026, 9, 17, 12, 30))
+        self.assertNotIn('finished_text', running)
 
 
 class RecapSpanAgentTests(Base):
@@ -579,9 +589,14 @@ class RecapSpanAgentTests(Base):
         self.assertEqual(event['span_start'], items[0]['time'])
         self.assertEqual(event['span_end'], items[-1]['ended'])
         self.assertIn('→', event['span_text'])
-        # A session without stamps (a fresh conversation resumed from an old file) has no span.
-        self.assertNotIn('span_text', suggestions.recap(provider, agent.messages, agent.turns,
-                                                        'resume', turn_items=[{'turn': 1}]))
+        # Every turn ended, so the recap also states when the work finished (#MVGR).
+        self.assertRegex(event['finished_text'], r'\d\d:\d\d')
+        # A session without stamps (a fresh conversation resumed from an old file) has no span
+        # and no finish time either.
+        bare = suggestions.recap(provider, agent.messages, agent.turns, 'resume',
+                                 turn_items=[{'turn': 1}])
+        self.assertNotIn('span_text', bare)
+        self.assertNotIn('finished_text', bare)
         # The model is never asked for the times, and is told to keep them out of the summary.
         self.assertIn('Never state clock times', provider.side_requests[-1][0]['content'])
 

@@ -95,6 +95,14 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 - `sessions` → `sessions {items: [{id, title, updated, turns, model}]}`; `resume {id}` → `state_loaded`, followed by a `recap {text}` event. `state_loaded` on `resume` carries `turn_open` (bool): the session's last checkpoint has no `ended` stamp — the turn was cut off mid-flight, and the pane may offer Continue (`agent.continue` / empty-box Ctrl+Enter). False for a completed session, a session with no checkpoints, and one saved before `ended` existed (the guard lives in `conv_index.turn_left_open`).
 - **Recap (owner: "claude style recaps", the session-return kind):** when a session is resumed, or when the pane's window regains focus after the agent finished work while the user was away (GUI sends `recap_request`), the worker produces a short summary of what happened (goal, what was done, current state, next step) with a no-tools model call and emits `recap {text, turns_covered}`.
 - **Recap span (owner: "state the start time, the end time and the time spent", 2026-09-17):** the `recap` event also carries `span_start`, `span_end` (epoch seconds), `span_seconds` (int) and `span_text` — the covered stretch of work, already formatted in the worker's local time in Relay's UI idiom: `09:12 → 11:47 · 2h 35m`, dated (`16 Sep 23:40 → 17 Sep 00:25 · 45m`) when the span is not today or crosses midnight. Elapsed is `Xh Ym`, minutes alone under an hour, `Xh` on a whole hour, `<1m` below a minute. The span is computed in `suggestions.span_fields` from the turns' recorded `time`/`ended` stamps (`checkpoints.span`) — never from the model, which is told in `RECAP_SYSTEM` not to mention times at all. **All four fields are absent when no turn carries a stamp**; the GUI then prints the recap with no span line rather than a wrong one.
+- **Recap finish (owner request, 2026-09-19, #MVGR):** the `recap` event also carries
+`finished_text` — the span's end as the worker's local clock writes it (`11:47`, dated
+`17 Sep 11:47` when the end is not today), present only when the last stamped turn also
+carries an `ended` stamp: a recap asked for while a turn is still running has a span whose
+end is a turn start, and states no finish time it cannot know. The GUI prints
+`[end of message]` and `finished at …` ahead of the `Recap ·` header, so a returning
+reader sees where the agent's last message ended and when; the marker prints alone when
+the finish time is unknown.
 
 ## 6. Plan mode (Warp-style)
 

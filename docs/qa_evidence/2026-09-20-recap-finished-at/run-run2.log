@@ -1,0 +1,223 @@
+display :172
+Preset
+Base URL
+Model ID
+
+API key
+
+Extra request SON
+Output token limit
+
+‘Agent workspace
+
+‘Custom / current settings of
+htto://127.0.0.1:8767/V1
+
+relay-ga-stub
+
+Not needed for a model server on this machine
+
+Save entered key to the desktop keyring
+
+Import keys from Warp
+{}
+1024 o
+/tmp/tmp.DskMRINILZ/work Choose...
+
+Entered keys are kept in process memory unless you choose to save them to the desktop
+keyring. Keys are never written to settings files. Changing settings starts a new conversation.
+Provider access and billing depend on your account.
+
+The agent runs tools without asking. Shell commands are NOT sandboxed: they have your user
+permissions. File tools are restricted to this workspace. Terminal history is not sent
+
+‘automatically.
+
+This is a model server on this machine: prompts and tool results stay here, and no API key is
+
+needed.
+Save at 912 655 (dialog 650x527 at 415,147)
+>* © work (2) + cpu00%-mem00% x +
+© work
+
+To run a command as administrator (user "root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dec9: /tmp/tmp.DskMRINLLZ/work$
+
+run the ga turns
+
+100% left _—_relay-qa-stub (main)
+
+‘tmp/tmp.DskMRINILZ/work ©
+
+(OE:
+
+e
+
+© Approvals Clea
+
+Relay's agent runs commands and edits files without stopping to ask.
+That is what makes it fast, and it is what we recommend.
+It runs with your user's permissions, inside the pane's workspace.
+
+Until you choose, the cautious set asks first: edits, deletions, reads outside the workspace, your terminal
+and your programs.
+
+Allow everything — recommended Choose what needs approval
+
+--- shot 01-agent-ready above ---
+>+ Y work + cpu00%-mem00% = +
+
+BO +m eo
+
+v Turndone auto
+
+Jtmp/tmp.DskMRINILZ/work Gai
+
+<
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp.DskMRINLLZ/work$
+I. run the ga turnsl
+
+> relay-qa-stub
+Turn done.
+
+turn 2
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+Ready
+
+Shell commands or agent prompts. 2? for help auto
+
+‘tmp/tmp.DskMRINILZ/work 100% left relay-qa-stub (main) -v
+
+--- shot 02-three-turns above ---
+>+ © work - cpu00%-mem 00% x + Os
+
+@ @i)o|/_a
+
+© Turndone auto Jtmpitmp.DskMRINIZiwork (@) BR
+
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp.DskMRINLLZ/work$
+
+> relay-qa-stub
+Turn done.
+
+turn 2
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+- slow turn four, finishing while away
+> relay-qa-stub
+Slow turn done.
+
+[end of message]
+finished at 01:38
+
+Recap + 01:38 + 01:38 - <Im
+
+Four stub turns ran; the last finished while the window was away. Nothing is unverified
+
+Shell commands or agent prompts. 2? for help auto
+
+‘tmp/tmp.DskMRINILZ/work 100% left relay-qa-stub (main) -v
+
+--- shot 03-away-recap above ---
+PASS: 03 the away recap opens with the marker
+PASS: 03 the away recap states the finish time
+PASS: 03 the away recap header follows
+>+ © work - cpu00%-mem 00% x + Os
+
+@ @i)o|/_a
+
+© Turndone auto Jtmpitmp.DskMRINIZiwork (@) BR
+
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp.DskMRINLLZ/work$
+
++ run the ga turns1
+
+> relay-qa-stub
+Turn done.
+
+turn 2
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+- slow turn four, finishing while away
+> relay-qa-stub
+Slow turn done.
+
+[end of message]
+finished at 01:38
+
+Recap + 01:38 + 01:38 - <Im
+
+Four stub turns ran; the last finished while the window was away. Nothing is unverified
+[end of message]
+
+finished at 01:38
+
+Recap - 01:38 + 01:38 - <Im
+
+Four stub turns ran; the last finished while the window was away. Nothing is unverified
+
+Bhell commands or agent prompts... 2? for help auto
+
+‘tmp/tmp.DskMRINILZ/work 100% left relay-qa-stub (main) -v
+
+--- shot 04-manual-recap above ---
+PASS: 04 the manual recap opens with the marker
+PASS: 04 the manual recap states the finish time
+Recap - 01:38 + 01:38 - <Im
+Four stub turns ran; the last finished while the window was away. Nothing is unverified.
+
++ st
+
+turn please
+
+[end of message]
+Recap + 01:38 + 61:39 - <Im
+Four stub turns ran; the last finished while the window was away. Nothing is unverified.
+
+© Relaying - thinking... - 8 s - step 1/256 - Esc stops
+Bhell commands or agent prompts... 2 for help
+
+‘tmp/tmp.DskMRINILZ/work
+
+100% left
+
+relay-qa-stub (main)
+
+--- shot 05 (bottom crop) above ---
+PASS: 05 a recap block printed while the turn runs
+PASS: 05 the mid-run recap prints no finish time
+fails=0
+PASS

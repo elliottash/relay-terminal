@@ -84,8 +84,19 @@ def span_fields(turn_items: list[dict] | None, now: float | None = None) -> dict
     if pair is None:
         return {}
     start, end = pair
-    return {"span_start": start, "span_end": end, "span_seconds": int(end - start),
-            "span_text": format_span(start, end, now)}
+    fields = {"span_start": start, "span_end": end, "span_seconds": int(end - start),
+              "span_text": format_span(start, end, now)}
+    # The "finished at HH:MM" line ahead of the recap header (owner request, 2026-09-19, #MVGR):
+    # the span's end in the local clock, but only when the last stamped turn also carries an
+    # `ended` stamp — a recap asked for mid-run has a span whose end is a turn start, and no
+    # finish time it can honestly state.
+    stamped = [item for item in (turn_items or []) if checkpoints._is_stamp(item.get("time"))]
+    if stamped and checkpoints._is_stamp(stamped[-1].get("ended")):
+        end_struct, today = time.localtime(end), time.localtime(time.time() if now is None else now)
+        fields["finished_text"] = (_clock(end_struct)
+                                   if (end_struct.tm_year, end_struct.tm_yday) == (today.tm_year, today.tm_yday)
+                                   else _dated(end_struct))
+    return fields
 
 
 def recap(provider, messages: list[dict], turns: int, reason: str = "manual", cancel=None,

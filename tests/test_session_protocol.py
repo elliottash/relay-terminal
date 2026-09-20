@@ -244,6 +244,7 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(recap['span_start'], agent.checkpoints.items[0]['time'])
         self.assertEqual(recap['span_end'], agent.checkpoints.items[-1]['ended'])
         self.assertRegex(recap['span_text'], r'\d\d:\d\d → .*\d\d:\d\d · ')
+        self.assertRegex(recap['finished_text'], r'\d\d:\d\d')  # resume recaps state the finish (#MVGR)
         self.cmds.handle('recap_request', {'id': 'r', 'reason': 'away'})
         self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'r')
         # plan execute re-reads the file from disk and switches to build mode

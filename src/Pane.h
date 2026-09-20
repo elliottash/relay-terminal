@@ -6593,10 +6593,18 @@ private:
             m_recapManual = false;
             m_lastRecapTurns = event.value(QStringLiteral("turns_covered")).toInt();
             ensureLineStart();
-            // The header states the stretch of work the recap covers ("Recap · 09:12 → 11:47 ·
-            // 2h 35m"), from the worker's recorded turn stamps (owner request, 2026-09-17). A
-            // session with no stamps sends no `span_text`, and the summary follows "Recap · " on
-            // one line as before: no span reads better than a guessed one.
+            // The block opens by marking where the agent's last message ended and when it
+            // finished (owner request, 2026-09-19, #MVGR), then states the stretch of work the
+            // recap covers ("Recap · 09:12 → 11:47 · 2h 35m"), from the worker's recorded turn
+            // stamps (owner request, 2026-09-17). `finished_text` is absent when the last turn
+            // never ended (a recap asked for mid-run) or the session predates stamps, and the
+            // marker then stands alone: the time is unknown, not guessed. A session with no
+            // stamps sends no `span_text` either, and the summary follows "Recap · " on one line
+            // as before: no span reads better than a guessed one.
+            const QString finished = event.value(QStringLiteral("finished_text")).toString();
+            printInline(QStringLiteral("[end of message]\n"), Ink::Recap);
+            if (!finished.isEmpty())
+                printInline(QStringLiteral("finished at %1\n").arg(finished), Ink::Recap);
             const QString span = event.value(QStringLiteral("span_text")).toString();
             const QString summary = event.value(QStringLiteral("text")).toString();
             if (span.isEmpty()) {
