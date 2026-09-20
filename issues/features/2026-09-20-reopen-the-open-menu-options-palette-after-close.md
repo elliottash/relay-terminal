@@ -9,7 +9,7 @@ session: 97f38dbd-c712-4c45-a429-5867cd7bc94d
 rank: zzzzzzzzzzzy
 created: '2026-09-20'
 source: pane /deliver, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-reopen-open-menus/], related: [], github: null}
+links: {plans: [], commits: [280dcc2e1d95f935a4cdc40091dd0f74cb897d8a], evidence: [docs/qa_evidence/2026-09-20-reopen-open-menus/], related: [8EXS], github: null}
 ---
 # Reopen the open menu (Options, palette…) after close and re-open
 
