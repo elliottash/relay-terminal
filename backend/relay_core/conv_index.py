@@ -59,6 +59,28 @@ that would otherwise be lost with them:
   the parser's own state — so a reconcile parses only the bytes a guest appended instead of the
   whole file (the largest transcript on the machine this was written on is 99 MB).
 
+Since v6 a conversation also carries the text that is not in its message list (card #0TJ9): the
+terminal text the pane showed, and what a rewind undid. The GUI writes three sidecar files beside
+`<session_dir>/<id>.json` and this module only ever reads them —
+
+* `<id>.scrollback.txt`          the pane's saved terminal text, plain UTF-8, capped at 5 000
+                                 lines / 512 KiB; indexed in ~40-line chunks as `terminal_text`.
+* `<id>.rewound.jsonl`           one JSON record per rewind, newest 20 kept, holding the dropped
+                                 messages verbatim; indexed as `rewound`, at the record's turn.
+* `<id>.rewound-<n>.scrollback.txt`  the terminal text rewind `<n>` undid; `rewound` as well.
+
+A guest has no Relay session directory, so its one sidecar lives in Relay's own tree instead:
+`relay/sessions/guests/<source>/<id>.scrollback.txt` (protocol 26.7 keeps Relay out of `~/.claude`
+and `~/.codex`; `guest-meta.json` is the same precedent). `sessions/guests/` is therefore **not** a
+workspace-digest directory, and nothing that walks `sessions/*/` may take it for one.
+
+Both kinds rank below message text and are left out of the message counts, the first and last
+prompt and the overview: they are what the conversation had around it, not what it said. The GUI
+writes them when a pane's session changes and at quit, which is after the last autosave, so a
+sidecar moves while the session JSON does not: `reconcile()` stats them in the same directory
+listing the session files already cost, and `session_sidecars` records what it read, so an
+unchanged one is never read again.
+
 The index holds message text, so it stays on this machine: same 0700 directory as the sessions,
 never synced, and deleting a conversation deletes its rows.
 """
@@ -83,7 +105,10 @@ from pathlib import Path
 # v5 (2026-09-20, #TZWF): `entry_count` and `entry_digest` — what an autosave compares itself
 # against to write only the turns that were added instead of the whole conversation again. v4
 # migrates in place and the two columns fill themselves at the next save of each conversation.
-SCHEMA_VERSION = 5
+# v6 (2026-09-20, #0TJ9): the `terminal_text` and `rewound` entry kinds and the `session_sidecars`
+# table that records what the files they come from looked like when they were read. No new column;
+# v1–v5 migrate in place and the rows are backfilled by the next `reconcile()`, as v3's were.
+SCHEMA_VERSION = 6
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -106,6 +131,20 @@ OVERVIEW_FILES = 12
 ITEM_FILES = 8               # touched paths carried by a list item
 TERMINAL_ID = re.compile(r"^term-[0-9a-f]{16}$")
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
+# ----- the sidecars beside a session file (v6, #0TJ9) -----------------------------------------
+# The GUI writes all three; this module only reads them. See the module docstring for the shape.
+SCROLLBACK_SUFFIX = ".scrollback.txt"       # <id>.scrollback.txt, and <id>.rewound-<n>.scrollback.txt
+REWOUND_SUFFIX = ".rewound.jsonl"           # <id>.rewound.jsonl
+GUESTS_DIRNAME = "guests"                   # sessions/guests/<source>/<id>.scrollback.txt
+_REWOUND_TEXT = re.compile(r"^(?P<id>.+)\.rewound-(?P<n>\d+)\.scrollback\.txt$")
+MAX_SCROLLBACK_LINES = 5000                 # the caps the GUI writes under, applied again here
+MAX_SCROLLBACK_BYTES = 512 * 1024           # because a file in that directory is not ours to trust
+MAX_REWOUND_BYTES = 4 * 1024 * 1024         # a rewind record holds the dropped messages verbatim
+MAX_REWOUND_RECORDS = 20                    # newest kept, as the GUI keeps them
+TERMINAL_TEXT_LINES = 40                    # lines per `terminal_text` entry
+# Sidecar entries share the `entries` table with the conversation's messages. Their `seq` starts
+# past anything a session can hold, so inside a turn they sort after the messages, never among them.
+SIDECAR_SEQ = 1_000_000
 # Context blocks Relay adds to a user message (agent.CONTEXT_OPEN); not something the user typed.
 RELAY_CONTEXT = "[Relay context: added by Relay, not typed by the user]"
 
@@ -190,13 +229,32 @@ CREATE TABLE IF NOT EXISTS guest_files(
     read_to    INTEGER NOT NULL DEFAULT 0,
     state      TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS session_sidecars(
+    session_id TEXT PRIMARY KEY,
+    stamp      TEXT NOT NULL DEFAULT ''
+);
 """
 
-KINDS = ("title", "summary", "prompt", "reply", "tool_call", "tool_output", "command", "command_output")
+KINDS = ("title", "summary", "prompt", "reply", "tool_call", "tool_output", "command",
+         "command_output", "terminal_text", "rewound")
 # Kinds that describe the conversation rather than sit inside it: they are searchable and rank
 # above body text, but the preview lists the messages, not these.
 HEADER_KINDS = ("title", "summary")
 _HEADER_SQL = ", ".join(f"'{kind}'" for kind in HEADER_KINDS)
+# The other way round (v6, #0TJ9): what was *around* the conversation rather than in it — the
+# terminal text the pane showed (`terminal_text`, so named because the `terminal` source is
+# something else: the commands Relay ran) and what a rewind undid (`rewound`). They are searchable
+# and rank below every kind of message text, and they come from the sidecars, not from the session
+# JSON, so every write that rewrites a conversation's own rows leaves them where they are.
+SIDECAR_KINDS = ("terminal_text", "rewound")
+_SIDECAR_SQL = ", ".join(f"'{kind}'" for kind in SIDECAR_KINDS)
+# Neither a header nor a message: what "the conversation's messages" means in SQL. Turn counts,
+# the overview and the list snippet all use it, so a 512 KiB scrollback cannot become a snippet or
+# push the last turn past the end of the conversation.
+_NOT_BODY_SQL = ", ".join(f"'{kind}'" for kind in HEADER_KINDS + SIDECAR_KINDS)
+# What the preview leaves out by default. `rewound` is listed — it is conversation, just dropped —
+# and saved terminal text is not, unless the query matched inside it (see `conversation`).
+_UNLISTED_SQL = ", ".join(f"'{kind}'" for kind in HEADER_KINDS + ("terminal_text",))
 SOURCES = ("agent", "terminal", "subagent", "claude", "codex")
 # The guest sources (protocol 26.7): their rows are written by guest_sessions.py from the guests'
 # own transcripts, never from Relay's session files, so a rebuild leaves them to `guest_reconcile`.
@@ -214,8 +272,11 @@ _MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 
 # `relevance` tiers a conversation by the best kind it matched, then by how many entries matched,
 # then by recency: a title hit outranks a summary hit outranks a prompt outranks a reply outranks
 # tool or terminal output, however many of the weaker ones there are.
-RANK_WEIGHTS = {"title": 6, "summary": 5, "prompt": 4, "command": 4, "reply": 3,
-                "tool_call": 2, "tool_output": 1, "command_output": 1}
+# Below all of it sit the two sidecar kinds (v6, #0TJ9): a word the user said is a better answer
+# to a search than the same word scrolling past in the terminal, or in a turn that was thrown away.
+RANK_WEIGHTS = {"title": 8, "summary": 7, "prompt": 6, "command": 6, "reply": 5,
+                "tool_call": 4, "tool_output": 3, "command_output": 3,
+                "rewound": 2, "terminal_text": 1}
 # The same weights as SQL. Built from our own literals, never from user input.
 _KIND_CASE = ("CASE e.kind " + " ".join(f"WHEN '{kind}' THEN {weight}" for kind, weight in RANK_WEIGHTS.items())
               + " ELSE 0 END")
@@ -239,6 +300,9 @@ V4_COLUMNS = (("raw_cwd", "TEXT NOT NULL DEFAULT ''"),)
 # digest of them (`entry_digests`). A row migrated from v4 has `''` for the digest, which says
 # "unknown" and costs it one full re-index at its next save — no reconcile is needed for these.
 V5_COLUMNS = (("entry_count", "INTEGER NOT NULL DEFAULT 0"), ("entry_digest", "TEXT NOT NULL DEFAULT ''"))
+# v6 (#0TJ9) adds no column: its rows are entries, and `session_sidecars` is a table the schema
+# creates on its own. What it does ask for is the v3 backfill — every agent and subagent row is
+# marked behind, so the next reconcile reads each conversation's sidecars once.
 MAX_MATCHES_LIMIT = 20
 THREAD_KIND = "relay_subagent_thread"
 # The guest rows' `<id>.meta.json` (see the module docstring): one file beside the database for
@@ -249,7 +313,7 @@ GUEST_META_NAME = "guest-meta.json"
 # `key:value` pairs parsed out of the query before anything reaches FTS5. An unknown key is not an
 # error: the whole token stays free text, so a path or a URL typed into the box still searches.
 OPERATOR_KEYS = ("project", "file", "model", "branch", "before", "after", "has", "is", "in")
-OPERATOR_VALUES = {"has": ("tasks", "edits", "summary"), "is": ("pinned", "unfinished"),
+OPERATOR_VALUES = {"has": ("tasks", "edits", "summary", "rewound"), "is": ("pinned", "unfinished"),
                    "in": ("terminal", "agent")}
 # Todo states that still want doing; a conversation with one of them is unfinished.
 OPEN_TODO_STATES = ("pending", "in_progress", "blocked")
@@ -805,6 +869,258 @@ def header_entries(title: str, summary: str) -> list[dict]:
     return rows
 
 
+# ----- the sidecars (v6, #0TJ9) ---------------------------------------------------------------
+#
+# Everything below reads the three files the GUI writes beside a session (module docstring). None
+# of it raises on what it finds there: a sidecar is a convenience the index mirrors, and a file
+# that is half-written, truncated or not text at all costs the entries it would have held and
+# nothing else.
+
+def read_sidecar_text(path: str | Path) -> str:
+    """A saved-scrollback file as text, capped the way the GUI caps it. "" when there is none.
+
+    The caps are applied again here because the file is in a directory Relay writes but does not
+    own the contents of: a `<id>.scrollback.txt` left by an older build, or by hand, must not be
+    able to put a gigabyte into the index.
+    """
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_SCROLLBACK_BYTES)
+    except OSError:
+        return ""
+    return "\n".join(raw.decode("utf-8", "replace").splitlines()[:MAX_SCROLLBACK_LINES])
+
+
+def text_chunks(text: str, lines: int = TERMINAL_TEXT_LINES) -> list[str]:
+    """Saved terminal text split into runs of `lines` lines, blank runs dropped.
+
+    One row for a whole 512 KiB file would make a search hit in it useless: `match_line` would have
+    five thousand lines to choose a snippet from and the preview would print the session's entire
+    history to show one of them. Forty lines is about a screen, so a hit reads like the place it
+    came from.
+    """
+    rows = (text or "").splitlines()
+    out = []
+    for start in range(0, len(rows), max(1, lines)):
+        chunk = "\n".join(rows[start:start + max(1, lines)]).strip()
+        if chunk:
+            out.append(chunk)
+    return out
+
+
+def rewound_records(path: str | Path) -> list[dict]:
+    """The rewind records of `<id>.rewound.jsonl`, oldest first, the newest `MAX_REWOUND_RECORDS`.
+
+    One JSON object per line (`{n, at, turn, restore, epoch, prompt, messages, restored_files,
+    conflicts}`). The GUI appends a line per rewind and can be stopped in the middle of one, so a
+    line that does not parse is dropped rather than failing the file — which is also what a read
+    that hit the byte cap mid-line leaves behind.
+    """
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_REWOUND_BYTES)
+    except OSError:
+        return []
+    records = []
+    for line in raw.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records[-MAX_REWOUND_RECORDS:]
+
+
+def dropped_message_texts(messages) -> list[str]:
+    """The text of each message a rewind dropped, rendered as `session_entries` renders the
+    session's own: the prompt, the reply, `name {arguments}` for each tool call, the tool output.
+    Relay's own context blocks are left out here too — they are not something the user typed."""
+    out: list[str] = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        content = str(message.get("content") or "")
+        if role == "user":
+            if content.lstrip().startswith(RELAY_CONTEXT):
+                continue
+            out.append(content)
+        elif role == "assistant":
+            out.append(content)
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") or {}
+                arguments = function.get("arguments")
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, ensure_ascii=False) if arguments else ""
+                out.append(f"{function.get('name') or 'tool'} {arguments}")
+        elif role == "tool":
+            out.append(content)
+    return out
+
+
+def terminal_text_entries(text: str) -> list[dict]:
+    """Saved terminal text as `terminal_text` rows: a guest session's whole sidecar, and the first
+    part of a Relay session's (`sidecar_entries`). Turn 0 — it belongs to no turn."""
+    rows: list[dict] = []
+    for offset, chunk in enumerate(text_chunks(text), 1):
+        chunk = _clean(chunk, MAX_TEXT).strip()
+        if chunk:
+            rows.append({"turn": 0, "seq": SIDECAR_SEQ + offset, "kind": "terminal_text",
+                         "time": None, "text": chunk})
+    return rows
+
+
+def sidecar_entries(directory: str | Path, session_id: str) -> list[dict]:
+    """The `terminal_text` and `rewound` rows of one Relay session's sidecars.
+
+    A rewind record's rows carry its `turn`, so the preview shows what was dropped where it was
+    dropped from, and its `<id>.rewound-<n>.scrollback.txt` — the terminal text that went with it —
+    is chunked under the same kind and the same turn.
+    """
+    directory = Path(directory)
+    rows = terminal_text_entries(read_sidecar_text(directory / f"{session_id}{SCROLLBACK_SUFFIX}"))
+    seq = rows[-1]["seq"] if rows else SIDECAR_SEQ
+
+    def add(turn: int, kind: str, text: str, when) -> None:
+        nonlocal seq
+        text = _clean(str(text or ""), MAX_TEXT).strip()
+        if not text:
+            return
+        seq += 1
+        rows.append({"turn": turn, "seq": seq, "kind": kind, "time": when, "text": text})
+
+    for record in rewound_records(directory / f"{session_id}{REWOUND_SUFFIX}"):
+        turn = record.get("turn")
+        turn = turn if isinstance(turn, int) and not isinstance(turn, bool) and turn >= 0 else 0
+        when = record.get("at") if isinstance(record.get("at"), (int, float)) else None
+        for text in dropped_message_texts(record.get("messages")):
+            add(turn, "rewound", text, when)
+        number = record.get("n")
+        if isinstance(number, int) and not isinstance(number, bool):
+            path = directory / f"{session_id}.rewound-{number}{SCROLLBACK_SUFFIX}"
+            for chunk in text_chunks(read_sidecar_text(path)):
+                add(turn, "rewound", chunk, when)
+    return rows
+
+
+def guest_text_dir(source: str, root: str | Path | None = None) -> Path:
+    """`sessions/guests/<source>/`, where a guest session's saved terminal text lives.
+
+    A guest has no session directory of Relay's to sit the file beside, and protocol 26.7 keeps
+    Relay out of `~/.claude` and `~/.codex`, so its own sidecar for a guest goes here instead.
+    """
+    return (Path(root) if root else sessions_root()) / GUESTS_DIRNAME / str(source)
+
+
+def _entry_stamp(entry) -> str | None:
+    """`name:size:mtime_ns` for one directory entry — what says a sidecar has to be read again."""
+    try:
+        stat = entry.stat()
+    except OSError:
+        return None
+    return f"{entry.name}:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def _sidecar_owner(name: str) -> str | None:
+    """The session id a sidecar file name belongs to, or None when it is not one of ours."""
+    match = _REWOUND_TEXT.match(name)
+    if match:
+        return match.group("id")
+    for suffix in (SCROLLBACK_SUFFIX, REWOUND_SUFFIX):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[:-len(suffix)]
+    return None
+
+
+def session_folders(directory: str | Path) -> list[Path]:
+    """The workspace-digest folders under the sessions root.
+
+    `sessions/guests/` is not one of them: it is Relay's own store for the guests' saved terminal
+    text, and a walk that took it for a workspace digest would go looking for session files under
+    `guests/claude/`.
+    """
+    out: list[Path] = []
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return out
+    for entry in entries:
+        if entry.name == GUESTS_DIRNAME or entry.name.startswith("."):
+            continue
+        try:
+            if entry.is_dir():
+                out.append(Path(entry.path))
+        except OSError:
+            continue
+    return out
+
+
+def scan_session_folder(folder: str | Path) -> tuple[list[Path], dict[str, str], list[Path]]:
+    """One listing of a session folder: `(session files, {session id: sidecar stamp}, .threads/)`.
+
+    `os.scandir` costs what the `glob` of the session files alone cost, and it hands back the
+    sidecars in the same pass. That is the point: the GUI writes a scrollback at quit, after the
+    last autosave, so noticing it means stat'ing the sidecars on every reconcile — and this runs on
+    the sessions pane's hot path (#MDSG), where a second listing of every session directory is not
+    free. A session with no sidecars is not stat'ed at all: it simply has no stamp.
+    """
+    sessions: list[Path] = []
+    threads: list[Path] = []
+    parts: dict[str, list[str]] = {}
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return sessions, {}, threads
+    for entry in entries:
+        name = entry.name
+        if name.startswith("."):
+            continue
+        if name.endswith(".threads"):
+            try:
+                if entry.is_dir():
+                    threads.append(Path(entry.path))
+            except OSError:
+                pass
+            continue
+        if name.endswith(".json"):
+            if not name.endswith(".meta.json"):
+                sessions.append(Path(entry.path))
+            continue
+        owner = _sidecar_owner(name)
+        stamp = _entry_stamp(entry) if owner else None
+        if stamp is not None:
+            parts.setdefault(owner, []).append(stamp)
+    return sessions, {sid: "\x1f".join(sorted(items)) for sid, items in parts.items()}, threads
+
+
+def guest_text_files(root: str | Path) -> list[tuple[str, Path, str]]:
+    """`(session_id, path, stamp)` for every guest scrollback under `sessions/guests/<source>/`.
+
+    One listing per guest source per pass — two directories, whatever the number of sessions.
+    """
+    out: list[tuple[str, Path, str]] = []
+    base = Path(root) / GUESTS_DIRNAME
+    for source in GUEST_SOURCES:
+        try:
+            entries = list(os.scandir(base / source))
+        except OSError:
+            continue
+        for entry in entries:
+            name = entry.name
+            if not name.endswith(SCROLLBACK_SUFFIX) or len(name) <= len(SCROLLBACK_SUFFIX):
+                continue
+            stamp = _entry_stamp(entry)
+            if stamp is not None:
+                out.append((name[:-len(SCROLLBACK_SUFFIX)], Path(entry.path), stamp))
+    return out
+
+
 # ----- the index -----------------------------------------------------------------------------
 
 class ConversationIndex:
@@ -863,7 +1179,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2, 3, 4) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3, 4, 5) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -907,7 +1223,7 @@ class ConversationIndex:
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1/v2/v3/v4 -> v5 in place, because terminal-history rows have no file to be rebuilt
+        """v1..v5 -> v6 in place, because terminal-history rows have no file to be rebuilt
         from — and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
@@ -915,7 +1231,9 @@ class ConversationIndex:
         the next `reconcile()`, which re-reads every row whose `indexed_version` is behind. v3 -> v4
         adds `raw_cwd`, which the next guest reconcile fills the same way. v4 -> v5 adds the
         incremental-index fingerprint, which every conversation fills itself at its next save, so
-        it is the one migration that does not ask for a re-read.
+        it is the one migration that does not ask for a re-read. v5 -> v6 adds no column at all:
+        `session_sidecars` is created with the schema, empty, and the rows the sidecars hold are
+        backfilled by the next reconcile the way v3's columns were.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
         for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS:
@@ -928,9 +1246,10 @@ class ConversationIndex:
                 if row["session_dir"]:
                     write_user_fields(Path(row["session_dir"]), row["session_id"],
                                       custom_title=row["custom_title"], pinned=bool(row["pinned"]))
-        if version < 4:
-            # The columns v2, v3 and v4 added are backfilled by re-reading the session files; v5's
-            # are not, so a database that is only one version behind is spared the whole re-index.
+        if version < 6:
+            # The columns v2, v3 and v4 added are backfilled by re-reading the session files, and
+            # so are v6's sidecar rows. (v5's fingerprint was the one that needed no re-read: a
+            # v4 database was spared this line, and v5 -> v6 is what puts it back.)
             db.execute("UPDATE conversations SET indexed_version=0 WHERE source IN ('agent', 'subagent')")
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
         db.commit()
@@ -990,6 +1309,12 @@ class ConversationIndex:
     def store_path(self) -> Path:
         """`guest-meta.json` beside the index database."""
         return self.path.with_name(GUEST_META_NAME)
+
+    @property
+    def sessions_dir(self) -> Path:
+        """`sessions/` beside the index database — the same directory `sessions_root()` names for
+        the real one, and the temporary one in a test that pointed the index elsewhere."""
+        return self.path.with_name("sessions")
 
     def _guest_store(self) -> dict:
         """The store as `{source: {id: {...}}}`, re-read when the file changed under us.
@@ -1135,6 +1460,9 @@ class ConversationIndex:
                 db.execute(f"DELETE FROM entries WHERE session_id IN ({marks})", chunk)
                 db.execute(f"DELETE FROM conversations WHERE session_id IN ({marks})", chunk)
                 db.execute(f"DELETE FROM guest_files WHERE session_id IN ({marks})", chunk)
+                # The saved terminal text stays on disk, so only its stamp goes: turning the
+                # setting back on reads it again with the row (v6).
+                db.execute(f"DELETE FROM session_sidecars WHERE session_id IN ({marks})", chunk)
             db.commit()
             return len(ids)
         return self._run(work)
@@ -1156,6 +1484,11 @@ class ConversationIndex:
         turn's own thread, against ~0.3 ms for the incremental write.
 
         The caller is never asked whether it appended: `entry_digests` decides from the text.
+
+        The sidecar rows (v6) are neither counted nor deleted here. They come from files the
+        autosave knows nothing about, so a save that rewrote them would drop a session's saved
+        terminal text on every turn, and counting them would make the row total disagree with
+        `entry_count` and fall back to the full rewrite for good.
         """
         prefix, whole = entry_digests(rows, indexed)
         extend = bool(stored_digest) and indexed <= len(rows) and prefix == stored_digest
@@ -1163,13 +1496,13 @@ class ConversationIndex:
             # The digest guards the session's text; this guards the table. The header rows are the
             # only others a conversation owns, so the total may exceed the indexed body rows by at
             # most a title and a summary — anything else means the rows are not what is recorded.
-            total = db.execute("SELECT COUNT(*) FROM entries WHERE session_id=?",
-                               (session_id,)).fetchone()[0]
+            total = db.execute(f"SELECT COUNT(*) FROM entries WHERE session_id=?"
+                               f" AND kind NOT IN ({_SIDECAR_SQL})", (session_id,)).fetchone()[0]
             extend = indexed <= total <= indexed + len(HEADER_KINDS)
         if extend:
             db.execute(f"DELETE FROM entries WHERE session_id=? AND kind IN ({_HEADER_SQL})", (session_id,))
             return rows[indexed:], whole
-        db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+        db.execute(f"DELETE FROM entries WHERE session_id=? AND kind NOT IN ({_SIDECAR_SQL})", (session_id,))
         return rows, whole
 
     def update_session(self, data: dict, session_dir: str | Path | None = None) -> int:
@@ -1251,6 +1584,46 @@ class ConversationIndex:
                            " VALUES(?,0,0,'summary',NULL,?)", (session_id, summary))
             db.commit()
         self._run(work)
+
+    def sidecar_stamps(self) -> dict[str, str]:
+        """`{session_id: stamp}` — what each conversation's sidecars looked like when they were
+        last read, for `reconcile()`. One query, no file reads."""
+        return self._run(lambda db: {row["session_id"]: row["stamp"] or "" for row in
+                                     db.execute("SELECT session_id, stamp FROM session_sidecars").fetchall()})
+
+    def update_sidecars(self, session_id: str, rows: list[dict], stamp: str = "") -> int:
+        """Replace a conversation's `terminal_text` and `rewound` rows and record `stamp` as what
+        the files they came from looked like (v6, #0TJ9). Returns the number of rows written.
+
+        They are written on their own, never inside `update_session` or `update_guest`: the GUI
+        saves the scrollback when a pane's session changes and at quit, which is *after* the last
+        autosave, so the session JSON is not what says they moved. `reconcile()` is what notices,
+        by the stamp, and this is what it calls.
+
+        Rows for a conversation the index does not hold would be orphans nothing could ever find or
+        delete, so they are dropped — and no stamp is stored for them, so the next pass looks
+        again: a guest's scrollback may simply be there before `guest_sessions.reconcile()` has
+        indexed the transcript it belongs to.
+        """
+        def work(db):
+            known = db.execute("SELECT 1 FROM conversations WHERE session_id=?", (session_id,)).fetchone()
+            db.execute(f"DELETE FROM entries WHERE session_id=? AND kind IN ({_SIDECAR_SQL})", (session_id,))
+            if not known:
+                db.execute("DELETE FROM session_sidecars WHERE session_id=?", (session_id,))
+                db.commit()
+                return 0
+            db.executemany(
+                "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
+                [(session_id, int(row["turn"]), int(row["seq"]), str(row["kind"]), row["time"],
+                  str(row["text"])) for row in rows])
+            if stamp:
+                db.execute("INSERT OR REPLACE INTO session_sidecars(session_id, stamp) VALUES(?,?)",
+                           (session_id, stamp))
+            else:
+                db.execute("DELETE FROM session_sidecars WHERE session_id=?", (session_id,))
+            db.commit()
+            return len(rows)
+        return self._run(work)
 
     def update_guest(self, data: dict) -> int:
         """Index (or re-index) one guest session (protocol 26.7) from a parsed record.
@@ -1336,7 +1709,10 @@ class ConversationIndex:
                     db.execute("DELETE FROM entries WHERE session_id=? AND kind='title'", (session_id,))
                     written = header_entries(shown, "") + rows
             else:
-                db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+                # Not the guest's saved terminal text, though: that is Relay's own sidecar, and
+                # re-parsing a transcript says nothing about it (v6).
+                db.execute(f"DELETE FROM entries WHERE session_id=? AND kind NOT IN ({_SIDECAR_SQL})",
+                           (session_id,))
                 db.execute(
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, raw_cwd, project, title,"
                     " custom_title, model, preset, created, updated, turns, open_requests, session_dir, pinned,"
@@ -1478,9 +1854,17 @@ class ConversationIndex:
 
     def reconcile(self, root: str | Path | None = None) -> dict:
         """Bring the rows in line with the files: index sessions and threads that are missing or
-        newer on disk than in the index, and drop rows whose file is gone. Cheap when nothing
-        changed (one stat per file and one small meta read per session), so it runs whenever a
-        worker first opens the index; `rebuild()` is still there for a full refresh."""
+        newer on disk than in the index, index the sidecars that changed, and drop rows whose file
+        is gone. Cheap when nothing changed (one listing per session folder, one stat per file and
+        one small meta read per session), so it runs whenever a worker first opens the index;
+        `rebuild()` is still there for a full refresh.
+
+        Each folder is listed **once** (`scan_session_folder`), which is what the session files
+        alone already cost. The sidecars come back from that same listing with their size and
+        mtime, and `sidecars` in the report counts the sessions whose stamp had moved: the GUI
+        writes a scrollback at quit, after the last autosave, so a sidecar changes while the
+        session JSON does not — and an unchanged one is never opened.
+        """
         started = time.time()
         directory = Path(root) if root else sessions_root()
         known = self._run(lambda db: {row["session_id"]: (row["source"], row["updated"] or 0, row["session_dir"],
@@ -1489,42 +1873,55 @@ class ConversationIndex:
                                                             " file_mtime, indexed_version"
                                                             " FROM conversations WHERE source IN"
                                                             " ('agent', 'subagent')").fetchall()})
+        stored = self.sidecar_stamps()
         seen: set[str] = set()
-        added = refreshed = backfilled = 0
+        added = refreshed = backfilled = sidecars = 0
         if directory.is_dir():
-            for path in directory.glob("*/*.json"):
-                name = path.name
-                if name.endswith(".meta.json") or name.startswith("."):
+            for folder in session_folders(directory):
+                paths, stamps, thread_folders = scan_session_folder(folder)
+                for path in paths:
+                    session_id = path.name[:-5]
+                    seen.add(session_id)
+                    row = known.get(session_id)
+                    stamp = _meta_updated(path)
+                    # A row written before the current schema has empty new columns whatever its
+                    # mtime says, so it is read again once and then left alone.
+                    stale = row is not None and int(row[4]) < SCHEMA_VERSION
+                    fresh = (row is not None and not stale and stamp is not None
+                             and stamp <= float(row[1]) + 1e-6 and row[2] == str(folder))
+                    if not fresh and self.index_session_file(path):
+                        added += row is None
+                        refreshed += row is not None
+                        backfilled += bool(stale)
+                    # The sidecars are the GUI's, not the autosave's: it is their own stamp that
+                    # says to read them, and a row that is behind the schema reads them once too.
+                    wanted = stamps.get(session_id, "")
+                    if stale or wanted != stored.get(session_id, ""):
+                        self.update_sidecars(session_id, sidecar_entries(folder, session_id), wanted)
+                        sidecars += 1
+                for thread_folder in thread_folders:
+                    for path in sorted(thread_folder.glob("*.json")):
+                        thread_id = path.name[:-5]
+                        seen.add(thread_id)
+                        row = known.get(thread_id)
+                        try:
+                            mtime = path.stat().st_mtime
+                        except OSError:
+                            continue
+                        stale = row is not None and int(row[4]) < SCHEMA_VERSION
+                        if row is not None and not stale and row[3] is not None and abs(mtime - float(row[3])) < 1e-6:
+                            continue
+                        if self.index_thread_file(path):
+                            added += row is None
+                            refreshed += row is not None
+                            backfilled += bool(stale)
+            # A guest's saved terminal text sits in Relay's own tree, not beside a transcript, and
+            # is stamped the same way. Two listings a pass, whatever the number of guest sessions.
+            for session_id, path, stamp in guest_text_files(directory):
+                if stamp == stored.get(session_id, ""):
                     continue
-                session_id = name[:-5]
-                seen.add(session_id)
-                row = known.get(session_id)
-                stamp = _meta_updated(path)
-                # A row written before the current schema has empty new columns whatever its
-                # mtime says, so it is read again once and then left alone.
-                stale = row is not None and int(row[4]) < SCHEMA_VERSION
-                if row is not None and not stale and stamp is not None and stamp <= float(row[1]) + 1e-6 \
-                        and row[2] == str(path.parent):
-                    continue
-                if self.index_session_file(path):
-                    added += row is None
-                    refreshed += row is not None
-                    backfilled += bool(stale)
-            for path in directory.glob("*/*.threads/*.json"):
-                thread_id = path.name[:-5]
-                seen.add(thread_id)
-                row = known.get(thread_id)
-                try:
-                    mtime = path.stat().st_mtime
-                except OSError:
-                    continue
-                stale = row is not None and int(row[4]) < SCHEMA_VERSION
-                if row is not None and not stale and row[3] is not None and abs(mtime - float(row[3])) < 1e-6:
-                    continue
-                if self.index_thread_file(path):
-                    added += row is None
-                    refreshed += row is not None
-                    backfilled += bool(stale)
+                self.update_sidecars(session_id, terminal_text_entries(read_sidecar_text(path)), stamp)
+                sidecars += 1
         gone = [sid for sid, (_source, _updated, folder, _mtime, _version) in known.items()
                 if sid not in seen and (not folder or Path(folder).parent == directory or
                                         Path(folder).parent.parent == directory)]
@@ -1533,11 +1930,12 @@ class ConversationIndex:
             for sid in gone:
                 db.execute("DELETE FROM entries WHERE session_id=?", (sid,))
                 db.execute("DELETE FROM conversations WHERE session_id=?", (sid,))
+                db.execute("DELETE FROM session_sidecars WHERE session_id=?", (sid,))
             db.commit()
         if gone:
             self._run(drop)
         return {"added": added, "refreshed": refreshed, "removed": len(gone), "backfilled": backfilled,
-                "ms": int((time.time() - started) * 1000)}
+                "sidecars": sidecars, "ms": int((time.time() - started) * 1000)}
 
     def rebuild(self, root: str | Path | None = None) -> dict:
         """Drop every agent conversation and rebuild it from the session JSON files.
@@ -1552,19 +1950,30 @@ class ConversationIndex:
         def clear(db):
             db.execute("DELETE FROM entries WHERE session_id IN"
                        " (SELECT session_id FROM conversations WHERE source IN ('agent', 'subagent'))")
+            # The stamps go with them, so nothing claims a sidecar is indexed when its rows are not.
+            db.execute("DELETE FROM session_sidecars WHERE session_id IN"
+                       " (SELECT session_id FROM conversations WHERE source IN ('agent', 'subagent'))")
             db.execute("DELETE FROM conversations WHERE source IN ('agent', 'subagent')")
             db.commit()
         self._run(clear)
         sessions = entries = threads = 0
         if directory.is_dir():
-            for path in sorted(directory.glob("*/*.json")):
-                if path.name.endswith(".meta.json"):
-                    continue
-                if self.index_session_file(path):
+            # `session_folders` rather than a `*/` glob: `sessions/guests/` holds the guests' saved
+            # terminal text, not a workspace's sessions (v6). A guest row survives a rebuild, and
+            # so does its sidecar's rows; a Relay session's are written again here with its own.
+            for folder in sorted(session_folders(directory)):
+                paths, stamps, thread_folders = scan_session_folder(folder)
+                for path in sorted(paths):
+                    if path.name.endswith(".meta.json") or not self.index_session_file(path):
+                        continue
                     sessions += 1
-            for path in sorted(directory.glob("*/*.threads/*.json")):
-                if self.index_thread_file(path):
-                    threads += 1
+                    session_id = path.name[:-5]
+                    self.update_sidecars(session_id, sidecar_entries(folder, session_id),
+                                         stamps.get(session_id, ""))
+                for thread_folder in sorted(thread_folders):
+                    for path in sorted(thread_folder.glob("*.json")):
+                        if self.index_thread_file(path):
+                            threads += 1
         entries = self._run(lambda db: db.execute("SELECT count(*) FROM entries").fetchone()[0])
         self._run(lambda db: (db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('rebuilt', ?)",
                                          (str(time.time()),)), db.commit())[0])
@@ -1668,6 +2077,7 @@ class ConversationIndex:
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
             db.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
             db.execute("DELETE FROM guest_files WHERE session_id=?", (session_id,))
+            db.execute("DELETE FROM session_sidecars WHERE session_id=?", (session_id,))
             # A session's subagent threads go with it (their files sit in its .threads folder).
             db.execute("DELETE FROM entries WHERE session_id IN"
                        " (SELECT session_id FROM conversations WHERE owner_session=?)", (session_id,))
@@ -1680,12 +2090,30 @@ class ConversationIndex:
             removed["forgotten"] = bool(forget)
             if forget:
                 self.forget(row["source"], session_id)
+            # The one file of a guest's that *is* Relay's: the terminal text Relay saved for it
+            # (v6). The guest's own transcript is still untouched, as it must be.
+            if remove_files:
+                try:
+                    (guest_text_dir(row["source"], self.sessions_dir)
+                     / f"{session_id}{SCROLLBACK_SUFFIX}").unlink()
+                    removed["files"] += 1
+                except OSError:
+                    pass
         if not remove_files or row is None or row["source"] != "agent" or not row["session_dir"]:
             return removed
         directory = Path(row["session_dir"])
-        for name in (f"{session_id}.json", f"{session_id}.meta.json"):
+        for name in (f"{session_id}.json", f"{session_id}.meta.json",
+                     f"{session_id}{SCROLLBACK_SUFFIX}", f"{session_id}{REWOUND_SUFFIX}"):
             try:
                 (directory / name).unlink()
+                removed["files"] += 1
+            except OSError:
+                pass
+        # The rewind sidecars are numbered, and the record that names them has just gone, so they
+        # are found by name rather than read out of the jsonl (v6).
+        for path in sorted(directory.glob(f"{session_id}.rewound-*{SCROLLBACK_SUFFIX}")):
+            try:
+                path.unlink()
                 removed["files"] += 1
             except OSError:
                 pass
@@ -1804,7 +2232,11 @@ class ConversationIndex:
                 add("COALESCE(c.updated, 0) < ?", parse_date(value, now), negated=negated)
             elif key == "has":
                 add({"tasks": "c.open_requests > 0", "edits": "c.has_edits = 1",
-                     "summary": "c.summary != ''"}[value], negated=negated)
+                     "summary": "c.summary != ''",
+                     # v6: the conversation has a rewind whose dropped turns were kept. There is no
+                     # column for it — the rows are the record — so it is an EXISTS on them.
+                     "rewound": "EXISTS (SELECT 1 FROM entries er WHERE er.session_id = c.session_id"
+                                " AND er.kind = 'rewound')"}[value], negated=negated)
             elif key == "is":
                 add({"pinned": "c.pinned = 1", "unfinished": "c.unfinished = 1"}[value], negated=negated)
             elif key == "in":
@@ -1973,7 +2405,7 @@ class ConversationIndex:
                     item["snippet"] = item["summary"][:200] or item["first_prompt"][:200]
                 if not item["snippet"]:
                     first = db.execute(
-                        f"SELECT text FROM entries WHERE session_id=? AND kind NOT IN ({_HEADER_SQL})"
+                        f"SELECT text FROM entries WHERE session_id=? AND kind NOT IN ({_NOT_BODY_SQL})"
                         " ORDER BY seq LIMIT 1", (item["session_id"],)).fetchone()
                     item["snippet"] = " ".join((first["text"] if first else "").split())[:200]
                 # Title and summary matches carry turn 0, so they lead the list.
@@ -1995,10 +2427,12 @@ class ConversationIndex:
         turns, the files touched, the open todos, the branch and whether it was left unfinished.
 
         It is read from the conversation's own row and a handful of its entries, so opening the
-        preview never reads the session JSON back off disk."""
+        preview never reads the session JSON back off disk. The sidecar kinds are left out of it
+        entirely (v6): a rewound turn is not where the conversation got to, and saved terminal text
+        is not a turn at all."""
         session_id = row["session_id"]
         last_turns: list[dict] = []
-        top = db.execute(f"SELECT MAX(turn) FROM entries WHERE session_id=? AND kind NOT IN ({_HEADER_SQL})",
+        top = db.execute(f"SELECT MAX(turn) FROM entries WHERE session_id=? AND kind NOT IN ({_NOT_BODY_SQL})",
                          (session_id,)).fetchone()[0]
         if top:
             first_wanted = max(1, int(top) - OVERVIEW_TURNS + 1)
@@ -2025,7 +2459,13 @@ class ConversationIndex:
                      limit: int = 400) -> dict:
         """One conversation for the preview: its header, its `overview` and its entries (optionally
         one turn). The searchable `title` and `summary` entries are not messages, so they are not
-        listed; the overview carries the summary instead."""
+        listed; the overview carries the summary instead.
+
+        `rewound` entries (v6) *are* listed, at the turn they were dropped from and after that
+        turn's messages, so the preview shows what a rewind undid where it happened. Saved
+        `terminal_text` is not: it is the whole of a pane's history and would bury the conversation
+        it belongs to. The exception is a search — with `query`, the chunks the query matched are
+        appended, so a hit found in saved terminal text can be read where it was found."""
         limit = max(1, min(int(limit or 400), 2000))
         terms = query_terms(query)
 
@@ -2034,7 +2474,7 @@ class ConversationIndex:
             if row is None:
                 raise ValueError("No indexed conversation with that id.")
             sql = ("SELECT turn, kind, time, status, text FROM entries"
-                   f" WHERE session_id=? AND kind NOT IN ({_HEADER_SQL})")
+                   f" WHERE session_id=? AND kind NOT IN ({_UNLISTED_SQL})")
             args: list = [session_id]
             if isinstance(turn, int):
                 sql += " AND turn=?"
@@ -2054,6 +2494,15 @@ class ConversationIndex:
                         item["ranges"] = ranges
                         item["line"] = line
                 entries.append(item)
+            if terms and not isinstance(turn, int):
+                for entry in db.execute(
+                        "SELECT turn, kind, time, text FROM entries WHERE session_id=?"
+                        " AND kind='terminal_text' ORDER BY seq LIMIT ?", (session_id, limit)).fetchall():
+                    line, ranges = match_line(entry["text"], terms)
+                    if not ranges:
+                        continue
+                    entries.append({"turn": entry["turn"], "kind": entry["kind"], "time": entry["time"],
+                                    "text": entry["text"], "line": line, "ranges": ranges})
             header = _item(row)
             header.pop("matches", None)
             if header.get("owner_session"):

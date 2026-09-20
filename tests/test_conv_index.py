@@ -818,9 +818,10 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(set(), index.forgotten())
 
     def test_a_v4_index_gains_the_fingerprint_without_a_re_index(self):
-        """v5 adds `entry_count`/`entry_digest` (#TZWF). Unlike every version before it, nothing
-        has to be re-read to fill them: each conversation writes its own at its next save, so the
-        migration leaves `indexed_version` alone and the next reconcile finds nothing to do."""
+        """v5 adds `entry_count`/`entry_digest` (#TZWF). Nothing has to be re-read to fill them:
+        each conversation writes its own at its next save. (The one backfill pass below is v6's,
+        for the sidecar rows — v5 on its own asks for none, which is why the fingerprint is there
+        before any reconcile has run.)"""
         self.write(session("a" * 32, workspace="/tmp/alpha", branch="main"))
         index = ConversationIndex(self.root / "index.db")
         index.rebuild(self.root / "sessions")
@@ -835,11 +836,13 @@ class MigrationTests(unittest.TestCase):
         items = {item["session_id"]: item for item in index.search("", scope="all")["items"]}
         self.assertIn("term-" + conv_index.workspace_digest("/tmp/alpha"), items)
         self.assertEqual("main", items["a" * 32]["branch"], "the v3 columns are still there")
-        self.assertEqual(index.reconcile(self.root / "sessions")["backfilled"], 0)
-        # The first save of each conversation fills the fingerprint, and the next one is cheap.
+        fingerprint = lambda: index._db.execute(
+            "SELECT entry_count, entry_digest FROM conversations WHERE session_id=?",
+            ("a" * 32,)).fetchone()
+        self.assertEqual((0, ""), tuple(fingerprint()), "added empty by the migration")
+        # The first save of each conversation fills it, with no reconcile and no file re-read.
         index.update_session(session("a" * 32, workspace="/tmp/alpha", branch="main"), self.sessions)
-        row = index._db.execute("SELECT entry_count, entry_digest FROM conversations"
-                                " WHERE session_id=?", ("a" * 32,)).fetchone()
+        row = fingerprint()
         self.assertGreater(row["entry_count"], 0)
         self.assertTrue(row["entry_digest"])
 
@@ -1137,6 +1140,315 @@ class GuestRowTests(unittest.TestCase):
         item = self.item()
         self.assertEqual((str(real), str(link)), (item["workspace"], item["raw_cwd"]))
         self.assertEqual(str(real), self.index.conversation(self.CLAUDE)["workspace"])
+
+
+def rewind_record(n=1, *, turn=2, prompt="what happened to the marmoset", at=500.0, messages=None):
+    """One line of `<id>.rewound.jsonl` as the worker writes it (protocol 5, card #0TJ9)."""
+    return {"n": n, "at": at, "turn": turn, "restore": "conversation", "epoch": 0, "prompt": prompt,
+            "messages": messages if messages is not None else [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": "the marmoset was renamed",
+                 "tool_calls": [{"id": "r1", "type": "function",
+                                 "function": {"name": "run_command",
+                                              "arguments": '{"command": "rg marmoset"}'}}]},
+                {"role": "tool", "tool_call_id": "r1", "content": "marmoset in three files"}],
+            "restored_files": [], "conflicts": []}
+
+
+class SidecarTests(unittest.TestCase):
+    """The saved terminal text and the rewound turns (protocol 14.1, v6, card #0TJ9).
+
+    The GUI writes the three sidecar files; the index only reads them, so everything here writes
+    them by hand, exactly as the contract in the protocol spells them.
+    """
+
+    SID = "a" * 32
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.sessions = self.root / "sessions"
+        self.digest = self.sessions / "digest"
+        self.digest.mkdir(parents=True)
+        self.index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(self.index.close)
+
+    # ----- writing the files the GUI writes -------------------------------------------
+    def write_session(self, data=None, **kwargs):
+        data = data or session(self.SID, **kwargs)
+        (self.digest / f"{data['id']}.json").write_text(json.dumps(data), encoding="utf-8")
+        # The meta file is what a reconcile reads to decide the session JSON has not moved; without
+        # one it re-reads every session every pass, and the sidecar assertions would say nothing.
+        (self.digest / f"{data['id']}.meta.json").write_text(
+            json.dumps({"id": data["id"], "updated": data["updated"]}), encoding="utf-8")
+        return data
+
+    def scrollback(self, text, session_id=None, *, rewound=None):
+        name = f"{session_id or self.SID}"
+        if rewound is not None:
+            name += f".rewound-{rewound}"
+        (self.digest / f"{name}.scrollback.txt").write_text(text, encoding="utf-8")
+
+    def rewound(self, *records, session_id=None, trailing=""):
+        text = "".join(json.dumps(record) + "\n" for record in records) + trailing
+        (self.digest / f"{session_id or self.SID}.rewound.jsonl").write_text(text, encoding="utf-8")
+
+    def guest_scrollback(self, text, session_id, source="claude"):
+        folder = conv_index.guest_text_dir(source, self.sessions)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{session_id}.scrollback.txt").write_text(text, encoding="utf-8")
+
+    def kinds(self, query):
+        """The distinct `(session, kind)` pairs a query matched, sorted."""
+        result = self.index.search(query, scope="all")
+        return sorted({(item["session_id"], match["kind"]) for item in result["items"]
+                       for match in item["matches"]})
+
+    # ----- both kinds are indexed and found ------------------------------------------
+    def test_saved_terminal_text_and_a_rewind_are_indexed_and_found(self):
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt  wombat.txt\n$ cat quokka.txt\nthe quokka file\n")
+        self.rewound(rewind_record())
+        self.scrollback("the capybara scrolled past here\n", rewound=1)
+        self.index.reconcile(self.sessions)
+
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka"))
+        self.assertEqual([(self.SID, "rewound")], self.kinds("marmoset"))
+        self.assertEqual([(self.SID, "rewound")], self.kinds("capybara"))
+        # A rewound row carries the turn it was dropped from, and the tool call is rendered the
+        # way the session's own messages are.
+        rewound = [entry for entry in self.index.conversation(self.SID)["items"]
+                   if entry["kind"] == "rewound"]
+        self.assertEqual({2}, {entry["turn"] for entry in rewound})
+        self.assertIn('run_command {"command": "rg marmoset"}', [entry["text"] for entry in rewound])
+
+    def test_saved_terminal_text_is_chunked_so_a_snippet_is_local(self):
+        self.write_session()
+        lines = [f"line {number}" for number in range(conv_index.TERMINAL_TEXT_LINES * 3)]
+        lines[-1] = "the wallaby appears at the end"
+        self.scrollback("\n".join(lines) + "\n")
+        self.index.reconcile(self.sessions)
+        rows = self.index._db.execute(
+            "SELECT text FROM entries WHERE session_id=? AND kind='terminal_text' ORDER BY seq",
+            (self.SID,)).fetchall()
+        self.assertEqual(3, len(rows))
+        self.assertTrue(all(len(row["text"].splitlines()) <= conv_index.TERMINAL_TEXT_LINES
+                            for row in rows))
+        match = self.index.search("wallaby", scope="all")["items"][0]["matches"][0]
+        self.assertEqual("the wallaby appears at the end", match["line"])
+
+    def test_the_sidecar_kinds_rank_below_message_text(self):
+        """A word the user typed beats the same word scrolling past in the terminal, or in a turn
+        that was thrown away, however many times it is in either."""
+        self.write_session(session(self.SID, extra_turn="tell me about the wallaby"))
+        self.write_session(session("b" * 32, workspace="/tmp/alpha", title="Rewound one"))
+        self.write_session(session("c" * 32, workspace="/tmp/alpha", title="Terminal one"))
+        self.rewound(rewind_record(messages=[{"role": "user", "content": "wallaby " * 20}]),
+                     session_id="b" * 32)
+        self.scrollback("wallaby " * 200, session_id="c" * 32)
+        self.index.reconcile(self.sessions)
+        order = [item["session_id"] for item in
+                 self.index.search("wallaby", scope="all", sort="relevance")["items"]]
+        self.assertEqual([self.SID, "b" * 32, "c" * 32], order)
+
+    def test_the_sidecars_are_not_messages(self):
+        """Not a turn, not the first or last prompt, not the overview, not the list snippet."""
+        self.write_session()
+        self.scrollback("\n".join(f"scrolled line {n}" for n in range(200)))
+        self.rewound(rewind_record(turn=9))
+        self.index.reconcile(self.sessions)
+        item = self.index.search("", scope="all")["items"][0]
+        self.assertEqual(2, item["turns"])
+        self.assertEqual("how do I search the scrollback", item["first_prompt"])
+        self.assertEqual("how do I search the scrollback", item["last_prompt"])
+        overview = self.index.conversation(self.SID)["overview"]
+        self.assertEqual([1], [turn["turn"] for turn in overview["last_turns"]])
+        self.assertNotIn("scrolled line", item["snippet"])
+        # The preview lists what a rewind dropped and leaves saved terminal text out of it.
+        kinds = {entry["kind"] for entry in self.index.conversation(self.SID)["items"]}
+        self.assertIn("rewound", kinds)
+        self.assertNotIn("terminal_text", kinds)
+
+    def test_a_hit_in_saved_terminal_text_is_visible_in_the_preview(self):
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        self.index.reconcile(self.sessions)
+        preview = self.index.conversation(self.SID, query="quokka")
+        hits = [entry for entry in preview["items"] if entry["kind"] == "terminal_text"]
+        self.assertEqual(["quokka.txt"], [entry["line"] for entry in hits])
+        self.assertEqual(1, preview["match_count"])
+        # Only the chunks the query matched: the default preview is still the conversation.
+        self.assertEqual([], [entry for entry in self.index.conversation(self.SID, query="zebra")["items"]
+                              if entry["kind"] == "terminal_text"])
+
+    def test_has_rewound_selects_the_conversations_that_kept_one(self):
+        self.write_session()
+        self.write_session(session("b" * 32, workspace="/tmp/alpha", title="No rewind"))
+        self.rewound(rewind_record())
+        self.index.reconcile(self.sessions)
+        self.assertEqual([self.SID], [item["session_id"] for item in
+                                      self.index.search("has:rewound", scope="all")["items"]])
+        self.assertEqual(["b" * 32], [item["session_id"] for item in
+                                      self.index.search("-has:rewound", scope="all")["items"]])
+        self.assertEqual([{"key": "has", "value": "rewound"}],
+                         conv_index.parse_query("has:rewound")["operators"])
+
+    def test_a_truncated_last_record_is_tolerated(self):
+        """The GUI appends a line per rewind and can be stopped in the middle of one."""
+        self.write_session()
+        self.rewound(rewind_record(), rewind_record(n=2, turn=3, prompt="the second marmoset ask"),
+                     trailing='{"n": 3, "turn": 4, "messages": [{"role": "user", "content": "the thir')
+        self.index.reconcile(self.sessions)
+        self.assertEqual([(self.SID, "rewound")], self.kinds("second"))
+        self.assertEqual([], self.kinds("thir"), "the half-written line is dropped, not indexed")
+        self.assertEqual({2, 3}, {entry["turn"] for entry in self.index.conversation(self.SID)["items"]
+                                  if entry["kind"] == "rewound"})
+
+    def test_only_the_newest_records_are_kept(self):
+        self.write_session()
+        self.rewound(*[rewind_record(n=number, turn=number,
+                                     messages=[{"role": "user", "content": f"rewind marker{number:02d}"}])
+                       for number in range(1, conv_index.MAX_REWOUND_RECORDS + 4)])
+        self.index.reconcile(self.sessions)
+        rows = self.index._db.execute(
+            "SELECT count(*) FROM entries WHERE session_id=? AND kind='rewound'", (self.SID,)).fetchone()[0]
+        self.assertEqual(conv_index.MAX_REWOUND_RECORDS, rows)
+        self.assertEqual([], self.kinds("marker01"))        # the oldest three fell off the front
+        self.assertEqual([(self.SID, "rewound")], self.kinds("marker04"))
+
+    # ----- reconcile reads a sidecar once ---------------------------------------------
+    def test_a_changed_sidecar_is_re_read_and_an_unchanged_one_is_not(self):
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        reads: list[str] = []
+        real = conv_index.read_sidecar_text
+
+        def counted(path):
+            text = real(path)
+            if text:
+                reads.append(Path(path).name)
+            return text
+
+        with mock.patch.object(conv_index, "read_sidecar_text", counted):
+            first = self.index.reconcile(self.sessions)
+            self.assertEqual(["a" * 32 + ".scrollback.txt"], reads)
+            self.assertEqual(1, first["sidecars"])
+            # Nothing moved: the stamp matches, so the file is not opened again.
+            reads.clear()
+            again = self.index.reconcile(self.sessions)
+            self.assertEqual(([], 0), (reads, again["sidecars"]))
+            # The GUI writes the scrollback at quit, after the last autosave: the session JSON has
+            # not moved, and the sidecar is still picked up.
+            self.scrollback("$ ls\nquokka.txt\n$ cat quokka.txt\nthe quokka file\n")
+            third = self.index.reconcile(self.sessions)
+            self.assertEqual(1, third["sidecars"])
+            self.assertEqual(0, third["refreshed"], "the session file itself was not re-read")
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka file"))
+
+    def test_an_autosave_leaves_the_saved_terminal_text_alone(self):
+        """The incremental write (#TZWF) rewrites what the session holds; the sidecars are not
+        part of it, and counting them would have made every save a full rewrite."""
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        self.index.reconcile(self.sessions)
+        self.index.update_session(session(self.SID, extra_turn="and then", turns=3, updated=9000.0),
+                                  self.digest)
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka"))
+        self.index.update_session(session(self.SID, updated=9500.0), self.digest)   # a full rewrite
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka"))
+
+    def test_a_rebuild_writes_the_sidecar_rows_again(self):
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        self.index.reconcile(self.sessions)
+        self.index.rebuild(self.sessions)
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka"))
+
+    def test_a_v5_index_backfills_the_sidecar_rows_on_the_next_reconcile(self):
+        """v6 adds no column, so the migration is the v3 one: the rows are marked behind and the
+        next reconcile reads each session's sidecars once, keeping the terminal history."""
+        self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        self.index.reconcile(self.sessions)
+        self.index.record_commands("/tmp/alpha", [{"command": "rg numbat", "exit_status": 0}])
+        self.index.close()
+        db = sqlite3.connect(str(self.root / "index.db"))
+        db.execute("DELETE FROM entries WHERE kind IN ('terminal_text', 'rewound')")
+        db.execute("DROP TABLE session_sidecars")
+        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '5')")
+        db.commit()
+        db.close()
+
+        self.index = ConversationIndex(self.root / "index.db")
+        self.assertEqual(5, self.index.migrated_from)
+        self.assertFalse(self.index.recovered, "migrated, not wiped")
+        self.assertEqual([], self.kinds("quokka"))
+        report = self.index.reconcile(self.sessions)
+        self.assertEqual((1, 1), (report["backfilled"], report["sidecars"]))
+        self.assertEqual([(self.SID, "terminal_text")], self.kinds("quokka"))
+        self.assertEqual(1, len(self.index.search("numbat", scope="all")["items"]),
+                         "the terminal history has no file to be rebuilt from and is kept")
+        self.assertEqual(0, self.index.reconcile(self.sessions)["backfilled"])
+
+    # ----- delete ----------------------------------------------------------------------
+    def test_delete_removes_the_sidecars(self):
+        data = self.write_session()
+        self.scrollback("$ ls\nquokka.txt\n")
+        self.rewound(rewind_record())
+        self.scrollback("the capybara scrolled past here\n", rewound=1)
+        self.index.reconcile(self.sessions)
+        removed = self.index.delete_session(data["id"])
+        self.assertEqual(5, removed["files"])       # the json, the meta file and the three sidecars
+        self.assertEqual([], sorted(path.name for path in self.digest.iterdir()))
+        self.assertEqual(0, self.index.stats()["entries"])
+        self.assertEqual({}, self.index.sidecar_stamps())
+
+    # ----- guests ------------------------------------------------------------------------
+    def test_the_guests_folder_is_not_a_workspace_digest(self):
+        """`sessions/guests/` is Relay's own store for the guests' saved text. A walk that took it
+        for a workspace would go looking for session files under `guests/claude/`."""
+        self.write_session()
+        self.guest_scrollback("nothing here\n", "g" * 32)
+        (self.sessions / "guests" / "claude" / f"{'g' * 32}.json").write_text(
+            json.dumps(session("g" * 32)), encoding="utf-8")
+        self.assertEqual([self.digest], conv_index.session_folders(self.sessions))
+        self.index.reconcile(self.sessions)
+        self.assertEqual([self.SID], [item["session_id"] for item in
+                                      self.index.search("", scope="all")["items"]])
+        self.assertEqual(1, self.index.rebuild(self.sessions)["sessions"])
+
+    def test_a_guest_scrollback_is_indexed_under_its_guest_row_and_deleted_with_it(self):
+        guest = "ea11ece1-7ec2-4597-8639-32fb1f43f073"
+        self.index.update_guest({"source": "claude", "id": guest, "title": "pane drag",
+                                 "workspace": "/tmp/alpha", "created": 1.0, "mtime": 1.0,
+                                 "message_count": 1,
+                                 "entries": [{"turn": 1, "seq": 1, "kind": "prompt", "time": 1.0,
+                                              "text": "fix the pane drag"}]})
+        self.guest_scrollback("$ ls\nquokka.txt\n", guest)
+        report = self.index.reconcile(self.sessions)
+        self.assertEqual(1, report["sidecars"])
+        self.assertEqual([(guest, "terminal_text")],
+                         [(item["session_id"], match["kind"]) for item in
+                          self.index.search("quokka", scope="all", sources=["claude"])["items"]
+                          for match in item["matches"]])
+        # Re-parsing the transcript rewrites the guest's own rows and leaves Relay's sidecar be.
+        self.index.update_guest({"source": "claude", "id": guest, "title": "pane drag",
+                                 "workspace": "/tmp/alpha", "mtime": 2.0, "message_count": 1,
+                                 "entries": [{"turn": 1, "seq": 1, "kind": "prompt", "time": 2.0,
+                                              "text": "fix the pane drag again"}]})
+        self.assertEqual(1, len(self.index.search("quokka", scope="all", sources=["claude"])["items"]))
+        # The transcript is the guest's, but that scrollback is Relay's, so a delete takes it.
+        removed = self.index.delete_session(guest)
+        self.assertEqual(1, removed["files"])
+        self.assertFalse((conv_index.guest_text_dir("claude", self.sessions)
+                          / f"{guest}.scrollback.txt").exists())
+
+    def test_a_scrollback_with_no_conversation_row_leaves_no_orphan(self):
+        self.guest_scrollback("$ ls\nquokka.txt\n", "h" * 32)
+        self.index.reconcile(self.sessions)
+        self.assertEqual(0, self.index.stats()["entries"])
+        self.assertEqual({}, self.index.sidecar_stamps(), "and it is looked at again next pass")
 
 
 class StoreIntegrationTests(unittest.TestCase):
