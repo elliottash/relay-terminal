@@ -1949,11 +1949,12 @@ private:
         relay::SettingsSection models;
         models.id = QStringLiteral("models");
         models.title = QStringLiteral("Models");
-        models.blurb = QStringLiteral("Relay is bring-your-own-key: a key lives in the desktop keyring and requests on "
-                                      "it go to that provider and never touch Relay's server. Relay Free, the included "
-                                      "allowance, is the one exception: its prompts go through Relay's hosted service. "
-                                      "Claude Code and Codex run with your own login. /models opens this page; "
-                                      "Ctrl+Shift+M opens it; Alt+M drops the model box open; Ctrl+Alt+M and /model open the picker.");
+        models.blurb = QStringLiteral("Relay runs on the models you already pay for: an API key, a coding-plan subscription "
+                                      "(GLM, Kimi, MiniMax), or your Claude Code and Codex logins. Keys live in the "
+                                      "desktop keyring and requests go straight to the provider, never through Relay's "
+                                      "server; Relay Free, the included allowance, is the one exception and goes through "
+                                      "Relay's hosted service. Ctrl+Shift+M or /models opens this page; Alt+M drops the "
+                                      "model box open; Ctrl+Alt+M or /model opens the picker.");
         Pane *pane = m_active;
         QSettings settings;
         const QJsonArray presets = pane ? pane->allPresets() : QJsonArray();
