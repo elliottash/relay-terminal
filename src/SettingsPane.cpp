@@ -4,6 +4,7 @@
 #include "HelperChat.h"
 #include "SettingsCache.h"   // a write here drops the hot-path settings cache (#057J)
 
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -118,6 +119,23 @@ protected:
     }
 private:
     QPoint m_pressed{-1, -1};
+};
+
+// A completer's popup opens as wide as the box it completes, which for a model id box is a
+// few dozen characters: "google/gemini-3.5-flash-lite" cut off mid-word (owner report,
+// 2026-09-20). This widens it as it shows, so the whole id is readable.
+class WidenOnShow final : public QObject {
+public:
+    WidenOnShow(QWidget *popup, int width) : QObject(popup), m_width(width) {}
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::Show)
+            if (auto *widget = qobject_cast<QWidget *>(object); widget && widget->width() < m_width)
+                widget->resize(m_width, widget->height());
+        return false;
+    }
+private:
+    int m_width;
 };
 
 void repolish(QWidget *widget) {
@@ -795,6 +813,9 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
             completer->setFilterMode(Qt::MatchContains);
             completer->setCompletionMode(QCompleter::PopupCompletion);
             edit->setCompleter(completer);
+            // Room for a full id in the box and under it.
+            edit->setMaximumWidth(520);
+            completer->popup()->installEventFilter(new WidenOnShow(completer->popup(), 560));
         }
         edit->setMinimumWidth(140);   // narrower than that, the label column goes first
         edit->setMaximumWidth(360);
