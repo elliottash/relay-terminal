@@ -418,7 +418,8 @@ QWidget *rowText(const QString &title, const QStringList &under, bool bold,
 }  // namespace
 
 QStringList RolesDialog::tierIds() {
-    return {QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("lite"),
+    // high first (owner, 2026-09-20): plan mode's tier, main at max reasoning unless a model is picked.
+    return {QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("lite"),
             QStringLiteral("local")};
 }
 
