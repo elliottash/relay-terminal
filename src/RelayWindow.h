@@ -1961,6 +1961,11 @@ private:
         auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
 
         // ----- 1. providers ---------------------------------------------------------------------
+        // Owner (2026-09-20): only the providers you can use are listed — a key stored, Relay Free,
+        // Claude Code and Codex on this machine — plus OpenRouter always, because it is the one key
+        // the fallbacks and the Lite tier lean on. The rest wait behind "+ add provider". Listed
+        // providers are ordered by intelligence, the best of their catalog models first; those with
+        // no score keep the worker's order after them.
         models.rows << headingRow(QStringLiteral("providers"));
         if (presets.isEmpty()) {
             relay::SettingRow none;
@@ -1969,27 +1974,58 @@ private:
             none.label = QStringLiteral("The agent worker has not answered yet. This page fills in once a pane's agent is up.");
             models.rows << none;
         }
+        auto providerIntelligence = [&catalog](const QString &id) {
+            int best = -1;
+            for (const relay::models::Entry &entry : catalog.ofPreset(id)) best = qMax(best, entry.intelligence);
+            return best;
+        };
+        // The add-key flow, shared by the listed rows and "+ add provider".
+        auto askForKey = [this](const QString &id, const QString &label) {
+            if (!m_active) return;
+            bool ok = false;
+            // Password echo: the key is never rendered and never leaves this call.
+            const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
+                QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
+                QLineEdit::Password, QString(), &ok).trimmed();
+            if (!ok || key.isEmpty()) return;
+            if (key.contains(QRegularExpression(QStringLiteral("\\s")))) {
+                QMessageBox::warning(this, QStringLiteral("API key"), QStringLiteral("An API key cannot contain spaces."));
+                return;
+            }
+            m_active->storeKey(id, key);
+        };
+        QList<QJsonObject> listed, waiting;
         for (const auto &value : presets) {
             const QJsonObject preset = value.toObject();
             const QString id = str(preset, "id");
             if (id.isEmpty() || preset.value(QStringLiteral("local")).toBool()) continue;   // Options › Local models
+            const bool guest = id.startsWith(QStringLiteral("guest:"));
+            const bool usable = preset.value(QStringLiteral("has_stored_key")).toBool()
+                || (preset.value(QStringLiteral("hosted")).toBool() && preset.value(QStringLiteral("available")).toBool())
+                || (guest && preset.value(QStringLiteral("installed")).toBool(true));
+            (usable || id == QStringLiteral("openrouter") ? listed : waiting) << preset;
+        }
+        std::stable_sort(listed.begin(), listed.end(), [&](const QJsonObject &a, const QJsonObject &b) {
+            return providerIntelligence(str(a, "id")) > providerIntelligence(str(b, "id"));
+        });
+        for (const QJsonObject &preset : std::as_const(listed)) {
+            const QString id = str(preset, "id");
             const QString label = str(preset, "label").toLower();
             const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
             const bool guest = id.startsWith(QStringLiteral("guest:"));
             const QString source = str(preset, "key_source");
             const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
             const QString limits = relay::models::limitsText(catalog.limits.value(id), now);
+            const int score = providerIntelligence(id);
             QString status;
             if (hosted) {
                 status = preset.value(QStringLiteral("available")).toBool()
-                    ? QStringLiteral("included, no key needed") + (limits.isEmpty() ? QString() : QStringLiteral(" · ") + limits)
-                    : QStringLiteral("needs python3-cryptography");
+                    ? QStringLiteral("included, no key needed") : QStringLiteral("needs python3-cryptography");
             } else if (guest) {
-                status = !preset.value(QStringLiteral("installed")).toBool(true)
-                    ? QStringLiteral("not installed: no `%1` on PATH").arg(id.mid(6))
-                    : preset.value(QStringLiteral("harness")).toBool()
-                    ? QStringLiteral("on this machine, runs with your own login") + (limits.isEmpty() ? QString() : QStringLiteral(" · ") + limits)
-                    : QStringLiteral("on this machine; runs as a program in the pane's terminal");
+                const QJsonValue loggedIn = preset.value(QStringLiteral("logged_in"));
+                status = loggedIn.isBool() ? (loggedIn.toBool() ? QStringLiteral("logged in on this machine")
+                                                                : QStringLiteral("not logged in: change login runs the CLI's own sign-in"))
+                                           : QStringLiteral("on this machine, runs with your own login");
             } else if (source == QStringLiteral("env")) {
                 status = QStringLiteral("key from RELAY_%1_API_KEY").arg(id.toUpper().replace(QLatin1Char('-'), QLatin1Char('_')));
             } else if (hasKey) {
@@ -1997,55 +2033,66 @@ private:
             } else {
                 status = QStringLiteral("no key yet · get one at %1").arg(str(preset, "key_url"));
             }
+            if (!limits.isEmpty()) status += QStringLiteral(" · ") + limits;
+            if (score >= 0) status += QStringLiteral(" · intelligence %1").arg(score);
             if (!str(preset, "note").isEmpty()) status += QStringLiteral(" · ") + str(preset, "note").toLower();
             relay::SettingRow row;
+            row.kind = relay::SettingRow::Buttons;
             row.id = QStringLiteral("provider:") + id;
             row.label = label;
             row.detail = status;
-            row.aliases = QStringLiteral("provider key api keyring ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
-            if (hosted || guest) {
-                // Nothing to add or remove; Relay Free's Test makes one real call.
-                if (hosted && preset.value(QStringLiteral("available")).toBool()) {
-                    row.kind = relay::SettingRow::Buttons;
-                    row.buttonTexts = QStringList{QStringLiteral("test")};
-                    row.agentSafeButtons = QList<int>{0};   // testing a key is reversible (#FEJQ, decision 2)
+            row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
+            if (hosted) {
+                if (!preset.value(QStringLiteral("available")).toBool()) { row.kind = relay::SettingRow::Info; row.label = label + QStringLiteral(" · ") + status; }
+                else {
+                    row.buttonTexts = QStringList{QStringLiteral("test")};   // one real call
                     row.onButton = [this, id](int) { if (m_active) m_active->testKey(id); };
-                } else {
-                    row.kind = relay::SettingRow::Info;
-                    row.label = label + QStringLiteral(" · ") + status;
                 }
-            } else {
-                row.kind = relay::SettingRow::Buttons;
-                // The row stands for a key the keyring holds, so it is marked as such (#FEJQ,
-                // §30.2): the agent may say where it is and test it, and may neither read it nor
-                // press the buttons that add, replace or remove it (owner decisions 1 and 2).
-                row.secret = true;
-                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
-                row.agentSafeButtons = QList<int>{1};
-                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
-                row.onButton = [this, id, label](int index) {
+            } else if (guest) {
+                // The same two buttons as a keyed provider, in the guest's words: its login is its
+                // key. The CLI's own sign-in runs in the pane's terminal; test runs one turn.
+                const QString cli = id.mid(6);
+                const QString login = cli == QStringLiteral("claude") ? QStringLiteral("claude auth login") : cli + QStringLiteral(" login");
+                row.buttonTexts = QStringList{QStringLiteral("change login"), QStringLiteral("test")};
+                row.onButton = [this, id, login](int index) {
                     if (!m_active) return;
-                    if (index == 0) {
-                        bool ok = false;
-                        // Password echo: the key is never rendered and never leaves this call.
-                        const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
-                            QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
-                            QLineEdit::Password, QString(), &ok).trimmed();
-                        if (!ok || key.isEmpty()) return;
-                        if (key.contains(QRegularExpression(QStringLiteral("\\s")))) {
-                            QMessageBox::warning(this, QStringLiteral("API key"), QStringLiteral("An API key cannot contain spaces."));
-                            return;
-                        }
-                        m_active->storeKey(id, key);
-                    } else if (index == 1) {
-                        m_active->testKey(id);
-                    } else if (QMessageBox::question(this, QStringLiteral("Remove key"),
-                                   QStringLiteral("Remove the stored key for %1 from the keyring?").arg(label)) == QMessageBox::Yes) {
+                    if (index == 0) m_active->runLoginCommand(login);
+                    else m_active->testKey(id);
+                };
+            } else {
+                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
+                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
+                row.onButton = [this, id, label, askForKey](int index) {
+                    if (!m_active) return;
+                    if (index == 0) askForKey(id, label);
+                    else if (index == 1) m_active->testKey(id);
+                    else if (QMessageBox::question(this, QStringLiteral("Remove key"),
+                                 QStringLiteral("Remove the stored key for %1 from the keyring?").arg(label)) == QMessageBox::Yes)
                         m_active->removeKey(id);
-                    }
                 };
             }
             models.rows << row;
+        }
+        if (!waiting.isEmpty()) {
+            // The providers without a key, one pick away: the picker lists them with where a key
+            // comes from, and the pick goes straight to the key box.
+            models.rows << buttonRow(QStringLiteral("models.addProvider"), QStringLiteral("+ add provider"),
+                QStringLiteral("%1 more: %2").arg(waiting.size()).arg([&] {
+                    QStringList names; for (const QJsonObject &preset : std::as_const(waiting)) names << str(preset, "provider").toLower();
+                    names.removeDuplicates(); return names.join(QStringLiteral(", ")); }()),
+                QStringLiteral("add…"), [this, waiting, askForKey, str] {
+                    QList<relay::agentui::PickerRow> rows;
+                    for (const QJsonObject &preset : waiting)
+                        rows << relay::agentui::PickerRow{{str(preset, "label").toLower(), str(preset, "plan").toLower(), str(preset, "key_url")},
+                                                          str(preset, "note"), str(preset, "id")};
+                    const auto result = relay::agentui::pick(this, QStringLiteral("add provider"),
+                        QStringLiteral("Pick a provider; the next step asks for its key."),
+                        {QStringLiteral("provider"), QStringLiteral("plan"), QStringLiteral("key page")}, rows,
+                        {{QStringLiteral("add"), QStringLiteral("add key…"), true}});
+                    if (result.row < 0) return;
+                    const QJsonObject preset = waiting.at(result.row);
+                    askForKey(str(preset, "id"), str(preset, "label").toLower());
+                });
         }
 
         // ----- 2. which models the picker shows -------------------------------------------------

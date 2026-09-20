@@ -9,7 +9,7 @@ no prompt is ever submitted. `drive.sh [build-dir]` reproduces every shot.
 | implementer-b-picker.png | Ctrl+Shift+M: the picker — filter, sort menu (priority), columns model · provider · reasoning · intelligence · tok/s · left; the current row bold and selected; the reasoning buttons (low · high · max) for it; ☆ favorite, customize…, use, cancel |
 | implementer-c-picker-filter.png | `flash` typed: one flat list of the two matching rows, the first selected |
 | implementer-d-picker-sort.png | the sort menu open (priority, a to z, intelligence, speed, most used, subscription left) |
-| implementer-e-options.png | `/models`: Options › Models — the providers group with status and add key… / replace key… / test |
+| implementer-e-options.png | `/models`: Options › Models — the providers group: only providers with a key (ordered by intelligence), Relay Free, OpenRouter always, Claude Code and Codex with `change login` / `test`; the rest behind `+ add provider` |
 | implementer-g-options-checklist.png | the checklist group: `relay free` and `kimi code · k3` with one toggle per model, and under `k3` the unchecked per-model switch "↳ when it fails, continue on openrouter's moonshotai/kimi-k3" (owner: off by default, on per model) |
 | implementer-f-options-down.png | the same page at the end of the priority list (↑ ↓ per row, reset) and the defaults group |
 

@@ -774,6 +774,9 @@ public:
     void storeKey(const QString &preset, const QString &key) { send({{"type", "store_key"}, {"preset", preset}, {"api_key", key}}); }
     void testKey(const QString &preset) { send({{"type", "test_key"}, {"preset", preset}}); }
     void removeKey(const QString &preset) { send({{"type", "remove_key"}, {"preset", preset}}); }
+    // Options › Models › "change login" on Claude Code or Codex: the CLI's own login runs in this
+    // pane's terminal, where it can open a browser and ask what it asks.
+    void runLoginCommand(const QString &command) { submitTerminal(command, true); }
     // Options › Models changed what the picker shows or in what order: every box re-reads it.
     void modelsCurationChanged() { rememberFallback(modelCatalog()); refreshPickers(); }
     // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
