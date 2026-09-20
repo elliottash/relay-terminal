@@ -697,6 +697,34 @@ it with fake events.
 The pane asks once, with `signals_list`, when its `board` event arrives: the worker pushes after
 every change, and every change so far happened before the pane existed.
 
+#### 4.11.2b A fault nobody is on works itself, out loud (#AQ6X phase 3, owner 2026-09-20)
+
+Decision 9, in the owner's words: *"6 -- i think yes by default, but its optional"*, and *"you get a
+notification that you can click on to open the agent thread, and those go into the sessions manger"*.
+So agents work unclaimed signals without being asked — and every pickup is something the owner can
+see, open and turn off.
+
+The pane whose own run opened a signal is told in that run's result and is expected to fix it before
+it reports. Everything it leaves unclaimed for a whole fold is picked up by a **signal thread**: an
+agent of the board worker, on the signal and nothing else, at most three per project, never when the
+board's autonomy is off, and not at all when Options › Agent › Switchboard's *"Work signals unasked"*
+is unticked (it writes `signals: {auto_work: false}` into that project's `board.yaml`, because
+whether a checkout's red tests are worth working is a property of the project and not of this
+installation). The thread claims the signal under its own thread id, so the row's `⧉` chip reads live
+while it works and clicking it opens the thread rather than hunting for a pane that does not exist.
+
+Three surfaces, and no fourth. One **notification** — "Working on ctest:panelayout", with an *Open
+thread* button — amended in place when the thread ends to "Fixed … (verified)", "Gave up on … —
+promoted to #ID", "Dismissed …" or "Stopped working on …": one fault, one line in the bell, never two.
+One **row in the Sessions manager**, under its project, marked `⚑ signal` and titled with the key,
+listed whether or not "Subagent threads" is ticked — it is Relay's thread, not the user's, and a
+checkbox for a feature nobody has heard of is not where a pickup should be hiding. And the **chip**,
+which is where an owner looking at the board finds out that something is already on it.
+
+What the thread cannot do is say it worked. The *check* decides: the signal resolves by passing, and a
+thread that runs out with the check still red has given up whether it said so or not, which files the
+bug card. That is the whole reason a fault the machine found is not a card until a person needs it.
+
 ### 4.12 The card reads as one page: a pencil, a seam, and a box that does the talking (#VZ69, owner 2026-09-19)
 
 Owner, on the card detail as 4.9 left it: *"there should be a promponent pencil edit button, rather
