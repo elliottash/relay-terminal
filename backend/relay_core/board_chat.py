@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 
 from . import board as B
+from . import sessions as S
 
 #: Prompts waiting for the page agent, past which a message is refused rather than queued. The
 #: pane's queue has no cap because a person is watching it fill; a board page can be left open.
@@ -122,6 +123,65 @@ PANE_BRIEFS = {
         "app_open the pane at the search you used, so the person lands on the rows you are "
         "talking about."),
 }
+
+
+#: Where a tab's helper conversation is kept: `$XDG_DATA_HOME/relay/helper-sessions/<workspace
+#: digest>/<tab digest>.json` (protocol 30.7).  Deliberately *outside* `relay/sessions/`, which
+#: is the one tree `SessionStore.index()` will index: the helper's chatter is not a conversation
+#: the Sessions pane lists, and keying it by the tab would make the same row reappear under two
+#: titles anyway.  The workspace digest is `default_session_dir`'s, so one project's helpers sit
+#: together and two projects never collide.
+HELPER_DIRNAME = "helper-sessions"
+
+#: A tab id is a `t` and twelve hex digits today; it is hashed, never used as a path, so the
+#: check is only against a protocol slip — a number, an object, a megabyte of text.
+MAX_TAB = 64
+
+
+def validate_tab(value) -> str:
+    """The tab's persistent id from `configure` (protocol 30.7), or "" when the GUI sent none.
+
+    Absent is not an error: a GUI from before 30.7 sends no `tab`, and its helper then behaves
+    exactly as it did — one conversation per worker, gone when the worker goes.
+    """
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > MAX_TAB or not value.strip():
+        raise ValueError(f"tab must be the tab's id, at most {MAX_TAB} characters.")
+    return value.strip()
+
+
+def helper_dir(workspace) -> Path:
+    """The directory this workspace's helper conversations live in."""
+    beside = S.default_session_dir(workspace or "")
+    return beside.parent.parent / HELPER_DIRNAME / beside.name
+
+
+def helper_session_id(tab: str) -> str:
+    """The session id a tab's helper conversation always has: 32 hex digits from the tab id.
+
+    Derived rather than stored, so nothing has to be written down to find the conversation
+    again: the same tab in the same workspace resolves to the same file at every start, which
+    is what "the conversation is persisted per (project, tab)" means in practice.
+    """
+    import hashlib
+    return hashlib.blake2b(str(tab).encode("utf-8"), digest_size=16,
+                           person=b"relay-helper").hexdigest()
+
+
+def adopt(agent, tab: str) -> bool:
+    """Point this helper agent at `tab`'s conversation, loading it when there is one (30.7).
+
+    True when a saved conversation came back, False when this tab's helper is new (or the GUI
+    sent no tab and there is nothing to key by).  Never raises: a helper whose history cannot
+    be read is a helper with no history, not a tab that cannot be talked to.
+    """
+    if not tab or getattr(agent, "store", None) is None:
+        return False
+    try:
+        return bool(agent.adopt_session(helper_session_id(tab)))
+    except (ValueError, OSError):                            # pragma: no cover - unreadable file
+        return False
 
 
 def validate_pane(value) -> str:
@@ -380,7 +440,10 @@ class PageAgent:
                     pass
             self.agent, self.tools = self._build(self.wrap(self._emit))
             if messages:
-                self.agent.messages.extend(messages)
+                # Replaced, not appended: since 30.7 the built agent may already have adopted
+                # this tab's saved conversation, and the live messages carried across a model
+                # switch are that same conversation plus whatever has happened since.
+                self.agent.messages[1:] = messages
             self._built_model = self.model
             self.built_model_id = getattr(getattr(self.agent, "config", None), "model", None)
         # The opening turn carries the board; every later one is the owner's words alone, the

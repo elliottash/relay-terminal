@@ -241,6 +241,14 @@ class BoardCommands:
         self.chat = board_chat.PageAgent(
             self.emit, lambda emit: self._build_page_agent(emit),
             on_turn_end=self._chat_turn_ended)
+        #: The tab this worker is the helper of (`configure {tab}`, protocol 30.7), or "" from a
+        #: GUI that sends none. With the workspace it keys the helper's conversation, which is
+        #: why it is kept here rather than passed through each ask.
+        self.tab = ""
+        #: The (workspace, tab) the live conversation belongs to. A `configure` that moves
+        #: either of them is a different helper, so the conversation is let go and the next ask
+        #: adopts that tab's own.
+        self._helper_key: tuple[str, str] | None = None
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
@@ -368,6 +376,26 @@ class BoardCommands:
             self.init.cancel = cancel
         self._refresh_chat_model()
 
+    def set_tab(self, tab) -> str:
+        """Which tab this worker is the helper of (`configure {tab}`, protocol 30.7).
+
+        The tab's persistent id — the one that restores its panes — keys the helper's
+        conversation together with the workspace, so the same tab comes back with its own
+        history and two tabs on one project keep two.  `worker.py` calls it straight after
+        `configure`, which is where the workspace is settled.
+
+        A worker re-pointed at another tab lets the live conversation go, so the first tab's
+        messages are never carried into the second tab's file; a `configure` that moves neither
+        — a model swap, a keybinding reload — leaves it exactly where it was.
+        """
+        tab = board_chat.validate_tab(tab)
+        key = (self.workspace or "", tab)
+        self.tab = tab
+        if self._helper_key is not None and self._helper_key != key:
+            self.chat.drop()
+        self._helper_key = key
+        return tab
+
     def _refresh_chat_model(self) -> None:
         """A `configure` rebuilt the pane's agent: does the live page conversation still run on
         the model the `switchboard` role names (19.18)?
@@ -491,7 +519,12 @@ class BoardCommands:
         if resolved is not None:
             config, preset_id = resolved.config, resolved.preset_id
             effort = resolved.effort or effort
-        agent = Agent(config, workspace, emit,
+        # The tab's helper keeps its conversation on disk, keyed by (workspace, tab) — 30.7.
+        # The directory is outside `relay/sessions/`, the one tree that is indexed, so nothing
+        # here is listed as one of the person's own conversations. No tab (a GUI from before
+        # 30.7): no store, and the conversation lives and dies with the worker as it did.
+        session_dir = str(board_chat.helper_dir(self.workspace or "")) if self.tab else None
+        agent = Agent(config, workspace, emit, session_dir=session_dir,
                       max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
                       skills=getattr(main.executor, "skills", None),
                       preset_id=preset_id, roles=main.roles, board=tools, effort=effort,
@@ -509,6 +542,8 @@ class BoardCommands:
             agent.executor.workspace = Workspace(workspace, policy)
         if getattr(main, "instructions", None) is not None:
             agent.set_instructions(main.instructions)
+        # Last of all, so nothing above rebuilds the conversation underneath it.
+        board_chat.adopt(agent, self.tab)
         return agent, tools
 
     def _chat_turn_ended(self, turn_id: str, survey: bool, outcome: str) -> None:

@@ -557,6 +557,171 @@ class ImportToolTest(ProtocolChatTest):
         self.assertNotIn("error", result)
 
 
+class StubProvider:
+    """Answers every request with one line, so a real `Agent.ask` finishes and autosaves."""
+
+    def complete(self, messages, tools, emit, cancel):
+        emit({"event": "delta", "text": "Noted."})
+        return {"role": "assistant", "content": "Noted."}
+
+    def cancel(self):
+        pass
+
+
+class HelperHistoryTest(unittest.TestCase):
+    """The helper's conversation is persisted per (project, tab) — protocol 30.7.
+
+    Keyed rather than stored: the same tab in the same workspace resolves to the same file at
+    every start, so a restart brings each tab's helper back with its own history and two tabs
+    on one project never share one.
+    """
+
+    TAB_A = "t0123456789ab"
+    TAB_B = "tfedcba987654"
+
+    def setUp(self):
+        import os
+        import tempfile
+        from unittest import mock
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = Path(self.tmp.name) / "data"
+        patch = mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.repo = Path(self.tmp.name).resolve() / "project"
+        self.root = self.repo / "issues"
+        self.root.mkdir(parents=True)
+        (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+        write_card(self.root, "2026-09-19-one.md", "ABCD", "One card")
+        self.events: list[dict] = []
+        self.commands = P.BoardCommands(StubTurns(), self.events.append)
+        self.commands.turns.agent = Agent(
+            ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
+            lambda event: None)
+        self.commands.chat._build = self.build
+        self.addCleanup(self.commands.chat.drop)
+
+    def build(self, emit):
+        agent, tools = self.commands._build_page_agent(emit)
+        agent.provider = StubProvider()
+        return agent, tools
+
+    def restart(self):
+        """Throw this worker away and start another on the same data root: what a restart is."""
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+        self.commands.chat.drop()
+        self.commands = P.BoardCommands(StubTurns(), self.events.append)
+        self.commands.turns.agent = Agent(
+            ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
+            lambda event: None)
+        self.commands.chat._build = self.build
+        self.addCleanup(self.commands.chat.drop)
+
+    def configure(self, tab=None, workspace=None):
+        # What `worker.py` does on a `configure`: point the board, then say which tab this
+        # worker is the helper of.
+        request = {} if tab is None else {"tab": tab}
+        self.commands.configure(str(workspace or self.repo), request)
+        self.commands.set_tab(request.get("tab"))
+
+    def turn(self, text):
+        """One real helper turn, saved the way a finished turn saves itself."""
+        self.commands.chat.ask(text, pane="options")
+        wait_idle(self.commands.chat)
+        return self.commands.chat.agent
+
+    def said(self, agent):
+        return [m.get("content") for m in agent.messages[1:] if m.get("role") == "user"]
+
+    # ---- the key ----------------------------------------------------------------
+    def test_a_tab_id_is_validated_and_optional(self):
+        self.assertEqual(board_chat.validate_tab(None), "")
+        self.assertEqual(board_chat.validate_tab(""), "")
+        self.assertEqual(board_chat.validate_tab(" " + self.TAB_A + " "), self.TAB_A)
+        for bad in (7, True, ["t1"], "x" * 65, "   "):
+            with self.assertRaises(ValueError):
+                board_chat.validate_tab(bad)
+
+    def test_the_session_id_is_derived_and_stable(self):
+        first = board_chat.helper_session_id(self.TAB_A)
+        self.assertRegex(first, r"^[0-9a-f]{32}$")
+        self.assertEqual(first, board_chat.helper_session_id(self.TAB_A))
+        self.assertNotEqual(first, board_chat.helper_session_id(self.TAB_B))
+
+    def test_the_helper_conversations_are_not_the_persons_sessions(self):
+        from relay_core import conv_index
+        directory = board_chat.helper_dir(str(self.repo))
+        root = conv_index.sessions_root()
+        self.assertNotEqual(directory, root)
+        self.assertNotIn(root, directory.parents)
+        # A different project is a different directory; no workspace is its own.
+        self.assertNotEqual(directory, board_chat.helper_dir(str(self.repo / "other")))
+        self.assertNotEqual(directory, board_chat.helper_dir(""))
+
+    # ---- the behaviour ------------------------------------------------------------
+    def test_the_same_tab_gets_its_history_back(self):
+        self.configure(self.TAB_A)
+        first = self.turn("what is this setting?")
+        self.assertEqual(self.said(first)[-1].split("\n")[-1], "what is this setting?")
+        self.assertTrue(first.store.path(first.session_id).is_file())
+
+        # A restart: a new worker, a new PageAgent, the same (workspace, tab).
+        self.restart()
+        self.configure(self.TAB_A)
+        again = self.turn("and this one?")
+        self.assertEqual(again.session_id, first.session_id)
+        self.assertEqual([s.split("\n")[-1] for s in self.said(again)],
+                         ["what is this setting?", "and this one?"])
+
+    def test_two_tabs_on_one_project_keep_two_conversations(self):
+        self.configure(self.TAB_A)
+        a = self.turn("the first tab's question")
+        a_id = a.session_id
+        # The same worker re-pointed at the other tab: the conversation is let go, not carried.
+        self.configure(self.TAB_B)
+        b = self.turn("the second tab's question")
+        self.assertNotEqual(b.session_id, a_id)
+        self.assertEqual([s.split("\n")[-1] for s in self.said(b)], ["the second tab's question"])
+        # And the first tab still has its own.
+        self.configure(self.TAB_A)
+        back = self.turn("more from the first tab")
+        self.assertEqual(back.session_id, a_id)
+        self.assertEqual([s.split("\n")[-1] for s in self.said(back)],
+                         ["the first tab's question", "more from the first tab"])
+
+    def test_a_configure_that_does_not_move_the_tab_keeps_the_conversation(self):
+        self.configure(self.TAB_A)
+        first = self.turn("first")
+        self.configure(self.TAB_A)              # a model swap, a keybinding reload, anything
+        self.assertIs(self.commands.chat.agent, first)
+        again = self.turn("second")
+        self.assertIs(again, first)
+        self.assertEqual(len(self.said(again)), 2)
+
+    def test_no_tab_means_no_store_and_a_fresh_conversation(self):
+        self.configure()                         # a GUI from before 30.7
+        first = self.turn("a question")
+        self.assertIsNone(first.store)
+        self.assertEqual(self.commands.tab, "")
+        self.commands.chat.drop()
+        second = self.turn("another question")
+        self.assertIsNot(second, first)
+        self.assertEqual([s.split("\n")[-1] for s in self.said(second)], ["another question"])
+
+    def test_a_board_less_tab_is_keyed_by_the_tab_alone(self):
+        self.commands.configure(None, {})
+        self.commands.set_tab(self.TAB_A)
+        self.assertIsNone(self.commands.tools)
+        agent, tools = self.build(lambda event: None)
+        self.assertIsNone(tools)
+        self.assertEqual(agent.session_id, board_chat.helper_session_id(self.TAB_A))
+        self.assertEqual(Path(agent.store.directory), board_chat.helper_dir(""))
+
+
 class BoardlessHelperTest(unittest.TestCase):
     """A tab with no project attached still has a helper (protocol 30.7, card #FEJQ).
 

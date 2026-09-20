@@ -173,6 +173,10 @@ def main():
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
+                # Protocol 30.7: which tab this worker is the helper of. It keys the helper's
+                # conversation with the workspace `board.configure` has just settled, so the
+                # same tab comes back with its own history after a restart.
+                board.set_tab(request.get("tab"))
                 config = session_protocol.provider_config(request)
                 # Tier A (protocol 29.3): a `guest:` preset makes the guest's own headless harness
                 # this pane's agent. `is_guest` here, the process started further down — after

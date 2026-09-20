@@ -5474,11 +5474,26 @@ generalised, not a sibling of it:
   being moved or renumbered. It is not the share id (`tab-…`), which is deliberately not saved.
   It rides twice on the helper's `configure`: as `app.tab` (30.2), which is the canonical field and
   reaches pane agents too, and as a **top-level `tab`** beside `workspace`, which is what the board
-  side is to key its conversation by without reaching into the app block. *The backend does not read
-  the top-level field yet* (30.8).
+  side keys its conversation by without reaching into the app block.
   Switchboards are per tab, so the same project open in two tabs gets two helpers with two
   conversations over **one** set of board files; only the conversation and the queue are the tab's
   own.
+- **The conversation is persisted per (project, tab)**, so a restart brings each tab's helper back
+  with its own history. The top-level `tab` and the workspace are the key and nothing else is
+  written down: the file is
+  `$XDG_DATA_HOME/relay/helper-sessions/<workspace digest>/<tab digest>.json`, the digest of the
+  workspace being `sessions.default_session_dir`'s and the file name a 32-hex digest of the tab id
+  (`board_chat.helper_dir` / `helper_session_id`), so the same tab in the same project resolves to
+  the same file at every start. The directory is deliberately **outside** `relay/sessions/`, the one
+  tree `SessionStore.index()` indexes: a helper conversation is not one of the person's own
+  sessions and is not listed as one (14). The page agent is built with that `session_dir` and takes
+  the id over with `Agent.adopt_session`, which loads the file when there is one and starts an empty
+  conversation under that id when there is not; from then on the ordinary end-of-turn autosave keeps
+  it. A `configure` that moves either the workspace or the tab drops the live conversation so the
+  next ask adopts the new tab's own; one that moves neither — a model swap, a keybinding reload —
+  leaves it exactly where it was. A board-less tab is keyed by `("", tab)`, and a `configure` with
+  **no** `tab` at all (a GUI from before 30.7) gets no store: its helper behaves as it did, one
+  conversation per worker, gone when the worker goes.
 - **Started on the first ask**, not when the tab opens (owner decision 5), and it lives as long as
   the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. A tab
   with no project attached gets a **board-less** helper: the `app` block and the app tools, no
@@ -5539,7 +5554,8 @@ decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "O
   and the helper panels and no further — so every write the helper attempted waited out the 20 s
   deadline and answered `no_reply`, while the GUI showed nothing at all. The helper's `who` is
   `"helper"`, which is what the change log and the notification say.
-- **Not built yet, and the section says so rather than describing it:**
-  - **The helper's conversation does not survive a restart.** It lives as long as its worker, which
-    lives as long as the tab; nothing writes it under the tab id, and the top-level `tab` on its
-    `configure` is carried for that purpose but not yet read by the backend.
+- **The helper's conversation is keyed, not registered.** Nothing keeps a list of which tab owns
+  which file: the path is derived from (workspace, tab) every time, so there is no index to fall
+  out of step with the tabs and a tab that is gone leaves one small file behind rather than a
+  dangling row. A helper file that cannot be read is a helper with no history, never an error the
+  person sees.

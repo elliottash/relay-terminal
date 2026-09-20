@@ -2870,6 +2870,31 @@ class Agent:
             return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
                     "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
 
+    def adopt_session(self, session_id: str) -> bool:
+        """Take over a session id the caller knows, loading its file when there is one.
+
+        The tab's helper (protocol 30.7): its conversation is keyed by (project, tab) rather
+        than by a random id, so the same tab finds the same conversation at every start.
+        `resume` cannot do it — it refuses an id with no file — and this has to work the first
+        time that tab is ever asked a question, when there is nothing to load.
+
+        Returns whether a saved conversation came back.  Either way the agent's autosave from
+        here on writes that one file, which is what makes the next start find it.
+        """
+        with self._lock:
+            session_id = check_session_id(session_id)
+            data = None
+            if self.store is not None and self.store.path(session_id).is_file():
+                try:
+                    data = self.store.load(session_id)
+                except (ValueError, OSError):
+                    data = None          # an unreadable file is a helper with no history
+            if data is not None:
+                self._apply_session(data, keep_id=True)
+                return True
+            self._new_session(session_id)
+            return False
+
     def resume(self, session_id) -> dict:
         if self.store is None:
             raise ValueError("Sessions are not stored for this pane.")
