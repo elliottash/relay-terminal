@@ -297,6 +297,23 @@ class BundledSkillTests(unittest.TestCase):
             self.assertIn(path, loaded['content'], path)
         self.assertLessEqual(len(index.skills['local-model-setup'].description), skills.MAX_DESCRIPTION)
 
+    def test_the_deliver_skill_is_the_switchboard_procedure_and_is_offered_as_a_command(self):
+        # The policy in every pane agent's prompt says "load the `deliver` skill" (#R9G7), and
+        # `/deliver <request>` runs it by hand: both need the bundled skill to be indexed, named
+        # `deliver`, and in `commands()` — that list is what the composer offers as `/name`.
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        self.assertEqual(index.skipped, [])
+        self.assertIn('deliver', index.skills)
+        self.assertLessEqual(len(index.skills['deliver'].description), skills.MAX_DESCRIPTION)
+        self.assertIn('/deliver', index.skills['deliver'].description)
+        self.assertIn('deliver', [c['name'] for c in index.commands()])
+        loaded = index.load_skill('deliver')
+        self.assertFalse(loaded['truncated'])
+        self.assertEqual(loaded['files'], [])          # one file: the procedure itself
+        for phrase in ('board_claim', 'board_claimed_elsewhere', 'needs-verification',
+                       'links.commits', 'links.related'):
+            self.assertIn(phrase, loaded['content'], phrase)
+
     def test_the_model_catalog_parses_and_dates_itself(self):
         index = skills.SkillIndex.load([skills.bundled_dir()])
         catalog = json.loads(index.read_file('local-model-setup', 'recipes/models.json')['content'])

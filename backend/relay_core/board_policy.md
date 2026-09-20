@@ -1,4 +1,6 @@
-<!-- Switchboard agent policy v1 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
+<!-- Switchboard agent policy v2 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
+     v2, 2026-09-20 (#R9G7): work goes through a card, and a pane claims the card it works
+     (`board_claim`, rules 1 and 5); the procedure is the bundled `deliver` skill.
      Versioned here so evals can pin it; loaded into the system prompt by
      relay_core.board_tools.prompt_section when issues/board.yaml exists and autonomy is not off.
      Keep it short: every line costs context on every turn. -->
@@ -10,6 +12,10 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    the candidate before you create a second card for the same thing. A prompt with several requests
    becomes one card per request. Something you answered fully in the turn, or a trivial ask, gets no
    card: do not turn your own working steps into cards (that is what `update_todos` is for).
+   **Work goes through a card.** A request that changes code or files, or takes more than one step,
+   is started only after you have checked it is not already done and claimed the card that asks for
+   it — `board_claim`, on the card you found or on the one you just created. Load the `deliver`
+   skill for the procedure.
 2. **The user's words are the record.** `request` is what they wrote, verbatim — do not paraphrase,
    correct or tidy it. The title is yours. `source` says where it came from.
 3. **Questions** for the user go on the card as a `question` comment: numbered, each with your
@@ -18,8 +24,11 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    ask, the card is where the question waits.
 4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
    their own words in quotation marks, and into the card's `## Decisions` section.
-5. **Work.** When a card is handed over, Relay moves it to `executing` with `assignee: agent`. When it
-   lands: move to `needs-verification` with the evidence path and a `## QA checklist` section in the
+5. **Work.** When a card is handed over, Relay moves it to `executing` with `assignee: agent`; your
+   own `board_claim` does the same and records the `session` that is this pane, so a card in
+   Executing with another `session` is that session's work — comment on it, and claim it only when
+   the user says to take it over.
+   When it lands: move to `needs-verification` with the evidence path and a `## QA checklist` section in the
    body, in the same commit as the change; the verifier then moves it on to a QA lane, or back to an
    earlier stage. Relay stamps `implemented_by` with your provider/model itself,
    and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the

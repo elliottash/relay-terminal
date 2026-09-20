@@ -114,7 +114,7 @@ string everywhere. Front matter values are single-line; prose belongs in the bod
 Parsing preserves the front matter bytes: a card that is read and written back without a field
 change is byte-identical. The first field change re-emits the whole block in canonical order
 (`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone,
-workstream, assignee, implemented_by, waiting_on, parent, blocked_by, aliases, paths, pinned,
+workstream, assignee, implemented_by, verified_by, session, waiting_on, parent, blocked_by, aliases, paths, pinned,
 reviewed, author, supersedes, approved_by, goal, label_count, label_output, codebook, priority,
 rank, created, acceptance, source, links`, then any other key, sorted).
 
@@ -129,7 +129,7 @@ outside the range is clamped on every write.
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
-| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
+| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `plan` | `approved_by`, `goal` | `draft`, `approved`, `executing`, `done`, `dropped` | `planning/`, `planning/done/` |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
@@ -166,6 +166,18 @@ outside the range is clamped on every write.
   (`anthropic/claude-opus-5 (pane 2)`), which is how the hand-typed values written before 2026-09-19
   keep working. The pair is what `relay-board.py verifier <ID>` answers from. `verified_by` is never `relay-free/…`: verifying is
   not available on the free plan (owner, 2026-09-19), and a close signed by it is refused.
+- `session` (2026-09-20, #R9G7) is the **pane session token of the session that holds the card**:
+  the terminal pane doing the work. Only a claim writes it — the Switchboard's **Execute** button
+  (`board_claim` with the token of the pane it just opened) or the pane agent's own `board_claim`
+  tool — and always from the pane's own `configure {pane_token}`, never from anything a model
+  typed: `session` is an immutable field, so a front-matter patch naming one is refused. A card in
+  `executing` (or `in-progress`) **with** a `session` is claimed by that pane, and another agent
+  reading the card sees it is taken: its `board_claim` is refused with `board_claimed_elsewhere`
+  until the user says to take it over. The Switchboard draws the token's first eight characters on
+  the card as a link that reveals that pane, and the claim's `progress` entry carries the same
+  token in its attributes (`pane_token`, section 3) so the thread links there too. A card that has
+  moved on keeps the field as a record of who did the work; it stops meaning "taken" the moment
+  the status leaves `executing`/`in-progress`.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching
@@ -257,6 +269,10 @@ where should transcription run? cheap is fine
   that a merge interleaved.
 - `kind` is `comment | question | decision | evidence | progress | note | event | task | plan |
   rewrite`. Attributes are `key=value`, quoted with `"` when the value contains spaces.
+- `pane_token=<session token>` on a `progress` entry is the terminal pane the card was handed to
+  or claimed by (#HKAP, #R9G7): the Switchboard draws such an entry as a link that reveals that
+  pane. At most 64 characters, and neither whitespace nor `>` — a value the entry marker could
+  not hold is refused rather than rewritten.
 - Appends use `O_APPEND` under `flock`, so two processes never interleave a write. Threads are
   never rewritten in place except by `check --fix` (re-sort).
 - The body of the card is the document QA reads (request, decisions, plan, checklist, verdicts);

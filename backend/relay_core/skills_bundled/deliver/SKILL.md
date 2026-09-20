@@ -1,0 +1,79 @@
+---
+name: deliver
+description: Work a request through the Switchboard: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
+---
+
+# Deliver a request through the Switchboard
+
+You are a terminal-pane agent in a project that has a Switchboard, so you have the `board_*` tools
+and the policy in your system prompt. This is the procedure that policy rule 1 points at: it turns
+a request into a card you hold, work that is visible while it runs, and a card in
+`needs-verification` with the evidence. `/deliver <request>` runs it even when the automatic rule
+would have skipped the card.
+
+Do not run it for a question, a one-command ask ("what does X do?", "run the tests"), or a turn
+that already carries a card block — that card is already yours to work, so start at step 3.
+
+## 1. Is it already done?
+
+Before anything else. Cards go stale; the code is the record.
+
+- Read the code the request is about (`search_files`, `read_file`). Working code is the best evidence.
+- `git log --grep "<keyword>"`, and `git log --oneline -20` for what landed today.
+- `board_list` with a query, including the closed lanes (`status: done`, `dropped`) and the QA
+  lanes — the work may be landed and waiting on a verifier.
+
+If it is done: say so with the evidence (the file and function, or the commit), name the card if
+there is one, and **stop**. Do not re-implement it unless the user says to do it anyway.
+
+## 2. Which card?
+
+`board_list` with a query from the request's own words, then `board_read` the candidates in full —
+a title match is not a match.
+
+- **Same ask** → that is the card. Claim it (step 3). If the request adds something, put the new
+  words on the card (`board_update_card`) so the card still holds what was asked.
+- **Related but different** → create the card (`board_create_card`, the user's words verbatim in
+  `request`) and put the neighbour in `links.related`. Never claim a card that asks for something
+  else.
+- **Nothing** → create the card, then claim it.
+
+## 3. Claim it
+
+```
+board_claim {id: "K7Q2", note: "what you are about to do, in a line"}
+```
+
+One call sets `assignee: agent`, moves the card to Executing, writes this pane's `session` onto it
+and links the claim to this pane in the thread. The result hands back the whole card, so you do not
+read it again. Claim **before** you change any code.
+
+Refused with `board_claimed_elsewhere`? Another pane holds it. `board_read` the card and its thread
+to see what that session is doing, post a `progress` comment saying what you are doing instead (or
+that you are standing off), and ask the user before you repeat the call with `force: true`.
+
+## 4. Plan, if it needs one
+
+More than a few steps, or more than two files: write the plan onto the card first —
+`board_update_card` with `replace_section: {heading: "Plan", text: …}`, in the shape a Plan turn
+uses: **Goal**, **Findings** (exact paths), **Steps** (numbered, each one checkable change),
+**Risks** (including anything the user has to decide), **Verify** (the tests, and how to see it
+working). Anything smaller: go straight to work.
+
+## 5. Execute
+
+- `#ID` in every commit message, and each commit hash into the card's `links.commits`.
+- A `progress` comment at a real milestone — the plan is settled, a hard part works, you are
+  blocked — not a running commentary.
+- A fault you find on the way that is not this card's: a new card in the bugs tab with the
+  measured evidence, never a silent fix and never a detour.
+- When it lands: `board_move_card` to `needs-verification` with the evidence path, and a
+  `## QA checklist` section in the body, in the same commit as the change (policy rule 5). Relay
+  stamps `implemented_by` itself — never type it, and never type `session` either.
+- A question for the user goes on the card as a `question` comment with your recommendation, and
+  the card goes to `discussing` with `waiting_on: owner`.
+
+## 6. Reply
+
+Name the card as `#ID`, then one line per thing you did, and where the evidence is. The card holds
+the detail; do not repeat it in the terminal.
