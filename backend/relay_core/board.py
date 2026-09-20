@@ -257,6 +257,21 @@ TASK_HEADING = {"work": "Tasks", "memory": "Tasks", "alias": "Tasks"}
 ISSUE_HEADING = "Issue"
 ISSUE_HEADINGS = ("issue", "request")
 
+#: The work-card body schema (2026-09-20, #Z4HR): one section per workflow stage, in body
+#: order, plus the two the merge and split tools write.  A section earns its place by recording
+#: what its stage *produced* -- a fact that stays true -- so the body is the record of the
+#: workflow and the append-only thread is what these sections digest.  `check` warns on a
+#: `## ` heading outside it (`unknown_section`): a warning, never an error, because the board
+#: predates the set by hundreds of cards and an error would invalidate it on day one; the
+#: warning keeps the backlog visible and countable, and a card converts when it is next
+#: touched.  `board_tools.AGENT_SECTIONS` derives the agent-writable set from it.  Memory and
+#: alias cards have their own layouts (`## Run`, `## Parameters`) and are not checked.
+CARD_SECTIONS = (
+    "issue", "decisions", "discussion points", "planning notes", "plan", "tasks",
+    "execution summary", "tests", "qa checklist", "verdict", "resolution",
+    "merged in", "split",
+)
+
 ITEM_STATUSES = ("open", "in-progress", "blocked", "deferred", "done", "dropped")
 CLOSED_ITEM_STATUSES = ("done", "dropped")
 
@@ -1360,7 +1375,28 @@ class Board:
                                         "card shows in its status section", "warning"))
         if not card.title:
             problems.append(Problem("missing_title", rel, "no '# ' heading in the body"))
+        if card.type == "work":
+            problems.extend(self._check_sections(card, rel))
         problems.extend(self._check_tasks(card, rel, fix))
+        return problems
+
+    def _check_sections(self, card: Card, rel: str) -> list[Problem]:
+        """`## ` headings outside the stage schema (#Z4HR, CARD_SECTIONS).  A warning, never an
+        error: the board predates the set by hundreds of cards, so an error would invalidate it
+        on day one.  The warning keeps the backlog visible and countable; a card converts when
+        it is next touched.  A parenthesized suffix (`## Decisions (owner, 2026-09-20)`) still
+        names its section.  Only work cards are checked -- memory and alias cards have their
+        own layouts."""
+        known = set(CARD_SECTIONS) | set(ISSUE_HEADINGS)
+        problems: list[Problem] = []
+        for match in _SECTION_HEADING_RE.finditer(card.body):
+            heading = match.group("heading").strip()
+            base = heading.split(" (", 1)[0].strip().lower()
+            if heading.lower() in known or base in known:
+                continue
+            problems.append(Problem("unknown_section", rel,
+                                    f"`## {heading}` is not one of the card body sections "
+                                    "(docs/SWITCHBOARD-FORMAT.md, card file)", "warning"))
         return problems
 
     def _check_tasks(self, card: Card, rel: str, fix: bool) -> list[Problem]:
@@ -2615,6 +2651,7 @@ def column_title_of(config: dict, column: str) -> str | None:
     return str(title) if isinstance(title, str) and title.strip() else None
 
 _HEADING_LINE_RE = re.compile(r"^(#{1,5})[ \t]+", re.M)
+_SECTION_HEADING_RE = re.compile(r"^##[ \t]+(?P<heading>.+?)[ \t]*$", re.M)
 
 
 def section_span(body: str, heading: str) -> tuple[int, int] | None:

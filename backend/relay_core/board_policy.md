@@ -7,6 +7,8 @@
      v4, 2026-09-20 (#7BM4): rule 6, the `## Tests` section and `tests_check` before
      needs-verification (protocol 31); the old rules 6-12 became 7-13.
      v5, 2026-09-20 (#GMCF, distillation decision 8): tiered the way v3 tiered the workflow.
+     v6, 2026-09-20 (#Z4HR): rule 10, one body section per workflow stage; the verdict gate
+     takes a verdict only, never a resolution.
      What has to be read *before* a board tool is called stays here; the detail a tool's own
      description or the `deliver` skill already states is read there instead — the landing detail
      of the three sizes and the `## Tests` section in the skill, the stamps and the close-a-QA-card
@@ -52,3 +54,13 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    writing and summarize the rest of the requests in your reply.
 9. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
    about the change, so the user can find it.
+10. **A card body is one section per stage**, written as the stage produces it, in this order:
+    `## Issue` (the request, verbatim — the owner's words), `## Decisions` (owner decisions,
+    quoted, whenever they happen), `## Discussion points` (what the owner is considering),
+    `## Planning notes` (decision factors, options not taken, questions asked with their
+    options, the owner's answers), `## Plan`, `## Tasks` (the live checklist), `## Execution
+    Summary` (what was built, links to the outputs), `## Tests` (what was automated),
+    `## QA checklist` (what a verifier must check by hand; the verifier may adjust it),
+    `## Verdict` (the verifier: how it was checked, and the result — a `## Resolution` is not
+    one), `## Resolution` (when and why the card closed). Write the section your stage
+    produces and invent no others; `relay-board.py check` warns on any heading outside the set.

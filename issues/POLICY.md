@@ -49,6 +49,16 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    writing and summarize the rest of the requests in your reply.
 9. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
    about the change, so the user can find it.
+10. **A card body is one section per stage**, written as the stage produces it, in this order:
+    `## Issue` (the request, verbatim — the owner's words), `## Decisions` (owner decisions,
+    quoted, whenever they happen), `## Discussion points` (what the owner is considering),
+    `## Planning notes` (decision factors, options not taken, questions asked with their
+    options, the owner's answers), `## Plan`, `## Tasks` (the live checklist), `## Execution
+    Summary` (what was built, links to the outputs), `## Tests` (what was automated),
+    `## QA checklist` (what a verifier must check by hand; the verifier may adjust it),
+    `## Verdict` (the verifier: how it was checked, and the result — a `## Resolution` is not
+    one), `## Resolution` (when and why the card closed). Write the section your stage
+    produces and invent no others; `relay-board.py check` warns on any heading outside the set.
 
 ## Deliver a request through the Switchboard
 
@@ -132,6 +142,11 @@ working). Anything smaller: go straight to work.
 
 ### 5. Execute
 
+- **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
+  produced. Planning leaves `## Plan`; the work keeps `## Tasks` live; landing writes
+  `## Execution Summary` (what was built, links to the outputs) beside `## Tests` and
+  `## QA checklist`; the verifier writes `## Verdict`. Invent no other headings —
+  `relay-board.py check` warns on them.
 - `#ID` in every commit message, and each commit hash into the card's `links.commits`.
 - A `progress` comment at a real milestone — the plan is settled, a hard part works, you are
   blocked — not a running commentary.
@@ -141,13 +156,19 @@ working). Anything smaller: go straight to work.
   (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
   `manual: <evidence path>`). Run `tests_check` on the card before you move it to
   `needs-verification`, and fix what it names.
+- **A signal your own run opened is yours.** `tests_run`'s result lists them as "signals this run
+  opened" (#AQ6X): claim one with `board_signals {action: "claim", key: …}`, fix it in this turn
+  before you report, and run the test again so it resolves — two consecutive passes of that key,
+  and nothing else, close it. If you cannot fix it, `board_signals {action: "release", reason:
+  "gave-up"}`, which files it as a bug card. Leave it unclaimed and Relay starts its own agent
+  thread on it after the next fold.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
-  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and a
-    `## QA checklist` section in the body; the verifier then moves it on to a QA lane, or back to
-    an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
+  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
+    `## Execution Summary` and `## QA checklist` sections in the body; the verifier then moves
+    it on to a QA lane, or back to an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
     body — any pane may flip it once that is there — and the card's `qa` block still names the
     best verifier.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the

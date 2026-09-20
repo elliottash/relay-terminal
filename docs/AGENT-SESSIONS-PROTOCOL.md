@@ -2750,7 +2750,8 @@ read tools and drops the four writes.
   once it has read them.
 - **QA rules:** into `needs-qa-*` requires `evidence` and `implemented_by`; out of a QA lane to
   `done`/`dropped` requires a verdict section in the body and a **different model family** from the
-  one that implemented it.
+  one that implemented it. The verdict is a `## Verdict` (19.20): a `## Resolution` no longer
+  satisfies the gate.
 - **A `decision` comment must quote the user verbatim** (text in quotation marks), or it is refused.
 
 ### 19.8 Notes and deviations
@@ -3525,6 +3526,32 @@ session holds alone — and points at the bundled **`deliver`** skill
 card, claim, plan if it is more than a few steps, execute with `#ID` in every commit, land in
 `needs-verification`. Being a bundled skill, it is in `configured.skill_commands`, so
 `/deliver <request>` runs it by hand with no GUI change.
+
+### 19.20 A card body is one section per stage (v3.10, 2026-09-20)
+
+Card `#Z4HR`, owner 2026-09-20: the eleven sections a work card's body is built from, one per
+workflow stage, in body order — `Issue`, `Decisions`, `Discussion points`, `Planning notes`,
+`Plan`, `Tasks`, `Execution Summary`, `Tests`, `QA checklist`, `Verdict`, `Resolution` — plus
+`Merged in` and `Split`, written by the merge and split tools. The full table (stage, author,
+what each holds) is `SWITCHBOARD-FORMAT.md` 2.7; the canonical list is
+`relay_core.board.CARD_SECTIONS`.
+
+- **`board_tools.AGENT_SECTIONS` is the schema**, derived from `CARD_SECTIONS` minus `issue`,
+  replacing the thirteen-name allowlist (`findings`, `implementer check`, `qa verdict`, …).
+  A heading outside it is owner text: an agent may still rewrite it, and the rewrite is logged
+  in the thread. `Issue` stays owner text even though it heads the schema.
+- **The verdict gate takes a verdict only.** `board_move_card` out of a QA lane accepted
+  `verdict`, `qa verdict`, `qa result` **or `resolution`** as the closing section, so a card
+  dropped on a changed mind satisfied the gate that means "a verifier checked this". It now
+  takes the three verdict spellings; `## Resolution` is the closing record of a `done` or
+  `dropped` card and is a different claim.
+- **`relay-board.py check` warns** on a work card's `## ` heading outside the set
+  (`unknown_section`; a parenthesized suffix still names its section). Warn, never error: the
+  board predates the schema by hundreds of cards and there is no bulk migration — a card
+  converts when it is next touched, and the warning keeps the backlog countable.
+- **The policy and the procedure carry the set**: rule 10 of `board_policy.md`, and the
+  `deliver` skill names the section each stage writes (`## Execution Summary` and
+  `## QA checklist` at landing).
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

@@ -110,15 +110,13 @@ UNDO_SECONDS = 30
 IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
                               "section", "session"})
 
-#: Sections an agent writes freely.  Anything else in a card body is owner text: it may
-#: still be rewritten (decision 12.3) but the old and new text go into the thread.
-AGENT_SECTIONS = frozenset({
-    "findings", "plan", "options", "implementer check", "qa checklist", "evidence",
-    "notes", "tasks", "steps", "verdict", "qa verdict", "resolution", "decisions",
-    # What proves this card, one invocation per line (#7BM4, protocol 31): `tests_check` reads
-    # it, the Test suites pane links a test back to the cards that name it.
-    "tests",
-})
+#: Sections an agent writes freely: the card body schema, one section per workflow stage
+#: (2026-09-20, #Z4HR; `board.CARD_SECTIONS`).  Anything else in a card body is owner text: it
+#: may still be rewritten (decision 12.3) but the old and new text go into the thread.
+#: `Issue` is the owner's own words and stays owner text, so a rewrite of it is always logged.
+#: `tests` is what proves the card, one invocation per line (#7BM4, protocol 31):
+#: `tests_check` reads it, the Test suites pane links a test back to the cards that name it.
+AGENT_SECTIONS = frozenset(B.CARD_SECTIONS) - {"issue"}
 
 #: A card in a QA lane is closed with a verdict section in the body; any pane may flip it once
 #: the verdict is there (owner, 2026-09-20, card #76DJ: the verdict is the gate, not the
@@ -2196,11 +2194,14 @@ class BoardTools:
             card.set("implemented_by", implemented_by)
         verified = ""
         if old_status in QA_STATUSES and status in ("done", "dropped"):
-            if not any(h.lower() in ("verdict", "qa verdict", "qa result", "resolution")
+            # A verdict only (#Z4HR): `## Resolution` records how a closed card was removed,
+            # not that a verifier checked it, so it no longer satisfies this gate.
+            if not any(h.lower() in ("verdict", "qa verdict", "qa result")
                        for h in section_headings(card.body)):
                 raise BoardToolError(
-                    "A card in a QA lane is closed with a verdict: add a `## Verdict` (or "
-                    "`## Resolution`) section to the body first, then move it.",
+                    "A card in a QA lane is closed with a verdict: add a `## Verdict` section "
+                    "to the body first, then move it. `## Resolution` is not a verdict "
+                    "(#Z4HR): it records how a closed card was removed.",
                     code="board_refused", requires="verdict")
             if QA.is_relay_free(mine):
                 raise BoardToolError(

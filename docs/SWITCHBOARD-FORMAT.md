@@ -296,6 +296,47 @@ one — with an optional ` — path` tail naming its source.
 - `tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without the write
   being recorded as a rewrite of the owner's own words.
 
+### 2.7 Sections: one per stage (2026-09-20, #Z4HR)
+
+A work card's body is **one section per workflow stage**, written as the stage produces it, in
+the order the stages happen (`relay_core.board.CARD_SECTIONS`):
+
+| # | Section | Stage | Written by | Holds |
+|---|---|---|---|---|
+| 1 | `## Issue` | inbox | the owner, or an agent quoting them | the request, verbatim |
+| 2 | `## Decisions` | any | an agent, quoting the owner | owner decisions, wherever they happen |
+| 3 | `## Discussion points` | discussing | the owner | what they are thinking about or considering |
+| 4 | `## Planning notes` | planning | the planner | decision factors, options not taken, the agent's questions with their options, and the owner's answers |
+| 5 | `## Plan` | planned | the planner | how it will be done |
+| 6 | `## Tasks` | planned → executing | the implementer | the live checklist (section 2.5) |
+| 7 | `## Execution Summary` | executing | the implementer | what was built, and links to the outputs |
+| 8 | `## Tests` | executing | the implementer | what was automated (section 2.6) |
+| 9 | `## QA checklist` | executing, adjusted at verify | implementer, then verifier, then the QA support agent | what a verifier must check by hand |
+| 10 | `## Verdict` | needs-qa-* | the verifier | how it was checked, and the result |
+| 11 | `## Resolution` | done / dropped | whoever closes it | a time-stamped record of how the card was removed |
+
+- `## Merged in` and `## Split` are written by the merge and split tools. The **thread** is not
+  a body section: it is the append-only file under `issues/threads/`, and these sections are
+  its digest. A section earns its place by recording what a stage *produced* — a fact that
+  stays true; state that must be kept current against the code (profiling status, say) belongs
+  on an object whose lifetime matches the code, not on a card.
+- **`Verdict` and `Resolution` are different claims.** The QA-close gate takes a verdict only:
+  a card dropped because the owner changed their mind has a resolution, and that does not say
+  a verifier checked anything.
+- **`AGENT_SECTIONS`** (`board_tools.py`) is this set minus `Issue` — everything an agent may
+  write without the write being logged as a rewrite of the owner's own words. `Issue` stays
+  owner text. Headings outside the set (`Change`, `Implementer check`, the forty other
+  spellings the board grew) are owner text too, so converting an old card logs its rewrite in
+  the thread.
+- **A parenthesized suffix still names its section**: `## Decisions (owner, 2026-09-20)` is
+  `Decisions`.
+- **`check` warns, never errors**, on a `## ` heading outside the set (`unknown_section`). The
+  board predates the schema by hundreds of cards and there is **no bulk migration**: existing
+  cards are left alone and converted when a card is next touched, and the warning keeps the
+  backlog visible and countable.
+- Memory and alias cards keep their own layouts (`## Run`, `## Parameters`) and are not
+  checked against this set.
+
 ## 3. Threads
 
 One append-only file per card, `issues/threads/<ID>.md` (private cards:
@@ -482,7 +523,8 @@ is not there; a `blocked_by` cycle; duplicate thread entry ids; a thread entry i
 sortable timestamp; an unknown entry kind; a thread file not named `<ID>.md`.
 Warnings: an item with no marker, a checkbox its marker disagrees with, entries out of id order
 (all three fixable with `--fix`), an item nested deeper than one level, a missing rank, a thread
-with no card.
+with no card, a work card's `## ` heading outside the section schema (`unknown_section`,
+section 2.7).
 
 `migrate` is deterministic and reversible by review: it parses the `- **Field**: value` header
 block into front matter (wrapped values joined with a space), keeps the H1 and every section

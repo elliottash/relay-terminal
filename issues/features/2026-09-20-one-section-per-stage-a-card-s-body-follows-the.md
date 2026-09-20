@@ -144,9 +144,45 @@ not because it is written then.
    checker's warning makes the backlog visible and countable.
 
 ## Tasks
-- [ ] `board_policy.md`: the stage/section table <!-- t:s1 -->
-- [ ] `AGENT_SECTIONS` becomes the schema <!-- t:s2 -->
-- [ ] the verdict gate stops taking `resolution` <!-- t:s3 -->
-- [ ] `relay-board.py check` warns on an unknown heading <!-- t:s4 -->
-- [ ] the `deliver` skill names the per-stage section <!-- t:s5 -->
-- [ ] docs: SWITCHBOARD-FORMAT and protocol §19 <!-- t:s6 -->
+- [x] `board_policy.md`: the stage/section table <!-- t:s1 -->
+- [x] `AGENT_SECTIONS` becomes the schema <!-- t:s2 -->
+- [x] the verdict gate stops taking `resolution` <!-- t:s3 -->
+- [x] `relay-board.py check` warns on an unknown heading <!-- t:s4 -->
+- [x] the `deliver` skill names the per-stage section <!-- t:s5 -->
+- [x] docs: SWITCHBOARD-FORMAT and protocol §19 <!-- t:s6 -->
+
+## Execution Summary
+All six plan steps landed, plus the planned no-migration stance.
+
+- `backend/relay_core/board.py`: `CARD_SECTIONS` — the eleven sections in body order plus
+  `merged in` / `split` — and `_check_sections`, run from `_check_card` for work cards only:
+  an out-of-schema `## ` heading is an `unknown_section` **warning** (a parenthesized suffix
+  still names its section). Memory and alias cards keep their own layouts.
+- `backend/relay_core/board_tools.py`: `AGENT_SECTIONS` is now `CARD_SECTIONS` minus `issue`
+  (the old 13-name allowlist is gone; `Issue` stays owner text so its rewrites are always
+  logged), and the QA-close gate takes `verdict` / `qa verdict` / `qa result` only —
+  `resolution` no longer satisfies it, with the refusal message saying why.
+- `backend/relay_core/board_policy.md`: v6, rule 10 — the stage/section table in every
+  agent's system prompt. `issues/POLICY.md` regenerated (`relay-board.py policy`).
+- `backend/relay_core/skills_bundled/deliver/SKILL.md`: step 5 names the section each stage
+  writes, and the large-tier landing now requires `## Execution Summary` beside
+  `## QA checklist`.
+- Docs: `docs/SWITCHBOARD-FORMAT.md` §2.7 (the full table, the no-bulk-migration rule, the
+  `unknown_section` warning) and §6's warning list; `docs/AGENT-SESSIONS-PROTOCOL.md` §19.20
+  and the §19.7 QA bullet.
+- No bulk migration: the live board checks clean of errors with 734 `unknown_section`
+  warnings — the backlog, visible and countable exactly as planned.
+
+Evidence: `docs/qa_evidence/2026-09-20-one-section-per-stage/`.
+
+## Tests
+- `python3 -m unittest tests.test_board tests.test_board_tools` (370 tests; needs `PYTHONPATH=backend`)
+- `python3 scripts/relay-board.py check` — 358 cards, 0 errors; the 734 `unknown_section` warnings are the intended migration backlog
+- manual: docs/qa_evidence/2026-09-20-one-section-per-stage/
+
+## QA checklist
+1. Run `python3 -m unittest tests.test_board tests.test_board_tools` (with `PYTHONPATH=backend`) — all pass, including the six new/changed cases named in `docs/qa_evidence/2026-09-20-one-section-per-stage/README.md`.
+2. Run `python3 scripts/relay-board.py check` — 0 errors; `unknown_section` warnings only, never errors.
+3. Confirm the gate: a card in a QA lane with only a `## Resolution` section is refused on close with `requires: verdict` (covered by `test_a_resolution_does_not_close_a_qa_card`).
+4. Confirm `backend/relay_core/board_policy.md` rule 10 reads as the card's table, and `issues/POLICY.md` carries it (regenerated, not hand-edited).
+5. Confirm `docs/SWITCHBOARD-FORMAT.md` §2.7 and `docs/AGENT-SESSIONS-PROTOCOL.md` §19.20 describe the same eleven-section set as `relay_core.board.CARD_SECTIONS`.

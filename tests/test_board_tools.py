@@ -415,11 +415,11 @@ class UpdateTests(BoardToolsTest):
     def test_writing_an_agent_section_is_not_logged_as_a_rewrite(self):
         self.tools.run("board_update_card", {
             "id": self.card_id, "base_hash": self.hash,
-            "append_section": {"heading": "Findings", "text": "- one"}})
+            "append_section": {"heading": "Planning notes", "text": "- one"}})
         current = self.tools.run("board_read", {"id": self.card_id})["hash"]
         result = self.tools.run("board_update_card", {
             "id": self.card_id, "base_hash": current,
-            "replace_section": {"heading": "Findings", "text": "- two"}})
+            "replace_section": {"heading": "Planning notes", "text": "- two"}})
         self.assertEqual(result["logged_rewrites"], [])
         self.assertNotIn("rewrite", self.kinds(self.card_id))
 
@@ -672,6 +672,20 @@ class MoveTests(BoardToolsTest):
 
     def test_closing_a_qa_card_needs_a_verdict_section(self):
         self._into_qa("openai/gpt-5")
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                    "reason": "passed"})
+        self.assertEqual(result["requires"], "verdict")
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-qa-llm")
+
+    def test_a_resolution_does_not_close_a_qa_card(self):
+        # #Z4HR: Verdict and Resolution are different claims at different stages -- a card
+        # dropped on a changed mind has a resolution, and that is not "a verifier checked
+        # this". The gate takes a verdict only.
+        self._into_qa("openai/gpt-5")
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                             "append_section": {"heading": "Resolution",
+                                                                "text": "dropped; changed mind"}})
         result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                                     "reason": "passed"})
         self.assertEqual(result["requires"], "verdict")
@@ -2552,6 +2566,27 @@ class TestsToolsTest(BoardToolsTest):
         self.assertTrue(scope.allows("tests_check"))
         self.assertTrue(scope.allows("tests_run"))
         self.tools.end_chat_turn()
+
+    def test_agent_sections_is_the_card_body_schema(self):
+        # #Z4HR: one section per workflow stage, minus the owner's own `## Issue`; the old
+        # thirteen-name allowlist (`implementer check`, `findings`, ...) is gone.
+        self.assertEqual(T.AGENT_SECTIONS, frozenset(B.CARD_SECTIONS) - {"issue"})
+        self.assertNotIn("implementer check", T.AGENT_SECTIONS)
+        self.assertNotIn("issue", T.AGENT_SECTIONS)
+
+    def test_rewriting_a_heading_outside_the_schema_logs_the_rewrite(self):
+        # No bulk migration (#Z4HR): an old card converts when it is next touched, and the old
+        # heading is owner text, so the rewrite lands in the thread.
+        card_id = self.create()
+        current = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {"id": card_id, "base_hash": current,
+                                             "append_section": {"heading": "Implementer check",
+                                                                "text": "looked at it"}})
+        current = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": current,
+            "replace_section": {"heading": "Implementer check", "text": "ran the tests"}})
+        self.assertEqual(result["logged_rewrites"], ["## Implementer check"])
 
     def test_tests_is_a_section_the_agent_writes_without_a_rewrite_entry(self):
         self.assertIn("tests", T.AGENT_SECTIONS)

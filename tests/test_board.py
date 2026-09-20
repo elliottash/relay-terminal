@@ -613,6 +613,38 @@ class CheckTests(TempBoardTest):
         self.assertIn("<!-- t:", path.read_text())
         self.assertEqual(self.board.check(), [])
 
+    def test_a_heading_outside_the_schema_is_a_warning(self):
+        # #Z4HR: one section per stage. The board predates the set by hundreds of cards, so an
+        # invented heading warns (and is not fixable) rather than erroring.
+        card = B.new_card("work", "A", "ready", card_id="K7Q2")
+        card.body += "\n## Implementer check (not a QA verdict)\nlooked at it\n"
+        write(self.root / "features" / "2026-09-17-a.md", card.to_text())
+        problems = [p for p in self.board.check() if p.code == "unknown_section"]
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0].severity, "warning")
+        self.assertFalse(problems[0].fixable)
+        self.assertIn("Implementer check", problems[0].message)
+
+    def test_the_schema_sections_do_not_warn(self):
+        card = B.new_card("work", "A", "ready", card_id="K7Q2")
+        card.body += ("\n## Discussion points\n\n## Planning notes\n\n## Plan\n\n## Execution Summary\n\n"
+                      "## Tests\n\n## QA checklist\n\n## Verdict\n\n## Resolution\n\n"
+                      "## Merged in\n\n## Split\n\n"
+                      # A parenthesized suffix still names its section.
+                      "## Decisions (owner, 2026-09-20)\n")
+        write(self.root / "features" / "2026-09-17-a.md", card.to_text())
+        self.assertEqual(self.board.check(), [])
+
+    def test_memory_and_alias_cards_are_not_checked_against_the_schema(self):
+        memory = B.new_card("memory", "A fact", "active", card_id="P4QT", name="a-fact")
+        memory.body += "\n## Context\nsome fact\n"
+        write(self.root / "memory" / "a-fact.md", memory.to_text())
+        alias = B.new_card("alias", "A command", "active", card_id="A1BC", name="a-command",
+                           kind="command")
+        alias.body += "\n## Run\n```bash\nmake\n```\n\n## Parameters\n- `target` = `all`\n"
+        write(self.root / "aliases" / "a-command.md", alias.to_text())
+        self.assertEqual([p for p in self.board.check() if p.code == "unknown_section"], [])
+
     def test_thread_entry_rules(self):
         self.good("K7Q2")
         thread = self.board.thread_path("K7Q2")
@@ -771,7 +803,12 @@ class MigrationTests(TempBoardTest):
 
     def test_migrated_tree_passes_check(self):
         B.migrate(self.root, apply=True, repo=self.repo)
-        self.assertEqual(B.Board(self.root, self.repo).check(), [])
+        problems = B.Board(self.root, self.repo).check()
+        # Migration keeps legacy bodies byte-for-byte, so their invented headings now draw the
+        # section-schema warning (#Z4HR: warn, never error, and no rewriting on migration).
+        # What the test asserts is that there are no *errors*.
+        self.assertTrue(all(p.code == "unknown_section" and p.severity == "warning"
+                            for p in problems), problems)
 
     def test_unparsable_files_are_reported_not_written(self):
         write(self.root / "features" / "2026-09-17-freeform.md", "Some note without a title.\n")

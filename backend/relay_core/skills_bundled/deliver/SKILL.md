@@ -86,6 +86,11 @@ working). Anything smaller: go straight to work.
 
 ## 5. Execute
 
+- **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
+  produced. Planning leaves `## Plan`; the work keeps `## Tasks` live; landing writes
+  `## Execution Summary` (what was built, links to the outputs) beside `## Tests` and
+  `## QA checklist`; the verifier writes `## Verdict`. Invent no other headings —
+  `relay-board.py check` warns on them.
 - `#ID` in every commit message, and each commit hash into the card's `links.commits`.
 - A `progress` comment at a real milestone — the plan is settled, a hard part works, you are
   blocked — not a running commentary.
@@ -105,9 +110,9 @@ working). Anything smaller: go straight to work.
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
-  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and a
-    `## QA checklist` section in the body; the verifier then moves it on to a QA lane, or back to
-    an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
+  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
+    `## Execution Summary` and `## QA checklist` sections in the body; the verifier then moves
+    it on to a QA lane, or back to an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
     body — any pane may flip it once that is there — and the card's `qa` block still names the
     best verifier.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
