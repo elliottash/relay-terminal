@@ -131,3 +131,12 @@ conversation persisted per (project, tab) and §30.8 still lists that as not bui
 subagent is landing it separately. A real provider, since every decision in the run was scripted.
 And `relay::appcommands::actionIsAgentSafe` lists a few keys that no longer appear in the action
 catalog (`help.shortcuts` among them): harmless, but an agent told about one finds nothing to run.
+
+<!-- relay:entry 20260920T165219Z-kh author=agent kind=progress pane=switchboard -->
+Correction to the entry above: **the helper's conversation across a restart has landed** —
+`3ddd2193`, persisted per (project, tab), and §30.8 documents it rather than listing it as not
+built. It went in at 11:02, before the live run, so the run was on a build that has it; what the
+run does not show is a *restart*, because each of its four phases starts Relay fresh with an empty
+profile's worth of helper history. So QA's list loses "it is not built" and keeps "nobody has
+watched a helper conversation come back": ask the Options helper something, quit, reopen the tab,
+and see the log.
