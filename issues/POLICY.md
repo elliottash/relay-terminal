@@ -22,10 +22,14 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    the candidate before you create a second card for the same thing. A prompt with several requests
    becomes one card per request. Something you answered fully in the turn, or a trivial ask, gets no
    card: do not turn your own working steps into cards (that is what `update_todos` is for).
-   **Work goes through a card.** A request that changes code or files, or takes more than one step,
-   is started only after you have checked it is not already done and claimed the card that asks for
-   it — `board_claim`, on the card you found or on the one you just created. Load the `deliver`
-   skill for the procedure.
+   **Work goes through a card, sized to the work.** *Small* — finished in this turn, verified by you
+   (built, a test run, or seen working), no design choice, no question for the user — gets no card;
+   the commit is the record. *Medium* — more than one turn or more than two files, but no decision
+   needed and a test proves it — is started only after you have checked it is not already done and
+   claimed the card that asks for it (`board_claim`, on the card you found or the one you just
+   created), and you close it yourself when it lands. *Large* — needs a plan, a decision from the
+   user, or changes UI — goes through the full workflow. `/deliver` makes any request large; "just
+   do it" or "no card" makes it small. Load the `deliver` skill for the procedure.
 2. **The user's words are the record.** `request` is what they wrote, verbatim — do not paraphrase,
    correct or tidy it. The title is yours. `source` says where it came from.
 3. **Questions** for the user go on the card as a `question` comment: numbered, each with your
@@ -38,9 +42,11 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    own `board_claim` does the same and records the `session` that is this pane, so a card in
    Executing with another `session` is that session's work — comment on it, and claim it only when
    the user says to take it over.
-   When it lands: move to `needs-verification` with the evidence path and a `## QA checklist` section in the
-   body, in the same commit as the change; the verifier then moves it on to a QA lane, or back to an
-   earlier stage. Relay stamps `implemented_by` with your provider/model itself,
+   When it lands: a *medium* card goes straight to `done` with the commits in `links.commits` and
+   the test that proves it as the evidence line, in the same commit as the change; a *large* card
+   moves to `needs-verification` with the evidence path and a `## QA checklist` section in the
+   body, in the same commit as the change, and the verifier then moves it on to a QA lane, or back
+   to an earlier stage. Relay stamps `implemented_by` with your provider/model itself,
    and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the
    verifier's verdict in the body — any pane may flip it once that is there (owner, 2026-09-20) —
    and the card's `qa` recommendation still names the best verifier.
@@ -71,8 +77,22 @@ a request into a card you hold, work that is visible while it runs, and a card i
 `needs-verification` with the evidence. `/deliver <request>` runs it even when the automatic rule
 would have skipped the card.
 
-Do not run it for a question, a one-command ask ("what does X do?", "run the tests"), or a turn
-that already carries a card block — that card is already yours to work, so start at step 3.
+Do not run it for a question or a one-command ask ("what does X do?", "run the tests"). A turn
+that already carries a card block is already yours to work: start at step 3.
+
+### 0. Which tier?
+
+Decide before anything else, and say the tier in one word in your reply when it is not obvious.
+
+| Tier | It is | What happens |
+|---|---|---|
+| **Small** | finished in this turn, verified by you (built, a test run, or seen working), no design choice, no question for the user | no card; the commit is the record; steps 1 and 5 still apply (do not redo done work, `#ID` only if a card already exists) |
+| **Medium** | more than one turn or more than two files, but no decision needed and a test proves it | steps 1–3, then work; at landing **you** move it to `done` (step 5) |
+| **Large** | needs a plan, a decision from the user, or changes UI (needs eyes) | all six steps; lands in `needs-verification` for a verifier |
+
+`/deliver <request>` makes it large whatever its size. "Just do it" or "no card" from the user
+makes it small. When in doubt between small and medium, small: a card nobody needed is noise,
+and the commit message still says what changed.
 
 ### 1. Is it already done?
 
@@ -127,9 +147,13 @@ working). Anything smaller: go straight to work.
   blocked — not a running commentary.
 - A fault you find on the way that is not this card's: a new card in the bugs tab with the
   measured evidence, never a silent fix and never a detour.
-- When it lands: `board_move_card` to `needs-verification` with the evidence path, and a
-  `## QA checklist` section in the body, in the same commit as the change (policy rule 5). Relay
-  stamps `implemented_by` itself — never type it, and never type `session` either.
+- When it lands, by tier (policy rule 5), in the same commit as the change:
+  - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
+    the commits in `links.commits`, and the test's path or command as the evidence line. No QA
+    checklist, no verifier: the user can reopen it.
+  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and a
+    `## QA checklist` section in the body; the verifier takes it from there.
+  Relay stamps `implemented_by` itself — never type it, and never type `session` either.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 
