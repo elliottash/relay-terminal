@@ -1674,6 +1674,11 @@ private:
     // and `presets`. A panel opened into a tab whose worker has been running for an hour would
     // otherwise show an empty box until the next reconfigure, because those events are sent once.
     QHash<QString, relay::helpermodel::State> m_helperModels;
+    // The helper worker's last `presets` answer per tab, and the defaults that came with it:
+    // Options › Models reads these when no pane's agent is up (owner, 2026-09-20: "if there is
+    // no agent loaded yet, load the helper agent").
+    QHash<QString, QJsonArray> m_helperPresets;
+    QHash<QString, QJsonObject> m_helperTierDefaults;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -1972,10 +1977,22 @@ private:
                                       "model box open; Ctrl+Alt+M or /model opens the picker.");
         Pane *pane = m_active;
         QSettings settings;
-        const QJsonArray presets = pane ? pane->allPresets() : QJsonArray();
+        QWidget *page = m_tabs->currentWidget();
+        // The pane's worker answers when a pane's agent is up. Otherwise the tab's helper agent
+        // does (owner, 2026-09-20: "if there is no agent loaded yet, load the helper agent"): it
+        // is started on the first look at this page, asked for `presets`, and every request the
+        // page makes goes down its pipe instead.
+        const bool viaHelper = !pane || pane->allPresets().isEmpty();
+        QJsonArray presets = viaHelper ? m_helperPresets.value(tabIdOf(page)) : pane->allPresets();
+        if (viaHelper && presets.isEmpty())
+            if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send({{"type", "presets"}});
+        auto request = [this, pane, viaHelper, page](const QJsonObject &message) {
+            if (!viaHelper && pane) { pane->sendModelRequest(message); return; }
+            if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send(message);
+        };
         // The pane's catalog, not a bare catalogFrom: it carries the usage limits that arrived
         // since the last presets answer (the "5h 62% left" status line, an exhausted row).
-        const relay::models::Catalog catalog = pane ? pane->modelCatalog() : relay::models::catalogFrom(presets);
+        const relay::models::Catalog catalog = !viaHelper ? pane->modelCatalog() : relay::models::catalogFrom(presets);
         const qint64 now = QDateTime::currentSecsSinceEpoch();
         auto curated = [this] {
             refreshSettingsPanes();
@@ -1996,12 +2013,11 @@ private:
             relay::SettingRow none;
             none.kind = relay::SettingRow::Info;
             none.id = QStringLiteral("info:models/none");
-            none.label = QStringLiteral("The agent worker has not answered yet. This page fills in once a pane's agent is up.");
+            none.label = QStringLiteral("Starting the helper agent to read your providers…");
             models.rows << none;
         }
         // The add-key flow, shared by the listed rows and "+ add provider".
-        auto askForKey = [this](const QString &id, const QString &label) {
-            if (!m_active) return;
+        auto askForKey = [this, request](const QString &id, const QString &label) {
             bool ok = false;
             // Password echo: the key is never rendered and never leaves this call.
             const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
@@ -2012,12 +2028,11 @@ private:
                 QMessageBox::warning(this, QStringLiteral("API key"), QStringLiteral("An API key cannot contain spaces."));
                 return;
             }
-            m_active->storeKey(id, key);
+            request({{"type", "store_key"}, {"preset", id}, {"api_key", key}});
         };
         // The custom-endpoint form (owner, 2026-09-20: "like in warp custom providers"): a name,
         // an OpenAI-compatible base URL, a key, the model ids. Saved through the pane's worker.
-        auto askForCustom = [this](const QJsonObject &existing) {
-            if (!m_active) return;
+        auto askForCustom = [this, request](const QJsonObject &existing) {
             QDialog dialog(this);
             dialog.setWindowTitle(existing.isEmpty() ? QStringLiteral("custom provider") : QStringLiteral("edit custom provider"));
             auto *form = new QFormLayout(&dialog);
@@ -2055,7 +2070,7 @@ private:
                                  {QStringLiteral("effort_style"), effort->currentData().toString()}};
             if (!existing.isEmpty()) provider.insert(QStringLiteral("id"), existing.value(QStringLiteral("id")).toString());
             if (!key->text().trimmed().isEmpty()) provider.insert(QStringLiteral("api_key"), key->text().trimmed());
-            m_active->saveCustomProvider(provider);
+            request({{"type", "custom_provider_save"}, {"provider", provider}});
         };
         QList<QJsonObject> listed, waiting;
         for (const auto &value : presets) {
@@ -2129,7 +2144,7 @@ private:
                 if (!preset.value(QStringLiteral("available")).toBool()) { row.kind = relay::SettingRow::Info; row.label = label + QStringLiteral(" · ") + status; }
                 else {
                     row.buttonTexts = QStringList{QStringLiteral("test")};   // one real call
-                    row.onButton = [this, id](int) { if (m_active) m_active->testKey(id); };
+                    row.onButton = [request, id](int) { request({{"type", "test_key"}, {"preset", id}}); };
                 }
             } else if (guest) {
                 // The same two buttons as a keyed provider, in the guest's words: its login is its
@@ -2137,32 +2152,32 @@ private:
                 const QString cli = id.mid(6);
                 const QString login = cli == QStringLiteral("claude") ? QStringLiteral("claude auth login") : cli + QStringLiteral(" login");
                 row.buttonTexts = QStringList{QStringLiteral("change login"), QStringLiteral("test")};
-                row.onButton = [this, id, login](int index) {
-                    if (!m_active) return;
-                    if (index == 0) m_active->runLoginCommand(login);
-                    else m_active->testKey(id);
+                row.onButton = [this, request, id, login](int index) {
+                    if (index == 0) {
+                        // The CLI's sign-in needs a terminal to run in: a pane, which the helper is not.
+                        if (m_active) m_active->runLoginCommand(login);
+                        else QMessageBox::information(this, QStringLiteral("Models"), QStringLiteral("Open a terminal pane first: `%1` runs there.").arg(login));
+                    } else request({{"type", "test_key"}, {"preset", id}});
                 };
             } else if (preset.value(QStringLiteral("custom")).toBool()) {
                 // A custom endpoint (§28.6): edit reopens the form, delete removes it and its key.
                 row.buttonTexts = QStringList{QStringLiteral("edit…"), QStringLiteral("test"), QStringLiteral("delete")};
-                row.onButton = [this, id, label, preset, askForCustom](int index) {
-                    if (!m_active) return;
+                row.onButton = [this, request, id, label, preset, askForCustom](int index) {
                     if (index == 0) askForCustom(preset);
-                    else if (index == 1) m_active->testKey(id);
+                    else if (index == 1) request({{"type", "test_key"}, {"preset", id}});
                     else if (QMessageBox::question(this, QStringLiteral("Delete provider"),
                                  QStringLiteral("Delete %1 and its stored key?").arg(label)) == QMessageBox::Yes)
-                        m_active->deleteCustomProvider(id);
+                        request({{"type", "custom_provider_delete"}, {"provider_id", id}});
                 };
             } else {
                 row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
                 if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
-                row.onButton = [this, id, label, askForKey](int index) {
-                    if (!m_active) return;
+                row.onButton = [this, request, id, label, askForKey](int index) {
                     if (index == 0) askForKey(id, label);
-                    else if (index == 1) m_active->testKey(id);
+                    else if (index == 1) request({{"type", "test_key"}, {"preset", id}});
                     else if (QMessageBox::question(this, QStringLiteral("Remove key"),
                                  QStringLiteral("Remove the stored key for %1 from the keyring?").arg(label)) == QMessageBox::Yes)
-                        m_active->removeKey(id);
+                        request({{"type", "remove_key"}, {"preset", id}});
                 };
             }
             models.rows << row;
@@ -2407,7 +2422,7 @@ private:
             // The two defaults (owner, 2026-09-20), computed by the worker from the providers you
             // can use: your own, or your own with the cost-sensitive OpenRouter twins after them and
             // OpenRouter leading the lite list, which chores lean on most.
-            const QJsonObject defaults = pane ? pane->tierListDefaults() : QJsonObject();
+            const QJsonObject defaults = !viaHelper ? pane->tierListDefaults() : m_helperTierDefaults.value(tabIdOf(page));
             auto apply = [this, catalog, curated](const QJsonObject &lists) {
                 relay::models::curation::applyTierDefaults(lists);
                 applyMainDefault(catalog);
@@ -5695,7 +5710,27 @@ public:
             }
             // What this worker says about its own model is kept for the panels that are not
             // open yet: it is said on configure and not again (#BRD3).
-            guard->m_helperModels[tab].take(event.value(QStringLiteral("type")).toString(), event);
+            const QString type = event.value(QStringLiteral("type")).toString();
+            guard->m_helperModels[tab].take(type, event);
+            // Options › Models on a tab with no pane agent reads the helper's presets, and its key,
+            // test and custom-provider requests come back down this pipe (owner, 2026-09-20).
+            if (type == QStringLiteral("presets")) {
+                guard->m_helperPresets[tab] = event.value(QStringLiteral("presets")).toArray();
+                guard->m_helperTierDefaults[tab] = event.value(QStringLiteral("tier_list_defaults")).toObject();
+                relay::SettingsWatch::instance().notify();
+            } else if (type == QStringLiteral("key_stored") || type == QStringLiteral("key_removed")
+                       || type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {
+                if (relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data()) worker->send({{"type", "presets"}});
+                if (const QString error = event.value(QStringLiteral("error")).toString(); !error.isEmpty() && !guard->m_active)
+                    QMessageBox::warning(guard, QStringLiteral("Models"), error);
+            } else if (type == QStringLiteral("key_tested") && !guard->m_active) {
+                // No pane to carry the status line: the answer is said where the button was.
+                const QString preset = event.value(QStringLiteral("preset")).toString();
+                QMessageBox::information(guard, QStringLiteral("Models"), event.value(QStringLiteral("ok")).toBool()
+                    ? QStringLiteral("%1 answered%2.").arg(preset, event.value(QStringLiteral("model")).toString().isEmpty()
+                          ? QString() : QStringLiteral(" on ") + event.value(QStringLiteral("model")).toString())
+                    : QStringLiteral("%1: %2").arg(preset, event.value(QStringLiteral("error")).toString()));
+            }
             QWidget *page = guard->pageOfTabId(tab);
             if (!page) return;
             for (QWidget *leaf : leavesIn(page))

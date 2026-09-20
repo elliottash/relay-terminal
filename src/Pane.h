@@ -808,6 +808,12 @@ public:
     void deleteCustomProvider(const QString &providerId) {
         send({{"type", "custom_provider_delete"}, {"id", QStringLiteral("custom-%1").arg(++m_requestId)}, {"provider_id", providerId}});
     }
+    // Options › Models' one door to this pane's worker for the requests above, so the page can
+    // send the same message to the tab's helper worker when no pane's agent is up.
+    void sendModelRequest(QJsonObject message) {
+        if (!message.contains(QStringLiteral("id"))) message.insert(QStringLiteral("id"), QStringLiteral("models-%1").arg(++m_requestId));
+        send(message);
+    }
     // Options › Models changed what the picker shows or in what order: every box re-reads it.
     void modelsCurationChanged() { rememberFallback(modelCatalog()); refreshPickers(); }
     // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
