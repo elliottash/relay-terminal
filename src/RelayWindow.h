@@ -13,6 +13,7 @@
 #include "PromptHistory.h"
 #include "RichEditor.h"
 #include "WindowChrome.h"
+#include "ThemeTabBar.h"
 
 #include "Theme.h"
 #include "FilePanes.h"
@@ -367,7 +368,7 @@ public:
         connect(statusBar(), &QStatusBar::messageChanged, this, [this](const QString &text) {
             statusBar()->setVisible(!text.isEmpty());
         });
-        m_tabs = new QTabWidget;
+        m_tabs = new WindowTabWidget;   // ThemeTabBar: an inactive tab wears its own theme (src/ThemeTabBar.h)
         m_tabs->setDocumentMode(true);
         m_tabs->setTabsClosable(false);
         m_tabs->setMovable(true);
@@ -2650,7 +2651,18 @@ private:
         appearance.rows << toggleRow(QStringLiteral("theme/new_tab_new_theme"), QStringLiteral("Start each new tab on the next theme"),
                                      QStringLiteral("A new tab takes the next theme in the list instead of the default, so "
                                                     "tabs are easy to tell apart"),
-                                     false);
+                                     false, [this](bool on) {
+            // One way of telling tabs apart at a time.
+            if (on) { QSettings().setValue(QStringLiteral("theme/randomize_new_tab"), false); refreshSettingsPanes(); }
+        });
+        // Card #R4ND, owner 2026-09-20: "i meant a persistent mode. it randomizes on each new
+        // tab." The button above is the one-shot; this is the mode.
+        appearance.rows << toggleRow(QStringLiteral("theme/randomize_new_tab"), QStringLiteral("Start each new tab on a random theme"),
+                                     QStringLiteral("A new tab takes a theme drawn at random — never the default and never the "
+                                                    "previous tab's — so tabs are easy to tell apart"),
+                                     false, [this](bool on) {
+            if (on) { QSettings().setValue(QStringLiteral("theme/new_tab_new_theme"), false); refreshSettingsPanes(); }
+        });
         {
             // Pane header colours (#SPBN): the pane chrome reads the key; refreshAll() repaints.
             relay::SettingRow colours = choiceRow(QStringLiteral("option:pane_colours"), QStringLiteral("Pane colours"),
@@ -6141,6 +6153,10 @@ private:
     // Two windows therefore never show two themes at once; the one you are in wins.
     static bool perTabThemes() { return QSettings().value(QStringLiteral("theme/per_tab"), true).toBool(); }
     static bool newTabNewTheme() { return QSettings().value(QStringLiteral("theme/new_tab_new_theme"), false).toBool(); }
+    // "Start each new tab on a random theme" (card #R4ND, owner 2026-09-20: "i meant a persistent
+    // mode. it randomizes on each new tab"). Mutually exclusive with the cycling one above —
+    // the two Options rows switch each other off.
+    static bool randomNewTabTheme() { return QSettings().value(QStringLiteral("theme/randomize_new_tab"), false).toBool(); }
     // Owner, 2026-09-19: "/light or /dark or /theme … should [change the new-tab default]. but in
     // options you can disable that". On: the command's theme is also what Relay opens on and what
     // the next new tab starts with, exactly as if it had been picked in Options.
@@ -6177,7 +6193,7 @@ private:
     // applied the way the picker applies one — this tab now, and the default for the next tab —
     // and then named in a notice, because a theme you cannot name is one you cannot ask for again.
     bool randomizeTheme() {
-        const QString id = relay::theme::randomThemeId(relay::theme::activeThemeId());
+        const QString id = relay::theme::randomThemeId({relay::theme::activeThemeId()});
         if (id.isEmpty()) {
             notice(QStringLiteral("There is only one theme installed, so there is nothing to randomize."), 6000);
             return false;
@@ -6195,7 +6211,26 @@ private:
     // "Start each new tab on the next theme": the list order, continuing from the last tab that
     // was started this way (the rotation is the application's, not a window's).
     void startNewTabTheme(QWidget *page) {
-        if (!page || !perTabThemes() || !newTabNewTheme()) return;
+        if (!page || !perTabThemes()) return;
+        // The persistent Randomize (card #R4ND): the tab takes a theme drawn at random — never
+        // the default and never the previous tab's, so a run of new tabs repeats nothing it can
+        // avoid. With only two themes installed the default is allowed back (every other tab
+        // being the same theme is worse); with one there is nothing to draw. It goes ahead of
+        // the cycling mode for the profile that has both keys on, since its row switches the
+        // cycling one off.
+        if (randomNewTabTheme()) {
+            static QString last;
+            QString id = relay::theme::randomThemeId({relay::theme::startupThemeId(), last});
+            if (id.isEmpty()) id = relay::theme::randomThemeId({last});
+            if (id.isEmpty()) return;
+            last = id;
+            page->setProperty("relayTheme", id);
+            if (page == m_tabs->currentWidget()) applyTabTheme(page);
+            m_tabs->tabBar()->update();
+            m_manager->scheduleSave();
+            return;
+        }
+        if (!newTabNewTheme()) return;
         const QList<relay::theme::ThemeChoice> themes = relay::theme::availableThemes();
         if (themes.size() < 2) return;
         static QString last;

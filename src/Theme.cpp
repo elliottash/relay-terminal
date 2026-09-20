@@ -899,10 +899,10 @@ QList<ThemeChoice> availableThemes() {
 // (card #R4ND). Excluding the theme you are on is what makes a second press feel like it did
 // something: with a handful of themes installed, one press in four would otherwise change nothing.
 // Empty when there is nothing else to pick (one theme installed, or none).
-QString randomThemeId(const QString &avoid) {
+QString randomThemeId(const QStringList &avoid) {
     QStringList ids;
     for (const ThemeChoice &choice : availableThemes())
-        if (choice.id != avoid) ids << choice.id;
+        if (!avoid.contains(choice.id)) ids << choice.id;
     if (ids.isEmpty()) return {};
     return ids.at(QRandomGenerator::global()->bounded(ids.size()));
 }

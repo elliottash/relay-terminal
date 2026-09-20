@@ -6,7 +6,7 @@ labels: [feature, settings]
 assignee: claude-code
 rank: m
 created: '2026-09-20'
-source: 'Claude Code in a Relay pane, 2026-09-20'
+source: Claude Code in a Relay pane, 2026-09-20
 links: {plans: [], commits: [dae8796e], evidence: [docs/qa_evidence/2026-09-20-randomize-theme/], related: [], github: null}
 ---
 # Options › Appearance: a Randomize button that takes a theme at random
@@ -33,6 +33,15 @@ as the last row of the bare `/theme` picker — and pressing the button teaches 
 | `tests/themeswitch_test.cpp` | `randomizeNeverGivesYouTheThemeYouAreOn` (300 draws) |
 | `docs/ARCHITECTURE.md` | the per-tab themes section |
 
+**The persistent mode** (owner, 2026-09-20: "i meant a persistent mode. it randomizes on each new
+tab"): **Start each new tab on a random theme** (`theme/randomize_new_tab`, off by default), the
+row directly under "Start each new tab on the next theme". A new tab takes a theme drawn at
+random — never the default and never the previous tab's (`randomThemeId` now takes an avoid
+list), with the default allowed back when only two themes are installed. The two new-tab modes
+switch each other off in Options. The one-shot button above is unchanged. Note: the turn's own
+summary claimed this landed as `6083b4cd`, but no such commit exists — this is the mode's first
+real landing, in the same commit as #3C7N.
+
 ## QA checklist
 - [ ] Options › Appearance shows **Randomize** directly under **Theme**; pressing it changes the
       whole window (chrome, terminal, prompt box) and a notice names the theme.
@@ -45,3 +54,10 @@ as the last row of the bare `/theme` picker — and pressing the button teaches 
       **Random** as its last row.
 - [ ] The first button press shows the hint "Next time: /theme random in any prompt box".
 - [ ] `ctest --test-dir build -R themeswitch` passes.
+- [ ] Options › Appearance shows **Start each new tab on a random theme** under the cycling row,
+      off by default. On: every new tab opens on a different theme, never the default, never the
+      previous tab's; off: new tabs take the default again.
+- [ ] Switching it on turns the cycling row off, and vice versa (the page redraws to show it).
+- [ ] The mode survives a restart.
+- [ ] `ctest --test-dir build -R themeswitch` passes (`theNewTabDrawAvoidsTheDefaultAndThePreviousTab`).
+- [ ] Evidence for both this and the row above: `docs/qa_evidence/2026-09-20-tab-theme-marks/`.

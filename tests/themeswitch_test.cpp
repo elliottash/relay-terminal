@@ -10,6 +10,7 @@
 // missing. Nothing checked that before, because nothing had ever removed a theme.
 #include "Theme.h"
 #include "ThemeFile.h"
+#include "ThemeTabBar.h"
 
 #include <QApplication>
 #include <QDir>
@@ -120,7 +121,7 @@ private Q_SLOTS:
         const QString on = ids.first();
         QSet<QString> seen;
         for (int i = 0; i < 300; ++i) {
-            const QString id = randomThemeId(on);
+            const QString id = randomThemeId({on});
             QVERIFY(!id.isEmpty());
             QVERIFY2(id != on, qPrintable(id));
             QVERIFY2(ids.contains(id), qPrintable(id));
@@ -131,6 +132,76 @@ private Q_SLOTS:
         QCOMPARE(seen.size(), ids.size() - 1);
         // With nothing to avoid, every theme is on offer.
         QVERIFY(ids.contains(randomThemeId()));
+    }
+
+    // The persistent Randomize's draw (card #R4ND, "it randomizes on each new tab"): the default
+    // and the previous tab's theme are both out of the hat, so a run of new tabs repeats nothing
+    // it can avoid — and the draw still moves around inside what is left.
+    void theNewTabDrawAvoidsTheDefaultAndThePreviousTab() {
+        QStringList ids;
+        for (const ThemeChoice &choice : availableThemes()) ids << choice.id;
+        QVERIFY(ids.size() >= 3);
+        const QStringList avoid{ids.at(0), ids.at(1)};
+        QSet<QString> seen;
+        for (int i = 0; i < 300; ++i) {
+            const QString id = randomThemeId(avoid);
+            QVERIFY2(!id.isEmpty(), "every theme was avoided");
+            QVERIFY2(!avoid.contains(id), qPrintable(id));
+            seen << id;
+        }
+        QCOMPARE(seen.size(), ids.size() - 2);
+        // When the avoided pair is everything but one theme, that one is what comes back; when it
+        // is everything, the empty answer the caller falls back from.
+        QStringList allButOne = ids;
+        allButOne.removeAll(ids.at(2));
+        QCOMPARE(randomThemeId(allButOne), ids.at(2));
+        QCOMPARE(randomThemeId(ids), QString());
+    }
+
+    // The clickable tab headers (owner, 2026-09-20: "can we color the other inactive tabs with
+    // their respective themes"): an inactive tab that owns a theme wears its accent — the wash
+    // over the body and the strip along the bottom (src/ThemeTabBar.h) — and a tab with no theme
+    // of its own stays plain. The front tab wears nothing, because the window around it is
+    // already its theme.
+    void anInactiveTabWearsItsOwnTheme() {
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark"), false));
+        WindowTabWidget tabs;
+        auto *front = new QWidget;
+        auto *plain = new QWidget;
+        auto *themed = new QWidget;
+        tabs.addTab(front, QStringLiteral("front"));
+        tabs.addTab(plain, QStringLiteral("plain"));
+        tabs.addTab(themed, QStringLiteral("themed"));
+        themed->setProperty("relayTheme", QStringLiteral("ibm-beige"));
+        tabs.resize(480, 200);
+        tabs.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+        auto *bar = tabs.tabBar();
+        const QColor accent = specFor(QStringLiteral("ibm-beige")).uiColor(QStringLiteral("accent"));
+        QVERIFY(accent.isValid());
+        const auto dist = [](const QColor &a, const QColor &b) {
+            return std::abs(a.red() - b.red()) + std::abs(a.green() - b.green()) + std::abs(a.blue() - b.blue());
+        };
+        // Off the label's glyphs: near the tab's left edge for the wash, the last row for the strip.
+        const auto samples = [bar](const QImage &img, int i) {
+            const QRect r = bar->tabRect(i);
+            return qMakePair(img.pixelColor(QPoint(r.left() + 4, r.center().y())),
+                             img.pixelColor(QPoint(r.center().x(), r.bottom())));
+        };
+        const QImage before = bar->grab().toImage();
+        // Both inactive, so only the mark tells them apart: the selection never paints either.
+        const auto plainSample = samples(before, 1);
+        const auto themedSample = samples(before, 2);
+        QVERIFY2(dist(themedSample.second, accent) < dist(plainSample.second, accent),
+                 qPrintable(QStringLiteral("strip %1 vs %2, accent %3").arg(themedSample.second.name(), plainSample.second.name(), accent.name())));
+        QVERIFY2(dist(themedSample.first, accent) < dist(plainSample.first, accent),
+                 qPrintable(QStringLiteral("wash %1 vs %2, accent %3").arg(themedSample.first.name(), plainSample.first.name(), accent.name())));
+        // Brought to the front, the tab carries no mark of its own.
+        tabs.setCurrentIndex(2);
+        const QImage after = bar->grab().toImage();
+        const auto frontSample = samples(after, 2);
+        QVERIFY2(dist(frontSample.second, accent) > dist(themedSample.second, accent),
+                 qPrintable(QStringLiteral("front strip %1 still reads %2").arg(frontSample.second.name(), accent.name())));
     }
 
     void theThemeItAsksForIsGone() {

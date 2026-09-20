@@ -2758,11 +2758,18 @@ the current tab and, by default, become that default too — the owner's call: a
 choice as the picker. "/light, /dark and /theme also set the default" (`theme/commands_set_default`,
 on) turns that off, and then a command changes one tab only. Either way the first such choice pins
 the other tabs to what they were showing, so they do not follow. "Start each new tab on the next theme" (off by default)
-walks the theme list instead of inheriting the default. **Randomize** (Options › Appearance, under the
-Theme row; `/theme random` and the picker's last row do the same) takes a theme at random that is
-*not* the one in front of you — `theme::randomThemeId(avoid)`, card #R4ND — and applies it exactly
-as the picker does, so what it lands on is the tab's theme and the new default; it is a button, not
-a stored mode, and the notice names the theme so it can be asked for again. A tab's own theme is saved with the layout
+walks the theme list instead of inheriting the default; "Start each new tab on a random theme"
+(also off, card #R4ND — the owner's "i meant a persistent mode. it randomizes on each new tab")
+draws one at random instead, never the default and never the previous tab's
+(`theme::randomThemeId(avoid)`), and the two rows switch each other off. **Randomize** (Options ›
+Appearance, under the Theme row; `/theme random` and the picker's last row do the same) is the
+one-shot beside that mode: it takes a theme at random that is *not* the one in front of you and
+applies it exactly as the picker does, so what it lands on is the tab's theme and the new default;
+it is a button, not a stored mode, and the notice names the theme so it can be asked for again.
+However a tab came by its own theme, the tab row says so: an inactive tab whose theme is not the
+one in front is washed in that theme's accent and carries a 2px strip of it along its bottom edge,
+echoing the selected tab's accent underline (src/ThemeTabBar.h) — the owner's "can we color the
+other inactive tabs with their respective themes". A tab's own theme is saved with the layout
 in the tab wrapper — `{"node", "theme"[, "project"]}`, only when it differs from the default
 (`windowstate::tabTheme()`). With "Each tab keeps its own theme" off, every choice is the
 application's and is stored, as before. What a tab has already

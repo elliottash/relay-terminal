@@ -11725,7 +11725,7 @@ private:
     // /theme random, and the picker's last row: a theme other than the one in front of you,
     // switched to exactly as a named one is (card #R4ND).
     void randomTheme() {
-        const QString id = relay::theme::randomThemeId(relay::theme::activeThemeId());
+        const QString id = relay::theme::randomThemeId({relay::theme::activeThemeId()});
         if (id.isEmpty()) {
             status(QStringLiteral("There is only one theme installed, so there is nothing to randomize."));
             return;
