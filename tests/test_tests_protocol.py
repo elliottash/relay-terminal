@@ -29,6 +29,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
 
 from relay_core import board as B                  # noqa: E402
+from relay_core import board_protocol as BP        # noqa: E402
+from relay_core import board_tools as BT           # noqa: E402
 from relay_core import test_history as H           # noqa: E402
 from relay_core import tests_protocol as TP        # noqa: E402
 
@@ -589,6 +591,42 @@ class BlockingRunTest(TestsProtocolTest):
         self.assertIn("no-tests", text)
         self.assertIn("Offered:", text)
         self.assertIn("Nothing to fix", TP.format_findings({"card": "AAA1", "findings": []}))
+
+
+class WiringTest(TestsProtocolTest):
+    """The five requests reach here through `board_protocol.BoardCommands.dispatch`."""
+
+    def commands(self):
+        commands = BP.BoardCommands(None, self.events.append)
+        commands.tools = BT.BoardTools(self.board, emit=self.events.append,
+                                       state_path=self.project / ".relay" / "rate.json")
+        return commands
+
+    def test_the_two_type_sets_are_the_same(self):
+        self.assertEqual(set(BP.TESTS_TYPES), set(TP.TYPES))
+        self.assertLessEqual(set(BP.TESTS_TYPES), BP.TYPES)
+
+    def test_a_request_is_delegated_and_its_event_names_the_board(self):
+        commands = self.commands()
+        self.assertTrue(commands.handles("tests_list"))
+        self.assertTrue(commands.dispatch({"type": "tests_list", "id": "r1"}))
+        event = self.of("tests_list")[0]
+        # `_send` tags every board event with the root a GUI routes by.
+        self.assertEqual(event["root"], str(self.root))
+        self.assertEqual(event["project"], str(self.project))
+
+    def test_the_handlers_are_made_once_per_board(self):
+        commands = self.commands()
+        commands.dispatch({"type": "tests_list"})
+        first = commands._tests()
+        self.assertIs(commands._tests(), first)
+        self.assertEqual(Path(first.project), self.project)
+
+    def test_without_a_board_it_is_the_ordinary_no_board_error(self):
+        commands = BP.BoardCommands(None, self.events.append)
+        with self.assertRaises(ValueError) as caught:
+            commands.dispatch({"type": "tests_check", "card": "AAA1"})
+        self.assertIn("no Switchboard", str(caught.exception))
 
 
 if __name__ == "__main__":                                    # pragma: no cover

@@ -36,6 +36,12 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           card_brief, check_pane_token, cleanup_brief, find_board_root,
                           named_board_root, normalize_id)
 
+#: The `tests_*` requests of protocol section 31, spelled out here rather than imported from
+#: `tests_protocol`: that module pulls in `test_probe` and `jobs`, and a pane that never opens
+#: the Test suites pane should not pay for them at start-up (#TZWF item 4). It is the same set
+#: as `tests_protocol.TYPES`, and `tests/test_tests_protocol.py` fails if the two drift.
+TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check")
+
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
          "board_cancel", "board_check",
@@ -51,7 +57,10 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          # Two-way sync with GitHub issues (19.14, docs/GITHUB-SYNC.md section 8).
          "forge_sync_plan", "forge_sync_run",
          # The Switchboard page agent (19.18): a conversation about the whole board.
-         "board_chat", "board_chat_cancel", "board_chat_queue_remove", "board_chat_queue_move"}
+         "board_chat", "board_chat_cancel", "board_chat_queue_remove", "board_chat_queue_move",
+         # The Test suites pane and a card's Check (section 31, #7BM4). Answered by
+         # `tests_protocol.TestsCommands`, which this class holds one of per board.
+         *TESTS_TYPES}
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
 #: names, because a project may carry either and neither is wrong.
@@ -1422,6 +1431,26 @@ class BoardCommands:
                if all(any(term in part for part in parts) for term in terms)]
         self._send({"event": "board_search", "id": rid, "query": query or "", "ids": sorted(ids)})
 
+    # ---- the tests (protocol section 31) --------------------------------------
+    def _tests(self):
+        """The `tests_*` handlers for the board this worker is pointed at (#7BM4).
+
+        Made on first use and cached against (project, board root), so a `set_board` that moves
+        this worker to another project answers about that project's tests; held as one attribute
+        rather than two fields in `__init__` for the same reason `observe_protocol` caches its
+        router that way — this is the only code that touches it. The emit is `_send`, so every
+        event carries the `root` a GUI routes by; the job table is the tests' own, so stopping a
+        run cannot reach a command the agent left running.
+        """
+        tools = self._need()
+        key = (str(tools.board.repo), str(tools.board.root))
+        cached = getattr(self, "_tests_cache", None)
+        if cached is None or cached[0] != key:
+            from . import tests_protocol as TP
+            cached = (key, TP.TestsCommands(tools.board.repo, tools.board.root, self._send))
+            self._tests_cache = cached
+        return cached[1]
+
     # ---- dispatch -------------------------------------------------------------
     def dispatch(self, request: dict) -> bool:
         kind = request.get("type")
@@ -1519,6 +1548,8 @@ class BoardCommands:
             self._import_apply(request, rid)
         elif kind in ("forge_sync_plan", "forge_sync_run"):
             self._forge_sync(kind, request, rid)
+        elif kind in TESTS_TYPES:
+            self._tests().dispatch(request)
         return True
 
     # ---- who may start a turn --------------------------------------------------
