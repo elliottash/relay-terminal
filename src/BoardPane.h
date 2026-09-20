@@ -409,6 +409,7 @@ private:
     QSet<QString> m_signalFolds;
     QString m_selectedSignal, m_selectedSignalFold;
     board::SignalDetail *m_signalDetail = nullptr;
+    bool m_signalsAsked = false;      // `signals_list` has gone out for this view
     // request id -> the signal it was sent about, so a refusal lands on the page that asked
     // rather than as a notice over a list nobody is looking at.
     QHash<QString, QString> m_signalRequests;
@@ -417,6 +418,9 @@ private:
     // (#AQ6X phase 3) will claim under its thread id instead. An unknown token reads `closed` on
     // the chip, which is honest — there is no pane to reveal.
     QString paneClaimToken() const;
+    // Ask the worker for the signal state once, when the board has loaded and the pane is on
+    // screen (§32.2). The worker pushes after every change from then on.
+    void askSignalsOnce();
     // One `signals_*` write about the signal the page is open on (protocol §32.2): the key and a
     // request id of this pane's own, so the worker's refusal comes back to the page that asked
     // rather than to a notice over a list nobody is looking at.

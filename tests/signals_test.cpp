@@ -531,10 +531,23 @@ void SignalsTests::theBoardAsksForTheSignalsWhenItOpens()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({card(QStringLiteral("AAA1"), QStringLiteral("inbox"))}));
-    QStringList types;
-    for (const QJsonObject &message : sent)
-        types << message.value(QStringLiteral("type")).toString();
-    QVERIFY(types.contains(QStringLiteral("signals_list")));
+    const auto asked = [&sent] {
+        for (const QJsonObject &message : sent)
+            if (message.value(QStringLiteral("type")).toString() == QStringLiteral("signals_list"))
+                return true;
+        return false;
+    };
+    // A view nobody is looking at asks nothing: opening a board is still a turn that writes
+    // nothing at all, which is what every test that counts this pane's messages is saying.
+    QVERIFY(!asked());
+    view.show();
+    QVERIFY(asked());
+    // And only once, however often the pane is shown again.
+    sent.clear();
+    view.hide();
+    view.show();
+    view.handleEvent(opened({card(QStringLiteral("AAA1"), QStringLiteral("inbox"))}));
+    QVERIFY(!asked());
 }
 
 void SignalsTests::aRefusalLandsOnThePagesErrorLine()

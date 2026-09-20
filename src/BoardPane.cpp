@@ -5193,7 +5193,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         // `signals_changed` after every change, but a pane that has just opened has missed every
         // change so far, so it asks once. A worker too old to know the message refuses it, and the
         // refusal is a `signals_written` with no key — which draws nothing.
-        send({{QStringLiteral("type"), QStringLiteral("signals_list")}});
+        //
+        // Asked when the pane is being looked at, the way `catchUp()` is: a board in a background
+        // tab has nobody to draw the rows for, and a view that is never shown at all — every test
+        // that opens a board and then asserts "nothing was written" — asks nothing.
+        askSignalsOnce();
         if (hadFocus)
             focusInput();
         showProblems(event.value(QStringLiteral("problems")).toArray());
@@ -6207,6 +6211,16 @@ bool BoardView::signalOpen() const
     return m_signalDetail && !m_signalDetail->isHidden();
 }
 
+void BoardView::askSignalsOnce()
+{
+    // Once per view: the worker pushes `signals_changed` after every change from here on, so a
+    // second question would only repeat an answer the pane already has.
+    if (m_signalsAsked || !m_open || !isVisible())
+        return;
+    m_signalsAsked = true;
+    send({{QStringLiteral("type"), QStringLiteral("signals_list")}});
+}
+
 QString BoardView::cardSignalStrip() const
 {
     return m_detail->signalStrip();
@@ -6330,6 +6344,9 @@ void BoardView::resizeEvent(QResizeEvent *event)
 // somebody is actually reading the board.
 void BoardView::showEvent(QShowEvent *event)
 {
+    // The pane is being looked at: ask what the machine has open against this board (#AQ6X), if
+    // the cards have arrived and nobody has asked yet.
+    askSignalsOnce();
     QWidget::showEvent(event);
     catchUp();
 }
