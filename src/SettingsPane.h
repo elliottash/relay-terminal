@@ -71,6 +71,11 @@ struct SettingRow {
     QString text, placeholder;                              // Text
     std::function<void(const QString &)> onText;
     QStringList completions;                                // Text: offered as you type (contains-match)
+    // Rows of one group can be dragged onto each other to reorder (the providers and the priority
+    // list on Options › Models). A drop calls the target row's callback with the dragged row's id,
+    // meaning "put that one before me"; the caller persists the order and the pane redraws.
+    QString dragGroup;
+    std::function<void(const QString &draggedRowId)> onDropBefore;
     int number = 0, minimum = 0, maximum = 0;               // Number
     QString suffix;
     std::function<void(int)> onNumber;

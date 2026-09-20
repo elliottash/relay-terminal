@@ -2014,9 +2014,17 @@ private:
                 || (guest && preset.value(QStringLiteral("installed")).toBool(true));
             (usable || id == QStringLiteral("openrouter") ? listed : waiting) << preset;
         }
-        std::stable_sort(listed.begin(), listed.end(), [&](const QJsonObject &a, const QJsonObject &b) {
-            return providerIntelligence(str(a, "id")) > providerIntelligence(str(b, "id"));
-        });
+        // Order of addition, then whatever you dragged (owner, 2026-09-20): the first time a
+        // provider is listed is its place, and a drop moves it.
+        {
+            QStringList ids;
+            for (const QJsonObject &preset : std::as_const(listed)) ids << str(preset, "id");
+            relay::models::curation::noteProviders(ids);
+            const QStringList order = relay::models::curation::providerOrder();
+            std::stable_sort(listed.begin(), listed.end(), [&](const QJsonObject &a, const QJsonObject &b) {
+                return order.indexOf(str(a, "id")) < order.indexOf(str(b, "id"));
+            });
+        }
         for (const QJsonObject &preset : std::as_const(listed)) {
             const QString id = str(preset, "id");
             const QString label = str(preset, "label").toLower();
@@ -2051,6 +2059,11 @@ private:
             row.label = label;
             row.detail = status;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
+            row.dragGroup = QStringLiteral("providers");
+            row.onDropBefore = [id, curated](const QString &draggedRowId) {
+                relay::models::curation::moveProviderBefore(draggedRowId.section(QLatin1Char(':'), 1), id);
+                curated();
+            };
             if (hosted) {
                 if (!preset.value(QStringLiteral("available")).toBool()) { row.kind = relay::SettingRow::Info; row.label = label + QStringLiteral(" · ") + status; }
                 else {
@@ -2268,6 +2281,14 @@ private:
                                          : QStringLiteral("%1 fallback%2 above the line; nothing below it is tried unasked")
                                                .arg(threshold - 1).arg(threshold == 2 ? QString() : QStringLiteral("s"));
             line.aliases = QStringLiteral("fallback threshold line failover relay free");
+            line.dragGroup = QStringLiteral("priority");
+            line.onDropBefore = [this, catalog, threshold, curated](const QString &draggedRowId) {
+                // A model dropped on the line goes just above it: the last fallback.
+                if (draggedRowId.startsWith(QStringLiteral("models/rank/")))
+                    relay::models::curation::setRank(draggedRowId.mid(QStringLiteral("models/rank/").size()), qMax(0, threshold - 1), catalog);
+                applyMainDefault(catalog);
+                curated();
+            };
             line.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
             line.onButton = [this, catalog, threshold, curated, count = ranked.size()](int index) {
                 relay::models::curation::setFallbackThreshold(qBound(1, threshold + (index == 0 ? -1 : 1), qMax(1, count)));
@@ -2282,10 +2303,18 @@ private:
             row.kind = relay::SettingRow::Buttons;
             row.id = QStringLiteral("models/rank/") + entry.key;
             row.label = QStringLiteral("%1. %2").arg(i + 1).arg(entry.displayName());
-            row.detail = i == 0 ? QStringLiteral("main · new panes start here")
+            row.detail = i == 0 ? QStringLiteral("main · new panes start here · drag rows to reorder")
                        : i < threshold ? QStringLiteral("fallback %1%2").arg(i).arg(i == 1 ? QStringLiteral(" · /swap goes here") : QString())
                                        : QString();
             row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
+            row.dragGroup = QStringLiteral("priority");
+            row.onDropBefore = [this, catalog, i, curated](const QString &draggedRowId) {
+                // "put the dragged one before me": its key, or the line, which lands at my rank.
+                if (draggedRowId == QStringLiteral("models/threshold")) relay::models::curation::setFallbackThreshold(qMax(1, i));
+                else relay::models::curation::setRank(draggedRowId.mid(QStringLiteral("models/rank/").size()), i, catalog);
+                applyMainDefault(catalog);
+                curated();
+            };
             row.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
             row.onButton = [this, catalog, key = entry.key, curated](int index) {
                 relay::models::curation::move(key, index == 0 ? -1 : 1, catalog);

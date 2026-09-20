@@ -21,6 +21,7 @@ const QString kRecent = QStringLiteral("models/recent");
 const QString kSort = QStringLiteral("models/sort");
 const QString kOpenrouter = QStringLiteral("models/openrouter_fallback");
 const QString kCollapsed = QStringLiteral("models/collapsed");
+const QString kProviderOrder = QStringLiteral("models/provider_order");
 const QString kThreshold = QStringLiteral("models/fallback_threshold");
 constexpr int kDefaultThreshold = 2;
 constexpr int kRecentCap = 10;
@@ -378,6 +379,23 @@ QStringList openrouterFallbackModels() {
         if (Catalog::splitKey(key, &preset, &model) && !models.contains(model)) models << model;
     }
     return models;
+}
+
+QStringList providerOrder() { return list(kProviderOrder); }
+void noteProviders(const QStringList &listedIds) {
+    QStringList order = providerOrder();
+    bool changed = false;
+    for (const QString &id : listedIds)
+        if (!order.contains(id)) { order << id; changed = true; }
+    if (changed) store(kProviderOrder, order);
+}
+void moveProviderBefore(const QString &id, const QString &beforeId) {
+    QStringList order = providerOrder();
+    order.removeAll(id);
+    const int at = beforeId.isEmpty() ? -1 : order.indexOf(beforeId);
+    if (at < 0) order << id;
+    else order.insert(at, id);
+    store(kProviderOrder, order);
 }
 
 QStringList collapsedProviders() { return list(kCollapsed); }

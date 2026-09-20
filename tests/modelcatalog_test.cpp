@@ -247,6 +247,16 @@ private Q_SLOTS:
         QCOMPARE(fallbacks(catalog).size(), shown(catalog).size() - 1);
     }
 
+    void providerOrderIsAdditionThenDrag() {
+        curation::noteProviders({QStringLiteral("glm-coding"), QStringLiteral("relay-free")});
+        curation::noteProviders({QStringLiteral("relay-free"), QStringLiteral("kimi-code"), QStringLiteral("glm-coding")});
+        QCOMPARE(curation::providerOrder(), (QStringList{QStringLiteral("glm-coding"), QStringLiteral("relay-free"), QStringLiteral("kimi-code")}));
+        curation::moveProviderBefore(QStringLiteral("kimi-code"), QStringLiteral("glm-coding"));
+        QCOMPARE(curation::providerOrder(), (QStringList{QStringLiteral("kimi-code"), QStringLiteral("glm-coding"), QStringLiteral("relay-free")}));
+        curation::moveProviderBefore(QStringLiteral("kimi-code"), QString());
+        QCOMPARE(curation::providerOrder().last(), QStringLiteral("kimi-code"));
+    }
+
     void sortRoundTrips() {
         QCOMPARE(curation::sort(), Sort::Priority);
         curation::setSort(Sort::Remaining);

@@ -125,6 +125,13 @@ bool openrouterFallback(const QString &key);
 void setOpenrouterFallback(const QString &key, bool on);
 QStringList openrouterFallbackModels();   // model ids, for the request option
 
+// The providers group's order (owner, 2026-09-20): the order they were added in, then dragged.
+// `noteProviders` appends any listed id not yet in the order, so the first time a provider appears
+// with a key is its place; `moveProviderBefore` is a drop.
+QStringList providerOrder();
+void noteProviders(const QStringList &listedIds);
+void moveProviderBefore(const QString &id, const QString &beforeId);   // beforeId empty = to the end
+
 // A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
 QStringList collapsedProviders();
 bool isCollapsed(const QString &preset);

@@ -9,6 +9,10 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QDrag>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFrame>
@@ -41,14 +45,67 @@ namespace relay {
 namespace {
 
 // A row that toggles when clicked anywhere on it, not only on the 14 px box at its right.
+void repolish(QWidget *widget);
+
+const char *const kRowMime = "application/x-relay-settings-row";
+
 class ClickRow final : public QFrame {
 public:
     std::function<void()> onClick;
+    // Set for a row of a reorderable group (SettingRow::dragGroup): press and drag it onto another
+    // row of the same group, and that row's onDropBefore gets this row's id.
+    QString dragGroup, rowId;
+    std::function<void(const QString &)> onDropBefore;
+    void enableDrag() { setAcceptDrops(true); setCursor(Qt::OpenHandCursor); }
 protected:
+    void mousePressEvent(QMouseEvent *event) override {
+        if (event->button() == Qt::LeftButton) m_pressed = event->pos();
+        QFrame::mousePressEvent(event);
+    }
+    void mouseMoveEvent(QMouseEvent *event) override {
+        if (dragGroup.isEmpty() || !(event->buttons() & Qt::LeftButton)
+            || (event->pos() - m_pressed).manhattanLength() < QApplication::startDragDistance()) {
+            QFrame::mouseMoveEvent(event); return;
+        }
+        auto *mime = new QMimeData;
+        mime->setData(QLatin1String(kRowMime), (dragGroup + QLatin1Char('\n') + rowId).toUtf8());
+        auto *drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->setPixmap(grab().scaledToWidth(qMin(width(), 420), Qt::SmoothTransformation));
+        drag->setHotSpot(QPoint(12, 12));
+        m_pressed = QPoint(-1, -1);
+        drag->exec(Qt::MoveAction);
+    }
     void mouseReleaseEvent(QMouseEvent *event) override {
         if (event->button() == Qt::LeftButton && rect().contains(event->pos()) && onClick) onClick();
         QFrame::mouseReleaseEvent(event);
     }
+    bool accepts(const QMimeData *mime, QString *draggedId = nullptr) const {
+        if (dragGroup.isEmpty() || !mime->hasFormat(QLatin1String(kRowMime))) return false;
+        const QString payload = QString::fromUtf8(mime->data(QLatin1String(kRowMime)));
+        const QString group = payload.section(QLatin1Char('\n'), 0, 0), id = payload.section(QLatin1Char('\n'), 1);
+        if (group != dragGroup || id == rowId) return false;
+        if (draggedId) *draggedId = id;
+        return true;
+    }
+    void dragEnterEvent(QDragEnterEvent *event) override {
+        if (!accepts(event->mimeData())) { event->ignore(); return; }
+        setProperty("dropTarget", true); repolish(this);
+        event->acceptProposedAction();
+    }
+    void dragLeaveEvent(QDragLeaveEvent *event) override {
+        setProperty("dropTarget", false); repolish(this);
+        QFrame::dragLeaveEvent(event);
+    }
+    void dropEvent(QDropEvent *event) override {
+        setProperty("dropTarget", false); repolish(this);
+        QString id;
+        if (!accepts(event->mimeData(), &id)) { event->ignore(); return; }
+        event->acceptProposedAction();
+        if (onDropBefore) onDropBefore(id);
+    }
+private:
+    QPoint m_pressed{-1, -1};
 };
 
 void repolish(QWidget *widget) {
@@ -540,6 +597,12 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     line->setObjectName(QStringLiteral("settingsRow"));
     line->setAttribute(Qt::WA_StyledBackground);
     line->setProperty("rowId", row.id);
+    if (!row.dragGroup.isEmpty()) {
+        line->dragGroup = row.dragGroup;
+        line->rowId = row.id;
+        line->onDropBefore = row.onDropBefore;
+        line->enableDrag();
+    }
     auto *box = new QHBoxLayout(line);
     box->setContentsMargins(10, 6, 10, 6);
     box->setSpacing(12);
