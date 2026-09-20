@@ -183,9 +183,9 @@ class RoundTripTests(QuestionsTestCase):
         # half of one.
         self.assertTrue(answer.endswith(module.ANSWER_CUT))
 
-    def test_a_card_id_is_never_reused_by_the_next_worker(self):
-        # `q-1` again in every process: a pane that outlived a worker could answer a new card with
-        # an old card's id and be believed.
+    def test_an_ask_id_is_never_reused_by_the_next_worker(self):
+        # `q-1` again in every process: a pane that outlived a worker could answer a new ask with
+        # an old ask's id and be believed.
         ids = {module._call_id() for _ in range(100)}
         self.assertEqual(len(ids), 100)
         self.assertNotIn("q-1", ids)
@@ -211,7 +211,7 @@ class RoundTripTests(QuestionsTestCase):
         self.questions.begin_turn()
         self.assertTrue(self.ask()["ok"])
 
-    def test_stop_unwinds_the_wait_and_closes_the_card(self):
+    def test_stop_unwinds_the_wait_and_closes_the_ask(self):
         # The pane never answers; Stop is what ends it.
         self.wire(lambda event: None)
         threading.Timer(0.05, self.cancel.set).start()
@@ -221,7 +221,7 @@ class RoundTripTests(QuestionsTestCase):
                          ["question", "question_closed"])
 
     def test_stop_wakes_the_wait_rather_than_being_polled_for(self):
-        """A card has no deadline, so the wait under it can last hours; it must not be a timer.
+        """An ask has no deadline, so the wait under it can last hours; it must not be a timer.
 
         The wait used to come round twenty times a second to ask an event that had not changed.
         Here every wait the waiting thread does is untimed, and Stop still ends it at once.
@@ -250,10 +250,10 @@ class RoundTripTests(QuestionsTestCase):
                          ["question", "question_closed"])
         self.assertEqual(self.questions._pending, {})
 
-    def test_stop_in_the_gap_before_the_card_is_registered_still_ends_the_wait(self):
-        # Stop landing after `execute`'s own check and before the card is in `_pending` is the one
+    def test_stop_in_the_gap_before_the_ask_is_registered_still_ends_the_wait(self):
+        # Stop landing after `execute`'s own check and before the ask is in `_pending` is the one
         # moment the hook has nothing to fail, and an untimed wait would then never be woken. The
-        # second look, after the card has gone up, is what covers it.
+        # second look, after the ask has gone up, is what covers it.
         self.wire(lambda event: None)
         real = module._call_id
 
@@ -265,16 +265,16 @@ class RoundTripTests(QuestionsTestCase):
             with self.assertRaises(Cancelled):
                 self.ask()
 
-    def test_a_turn_that_ends_takes_its_card_with_it(self):
+    def test_a_turn_that_ends_takes_its_ask_with_it(self):
         self.wire(lambda event: None)
         threading.Timer(0.05, self.questions.end_turn).start()
         with self.assertRaises(Cancelled):
             self.ask()
-        # The pane is told, so a card is never left up for a turn that no longer exists.
+        # The pane is told, so an ask is never left up for a turn that no longer exists.
         self.assertEqual([e["event"] for e in self.events if e["event"].startswith("question")],
                          ["question", "question_closed"])
 
-    def test_an_answer_to_a_card_nobody_is_waiting_on_is_ignored(self):
+    def test_an_answer_to_an_ask_nobody_is_waiting_on_is_ignored(self):
         self.questions.resolve({"id": "q-does-not-exist", "answers": [["x"]]})
 
 
@@ -316,9 +316,9 @@ class ToolListTests(unittest.TestCase):
                 self.assertEqual(agent._prepare("ask_user", OPEN).name, "ask_user", mode)
 
 
-class PaneCardTests(unittest.TestCase):
-    """The card itself is C++ (`src/Pane.h`), and nothing can include that header but the one
-    translation unit it belongs to, so the two decisions this card's review turned on are checked
+class PaneAskTests(unittest.TestCase):
+    """The ask itself is C++ (`src/Pane.h`), and nothing can include that header but the one
+    translation unit it belongs to, so the two decisions this ask's review turned on are checked
     where they are written. `tests/test_presets.py` reads the same file the same way.
     """
 
@@ -332,7 +332,7 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn(end, rest)
         return rest.split(end, 1)[0]
 
-    def test_a_number_the_card_has_no_option_for_is_not_sent_as_the_answer(self):
+    def test_a_number_the_ask_has_no_option_for_is_not_sent_as_the_answer(self):
         # "4" with three options used to be forwarded to the model as the prose answer "4".
         reading = self.block("inline Reading read(", "}  // namespace relay::ask")
         self.assertIn("if (!ok || index > labels.size()) return {Reading::NoSuchOption, {}, part};",
@@ -340,14 +340,14 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn("if (ok && index == 0) return {Reading::Skip, {}, {}};", reading)
         answer = self.block("bool answerQuestion(", "void sendAnswers()")
         branch = answer.split("Reading::NoSuchOption) {", 1)[1].split("return true;", 1)[0]
-        self.assertIn("There is no option", branch)      # named, in the card's own ink
-        self.assertIn("printQuestion();", branch)        # the card goes up again
+        self.assertIn("There is no option", branch)      # named, in the ask's own ink
+        self.assertIn("printQuestion();", branch)        # the ask goes up again
         self.assertNotIn("m_ask.answers", branch)        # nothing is recorded
         self.assertNotIn("sendAnswers", branch)          # and nothing is sent: the wait goes on
 
-    def test_a_superseded_card_is_answered_before_the_new_one_goes_up(self):
-        # Protocol 27 has one question open at a time, so a second `question` arriving while a
-        # card is up can only mean the first is stale. Dropping it used to be the whole of it,
+    def test_a_superseded_ask_is_answered_before_the_new_one_goes_up(self):
+        # Protocol 27 has one question open at a time, so a second `question` arriving while an
+        # ask is up can only mean the first is stale. Dropping it used to be the whole of it,
         # which would have left whoever asked it blocked on an answer nobody could still type.
         show = self.block("void showQuestion(const QJsonObject &event) {",
                           "m_ask.questions = event.value")
@@ -358,12 +358,12 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn("superseded != incoming", superseded)        # a redraw of the same id is not
 
     def test_esc_skips_the_question_rather_than_stopping_the_turn(self):
-        # Owner, 2026-09-19: while a card is up Esc is "skip this one". It used to stop the turn,
+        # Owner, 2026-09-19: while an ask is up Esc is "skip this one". It used to stop the turn,
         # which made the key nearest the reader's hand end the work they were being asked about.
         key = self.block("if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {",
                          'toast(QStringLiteral("Agent interrupted"));')
-        self.assertIn("if (skipQuestion()) return true;", key)   # the card first; the turn only after
-        self.assertIn("stopAgent();", key)                       # ... and with no card, Esc still stops
+        self.assertIn("if (skipQuestion()) return true;", key)   # the ask first; the turn only after
+        self.assertIn("stopAgent();", key)                       # ... and with no ask, Esc still stops
         skip = self.block("bool skipQuestion() {", "void recordAnswer(")
         self.assertIn("if (!m_ask.open()) return false;", skip)
         # The same thing typing `0` does: an empty answer recorded through the one shared path.
@@ -373,13 +373,13 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn("++m_ask.current;", record)
         self.assertIn("sendAnswers();", record)                  # the last question sends them all
 
-    def test_the_card_says_esc_skips_and_where_the_turns_stop_went(self):
-        # Relay ships `agent.stop` unbound, so Esc was the only keyboard Stop: a card that takes it
+    def test_the_ask_says_esc_skips_and_where_the_turns_stop_went(self):
+        # Relay ships `agent.stop` unbound, so Esc was the only keyboard Stop: an ask that takes it
         # over has to say where Stop is instead, in the user's own keys.
-        card = self.block("void printQuestion() {", "// The turn's Stop, named the way")
-        self.assertIn("0 or Esc skips", card)
-        self.assertIn("/skip or Esc passes", card)               # an open question has no numbers
-        self.assertIn("stopTurnHint()", card)
+        ask = self.block("void printQuestion() {", "// The turn's Stop, named the way")
+        self.assertIn("0 or Esc skips", ask)
+        self.assertIn("/skip or Esc passes", ask)               # an open question has no numbers
+        self.assertIn("stopTurnHint()", ask)
         hint = self.block("static QString stopTurnHint() {", "\n    }")
         self.assertIn('Keymap::instance().shortcutText(QStringLiteral("agent.stop"))', hint)
         self.assertIn("Stop agent stops the turn", hint)         # nothing bound: name the action
@@ -389,9 +389,9 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn('asked ? QStringLiteral("Esc skips it")', clock)
         self.assertIn("Esc skips this question. %2.", clock)
 
-    def test_a_line_from_a_paired_device_is_routed_before_the_card_sees_it(self):
+    def test_a_line_from_a_paired_device_is_routed_before_the_ask_sees_it(self):
         # Owner, 2026-09-19: a phone's line used to be taken as the answer before anything was
-        # routed, so an unanswered card left the shell unreachable from that phone. The rule itself
+        # routed, so an unanswered ask left the shell unreachable from that phone. The rule itself
         # is `relay::input::askTakesRemoteLine` (tests/inputpolicy_test.cpp); this is the wiring.
         submit = self.block("void submitRemote(const QString &text, bool route, const QString &origin,",
                             "// The router's verdict for a remote prompt")
@@ -402,7 +402,7 @@ class PaneCardTests(unittest.TestCase):
                            "void submitTerminal(")
         self.assertIn("relay::input::askTakesRemoteLine({m_ask.open(), true, toShell})", route)
         self.assertIn("submitTerminal(prompt.text, false);", route)   # a command still runs
-        # Whoever typed it keeps their name on it: on the card's echo and on the queue row.
+        # Whoever typed it keeps their name on it: on the ask's echo and on the queue row.
         self.assertIn("answerQuestion(prompt.text, prompt.author)", route)
         self.assertIn("m_remoteAuthor = prompt.author;", route)
         answer = self.block("bool answerQuestion(", "bool skipQuestion()")
@@ -410,10 +410,10 @@ class PaneCardTests(unittest.TestCase):
         self.assertIn("QStringLiteral(\" · from %1\").arg(author.trimmed())",
                       self.block("void recordAnswer(", "public:"))
 
-    def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
+    def test_an_ask_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
         # An empty id or no questions used to `return` and leave the worker blocked for good.
         # The check itself is `unreadableAsk()` (its own method since the approval ask, #K2FV,
-        # needed a different notion of readable); this is the branch that answers such a card.
+        # needed a different notion of readable); this is the branch that answers such an ask.
         show = self.block("void showQuestion(const QJsonObject &event) {",
                           "// The worker took the ask away")
         malformed = show.split("if (unreadableAsk()) {", 1)[1]

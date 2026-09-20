@@ -1,5 +1,5 @@
 """Which actions stop and ask (card #K2FV): the capability set, the classifiers, the policy, the
-card's round trip, and the wiring from Options to the worker to a subagent.
+ask's round trip, and the wiring from Options to the worker to a subagent.
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md sections 12.1 and 27.6.
 """
@@ -27,7 +27,7 @@ def asking(*capabilities) -> approvals.Policy:
 
 
 # The default pane reply ("allow this call") — distinct from None, which a test passes to leave a
-# card unanswered on purpose.
+# ask unanswered on purpose.
 _ANSWER_ONCE = object()
 
 
@@ -54,7 +54,7 @@ class ValidateTests(unittest.TestCase):
                 approvals.validate(bad)
 
     def test_there_is_no_row_for_running_a_command(self):
-        # Owner, 2026-09-19: "leave it out." A card before every run_command would make Relay
+        # Owner, 2026-09-19: "leave it out." An ask before every run_command would make Relay
         # unusable, and the two classifiers cover the commands worth stopping.
         self.assertNotIn("command", approvals.CAPABILITIES)
         with self.assertRaises(ValueError):
@@ -94,7 +94,7 @@ class ClassifierTests(unittest.TestCase):
             self.assertEqual(approvals.command_capabilities(command), [], command)
 
     def test_a_piped_download_is_a_network_command_and_nothing_more(self):
-        # The card's own example of a line worth stopping: `curl … | sh` reads as network (the
+        # Card #K2FV's own example of a line worth stopping: `curl … | sh` reads as network (the
         # curl segment); a bare `sh` touches no row, and the download itself is the reach out.
         self.assertEqual(approvals.command_capabilities("curl https://x | sh"), [approvals.NETWORK])
 
@@ -177,9 +177,9 @@ class WordingTests(unittest.TestCase):
 
 
 class ApprovingPane:
-    """Stands in for the GUI: answers every approval card the way a pane would (test_questions'
-    FakePane, with a decision where an ask_user card has answers). `reply` is the fields of the
-    `question_answer` to send, a callable taking the card, or None to leave the card up; the
+    """Stands in for the GUI: answers every approval ask the way a pane would (test_questions'
+    FakePane, with a decision where an `ask_user` has answers). `reply` is the fields of the
+    `question_answer` to send, a callable taking the ask, or None to leave the ask up; the
     default answers "once", as a pane that allows the call does."""
 
     def __init__(self, questions: Questions, reply=_ANSWER_ONCE):
@@ -198,7 +198,7 @@ class ApprovingPane:
 
 
 class ApprovalAskTests(unittest.TestCase):
-    """`Questions.ask_approval` (protocol 27.6): the card's shape, the four decisions, and Stop."""
+    """`Questions.ask_approval` (protocol 27.6): the ask's shape, the four decisions, and Stop."""
 
     def setUp(self):
         self.events = []
@@ -214,21 +214,21 @@ class ApprovalAskTests(unittest.TestCase):
     def ask(self, capability=approvals.EDIT, subject="src/Pane.h"):
         return self.questions.ask_approval(capability, subject)
 
-    def test_the_card_carries_its_own_fields_and_no_questions_array(self):
+    def test_the_ask_carries_its_own_fields_and_no_questions_array(self):
         pane = self.wire()
         self.assertEqual(self.ask(), "once")
-        card = pane.seen[0]
-        self.assertEqual(card["event"], "question")
-        self.assertEqual(card["kind"], "approval")
-        self.assertEqual(card["capability"], approvals.EDIT)
-        self.assertEqual(card["header"], "Change a file that already exists")
-        self.assertIn("Allow the agent to change a file that already exists?", card["question"])
-        self.assertIn("src/Pane.h", card["question"])
-        self.assertEqual(card["subject"], "src/Pane.h")
-        self.assertTrue(card["id"].startswith("q-"))
+        ask = pane.seen[0]
+        self.assertEqual(ask["event"], "question")
+        self.assertEqual(ask["kind"], "approval")
+        self.assertEqual(ask["capability"], approvals.EDIT)
+        self.assertEqual(ask["header"], "Change a file that already exists")
+        self.assertIn("Allow the agent to change a file that already exists?", ask["question"])
+        self.assertIn("src/Pane.h", ask["question"])
+        self.assertEqual(ask["subject"], "src/Pane.h")
+        self.assertTrue(ask["id"].startswith("q-"))
         # It belongs to no turn: an approval is drawn wherever the pane is, not where a turn is.
-        self.assertNotIn("turn_id", card)
-        self.assertNotIn("questions", card)
+        self.assertNotIn("turn_id", ask)
+        self.assertNotIn("questions", ask)
         self.assertEqual(self.questions._pending, {})
 
     def test_each_of_the_four_decisions_comes_back_unchanged(self):
@@ -245,15 +245,15 @@ class ApprovalAskTests(unittest.TestCase):
         self.assertFalse(self.questions.turn_allows(approvals.EDIT))
 
     def test_a_reply_that_is_not_one_of_the_four_is_a_deny(self):
-        # The safe side of a card the user never actually answered.
+        # The safe side of an ask the user never actually answered.
         self.wire({"decision": "yes please"})
         self.assertEqual(self.ask(), "deny")
         self.wire({})
         self.assertEqual(self.ask(), "deny")
 
-    def test_stop_under_a_card_ends_the_wait_and_closes_it(self):
-        # The card's Stop requirement: Stop during an approval ends the turn like it does a
-        # question, and the pane is told so no card stays up for a turn that no longer exists.
+    def test_stop_under_an_ask_ends_the_wait_and_closes_it(self):
+        # The ask's Stop requirement: Stop during an approval ends the turn like it does a
+        # question, and the pane is told so no ask stays up for a turn that no longer exists.
         self.wire(None)
         threading.Timer(0.05, self.cancel.set).start()
         with self.assertRaises(Cancelled):
@@ -261,7 +261,7 @@ class ApprovalAskTests(unittest.TestCase):
         self.assertEqual([e["event"] for e in self.events if e["event"].startswith("question")],
                          ["question", "question_closed"])
 
-    def test_a_turn_ending_under_a_card_takes_it_with_it(self):
+    def test_a_turn_ending_under_an_ask_takes_it_with_it(self):
         self.wire(None)
         threading.Timer(0.05, self.questions.end_turn).start()
         with self.assertRaises(Cancelled):
@@ -270,8 +270,8 @@ class ApprovalAskTests(unittest.TestCase):
                          ["question", "question_closed"])
 
     def test_an_answer_routes_by_id_to_whichever_questions_holds_it(self):
-        # The worker routes a `question_answer` by the pending id (worker.py): a subagent's card
-        # is answered through the same pane, so `handles` is what says whose card it is.
+        # The worker routes a `question_answer` by the pending id (worker.py): a subagent's ask
+        # is answered through the same pane, so `handles` is what says whose ask it is.
         other = Questions(lambda event: None, threading.Event())
         self.wire(None)
         outcome = {}
@@ -290,7 +290,7 @@ class ApprovalAskTests(unittest.TestCase):
 
 
 class ApprovalGateTests(unittest.TestCase):
-    """The executor's gate (tools.py `_approval`): the card goes up at prepare, once per call."""
+    """The executor's gate (tools.py `_approval`): the ask goes up at prepare, once per call."""
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -305,7 +305,7 @@ class ApprovalGateTests(unittest.TestCase):
         self.executor.questions.emit = lambda event: (self.events.append(event), pane(event))[0]
         return pane
 
-    def cards(self):
+    def asks(self):
         return [event for event in self.events
                 if event.get("event") == "question" and event.get("kind") == "approval"]
 
@@ -319,30 +319,30 @@ class ApprovalGateTests(unittest.TestCase):
         self.wire(reply)
         return self.executor.prepare("write_file", {"path": self.touch(name), "content": "two\n"})
 
-    def test_the_card_goes_up_while_preparing_so_nothing_has_run_yet(self):
+    def test_the_ask_goes_up_while_preparing_so_nothing_has_run_yet(self):
         # `Prepared.approved` is a run_command concern (its execution-time second look); for the
-        # file tools the card itself is the whole gate — nothing runs before it is answered.
+        # file tools the ask itself is the whole gate — nothing runs before it is answered.
         self.executor.approvals = asking(approvals.EDIT)
         self.edit()
-        card = self.cards()[0]
-        self.assertEqual(card["capability"], approvals.EDIT)
-        self.assertTrue(card["subject"].endswith("notes.txt"))
+        ask = self.asks()[0]
+        self.assertEqual(ask["capability"], approvals.EDIT)
+        self.assertTrue(ask["subject"].endswith("notes.txt"))
 
     def test_once_allows_this_call_and_not_the_next(self):
         self.executor.approvals = asking(approvals.EDIT)
         self.edit()
         self.edit(name="other.txt")
-        self.assertEqual([card["capability"] for card in self.cards()],
+        self.assertEqual([ask["capability"] for ask in self.asks()],
                          [approvals.EDIT, approvals.EDIT])
 
     def test_the_rest_of_the_turn_is_not_asked_again(self):
         self.executor.approvals = asking(approvals.EDIT)
         self.edit(reply={"decision": "turn"})
-        self.edit(name="other.txt")                    # same turn: no second card
-        self.assertEqual(len(self.cards()), 1)
+        self.edit(name="other.txt")                    # same turn: no second ask
+        self.assertEqual(len(self.asks()), 1)
         self.executor.questions.begin_turn()
         self.edit(name="third.txt")                    # a new turn asks again
-        self.assertEqual(len(self.cards()), 2)
+        self.assertEqual(len(self.asks()), 2)
 
     def test_deny_refuses_the_call_with_the_model_readable_refusal(self):
         self.executor.approvals = asking(approvals.EDIT)
@@ -350,7 +350,7 @@ class ApprovalGateTests(unittest.TestCase):
             self.edit(reply={"decision": "deny"})
         self.assertIn("did not allow", str(caught.exception))
         self.assertIn("another way", str(caught.exception))
-        self.assertEqual(len(self.cards()), 1)
+        self.assertEqual(len(self.asks()), 1)
 
     def test_a_read_from_a_folder_options_lists_as_readable_still_asks(self):
         # read_outside is about the folders Options › Security widens reads to (#3KB7): a file in
@@ -364,11 +364,11 @@ class ApprovalGateTests(unittest.TestCase):
             pane = ApprovingPane(executor.questions)
             executor.questions.emit = lambda event: (self.events.append(event), pane(event))[0]
             executor.prepare("read_file", {"path": notes})
-            self.assertEqual([card["capability"] for card in self.cards()], [approvals.READ_OUTSIDE])
+            self.assertEqual([ask["capability"] for ask in self.asks()], [approvals.READ_OUTSIDE])
 
     def test_run_commands_second_look_asks_only_about_what_the_policy_added(self):
-        # The checklist may change while a card sits unanswered, so run_command is checked again
-        # at execution; what prepare already drew its card for is not asked for twice.
+        # The checklist may change while an ask sits unanswered, so run_command is checked again
+        # at execution; what prepare already drew its ask for is not asked for twice.
         self.wire()
         self.executor.approvals = asking(approvals.DELETE_OR_MOVE)
         command = {"command": "curl https://x -o y && rm y"}
@@ -377,7 +377,7 @@ class ApprovalGateTests(unittest.TestCase):
         self.executor.approvals = asking(approvals.DELETE_OR_MOVE, approvals.NETWORK)
         approved = self.executor._approval("run_command", prepared.arguments, subject=command["command"],
                                            already=prepared.approved)
-        self.assertEqual([card["capability"] for card in self.cards()],
+        self.assertEqual([ask["capability"] for ask in self.asks()],
                          [approvals.DELETE_OR_MOVE, approvals.NETWORK])
         self.assertEqual(approved, (approvals.DELETE_OR_MOVE, approvals.NETWORK))
 
@@ -387,13 +387,13 @@ class ApprovalGateTests(unittest.TestCase):
         existing = self.touch("log.txt")
         prepared = self.executor.prepare("run_command", {"command": f"echo hi > {existing}"})
         self.executor.execute(prepared)                # runs echo; the second look stays quiet
-        self.assertEqual(len(self.cards()), 1)
+        self.assertEqual(len(self.asks()), 1)
 
-    def test_may_approve_off_draws_no_card_and_blocks_nothing(self):
+    def test_may_approve_off_draws_no_ask_and_blocks_nothing(self):
         self.executor.approvals = asking(approvals.EDIT)
         self.executor.may_approve = False
         prepared = self.edit()
-        self.assertEqual(self.cards(), [])
+        self.assertEqual(self.asks(), [])
         self.assertEqual(prepared.approved, ())
 
 
@@ -442,10 +442,10 @@ class OptionsWiringTests(unittest.TestCase):
 
 
 class SubagentApprovalTests(unittest.TestCase):
-    """A subagent cannot ask the user anything, but its actions draw cards in the pane it
+    """A subagent cannot ask the user anything, but its actions draw asks in the pane it
     belongs to, named as the subagent's (protocol 27.6)."""
 
-    def test_a_subagent_cannot_ask_but_its_actions_still_draw_cards(self):
+    def test_a_subagent_cannot_ask_but_its_actions_still_draw_asks(self):
         with tempfile.TemporaryDirectory() as root:
             events = []
             sub = RestrictedExecutor(root, events.append, threading.Event(), None, {"write_file"})
@@ -457,10 +457,10 @@ class SubagentApprovalTests(unittest.TestCase):
             path = os.path.join(root, "notes.txt")
             open(path, "w").close()
             sub.prepare("write_file", {"path": path, "content": "two\n"})
-            self.assertEqual([card["capability"] for card in events if card.get("kind") == "approval"],
+            self.assertEqual([ask["capability"] for ask in events if ask.get("kind") == "approval"],
                              [approvals.EDIT])
 
-    def test_a_card_a_subagent_drew_is_forwarded_named_as_its_own(self):
+    def test_an_ask_a_subagent_drew_is_forwarded_named_as_its_own(self):
         events = []
         manager = SubagentManager(events.append)
         sub = Subagent(id="s1", type="general", description="Fix the docs", background=True,
@@ -475,7 +475,7 @@ class SubagentApprovalTests(unittest.TestCase):
         self.assertTrue(any(event["event"] == "question_closed" and event.get("agent_id") == "s1"
                             for event in events))
 
-    def test_the_answer_routes_back_to_the_subagent_whose_card_it_is(self):
+    def test_the_answer_routes_back_to_the_subagent_whose_ask_it_is(self):
         events = []
         manager = SubagentManager(events.append)
         questions = Questions(events.append, threading.Event())
@@ -514,16 +514,16 @@ class SubagentApprovalTests(unittest.TestCase):
     def test_a_pane_agent_that_models_only_its_switches_still_spawns(self):
         # tests/test_failover.py hands the factory a SimpleNamespace of the two failover switches,
         # which the factory reads with getattr; the checklist is read just as forgivingly, and a
-        # subagent handed no checklist keeps the bare Agent's allow-all (it draws no cards).
+        # subagent handed no checklist keeps the bare Agent's allow-all (it draws no asks).
         with tempfile.TemporaryDirectory() as root:
             agent = self.spawn(root, [], SimpleNamespace(failover=True, failover_hosted=False))
             self.assertEqual(agent.executor.approvals, approvals.ALLOW_ALL)
 
 
 class SourceTestCase(unittest.TestCase):
-    """The card and the first-launch screen are C++ (`src/Pane.h`, `src/ApprovalsPane.h`,
+    """The ask and the first-launch screen are C++ (`src/Pane.h`, `src/ApprovalsPane.h`,
     `src/RelayWindow.h`), so the decisions their review turned on are checked where they are
-    written, the way tests/test_questions.py's PaneCardTests reads `src/Pane.h`."""
+    written, the way tests/test_questions.py's PaneAskTests reads `src/Pane.h`."""
 
     @staticmethod
     def block(source: str, start: str, end: str) -> str:
@@ -539,7 +539,7 @@ class PaneApprovalAskTests(SourceTestCase):
         cls.source = (ROOT / "src" / "Pane.h").read_text(encoding="utf-8")
 
     def test_a_superseded_approval_is_denied_rather_than_answered_empty(self):
-        # Protocol 27 has one card at a time, so a second `question` means the first is stale;
+        # Protocol 27 has one ask at a time, so a second `question` means the first is stale;
         # an approval nobody answers is a refusal on the worker's side, and an empty answer to
         # an approval would read there as a deny the user never chose — so say that instead.
         show = self.block(self.source, "void showQuestion(const QJsonObject &event) {",
@@ -553,7 +553,7 @@ class PaneApprovalAskTests(SourceTestCase):
 
     def test_an_approval_the_pane_cannot_read_is_a_deny_not_an_empty_answer(self):
         # The approval branch is parsed before the unreadable check, which would otherwise answer
-        # the card away as empty — an empty answer to an approval is a silent deny.
+        # the ask away as empty — an empty answer to an approval is a silent deny.
         show = self.block(self.source, "void showQuestion(const QJsonObject &event) {",
                           "// The worker took the ask away")
         self.assertLess(show.index('QStringLiteral("kind")'), show.index("if (unreadableAsk())"))
@@ -566,19 +566,19 @@ class PaneApprovalAskTests(SourceTestCase):
         decisions = self.block(self.source, "static QStringList approvalDecisions() {", "void printApproval()")
         indexes = [decisions.index(f'QStringLiteral("{decision}")') for decision in approvals.DECISIONS]
         self.assertEqual(indexes, sorted(indexes))
-        card = self.block(self.source, "void printApproval() {", "int readDecision(")
+        ask = self.block(self.source, "void printApproval() {", "int readDecision(")
         for label in ("Allow once", "Allow this turn", "Always allow", "Deny"):
-            self.assertIn(label, card)
-        self.assertIn("no skip, no free text", card)
-        self.assertIn("stopTurnHint()", card)                 # Esc is not this card's key either
+            self.assertIn(label, ask)
+        self.assertIn("no skip, no free text", ask)
+        self.assertIn("stopTurnHint()", ask)                 # Esc is not this ask's key either
 
     def test_words_that_are_not_one_of_the_four_do_not_reach_the_worker(self):
-        # Anything else would arrive as a deny the user never chose, so the card is restated.
+        # Anything else would arrive as a deny the user never chose, so the ask is restated.
         answer = self.block(self.source, "bool answerApproval(const QString &text, const QString &author) {",
                             "// Esc while an ask is up")
         refused = answer.split("if (index < 0) {", 1)[1].split("return true;", 1)[0]
         self.assertIn("Answer 1–4", refused)
-        self.assertIn("printApproval();", refused)            # the card goes up again
+        self.assertIn("printApproval();", refused)            # the ask goes up again
         self.assertNotIn("recordDecision", refused)           # nothing is decided
         self.assertNotIn("send(", refused)                    # and nothing is sent: the wait goes on
         reader = self.block(self.source, "int readDecision(", "QStringList questionPlaceholders()")
@@ -586,12 +586,12 @@ class PaneApprovalAskTests(SourceTestCase):
         self.assertIn("return -1;", reader)
 
     def test_esc_does_not_deny(self):
-        # Esc is the one key a person reaches for to make a card go away, and on this card it
-        # must not decide anything: the card stays up and the line under it says why.
+        # Esc is the one key a person reaches for to make an ask go away, and on this ask it
+        # must not decide anything: the ask stays up and the line under it says why.
         skip = self.block(self.source, "bool skipQuestion() {", "// One question answered (or skipped)")
         branch = skip.split("if (m_ask.approval) {", 1)[1].split("return true;", 1)[0]
         self.assertIn("Esc does not deny this one", branch)
-        self.assertIn("focusInput()", branch)                 # the card stays up
+        self.assertIn("focusInput()", branch)                 # the ask stays up
         self.assertNotIn("recordAnswer", branch)
         self.assertNotIn("question_answer", branch)
 
@@ -610,7 +610,7 @@ class PaneApprovalAskTests(SourceTestCase):
     def test_always_before_the_first_launch_choice_starts_from_the_cautious_set(self):
         # The saved key is empty until the choice is made, and the cautious set is what is in
         # force: reading the key raw would store "ask about nothing" and flip the whole policy
-        # to allow-all with one card (found by the Xvfb drive, 2026-09-19).
+        # to allow-all with one ask (found by the Xvfb drive, 2026-09-19).
         remember = self.block(self.source, "void rememberAlwaysAllowed() {", "public:")
         branch = remember.split("QStringList ask =", 1)[1].split("ask.removeAll", 1)[0]
         self.assertIn('security/approvals_chosen"), false)', branch)   # gated on the choice
@@ -680,7 +680,7 @@ class FirstLaunchPaneTests(SourceTestCase):
 
     def test_the_rows_display_the_cautious_set_until_chosen(self):
         # The list itself lives beside the first-launch pane (relay::approvals::cautious) so the
-        # card's "Always allow" shares it; the window's rows are its only other reader.
+        # ask's "Always allow" shares it; the window's rows are its only other reader.
         shared = self.block(self.view, "inline QStringList cautious() {", "}  // namespace approvals")
         for capability in approvals.CAUTIOUS:
             self.assertIn(f'QStringLiteral("{capability}")', shared, capability)
