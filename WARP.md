@@ -11,7 +11,9 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   executing, needs verification, needs QA, done — and Relay makes each stage move itself at the
   event that earns it; a section may also collect nothing and be filled by hand (`section:`).
   Implemented work lands in `needs-verification` (then QA) with implementer evidence under
-  `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist.
+  `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist. `issues/POLICY.md` is the generated
+  copy of the rules Relay's own pane agents get in their system prompt — read it when you have no
+  `board_*` tools, because it also says how to make each of those calls by editing files.
 - **Build:** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
   against the other sessions and stamps the objects it made back to the build's start, so a
   header edited while a compile was running is recompiled instead of silently missed

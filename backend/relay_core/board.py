@@ -2321,10 +2321,11 @@ def _new_agents_text(board: "Board", block: str) -> str:
     if imports:
         lines += [f"@{name}" for name in imports]
         lines += ["",
-                  "<!-- The import(s) above are this project's own instructions. They are imported"
-                  " rather than repeated because a tool that reads AGENTS.md instead of CLAUDE.md"
-                  " would otherwise miss them (Relay: relay_core.instructions.PROJECT_ORDER takes"
-                  " the first instruction file it finds per directory). -->", ""]
+                  _wrap("<!-- The import(s) above are this project's own instructions. They are "
+                        "imported rather than repeated because a tool that reads AGENTS.md instead "
+                        "of CLAUDE.md would otherwise miss them: Relay takes the first instruction "
+                        "file it finds per directory (relay_core.instructions.PROJECT_ORDER), and "
+                        "so do the CLIs. -->", indent="     "), ""]
     else:
         lines += ["Instructions for any coding agent working in this project.", ""]
     rules = sorted(p.name for p in (board.repo / ".claude" / "rules").glob("*.md")) \

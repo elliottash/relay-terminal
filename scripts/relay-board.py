@@ -7,6 +7,7 @@ Never calls a model and never uses the network.
 
   relay-board.py check [--fix] [--json] [--strict]
   relay-board.py index [--stdout] [--private]
+  relay-board.py policy [--stdout]
   relay-board.py migrate [--apply]
   relay-board.py verifier <ID> [--json]
 """
@@ -82,6 +83,25 @@ def cmd_index(args, board: board_mod.Board) -> int:
     return 0
 
 
+def cmd_policy(args, board: board_mod.Board) -> int:
+    """Regenerate `<board>/POLICY.md` and the pointer block in CLAUDE.md / AGENTS.md.
+
+    A new board gets both from the scaffold; this is for a board that predates them, or one whose
+    copy has gone stale because the policy or the `deliver` skill changed.  Both files are
+    generated, so there is nothing to merge: the file is rewritten and the block is replaced
+    between its markers, leaving everything else in the instruction file alone.
+    """
+    if args.stdout:
+        sys.stdout.write(board_mod.policy_text(board))
+        return 0
+    written = board_mod.write_policy(board)
+    for path in written:
+        print(f"wrote {path}")
+    if not written:
+        print(f"unchanged {board.root / board_mod.POLICY_FILE} (and the instruction files)")
+    return 0
+
+
 def cmd_migrate(args, board: board_mod.Board) -> int:
     report = board_mod.migrate(board.root, apply=args.apply, repo=board.repo)
     for item in report.migrations:
@@ -146,6 +166,11 @@ def main(argv=None) -> int:
     index.add_argument('--stdout', action='store_true', help='print instead of writing')
     index.add_argument('--private', action='store_true', help='include private cards')
     index.set_defaults(func=cmd_index)
+
+    policy = sub.add_parser('policy', help="regenerate the board's POLICY.md and the CLAUDE.md / "
+                                          "AGENTS.md pointer at it")
+    policy.add_argument('--stdout', action='store_true', help='print POLICY.md instead of writing')
+    policy.set_defaults(func=cmd_policy)
 
     migrate = sub.add_parser('migrate', help='convert a pre-board card tree to cards')
     migrate.add_argument('--apply', action='store_true', help='write the changes (default: dry run)')
