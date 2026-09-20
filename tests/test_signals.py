@@ -399,8 +399,9 @@ class ActionTests(unittest.TestCase):
         signal = fold(self.rows(), events)["ctest:a"]
         self.assertEqual(signal.card, "AB12")
         self.assertEqual(signal.promote, "")
-        self.assertEqual([s["key"] for s in S.summary(fold(self.rows(), events).values())
-                          ["promoted"]], ["ctest:a"])
+        payload = S.summary(fold(self.rows(), events).values())
+        self.assertEqual([s["key"] for s in payload["promoted"]], ["ctest:a"])
+        self.assertEqual([s["card"] for s in payload["promoted"]], ["AB12"])
 
     def test_an_action_for_a_key_with_no_signal_invents_none(self):
         events = [{"ts": day(3), "action": "claim", "key": "ctest:nothing", "session": "t"}]
@@ -666,8 +667,21 @@ class WireTests(unittest.TestCase):
         self.assertEqual([row["key"] for row in payload["open"]], ["ctest:open"])
         self.assertEqual(payload["pending_count"], 1)
         self.assertEqual(payload["dismissed_count"], 0)
+        self.assertEqual(payload["dismissed"], [])
         self.assertEqual(payload["promoted"], [])
-        self.assertEqual(set(payload), {"open", "pending_count", "dismissed_count", "promoted"})
+        self.assertEqual(set(payload), {"open", "dismissed", "pending_count", "dismissed_count",
+                                        "promoted"})
+
+    def test_a_dismissed_signal_is_sent_as_a_row_so_its_expiry_can_be_shown(self):
+        rows = [ex(day(1), "ctest:a", "fail", run="r1"),
+                ex(day(2), "ctest:a", "fail", run="r2", commit="c2")]
+        events = [{"ts": day(3), "action": "dismiss", "key": "ctest:a", "reason": "wont-fix",
+                   "comment": "known", "until": day(30)}]
+        payload = S.summary(fold(rows, events, now=day(4)).values())
+        self.assertEqual(payload["open"], [])
+        self.assertEqual([row["key"] for row in payload["dismissed"]], ["ctest:a"])
+        self.assertEqual(payload["dismissed"][0]["dismissed"]["until"], day(30))
+        self.assertEqual(payload["dismissed_count"], 1)
 
     def test_a_signal_dict_is_json_and_carries_the_contract_keys(self):
         row = self.signals()["ctest:open"].to_dict()

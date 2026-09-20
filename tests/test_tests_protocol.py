@@ -972,7 +972,7 @@ class SignalProtocolTest(TestsProtocolTest):
         self.assertTrue(events)
         self.assertEqual([row["key"] for row in events[-1]["open"]], ["ctest:beta"])
         self.assertEqual(set(events[-1]) - {"event"},
-                         {"open", "pending_count", "dismissed_count", "promoted"})
+                         {"open", "dismissed", "pending_count", "dismissed_count", "promoted"})
         before = len(self.changed())
         self.send(type="tests_list")                          # nothing changed: nothing re-sent
         self.assertEqual(len(self.changed()), before)

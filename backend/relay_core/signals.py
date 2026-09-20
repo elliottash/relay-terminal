@@ -793,15 +793,29 @@ def sort_signals(signals: Iterable[Signal], *, session: str = "") -> list[Signal
 
 
 def summary(signals: Iterable[Signal], *, session: str = "") -> dict:
-    """What `signals_changed` carries: the open rows, the two counts and the promoted cards."""
+    """What `signals_changed` carries: the open rows, the dismissed ones, the counts, the cards.
+
+    `open` is what a surface draws; `dismissed` is what its toggle reveals (R12: hidden behind a
+    toggle **with their expiry shown**, which needs the rows and not just a number); `promoted` is
+    every signal with a card that is still open, so a row can link to it.  `pending` signals are a
+    count and nothing more, on purpose: a signal seen failing once is in-loop feedback for the pane
+    that ran it, and a list of them on a human surface is the flood this design exists to avoid.
+    """
     rows = list(signals)
-    open_rows = sort_signals([s for s in rows if s.state == "open"], session=session)
+    order = {"open": [], "dismissed": [], "promoted": []}
+    for signal in sort_signals(rows, session=session):
+        if signal.state == "open":
+            order["open"].append(signal)
+        elif signal.state == "dismissed":
+            order["dismissed"].append(signal)
+        if signal.card and signal.state in OPEN_STATES:
+            order["promoted"].append(signal)
     return {
-        "open": [s.to_dict() for s in open_rows],
+        "open": [s.to_dict() for s in order["open"]],
+        "dismissed": [s.to_dict() for s in order["dismissed"]],
         "pending_count": sum(1 for s in rows if s.state == "pending"),
-        "dismissed_count": sum(1 for s in rows if s.state == "dismissed"),
-        "promoted": [{"key": s.key, "card": s.card} for s in sort_signals(
-            [s for s in rows if s.card and s.state in OPEN_STATES], session=session)],
+        "dismissed_count": len(order["dismissed"]),
+        "promoted": [s.to_dict() for s in order["promoted"]],
     }
 
 
