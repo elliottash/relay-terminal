@@ -43,6 +43,12 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
                "tests_suggest")
 
+#: The Profile button's two requests (section 31.9, #7BM4 phase 5), spelled out here for the same
+#: reason: `profile_protocol` pulls in `jobs`, and a worker whose owner never presses Profile
+#: should not pay for it at start-up. It is the same set as `profile_protocol.TYPES`, and
+#: `tests/test_profile_protocol.py` fails if the two drift.
+PROFILE_TYPES = ("profile_run", "profile_stop")
+
 #: The Check gate's two ends (#7BM4), spelled out here for the same reason `TESTS_TYPES` is: the
 #: move path must not import `tests_protocol` — and through it `test_probe` and `jobs` — to decide
 #: that an ordinary move is not a landing. `tests/test_tests_protocol.py` fails if they drift from
@@ -68,7 +74,10 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          "board_chat", "board_chat_cancel", "board_chat_queue_remove", "board_chat_queue_move",
          # The Test suites pane and a card's Check (section 31, #7BM4). Answered by
          # `tests_protocol.TestsCommands`, which this class holds one of per board.
-         *TESTS_TYPES}
+         *TESTS_TYPES,
+         # The Profile button (section 31.9, #7BM4), answered by `profile_protocol.ProfileCommands`
+         # the same way: one per board, made on first use.
+         *PROFILE_TYPES}
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
 #: names, because a project may carry either and neither is wrong.
@@ -1512,6 +1521,23 @@ class BoardCommands:
         except Exception:                                    # pragma: no cover - defensive
             pass
 
+    # ---- the profile (protocol section 31.9) ----------------------------------
+    def _profile(self):
+        """The `profile_*` handlers for the project this worker is pointed at (#7BM4 phase 5).
+
+        Cached against the project exactly as `_tests` is, and for the same reason: a `set_board`
+        that moves this worker profiles the project it moved to. Its job table is its own, so
+        stopping a profile cannot reach a test run or a command the agent left going.
+        """
+        tools = self._need()
+        key = str(tools.board.repo)
+        cached = getattr(self, "_profile_cache", None)
+        if cached is None or cached[0] != key:
+            from . import profile_protocol as PP
+            cached = (key, PP.ProfileCommands(tools.board.repo, self._send))
+            self._profile_cache = cached
+        return cached[1]
+
     # ---- dispatch -------------------------------------------------------------
     def dispatch(self, request: dict) -> bool:
         kind = request.get("type")
@@ -1611,6 +1637,8 @@ class BoardCommands:
             self._forge_sync(kind, request, rid)
         elif kind in TESTS_TYPES:
             self._tests().dispatch(request)
+        elif kind in PROFILE_TYPES:
+            self._profile().dispatch(request)
         return True
 
     # ---- who may start a turn --------------------------------------------------

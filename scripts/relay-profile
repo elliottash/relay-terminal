@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Profile this project, in the three senses that phrase has here (card #7BM4, design item (c)).
+#
+#   scripts/relay-profile build                    per-target compile times, this machine
+#   scripts/relay-profile build --host sphinxpad.local --rev main
+#   scripts/relay-profile build --build-dir /tmp/x  an existing Ninja directory's .ninja_log
+#   scripts/relay-profile tests tests.test_board   py-spy over the Python suite
+#   scripts/relay-profile app --stop-after 30      the app under perf, stopped after 30 s
+#
+#   --out DIR         where the evidence goes (default docs/qa_evidence/<date>-profile-<mode>)
+#   --target NAME     build: the cmake target (default relay); app: names the run in meta.json
+#   --rev REV         build --host: the commit to export and build there (default main)
+#   --host HOST       build: profile the build on that machine, through relay-remote-tests
+#   --stop-after SEC  app: stop the app after that many seconds (else Ctrl-C)
+#   --time-trace      build: also run ClangBuildAnalyzer (clang only; optional)
+#   --binary PATH     app: what to run (default build/relay)
+#   --limit N         rows in the summary table (default 25)
+#
+# Every mode writes the same three things into the evidence directory — `meta.json` (target, host,
+# commit, when, the command, the tool versions), `rows.json` (the table, as the worker sends it)
+# and `summary.md` (the table in Markdown, which is what goes onto a card) — and prints the
+# directory and the `scripts/relay-speedscope` line that opens the flame graph.  The table comes
+# first and the flame graph second because that is what every profiling product settled on
+# (docs/SWITCHBOARD-TOOLING-RESEARCH.md section 4.3).
+#
+# Machine setup, and each of these commands by hand: docs/PROFILING.md.
+set -uo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+mode=${1:-}
+case $mode in
+    build|tests|app) shift ;;
+    -h|--help) sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "relay-profile: first argument is build, tests or app (--help)" >&2; exit 2 ;;
+esac
+
+out= target= rev=main host= stop_after= time_trace=0 build_dir= binary=$root/build/relay limit=25
+names=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --out) out=${2:-}; shift 2 ;;
+        --out=*) out=${1#--out=}; shift ;;
+        --target) target=${2:-}; shift 2 ;;
+        --target=*) target=${1#--target=}; shift ;;
+        --rev) rev=${2:-}; shift 2 ;;
+        --rev=*) rev=${1#--rev=}; shift ;;
+        --host) host=${2:-}; shift 2 ;;
+        --host=*) host=${1#--host=}; shift ;;
+        --stop-after) stop_after=${2:-}; shift 2 ;;
+        --stop-after=*) stop_after=${1#--stop-after=}; shift ;;
+        --build-dir) build_dir=${2:-}; shift 2 ;;
+        --build-dir=*) build_dir=${1#--build-dir=}; shift ;;
+        --binary) binary=${2:-}; shift 2 ;;
+        --binary=*) binary=${1#--binary=}; shift ;;
+        --limit) limit=${2:-}; shift 2 ;;
+        --limit=*) limit=${1#--limit=}; shift ;;
+        --time-trace) time_trace=1; shift ;;
+        -h|--help) sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --) shift; names+=("$@"); break ;;
+        -*) echo "relay-profile: unknown option $1" >&2; exit 2 ;;
+        *) names+=("$1"); shift ;;
+    esac
+done
+[[ $limit =~ ^[0-9]+$ ]] || { echo "relay-profile: --limit takes a number" >&2; exit 2; }
+[[ -z $stop_after || $stop_after =~ ^[0-9]+$ ]] || { echo "relay-profile: --stop-after takes seconds" >&2; exit 2; }
+
+label=$mode
+[[ -n $target && $mode != build ]] && label=$target
+[[ -z $out ]] && out=$root/docs/qa_evidence/$(date +%F)-profile-$label
+mkdir -p "$out" || exit 1
+out=$(cd -- "$out" && pwd)
+
+python=${PYTHON:-python3}
+started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown)
+dirty=$(git -C "$root" status --porcelain 2>/dev/null | head -1)
+[[ -n $dirty ]] && commit="$commit+dirty"
+command_line="scripts/relay-profile $mode"
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# The folded rows and the Markdown table, out of whatever the mode left behind.  One call, so
+# every mode's summary is the same arithmetic (backend/relay_core/profile_convert.py).
+fold() {
+    local input=$1 full=${2:-}
+    local args=(rows "$input" --limit "$limit" --json "$out/rows.json")
+    [[ -n $full ]] && args+=(--full-json "$out/$full")
+    PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}" \
+        "$python" -m relay_core.profile_convert "${args[@]}"
+}
+
+# $1 the table (Markdown), $2 the file the flame graph opens ("-" for none), $3… the raw files.
+finish() {
+    local table=$1 flame=$2; shift 2
+    local finished; finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    {
+        echo "# Profile: $label"
+        echo
+        echo "\`$command_line\` · $(hostname) · commit \`$commit\` · $started"
+        echo
+        echo "$table"
+        echo
+        [[ $# -gt 0 ]] && { echo "Raw: $*"; echo; }
+        [[ $flame != - ]] && echo "Flame graph: \`scripts/relay-speedscope $out/$flame\`"
+    } > "$out/summary.md"
+    "$python" - "$out/meta.json" "$out/.tools.json" <<PY
+import json, os, sys
+try:
+    versions = json.load(open(sys.argv[2]))
+except Exception:
+    versions = {}
+json.dump({"target": "$label", "mode": "$mode", "host": "${host:-$(hostname)}",
+           "commit": "$commit", "started": "$started", "finished": "$finished",
+           "command": "$command_line", "out": "$out",
+           "raw": [$(for f in "$@"; do printf '"%s",' "$f"; done)],
+           "tool_versions": versions},
+          open(sys.argv[1], "w"), indent=1)
+os.path.exists(sys.argv[2]) and os.remove(sys.argv[2])
+PY
+    echo
+    echo "relay-profile: $out"
+    sed -n '1,12p' "$out/summary.md" | sed 's/^/  /'
+    [[ $flame != - ]] && echo "  flame graph: scripts/relay-speedscope $out/$flame"
+    return 0
+}
+
+# meta.json's tool_versions: `{tool: its --version's first line}` on stdout.
+tools_json() {
+    "$python" - "$@" <<'PY'
+import json, shutil, subprocess, sys
+out = {}
+for name in sys.argv[1:]:
+    path = shutil.which(name)
+    if not path:
+        out[name] = "not installed"
+        continue
+    try:
+        text = subprocess.run([path, "--version"], capture_output=True, text=True,
+                              timeout=10).stdout.strip().splitlines()
+        out[name] = text[0] if text else path
+    except Exception as exc:                                  # noqa: BLE001
+        out[name] = f"{path} ({type(exc).__name__})"
+print(json.dumps(out))
+PY
+}
+
+# ------------------------------------------------------------------------------- build
+profile_build() {
+    local log= keep= note=
+    target=${target:-relay}
+    if [[ -n $host ]]; then
+        command_line="scripts/relay-profile build --host $host --rev $rev"
+        echo "relay-profile: building $rev on $host through scripts/relay-remote-tests --build-only"
+        "$root/scripts/relay-remote-tests" --build-only --host "$host" --rev "$rev" \
+            --out "$out/remote" || true
+        log=$out/remote/ninja_log
+        [[ -f $log ]] || { echo "relay-profile: $host left no ninja_log in $out/remote" >&2; return 3; }
+    elif [[ -n $build_dir ]]; then
+        [[ $build_dir = /* ]] || build_dir=$PWD/$build_dir
+        log=$build_dir/.ninja_log
+        [[ -f $log ]] || { echo "relay-profile: $build_dir has no .ninja_log (is it a Ninja build?)" >&2; return 3; }
+        command_line="$command_line --build-dir $build_dir"
+    else
+        # Never the shared `build/`: it is Unix Makefiles, every session builds in it, and
+        # re-generating it with Ninja under another session's compile is the one thing this must
+        # not do (CLAUDE.md).  A separate directory of this tool's own, kept between runs so it
+        # stays incremental.
+        have ninja || { echo "relay-profile: ninja is not installed (scripts/relay-tooling-setup --install)" >&2; return 127; }
+        local dir=${RELAY_PROFILE_BUILD_DIR:-/tmp/claude-1000/relay-profile-build}
+        mkdir -p "$dir" || return 1
+        local args=(-S "$root" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo)
+        if (( time_trace )) && have clang++; then
+            args+=(-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS=-ftime-trace)
+            note="clang -ftime-trace"
+        fi
+        if [[ ! -f $dir/CMakeCache.txt ]]; then
+            echo "relay-profile: configuring $dir (Ninja, RelWithDebInfo${note:+, $note})"
+            cmake "${args[@]}" > "$out/configure.log" 2>&1 || {
+                echo "relay-profile: cmake configure failed; see $out/configure.log" >&2
+                tail -15 "$out/configure.log" >&2; return 3; }
+        fi
+        log=$dir/.ninja_log
+        local before=0
+        [[ -f $log ]] && before=$(stat -c%s "$log")
+        local cba=0
+        if (( time_trace )) && have ClangBuildAnalyzer && [[ -n $note ]]; then
+            ClangBuildAnalyzer --start "$dir" >/dev/null 2>&1 && cba=1
+        fi
+        echo "relay-profile: building target $target in $dir"
+        cmake --build "$dir" --target "$target" -j "${RELAY_JOBS:-8}" \
+            > "$out/build.log" 2>&1 || {
+            echo "relay-profile: the build failed; see $out/build.log" >&2
+            grep -m5 -E "error|FAILED" "$out/build.log" >&2; }
+        if (( cba )); then
+            ClangBuildAnalyzer --stop "$dir" "$out/cba.bin" >/dev/null 2>&1 \
+                && ClangBuildAnalyzer --analyze "$out/cba.bin" > "$out/cba.txt" 2>&1 \
+                && echo "relay-profile: per-header report in $out/cba.txt"
+        fi
+        # Only this build's steps: `.ninja_log` is appended to, and its milliseconds are counted
+        # from the start of each ninja invocation, so mixing two builds' lines makes the wall time
+        # meaningless.  An incremental build that rebuilt nothing falls back to the whole log.
+        keep=$out/ninja_log
+        if [[ -f $log ]]; then
+            { echo "# ninja log v5"; tail -c "+$((before + 1))" "$log"; } > "$keep"
+            grep -qc $'\t' "$keep" || cp "$log" "$keep"
+        fi
+        log=$keep
+        command_line="$command_line --target $target (local Ninja build in $dir)"
+    fi
+    [[ -f $log ]] || { echo "relay-profile: no .ninja_log to read" >&2; return 3; }
+    [[ $log == "$out"/* ]] || cp "$log" "$out/ninja_log"
+    local table
+    table=$(fold "$out/ninja_log" build.json) || return 1
+    PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}" "$python" -m relay_core.profile_convert \
+        trace "$out/ninja_log" "$out/build.trace.json" >/dev/null
+    tools_json ninja cmake clang++ ClangBuildAnalyzer > "$out/.tools.json"
+    finish "$table" build.trace.json ninja_log build.json build.trace.json
+}
+
+# ------------------------------------------------------------------------------- tests
+profile_tests() {
+    (( ${#names[@]} )) || names=(discover -s "$root/tests" -t "$root")
+    command_line="$command_line ${names[*]}"
+    local iso; iso=$(mktemp -d /tmp/rp-XXXXXX) || return 1
+    chmod 700 "$iso"
+    local v
+    for v in XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR TMPDIR; do
+        mkdir -p "$iso/$v"; chmod 700 "$iso/$v"; export "$v=$iso/$v"
+    done
+    export RELAY_KEYRING=off QT_QPA_PLATFORM=offscreen RELAY_LOCAL_MODELS="$iso/local-models.json"
+    export PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}"
+    local speedscope=$out/tests.speedscope.json raw=tests.speedscope.json
+    if have py-spy; then
+        echo "relay-profile: py-spy record --rate 250 -- $python -m unittest ${names[*]}"
+        ( cd "$root" && py-spy record --subprocesses --rate 250 --format speedscope \
+            -o "$speedscope" -- "$python" -m unittest "${names[@]}" ) > "$out/run.log" 2>&1
+    fi
+    if [[ ! -s $speedscope ]]; then
+        # No py-spy, or it recorded nothing (it needs ptrace, and a suite that finishes in a few
+        # milliseconds yields no samples at all).  cProfile is in the standard library and is the
+        # zero-dependency fallback; its pstats file becomes the same speedscope JSON.
+        echo "relay-profile: falling back to cProfile (py-spy unavailable or empty)"
+        ( cd "$root" && "$python" -m cProfile -o "$out/tests.prof" \
+            -m unittest "${names[@]}" ) >> "$out/run.log" 2>&1
+        [[ -s $out/tests.prof ]] || { echo "relay-profile: the test run produced no profile; see $out/run.log" >&2
+                                      rm -rf "$iso"; return 3; }
+        "$python" -m relay_core.profile_convert pstats "$out/tests.prof" "$speedscope" >/dev/null \
+            || { rm -rf "$iso"; return 1; }
+        raw="tests.speedscope.json tests.prof"
+    fi
+    rm -rf "$iso"
+    local table
+    table=$(fold "$speedscope") || return 1
+    tools_json py-spy "$python" > "$out/.tools.json"
+    # shellcheck disable=SC2086
+    finish "$table" tests.speedscope.json $raw
+}
+
+# ------------------------------------------------------------------------------- app
+profile_app() {
+    have perf || { echo "relay-profile: perf is not installed (scripts/relay-tooling-setup --install)" >&2; return 127; }
+    [[ -x $binary ]] || { echo "relay-profile: no $binary — run scripts/relay-build first" >&2; return 127; }
+    if ! sudo -n true 2>/dev/null; then
+        echo "relay-profile: kernel.perf_event_paranoid is 4 here and \`sudo -n perf\` wants a password, so the app cannot be sampled from this session — run it in a terminal where sudo is already authorised, or see docs/PROFILING.md section 1." >&2
+        return 3
+    fi
+    local data=$out/app.perf.data folded=$out/app.folded
+    local launch=("$binary" --clean-shell --fresh "${names[@]}")
+    # perf runs as root; the app should not.  setpriv drops back to this user for the child, so
+    # Relay writes its settings where it always does and the profile is of the app the user runs.
+    local child=("${launch[@]}")
+    have setpriv && child=(setpriv "--reuid=$(id -u)" "--regid=$(id -g)" --init-groups "${launch[@]}")
+    command_line="$command_line -- ${launch[*]}"
+    echo "relay-profile: sudo -n perf record -g --call-graph dwarf -- ${launch[*]}"
+    sudo -n perf record -g --call-graph dwarf -o "$data" -- "${child[@]}" > "$out/run.log" 2>&1 &
+    local perf_pid=$!
+    # The app is perf's grandchild (sudo -> perf -> setpriv -> relay); this walks down to the
+    # process whose name is the binary's, so a stop really stops the app and lets perf finish.
+    local app_pid= waited=0 name; name=$(basename "$binary")
+    while (( waited < 60 )); do
+        app_pid=$(pgrep -f -- "$binary --clean-shell" 2>/dev/null | head -1)
+        [[ -n $app_pid ]] && break
+        kill -0 "$perf_pid" 2>/dev/null || break
+        sleep 0.5; waited=$((waited + 1))
+    done
+    if [[ -n $stop_after ]]; then
+        echo "relay-profile: recording ${name} (pid ${app_pid:-?}) for ${stop_after}s"
+        local elapsed=0
+        while (( elapsed < stop_after )) && kill -0 "$perf_pid" 2>/dev/null; do
+            sleep 1; elapsed=$((elapsed + 1))
+        done
+        [[ -n $app_pid ]] && kill -TERM "$app_pid" 2>/dev/null
+    else
+        echo "relay-profile: recording ${name} (pid ${app_pid:-?}) — Ctrl-C, or quit the app, to stop"
+        trap '[[ -n "${app_pid:-}" ]] && kill -TERM "$app_pid" 2>/dev/null' INT TERM
+    fi
+    wait "$perf_pid"
+    trap - INT TERM
+    [[ -s $data ]] || { echo "relay-profile: perf recorded nothing; see $out/run.log" >&2; return 3; }
+    # perf refuses, even under sudo, a perf.data that is neither root's nor the caller's, so the
+    # file is handed back before `perf script` reads it — as this user, which needs no perf access.
+    sudo -n chown "$(id -u):$(id -g)" "$data" 2>/dev/null
+    if have stackcollapse-perf.pl; then
+        perf script -i "$data" 2>>"$out/run.log" | stackcollapse-perf.pl > "$folded" 2>>"$out/run.log"
+    else
+        echo "relay-profile: stackcollapse-perf.pl is missing (scripts/relay-tooling-setup --install)" >&2
+    fi
+    [[ -s $folded ]] || { echo "relay-profile: no folded stacks; see $out/run.log" >&2; return 3; }
+    local table
+    table=$(fold "$folded") || return 1
+    tools_json perf > "$out/.tools.json"
+    finish "$table" app.folded app.folded app.perf.data
+}
+
+case $mode in
+    build) profile_build ;;
+    tests) profile_tests ;;
+    app)   profile_app ;;
+esac
+status=$?
+exit "$status"
