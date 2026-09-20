@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m7
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/board/], related: [PF4K, 7M6E], github: null}
+links: {plans: [], commits: [0a02f666], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/board/], related: [PF4K, 7M6E], github: null}
 ---
 # The Switchboard's watcher misses appends to existing cards and threads
 
