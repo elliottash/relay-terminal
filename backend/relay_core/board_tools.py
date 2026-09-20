@@ -1491,7 +1491,7 @@ class BoardTools:
         return {"id": card.id, "title": card.title, "type": card.type, "status": card.status,
                 "tab": self._tab_of(card), "labels": list(card.front.get("labels") or []),
                 "assignee": card.front.get("assignee"), "waiting_on": card.front.get("waiting_on"),
-                "rank": card.rank, "private": card.private,
+                "rank": card.rank, "private": card.private, "priority": card.priority,
                 "path": str(card.path.relative_to(self.board.repo)) if card.path else None,
                 "thread_entries": thread_counts.get(card.id or "", 0),
                 "created": str(card.front.get("created") or ""),
@@ -1792,6 +1792,15 @@ class BoardTools:
                 if key not in writable:
                     raise BoardToolError(f"{key} is not a field of a {card.type} card; allowed: "
                                          f"{', '.join(sorted(writable))}.", code="board_refused", field=key)
+                if key == "priority" and value is not None:
+                    # One clamped int (#VKFV): a bad value is refused rather than guessed at,
+                    # and 0 means "no flag", which is the key's absence in the file.
+                    try:
+                        value = B.clamp_priority(value)
+                    except B.BoardError as exc:
+                        raise BoardToolError(str(exc), code="board_refused", field=key) from exc
+                    if value == 0:
+                        value = None
                 old = card.front.get(key)
                 if value is None:
                     card.drop(key)
@@ -1961,6 +1970,37 @@ class BoardTools:
         return {"id": card.id, "status": status, "tab": tab, "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
+                "write_id": write_id, "summary": summary}
+
+    def set_priority(self, card_id: str, priority) -> dict:
+        """The pane's flag click (protocol 19.3 ``board_priority``, card #VKFV).
+
+        Not a `run()` tool: it is the owner at the keyboard, not an agent turn, so it takes no
+        `base_hash` — the whole patch is one clamped integer, like a drag's rank — and it is not
+        offered to the agent, which sets the same field through `board_update_card`. Undo, the
+        write record and the thread entry are the ordinary ones, so a misclick is Ctrl+Z like
+        any other move.
+        """
+        card_id = normalize_id(card_id)
+        priority = B.clamp_priority(priority)   # raises BoardError -> BoardToolError below
+        card = self._card(card_id)
+        before = card.path.read_bytes()
+        base_hash = B.file_hash(card.path)
+        old_priority = card.priority
+        if priority:
+            card.set("priority", priority)
+        else:
+            card.drop("priority")
+        size = self._thread_size(card)
+        self.board.save(card, base_hash=base_hash)
+        self.writes_this_turn += 1
+        flag = ("-" if priority < 0 else "+" if priority else "") + str(abs(priority))
+        line = (f"- ✦ {self.context.actor} flagged this card · priority {flag}"
+                if priority else f"- ✦ {self.context.actor} cleared this card's priority flag")
+        self._append(card, line, kind="event")
+        summary = f"priority {old_priority} → {priority}"
+        write_id = self._record("priority", card, summary, before, size)
+        return {"id": card.id, "priority": priority, "hash": B.file_hash(card.path),
                 "write_id": write_id, "summary": summary}
 
     def _rank_for(self, card: B.Card, status: str, before, after) -> str | None:
