@@ -895,8 +895,13 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 | `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `minimax`, `openrouter`, `openai`, `anthropic`, `gemini`) |
 | `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
 | `model` | string | with `preset`: a different model id on that provider |
-| `extra` | object | provider params; defaults to the preset's `extra` |
-| `effort` | `low`/`medium`/`high`/`max` | mapped as in section 3; omitted means the provider's own default |
+| `extra` | object | provider params; defaults to the preset's `extra`, or — when `model` names one of that provider's *other* models — to that model's own (`presets.model_extra`, the rule a tier list entry follows: glm-5.3-flash is the same request whether it was ranked under Flash or picked by hand) |
+| `effort` | `low`/`medium`/`high`/`max` | mapped as in section 3; omitted means the provider's own default, and a level asked of a model with no effort knob (Kimi's high-speed ones) is not sent |
+
+A role may name a provider **and** a model **and** a level together, and does routinely since card
+#PK5Q: every helper agent's model box lists a provider's models one by one, the way a terminal
+pane's does, and a pick writes all three. A value that names only a provider still means that
+provider's own model, exactly as it did.
 
 Keys never cross the pipe: a role resolves its key through the keystore (environment variable, then the
 desktop keyring) for the preset matching its endpoint, and reuses the main agent's in-memory key when it
