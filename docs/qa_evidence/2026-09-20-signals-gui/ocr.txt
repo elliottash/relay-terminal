@@ -1,0 +1,30 @@
+relay binary: /tmp/claude-1000/-home-elliott-repos-relay-terminal/501201b7-0147-4e7f-a867-125a2e45d722/scratchpad/aq6x-gui/tree/build/relay (2026-09-20 17:20:51.138563284 -0400)
+01 the fold row says '2 signals': yes
+01 and the dismissed toggle says '1 dismissed': yes
+01 the signals themselves are away: yes
+01 a test that passes has no signal at all: yes
+02 a click shows ctest:panelayout: yes
+02 and ctest:themes: yes
+02 with its kind as a word: yes
+02 the dismissed one is still behind its toggle: yes
+03 the dismissed toggle shows ctest:voice: yes
+03 with when the dismissal expires: yes
+04 the page names the signal: yes
+04 Claim: yes
+04 Release: yes
+04 Dismiss: yes
+04 Promote: yes
+04 and the excerpt is the failure's own words: yes
+05 the form says every dismissal expires: yes
+05 with the reason it defaults to: yes
+05 and the form can be cancelled: yes
+07 the notice says the claim was written: yes
+08 back on the list, the row is still there: yes
+10 the strip says whose words they are: yes
+10 and names the signal's key: yes
+10 and that they are rewritten on every change: yes
+relay still alive at the end: yes
+no gui_crash in relay.log
+--- signals events after the run
+{"action":"dismiss","by":"owner","comment":"this host has no sound card","key":"ctest:voice","reason":"environmental","ts":"2026-09-20T21:21:02Z","until":"2026-09-27","v":1}
+{"action":"claim","key":"ctest:panelayout","session":"board-sb23vpzckiz4-","ts":"2026-09-20T21:21:59Z","v":1}
