@@ -417,6 +417,20 @@ def format_program_control(grant: dict, program: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def plan_mode_note(mode: str) -> str:
+    """Plan mode as the turn's Relay context, not a section of the system prompt (#GMCF).
+
+    The note is 1.4 KB that appeared and disappeared in the middle of the prompt on a toggle, and
+    a system prompt that changes re-prefills everything below it — on the Local tier a mode switch
+    cost 13–18 s of prefill, because the tool list moved with it too. It is about *this* turn, so
+    it travels with the turn the way the terminal state does; `write_plan` is offered in both
+    modes and refused outside plan mode in `Agent._prepare`, as the blocked tools already are.
+    """
+    if mode != "plan":
+        return ""
+    return f"{CONTEXT_OPEN}\n{PLAN_MODE_NOTE.strip()}\n{CONTEXT_CLOSE}\n\n"
+
+
 def format_context(context) -> str:
     """A clearly labelled note prepended to the user's turn; empty when there is no context."""
     context = validate_context(context)
@@ -470,6 +484,14 @@ def format_context(context) -> str:
             "program over (the pane's banner button, or \"Let the agent drive this program\" in the "
             "actions palette). Do not simulate it with unrelated commands.\n"
             f"{CONTEXT_CLOSE}\n\n")
+
+
+#: The tools `Agent.tools` puts last, whatever else the pane has (#GMCF, distillation 4.2).
+#: `run_in_terminal` and `type_into_program` come and go with the turn (the user hands a program
+#: over, or takes it back) and `set_keybinding` only exists when the GUI sent a keybinding
+#: catalogue, so a list that ends with them is one every other pane and turn shares up to that
+#: point: they can only append, never insert.
+TAIL_TOOLS = ("set_keybinding", "type_into_program", "run_in_terminal")
 
 
 class Agent:
@@ -783,27 +805,46 @@ class Agent:
 
     # ----- prompt, tools, modes ----------------------------------------------
     def system_prompt(self) -> str:
-        skills_note = self.executor.skills.prompt_section() if self.executor.skills is not None else ""
-        instructions = self.instructions.section if self.instructions is not None else ""
-        plan = PLAN_MODE_NOTE if self.mode == "plan" else ""
+        """The sections, assembled most stable first (#GMCF, distillation 4.2).
+
+        Every provider's prompt cache and llama.cpp's prefix cache key on the prefix, so a section
+        that appears, disappears or moves throws away the cached work for everything below it —
+        the conversation, not just the rest of the prompt. The order is therefore by how often a
+        section changes, and by how much two panes have in common: Relay's own rules, the todo
+        rules and the app and own-session rules are the same for every pane of a release; the
+        skill catalogue changes when the user edits a skill; the project instructions and the
+        workspace line are per project; the Switchboard sections come and go when a project is
+        attached or detached, and what this pane holds changes as it works, so those are last.
+        The plan-mode note used to sit in the middle and toggle with the mode: it is now the
+        turn's Relay context (`plan_mode_note`), which costs nothing above it.
+
+        `getattr` throughout: `refresh_system_prompt` runs while `__init__` is still setting the
+        pane's parts up.
+        """
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
-        board_rules = board_tools.prompt_section(getattr(self, "board", None))
         # Protocol 30: driving the app, and reading this pane's own session. Both are "" for an
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
-        app_rules = app_tools.prompt_section(getattr(self, "app", None))
-        own_rules = activity_tools.prompt_section(getattr(self, "activity", None))
-        # Everything above is the same on every request of this conversation; what follows changes
-        # while it runs (the mode, the cards this pane holds), so it is last. Both the providers'
-        # prompt caches and llama.cpp's prefix cache key on the prefix, and a line that moves in
-        # the middle of the prompt discards the cached work for everything after it (#GMCF).
-        volatile = plan + board_tools.session_note(getattr(self, "board", None))
-        return (SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions
-                + todo_rules + board_rules + app_rules + own_rules + volatile)
+        sections = [
+            SYSTEM,
+            todo_rules,
+            app_tools.prompt_section(getattr(self, "app", None)),
+            activity_tools.prompt_section(getattr(self, "activity", None)),
+            self.executor.skills.prompt_section() if self.executor.skills is not None else "",
+            self.instructions.section if self.instructions is not None else "",
+            "Chosen workspace: " + str(self.executor.workspace.root),
+            board_tools.prompt_section(getattr(self, "board", None)),
+            board_tools.session_note(getattr(self, "board", None)),
+        ]
+        # One blank line between sections, wherever each one's own text puts its newlines.
+        return "\n\n".join(text for text in (s.strip("\n") for s in sections) if text)
 
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
 
     def set_mode(self, mode: str) -> None:
+        # Neither the prompt nor the tool list depends on the mode since #GMCF, so a switch
+        # mid-conversation keeps every cached prefix; the refresh stays because it is also where
+        # anything else that changed since the last one (a skill, an instruction file) is picked up.
         self.mode = validate_mode(mode)
         self.refresh_system_prompt()
 
@@ -820,23 +861,30 @@ class Agent:
             # needs them most, and protocol 30.4 is that the tool set is the same everywhere.
             return scope.tool_specs(self.executor.tools()) + (
                 self.app.tool_specs() if self.app is not None else [])
-        tools = self.executor.tools()
+        # One order for the life of the pane (#GMCF, distillation 4.2). The mode changes nothing
+        # here: a tool that appears or disappears re-prefills the whole request, and on the Local
+        # tier the chat template renders the tools *before* the system prompt, so a mode switch
+        # cost 13–14 s. What plan mode must not run is refused in `_prepare` instead, and
+        # `write_plan` — refused outside plan mode there — is offered in both.
+        offered = self.executor.tools()
+        tail = [t for name in TAIL_TOOLS for t in offered if t["function"]["name"] == name]
+        tools = [t for t in offered if t["function"]["name"] not in TAIL_TOOLS]
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
-        if self.board is not None:
-            # Plan mode keeps the Switchboard reads but not its writes (see PLAN_BLOCKED_TOOLS).
-            extra = extra + self.board.tool_specs()
+        extra = extra + [WRITE_PLAN_SPEC]
+        if self.subagents is not None:
+            extra = extra + self.subagents.tool_specs()
         # Protocol 30: the app tools and, on a pane agent, its own session's read tools. Plan
         # mode keeps both — a plan that has read the settings it is about is a better plan — and
-        # the writes among them are refused below, the way the board's are.
+        # the writes among them are refused in `_prepare`, the way the board's are.
         for side in (self.app, self.activity):
             if side is not None:
                 extra = extra + side.tool_specs()
-        if self.mode == "plan":
-            # Subagents may write files, so plan mode does not offer them either.
-            return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
-        if self.subagents is not None:
-            tools = tools + self.subagents.tool_specs()
-        return tools + extra
+        # The board's eight tools go after those two, not before them as the draft order had it:
+        # they are the group that comes and goes while the pane runs, when a project is attached
+        # or detached, so ending with them makes that an append instead of an insert.
+        if self.board is not None:
+            extra = extra + self.board.tool_specs()
+        return tools + extra + tail
 
     @property
     def _routed(self) -> dict | None:
@@ -1535,8 +1583,8 @@ class Agent:
         self.executor.program.begin_turn(validated.get("program_control"))
         self.executor.terminal.begin_turn(validated.get("terminal_handoff"))
         self.executor.questions.begin_turn()
-        note = (self._pending_note + format_context(context) + format_attachments(attachments)
-                + image_block(attachments))
+        note = (self._pending_note + plan_mode_note(self.mode) + format_context(context)
+                + format_attachments(attachments) + image_block(attachments))
         if reset_cancellation:
             self.cancel_event.clear()
         self._pending_note = ""

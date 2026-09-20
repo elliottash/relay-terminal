@@ -1,0 +1,37 @@
+{
+ "repo": "/tmp/claude-1000/pf4k/fix/assembly/after",
+ "build": {
+  "prompt_bytes": 17888,
+  "tools_bytes": 38864,
+  "tools": 34,
+  "note_bytes": 0
+ },
+ "plan": {
+  "prompt_bytes": 17888,
+  "tools_bytes": 38864,
+  "tools": 34,
+  "note_bytes": 1559
+ },
+ "switch_changes_prompt": false,
+ "switch_changes_tools": false,
+ "switch": [
+  {
+   "wall_s": 0.62,
+   "prompt_n": 363,
+   "cache_n": 14347,
+   "prompt_ms": 563.7
+  },
+  {
+   "wall_s": 0.592,
+   "prompt_n": 363,
+   "cache_n": 14347,
+   "prompt_ms": 556.9
+  },
+  {
+   "wall_s": 0.614,
+   "prompt_n": 363,
+   "cache_n": 14347,
+   "prompt_ms": 559.8
+  }
+ ]
+}

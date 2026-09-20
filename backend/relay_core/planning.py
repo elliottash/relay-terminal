@@ -9,8 +9,12 @@ import time
 from pathlib import Path
 
 MODES = ("build", "plan")
-# The only file write in plan mode is the plan itself, through write_plan.
-PLAN_BLOCKED_TOOLS = {"write_file", "edit_file", "set_keybinding"}
+# The only file write in plan mode is the plan itself, through write_plan. The subagent tools are
+# here since #GMCF: a subagent may write files, so a plan turn never started one, which used to be
+# done by leaving all three out of the tool list. The list is the same in both modes now (a tool
+# that comes and goes costs the whole cached prefix), so the refusal is what keeps them out.
+PLAN_BLOCKED_TOOLS = {"write_file", "edit_file", "set_keybinding",
+                      "agent", "agent_message", "agent_wait"}
 MAX_PLAN_BYTES = 131072
 MAX_TITLE = 200
 

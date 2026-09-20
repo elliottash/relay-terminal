@@ -180,12 +180,34 @@ class StabilityTests(PromptFixture):
         self.assertTrue(after.startswith(head), 'a claim changed something other than the tail')
         self.assertIn(f"You hold: #{card['id']}.", after.splitlines()[-1])
 
-    def test_switching_mode_only_changes_the_tail_too(self):
+    def test_switching_mode_changes_neither_the_prompt_nor_the_tool_list(self):
+        # A mode switch used to rewrite the middle of the prompt (the plan-mode note) and remove
+        # three tools from the middle of the list, which re-prefills everything: 13–18 s on the
+        # Local tier, where the chat template renders the tools above the system prompt (#GMCF).
+        # The note is the turn's Relay context now and write_plan is offered in both modes.
+        from relay_core import agent as agent_mod
         agent = self.agent()
-        build = agent.system_prompt()
+        build = (agent.system_prompt(), json.dumps(agent.tools(), ensure_ascii=False))
         agent.set_mode('plan')
-        shared = os.path.commonprefix([build, agent.system_prompt()])
-        self.assertGreater(len(shared), len(build) - 200)
+        self.assertEqual((agent.system_prompt(), json.dumps(agent.tools(), ensure_ascii=False)), build)
+        self.assertIn('write_plan', [t['function']['name'] for t in agent.tools()])
+        self.assertIn('PLAN MODE', agent_mod.plan_mode_note('plan'))
+        self.assertEqual(agent_mod.plan_mode_note('build'), '')
+
+    def test_attaching_a_switchboard_only_appends(self):
+        # A project attached or detached mid-session is the other event that used to move the
+        # middle of the prompt: the board's header and policy sat above the app and own-session
+        # rules. Both board sections are the tail now, and its tools are appended.
+        from relay_core import agent as agent_mod
+        without = build_agent(self.workspace, self.repo, self.library, board=False)
+        attached = self.agent()
+        self.assertTrue(attached.system_prompt().startswith(without.system_prompt()),
+                        'attaching a Switchboard changed something other than the tail')
+        self.assertIn('Switchboard', attached.system_prompt()[len(without.system_prompt()):])
+        # The tools before the ones that can only append (TAIL_TOOLS) keep their order too.
+        stable = [[t for t in a.tools() if t['function']['name'] not in agent_mod.TAIL_TOOLS]
+                  for a in (without, attached)]
+        self.assertEqual(stable[1][:len(stable[0])], stable[0])
 
     def test_the_prompt_carries_no_clock_and_no_identifier(self):
         # The two that would be easiest to add without noticing. A session id or a timestamp

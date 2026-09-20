@@ -687,10 +687,14 @@ class PlanModeTests(Base):
         agent.ask('plan the refactor')
         tools = provider.requests[0][1]
         self.assertIn('write_plan', tools)
-        self.assertNotIn('write_file', tools)
-        self.assertNotIn('edit_file', tools)
         self.assertIn('run_command', tools)
-        self.assertIn('PLAN MODE', provider.requests[0][0][0]['content'])
+        # The tool list is the same in both modes since #GMCF — one that came and went cost the
+        # whole cached prefix — so write_file is still offered here and refused when it is called.
+        self.assertIn('write_file', tools)
+        self.assertIn('edit_file', tools)
+        # And plan mode is stated in the turn's Relay context, not in the system prompt.
+        self.assertNotIn('PLAN MODE', provider.requests[0][0][0]['content'])
+        self.assertIn('PLAN MODE', provider.requests[0][0][-1]['content'])
         self.assertEqual((self.root / 'a.txt').read_text(), 'keep\n')
         written = self.of('plan_written')
         self.assertEqual(len(written), 1)
@@ -722,7 +726,9 @@ class PlanModeTests(Base):
             agent.set_mode('yolo')
 
 
-    def test_plan_mode_hides_subagent_tools(self):
+    def test_plan_mode_keeps_the_subagent_tools_in_the_list_and_refuses_them(self):
+        # A subagent may write files, so a plan turn still never starts one (#GMCF): the tools
+        # stay in the list — removing one re-prefills the request — and the call is refused.
         class FakeSubagents:
             def tool_specs(self):
                 return [{'type': 'function', 'function': {'name': 'agent', 'parameters': {}}}]
@@ -730,7 +736,10 @@ class PlanModeTests(Base):
         agent.subagents = FakeSubagents()
         self.assertIn('agent', [t['function']['name'] for t in agent.tools()])
         agent.set_mode('plan')
-        self.assertNotIn('agent', [t['function']['name'] for t in agent.tools()])
+        self.assertIn('agent', [t['function']['name'] for t in agent.tools()])
+        with self.assertRaises(ValueError) as caught:
+            agent._prepare('agent', {'type': 'general', 'description': 'd', 'prompt': 'p'})
+        self.assertIn('not available in plan mode', str(caught.exception))
 
 
 class AttachmentTests(Base):

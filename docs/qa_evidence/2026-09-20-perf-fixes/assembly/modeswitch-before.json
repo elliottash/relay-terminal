@@ -1,0 +1,37 @@
+{
+ "repo": "/tmp/claude-1000/pf4k/fix/assembly/head",
+ "build": {
+  "prompt_bytes": 17888,
+  "tools_bytes": 38410,
+  "tools": 33,
+  "note_bytes": 0
+ },
+ "plan": {
+  "prompt_bytes": 19369,
+  "tools_bytes": 27428,
+  "tools": 31,
+  "note_bytes": 0
+ },
+ "switch_changes_prompt": true,
+ "switch_changes_tools": true,
+ "switch": [
+  {
+   "wall_s": 13.27,
+   "prompt_n": 11714,
+   "cache_n": 0,
+   "prompt_ms": 12873.3
+  },
+  {
+   "wall_s": 0.661,
+   "prompt_n": 22,
+   "cache_n": 11692,
+   "prompt_ms": 192.4
+  },
+  {
+   "wall_s": 0.654,
+   "prompt_n": 22,
+   "cache_n": 11692,
+   "prompt_ms": 188.8
+  }
+ ]
+}
