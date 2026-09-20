@@ -232,7 +232,9 @@ void ModelPicker::selectKey(const QString &key) {
 
 void ModelPicker::onRowChanged() {
     // Rebuild the level buttons for the highlighted model.
-    for (QAbstractButton *button : m_efforts->buttons()) { m_efforts->removeButton(button); button->deleteLater(); }
+    // Deleted now, not deleteLater: a button taken out of the layout but still alive when the
+    // dialog is shown is drawn at its default geometry, a large blank square over the list.
+    for (QAbstractButton *button : m_efforts->buttons()) { m_efforts->removeButton(button); m_effortRow->removeWidget(button); delete button; }
     while (QLayoutItem *item = m_effortRow->takeAt(0)) delete item;
     const QString key = selectedKey();
     const Entry *entry = key.isEmpty() ? nullptr : m_context.catalog.find(key);
