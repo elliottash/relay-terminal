@@ -624,6 +624,37 @@ folds.
 - **Folded by default, remembered per pane.** Which groups are open rides the layout node beside
   the folded sections: `{"board": {"self_closed": ["done"]}}`.
 
+### 4.11.2 Signals: the faults the machine tracks, and the one row they get (#AQ6X, owner 2026-09-20)
+
+The owner asked for "a separate agent-only card type, for tracking, that humans aren't supposed to
+read — cards that come from failed tests". `docs/SIGNALS-RESEARCH.md` read thirty-odd systems and
+the answer that came back is the same shape everywhere: a **signal** is a keyed, counted,
+machine-closed item in a layer *below* the board, and it becomes a card only when it needs a person.
+So it is not a card type. It gets no id, no rank, no thread and no survey until it is promoted.
+
+- **Not in git, and not a file per fault.** A signal is the fold of two append-only files under the
+  board's private root (`SWITCHBOARD-FORMAT.md` §5.1): every test execution, and every action a
+  person or an agent took. `issues/` already takes 39 % of this repo's commits, and a machine
+  writing a card after every test run would contend on `land.py` from every pane.
+- **The machine opens it and the machine closes it.** `pending` on the first failing execution of a
+  key, `open` on the second consecutive one, `resolved` on two consecutive passes — twenty for a
+  flaky test, which is Datadog's number and is cheap here because Relay can simply run the test
+  again. Nobody, agent or owner, can mark one fixed: the way to resolve a signal is to run the
+  check. The owner's override is a **dismissal**, which always expires.
+- **One cause, one item.** A build failure explains the tests under it; three tests failing with one
+  fingerprint are one group; more than half of ten or more failing is one red run. A pane that
+  broke a header sees one row, not two hundred.
+- **What a person sees.** A count on the bugs tab and one folded row, reusing #93WR's fold widget:
+  groups before members, dismissed behind a toggle. Nothing reaches a human surface unasked except
+  a promotion — a bug card in `inbox` — and a dismissal about to expire. A signal that is going to
+  be fixed in the next minute by the pane that broke it should never have interrupted anybody.
+- **The machine's state wins over the card's.** A card cannot leave `needs-verification` while a
+  signal its own pane's runs opened is still failing, and closing the card resolves nothing. That
+  is the reverse of the first proposal, and it is what stops a red test being closed by assertion.
+
+Decisions 1–12 on card `#AQ6X` are the spec, the research's R1–R13 the reasoning, and
+`AGENT-SESSIONS-PROTOCOL.md` §32 the wire.
+
 ### 4.12 The card reads as one page: a pencil, a seam, and a box that does the talking (#VZ69, owner 2026-09-19)
 
 Owner, on the card detail as 4.9 left it: *"there should be a promponent pencil edit button, rather

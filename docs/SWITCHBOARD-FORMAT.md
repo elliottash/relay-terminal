@@ -401,6 +401,35 @@ GitHub sync's state, `docs/GITHUB-SYNC.md` §3) and `forge-logins.yaml` — or `
 GitHub login map, which is per user rather than committed. `Board.card_paths()` only walks `*.md`
 two levels down, so `check` ignores both.
 
+### 5.1 The machine's two stores: run history and signals
+
+`.private/` also holds what the *machine* records about this checkout, in two append-only JSONL
+files. Both are per machine on purpose — they describe runs of *this* working tree — and neither is
+ever committed; the thing another clone should see is the card a signal was promoted into.
+
+| Path | One line is | Written by | Read by |
+|---|---|---|---|
+| `.private/tests/history.jsonl` | one **test execution**: `{ts, run_id, id, runner, result, duration, commit, host, message?, excerpt?, source_hash?, tree_digest?}` | `test_history.append`, from `ingest_junit` | `test_history.records()` (the Test suites pane, Check), `signals.fold()` |
+| `.private/tests/incoming/<host>-<run>/` | a run fetched from another machine: `meta.json`, `ctest.xml`, `unittest.xml`, logs, and an `ingested` marker once folded in | `scripts/relay-remote-tests` | `tests_protocol.ingest_incoming`, exactly once per folder |
+| `.private/signals/events.jsonl` | one **action** on a signal: `{ts, v, action, key?, session?, reason?, comment?, until?, card?, by?, run_id?}` | `signals.append_event` | `signals.fold()` |
+
+`tree_digest` on an execution is empty when the working tree was `commit`'s, and otherwise twelve
+hex of sha256 over `git diff HEAD`: several sessions edit this one checkout, so a commit does not
+identify the code that ran, and the flake rule that Datadog states over commits is read over
+`(commit, tree_digest)` instead (card `#AQ6X`, research R2).
+
+`action` is one of `claim`, `release`, `dismiss`, `promote`, `note` and `run`. A **signal** is not
+stored: it is the fold of the executions and these actions, so the log holds only what a person or
+an agent *did*, and an occurrence is never written twice (`docs/SIGNALS-RESEARCH.md` R1, R13). The
+`run` lines are the one thing the executions cannot say — which pane's run a failure came from —
+and they are what the verification gate reads. `AGENT-SESSIONS-PROTOCOL.md` §32 is the contract;
+`backend/relay_core/signals.py` is the fold and every threshold.
+
+A signal's only committed trace is its promoted card: an ordinary `work` card in the bugs tab with
+labels `bug` and `signal`, `links.signal` naming the key, and a machine-owned `## Signal` section
+that Relay **rewrites in place** on every state change. Treat that section like `implemented_by`:
+generated, never hand-edited.
+
 ## 6. `scripts/relay-board.py`
 
 | Command | Does |
