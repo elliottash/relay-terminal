@@ -1317,6 +1317,25 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual([], self.kinds("marker01"))        # the oldest three fell off the front
         self.assertEqual([(self.SID, "rewound")], self.kinds("marker04"))
 
+    def test_the_worker_writes_records_this_reads(self):
+        """`SessionStore.append_rewound` is the other half of the jsonl contract (commit
+        73d50015). The parser here is fed by it rather than by a hand-written line, so the two
+        cannot drift apart without a test saying so."""
+        self.write_session()
+        store = SessionStore(self.digest, index=self.index)
+        number = store.append_rewound(self.SID, {
+            "at": 500.0, "turn": 3, "restore": "conversation", "epoch": 0,
+            "prompt": "what about the marmoset", "restored_files": [], "conflicts": [],
+            "messages": rewind_record()["messages"]})
+        self.assertEqual(1, number)
+        self.scrollback("the capybara scrolled past here\n", rewound=number)
+        self.index.reconcile(self.sessions)
+        rewound = [entry for entry in self.index.conversation(self.SID)["items"]
+                   if entry["kind"] == "rewound"]
+        self.assertEqual({3}, {entry["turn"] for entry in rewound})
+        self.assertIn("the capybara scrolled past here", [entry["text"] for entry in rewound])
+        self.assertEqual([(self.SID, "rewound")], self.kinds("marmoset"))
+
     # ----- reconcile reads a sidecar once ---------------------------------------------
     def test_a_changed_sidecar_is_re_read_and_an_unchanged_one_is_not(self):
         self.write_session()
