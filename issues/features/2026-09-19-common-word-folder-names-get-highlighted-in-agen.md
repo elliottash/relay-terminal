@@ -8,7 +8,7 @@ implemented_by: glm/glm-5.3
 priority: 1
 rank: zzzzzzzr
 created: '2026-09-19'
-links: {plans: [], commits: [a7fc3ca2], evidence: [docs/qa_evidence/2026-09-20-prose-bare-folder-links/], related: [R2WQ], github: null}
+links: {commits: [a7fc3ca2, 281c81e8], evidence: [docs/qa_evidence/2026-09-20-prose-bare-folder-links/], github: null, plans: [], related: [R2WQ]}
 ---
 # common-word folder names get highlighted in agent messages
 
