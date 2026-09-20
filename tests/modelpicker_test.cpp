@@ -3,9 +3,7 @@
 // the reasoning level beside the model, favorites and recent sections, and what a pick returns.
 #include "ModelPicker.h"
 
-#include <QAbstractButton>
 #include <QApplication>
-#include <QButtonGroup>
 #include <QDateTime>
 #include <QComboBox>
 #include <QJsonArray>
@@ -90,31 +88,30 @@ private Q_SLOTS:
         QCOMPARE(picker.list()->topLevelItem(0)->text(3), QStringLiteral("45"));
     }
 
-    void theReasoningRowFollowsTheHighlightedModel() {
+    void theReasoningColumnIsTheListsLevelOrThePanes() {
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("low"));
         ModelPicker picker(context());
-        QCOMPARE(picker.effortGroup()->buttons().size(), 3);
-        QCOMPARE(picker.selectedEffort(), QStringLiteral("high"));   // the pane's level, offered here
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("low"));   // the list's level
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("low"));
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("high"));  // in no list: the pane's own
+        QCOMPARE(picker.selectedEffort(), QString());                              // …so the pick keeps it
         picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
-        QCOMPARE(picker.effortGroup()->buttons().size(), 0);         // no knob
-        QCOMPARE(picker.selectedEffort(), QString());
-        curation::setEffortFor(QStringLiteral("guest:claude|opus"), QStringLiteral("low"));
-        picker.rebuild();   // the column reads the memory when the rows are drawn
+        QCOMPARE(picker.list()->currentItem()->text(2), QString());               // no knob
+        QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().isEmpty());
         picker.selectKey(QStringLiteral("guest:claude|opus"));
-        QCOMPARE(picker.selectedEffort(), QStringLiteral("low"));    // remembered per model
-        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("low"));
         QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().contains(QStringLiteral("5h 62% left")));
     }
 
-    void aPickReturnsTheKeyAndTheLevelAndRemembersIt() {
+    void aPickReturnsTheKeyAndTheListsLevel() {
+        curation::addToTier(QStringLiteral("high"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("max"));
         ModelPicker picker(context());
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
-        for (QAbstractButton *button : picker.effortGroup()->buttons())
-            if (button->property("level").toString() == QStringLiteral("max")) button->click();
         picker.accept();
         QVERIFY(picker.pick().accepted);
         QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3-flash"));
         QCOMPARE(picker.pick().effort, QStringLiteral("max"));
-        QCOMPARE(curation::effortFor(QStringLiteral("glm-coding|glm-5.3-flash")), QStringLiteral("max"));
     }
 
     void typingFiltersToOneFlatList() {
@@ -193,15 +190,13 @@ private Q_SLOTS:
     }
 
     void levelsAreShownInTheProvidersWords() {
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
         ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("max"));
         for (Entry &entry : ctx.catalog.entries)
             if (entry.key == QStringLiteral("glm-coding|glm-5.3")) entry.effortLabels.insert(QStringLiteral("max"), QStringLiteral("xhigh"));
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
-        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("xhigh"));   // the column
-        QStringList buttons;
-        for (QAbstractButton *button : picker.effortGroup()->buttons()) buttons << button->text();
-        QCOMPARE(buttons, (QStringList{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")}));
+        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("xhigh"));   // the provider's word
         QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                   // Relay's level is what is returned
     }
 

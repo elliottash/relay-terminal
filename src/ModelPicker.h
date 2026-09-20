@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The model picker (owner, 2026-09-20): Ctrl+Shift+M, /model, and the "more models…" row of the
-// pane's model box. Warp's shape: a filter over one list, the reasoning level chosen separately
-// from the model, and a sort menu. opencode's additions: favorites and the ten most recent picks
+// The model picker (owner, 2026-09-20): Ctrl+Alt+M, /model, and the "more models…" row of the
+// pane's model box. Warp's shape: a filter over one list and a sort menu. It picks a *model*
+// only (owner, later that day): the level is the composer's own level box beside the model box,
+// for mouse and keys alike, and a pick takes the level the tier lists give that model. opencode's additions: favorites and the ten most recent picks
 // above the rest, sections that give way to one flat list the moment you type, and the reasoning
 // level remembered per model.
 //
@@ -22,8 +23,6 @@ class QLineEdit;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
-class QButtonGroup;
-class QHBoxLayout;
 class QEvent;
 
 namespace relay {
@@ -55,9 +54,8 @@ public:
     QLineEdit *filter() const { return m_filter; }
     QTreeWidget *list() const { return m_list; }
     QComboBox *sortBox() const { return m_sort; }
-    QButtonGroup *effortGroup() const { return m_efforts; }
     QString selectedKey() const;
-    QString selectedEffort() const;
+    QString selectedEffort() const;   // the level the lists give the highlighted model; empty = keep
     void selectKey(const QString &key);
     void accept() override;
 
@@ -74,9 +72,6 @@ private:
     QLineEdit *m_filter = nullptr;
     QComboBox *m_sort = nullptr;
     QTreeWidget *m_list = nullptr;
-    QLabel *m_effortLabel = nullptr;
-    QHBoxLayout *m_effortRow = nullptr;
-    QButtonGroup *m_efforts = nullptr;
     QLabel *m_limits = nullptr;
     QPushButton *m_favorite = nullptr;
     QPushButton *m_use = nullptr;

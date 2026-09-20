@@ -299,6 +299,8 @@ private Q_SLOTS:
         QCOMPARE(curation::tierList(QStringLiteral("main")).last().effort, QStringLiteral("low"));
         curation::removeFromTier(QStringLiteral("main"), QStringLiteral("guest:claude|opus"));
         QCOMPARE(mainDefault(catalog).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(curation::listEffortFor(QStringLiteral("kimi-code|k3")), QStringLiteral("low"));
+        QCOMPARE(curation::listEffortFor(QStringLiteral("relay-free|relay-main")), QString());   // in no list: the pane keeps its level
         // The picker's priority order leads with the lists.
         QCOMPARE(curation::ranked(catalog).first(), QStringLiteral("glm-coding|glm-5.3"));
         // An emptied list stays a choice: no fallbacks, and the defaults do not come back.

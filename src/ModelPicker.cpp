@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelPicker.h"
 
-#include <QAbstractButton>
-#include <QButtonGroup>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -13,7 +11,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -64,18 +61,6 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     for (int c = ColProvider; c < ColCount; ++c) m_list->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     m_list->setTextElideMode(Qt::ElideRight);
     layout->addWidget(m_list, 1);
-
-    // The reasoning level, separate from the model (Warp): one button per level the highlighted
-    // model takes, the remembered one pressed.
-    auto *effortBox = new QHBoxLayout;
-    m_effortLabel = new QLabel(QStringLiteral("reasoning"));
-    effortBox->addWidget(m_effortLabel);
-    m_effortRow = new QHBoxLayout;
-    effortBox->addLayout(m_effortRow);
-    effortBox->addStretch(1);
-    m_efforts = new QButtonGroup(this);
-    m_efforts->setExclusive(true);
-    layout->addLayout(effortBox);
 
     m_limits = new QLabel;
     m_limits->setObjectName(QStringLiteral("modelLimits"));
@@ -157,11 +142,14 @@ void ModelPicker::addSection(const QString &title) {
 }
 
 QTreeWidgetItem *ModelPicker::addRow(const Entry &entry) {
-    const QString remembered = curation::effortFor(entry.key);
+    // The level the pane would run at after this pick: the lists' entry for the model, else the
+    // pane's own level moved to one the model offers. Information, not a control.
     QString reasoning;
-    if (!entry.efforts.isEmpty())
-        reasoning = entry.efforts.contains(remembered) ? remembered
+    if (!entry.efforts.isEmpty()) {
+        const QString listed = curation::listEffortFor(entry.key);
+        reasoning = entry.efforts.contains(listed) ? listed
                   : entry.efforts.contains(m_context.currentEffort) ? m_context.currentEffort : entry.efforts.last();
+    }
     const double speed = curation::speed(entry.key);
     QStringList columns{(curation::isFavorite(entry.key) ? QStringLiteral("★ ") : QString()) + entry.label,
                         entry.provider + (entry.plan.isEmpty() ? QString() : QStringLiteral(" · ") + entry.plan),
@@ -228,8 +216,11 @@ QString ModelPicker::selectedKey() const {
 }
 
 QString ModelPicker::selectedEffort() const {
-    QAbstractButton *button = m_efforts->checkedButton();
-    return button ? button->property("level").toString() : QString();
+    const QString key = selectedKey();
+    const Entry *entry = key.isEmpty() ? nullptr : m_context.catalog.find(key);
+    if (!entry || entry->efforts.isEmpty()) return QString();
+    const QString listed = curation::listEffortFor(key);
+    return entry->efforts.contains(listed) ? listed : QString();
 }
 
 void ModelPicker::selectKey(const QString &key) {
@@ -240,36 +231,12 @@ void ModelPicker::selectKey(const QString &key) {
 }
 
 void ModelPicker::onRowChanged() {
-    // Rebuild the level buttons for the highlighted model.
-    // Deleted now, not deleteLater: a button taken out of the layout but still alive when the
-    // dialog is shown is drawn at its default geometry, a large blank square over the list.
-    for (QAbstractButton *button : m_efforts->buttons()) { m_efforts->removeButton(button); m_effortRow->removeWidget(button); delete button; }
-    while (QLayoutItem *item = m_effortRow->takeAt(0)) delete item;
     const QString key = selectedKey();
     const Entry *entry = key.isEmpty() ? nullptr : m_context.catalog.find(key);
     m_use->setEnabled(entry != nullptr);
     m_favorite->setEnabled(entry != nullptr);
     m_favorite->setText(entry && curation::isFavorite(key) ? QStringLiteral("★ unfavorite") : QStringLiteral("☆ favorite"));
-    if (!entry) { m_effortLabel->setText(QStringLiteral("reasoning")); m_limits->clear(); return; }
-    if (entry->efforts.isEmpty()) {
-        m_effortLabel->setText(QStringLiteral("reasoning: this model has no reasoning setting"));
-    } else {
-        m_effortLabel->setText(QStringLiteral("reasoning"));
-        const QString remembered = curation::effortFor(key);
-        const QString chosen = entry->efforts.contains(remembered) ? remembered
-                             : entry->efforts.contains(m_context.currentEffort) ? m_context.currentEffort : entry->efforts.last();
-        for (const QString &level : entry->efforts) {
-            auto *button = new QToolButton;
-            button->setText(entry->effortLabel(level));   // the provider's own word (xhigh), the level underneath
-            button->setCheckable(true);
-            button->setAutoRaise(false);
-            button->setProperty("level", level);
-            button->setAccessibleName(QStringLiteral("reasoning %1").arg(level));
-            button->setChecked(level == chosen);
-            m_efforts->addButton(button);
-            m_effortRow->addWidget(button);
-        }
-    }
+    if (!entry) { m_limits->clear(); return; }
     const QString limits = limitsText(m_context.catalog.limits.value(entry->preset),
                                       m_context.now > 0 ? m_context.now : QDateTime::currentSecsSinceEpoch());
     m_limits->setText(limits.isEmpty() ? QString() : entry->provider + QStringLiteral(": ") + limits);
@@ -281,7 +248,6 @@ void ModelPicker::accept() {
     m_pick.accepted = true;
     m_pick.key = key;
     m_pick.effort = selectedEffort();
-    if (!m_pick.effort.isEmpty()) curation::setEffortFor(key, m_pick.effort);
     QDialog::accept();
 }
 

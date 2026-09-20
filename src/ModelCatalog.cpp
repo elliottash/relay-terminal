@@ -466,6 +466,12 @@ void setTierEffort(const QString &tier, const QString &key, const QString &effor
     for (TierEntry &entry : entries) if (entry.key == key) entry.effort = effort;
     setTierList(tier, entries);
 }
+QString listEffortFor(const QString &key) {
+    for (const QString &tier : tierIds())
+        for (const TierEntry &entry : tierList(tier))
+            if (entry.key == key) return entry.effort;
+    return QString();
+}
 void applyTierDefaults(const QJsonObject &lists) {
     for (const QString &tier : tierIds()) {
         QList<TierEntry> entries;

@@ -1393,7 +1393,7 @@ public:
     void selectEntry(const QString &key, const QString &effort = QString()) {
         QString preset, model;
         if (!relay::models::Catalog::splitKey(key, &preset, &model)) return;
-        const QString level = effort.isEmpty() ? relay::models::curation::effortFor(key) : effort;
+        const QString level = effort.isEmpty() ? relay::models::curation::listEffortFor(key) : effort;   // the tier lists' level for it
         if (const QString guest = guestOfPreset(preset); !guest.isEmpty()) {
             if (preset != m_currentPreset || model != m_guestModel) pickGuest(guest, model);
         } else if (preset != m_currentPreset) {

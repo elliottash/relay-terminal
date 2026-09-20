@@ -164,6 +164,9 @@ void addToTier(const QString &tier, const QString &key, const QString &effort = 
 void removeFromTier(const QString &tier, const QString &key);
 void moveInTier(const QString &tier, const QString &key, int toIndex);
 void setTierEffort(const QString &tier, const QString &key, const QString &effort);
+// The level a model runs at when picked: the main list's entry for it, else the first other list
+// that names it, else empty (the pane keeps its own level, moved to one the model offers).
+QString listEffortFor(const QString &key);
 // Apply one of the worker's `tier_list_defaults` ({tier: [{preset, model, effort}]}).
 void applyTierDefaults(const QJsonObject &lists);
 void clearTierLists();
