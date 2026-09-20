@@ -1,0 +1,30 @@
+{"tag": "statx-before2", "pid": 1039963, "load_before": "2.18", "load_after": "2.18", "wall0": 1789933366.7740045, "worker": 223.3, "window": 249.3, "shell": 259.2, "wready": 333.8}
+== before2 (/tmp/claude-1000/pf4k/build/relay)
+   idle 4 s        {'sys_enter_statx': 580, 'sys_enter_faccessat': 144, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 13105, 'sys_enter_faccessat': 5251, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        170.2
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            417.5
+{"tag": "statx-after2", "pid": 1040795, "load_before": "2.20", "load_after": "2.20", "wall0": 1789933388.5774753, "worker": 182.2, "window": 210.3, "shell": 228.6, "wready": 274.1}
+== after2 (/tmp/claude-1000/pf4k/fix/idle/relay-after)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 4, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 305, 'sys_enter_faccessat': 71, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        2.2
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.5
+DONE
+{"tag": "statx-before", "pid": 860546, "load_before": "4.45", "load_after": "4.45", "wall0": 1789932434.6734354, "worker": 229.4, "window": 266.1, "shell": 281.8, "wready": 322.5}
+== before (/tmp/claude-1000/pf4k/build/relay)
+   idle 4 s        {'sys_enter_statx': 580, 'sys_enter_faccessat': 144, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 15090, 'sys_enter_faccessat': 14031, 'sys_enter_openat': 521}
+   per key press   sys_enter_faccessat        462.9
+   per key press   sys_enter_openat           12.4
+   per key press   sys_enter_statx            483.7
+{"tag": "statx-after", "pid": 866763, "load_before": "4.35", "load_after": "4.35", "wall0": 1789932451.3182628, "worker": 173.9, "window": 205.2, "shell": 205.2, "wready": 249.0}
+== after (/tmp/claude-1000/pf4k/fix/idle/relay-after)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 4, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 2320, 'sys_enter_faccessat': 8868, 'sys_enter_openat': 141}
+   per key press   sys_enter_faccessat        295.5
+   per key press   sys_enter_openat           1.4
+   per key press   sys_enter_statx            69.7
+DONE

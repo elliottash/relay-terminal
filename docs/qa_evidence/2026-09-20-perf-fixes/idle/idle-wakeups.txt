@@ -1,0 +1,25 @@
+== idle before 1pane
+  panes_built=1 load=3.52 cpu%=0.48 wakeups/s=20.2
+    relay                    cpu%=0.48 wk/s=20.2 pss_kb=48352
+== idle before 4pane
+  panes_built=4 load=3.25 cpu%=1.35 wakeups/s=47.3
+    relay                    cpu%=1.35 wk/s=47.3 pss_kb=52159
+== unmap before 4panes
+{"tag": "unmap", "pid": 718860, "load_before": "3.64", "load_after": "3.64", "wall0": 1789931770.355336, "worker": 191.7, "window": 215.8, "shell": 238.4, "wready": 279.2}
+panes 4 load 3.16
+mapped   (34.6, 1.23)
+unmapped (31.1, 1.0)
+remapped (35.1, 1.17)
+== idle after 1pane
+  panes_built=1 load=5.00 cpu%=0.33 wakeups/s=20.2
+    relay-after              cpu%=0.33 wk/s=20.2 pss_kb=46903
+== idle after 4pane
+  panes_built=4 load=4.27 cpu%=0.68 wakeups/s=33.7
+    relay-after              cpu%=0.68 wk/s=33.7 pss_kb=51937
+== unmap after 4panes
+{"tag": "unmap", "pid": 757048, "load_before": "2.91", "load_after": "2.91", "wall0": 1789932027.9414747, "worker": 203.4, "window": 225.1, "shell": 231.3, "wready": 294.5}
+panes 4 load 2.85
+mapped   (47.1, 0.63)
+unmapped (6.0, 0.2)
+remapped (6.0, 0.27)
+DONE

@@ -1,13 +1,13 @@
 ---
 id: 057J
 type: work
-status: executing
+status: done
 labels: [bug, performance]
 assignee: claude-code
 rank: m3
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-perf-profile/], related: [PF4K], github: null}
+links: {plans: [], commits: [e73e7bae], evidence: [docs/qa_evidence/2026-09-20-perf-fixes/idle/, docs/qa_evidence/2026-09-20-perf-profile/], related: [PF4K], github: null}
 ---
 # An idle pane wakes 13 times a second; QSettings is constructed on hot paths
 
@@ -32,3 +32,38 @@ Idle, one pane: 0.53 % CPU / 20.9 wakeups/s (spark), 0.48 % / 18.5 (sphinxpad Qt
 4. Stop the caret timer on focus-out, as `engine/view/TerminalView.cpp:2713` does.
 5. Walk only the visible tab's panes.
 Re-measure with `startup/harness/` on sphinxpad, on battery if possible.
+
+## Done
+All five landed in `e73e7bae`; evidence and the full tables in
+[docs/qa_evidence/2026-09-20-perf-fixes/idle/](../../../docs/qa_evidence/2026-09-20-perf-fixes/idle/README.md).
+
+1. `pollGuestEvents()` lists the spool only when its directory's mtime or inode moved
+   (`relay::runtimedirs::DirStamp`, the gate `pollShell()` keeps on `state.json`).
+2. `relay::settings` (`src/SettingsCache.h`) is the one way to read a setting on a hot path: one
+   `QSettings` per key, dropped by `SettingsWatch::notify()`, which every control in Options
+   already calls after it writes. `metersEnabled()`, `relay::log::level()`, `showToolOutput()`,
+   `voiceEnabled()`, `voiceHoldKey()` (with the `/etc/default/keyboard` read behind the same
+   generation) and `updateGhost()`'s history suggestions go through it.
+3. `tunePoll()` also asks `window()->isMinimized()` and `QGuiApplication::applicationState()`, and
+   is re-run from `QEvent::WindowStateChange` and `applicationStateChanged` rather than waiting for
+   the next quiet tick.
+4. `RichEditor` starts its caret blink in `focusInEvent` and stops it in `focusOutEvent` /
+   `hideEvent`, as `engine/view/TerminalView.cpp` does.
+5. `refreshPaneStatus()` walks `/proc` for the tab in front on every poll and for the tabs behind
+   it on the tab label's own 5 s clock, which is the only thing that reads those numbers.
+
+Measured on spark, Xvfb, fresh profile, against the clean export of `ccb31a8e`:
+
+| | before | after |
+|---|---|---|
+| 1 idle pane, CPU | 0.48 % | 0.33 % |
+| 1 idle pane, syscalls/s | 325 (145 `statx`, 35 `getdents64`, 36 `faccessat`) | 162 (58, 10, 1) |
+| 4 idle panes, CPU / wakeups | 1.35 % / 47.3 wk/s | 0.68 % / 33.7 wk/s |
+| per key press | 417.5 `statx` + 170.2 `faccessat` | 2.5 + 2.2 |
+| 4 panes minimised | 31.1 wk/s / 0.87 % (no change from mapped) | 7.3 wk/s / 0.20 % |
+
+Tests: `settingscache` (new — a value read 1 000 times builds one `QSettings`),
+`settings::aSettingChangedInOptionsIsInEffectAtOnce` (a control in Options is in effect on the next
+read), `runtimedirs::aDirectoryStampReportsOnlyRealChanges`,
+`editor::theCaretBlinksOnlyForTheFocusedBox`, and the existing `logging`, `paneusage`, `voice`,
+`panes`, `panestatus`, `titles`, `guestbridge` and `appcommands` suites.

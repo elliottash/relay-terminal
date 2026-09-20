@@ -1,0 +1,37 @@
+{"tag": "sys-before1", "pid": 813005, "load_before": "7.82", "load_after": "7.82", "wall0": 1789932242.5791266, "worker": 268.6, "window": 305.5, "shell": 321.4, "wready": 437.6}
+== before1  panes=1 load=7.54 over 20.0s
+   sys_enter_statx    2901  =  145.1/s
+   sys_enter_openat     740  =   37.0/s
+   sys_enter_getdents64     700  =   35.0/s
+   sys_enter_faccessat     720  =   36.0/s
+   sys_enter_newfstatat     550  =   27.5/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           6501  =  325.1/s
+{"tag": "sys-after1", "pid": 824547, "load_before": "7.54", "load_after": "7.54", "wall0": 1789932274.2811708, "worker": 210.8, "window": 237.3, "shell": 272.8, "wready": 301.8}
+== after1  panes=1 load=7.50 over 20.0s
+   sys_enter_statx    1150  =   57.5/s
+   sys_enter_openat     490  =   24.5/s
+   sys_enter_getdents64     200  =   10.0/s
+   sys_enter_faccessat      20  =    1.0/s
+   sys_enter_newfstatat     500  =   25.0/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           3250  =  162.5/s
+{"tag": "sys-before4", "pid": 831237, "load_before": "7.50", "load_after": "7.50", "wall0": 1789932305.8337243, "worker": 172.8, "window": 199.5, "shell": 219.5, "wready": 248.2}
+== before4  panes=4 load=5.21 over 20.0s
+   sys_enter_statx    9352  =  467.6/s
+   sys_enter_openat    2962  =  148.1/s
+   sys_enter_getdents64    2804  =  140.2/s
+   sys_enter_faccessat    1830  =   91.5/s
+   sys_enter_newfstatat    1753  =   87.7/s
+   sys_enter_read    3494  =  174.7/s
+   TOTAL          22195  = 1109.8/s
+{"tag": "sys-after4", "pid": 840400, "load_before": "5.21", "load_after": "5.21", "wall0": 1789932342.9234092, "worker": 189.5, "window": 218.4, "shell": 232.6, "wready": 261.1}
+== after4  panes=4 load=5.63 over 20.0s
+   sys_enter_statx    4605  =  230.2/s
+   sys_enter_openat    1962  =   98.1/s
+   sys_enter_getdents64     800  =   40.0/s
+   sys_enter_faccessat      81  =    4.0/s
+   sys_enter_newfstatat    2000  =  100.0/s
+   sys_enter_read    3499  =  174.9/s
+   TOTAL          12947  =  647.4/s
+DONE

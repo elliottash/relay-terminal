@@ -1,0 +1,21 @@
+{"tag": "states-relay", "pid": 956760, "load_before": "5.44", "load_after": "5.44", "wall0": 1789932806.6058176, "worker": 229.2, "window": 258.3, "shell": 258.3, "wready": 336.3}
+== /tmp/claude-1000/pf4k/build/relay  panes=4 load=4.99
+  mapped, in front             34.2 wk/s    1.20 % cpu
+  mapped, another app up       35.0 wk/s    1.33 % cpu
+  unmapped (minimised)         31.1 wk/s    0.87 % cpu
+  remapped and refocused       36.9 wk/s    1.33 % cpu
+{"tag": "states-relay-after", "pid": 964994, "load_before": "3.40", "load_after": "3.40", "wall0": 1789932890.170016, "worker": 203.7, "window": 236.2, "shell": 236.2, "wready": 301.1}
+== /tmp/claude-1000/pf4k/fix/idle/relay-after  panes=4 load=3.32
+  mapped, in front             45.3 wk/s    0.80 % cpu
+  mapped, another app up        7.3 wk/s    0.27 % cpu
+  unmapped (minimised)          7.3 wk/s    0.20 % cpu
+  remapped and refocused       22.9 wk/s    0.60 % cpu
+DONE
+{"tag": "states-relay-after", "pid": 978235, "load_before": "1.72", "load_after": "1.82", "wall0": 1789933017.290548, "worker": 173.9, "window": 202.2, "shell": 202.2, "wready": 262.1}
+== /tmp/claude-1000/pf4k/fix/idle/relay-after  panes=4 load=1.50
+  mapped, in front             21.5 wk/s    0.47 % cpu
+  mapped, another app up        7.3 wk/s    0.27 % cpu
+  unmapped (minimised)          7.5 wk/s    0.27 % cpu
+  first 2 s back               24.5 wk/s    0.50 % cpu
+  remapped and refocused       21.4 wk/s    0.47 % cpu
+DONE
