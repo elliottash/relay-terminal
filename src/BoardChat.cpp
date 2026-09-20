@@ -446,8 +446,15 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_queueBox);
 
     // ---- the composer -------------------------------------------------------------------------
-    m_composerRow = new QHBoxLayout;
-    m_composerRow->setSpacing(6);
+    // The shape a pane's prompt box has (src/Pane.h): the box is a row of its own and fills the
+    // panel's width, and the chips that qualify it — context, model, microphone — sit on a strip
+    // under it, with Send at that strip's end.
+    //
+    // They shared one row until 2026-09-20, and at panel width that left the box a stub barely
+    // wider than its "Ask…" fallback placeholder (owner: "the place where I type is that small
+    // thing at the bottom left"). A QHBoxLayout hands every widget its size hint before it
+    // distributes stretch, and the model box's hint is its current row's text ("Follow Main —
+    // deepseek/deepseek-chat"), so there was no stretch left to give the box beside it.
     m_composer = new RichEditor(this);
     m_composer->setObjectName(QStringLiteral("boardChatComposer"));
     m_composer->setAutoHeight(1, 6);
@@ -460,7 +467,23 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     // Every route sends: this box has one destination (owner's words to the page agent), so the
     // chords that mean "terminal" or "agent" in a pane must not silently do nothing here.
     m_composer->onSubmit = [this](const QString &) { sendPrompt(); };
-    m_composerRow->addWidget(m_composer, 1);
+    layout->addWidget(m_composer);
+
+    // The strip under the box. Nothing sits at its left, so a stretch pushes the chips to the
+    // right end, where a pane's context chip, model box and microphone are.
+    m_composerRow = new QHBoxLayout;
+    m_composerRow->setContentsMargins(2, 0, 2, 0);
+    m_composerRow->setSpacing(6);
+    m_composerRow->addStretch(1);
+
+    // "72% left" — the pane's chip, for the conversation the page is holding. `context` rides on
+    // the `chat: true` tagging (19.18) precisely so this can exist. First on the strip, so the
+    // model box `addComposerWidget` inserts before the microphone lands between the two, exactly
+    // as it does in a pane.
+    m_context = new QLabel(this);
+    m_context->setObjectName(QStringLiteral("boardChatContext"));
+    m_context->hide();
+    m_composerRow->addWidget(m_context, 0);
 
     // The microphone, protocol 16: record, `transcribe`, insert the text at the cursor. The
     // pane's own SVG, from the same place `Pane::stripIcon` reads it, so the two composers wear
@@ -476,13 +499,6 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     m_mic->setFocusPolicy(Qt::NoFocus);
     m_composerRow->addWidget(m_mic, 0);
     QObject::connect(m_mic, &QToolButton::clicked, this, [this] { toggleVoice(); });
-
-    // "72% left" — the pane's chip, for the conversation the page is holding. `context` rides on
-    // the `chat: true` tagging (19.18) precisely so this can exist.
-    m_context = new QLabel(this);
-    m_context->setObjectName(QStringLiteral("boardChatContext"));
-    m_context->hide();
-    m_composerRow->addWidget(m_context, 0);
 
     m_send = new QToolButton(this);
     m_send->setObjectName(QStringLiteral("boardChatSend"));

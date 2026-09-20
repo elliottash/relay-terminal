@@ -3319,10 +3319,12 @@ void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
     QVERIFY(keys->text().contains(QStringLiteral("ask the agent")));
 }
 
-// Composer parity with the main panes (#8YQ9 `t:6m`): the composer row carries the model box
-// (#BRD3), the microphone and the context-left chip, the three things a terminal pane's composer
-// row has. The box is built with the list tools — it must exist before this panel does — and
-// reparented into the row, so the filter row above must no longer be reserving its width.
+// Composer parity with the main panes (#8YQ9 `t:6m`): the strip under the box carries the model
+// box (#BRD3), the microphone and the context-left chip, the three things a terminal pane's
+// composer strip has, and — since the owner found the box shrunk to a stub beside them,
+// 2026-09-20 — the box itself is a row of its own that fills the panel's width. The model box is
+// built with the list tools — it must exist before this panel does — and reparented into the
+// strip, so the filter row above must no longer be reserving its width.
 void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -3343,17 +3345,36 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
     QVERIFY(tools && !tools->isAncestorOf(box));
 
-    // One row, in the pane's order: what is typed, then the model, then the microphone. The row
-    // is a layout inside the panel, not a widget of its own, so it is found by what it holds.
+    // Two rows of the panel's column, in the pane's order: the box, then a strip holding the
+    // context chip, the model and the microphone. Neither row is a widget of its own, so each is
+    // found by what it holds.
     QCOMPARE(box->parentWidget(), composer->parentWidget());
     QCOMPARE(mic->parentWidget(), composer->parentWidget());
-    QLayout *layout = nullptr;
+    QLayout *column = panel->layout();
+    QLayout *strip = nullptr;
     for (QLayout *candidate : panel->findChildren<QLayout *>())
-        if (candidate->indexOf(composer) >= 0)
-            layout = candidate;
-    QVERIFY(layout);
-    QVERIFY(layout->indexOf(composer) < layout->indexOf(box));
-    QVERIFY(layout->indexOf(box) < layout->indexOf(mic));
+        if (candidate->indexOf(box) >= 0)
+            strip = candidate;
+    QVERIFY(column && strip);
+    QVERIFY(strip->indexOf(composer) < 0);            // the box is not on the strip any more
+    QVERIFY(strip->indexOf(context) < strip->indexOf(box));
+    QVERIFY(strip->indexOf(box) < strip->indexOf(mic));
+    int composerAt = -1, stripAt = -1;
+    for (int i = 0; i < column->count(); ++i) {
+        if (column->itemAt(i)->widget() == composer)
+            composerAt = i;
+        if (column->itemAt(i)->layout() == strip)
+            stripAt = i;
+    }
+    QVERIFY(composerAt >= 0 && stripAt > composerAt);
+
+    // And it fills the panel: the whole box to type in, not the stub left over beside a model
+    // box naming "Follow Main — deepseek/deepseek-chat".
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QVERIFY2(composer->width() > panel->width() * 3 / 4,
+             qPrintable(QStringLiteral("composer %1 px in a %2 px panel")
+                            .arg(composer->width()).arg(panel->width())));
 
     // A pick still goes out the way #BRD3 wired it: the view writes no settings itself.
     QString picked;
