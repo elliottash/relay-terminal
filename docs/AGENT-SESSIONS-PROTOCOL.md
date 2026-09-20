@@ -382,6 +382,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
+| `prompt_profile` | `auto` \| `full` \| `short` | `auto` | which system prompt and tool list this pane sends (12.12). `auto` is `short` when the model is served from this machine (a `local:` endpoint) or its catalogue window is at most 32,768, and `full` otherwise |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 | `fallbacks` | `[{preset, model}, …]` | `[]` | the Options › Models priority list below the pane's own model, in order: where a failing turn goes, first entry first (15.2.2). Relay Free is a target only when it is in the list. Null or a non-list means an empty list; an entry that is not `{preset, model}` is dropped. Superseded by the `tiers.main` list (13.7, v3.10): still accepted, and it **is** the Main chain whenever no `tiers.main` was sent. `fallback` (singular, one `{preset, model}` or null, 2026-09-20 morning) is still read as a one-element list; `fallbacks` wins when both are sent |
 | `failover_openrouter` | string[] | `[]` | model ids that may continue on the same model through OpenRouter when they fail (15.2.2), tried after the whole list; per model and off by default, since it spends the OpenRouter key at pay-as-you-go rates. Null or an unusable shape means none |
@@ -765,6 +766,38 @@ a status change to `R5` in a ledger of two hundred would read as the ids going b
 entry that is not sent has not changed, so anything derived from it (the GUI's `waiting` flag)
 stands. Backend: `backend/relay_core/request_stream.py`, applied in `worker.py`'s `emit`; GUI:
 `RequestLedgerModel::handle`; tests: `tests/test_request_stream.py` and `tests/requests_test.cpp`.
+
+### 12.12 `prompt_profile` — the short profile (v4.2, 2026-09-20, #GMCF decision 7)
+
+A pane with a Switchboard sends about 14,500 tokens of system prompt and tool schemas before the
+first user word. A hosted provider caches that prefix; a model served on this machine prefills it at
+roughly 800 tokens a second, so it is **eighteen seconds of silence on every cold turn**. The
+`prompt_profile` option (12.1) chooses what that pane sends:
+
+| Profile | Prompt | Tools |
+|---|---|---|
+| `full` | `SYSTEM`, the todo rules, the app and own-session rules, the skill catalogue, the project's instruction files, the workspace line, the Switchboard policy and session note | everything the pane has: files and commands, jobs, skills, `ask_user`, `update_todos`, `write_plan`, subagents, app, own session, the Switchboard, `set_keybinding`, and the terminal pair when offered |
+| `short` | `relay_core.prompt_profiles.SYSTEM_SHORT` (18 rules), the project's instruction files, the workspace line, and one line naming the user's skills | eight: `run_command`, `read_file`, `list_directory`, `write_file`, `edit_file`, `command_output`, `stop_command`, `load_skill`, plus `run_in_terminal` / `type_into_program` when the turn offers them |
+
+`auto`, the default, is `short` when the model is served from this machine (a `local:` endpoint) or
+its catalogue `context_window` is at most 32,768, and `full` otherwise — a window alone does not say
+it (Bonsai runs with 131k), which is why the endpoint is tested first. It is resolved per request,
+so a per-turn model swap (vision, planning, failover) sends the profile of the model actually
+serving, and `set_model` refreshes the prompt as it already does.
+
+The short profile drops no *rule* the full one keeps: every line of `SYSTEM_SHORT` is one of
+`SYSTEM`'s, tightened, and what is absent is about features the profile does not offer. It carries
+**no Switchboard tools and no board policy**, which is the answer to decision 8's sub-question until
+an A/B shows a 27B model can file a card; `prompt_profile: "full"` is the override for a pane that
+wants them back. `session_info` (25.3) reports `prompt_profile` (what is in force now) and
+`prompt_profile_setting` (what the option says) on a live session, and the `configure` reply carries
+both as `prompt_profile` and `prompt_profile_in_effect`. GUI: Options › Agent "Prompt profile"
+(`src/RelayWindow.h`), sent by `Pane::requestOptions` and applied at once by `set_agent_options`; the
+ⓘ pane says "short prompt" beside the mode. Backend: `backend/relay_core/prompt_profiles.py`; tests:
+`tests/test_prompt_profiles.py`.
+
+Measured on `local:bonsai` (2026-09-20): full 14,544 tokens and 18.5 s of cold prefill, short 1,480
+tokens and 2.2 s; warm, both 0.2 s.
 
 ## 13. Model roles (v1.3, 2026-09-17; `planning` added v3.4, 2026-09-19)
 
@@ -4321,7 +4354,8 @@ subagent. Nothing is estimated.
 → `session_info` for a session:
 
 `{id, kind: "session", live, session_id, session_dir, file, file_exists, title, workspace,
-git_branch, created, updated, turns, model, models, preset, provider, effort, mode, usage,
+git_branch, created, updated, turns, model, models, preset, provider, effort, mode,
+prompt_profile?, prompt_profile_setting?, usage,
 context: {used_tokens, window, limit_tokens, percent, estimated} | null, instructions,
 instructions_bytes?, forked_from?, open_requests, thread_count, history: [{turn, prompt, time,
 ended, files, threads: [link]}], unplaced_threads: [link]}`
@@ -4333,6 +4367,9 @@ number of files the turn changed) with each thread the session started placed at
 parent_thread, owner_session, created, updated, usage, file, runs, children: [link], live?}`;
 `children` are the threads it started, `live` means this worker still holds it (its transcript
 can be opened in the pane's subagent pane). `context` is `null` for a saved session.
+`prompt_profile` (`full` | `short`, what this pane is sending now) and `prompt_profile_setting`
+(`auto` | `full` | `short`, the option behind it) are on a **live** session only: `auto` resolves
+per model, so a saved file cannot answer it (12.12).
 
 → `session_info` for a thread:
 

@@ -3464,6 +3464,7 @@ public:
             || key == QStringLiteral("agent/stall_timeout_s")
             || key == QStringLiteral("agent/first_token_timeout_s")
             || key == QStringLiteral("agent/audit_requests")
+            || key == QStringLiteral("agent/prompt_profile")
             || key == QStringLiteral("agent/failover") || key == QStringLiteral("agent/failover_hosted")
             || key.startsWith(QStringLiteral("models/"))   // the ranked fallback, the OpenRouter opt-ins
             || key.startsWith(QStringLiteral("security/"))) {
@@ -4510,6 +4511,11 @@ private:
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
                 {"first_token_timeout_s", std::clamp(settings.value(QStringLiteral("agent/first_token_timeout_s"), 0).toInt(), 0, 1800)},
                 {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()},
+                // Which system prompt and tool list this pane sends (#GMCF decision 7). "auto" is
+                // short on a model served from this machine or with a window of 32k or less, where
+                // the full 14,500-token prompt is eighteen seconds of prefill on every cold turn.
+                {"prompt_profile", settings.value(QStringLiteral("agent/prompt_profile"),
+                                                  QStringLiteral("auto")).toString()},
                 // Whether a turn whose provider keeps failing continues on another one (#G9VE),
                 // and whether Relay Free may be one of those providers (owner, 2026-09-19: opt-in,
                 // because a pane on the user's own key never chose Relay's hosted service).

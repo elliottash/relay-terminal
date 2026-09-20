@@ -157,6 +157,10 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     const QString mode = info.value(QStringLiteral("mode")).toString();
     if (!effort.isEmpty()) model += QStringLiteral(" <span class=m>· effort %1</span>").arg(esc(effort));
     if (mode == QLatin1String("plan")) model += QStringLiteral(" <span class=m>· plan mode</span>");
+    // Which prompt profile the pane is sending (#GMCF decision 7): only worth a word when it is
+    // the short one, which is a different agent — 16 rules and 8 tools, no Switchboard, no todos.
+    if (info.value(QStringLiteral("prompt_profile")).toString() == QLatin1String("short"))
+        model += QStringLiteral(" <span class=m>· short prompt</span>");
     html += row(QStringLiteral("Model"), model);
     QStringList models;
     for (const auto &value : info.value(QStringLiteral("models")).toArray()) models << value.toString();

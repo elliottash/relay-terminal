@@ -1445,6 +1445,11 @@ class SessionCommands:
         context = agent.context_event()
         event.update({"live": True, "provider": provider_name(preset.id if preset else "", agent.config.base_url),
                       "base_url_host": urlsplit(agent.config.base_url).hostname or "",
+                      # Which prompt profile this pane is sending, beside the mode it is in
+                      # (#GMCF decision 7): "auto" resolves per model, so only the live session
+                      # can answer it, and a short-prompt pane is a pane with eight tools.
+                      "prompt_profile": agent.profile(),
+                      "prompt_profile_setting": getattr(agent, "prompt_profile", "auto"),
                       "context": {k: context.get(k) for k in ("used_tokens", "window", "limit_tokens", "percent",
                                                                "estimated") if k in context},
                       "instructions_bytes": len(agent.instructions.section.encode("utf-8")) if agent.instructions else 0,

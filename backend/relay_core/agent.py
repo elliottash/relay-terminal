@@ -24,6 +24,7 @@ from . import approvals
 from . import activity_tools
 from . import app_tools
 from . import board_tools
+from . import prompt_profiles
 from . import todos as todo_tool
 from . import security
 from . import tool_labels
@@ -269,6 +270,10 @@ def validate_turn_options(request: dict) -> dict:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
             out[key] = request[key]
+    # Options › Agent's "Prompt profile" row (#GMCF decision 7), validated beside `todo_tool`
+    # because it is the same kind of setting: one row, three values, applied from the next request.
+    if request.get("prompt_profile") is not None:
+        out["prompt_profile"] = prompt_profiles.validate(request["prompt_profile"])
     # `failover_hosted` (2026-09-19 to 2026-09-20) was the pane-wide "Relay Free may be a
     # fallback" switch. Relay Free is now a fallback only when the priority list names it, so an
     # older GUI's value is accepted and ignored rather than refused.
@@ -502,7 +507,8 @@ class Agent:
                  session_dir: str | None = None, plans_dir: str | None = None, instructions=None,
                  max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
                  max_program_writes: int = DEFAULT_MAX_WRITES,
-                 todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
+                 todo_tool: bool = True, prompt_profile: str = prompt_profiles.DEFAULT_PROFILE,
+                 completion_check: bool = True, audit_requests: bool = False,
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
@@ -565,6 +571,9 @@ class Agent:
         # Request ledger, todos, completion check and audit (research section 6 items 2-8). Off for subagents.
         self.track_requests = track_requests
         self.todo_tool = todo_tool
+        # Which prompt profile this pane sends: "auto" (short on a local endpoint or a small
+        # window), "full" or "short" — see relay_core.prompt_profiles (#GMCF decision 7).
+        self.prompt_profile = prompt_profiles.validate(prompt_profile)
         self.completion_check = completion_check
         self.audit_requests = audit_requests
         self._announce = False   # emit requests/todos events on change (after construction)
@@ -744,7 +753,7 @@ class Agent:
             self.set_security(policy_keys)
         if approval_keys:
             self.set_approvals(approval_keys)
-        if "todo_tool" in request:
+        if "todo_tool" in request or "prompt_profile" in request:
             self.refresh_system_prompt()
         if "stall_timeout_s" in request or "first_token_timeout_s" in request:
             self._apply_stall_timeout()
@@ -778,6 +787,8 @@ class Agent:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
                 "completion_check": self.completion_check, "audit_requests": self.audit_requests,
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
+                # The setting and what it resolves to for the model serving now (#GMCF decision 7).
+                "prompt_profile": self.prompt_profile, "prompt_profile_in_effect": self.profile(),
                 "first_token_timeout_s": self.first_token_timeout_s,
                 "max_program_writes": self.max_program_writes, "failover": self.failover,
                 "fallbacks": [dict(entry) for entry in self.fallbacks],
@@ -794,6 +805,18 @@ class Agent:
 
     def _todos_enabled(self) -> bool:
         return self.track_requests and self.todo_tool
+
+    def profile(self) -> str:
+        """"full" or "short": what this pane is sending right now (#GMCF decision 7).
+
+        Read fresh rather than stored, because `auto` follows the model: a pane that switches from
+        the Local tier to a hosted one, or a turn a vision or planning swap took over, sends the
+        profile of the model actually serving it. `set_model` refreshes the prompt, so the switch
+        reaches the next request on its own.
+        """
+        return prompt_profiles.resolve(getattr(self, "prompt_profile", prompt_profiles.DEFAULT_PROFILE),
+                                       preset=self.preset,
+                                       context_window=getattr(getattr(self, "context", None), "window", None))
 
     def context_invalidate(self) -> None:
         if hasattr(self, "context"):
@@ -821,6 +844,13 @@ class Agent:
         `getattr` throughout: `refresh_system_prompt` runs while `__init__` is still setting the
         pane's parts up.
         """
+        if self.profile() == "short":
+            # A model that pays for the prompt in seconds gets the rules and the tools it can use,
+            # and none of the Switchboard, todo, app, own-session or keybinding text: 1.4k tokens
+            # against 14.5k, and about two seconds of prefill against eighteen.
+            return prompt_profiles.system_prompt(
+                workspace=str(self.executor.workspace.root), skills=self.executor.skills,
+                instructions=self.instructions.section if self.instructions is not None else "")
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
         # Protocol 30: driving the app, and reading this pane's own session. Both are "" for an
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
@@ -884,7 +914,10 @@ class Agent:
         # or detached, so ending with them makes that an append instead of an insert.
         if self.board is not None:
             extra = extra + self.board.tool_specs()
-        return tools + extra + tail
+        offered = tools + extra + tail
+        # The short profile keeps eight of these (#GMCF decision 7) — filtered here rather than
+        # assembled separately, so a tool cannot exist in two shapes.
+        return prompt_profiles.tool_specs(offered) if self.profile() == "short" else offered
 
     @property
     def _routed(self) -> dict | None:
