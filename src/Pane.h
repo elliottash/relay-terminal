@@ -5780,9 +5780,9 @@ public:
         QFile file(QStringLiteral("/etc/default/keyboard"));
         if (file.exists() && file.size() < 64 * 1024 && file.open(QIODevice::ReadOnly | QIODevice::Text))
             layouts = QString::fromUtf8(file.readAll());
-        const QString chosen = relay::voice::defaultHoldKey(relay::voice::layoutsFromKeyboardConfig(layouts));
-        settings.setValue(QStringLiteral("voice/hold_key"), chosen);
-        return chosen;
+        // Derived, not stored: Options › Voice reads "voice/hold_key exists" as "the user chose
+        // one", so writing the default here marked every fresh install as customised.
+        return relay::voice::defaultHoldKey(relay::voice::layoutsFromKeyboardConfig(layouts));
     }
 
     // The microphone chip and the palette action: start, or finish a recording that is running.

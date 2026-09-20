@@ -3021,7 +3021,7 @@ private:
                                    QStringLiteral("Each pane's shell and agent run in their own systemd scope, so a runaway "
                                                    "command stops inside its pane; applies to new panes"), true);
         {
-            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max")).toString();
+            const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max"), QStringLiteral("auto")).toString();   // unset is "auto", so a fresh install shows no ↺
             relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
                                               QStringLiteral("Agent memory limit"),
                                               QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
@@ -3045,7 +3045,7 @@ private:
             security.rows << row;
         }
         {
-            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max")).toString();
+            const QString current = QSettings().value(QStringLiteral("isolation/shell_memory_max"), QStringLiteral("auto")).toString();   // unset is "auto", so a fresh install shows no ↺
             relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
                                               QStringLiteral("Shell memory limit"),
                                               QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
