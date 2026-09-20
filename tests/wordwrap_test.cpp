@@ -44,7 +44,7 @@ QStringList sharedRows(const QString &text, int columns, int firstIndent, int ha
         const QChar c = text.at(i);
         uint cp = c.unicode();
         if (c.isHighSurrogate()) { high = cp; continue; }
-        if (c.isLowSurrogate() && high) { cp = QChar::surrogateToUcs4(high, c); high = 0; }
+        if (c.isLowSurrogate() && high) { cp = QChar::surrogateToUcs4(char16_t(high), c.unicode()); high = 0; }
         widths << WordWrap::cellWidth(cp);
         spaces << char(c == QLatin1Char(' ') ? 1 : 0);
     }
@@ -83,7 +83,7 @@ QStringList terminalRows(const QString &text, int columns)
             const QChar c = row.at(i);
             uint cp = c.unicode();
             if (c.isHighSurrogate()) { high = cp; continue; }
-            if (c.isLowSurrogate() && high) { cp = QChar::surrogateToUcs4(high, c); high = 0; }
+            if (c.isLowSurrogate() && high) { cp = QChar::surrogateToUcs4(char16_t(high), c.unicode()); high = 0; }
             const int w = WordWrap::cellWidth(cp);
             if (used > 0 && used + w > columns) {
                 out << line;
