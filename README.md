@@ -66,10 +66,14 @@ that conflict.
    bottom of the model box). The page reads top to bottom the way it is set up: **providers** —
    add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
    Codex**; **test** checks the key reaches the provider) — then **models in the picker**, a
-   checklist of each provider's models, then **priority**: rank 1 is Main, what new panes start
-   on; the models above the line after it are the fallbacks, in order — an OpenRouter model
-   ranked there is how "the same model on OpenRouter" is done. Claude Code and Codex, when
-   installed, are providers there like any other.
+   checklist of each provider's models, then five ordered lists — **main, high, flash, lite and
+   local models**. Each row is a model and the reasoning level it runs at there, in the provider's
+   own words (xhigh on a GPT row, max on a GLM row). The first of a list is what that tier runs
+   on: main for new panes, high for plan mode, flash for terminal driving and quick side calls,
+   lite for chores, local for `/local`. The rest are that tier's fallbacks, in order, and a model
+   in no list is only used when you pick it by hand. "fill the lists" applies Relay's defaults,
+   or the recommended ones with the cheaper OpenRouter twins after your own models. Claude Code
+   and Codex, when installed, are providers there like any other.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.
 

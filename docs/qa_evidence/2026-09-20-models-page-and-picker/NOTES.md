@@ -11,7 +11,7 @@ no prompt is ever submitted. `drive.sh [build-dir]` reproduces every shot.
 | implementer-d-picker-sort.png | the sort menu open (priority, a to z, intelligence, speed, most used, subscription left) |
 | implementer-e-options.png | `/models`: Options › Models — the providers group: only providers with a key (ordered by intelligence), Relay Free, OpenRouter always, Claude Code and Codex with `change login` / `test`; the rest behind `+ add provider` |
 | implementer-g-options-checklist.png | the checklist group: one checkbox per provider ("3 of 3 models in the picker"; off hides all and folds the group), the models indented under it; the small "openrouter fallback" switch appears under a model only once an OpenRouter key is stored (none in this profile) |
-| implementer-h-options-priority.png | the priority group: ranks with ↑ ↓, "main" and "fallback 1 · /swap goes here", and the movable "fallbacks end here" line after rank 2 |
+| implementer-h-options-priority.png | the tier lists (evening): main models filled from the worker's defaults — fable · claude code at max, glm-5.3 at high, k3 at high, relay main at medium — then high models at max, flash at low; each row a grip, the level in the provider's words, and × |
 | implementer-f-options-down.png | the same page at the end of the priority list (↑ ↓ per row, reset) and the defaults group |
 
 Seen and left as is: the box shows every model of every usable provider until the user un-checks

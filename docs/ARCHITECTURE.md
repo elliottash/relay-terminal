@@ -1802,20 +1802,21 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   reasoning unless `tiers.high` names a model. Plus the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands. The "New panes use the
-  Flash agent" row went on 2026-09-20 (owner: redundant next to the priority list); the setting
+  Flash agent" row went on 2026-09-20 (owner: redundant next to the tier lists); the setting
   `agent/panes_flash` is still read, off unless set by hand.
 - **The model catalog and the picker (owner, 2026-09-20).** `src/ModelCatalog.*`
   (`relay::models`, library `relay-modelcatalog`, `tests/modelcatalog_test.cpp`) turns the worker's
   preset rows — each carries `models`, the per-model catalog of `presets.py MODEL_CATALOG` — into
   one flat list of entries keyed `<preset>|<model>`, and keeps what the user said about them in
-  QSettings under `models/*`: shown, priority (rank 1 is Main and writes `provider/preset` +
-  `provider/model` for new panes; a movable line, `models/fallback_threshold` = how many models
-  are above it, makes every model above it after Main a fallback in order — they are kept as
-  `models/fallbacks` and sent as the ordered `fallbacks` request option, which is the whole
-  failover chain; `models/collapsed` folds a provider's group; `models/openrouter_fallback` is the
-  per-model opt-in sent as `failover_openrouter`, the model ids to continue on OpenRouter when
-  their own provider fails — off by default, per the owner: "you wouldn't want to start doing
-  gpt 6 calls at PAYG"), custom ids, favorites, recent, sort,
+  QSettings under `models/*`: shown; the five tier lists (`models/tier/<tier>`, owner, 2026-09-20
+  evening: main, high, flash, lite, local — each an ordered list of a model and the reasoning level
+  it runs at there, `curation::tierList`; rank 1 of main writes `provider/preset`, `provider/model`
+  and `agent/effort` for new panes, every entry after it is a fallback, and a model in no list is
+  only used when picked by hand; the lists go to the worker as `tiers: {tier: [entries]}` and the
+  two defaults it computes, `tier_list_defaults`, fill them — a fresh install takes the OpenRouter
+  one when that key is stored); `models/collapsed` folds a provider's group (the priority list, its
+  "fallbacks end here" line and the per-model "openrouter fallback" switch of earlier that day are
+  gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
   (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Alt+M
   (`agent.model`), `/model` alone and the box's "more models…": filter, sort menu, columns model ·
@@ -1824,7 +1825,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   through `Pane::selectEntry(key, effort)`, which is `selectModel(preset, model)` plus the level;
   `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
   is the one page: providers and keys (through the pane's `storeKey` / `testKey` / `removeKey`),
-  the per-provider checklist with "add a model by id", the priority list, the defaults; it replaced
+  the per-provider checklist with "add a model by id", the five tier lists, the defaults; it replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page (a guest's permission
   posture sits under its models). Labels are lower-case throughout, per the owner.
 - **Usage limits and an exhausted subscription (owner, 2026-09-20).** `Catalog.limits` (one
@@ -1841,7 +1842,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the shown list minus exhausted presets, so the next live entry takes the place — which is what
   `/swap` and `models/fallbacks` (the worker's chain) use; the picker's row stays, greyed
   (`QPalette::Disabled`, "left" = "0% · resets 14:30"), still selectable; the model box says " ·
-  exhausted"; the priority list's detail says "exhausted · resets tue · skipped". Every change
+  exhausted"; a tier list's row says "skipped" with the reset time in its hover. Every change
   redraws the box, notifies `SettingsWatch` (the providers' status line), re-sends the chain when
   the exhausted set changed, and arms a single-shot timer for the nearest reset so the row comes
   back by itself. `applyMainDefault` still writes rank 1 itself as the new-pane default.
@@ -1897,11 +1898,13 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the history to the new provider's dialect and follows its context window, and the restore, before
   the turn's terminal event, puts all of it back, so the pane keeps the model the user chose; if the
   chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
-  Models can turn it off (`agent/failover`). **The chain is the priority list** (owner, 2026-09-20):
-  the models above the "fallbacks end here" line, in order, as the `fallbacks` option, and nothing
-  else (the worker's `failover_openrouter` twin step is still there but the GUI sends no ids). Relay
-  Free is a fallback only when it sits above the line, which replaced the `failover_hosted` switch
-  of 2026-09-19 (still accepted from older GUIs and ignored).
+  Models can turn it off (`agent/failover`). **The chain is the list the turn is on** (owner,
+  2026-09-20): a Main turn walks the main list from the entry after the pane's model, or from the
+  top for a model picked by hand; a plan turn walks the high list, then drops to the pane's own
+  model and the main list; side calls walk their tier's list (`tiers` as lists, protocol §13.7 and
+  §15.2.2). Relay Free is a fallback only where a list names it, which replaced the
+  `failover_hosted` switch of 2026-09-19 (still accepted from older GUIs and ignored); `fallbacks`
+  is accepted as the main chain only when no `tiers.main` list was sent.
   **Subagents fail over on the pane's chain**: `subagents.py` hands each one the pane's role
   resolver, its preset and both switches, which it did not before — without a resolver
   `_begin_failover` cannot know which presets are keyed and refuses every move. **A routed step —
