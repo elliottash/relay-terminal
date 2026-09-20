@@ -1508,6 +1508,13 @@ private:
     // window, wired lazily by appCommands(); a pane's worker and the tab's helper both go
     // through it, so Undo works whichever of them made the change.
     relay::AppCommands m_appCommands;
+    // The helper panels of this window that are not Switchboards (listenToHelper).
+    struct HelperListener {
+        QPointer<QWidget> page;
+        QPointer<QObject> owner;
+        std::function<void(const QJsonObject &)> handle;
+    };
+    QList<HelperListener> m_helperListeners;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -4957,11 +4964,35 @@ public:
             for (QWidget *leaf : leavesIn(page))
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                     tool->board()->handleEvent(event);
+            guard->deliverToHelperPanels(page, event);
         };
         worker->onStatus = [guard](const QString &text) {
             if (guard) guard->statusBar()->showMessage(text, 9000);
         };
         return worker;
+    }
+
+    // A helper panel embedded in a pane that is *not* a Switchboard — the collapsed "Ask about
+    // this pane" row in Options, Actions and Sessions — registers here, so its tab's worker events
+    // reach it too (§30.7). Everything the helper says is tagged with the `pane` that asked, and a
+    // panel draws its own and drops the rest; the conversation is one, so the Options panel sees
+    // the board's turns going by and must ignore them.
+    //
+    // `owner` owns the subscription the way SettingsWatch's context does: a pane that closes is
+    // dropped rather than called.
+    void listenToHelper(QWidget *page, QObject *owner, std::function<void(const QJsonObject &)> handle) {
+        if (!page || !owner || !handle) return;
+        m_helperListeners.append({QPointer<QWidget>(page), QPointer<QObject>(owner), std::move(handle)});
+    }
+
+    // What a helper panel sends: everything it does leaves as a worker message
+    // (relay::HelperChatPanel::onSend), and this puts it on the tab's helper — started here, at
+    // the **first ask** rather than when the tab opened (owner decision 5). `pane` rides on the
+    // message so the brief follows the panel that asked (§30.7).
+    void sendToHelper(QWidget *page, const QString &pane, QJsonObject message) {
+        if (!page) return;
+        if (!pane.isEmpty()) message.insert(QStringLiteral("pane"), pane);
+        if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send(message);
     }
 
     // The helper for this tab, started if it is not running yet. This is what a panel calls at the
@@ -4982,6 +5013,16 @@ public:
             if (QWidget *page = m_tabs->widget(i); page && page->property("relayTabId").toString() == tab)
                 return page;
         return nullptr;
+    }
+
+    // One helper event to the panels of its own tab, dropping the ones whose pane has closed.
+    void deliverToHelperPanels(QWidget *page, const QJsonObject &event) {
+        for (int i = int(m_helperListeners.size()) - 1; i >= 0; --i)
+            if (!m_helperListeners.at(i).owner || !m_helperListeners.at(i).page)
+                m_helperListeners.removeAt(i);
+        const QList<HelperListener> listeners = m_helperListeners;   // a handler may close a pane
+        for (const HelperListener &listener : listeners)
+            if (listener.owner && listener.page == page) listener.handle(event);
     }
 
     // The tab a helper worker belongs to: the map's own key.

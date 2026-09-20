@@ -701,7 +701,9 @@ private slots:
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int models = text.indexOf(QStringLiteral("sections << models;"));
+        // `modelsSection()` since the page grew its own builder (2026-09-20); the placement
+        // this checks is still the one line of settingsSections() it is appended from.
+        const int models = text.indexOf(QStringLiteral("sections << modelsSection();"));
         QVERIFY2(models > 0, "the Models section is gone");
         const int next = text.indexOf(QStringLiteral("sections << "), models + 12);
         QVERIFY(next > models);
