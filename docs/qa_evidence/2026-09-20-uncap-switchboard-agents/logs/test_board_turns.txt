@@ -1,0 +1,20 @@
+test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs (tests.test_board_turns.RunningTests.test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs) ... ok
+test_a_turn_runs_its_prompt_and_tags_every_event_with_the_card (tests.test_board_turns.RunningTests.test_a_turn_runs_its_prompt_and_tags_every_event_with_the_card) ... ok
+test_a_turn_that_raises_is_reported_and_leaves_nothing_running (tests.test_board_turns.RunningTests.test_a_turn_that_raises_is_reported_and_leaves_nothing_running) ... ok
+test_an_error_or_a_stop_ends_the_turn_and_writes_no_answer (tests.test_board_turns.RunningTests.test_an_error_or_a_stop_ends_the_turn_and_writes_no_answer) ... ok
+test_as_many_cards_run_at_once_as_are_started (tests.test_board_turns.RunningTests.test_as_many_cards_run_at_once_as_are_started)
+No concurrent cap (owner, 2026-09-19: 'remove the cap on number of agents in the ... ok
+test_stop_ends_one_card_and_leaves_the_other_running (tests.test_board_turns.RunningTests.test_stop_ends_one_card_and_leaves_the_other_running) ... ok
+test_the_scope_is_opened_for_the_turn_and_closed_after_it (tests.test_board_turns.RunningTests.test_the_scope_is_opened_for_the_turn_and_closed_after_it) ... ok
+test_turns_on_different_cards_run_at_the_same_time (tests.test_board_turns.RunningTests.test_turns_on_different_cards_run_at_the_same_time) ... ok
+test_a_card_keeps_its_conversation_between_turns (tests.test_board_turns.SessionTests.test_a_card_keeps_its_conversation_between_turns) ... ok
+test_drop_stops_everything_and_forgets_it (tests.test_board_turns.SessionTests.test_drop_stops_everything_and_forgets_it) ... ok
+test_forget_drops_an_idle_conversation_and_keeps_a_running_one (tests.test_board_turns.SessionTests.test_forget_drops_an_idle_conversation_and_keeps_a_running_one) ... ok
+test_the_least_recently_used_conversation_is_dropped_past_the_cap (tests.test_board_turns.SessionTests.test_the_least_recently_used_conversation_is_dropped_past_the_cap) ... ok
+test_the_next_turn_waits_for_the_last_one_to_unwind (tests.test_board_turns.SessionTests.test_the_next_turn_waits_for_the_last_one_to_unwind) ... ok
+test_the_seed_hash_and_brief_mode_travel_with_the_session (tests.test_board_turns.SessionTests.test_the_seed_hash_and_brief_mode_travel_with_the_session) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.068s
+
+OK
