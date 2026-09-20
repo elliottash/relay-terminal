@@ -473,6 +473,15 @@ target_include_directories(relay-sharing PUBLIC src)
 target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-sharing PRIVATE -Wall -Wextra -Wpedantic)
 
+# Remote control as a service (card #PH0N): which QSettings keys remember the switch and the
+# address, the `start` line the sidecar is sent, the `remote_state` line it sends back, and the
+# Options > Remote section built from them. No process and no pane, so tests/remotesettings_test.cpp
+# runs the whole contract headless.
+add_library(relay-remotesettings STATIC src/RemoteSettings.cpp src/RemoteSettings.h)
+target_include_directories(relay-remotesettings PUBLIC src)
+target_link_libraries(relay-remotesettings PUBLIC relay-settings relay-settingscache ${RELAY_QT}::Widgets)
+target_compile_options(relay-remotesettings PRIVATE -Wall -Wextra -Wpedantic)
+
 # Relay-to-Relay: a pane shared by another desktop, opened here as the owner's own device — the
 # screen painter, the pane_state view, and the `remote/viewer.py` sidecar that holds the session.
 add_library(relay-remotepane STATIC src/RemotePane.cpp src/RemotePane.h)
@@ -531,6 +540,7 @@ if(RELAY_BUILD_APP)
         COMMENT "Numbering this build of relay" VERBATIM)
     install(FILES $<TARGET_FILE_DIR:relay>/relay.build-id DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
+    target_link_libraries(relay PRIVATE relay-remotesettings)   # Options > Remote, the always-on switch (#PH0N)
     target_link_libraries(relay PRIVATE relay-internals)   # the agent internals pane (#QT8C)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay
@@ -673,6 +683,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-sharing-tests PRIVATE relay-sharing ${RELAY_QT}::Test)
     add_test(NAME sharing COMMAND relay-sharing-tests)
     set_tests_properties(sharing PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-remotesettings-tests tests/remotesettings_test.cpp)
+    target_link_libraries(relay-remotesettings-tests PRIVATE relay-remotesettings ${RELAY_QT}::Test)
+    add_test(NAME remotesettings COMMAND relay-remotesettings-tests)
+    set_tests_properties(remotesettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;RELAY_KEYRING=off")
     add_executable(relay-remotepane-tests tests/remotepane_test.cpp)
     target_link_libraries(relay-remotepane-tests PRIVATE relay-remotepane ${RELAY_QT}::Test)
     add_test(NAME remotepane COMMAND relay-remotepane-tests)

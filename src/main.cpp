@@ -360,6 +360,11 @@ int main(int argc, char **argv) {
         const int reopened = startFresh ? 0 : manager.restoreSavedLayout();
         if (reopened == 0 && !manager.newWindowAt(path)) return 1;
         manager.announceRestore();   // also explains a layout that was deliberately not reopened
+        // Remote control (#PH0N): while the switch in Options › Remote is on, the sidecar comes up
+        // with Relay rather than with the first share, so a phone paired yesterday finds this
+        // desktop after a restart. Queued, so starting python never delays the first window; it
+        // does nothing at all when the switch is off.
+        QTimer::singleShot(0, &app, [] { relay::RemoteShare::instance().startAtLaunch(); });
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, QStringLiteral("Relay could not start"), QString::fromUtf8(error.what()));

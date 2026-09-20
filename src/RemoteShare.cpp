@@ -45,6 +45,10 @@ namespace {
 // (docs/REMOTE-PROTOCOL.md section 6.5). A phone pages; it does not download the buffer.
 constexpr int kHistoryPage = 200;
 
+// What the sidecar calls this machine on a phone's screen. One string, because `start` is now sent
+// from two places: the first share, and the switch in Options › Remote (#PH0N).
+QString desktopName() { return QStringLiteral("this desktop"); }
+
 // The sidecar lives beside the backend: <data>/remote in an install, the source tree otherwise.
 QString sidecarRoot()
 {
@@ -171,8 +175,10 @@ bool RemoteShare::ensureSidecar(QString *error)
         m_process = nullptr;
         return false;
     }
-    QJsonObject start{{"t", "start"}, {"tls", true}, {"name", QStringLiteral("this desktop")}};
-    send(start);
+    // `always` and `address` are phase 1 of #PH0N: with the switch on the sidecar registers at the
+    // remembered address and keeps itself registered, rather than waiting for a pane to be shared.
+    send(remotesettings::startMessage(desktopName(), remotesettings::alwaysOn(),
+                                      remotesettings::address()));
     send({{"t", "window_active"},
           {"active", QGuiApplication::applicationState() == Qt::ApplicationActive}});
     return true;
@@ -425,12 +431,70 @@ void RemoteShare::handle(const QJsonObject &message)
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
         if (it != m_panes.end()) it->needFull = true;
+    } else if (kind == QLatin1String("remote_state")) {
+        // The service's own state (#PH0N): on, where it is registered, whether that registration
+        // is live and how many of the owner's devices are connected. Sent whenever any of it
+        // changes, including a reconnection after a drop, so the chrome never has to poll.
+        m_remoteState = remotesettings::parseState(message);
+        emit remoteStateChanged();
     } else if (kind == QLatin1String("error")) {
         emit failed(message.value(QStringLiteral("message")).toString());
     } else if (kind == QLatin1String("stopped")) {
         m_running = false;
+        m_remoteState = remotesettings::State{};
         emit startedChanged();
+        emit remoteStateChanged();
     }
+}
+
+// ----- remote control as a service (#PH0N, phase 1) --------------------------------------------
+
+bool RemoteShare::alwaysOn() const { return remotesettings::alwaysOn(); }
+
+void RemoteShare::startAtLaunch()
+{
+    if (!remotesettings::alwaysOn()) return;
+    QString error;
+    if (!ensureSidecar(&error)) emit failed(error);
+}
+
+void RemoteShare::setAlwaysOn(bool on)
+{
+    if (!on) {
+        remotesettings::setAlwaysOn(false);
+        // Stop publishing. Every pane is withdrawn and the service comes down, which is what the
+        // switch says: the sidecar has no "stay up but publish nothing" line, and inventing one
+        // here would leave a registration nobody can see.
+        stopAll();
+        m_remoteState = remotesettings::State{};
+        emit remoteStateChanged();
+        emit alwaysOnChanged(false);
+        return;
+    }
+    remotesettings::setAlwaysOn(true);          // ensureSidecar reads it while building `start`
+    QString error;
+    if (!m_process) {
+        if (!ensureSidecar(&error)) {
+            remotesettings::setAlwaysOn(false);
+            emit failed(error);
+            emit alwaysOnChanged(false);
+            return;
+        }
+    } else {
+        // Already running for an ordinary share: the same `start` line again is how the service
+        // is told it is on now, rather than a second name for the same thing.
+        send(remotesettings::startMessage(desktopName(), true, remotesettings::address()));
+    }
+    emit alwaysOnChanged(true);
+}
+
+void RemoteShare::setRemoteAddress(const QString &value)
+{
+    if (value.isEmpty() || value == remotesettings::address()) return;
+    remotesettings::setAddress(value);
+    if (m_process && remotesettings::alwaysOn())
+        send(remotesettings::startMessage(desktopName(), true, value));
+    emit remoteStateChanged();     // the page and the chrome are showing the old address
 }
 
 void RemoteShare::voiceResult(const QString &paneId, const QString &requestId, bool ok,

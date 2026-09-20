@@ -12,6 +12,7 @@
 // Screen state comes from the frame `relay::TerminalView` has already pulled: `VtCore::updateFrame`
 // consumes the dirty state, so a second caller would stop the pane repainting. A pane without a
 // frame cannot be shared (docs/ENGINE.md).
+#include "RemoteSettings.h"
 #include "SharingPane.h"
 
 #include <QByteArray>
@@ -50,6 +51,23 @@ public:
     QString base() const { return m_base; }
     QString note() const { return m_note; }
     bool isSharing(const QString &paneId) const { return m_panes.contains(paneId); }
+
+    // ----- remote control as a service (card #PH0N, phase 1) -----------------------------------
+    // The switch is Options › Remote and it is remembered in `remote/alwaysOn`. While it is on the
+    // sidecar starts with Relay rather than with the first share, `start` carries `always` and the
+    // remembered `address`, and the window publishes every pane that has a screen as it appears.
+    // Off is what this file did before: a pane at a time, from its share button.
+    bool alwaysOn() const;
+    void setAlwaysOn(bool on);
+    // Options › Remote picked another address. Remembered either way; sent to a running sidecar
+    // only while the service is on, because a per-share address is the dialog's business.
+    void setRemoteAddress(const QString &value);
+    // Called once from main(): brings the sidecar up when the switch is on, and does nothing at
+    // all when it is off — a desktop with no phone starts no python.
+    void startAtLaunch();
+    // The last `remote_state` line: whether the service is registered, where, and how many of the
+    // owner's devices are connected. The window chrome reads it.
+    const remotesettings::State &remoteState() const { return m_remoteState; }
 
     // What a pane hands over. `status` is polled (idle/running/password/finished/failed) and
     // `input` receives the bytes a phone typed.
@@ -211,6 +229,12 @@ signals:
     void needsOwner(const QString &paneId, const QString &title, const QString &body);
     // One second passed: the waiting rows' countdowns move and a lapsed one goes.
     void secondPassed();
+    // The remote-control switch was turned on or off (#PH0N). On: every window publishes the panes
+    // it already has, since only the ones opened afterwards would otherwise be reachable.
+    void alwaysOnChanged(bool on);
+    // A `remote_state` line: the service came up or went down, changed address, or gained or lost
+    // one of the owner's devices. The window chrome's plug reads remoteState().
+    void remoteStateChanged();
 
 private:
     RemoteShare();
@@ -254,6 +278,7 @@ private:
     QString m_base;
     QString m_note;
     QJsonArray m_addresses;
+    remotesettings::State m_remoteState;
     sharing::Model m_sharing;
     QTimer *m_second = nullptr;
 };

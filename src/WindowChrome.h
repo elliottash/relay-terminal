@@ -149,6 +149,10 @@ protected:
             painter.drawLine(centre + QPointF(-1.5, -1.8) * unit, centre + QPointF(-5.5, -1.8) * unit);
             painter.drawLine(centre + QPointF(-1.5, 1.8) * unit, centre + QPointF(-5.5, 1.8) * unit);
             painter.drawLine(centre + QPointF(3.5, 0) * unit, centre + QPointF(6, 0) * unit);
+            // A dot while the owner's phones are connected (#PH0N): remote control is a service
+            // now, and "I forgot it was on" is answered by something visible in the chrome rather
+            // than by opening a menu.
+            paintBadge(painter);
             break;
         case Glyph::Plus:
             painter.drawLine(centre + QPointF(-4.5, 0) * unit, centre + QPointF(4.5, 0) * unit);
@@ -189,9 +193,14 @@ private:
         painter.drawPath(bell);
         painter.drawArc(QRectF(x - 2, y + 2.6, 4, 3.4), 200 * 16, 140 * 16);   // clapper
         painter.restore();
+        paintBadge(painter);
+    }
+
+    // The dot in the top-right corner, over the glyph's shoulder: unseen notifications on the
+    // bell, and — since #PH0N — the owner's phones connected through the plug. A count grows it
+    // into a pill wide enough for its digits at the legibility floor; they were 7px in an 8px dot.
+    void paintBadge(QPainter &painter) const {
         if (m_badge <= 0) return;
-        // Unread dot, top-right, over the bell's shoulder. A count grows it into a pill wide
-        // enough for its digits at the legibility floor; they were 7px in an 8px dot.
         painter.setPen(Qt::NoPen);
         painter.setBrush(relay::theme::Accent);
         if (m_badge <= 1) {
