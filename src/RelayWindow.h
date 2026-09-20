@@ -3998,6 +3998,12 @@ public:
         view->onOpenDiff = [ownerGuard](const QString &title, const QString &diff) {
             if (auto *w = windowOf(ownerGuard)) w->openDiffPane(ownerGuard, title, diff);
         };
+        // The Ask row (#FEJQ, §30.5), as on Info: Activity is about this owner's own agent, so the
+        // question goes to that agent's composer rather than to a second agent reading a ledger
+        // about the first. The row appears only once this is set.
+        view->onAskOwner = [ownerGuard](const QString &text) {
+            if (ownerGuard) ownerGuard->insertInComposer(text);
+        };
         // The view going — the pane closed any way at all — is what hands the rows back. The
         // owner is the context, so when the owner goes first the connection goes with it and a
         // dying pane is reprinted into by nobody.
@@ -4297,6 +4303,13 @@ public:
                 if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); focusLeaf(ownerGuard); }
             };
             view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            // The Ask row (#FEJQ, §30.5): Info has no helper agent of its own, because the pane is
+            // about the *owner's* agent and that agent has the read tools over its own session. So
+            // the row prefills the owner's composer and focuses it, and the row draws itself only
+            // when this callback is set.
+            view->onAskOwner = [ownerGuard](const QString &text) {
+                if (ownerGuard) ownerGuard->insertInComposer(text);
+            };
             // Closing the owner takes its ⓘ pane with it: nothing else can answer its links.
             connect(owner, &QObject::destroyed, tool, [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
