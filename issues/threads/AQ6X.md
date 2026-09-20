@@ -22,3 +22,6 @@ Owner, in the terminal, on the twelve questions: "6 -- i think yes by default, b
 
 <!-- relay:entry 20260920T195828Z-31 author=agent kind=decision -->
 Owner, on unasked pickup (decision 9): "and you get a notification that you can click on to open the agent thread, and those go into the sessions manger". So a pickup is its own agent thread, announced by a clickable notification that is amended with the outcome, and listed in the Sessions manager. Recorded under decision 9.
+
+<!-- relay:entry 20260920T202852Z-yk author=agent kind=progress -->
+Owner: "yes, make those reconciliations, lets go the signals route. and ok for the added field. go". Plan written on the card; #7BM4 reconciled; phases 1 and 2 handed to Opus subagents, phase 3 follows.

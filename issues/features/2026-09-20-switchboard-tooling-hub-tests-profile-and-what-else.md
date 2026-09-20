@@ -22,11 +22,12 @@ why not have a profiling button as well? so you click a Profiling button from th
 do you understand what i am doing? are there other project / SWE tooling that we can smoothly add to the swtichboard? do research on what other tools do
 
 ## Decisions
+- 2026-09-20, owner, on #AQ6X: "yes, make those reconciliations, lets go the signals route" — flaky-tests-become-cards is struck from this card; the run history gains a `tree_digest` field (empty on a clean tree, else a short digest of `git diff HEAD`), so an execution names the code it ran on in this shared checkout.
 - 2026-09-20, owner, on the four questions below: "i agree with those recommendations." So: the
   Profile button asks for its target and ships the build first; Check is a gate on leaving
   `needs-verification`, with a recorded override; the pane lists the attached project's tests
-  only; after the three surfaces, flaky-tests-become-cards comes first, then the dependencies
-  file, release notes, hotspots and TODO mining.
+  only; after the three surfaces come the dependencies file, release notes, hotspots and TODO
+  mining. (Flaky-tests-become-cards was struck on 2026-09-20: it is signal promotion on #AQ6X.)
 - 2026-09-20, owner: "can you help me set up my machine and sphinxpad for the test suites /
   profiling system." Both machines are runners: spark (aarch64, Ubuntu 24.04, g++ 13, Qt5) and
   sphinxpad (x86_64, Ubuntu 26.04, clang, Qt5 and Qt6). Setup is `scripts/relay-tooling-setup`.
@@ -94,7 +95,8 @@ Copilot) do, and what this repo already has. The findings below are the ones tha
 9. The board-native ideas from elsewhere are not dashboards: Renovate's dependency dashboard is
    one Markdown file where a checkbox is the only verb; Trunk, Buildkite and LUCI file one issue
    per flaky test and close it when it recovers. Both are "a tool writes cards", which the
-   Switchboard's agents already do.
+   Switchboard's agents already do. (Superseded for tests: a failing or flaky test is a *signal*,
+   #AQ6X, a keyed record over this card's history file, promoted to a card only on impact.)
 
 **Design**
 
