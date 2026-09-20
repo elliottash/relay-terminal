@@ -2901,9 +2901,17 @@ private:
                                 ? QStringLiteral("Bring this pane's Activity pane forward")
                                 : QStringLiteral("Watch the reasoning and the tool calls in a pane beside the terminal"),
                             QStringLiteral("agent.internalsPane"), pane && pane->internals());
+        // The row is a slow path, so it teaches the fast one (#SXF1): agent.continue's own key
+        // when it has one, else agent.interrupt's empty-box send-now that continues a stopped turn.
+        QString continueKeys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
+        if (continueKeys.isEmpty()) continueKeys = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
+        const QString continueHow = continueKeys.isEmpty() ? QStringLiteral("/continue")
+                                                           : continueKeys + QStringLiteral(" on an empty box or /continue");
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
-                            pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
-                                                         : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
+                            pane && (pane->limitReached() || pane->turnCutOff())
+                                ? QStringLiteral("The last turn stopped early · %1").arg(continueHow)
+                                : QStringLiteral("Send “Continue” to the agent · %1").arg(continueHow),
+                            QStringLiteral("agent.continue"));
         items << actionItem(agent, QStringLiteral("Export conversation"), QStringLiteral("Save the conversation as Markdown"), QStringLiteral("agent.export"));
         // Image context: reaching this from the palette is the slow path, so the palette's own hint
         // teaches its shortcut (issue EM1E).

@@ -30,6 +30,7 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "QueueSubmit.h"   // when a submitted agent prompt starts its turn at once (#N8VK)
+#include "ContinueTurn.h"  // when Ctrl+Enter on an empty box continues a stopped turn (#SXF1)
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
@@ -907,9 +908,15 @@ public:
         pumpQueue();
     }
     // Ctrl+Enter: send to the agent. While the agent is busy, stop the current turn and send now.
+    // On an empty box with the agent idle, it continues a turn that stopped at its limit or was
+    // cut off by a restart (#SXF1); every other empty box still asks for a prompt.
     void interruptAgentWithPrompt() {
         if (sendSelectedSteerNow()) return;   // a selected steer row: that steer, now
         const QString text = m_editor->toPlainText().trimmed();
+        if (relay::continueturn::sendNowContinues({m_agentBusy, text.isEmpty(), m_limitReached, m_turnCutOff})) {
+            continueTurn();
+            return;
+        }
         if (!m_agentBusy) {
             if (text.isEmpty()) { status(QStringLiteral("Type a prompt first.")); return; }
             requestRoute(true, QStringLiteral("agent"));
@@ -6508,6 +6515,8 @@ private:
         if (type == QStringLiteral("state_loaded")) {
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
             m_turnsCompleted = event.value(QStringLiteral("turns")).toInt();
+            // A resumed session whose last turn never ended: the pane may offer to continue it (#SXF1).
+            m_turnCutOff = event.value(QStringLiteral("turn_open")).toBool();
             const QString title = event.value(QStringLiteral("title")).toString();
             ensureLineStart();
             if (m_forkLoadPending)
@@ -8304,14 +8313,22 @@ public:
     void continueTurn(bool slowPath = false) {
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         m_limitReached = false;
+        m_turnCutOff = false;
         submitAgent(QStringLiteral("Continue"), false);
         if (slowPath) {
+            // agent.continue has no key of its own — its empty-box path IS agent.interrupt's
+            // Ctrl+Enter — so the slow paths (/continue, the ▸ Continue link, the palette row)
+            // teach that binding, read live from the Keymap rather than hard-coded (#SXF1).
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
-            hint(QStringLiteral("continue.slow"), keys.isEmpty() ? QStringLiteral("Next time: /continue in the prompt box")
-                                                               : relay::ShortcutHints::nextTime(keys, QStringLiteral("continue")));
+            const QString sendNow = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
+            hint(QStringLiteral("continue.slow"),
+                 !sendNow.isEmpty() ? relay::ShortcutHints::nextTime(sendNow, QStringLiteral("continue a stopped turn from an empty prompt box"))
+                                    : keys.isEmpty() ? QStringLiteral("Next time: /continue in the prompt box")
+                                                     : relay::ShortcutHints::nextTime(keys, QStringLiteral("continue")));
         }
     }
     bool limitReached() const { return m_limitReached; }
+    bool turnCutOff() const { return m_turnCutOff; }
     QString tasksProgress() const { return m_ledger.hasTasks() ? m_ledger.chipText() : QString(); }
 
 private:
@@ -8324,7 +8341,10 @@ private:
 
     // Terminal-output lines for the end of a turn: the limit with a Continue link, open items.
     void printTurnEndRequests(const QString &type, const QJsonObject &event) {
-        if (type == QStringLiteral("done")) m_limitReached = event.value(QStringLiteral("stop_reason")).toString() == QStringLiteral("limit");
+        if (type == QStringLiteral("done")) {
+            m_limitReached = event.value(QStringLiteral("stop_reason")).toString() == QStringLiteral("limit");
+            m_turnCutOff = false;   // a turn that finished — even cancelled — retires the restored flag
+        }
         if (m_limitReached && type == QStringLiteral("done")) {
             ensureLineStart();
             printInline(relay::RequestLedgerModel::limitLine(event) + '\n', Ink::Tool);
@@ -8339,8 +8359,13 @@ private:
     // The link text is white (owner, 2026-09-18): it continues the agent's turn, so it sits with
     // the agent's prose rather than the grey machinery around it.
     void printContinueLink() {
+        // The link is a slow path, so it teaches the fast one: agent.continue's own key when it
+        // has one, else the empty-box send-now that continues a stopped turn (#SXF1).
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
-        const QString fast = keys.isEmpty() ? QStringLiteral("/continue") : keys + QStringLiteral(" or /continue");
+        const QString sendNow = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
+        const QString fast = keys.isEmpty() ? (sendNow.isEmpty() ? QStringLiteral("/continue")
+                                                                 : sendNow + QStringLiteral(" or /continue"))
+                                            : keys + QStringLiteral(" or /continue");
         if (!shellIdleAtPrompt()) { printInline(QStringLiteral("▸ Continue: %1 (Actions › Continue agent turn)\n").arg(fast), Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://continue/%1").arg(m_token).toUtf8();
         QByteArray out = takeWrapped() + closeProseRun();
@@ -8353,7 +8378,7 @@ private:
     }
 
     bool handleRequestsEvent(const QString &type, const QJsonObject &event) {
-        if (type == QStringLiteral("ready")) { m_ledger.clear(); m_limitReached = false; return false; }
+        if (type == QStringLiteral("ready")) { m_ledger.clear(); m_limitReached = false; m_turnCutOff = false; return false; }
         if (m_ledger.handle(event)) {
             if (type == QStringLiteral("request_audit")) {
                 const QString line = relay::RequestLedgerModel::auditLine(event);
@@ -15221,6 +15246,7 @@ private:
     Ask m_ask;                   // the question card up in this pane, if any (#MQ9C)
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
+    bool m_turnCutOff = false;     // a resumed session whose last turn never ended (#SXF1)
     relay::SubagentsPanel *m_agentsPanel = nullptr;
     relay::JobsModel m_jobs;
     relay::JobsPanel *m_jobsPanel = nullptr;
