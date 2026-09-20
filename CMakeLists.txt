@@ -495,6 +495,8 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         # The Test suites pane (#7BM4): its own translation units, not included by main.cpp.
         src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
+        # The Profile result pane (#7BM4 phase 5), likewise.
+        src/ProfilePane.cpp src/ProfilePane.h
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
@@ -619,6 +621,14 @@ if(BUILD_TESTING)
     target_compile_options(relay-testsuites-tests PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME testsuites COMMAND relay-testsuites-tests)
     set_tests_properties(testsuites PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The Profile result pane (#7BM4 phase 5): the `profile` events of protocol 31.9 in, the
+    # table, the header line, the two buttons and the stop out — no worker and no window.
+    add_executable(relay-profilepane-tests tests/profilepane_test.cpp src/ProfilePane.cpp)
+    target_include_directories(relay-profilepane-tests PRIVATE src)
+    target_link_libraries(relay-profilepane-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    target_compile_options(relay-profilepane-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME profilepane COMMAND relay-profilepane-tests)
+    set_tests_properties(profilepane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The strip under the composer pairs subagents with the open tasks (owner, 2026-09-19): the
     # window centred on the marginal task and the row pairing are pure functions, tested without a
     # window.

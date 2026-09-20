@@ -63,6 +63,7 @@
 #include "SharingPane.h"
 #include "RemotePane.h"   // Relay-to-Relay: a pane another desktop shares, opened here
 #include "TestSuitesPane.h"   // the Test suites pane, beside the Switchboard (card #7BM4)
+#include "ProfilePane.h"      // the Profile result pane, ditto (card #7BM4 phase 5)
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -1670,6 +1671,15 @@ private:
     };
     QHash<QString, TestsCardWrite> m_testsWrites;
     quint64 m_testsWriteSeq = 0;
+    // The same two-step write for the Profile pane's "Attach to card…" (#7BM4 phase 5): the
+    // `## Profile` block and the evidence directory need the card's `base_hash`, so the
+    // `board_card_get` answer carries what to write.
+    struct ProfileCardWrite {
+        QString markdown;     // the `## Profile` block
+        QString evidence;     // the directory for links.evidence
+    };
+    QHash<QString, ProfileCardWrite> m_profileWrites;
+    quint64 m_profileWriteSeq = 0;
     // What each tab's helper last said about its own model (#BRD3): `configured`, `model_roles`
     // and `presets`. A panel opened into a tab whose worker has been running for an hour would
     // otherwise show an empty box until the next reconfigure, because those events are sent once.
@@ -4605,6 +4615,211 @@ public:
         linkTestSuitesPane(tool);
     }
 
+    // ----- the Profile result pane (card #7BM4, design item (c)) --------------------------------
+    // Transient, the way the diff pane is (`openDiffPane`): a profile is a moment, not a file the
+    // layout should bring back, so `node()` saves nothing and one per tab is replaced by the next.
+    // It is attached to the **tab's board worker**, like the Test suites pane, because
+    // `profile_run` and `profile_stop` are the board helper's (§31.9).
+    static ToolPane *profilePaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Profile)
+                return tool;
+        return nullptr;
+    }
+    static relay::profile::ProfilePane *profileViewOf(ToolPane *tool) {
+        return tool ? dynamic_cast<relay::profile::ProfilePane *>(tool->hosted()) : nullptr;
+    }
+
+    // The Profile button on the Switchboard's tool row: ask which target, then run it. The menu
+    // is `relay::profile::showTargetMenu` so the GUI and the worker describe the four targets
+    // from one list; while a profile runs it offers Stop instead of starting a second one, which
+    // the worker would refuse anyway.
+    void openProfileMenu(QWidget *anchor) {
+        QWidget *page = m_tabs->currentWidget();
+        relay::profile::ProfilePane *open = profileViewOf(profilePaneIn(page));
+        const bool running = open && open->running();
+        QPointer<RelayWindow> guard(this);
+        relay::profile::showTargetMenu(
+            anchor,
+            [guard](const QString &target) { if (guard) guard->startProfile(target); },
+            running,
+            [guard] { if (guard) if (auto *view = profileViewOf(profilePaneIn(guard->m_tabs->currentWidget()))) view->stopRun(); });
+    }
+
+    // One `profile_run`, and the pane that will show it — opened before the request goes out, so
+    // the run is visible from its first line rather than only once it ends.
+    void startProfile(const QString &target) {
+        QWidget *page = m_tabs->currentWidget();
+        if (!page) return;
+        if (boardWorkspaceOfTab(page).isEmpty()) {
+            notice(QStringLiteral("This tab is not attached to a project, so there is nothing to profile."), 9000);
+            return;
+        }
+        relay::profile::ProfilePane *view = openProfilePane();
+        if (!view) return;
+        view->startWaitingFor(target);
+        updateTitles();
+        sendToHelper(page, QString(),
+                     {{QStringLiteral("type"), QStringLiteral("profile_run")},
+                      {QStringLiteral("target"), target}});
+    }
+
+    relay::profile::ProfilePane *openProfilePane() {
+        QWidget *page = m_tabs->currentWidget();
+        if (!page) return nullptr;
+        if (ToolPane *open = profilePaneIn(page)) {
+            setActiveLeaf(open);
+            focusLeaf(open);
+            return profileViewOf(open);
+        }
+        QWidget *anchor = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) { anchor = tool; break; }
+        if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        auto *view = new relay::profile::ProfilePane;
+        auto *tool = new ToolPane(ToolPane::Kind::Profile, view, view, boardWorkspaceOfTab(page));
+        tool->setProperty("paneType", QStringLiteral("profile"));
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        else if (page->layout()) page->layout()->addWidget(tool);
+        linkProfilePane(tool);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+        return view;
+    }
+
+    // The four seams of src/ProfilePane.h, wired to this window.
+    void linkProfilePane(ToolPane *tool) {
+        relay::profile::ProfilePane *view = profileViewOf(tool);
+        QWidget *page = view ? pageOf(tool) : nullptr;
+        if (!page) return;
+        QPointer<ToolPane> guard(tool);
+        QPointer<relay::profile::ProfilePane> viewGuard(view);
+        view->onSend = [guard](const QJsonObject &request) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            QWidget *page = w->pageOf(guard);
+            if (!page || w->boardWorkspaceOfTab(page).isEmpty()) return;
+            w->sendToHelper(page, QString(), request);
+        };
+        listenToHelper(page, view, [guard, viewGuard](const QJsonObject &event) {
+            auto *w = windowOf(guard);
+            // The two board writes "Attach to card…" makes are answered on the same connection,
+            // keyed by a request id the Switchboard's own prefix cannot collide with.
+            if (w && w->handleProfileCardReply(event)) return;
+            if (relay::profile::ProfilePane *pane = viewGuard.data()) {
+                pane->handleEvent(event);
+                if (w) w->updateTitles();
+            }
+        });
+        // "Open flame graph": speedscope's static bundle in the system browser, from the local
+        // copy `scripts/relay-tooling-setup` put in ~/.local/share. Nothing is uploaded, and the
+        // app has no QtWebEngine to draw it in (docs/PROFILING.md section 4).
+        view->onOpenFlameGraph = [guard](const QString &file) {
+            auto *w = windowOf(guard);
+            if (!w || file.isEmpty()) return;
+            const QString script = dataRoot() + QStringLiteral("/scripts/relay-speedscope");
+            if (!QFileInfo::exists(script)) {
+                w->notice(QStringLiteral("scripts/relay-speedscope is not in this checkout."), 9000);
+                return;
+            }
+            if (QProcess::startDetached(script, {file}))
+                w->notice(QStringLiteral("Opening the flame graph in your browser…"), 5000);
+            else
+                w->notice(QStringLiteral("Could not start scripts/relay-speedscope."), 9000);
+        };
+        view->onAttachToCard = [guard](const QString &markdown, const QString &evidence) {
+            if (auto *w = windowOf(guard)) w->attachProfileToCard(guard, markdown, evidence);
+        };
+        // The board's notice line, where a cleanup's progress goes: a profile is minutes, and the
+        // person who pressed the button may be reading the board rather than the pane.
+        view->onNotice = [guard](const QString &text) {
+            auto *w = windowOf(guard);
+            QWidget *page = w ? w->pageOf(guard) : nullptr;
+            if (!page || text.isEmpty()) return;
+            for (QWidget *leaf : leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
+                    tool->board()->showToolNotice(text, false);
+                    return;
+                }
+        };
+    }
+
+    // "Attach to card…": the same card picker the Test suites pane uses, then two writes — the
+    // `## Profile` block appended, and the evidence directory added to `links.evidence`, which is
+    // where this repo has always kept the raw file (docs/PROFILING.md section 5).
+    QString nextProfileWriteId() { return QStringLiteral("pf%1-").arg(quintptr(this), 0, 36) + QString::number(++m_profileWriteSeq); }
+
+    void attachProfileToCard(ToolPane *tool, const QString &markdown, const QString &evidence) {
+        QWidget *page = pageOf(tool);
+        if (!page || markdown.isEmpty()) return;
+        ToolPane *board = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *found = dynamic_cast<ToolPane *>(leaf); found && found->board()) { board = found; break; }
+        if (!board) {
+            notice(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
+            return;
+        }
+        const QString card = pickCard(board->board()->model(),
+                                      QStringLiteral("Attach this profile to a card"));
+        if (card.isEmpty()) return;
+        const QString root = boardWorkspaceOfTab(page);
+        QString relative = evidence;
+        if (!root.isEmpty() && evidence.startsWith(root))
+            relative = QDir(root).relativeFilePath(evidence);
+        const QString id = nextProfileWriteId();
+        m_profileWrites.insert(id, ProfileCardWrite{markdown, relative});
+        sendToHelper(page, QString(),
+                     {{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                      {QStringLiteral("id"), id},
+                      {QStringLiteral("card"), card}});
+    }
+
+    // The `board_card` answer to that first step: append the block and, if the directory is not
+    // already there, extend `links.evidence`. Returns true when the event was one of ours.
+    bool handleProfileCardReply(const QJsonObject &event) {
+        const QString requestId = event.value(QStringLiteral("id")).toString();
+        if (requestId.isEmpty() || !m_profileWrites.contains(requestId)) return false;
+        const ProfileCardWrite pending = m_profileWrites.take(requestId);
+        if (event.value(QStringLiteral("event")).toString() == QLatin1String("error")) {
+            notice(QStringLiteral("The board refused that: ") + event.value(QStringLiteral("text")).toString(), 9000);
+            return true;
+        }
+        const QString card = event.value(QStringLiteral("card_id")).toString();
+        const QString hash = event.value(QStringLiteral("hash")).toString();
+        QWidget *page = m_tabs->currentWidget();
+        if (card.isEmpty() || hash.size() != 64 || !page) {
+            notice(QStringLiteral("The card could not be read, so nothing was written."), 9000);
+            return true;
+        }
+        QJsonObject patch{{QStringLiteral("append_section"),
+                           QJsonObject{{QStringLiteral("heading"), QStringLiteral("Profile")},
+                                       {QStringLiteral("text"), pending.markdown}}}};
+        if (!pending.evidence.isEmpty()) {
+            QJsonObject links = event.value(QStringLiteral("front")).toObject()
+                                    .value(QStringLiteral("links")).toObject();
+            QJsonArray paths = links.value(QStringLiteral("evidence")).toArray();
+            bool seen = false;
+            for (const QJsonValue &value : paths)
+                if (value.toString() == pending.evidence) { seen = true; break; }
+            if (!seen) {
+                paths.append(pending.evidence);
+                links.insert(QStringLiteral("evidence"), paths);
+                patch.insert(QStringLiteral("fields"), QJsonObject{{QStringLiteral("links"), links}});
+            }
+        }
+        sendToHelper(page, QString(),
+                     {{QStringLiteral("type"), QStringLiteral("board_update")},
+                      {QStringLiteral("id"), nextProfileWriteId()},
+                      {QStringLiteral("card"), card},
+                      {QStringLiteral("base_hash"), hash},
+                      {QStringLiteral("patch"), patch}});
+        notice(QStringLiteral("Added the profile to #%1.").arg(card), 9000);
+        return true;
+    }
+
     // ----- the two board writes the Test suites pane makes (#7BM4, §31) -------------------------
     // Both are two steps, because `board_create` takes no section and `board_update` takes a
     // `base_hash`: ask for the card (or create it), then append one line to its `## Tests` against
@@ -6018,6 +6233,11 @@ public:
         // a splitter pane beside this one on the same tab's worker.
         view->onOpenTestSuites = [guard] {
             if (auto *w = windowOf(guard)) w->openTestSuitesPane();
+        };
+        // The Profile button beside it (#7BM4 phase 5): the menu is the window's, anchored under
+        // the button, and what it starts opens a result pane of the window's too.
+        view->onProfile = [guard](QWidget *anchor) {
+            if (auto *w = windowOf(guard)) w->openProfileMenu(anchor);
         };
         // A thread entry's pane link (#HKAP): the token names a pane Execute opened — the manager
         // looks in every window, so a pane dragged into its own window still comes back.

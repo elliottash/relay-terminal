@@ -386,7 +386,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));

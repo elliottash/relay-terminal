@@ -3728,6 +3728,26 @@ void BoardView::buildChatPanel(QVBoxLayout *layout)
         });
         m_chat->addToolWidget(tests);
     }
+    // Profile (#7BM4 phase 5), beside Tests. "Profile the project" is four different things here
+    // — the build on this machine, the build on the second runner, the Python tests, the app — so
+    // the button asks which (the owner's answer on the card) in a menu the window anchors under
+    // it. Everything else about the run is the window's: this is the press and nothing more.
+    {
+        auto *profile = new QToolButton(m_chat);
+        profile->setObjectName(QStringLiteral("boardProfile"));
+        profile->setText(QStringLiteral("Profile"));
+        profile->setToolTip(QStringLiteral("Profile the project: the build, the Python tests or "
+                                           "the app — a table of where the time goes, in a pane "
+                                           "beside the board"));
+        profile->setCursor(Qt::PointingHandCursor);
+        profile->setFocusPolicy(Qt::NoFocus);
+        profile->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        connect(profile, &QToolButton::clicked, this, [this, profile] {
+            if (onProfile)
+                onProfile(profile);
+        });
+        m_chat->addToolWidget(profile);
+    }
     layout->addWidget(m_chat);
     // The model box (#BRD3) belongs in this composer row — composer parity with the main panes
     // (#8YQ9 t:6m) — left of the microphone, so Send stays last. Built with the list tools

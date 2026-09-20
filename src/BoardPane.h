@@ -79,6 +79,10 @@ public:
     // buttons live in that row). The pane it opens is the window's — a splitter pane beside this
     // one, on the same tab's board worker — so the view only says that it was pressed.
     std::function<void()> onOpenTestSuites;
+    // The Profile button beside it (#7BM4 phase 5). The window owns the target menu — it has to
+    // be anchored under the button, so the button is what is handed over — and the result pane it
+    // opens. Unset, the button does nothing.
+    std::function<void(QWidget *anchor)> onProfile;
     // A thread entry's pane link (#HKAP): reveal the pane with this session token, in whatever
     // window it lives in. No pane has it (closed, or another machine's board) → inert.
     std::function<void(const QString &token)> onFocusPane;
@@ -215,6 +219,10 @@ public:
     QString selectedCard() const { return m_selected; }
     // The notice line over the list: "Moved #K7Q2 to Ready · Undo", or a refused write.
     QString notice() const;
+    // One line in that same notice area for a tool the *window* drives — the Profile run's
+    // progress (#7BM4 phase 5), which goes exactly where Clean up's does. The view owns the
+    // notice, so nothing outside it touches the widget.
+    void showToolNotice(const QString &text, bool error = false) { showNotice(text, error); }
 
     // Room kept free at the right of the filter row while the pane's hover buttons sit there.
     void setHeaderRightInset(int pixels);
