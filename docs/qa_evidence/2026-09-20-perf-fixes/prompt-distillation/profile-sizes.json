@@ -1,0 +1,23 @@
+{
+ "today": {
+  "prompt_bytes": 17894,
+  "tools_bytes": 40715,
+  "tools": 36,
+  "prompt_tokens": 4144,
+  "tools_tokens": 10402
+ },
+ "distilled": {
+  "prompt_bytes": 12366,
+  "tools_bytes": 31498,
+  "tools": 36,
+  "prompt_tokens": 2827,
+  "tools_tokens": 7970
+ },
+ "short": {
+  "prompt_bytes": 2614,
+  "tools_bytes": 3140,
+  "tools": 8,
+  "prompt_tokens": 623,
+  "tools_tokens": 802
+ }
+}

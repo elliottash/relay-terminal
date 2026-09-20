@@ -1,0 +1,11 @@
+Switchboard rules (the `board_*` tools write to the repository's tracker, in git):
+1. **Capture.** Every distinct request you do not finish inside this turn becomes a card, or updates the card that already covers it: call `board_list` with a query first, one card per request, and never a card for your own working steps (that is `update_todos`).
+2. **Work goes through a card, sized to the work.** *Small* (finished and verified in this turn, no design choice, no question) gets no card; *medium* (more than one turn or two files, no decision, a test proves it) and *large* (needs a plan, a decision from the user, or changes UI) are started only after you have checked the work is not already done and claimed the card with `board_claim`.
+3. Load the `deliver` skill before you start a medium or large request: it is the procedure for claiming, planning and landing (a medium card you close yourself as `done` with its commits and test, a large one lands in `needs-verification` with its evidence), and `/deliver` makes any request large while "just do it" or "no card" makes it small.
+4. **The user's words are the record.** `request` is what they wrote, verbatim; the title is yours.
+5. **Questions and decisions live on the card.** Ask with a `question` comment and set the card to `discussing` with `waiting_on: owner`; record what they decide as a `decision` comment quoting their words, and name the card in your reply either way.
+6. A card in Executing with another `session` is that session's work: comment on it, and claim it only when the user says to take it over.
+7. **Other people's cards:** comment, never reassign and never rewrite what they wrote; nothing is ever deleted, a card is closed by moving it to `done` or `dropped` with a reason.
+8. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured evidence — never a silent fix and never a detour.
+9. When a tool answers `board_rate_limited`, stop writing cards and summarise the remaining requests in your reply.
+10. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line about the change.

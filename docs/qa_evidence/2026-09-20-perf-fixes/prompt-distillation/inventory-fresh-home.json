@@ -1,0 +1,236 @@
+{
+ "pane, no board, build": {
+  "prompt": {
+   "bytes": 8379,
+   "tokens_div4": 2095,
+   "tokens_local": 1843
+  },
+  "tools": {
+   "bytes": 27637,
+   "tokens_div4": 6909,
+   "tokens_local": 7004
+  },
+  "tool_count": 26,
+  "total": {
+   "bytes": 36016,
+   "tokens_div4": 9004,
+   "tokens_local": 8847
+  }
+ },
+ "pane, no board, build, terminal handoff + program handed over": {
+  "prompt": {
+   "bytes": 8379,
+   "tokens_div4": 2095,
+   "tokens_local": 1842
+  },
+  "tools": {
+   "bytes": 31136,
+   "tokens_div4": 7784,
+   "tokens_local": 7856
+  },
+  "tool_count": 28,
+  "total": {
+   "bytes": 39515,
+   "tokens_div4": 9879,
+   "tokens_local": 9698
+  }
+ },
+ "pane, no board, plan": {
+  "prompt": {
+   "bytes": 9860,
+   "tokens_div4": 2465,
+   "tokens_local": 2158
+  },
+  "tools": {
+   "bytes": 14350,
+   "tokens_div4": 3588,
+   "tokens_local": 3575
+  },
+  "tool_count": 21,
+  "total": {
+   "bytes": 24210,
+   "tokens_div4": 6052,
+   "tokens_local": 5732
+  }
+ },
+ "pane, no board, build, todo tool off": {
+  "prompt": {
+   "bytes": 6929,
+   "tokens_div4": 1732,
+   "tokens_local": 1529
+  },
+  "tools": {
+   "bytes": 25842,
+   "tokens_div4": 6460,
+   "tokens_local": 6550
+  },
+  "tool_count": 25,
+  "total": {
+   "bytes": 32771,
+   "tokens_div4": 8193,
+   "tokens_local": 8079
+  }
+ },
+ "bare Agent as the profile measured it (no app block, no keybindings)": {
+  "prompt": {
+   "bytes": 7496,
+   "tokens_div4": 1874,
+   "tokens_local": 1641
+  },
+  "tools": {
+   "bytes": 12563,
+   "tokens_div4": 3141,
+   "tokens_local": 3119
+  },
+  "tool_count": 16,
+  "total": {
+   "bytes": 20059,
+   "tokens_div4": 5015,
+   "tokens_local": 4760
+  }
+ },
+ "pane, board, build": {
+  "prompt": {
+   "bytes": 13528,
+   "tokens_div4": 3382,
+   "tokens_local": 3163
+  },
+  "tools": {
+   "bytes": 40715,
+   "tokens_div4": 10179,
+   "tokens_local": 10402
+  },
+  "tool_count": 36,
+  "total": {
+   "bytes": 54243,
+   "tokens_div4": 13561,
+   "tokens_local": 13565
+  }
+ },
+ "pane, board, build, terminal handoff + program handed over": {
+  "prompt": {
+   "bytes": 13528,
+   "tokens_div4": 3382,
+   "tokens_local": 3165
+  },
+  "tools": {
+   "bytes": 44214,
+   "tokens_div4": 11054,
+   "tokens_local": 11254
+  },
+  "tool_count": 38,
+  "total": {
+   "bytes": 57742,
+   "tokens_div4": 14436,
+   "tokens_local": 14419
+  }
+ },
+ "pane, board, plan": {
+  "prompt": {
+   "bytes": 15009,
+   "tokens_div4": 3752,
+   "tokens_local": 3479
+  },
+  "tools": {
+   "bytes": 27428,
+   "tokens_div4": 6857,
+   "tokens_local": 6973
+  },
+  "tool_count": 31,
+  "total": {
+   "bytes": 42437,
+   "tokens_div4": 10609,
+   "tokens_local": 10451
+  }
+ },
+ "helper: card Discuss turn": {
+  "prompt": {
+   "bytes": 13194,
+   "tokens_div4": 3298,
+   "tokens_local": 3091
+  },
+  "tools": {
+   "bytes": 16314,
+   "tokens_div4": 4078,
+   "tokens_local": 4170
+  },
+  "tool_count": 20,
+  "total": {
+   "bytes": 29508,
+   "tokens_div4": 7377,
+   "tokens_local": 7261
+  }
+ },
+ "helper: card Plan turn": {
+  "prompt": {
+   "bytes": 13194,
+   "tokens_div4": 3298,
+   "tokens_local": 3091
+  },
+  "tools": {
+   "bytes": 12566,
+   "tokens_div4": 3142,
+   "tokens_local": 3215
+  },
+  "tool_count": 18,
+  "total": {
+   "bytes": 25760,
+   "tokens_div4": 6440,
+   "tokens_local": 6306
+  }
+ },
+ "helper: Switchboard page chat": {
+  "prompt": {
+   "bytes": 13194,
+   "tokens_div4": 3298,
+   "tokens_local": 3092
+  },
+  "tools": {
+   "bytes": 21473,
+   "tokens_div4": 5368,
+   "tokens_local": 5526
+  },
+  "tool_count": 25,
+  "total": {
+   "bytes": 34667,
+   "tokens_div4": 8667,
+   "tokens_local": 8618
+  }
+ },
+ "subagent: general": {
+  "prompt": {
+   "bytes": 6411,
+   "tokens_div4": 1603,
+   "tokens_local": 1413
+  },
+  "tools": {
+   "bytes": 5116,
+   "tokens_div4": 1279,
+   "tokens_local": 1264
+  },
+  "tool_count": 9,
+  "total": {
+   "bytes": 11527,
+   "tokens_div4": 2882,
+   "tokens_local": 2676
+  }
+ },
+ "subagent: explore": {
+  "prompt": {
+   "bytes": 6729,
+   "tokens_div4": 1682,
+   "tokens_local": 1492
+  },
+  "tools": {
+   "bytes": 3642,
+   "tokens_div4": 910,
+   "tokens_local": 913
+  },
+  "tool_count": 7,
+  "total": {
+   "bytes": 10371,
+   "tokens_div4": 2593,
+   "tokens_local": 2404
+  }
+ }
+}

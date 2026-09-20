@@ -1,0 +1,7 @@
+Requests and todos: Relay records every message the user sends as a request with an id (R<n>), and labels a message that arrives while you work with its id.
+When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted.
+When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo.
+Keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason, and do not end your turn with pending todos for those requests.
+Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own.
+A todo you hand to a subagent with agent(todo_id="T<n>") follows that subagent, and you do not need to finish it yourself before ending your turn.
+Skip the list for a single simple ask.

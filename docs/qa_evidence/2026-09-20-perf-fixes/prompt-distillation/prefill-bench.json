@@ -1,0 +1,119 @@
+{
+ "today": {
+  "prompt_bytes": 18146,
+  "tools_bytes": 40715,
+  "tools": 36,
+  "prompt_tokens": 4138,
+  "tools_tokens": 10402,
+  "cold": [
+   {
+    "wall_s": 18.638,
+    "prompt_n": 14802,
+    "cache_n": 0,
+    "prompt_ms": 18461.796,
+    "prompt_tokens": 14802
+   },
+   {
+    "wall_s": 18.681,
+    "prompt_n": 14802,
+    "cache_n": 0,
+    "prompt_ms": 18621.144,
+    "prompt_tokens": 14802
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.282,
+    "prompt_n": 24,
+    "cache_n": 14778,
+    "prompt_ms": 223.695,
+    "prompt_tokens": 14802
+   },
+   {
+    "wall_s": 0.282,
+    "prompt_n": 24,
+    "cache_n": 14778,
+    "prompt_ms": 221.957,
+    "prompt_tokens": 14802
+   }
+  ]
+ },
+ "distilled": {
+  "prompt_bytes": 12618,
+  "tools_bytes": 31498,
+  "tools": 36,
+  "prompt_tokens": 2821,
+  "tools_tokens": 7970,
+  "cold": [
+   {
+    "wall_s": 16.032,
+    "prompt_n": 11053,
+    "cache_n": 0,
+    "prompt_ms": 15606.355,
+    "prompt_tokens": 11053
+   },
+   {
+    "wall_s": 13.433,
+    "prompt_n": 11053,
+    "cache_n": 0,
+    "prompt_ms": 13382.197,
+    "prompt_tokens": 11053
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.269,
+    "prompt_n": 24,
+    "cache_n": 11029,
+    "prompt_ms": 219.115,
+    "prompt_tokens": 11053
+   },
+   {
+    "wall_s": 0.258,
+    "prompt_n": 24,
+    "cache_n": 11029,
+    "prompt_ms": 208.535,
+    "prompt_tokens": 11053
+   }
+  ]
+ },
+ "short": {
+  "prompt_bytes": 2033,
+  "tools_bytes": 3140,
+  "tools": 8,
+  "prompt_tokens": 476,
+  "tools_tokens": 802,
+  "cold": [
+   {
+    "wall_s": 2.154,
+    "prompt_n": 1540,
+    "cache_n": 0,
+    "prompt_ms": 1882.134,
+    "prompt_tokens": 1540
+   },
+   {
+    "wall_s": 1.925,
+    "prompt_n": 1540,
+    "cache_n": 0,
+    "prompt_ms": 1913.038,
+    "prompt_tokens": 1540
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.228,
+    "prompt_n": 23,
+    "cache_n": 1517,
+    "prompt_ms": 215.572,
+    "prompt_tokens": 1540
+   },
+   {
+    "wall_s": 0.235,
+    "prompt_n": 23,
+    "cache_n": 1517,
+    "prompt_ms": 223.086,
+    "prompt_tokens": 1540
+   }
+  ]
+ }
+}
