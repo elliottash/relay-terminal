@@ -589,6 +589,17 @@ if(BUILD_TESTING)
     target_link_libraries(relay-jobs-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
     add_test(NAME jobs COMMAND relay-jobs-tests)
     set_tests_properties(jobs PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The Test suites pane (#7BM4): the headless model's fold of the worker's tests_* events, its
+    # filter tokens and its five sorts, and a smoke test of the widget over it. The two sources are
+    # compiled here as well as into `relay`; relay-highlight carries src/Theme.cpp, which the run
+    # grid's pass/fail/skip inks come from.
+    add_executable(relay-testsuites-tests tests/testsuites_test.cpp
+        src/TestSuitesModel.cpp src/TestSuitesPane.cpp)
+    target_include_directories(relay-testsuites-tests PRIVATE src)
+    target_link_libraries(relay-testsuites-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    target_compile_options(relay-testsuites-tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME testsuites COMMAND relay-testsuites-tests)
+    set_tests_properties(testsuites PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The strip under the composer pairs subagents with the open tasks (owner, 2026-09-19): the
     # window centred on the marginal task and the row pairing are pure functions, tested without a
     # window.
