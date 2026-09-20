@@ -1,0 +1,47 @@
+# #PPR4 item 2: worker -> GUI bytes over 120 back-to-back turns (stub provider, `ok.` replies)
+#   IPC=1 ./drive.sh ipc 6 'zturn 1' ... 'zturn 120'   (the shim in drive.sh tees both directions)
+
+event                       n      bytes      avg  share
+requests                  360    8663760    24066   95.8 %
+presets                     3     223517    74505    2.5 %
+queue_changed             361      47982      132    0.5 %
+turn_summary              120      19321      161    0.2 %
+queued                    120      18504      154    0.2 %
+context                   120      16679      138    0.2 %
+agent_started             120      13920      116    0.2 %
+agent_finished            120      10680       89    0.1 %
+done                      120       9960       83    0.1 %
+status                    120       7320       61    0.1 %
+TOTAL                    1719    9046034
+
+# bytes of `requests` per turn, against everything else
+ turn   requests   n  everything else
+    1       2049   3             1344
+   10      12649   3             1236
+   25      30439   3             1236
+   50      60116   3             1236
+   75      89781   3             1236
+  100     119459   3             1239
+  120      95348   2             1268
+
+# AFTER (requests_delta on), the same 120 turns
+
+event                       n      bytes      avg  share
+presets                     3     223517    74505   37.6 %
+requests                  360     211945      588   35.7 %
+queue_changed             360      47892      133    8.1 %
+turn_summary              120      19321      161    3.3 %
+queued                    120      18504      154    3.1 %
+context                   120      16679      138    2.8 %
+agent_started             120      13920      116    2.3 %
+agent_finished            120      10680       89    1.8 %
+TOTAL                    1718     594129
+
+ turn   requests   n  everything else
+    1       1753   3             1344
+   10       1764   3             1236
+   25       1767   3             1236
+   50       1765   3             1236
+   75       1767   3             1236
+  100       1778   3             1239
+  120       1226   2             1178
