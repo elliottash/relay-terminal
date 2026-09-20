@@ -2303,112 +2303,124 @@ private:
             }
         }
 
-        // ----- 3. priority ----------------------------------------------------------------------
-        // Rank 1 is Main. A line sits in the list (owner, 2026-09-20): every model above it after
-        // Main is a fallback, in order — the second model the main fallback, the third the next, as
-        // many as you want — and nothing below it is ever tried unasked. Relay Free is a fallback
-        // only when it is above the line, which is what the old "allow Relay Free" switch said.
-        models.rows << headingRow(QStringLiteral("priority"));
-        {
-            relay::SettingRow info;
-            info.kind = relay::SettingRow::Info;
-            info.id = QStringLiteral("info:models/priority");
-            info.label = QStringLiteral("Rank 1 is Main: new panes start on it. The models above the line after it are the "
-                                        "fallbacks, in order: /swap goes to the first, and a failing turn walks them. "
-                                        "This is also the picker's default order.");
-            models.rows << info;
+        // ----- 3. the five lists ----------------------------------------------------------------
+        // Main, high, flash, lite, local (owner, 2026-09-20), in place of one priority list and its
+        // line. Each is ordered: rank 1 is what the tier runs on, the rest are its fallbacks, and a
+        // model in no list is only ever used when you pick it by hand. A row is a model and the
+        // reasoning level it runs at *there* — the provider's own word for it (xhigh, not max, on a
+        // GPT entry) — so "glm at max for plans, codex at xhigh" is two rows of the high list.
+        const QHash<QString, QString> tierBlurbs{
+            {QStringLiteral("main"), QStringLiteral("New panes start on the first; /swap and a failing turn step down the rest")},
+            {QStringLiteral("high"), QStringLiteral("Plan mode and the hardest turns. Empty: the main model at its top level")},
+            {QStringLiteral("flash"), QStringLiteral("Driving programs in the terminal, quick side calls, Alt+F and /flash")},
+            {QStringLiteral("lite"), QStringLiteral("Titles, labels, duplicate checks and other chores")},
+            {QStringLiteral("local"), QStringLiteral("Models served on this machine, for /local")}};
+        const bool listsSet = relay::models::curation::tierListsSet();
+        for (const QString &tier : relay::models::curation::tierIds()) {
+            relay::SettingRow heading = headingRow(relay::models::curation::tierLabel(tier));
+            models.rows << heading;
+            const QList<relay::models::curation::TierEntry> list = relay::models::curation::tierList(tier);
+            int rank = 0;
+            for (const relay::models::curation::TierEntry &item : list) {
+                const relay::models::Entry *entry = catalog.find(item.key);
+                ++rank;
+                relay::SettingRow row;
+                row.id = QStringLiteral("models/tier/") + tier + QLatin1Char('/') + item.key;
+                const qint64 until = entry ? relay::models::exhaustedUntil(catalog, entry->preset, now) : -1;
+                row.label = QStringLiteral("%1. %2").arg(rank).arg(entry ? entry->displayName() : item.key);
+                row.tooltip = !entry ? QStringLiteral("This model is not available right now: its provider has no key, or it left the catalog")
+                            : !entry->usable ? QStringLiteral("Skipped: no key for %1").arg(entry->provider)
+                            : until >= 0 ? QStringLiteral("Exhausted%1 · skipped until then")
+                                               .arg(until > 0 ? QStringLiteral(" · resets ") + relay::models::resetText(until, now) : QString())
+                            : rank == 1 ? tierBlurbs.value(tier)
+                                        : QStringLiteral("Fallback %1 of the %2 list").arg(rank - 1).arg(tier);
+                if (!entry || !entry->usable || until >= 0) row.label += QStringLiteral("  · skipped");
+                row.aliases = tier + QStringLiteral(" models list priority fallback ") + item.key;
+                row.dragGroup = QStringLiteral("tier:") + tier;
+                const int index = rank - 1;
+                row.onDropBefore = [tier, index, curated](const QString &draggedRowId) {
+                    const QString prefix = QStringLiteral("models/tier/") + tier + QLatin1Char('/');
+                    if (!draggedRowId.startsWith(prefix)) return;
+                    relay::models::curation::moveInTier(tier, draggedRowId.mid(prefix.size()), index);
+                    curated();
+                };
+                const QStringList levels = entry ? entry->efforts : QStringList();
+                if (levels.isEmpty()) {
+                    row.kind = relay::SettingRow::Buttons;
+                    row.buttonTexts = QStringList{QStringLiteral("×")};
+                    row.onButton = [tier, key = item.key, curated](int) { relay::models::curation::removeFromTier(tier, key); curated(); };
+                } else {
+                    row.kind = relay::SettingRow::Choice;
+                    QStringList labels;
+                    for (const QString &level : levels) labels << entry->effortLabel(level);
+                    row.options = levels;
+                    row.optionLabels = labels;
+                    row.current = levels.contains(item.effort) ? item.effort : levels.last();
+                    row.onChoose = [tier, key = item.key, curated](const QString &level) {
+                        relay::models::curation::setTierEffort(tier, key, level);
+                        curated();
+                    };
+                    row.buttonTexts = QStringList{QStringLiteral("×")};
+                    row.onButton = [tier, key = item.key, curated](int) { relay::models::curation::removeFromTier(tier, key); curated(); };
+                }
+                models.rows << row;
+            }
+            models.rows << buttonRow(QStringLiteral("models.tier.add.") + tier, QStringLiteral("+ add a model"),
+                list.isEmpty() ? tierBlurbs.value(tier) : QString(), QStringLiteral("add…"), [this, tier, catalog, list, curated] {
+                    QList<relay::agentui::PickerRow> rows;
+                    QList<relay::models::Entry> offered;
+                    for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
+                        if ((tier == QStringLiteral("local")) != entry.local) continue;      // local models in local, the rest elsewhere
+                        if (tier != QStringLiteral("main") && entry.guest) continue;         // a guest can only be a pane's own agent
+                        bool already = false;
+                        for (const auto &item : list) already = already || item.key == entry.key;
+                        if (already) continue;
+                        offered << entry;
+                        rows << relay::agentui::PickerRow{{entry.label, entry.provider + (entry.plan.isEmpty() ? QString() : QStringLiteral(" · ") + entry.plan)},
+                                                          entry.model, entry.key};
+                    }
+                    const auto result = relay::agentui::pick(this, relay::models::curation::tierLabel(tier),
+                        QStringLiteral("Checked models from the list above. A model you have not checked is not offered here."),
+                        {QStringLiteral("model"), QStringLiteral("provider")}, rows, {{QStringLiteral("add"), QStringLiteral("add"), true}});
+                    if (result.row < 0) return;
+                    const relay::models::Entry &entry = offered.at(result.row);
+                    relay::models::curation::addToTier(tier, entry.key, entry.efforts.isEmpty() ? QString() : entry.efforts.last());
+                    applyMainDefault(catalog);
+                    curated();
+                });
         }
-        const QList<relay::models::Entry> ranked = relay::models::shown(catalog);
-        const int threshold = qBound(1, relay::models::curation::fallbackThreshold(), qMax(1, ranked.size()));
-        auto lineRow = [&] {
-            relay::SettingRow line;
-            line.kind = relay::SettingRow::Buttons;
-            line.id = QStringLiteral("models/threshold");
-            line.label = QStringLiteral("──────────── fallbacks end here ────────────");
-            line.detail = threshold <= 1 ? QStringLiteral("No fallback: a failing turn stops. Move the line down to add some")
-                                         : QStringLiteral("%1 fallback%2 above the line; nothing below it is tried unasked")
-                                               .arg(threshold - 1).arg(threshold == 2 ? QString() : QStringLiteral("s"));
-            line.aliases = QStringLiteral("fallback threshold line failover relay free");
-            line.dragGroup = QStringLiteral("priority");
-            line.onDropBefore = [this, catalog, threshold, curated](const QString &draggedRowId) {
-                // A model dropped on the line goes just above it: the last fallback.
-                if (draggedRowId.startsWith(QStringLiteral("models/rank/")))
-                    relay::models::curation::setRank(draggedRowId.mid(QStringLiteral("models/rank/").size()), qMax(0, threshold - 1), catalog);
+        {
+            // The two defaults (owner, 2026-09-20), computed by the worker from the providers you
+            // can use: your own, or your own with the cost-sensitive OpenRouter twins after them and
+            // OpenRouter leading the lite list, which chores lean on most.
+            const QJsonObject defaults = pane ? pane->tierListDefaults() : QJsonObject();
+            auto apply = [this, catalog, curated](const QJsonObject &lists) {
+                relay::models::curation::applyTierDefaults(lists);
                 applyMainDefault(catalog);
                 curated();
             };
-            line.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
-            line.onButton = [this, catalog, threshold, curated, count = ranked.size()](int index) {
-                relay::models::curation::setFallbackThreshold(qBound(1, threshold + (index == 0 ? -1 : 1), qMax(1, count)));
-                applyMainDefault(catalog);
-                curated();
-            };
-            return line;
-        };
-        for (int i = 0; i < ranked.size(); ++i) {
-            const relay::models::Entry &entry = ranked.at(i);
             relay::SettingRow row;
             row.kind = relay::SettingRow::Buttons;
-            row.id = QStringLiteral("models/rank/") + entry.key;
-            row.label = QStringLiteral("%1. %2").arg(i + 1).arg(entry.displayName());
-            const qint64 spentUntil = relay::models::exhaustedUntil(catalog, entry.preset, now);
-            row.detail = spentUntil >= 0 ? QStringLiteral("exhausted · resets %1 · skipped").arg(spentUntil > 0 ? relay::models::resetText(spentUntil, now) : QStringLiteral("when the provider says so"))
-                       : i == 0 ? QStringLiteral("main · new panes start here · drag rows to reorder")
-                       : i < threshold ? QStringLiteral("fallback %1%2").arg(i).arg(i == 1 ? QStringLiteral(" · /swap goes here") : QString())
-                                       : QString();
-            row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
-            row.dragGroup = QStringLiteral("priority");
-            row.onDropBefore = [this, catalog, i, curated](const QString &draggedRowId) {
-                // "put the dragged one before me": its key, or the line, which lands at my rank.
-                if (draggedRowId == QStringLiteral("models/threshold")) relay::models::curation::setFallbackThreshold(qMax(1, i));
-                else relay::models::curation::setRank(draggedRowId.mid(QStringLiteral("models/rank/").size()), i, catalog);
-                applyMainDefault(catalog);
-                curated();
+            row.id = QStringLiteral("models.tier.defaults");
+            row.label = QStringLiteral("fill the lists");
+            row.tooltip = QStringLiteral("defaults: your own providers' models, best first. with openrouter: the same, then their "
+                                         "cheaper OpenRouter twins, and OpenRouter first for lite. Voice transcription uses the "
+                                         "OpenRouter key either way");
+            row.buttonTexts = QStringList{QStringLiteral("defaults"), QStringLiteral("defaults with openrouter (recommended)")};
+            row.onButton = [defaults, apply, this](int index) {
+                const QJsonObject lists = defaults.value(index == 0 ? QStringLiteral("plain") : QStringLiteral("openrouter")).toObject();
+                if (lists.isEmpty()) { hint(QStringLiteral("models.defaults.none"), QStringLiteral("The worker has not sent defaults yet; open a pane's agent first")); return; }
+                apply(lists);
             };
-            row.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
-            row.onButton = [this, catalog, key = entry.key, curated](int index) {
-                relay::models::curation::move(key, index == 0 ? -1 : 1, catalog);
-                applyMainDefault(catalog);
-                curated();
-            };
-            models.rows << row;
-            if (i + 1 == threshold) models.rows << lineRow();
+            if (!listsSet || !defaults.isEmpty()) models.rows << row;
         }
-        if (ranked.isEmpty()) models.rows << lineRow();
-        models.rows << buttonRow(QStringLiteral("models.resetOrder"), QStringLiteral("reset the order"),
-                                 QStringLiteral("Back to the default: the default provider's main and flash models, then each provider's main; one fallback"),
-                                 QStringLiteral("reset"), [this, catalog, curated] {
-            relay::models::curation::resetPriority();
-            relay::models::curation::setFallbackThreshold(2);
-            applyMainDefault(catalog);
-            curated();
-        });
 
         // ----- 4. defaults ----------------------------------------------------------------------
         models.rows << headingRow(QStringLiteral("defaults"));
         {
-            // The levels the current provider offers, so this row and the Model roles modal beside
-            // it always name the same ones (owner report, 2026-09-18: four here, three there). A
-            // provider with no effort knob at all leaves Relay's four, because the default outlives
-            // it: it is what the next pane on the next provider starts at.
-            const QString effort = settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
-            const QStringList levels = m_active ? m_active->offeredEfforts() : Pane::efforts();
-            const QStringList offered = levels.isEmpty() ? Pane::efforts() : levels;
-            const QString note = m_active ? m_active->effortNote() : QString();
-            models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
-                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane")
-                                         + (note.isEmpty() ? QString() : QStringLiteral(" · ") + note),
-                                     offered, offered, Pane::nearestEffort(offered, effort),
-                                     QStringLiteral("high"), [this](const QString &value) {
-                QSettings().setValue(QStringLiteral("agent/effort"), value);
-                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
-            });
-        }
-        {
             relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a fallback model"),
-                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on the "
-                                                                 "fallbacks above the line in the priority list, in order — that turn "
-                                                                 "only. The pane keeps the model you chose"), true);
+                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues down "
+                                                                 "the list it is on — that turn only. The pane keeps the model you chose"), true);
             failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded relay free");
             models.rows << failover;
         }
@@ -2436,6 +2448,8 @@ private:
         QSettings settings;
         settings.setValue(QStringLiteral("provider/preset"), main.preset);
         settings.setValue(QStringLiteral("provider/model"), main.model);
+        for (const relay::models::curation::TierEntry &item : relay::models::curation::tierList(QStringLiteral("main")))
+            if (item.key == main.key && !item.effort.isEmpty()) settings.setValue(QStringLiteral("agent/effort"), item.effort);
     }
     // One spelling of the key, shared with Pane::guestSetting.
     static QString guestSettingKey(const QString &guest, const QString &key) {

@@ -738,6 +738,14 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         });
         entry.activate = [combo] { combo->setFocus(Qt::OtherFocusReason); combo->showPopup(); };
         box->addWidget(combo);
+        // A dropdown row may carry small buttons after it (a tier list's row: its level, then ×).
+        for (int i = 0; i < row.buttonTexts.size(); ++i) {
+            auto *button = new QPushButton(row.buttonTexts.at(i));
+            button->setObjectName(QStringLiteral("settingsRowSmallButton"));
+            button->setFocusPolicy(Qt::TabFocus);
+            connect(button, &QPushButton::clicked, this, [fn = row.onButton, after, i] { if (fn) fn(i); after(); });
+            box->addWidget(button);
+        }
         break;
     }
     case SettingRow::Text: {

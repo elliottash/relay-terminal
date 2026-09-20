@@ -781,6 +781,15 @@ public:
     // Every preset row the worker sent, guests and local servers included: what Options › Models
     // builds its catalog from (owner, 2026-09-20).
     QJsonArray allPresets() const { return m_presets; }
+    // {plain: {tier: [entries]}, openrouter: {…}} — what the page's two "defaults" buttons apply.
+    QJsonObject tierListDefaults() const { return m_tierListDefaults; }
+    // A reasoning level in the words of the provider this pane is on (owner, 2026-09-20: "for codex
+    // planning you pick xhigh, not max"): Relay keeps its four levels and shows what is sent.
+    QString effortLabel(const QString &level) const {
+        const relay::models::Catalog catalog = modelCatalog();
+        const relay::models::Entry *entry = catalog.find(currentEntryKey());
+        return entry ? entry->effortLabel(level) : level;
+    }
     // Options › Models drives the keyring through this pane's worker, with the requests the keys
     // dialog sends; the events come back through handleEvent and re-draw every Options pane.
     void storeKey(const QString &preset, const QString &key) { send({{"type", "store_key"}, {"preset", preset}, {"api_key", key}}); }
@@ -1252,6 +1261,23 @@ public:
     static QJsonObject tiersObject() {
         QSettings settings;
         QJsonObject tiers;
+        // The five lists of Options › Models (owner, 2026-09-20), once any exists: each tier is an
+        // ordered list of {preset, model, effort}; the worker takes a tier's first usable entry and
+        // walks the list a turn is on when it fails. Before that, the old one-entry-per-tier keys.
+        if (relay::models::curation::tierListsSet()) {
+            for (const QString &tier : relay::models::curation::tierIds()) {
+                QJsonArray list;
+                for (const relay::models::curation::TierEntry &item : relay::models::curation::tierList(tier)) {
+                    QString preset, model;
+                    if (!relay::models::Catalog::splitKey(item.key, &preset, &model)) continue;
+                    QJsonObject entry{{"preset", preset}, {"model", model}};
+                    if (efforts().contains(item.effort)) entry.insert(QStringLiteral("effort"), item.effort);
+                    list.append(entry);
+                }
+                tiers.insert(tier, list);
+            }
+            return tiers;
+        }
         for (const QString &tier : relay::RolesDialog::tierIds()) {
             if (tier == QStringLiteral("main")) continue;
             const QString preset = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("preset"))).toString();
@@ -2640,7 +2666,7 @@ public:
         m_effort = value;
         if (m_configured) send({{"type", "set_effort"}, {"effort", value}});
         changed();
-        toast(QStringLiteral("Effort: ") + value);
+        toast(QStringLiteral("Effort: ") + effortLabel(value));
     }
     // Alt+. / Alt+, walk the levels this provider offers, not Relay's four: on GLM the step from low
     // is high, because medium there is the same request as high.
@@ -4047,7 +4073,7 @@ private:
         for (int i = 0; i < m_effortBox->count(); ++i) shown << m_effortBox->itemData(i).toString();
         if (shown != levels) {
             m_effortBox->clear();
-            for (const QString &level : levels) m_effortBox->addItem(level, level);
+            for (const QString &level : levels) m_effortBox->addItem(effortLabel(level), level);
         }
         m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(nearestEffort(levels, m_effort))));
         m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
@@ -9524,6 +9550,16 @@ private:
             // Tier defaults and the Advanced action list come from the worker so the GUI never has
             // to keep a second copy of backend/relay_core/presets.py in step (protocol 13.7).
             m_tierCatalog = event.value(QStringLiteral("tier_defaults")).toObject();
+            // The two defaults the worker computed for the five lists (owner, 2026-09-20). A fresh
+            // install takes one at once — with the OpenRouter twins when that key is stored, which
+            // is the recommended one — so no list is ever empty by accident.
+            m_tierListDefaults = event.value(QStringLiteral("tier_list_defaults")).toObject();
+            if (!relay::models::curation::tierListsSet() && !m_tierListDefaults.isEmpty()) {
+                const QJsonObject withOpenrouter = m_tierListDefaults.value(QStringLiteral("openrouter")).toObject();
+                const QJsonObject plain = m_tierListDefaults.value(QStringLiteral("plain")).toObject();
+                const QJsonObject chosen = withOpenrouter.isEmpty() ? plain : withOpenrouter;
+                if (!chosen.isEmpty()) relay::models::curation::applyTierDefaults(chosen);
+            }
             m_roleActions = event.value(QStringLiteral("role_actions")).toArray();
             m_stored.clear();
             bool hostedUnavailable = false;
@@ -15795,7 +15831,7 @@ private:
     // one state fed by all three rather than a member each: every move pushes, every `*_ended`
     // pops, and the end of the turn empties it however the turn ended.
     QList<Serving> m_serving;
-    QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog;
+    QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog, m_tierListDefaults;
     QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
