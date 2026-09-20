@@ -8,7 +8,7 @@ assignee: claude-code
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/], related: [R9G7, SDXE, PF4K], github: null}
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/], related: [R9G7, SDXE, PF4K], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -189,7 +189,7 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 
 - [x] Backend: test discovery, JUnit in, JSONL history and fold, `check_card` verdicts, tests <!-- t:5f -->
 - [ ] GUI: Test suites pane with headless model, grid, columns, detail, row actions, registration <!-- t:xe -->
-- [ ] Worker protocol §31: tests_list / tests_run / tests_history / tests_check, agent tools, policy lines <!-- t:pg -->
+- [x] Worker protocol §31: tests_list / tests_run / tests_history / tests_check, agent tools, policy lines <!-- t:pg -->
 - [ ] Card: `## Tests` section strip, Check button, dated `### Check` block, three actions, verification gate <!-- t:q5 -->
 - [ ] Profile: scripts/relay-profile, button, streamed run, table pane, evidence under qa_evidence <!-- t:ea -->
 - [ ] Docs and QA: SWITCHBOARD-DESIGN §4.14, VALIDATION inventory pointer, protocol §31, QA checklist <!-- t:em -->
