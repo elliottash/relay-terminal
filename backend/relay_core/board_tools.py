@@ -1448,6 +1448,14 @@ class BoardTools:
                     "This turn writes nothing by design — the owner has not confirmed anything "
                     "yet. Say what you would do; the write happens once the owner answers.",
                     code="board_readonly_turn")
+            if name == "board_claim" and self.cleanup is not None:
+                # A cleanup is the Switchboard worker tidying the whole board (19.9): it has no
+                # terminal pane of its own to claim *for*, and putting a card into Executing is
+                # not tidying. The ordinary move is still there if a card is genuinely mis-filed.
+                raise BoardToolError(
+                    "board_claim is not available during a Switchboard cleanup: a cleanup has no "
+                    "terminal pane of its own, and taking a card is not tidying one. Move a "
+                    "mis-filed card with board_move_card.", code="board_refused")
             if name == "search_files":
                 return search_workspace(Path(self.board.repo), dict(args))
             if self.state == "uninitialized" and name not in UNINITIALIZED_TOOLS:

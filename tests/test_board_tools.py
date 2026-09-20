@@ -1040,6 +1040,15 @@ class ClaimTests(BoardToolsTest):
         self.assertEqual(refused["field"], "session")
         self.assertNotIn("session", self.board.card_by_id(self.card_id).front)
 
+    def test_a_cleanup_cannot_claim_a_card(self):
+        # A cleanup is the Switchboard worker tidying the whole board (19.9): no pane of its own,
+        # and moving a card to Executing is not tidying.
+        self.tools.begin_cleanup("c-1")
+        refused = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertIn("cleanup", refused["error"])
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "inbox")
+
     def test_only_a_work_card_is_claimed(self):
         plan = self.tools.run("board_create_card", {
             "tab": "planning", "status": "draft", "type": "plan", "title": "A plan",
