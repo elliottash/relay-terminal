@@ -37,6 +37,7 @@
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
+#include "SettingsPane.h"   // SettingsWatch: a late presets event can change what an open Options pane shows
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -8987,6 +8988,10 @@ private:
             }
             if (m_keysDialog) m_keysDialog->setPresets(providerPresets());
             if (m_rolesDialog) m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
+            // A presets event that arrives after the first one can change what a settings pane
+            // shows — the codex catalogue landing turns Options' Codex Model row from its text
+            // field into the dropdown (#E516) — so an open Options re-renders from the fresh rows.
+            relay::SettingsWatch::instance().notify();
             changed();
             // A pane opened for a guest sessions row (29.4) could not know until now whether the
             // guest can be its agent. It does now: the preset, or the Tier B launch.

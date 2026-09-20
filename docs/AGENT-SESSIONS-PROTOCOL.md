@@ -4910,7 +4910,14 @@ Relay's enum must not be mapped onto them. The `guest:` preset rows therefore ca
 `efforts` for the guest, and `models` as `[{id, label, efforts, default_effort}]` — claude's
 aliases are static, codex's come from `codex debug models`, which runs once per worker process in a
 background thread because `presets` is answered on the protocol thread and may not wait for a
-subprocess; until it lands the row says `models: []` and the GUI offers a text box.
+subprocess; until it lands the row says `models: []` and the GUI offers a text box. When the scan
+lands the worker **re-emits `presets` unsolicited** (#E516) — nothing re-asks for it, and without
+the push the GUI's cached copy would keep the empty list and the text box forever, which is what
+the card was filed on. A scan that completes *empty* (codex missing, refusing or slow) then serves
+a four-model fallback (`_CODEX_FALLBACK_MODELS`, read off codex-cli 0.155.1; a scan with rows
+always wins), so the row is a menu even on a machine whose codex cannot be asked. The pane
+re-renders open settings panes on every `presets` event, so an Options page that is already open
+when the catalogue lands turns its Codex Model row from the text box into the dropdown by itself.
 
 Changing the effort is not the same operation for the two guests, and the difference is the CLI's,
 not Relay's. **Codex** takes it on the next `turn/start` (`thread/start` takes it through

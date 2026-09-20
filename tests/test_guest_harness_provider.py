@@ -712,13 +712,16 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(rows["guest:codex"]["efforts"], ["low", "high", "ultra"])
         self.assertEqual(seen, ["/usr/bin/codex"])       # read once per worker process
 
-    def test_a_codex_that_fails_or_is_missing_is_simply_no_menu(self):
+    def test_a_codex_that_fails_or_is_missing_gets_the_fallback_menu(self):
         with self._installed(), mock.patch.object(ghp, "_read_codex_catalog",
                                                   side_effect=RuntimeError("not logged in")):
             ghp.preset_rows()
             self.assertTrue(ghp.catalog_ready.wait(5.0))
             rows = {row["id"]: row for row in ghp.preset_rows()}
-        self.assertEqual(rows["guest:codex"]["models"], [])
+        # The scan completed empty, so codex's four stand in (#E516), and the first row's own
+        # levels are the row's efforts, exactly as for a scanned catalogue.
+        self.assertEqual([m["id"] for m in rows["guest:codex"]["models"]],
+                         ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
         self.assertEqual(rows["guest:codex"]["efforts"],
                          ["low", "medium", "high", "xhigh", "max", "ultra"])
         ghp.reset_catalog()
@@ -727,6 +730,18 @@ class CatalogueTests(unittest.TestCase):
                 ghp, "_read_codex_catalog", side_effect=AssertionError("nothing to run")):
             rows = {row["id"]: row for row in ghp.preset_rows()}
         self.assertEqual((rows["guest:codex"]["models"], rows["guest:codex"]["efforts"]), ([], []))
+
+    def test_the_scan_landing_is_what_the_worker_pushes_on(self):
+        # The catalogue reaching the GUI at all is the listener: the worker re-emits `presets`
+        # when a scan finishes, whatever it found (#E516), so Options' row does not wait for a
+        # re-ask that never comes.
+        pushes = []
+        ghp.set_catalog_listener(lambda: pushes.append("landed"))
+        self.addCleanup(ghp.set_catalog_listener, None)
+        with self._installed(), mock.patch.object(ghp, "_read_codex_catalog", return_value=[]):
+            ghp.preset_rows()
+            self.assertTrue(ghp.catalog_ready.wait(5.0))
+        self.assertEqual(pushes, ["landed"])
 
     def test_the_real_reader_parses_what_codex_debug_models_prints(self):
         printed = json.dumps({"models": [

@@ -218,11 +218,37 @@ _CLAUDE_MODELS = None            # filled on first use from guest_harness_claude
 CODEX_CATALOG_TIMEOUT = 20.0
 _CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 
+# What `guest_models("codex")` answers once a scan has *completed empty* — a missing, refusing or
+# slow `codex debug models` is then no menu no longer, but the four models codex-cli 0.155.1 lists
+# first (read off this machine's own `codex debug models`, 2026-09-20; the scan always wins when it
+# works, so this only goes stale while codex itself cannot be asked). Order is codex's own
+# `priority` so the menu does not reorder when the scan recovers.
+_CODEX_FALLBACK_MODELS = (
+    {"id": "gpt-6-astra", "label": "GPT-6-Astra",
+     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
+    {"id": "gpt-5.6-sol", "label": "GPT-5.6-Sol",
+     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "low"},
+    {"id": "gpt-5.6-terra", "label": "GPT-5.6-Terra",
+     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
+    {"id": "gpt-5.6-luna", "label": "GPT-5.6-Luna",
+     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
+)
+
 _catalog: dict[str, list[dict]] = {}
 _catalog_started: set = set()
 _catalog_lock = threading.Lock()
 # Set once the codex scan has finished, whatever it found. Tests wait on it; nothing else does.
 catalog_ready = threading.Event()
+# The worker's "the catalogue landed" hook, called from the scan thread once a scan has finished —
+# it re-emits `presets` so the GUI's cached copy (Options' Codex row) gets the list without a
+# re-ask. None until the worker registers one, and never called on the no-binary early path.
+_catalog_listener = None
+
+
+def set_catalog_listener(callback) -> None:
+    """Register (or clear, with None) the callable told when a catalogue scan finishes."""
+    global _catalog_listener
+    _catalog_listener = callback
 
 
 def _read_codex_catalog(binary: str) -> list[dict]:
@@ -254,11 +280,17 @@ def start_catalog_scan(guest_id: str = "codex") -> None:
         rows: list[dict] = []
         try:
             rows = _read_codex_catalog(binary)
-        except Exception as exc:              # a missing, refusing or slow codex is simply no menu
+        except Exception as exc:     # a codex that cannot be asked means the fallback menu below
             _log.debug("codex catalogue could not be read: %s", exc)
         with _catalog_lock:
             _catalog[guest_id] = rows
         catalog_ready.set()
+        listener = _catalog_listener
+        if listener is not None:
+            try:
+                listener()          # the worker pushes a fresh `presets` now that there is a list
+            except Exception:                                          # pragma: no cover
+                _log.debug("codex catalogue listener failed", exc_info=True)
 
     threading.Thread(target=scan, name="relay-codex-models", daemon=True).start()
 
@@ -281,7 +313,14 @@ def guest_models(guest_id: str) -> list[dict]:
         return [dict(row) for row in _CLAUDE_MODELS]
     start_catalog_scan(guest_id)
     with _catalog_lock:
-        return [dict(row) for row in _catalog.get(guest_id) or ()]
+        rows = [dict(row) for row in _catalog.get(guest_id) or ()]
+    # Codex only, and only once the scan has completed empty (owner, 2026-09-19: "add model
+    # selection in codex options"): before that the first `presets` answer must not wait, and
+    # after it an empty scan is a codex that could not be asked — the fallback's four models
+    # stand in until one can. A scan that found rows always wins.
+    if guest_id == "codex" and not rows and catalog_ready.is_set():
+        return [dict(row) for row in _CODEX_FALLBACK_MODELS]
+    return rows
 
 
 def guest_efforts(guest_id: str, models: list[dict] | None = None) -> list[str]:

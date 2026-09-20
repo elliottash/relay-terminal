@@ -96,6 +96,33 @@ def main():
 
     observe = observe_protocol.ObserveCommands(turns, emit)  # protocol 11
 
+    def emit_presets(request_id=None):
+        # key_source says where each key comes from so the keys modal can show "from
+        # RELAY_*_API_KEY" instead of offering to remove something it cannot remove.
+        sources = keystore.sources()
+        # Relay Free (protocol 13.9): nothing is stored and nothing can be, so key_source
+        # says "included"; `available` (cryptography imports) is what makes the row usable,
+        # and `quota` is the last allowance seen, null before the first exchange.
+        relay_free = {"has_stored_key": False, "key_source": "included", **hosted.status()}
+        emit({"event": "presets", "id": request_id, "warp_default": keystore.warp_default_preset(),
+              "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
+              "presets": [{**p.to_dict(), **(relay_free if p.hosted else
+                                             {"has_stored_key": bool(sources[p.id]),
+                                              "key_source": sources[p.id]})}
+                          for p in PRESETS.values()]
+              # Model servers on this machine (protocol 28): no key to store, so
+              # has_stored_key stays false and `local` is what makes the row usable.
+              + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
+                 for e in localmodels.catalog().values()]
+              # Guest agents on this machine (protocol 29.3): no key either, and `harness`
+              # is what makes the row this pane's agent rather than a Tier B launch.
+              + guest_harness_provider.preset_rows()})
+
+    # The codex catalogue lands after the first `presets` answer (the scan must not delay it,
+    # 29.3), and nothing re-asks — so the worker pushes a fresh `presets` when it does, and
+    # Options' Codex row turns from the text field into the dropdown on its own.
+    guest_harness_provider.set_catalog_listener(lambda: emit_presets())
+
     emit({"event": "ready", "version": __version__})
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
@@ -245,26 +272,7 @@ def main():
                 agent.executor.keybindings = catalog
                 emit({"event": "keybindings_updated", "id": request.get("id")})
             elif kind == "presets":
-                # key_source says where each key comes from so the keys modal can show "from
-                # RELAY_*_API_KEY" instead of offering to remove something it cannot remove.
-                sources = keystore.sources()
-                # Relay Free (protocol 13.9): nothing is stored and nothing can be, so key_source
-                # says "included"; `available` (cryptography imports) is what makes the row usable,
-                # and `quota` is the last allowance seen, null before the first exchange.
-                relay_free = {"has_stored_key": False, "key_source": "included", **hosted.status()}
-                emit({"event": "presets", "id": request.get("id"), "warp_default": keystore.warp_default_preset(),
-                      "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
-                      "presets": [{**p.to_dict(), **(relay_free if p.hosted else
-                                                     {"has_stored_key": bool(sources[p.id]),
-                                                      "key_source": sources[p.id]})}
-                                  for p in PRESETS.values()]
-                      # Model servers on this machine (protocol 28): no key to store, so
-                      # has_stored_key stays false and `local` is what makes the row usable.
-                      + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
-                         for e in localmodels.catalog().values()]
-                      # Guest agents on this machine (protocol 29.3): no key either, and `harness`
-                      # is what makes the row this pane's agent rather than a Tier B launch.
-                      + guest_harness_provider.preset_rows()})
+                emit_presets(request.get("id"))
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
             elif kind == "hosted_quota":
