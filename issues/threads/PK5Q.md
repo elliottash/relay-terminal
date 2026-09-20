@@ -23,3 +23,13 @@ the first ask; a terminal pane lends its catalog until the helper speaks.
 and six shots driven live under Xvfb on the binary land.py built from the exact tree it committed.
 `_rows-pane.txt` and `_rows-switchboard.txt` are the two popups' rows read off the two shots, and
 `03-two-popups-side-by-side.png` is both in one picture.
+
+<!-- relay:entry 20260920T190000Z-b3 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-20 19:00
+The live run found two more faults and both are fixed: `eb45e571` — Alt+M in the Switchboard's
+composer opened the *terminal pane's* box, because the lookup asked the window which leaf it
+thought was active rather than the keyboard which widget the key reached — and `7226236a` — the
+Local row read "stub · local (local)" against the pane's "stub (local)", because a pane puts only
+its Main row through the concise wording. `drive.sh` now proves the cursor is in the composer (it
+types a word and reads it back) and checks *where* the popup opened, so the false pass that hid
+the first of those cannot happen again. 30 checks, 0 failures; `_rows.diff` is empty over 23 rows.

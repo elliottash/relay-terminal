@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: 'owner, terminal, 2026-09-20'
-links: {plans: [], commits: [78143918, 3669df02, cddde462, b193f83c], evidence: ['docs/qa_evidence/2026-09-20-helper-picker-like-the-pane/'], related: [BRD3, FEJQ, PBX1, GH5T], github: null}
+links: {plans: [], commits: [78143918, 3669df02, cddde462, b193f83c, eb45e571, 7226236a, 8984840c], evidence: ['docs/qa_evidence/2026-09-20-helper-picker-like-the-pane/'], related: [BRD3, FEJQ, PBX1, GH5T], github: null}
 ---
 # The helper agent's model box is the pane's model box
 
