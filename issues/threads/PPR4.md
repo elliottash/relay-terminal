@@ -45,3 +45,7 @@ take that on; a `QListWidgetItem` destructor 200 turns in looks like a list rebu
 <!-- relay:entry 20260920T212011Z-c9 author=claude-code kind=evidence -->
 ### Claude Code · 2026-09-20 21:20
 items 2 and 3 landed (the ledger delta and the chunked reasoning render; commits added to links.commits, results and six QA items in the body); the card stays in needs-verification.
+
+<!-- relay:entry 20260920T230722Z-ca author=claude-code kind=evidence -->
+### Claude Code · 2026-09-20 23:07
+QA item 5 reworded and the `sharedWithPhone()` arm removed (13772bdf, evidence 71c43fe2): the phone draws the pane's screen and discards tool text, so the worker now sends counts while shared too; on the Pixel 8 a tool-heavy turn puts 138 KB on the air instead of 1.46 MB and the slowest screen frame is 319 ms instead of 3.1 s. Card #3H5T holds the phone profile.

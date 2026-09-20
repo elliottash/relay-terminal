@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m6
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7, 5a76d136, 5a4fb702, cf8934bd, 5544922e, f64f037c, 557ced32, 6ec4b0fc, ac567e76], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
+links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7, 5a76d136, 5a4fb702, cf8934bd, 5544922e, f64f037c, 557ced32, 6ec4b0fc, ac567e76, 13772bdf, 71c43fe2], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
 ---
 # Tool output is sent to the GUI and thrown away; per-turn GUI cost grows with the conversation
 
@@ -41,7 +41,7 @@ Evidence and the commands: [docs/qa_evidence/2026-09-20-perf-fixes/toolout/](../
 2. **The stream still comes back.** Options › General › **Show tool output** on, ask for the same command: the output prints under the line as it arrives, exactly as before. Toggle it **during** a long-running command: the text starts appearing within a chunk or two, without a New chat. Toggle it off again mid-command: the text stops and the line goes back to counting, and the final count is still right.
 3. **A second pane follows.** Two agent panes, both running a noisy command. Toggle Show tool output with pane A focused, then look at pane B: B's output comes back too (Options only tells the active pane, so the pane asks again when the shape that arrives is not the shape it needs).
 4. **The Activity pane.** Ctrl+Shift+I (Activity) open, run a noisy command: the row counts lines live as it did, and clicking it still opens the full output.
-5. **A phone still sees tool output.** Share a pane to a paired phone or browser and run a noisy command with Show tool output *off*: the phone's transcript must still show the output under the running call. Stop sharing, run it again: the desktop is unchanged. Start sharing *while* a command runs: the phone starts getting output.
+5. **A phone shows the same line the desktop shows** (reworded after #3H5T measured it on the owner's Pixel 8: the phone draws the pane's screen, not a transcript, so it never showed tool text and the `sharedWithPhone()` arm was removed in 13772bdf). Share a pane to a paired phone or browser and run a noisy command with Show tool output *off*: the phone shows `▸ ran <cmd> · N lines · exit 0` exactly as the desktop does, and no tool text crosses the wire. Verify instead that the worker's `configure` carried `stream_tool_output: false` and that no `set_agent_options` was sent when the share started or ended.
 6. **Guests.** A pane on `claude` or `codex` (Options › Models): a long tool call's output still appears where it did — under the line with Show tool output on, counted without it.
 7. **Subagents.** Ask for a background subagent that runs something noisy and open its tab: its transcript is unaffected (subagent payloads are never trimmed).
 8. **An old worker.** Nothing to do here beyond: after any of the above, `~/.local/share/relay/logs` must have no repeated `set_agent_options` (the pane asks once per change, not once per chunk).
