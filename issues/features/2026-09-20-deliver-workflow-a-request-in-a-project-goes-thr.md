@@ -1,0 +1,48 @@
+---
+id: R9G7
+type: work
+status: needs-verification
+labels: [feature, switchboard, agent]
+assignee: agent
+rank: i1
+created: '2026-09-20'
+source: pane, 2026-09-20
+links: {plans: [], commits: [d97bcf24, 5fc80e33, 6a8575f4, be5d9ec1, a1ec6290, baae6a63, a7746e2d, a5e0dfbb, d52916e4, ca6ebaad, fec0fd71, 7bd892f2, c82f171d, 4bedd4f1], evidence: [docs/qa_evidence/2026-09-20-deliver-claim], related: [], github: null}
+---
+# Deliver workflow: a request in a project goes through a card; sessions claim cards visibly; /deliver
+
+## Issue
+what do you think about, when you are in a project, the system prompt for the agent instructs it to use the switchboard workflow.
+
+so when the user asks you to do something, you first check if its already done, then look for related cards, if so, attach to them, otherwise create one. then plan (if needed), then execute.
+
+should this be a "deliver issue" skill for example.
+
+re a session claiming a card, lets also implement taht more directly, where in the swtichboard, you see the linked session id that links to the session pane. (lets implement that as part of this job). then agents know if another agent already claimed it and can coordinate easily.
+
+yes, tell claude md and agents md to read the relay system prompt
+
+so if i want to activate the workflow manually, should it be /deliver?
+
+## Decisions
+- Rule in the always-on Switchboard policy (two or three lines); procedure in a bundled skill `deliver`, so `/deliver <request>` runs it by hand (owner, 2026-09-20).
+- A pane claims a card with one tool, `board_claim`: front matter `session: <pane token>`, status executing, assignee agent, a progress entry linking to the pane. The Switchboard shows the session on the card and the link reveals the pane; another agent sees the claim in `board_read`.
+- Guest agents (claude, codex) reach the same rules through the project's CLAUDE.md and AGENTS.md, which point at a generated `<board>/POLICY.md` (owner: "tell claude md and agents md to read the relay system prompt").
+
+## Tasks
+
+- [x] Backend: `board_claim`, pane token on `configure`, policy lines, bundled `deliver` skill, tests, protocol §19
+- [x] GUI: `session` chip on card rows and detail, link reveals the pane, Execute records the session, Pane sends its token
+- [x] Guest path: generated POLICY.md, CLAUDE.md/AGENTS.md paragraph at board init, applied to this repo
+
+## QA checklist
+
+- [ ] In a project with a board, ask a pane agent for a small code change: it checks the code and `board_list` first, then `board_claim`s (or creates and claims) a card before editing, and the reply names `#ID`.
+- [ ] Ask a question ("what does X do?"): no card is created or claimed.
+- [ ] `/deliver <request>` in the composer previews as `SKILL · /deliver` and the agent follows the six steps.
+- [ ] After a claim, the card row shows `⧉ <8 chars>` in the link colour and the card page shows `session ⧉ <8 chars>`; clicking it reveals the pane.
+- [ ] Close that pane: the chip reads `⧉ <8 chars> closed`, muted, no link.
+- [ ] From the Switchboard, press Execute on a card: one `board_claim` write (thread entry `Claimed (xxxxxxxx) · …`), and the note "Claimed #ID · Execute".
+- [ ] In a second pane, ask the agent to work the same card: `board_claim` is refused with `board_claimed_elsewhere`; the agent comments instead of taking over.
+- [ ] Initialize a board in a fresh project that has only a CLAUDE.md: `.switchboard/POLICY.md` exists, CLAUDE.md ends with the marked block, AGENTS.md was created starting with `@CLAUDE.md`, and Relay's Instructions dialog still loads CLAUDE.md's content.
+- [ ] Start `claude` in a pane of that project: it reads the block, and POLICY.md tells it how to file, claim and move a card by editing files.
