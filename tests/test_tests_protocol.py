@@ -208,8 +208,8 @@ class DiscoveryAndListTest(TestsProtocolTest):
         events = self.of("tests_list")
         self.assertEqual(len(events), 1)
         event = events[0]
-        self.assertEqual(set(event) - {"id"},
-                         {"event", "project", "tests", "summary", "cards_without_tests"})
+        self.assertEqual(set(event),
+                         {"event", "id", "project", "tests", "summary", "cards_without_tests"})
         self.assertEqual(event["id"], "r1")
         self.assertEqual(event["project"], str(self.project))
         self.assertEqual(set(event["summary"]),
@@ -319,6 +319,7 @@ class RunTest(TestsProtocolTest):
         self.assertEqual((last["done"], last["total"]), (2, 2))
         self.assertIn("1 passed", last["message"])
         self.assertIn("1 failed", last["message"])
+        self.assertIn(" ms", last["message"])         # never "in 0.0 s" for a sub-second run
 
     def test_a_run_stores_its_executions_and_ends_with_a_fresh_list(self):
         self.send(type="tests_run", ids=["ctest:alpha"])
@@ -476,7 +477,7 @@ class CheckTest(TestsProtocolTest):
         self.card("AAA1", "No tests named", "needs-verification")
         self.send(type="tests_check", card="AAA1", id="r9")
         event = self.of("tests_check")[0]
-        self.assertEqual(set(event) - {"id"}, {"event", "card", "findings", "actions"})
+        self.assertEqual(set(event), {"event", "id", "card", "findings", "actions"})
         self.assertEqual(event["card"], "AAA1")
         self.assertEqual(len(event["findings"]), 1)
         finding = event["findings"][0]
@@ -489,6 +490,8 @@ class CheckTest(TestsProtocolTest):
         self.card("AAA2", "Names a test that is not there", "needs-verification",
                   body="\n## Tests\n- `ctest -R vanished`\n")
         self.send(type="tests_check", card="AAA2")
+        # No request id, so the event carries no `id` key at all rather than a null one.
+        self.assertNotIn("id", self.of("tests_check")[0])
         findings = self.of("tests_check")[0]["findings"]
         self.assertEqual([f["verdict"] for f in findings], ["gone"])
         self.assertEqual(findings[0]["severity"], "failure")
@@ -528,6 +531,20 @@ class CheckTest(TestsProtocolTest):
                   body="\n## Tests\n- `ctest -R alpha`\n")
         self.assertEqual(self.tests.card_files("AAA5"), ["src.txt"])
         self.assertTrue(self.tests.head_commit())
+
+
+class WordingTest(unittest.TestCase):
+    """The two things a person reads first: the run's wall time and the request id."""
+
+    def test_a_short_run_is_milliseconds_not_zero_seconds(self):
+        self.assertEqual(TP.format_seconds(0.035), "35 ms")
+        self.assertEqual(TP.format_seconds(0.0), "0 ms")
+        self.assertEqual(TP.format_seconds(1.44), "1.4 s")
+        self.assertEqual(TP.format_seconds(240.0), "4.0 m")
+
+    def test_an_unasked_event_carries_no_null_id(self):
+        self.assertEqual(TP._rid(None), {})
+        self.assertEqual(TP._rid("r1"), {"id": "r1"})
 
 
 class CtestOutputTest(unittest.TestCase):

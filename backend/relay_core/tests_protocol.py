@@ -277,7 +277,7 @@ class TestsCommands:
 
     def emit_list(self, rid=None, *, build_dir=None) -> dict:
         payload = self.inventory(build_dir=build_dir)
-        self.emit({"event": "tests_list", "id": rid, **payload})
+        self.emit({"event": "tests_list", **_rid(rid), **payload})
         return payload
 
     def card_index(self) -> tuple[dict[str, list[str]], list[dict]]:
@@ -424,7 +424,7 @@ class TestsCommands:
 
     def emit_check(self, card_id, rid=None) -> dict:
         result = self.check_card(card_id)
-        self.emit({"event": "tests_check", "id": rid, **result})
+        self.emit({"event": "tests_check", **_rid(rid), **result})
         return result
 
     def card_files(self, card_id: str, card=None) -> list[str]:
@@ -720,7 +720,7 @@ class TestsCommands:
             parts.append(f"{counts['skip']} skipped")
         if not executions:
             return "the run produced no results"
-        return ", ".join(parts) + f" in {seconds:.1f} s"
+        return ", ".join(parts) + f" in {format_seconds(seconds)}"
 
     # ---- events ----------------------------------------------------------------
     def _emit_run(self, fields: dict, *, run_id: str) -> None:
@@ -768,6 +768,29 @@ class TestsCommands:
                 "tests": table, "skipped": list(run.skipped),
                 "message": ("The run passed its timeout and was stopped."
                             if not completed else self._finished_message(run, []) or "")}
+
+
+def format_seconds(seconds: float) -> str:
+    """`"35 ms"`, `"1.4 s"`, `"2.1 m"` — a run's wall time, never `"0.0 s"`.
+
+    A whole suite is minutes and one test is often under a millisecond, and a line that says a
+    run took `0.0 s` reads as "it did not run" rather than as "it was fast".
+    """
+    value = max(0.0, float(seconds))
+    if value < 1.0:
+        return f"{value * 1000:.0f} ms"
+    if value < 120.0:
+        return f"{value:.1f} s"
+    return f"{value / 60.0:.1f} m"
+
+
+def _rid(rid) -> dict:
+    """`{"id": rid}` when there is a request to answer, and nothing at all when there is not.
+
+    `tests_list` and `tests_check` are the two events with the `id` key free (on the other two
+    it is the *test*), so a null there would be a key the contract does not have.
+    """
+    return {"id": rid} if rid is not None else {}
 
 
 def _hostname() -> str:
