@@ -2194,6 +2194,7 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
 | `board_delete {id?, card, reason?, author?}` | `board_written` + `board_changed` |
 | `board_comment {id?, card, text, kind?, author?, pane_token?}` | `board_written` + `board_changed` |
+| `board_claim {id?, card, pane_token?, text?, force?, author?}` | `board_written` + `board_changed` |
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
 
 `board_priority` (2026-09-20, #VKFV) is the pane's flag click: `priority` is one clamped integer
@@ -2515,7 +2516,12 @@ card whose `links.plans` names plan cards has them read as context. The scope en
 cards run at the same time, a second turn on the *same* card is refused, and so is anything while
 a cleanup runs (`board_busy`, text "… then start the plan."), with nothing written.
 
-**Execute** (no message). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
+**Execute** sends **one** message when a pane was opened for the card: `board_claim {card,
+pane_token, text}` (19.19), which does (a), (b) and (d) below in one write and adds the card's
+`session` field, so the Switchboard shows which session holds the card. The three-message path
+below is what it still does when no pane could be opened, and is what it did before #R9G7.
+
+**Execute** (no pane, and the shape the claim replaces). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
 against the hash the card was read at, unless it is already the agent's; (b) `board_move {status:
 "executing", reason: "Execute: handed to a terminal pane"}` unless it is already there (or
 `in-progress`, on a board configured before the stage statuses; #3XZV); (c) the window opens a
@@ -3020,6 +3026,61 @@ nothing is fetched or synced.
 `board_problems {items, section}` with only that section's cards' problems. Problems about the
 board itself (an orphan thread, a duplicate id) belong to no section and are left out of a scoped
 check; unscoped `board_check` is unchanged.
+
+### 19.19 A pane claims a card: `pane_token`, `board_claim` and `session` (v3.9, 2026-09-20)
+
+Card `#R9G7`, owner 2026-09-20: *"re a session claiming a card, lets also implement that more
+directly, where in the switchboard, you see the linked session id that links to the session pane …
+then agents know if another agent already claimed it and can coordinate easily."*
+
+**`configure {pane_token}`** (and `set_board {pane_token}`) is the pane's own session token — the
+same token `board_comment {pane_token}` has carried since #HKAP, at most 64 characters with no
+whitespace and no `>`, because it persists in a thread entry's marker. `BoardCommands` keeps it and
+hands it to both halves of the board tools, so the owner's writes and the agent's turns name the
+same pane. A worker with no pane of its own — the Switchboard worker, a test — has none, and a
+value the marker could not hold is a protocol error rather than a quiet drop. A `set_board` without
+the field leaves the worker's token alone: the board changed, not the pane.
+
+**`session`** is the new work-card front-matter field (`SWITCHBOARD-FORMAT.md` 2.2): the pane
+session token of the session holding the card. It is **immutable to a model** — the tool writes it
+from `configure`, so a card cannot be taken by typing a token into a patch — and a card in
+`executing` (or `in-progress`) with a `session` is **held** by that pane. The Switchboard draws it
+on the card as a link that reveals the pane; a card that has moved on keeps the field as a record.
+
+**`board_claim {id, note?, force?}`** is the agent tool, offered wherever the board tools are (not
+in a Discuss, Plan or page-agent turn: those have no pane of their own). One call, in Execute's
+order: `assignee` → `agent` if it is not already; status → `executing` (reason "Claimed by a
+terminal pane") unless the card is already `executing`/`in-progress`; `implemented_by` stamped as
+any move into executing stamps it (19.15); `session` → this pane's token; and a `progress` entry
+carrying `pane_token`, whose first line is `Claimed (<first 8 of the token>) · working on it from a
+terminal pane`, with `note` on the lines after it. The result is
+`{claimed: true, id, status, session, entry_id, hash, write_id, summary, card}`, where `card` is the
+same block `ask {cards: [...]}` builds (19.6) — front matter, body (16 KiB cap), open tasks, the
+last 10 thread entries — so the turn that claimed the card does not read it again. With no pane
+token the claim still happens, writes no `session` and no `pane_token`, and says so in `warning`.
+
+A card another session holds is refused with `code: "board_claimed_elsewhere"`, carrying
+`{id, session: <first 8>, status, latest_entry}` — the holder and the age of its last thread entry,
+so the model can read the thread and coordinate — unless `force: true`, which the policy reserves
+for the user saying to take it over. Claiming a card this pane already holds is idempotent: the
+front matter is already right, and the call adds one more progress entry. The prompt's Switchboard
+header states `Your session: <first 8>.` and `You hold: #A, #B`, so a model never has to remember
+or retype a token.
+
+**The same operation as an owner-side message**, which is what Execute sends: `board_claim {card,
+pane_token, text?, force?}` (19.3). Its `pane_token` is the pane the card was handed to and
+overrides the worker's own for that one call — the Switchboard worker has no pane — `text` is the
+reply box's note, and the answer is `board_written {kind: "board_claim", card_id, session, …}` plus
+`board_changed`, exactly as a move answers; a refusal is the ordinary `error` event with the code
+above. The `card` block is for the model and is not sent down the pipe.
+
+**The policy and the skill.** `board_policy.md` (v2) says in rules 1 and 5 that work goes through a
+card — check it is not already done, claim the card that asks for it, and leave a card another
+session holds alone — and points at the bundled **`deliver`** skill
+(`relay_core/skills_bundled/deliver/SKILL.md`) for the procedure: done-check, find or create the
+card, claim, plan if it is more than a few steps, execute with `#ID` in every commit, land in
+`needs-verification`. Being a bundled skill, it is in `configured.skill_commands`, so
+`/deliver <request>` runs it by hand with no GUI change.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
