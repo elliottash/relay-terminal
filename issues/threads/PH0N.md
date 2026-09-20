@@ -71,3 +71,14 @@ tapping a notification opens that pane; the push carries Relay's icon; on iOS ou
 installed app the settings say to add to the Home Screen first. Found and fixed: Stop vanished the
 moment the socket dropped. Missing wire field `updated` on the GUI's `pane` message is being added
 by the orchestrator (`src/RemoteShare.cpp`) so "running · 3m" is exact.
+
+<!-- relay:entry 20260921T010000Z-g1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 01:00
+Phase 1.3 landed (`ee12ac1a`): a connect token per device, minted by the desktop (HMAC under a
+secret derived from its identity key, length-prefixed fields), handed over only inside the Noise
+session, presented as `ct` on `/v1/connect`; the rendezvous checks it statelessly, counts channels
+per token (3), and answers a missing, bad or revoked token exactly like an unknown desktop.
+Revoking a device posts `/v1/revoke` and closes a live channel. No shim: devices paired before
+today pair again. Redeployed to join.relay-terminal.ai from `ee12ac1a` (26 files match main).
+The Opus session limit cut the first two wave-2 agents off mid-work; Fable subagents took over
+under the same land.py names. Phase 2.6 (pane view) still running.
