@@ -77,8 +77,9 @@ Tests: `tests/test_provider.py::SharedOpenerTests`, `tests/test_install_bytecode
       once, and so is something from the first turn. <!-- t:q2 -->
 - [ ] Rewind a conversation (or fork it), then search for a turn that was undone: it must be gone
       from the results. <!-- t:q3 -->
-- [ ] Options › … › rebuild the conversation index on the real store, then search again; the status
-      line reports the rebuild and the file should be smaller afterwards (a one-off `VACUUM`).
+- [ ] Run "Rebuild the conversation index" from the command palette on the real store, then search
+      again: the status line reports the rebuild, and `~/.local/share/relay/index.db` should be
+      about 27 % smaller afterwards (the one-off `VACUUM`; 119.6 → 87.3 MB on a copy of it here).
       <!-- t:q4 -->
 - [ ] A model turn still works against a live provider (a real key, one turn, one tool call), and a
       local model server is still reached with no proxy in the way. <!-- t:q5 -->
