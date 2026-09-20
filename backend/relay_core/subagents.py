@@ -137,7 +137,8 @@ class SubagentFactory:
         self.main_agent = main_agent
 
     def failover_options(self) -> dict:
-        """The two failover switches a new subagent inherits from the pane (owner, 2026-09-19).
+        """The failover switches, and the ranked fallback, a new subagent inherits from the pane
+        (owner, 2026-09-19).
 
         A subagent is a turn of the pane's work on the pane's providers, so a provider that will
         not answer must not be the end of it any more than it is for the pane; and Relay Free is
@@ -147,7 +148,10 @@ class SubagentFactory:
         if main is None:
             return {}
         return {"failover": bool(getattr(main, "failover", True)),
-                "failover_hosted": bool(getattr(main, "failover_hosted", False))}
+                "failover_hosted": bool(getattr(main, "failover_hosted", False)),
+                # And the model the user ranked second (owner, 2026-09-20): it is the pane's
+                # first spare, so it is the subagent's too.
+                "fallback": getattr(main, "fallback", None)}
 
     def base(self) -> tuple[ProviderConfig, str | None]:
         """The config a subagent that does not name a model uses: the "subagent" role, else main."""

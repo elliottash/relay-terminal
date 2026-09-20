@@ -23,6 +23,19 @@ from relay_core.agents_defs import AgentDefinition
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
+def setUpModule():
+    # These tests describe a machine with no saved model server: the owner's own catalog
+    # (~/.config/relay/local-models.json) would otherwise make the Local tier resolve to it, and
+    # "every role stays on main" fail on the one machine the suite runs on most.
+    global _no_local_catalog
+    _no_local_catalog = mock.patch.dict(os.environ, {"RELAY_LOCAL_MODELS": os.devnull})
+    _no_local_catalog.start()
+
+
+def tearDownModule():
+    _no_local_catalog.stop()
+
 CONFIGS = {
     "relay-free": ("https://api.relay-terminal.ai/v1", "relay-main"),
     "kimi": ("https://api.moonshot.ai/v1", "kimi-k3"),

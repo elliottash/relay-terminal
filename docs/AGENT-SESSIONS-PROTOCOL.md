@@ -365,6 +365,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 | `failover_hosted` | bool | false | Relay Free may be one of those providers (15.2.2) |
+| `fallback` | `{preset, model}` \| null | null | the model ranked second in Options › Models, tried first when a turn fails over (15.2.2); null or an unusable shape means no ranked fallback |
 | `approvals_ask` | string[] | `[]` | capabilities that draw an approval card before the call runs (27.6) |
 | `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
 
@@ -1484,6 +1485,14 @@ value once per turn, with the pane's own tier, so a hosted spare cannot widen th
 second move. A pane already running on Relay Free passes `True`: it has nothing left to opt into.
 When the turn does move there the note says so plainly — "… keeps failing; continuing this turn on
 Relay's hosted service (Relay Free)." — because that is the one target the user had to allow.
+
+**The ranked fallback goes first** (owner, 2026-09-20). Rank 2 of the Options › Models priority
+list — the model `/swap` goes to — arrives as the `fallback` option (12.1), `{"preset", "model"}`,
+and `RoleResolver.fallback_candidate` tries that preset at that model, at the pane's effort, before
+the catalog order above, on the same terms as any candidate: the same key lookup, never the failing
+preset or another key on its host, Relay Free still gated by `failover_hosted`. A saved local
+endpoint is allowed here (the user ranked it), a guest harness never is; a fallback that cannot take
+the turn is skipped silently and the old order stands. Subagents inherit it with the two switches.
 
 **Subagents fail over too, following the parent's chain** (owner, 2026-09-19). `subagents.py` builds
 each subagent's `Agent` with the pane's role resolver, its preset and both switches above, read from

@@ -565,6 +565,50 @@ class RoleResolver:
                 out.append(resolved)
         return out
 
+    def fallback_candidate(self, fallback, tier: str, exclude, hosts=(), *,
+                           allow_hosted: bool = False) -> Resolved | None:
+        """The model the user ranked second in Options › Models, as the first failover target
+        (owner, 2026-09-20), or None when it cannot take this turn.
+
+        ``fallback`` is the request option of the same name: ``{"preset", "model"}``, the preset
+        id and the model id the user put at rank 2 — the pair `/swap` goes to. It is tried before
+        `failover_candidates`' catalog order, on the same terms as any candidate: the key comes
+        from the same lookup, the failing preset and its hostname are skipped (a fallback that
+        names the pane's own provider, or another key on the same host, is nothing to move to),
+        and Relay Free is still gated by ``allow_hosted``. A model server on this machine is
+        allowed here, unlike in the catalog chain: the user ranked it, so its answers are what
+        they asked for. A guest harness or an unknown id is not a provider this resolver can
+        build, and gets None. A missing model means the preset's own.
+
+        None here means "the old order stands", never an error: a stale fallback (a key since
+        deleted, an endpoint since removed) must not cost the turn its other spares.
+        """
+        if not isinstance(fallback, dict):
+            return None
+        preset_id = fallback.get("preset")
+        if not isinstance(preset_id, str) or not preset_id or preset_id in exclude:
+            return None
+        preset = _preset(preset_id)
+        if preset is None:
+            return None
+        if preset.hosted and not allow_hosted:
+            return None
+        skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
+        skip_hosts |= {(h or "").lower() for h in hosts}
+        skip_hosts.discard("")
+        if _hostname(preset.base_url) in skip_hosts:
+            return None
+        model = fallback.get("model")
+        model = model.strip() if isinstance(model, str) and model.strip() else preset.model
+        tier = validate_tier(tier)
+        effort = "max" if tier == "high" else None
+        try:
+            resolved = self._build("main", preset_id, preset.base_url, model, dict(preset.extra),
+                                   effort, "failover", tier)
+        except ValueError:
+            return None                 # a preset whose config will not validate: not a spare
+        return None if resolved.source == "fallback" else resolved
+
     # ----- api --------------------------------------------------------------------------
     def resolve(self, role: str) -> Resolved:
         role = validate_role(role)   # also translates the pre-2026-09-18 name "fast"

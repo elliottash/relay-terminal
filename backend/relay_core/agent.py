@@ -128,6 +128,25 @@ def _pending_window(pending: dict) -> int:
                                                                   config.model))
 
 
+def validate_fallback(value) -> dict | None:
+    """The `fallback` request option: `{"preset": <preset id>, "model": <model id>}`, or None.
+
+    Anything that is not that shape — not a dict, no preset, a preset that is not a string — is
+    None rather than an error: the GUI sends whatever sits at rank 2 of the priority list, and a
+    row it cannot express must not refuse the whole configure. A missing or empty model means the
+    preset's own model. Whether the preset can actually take a turn (a stored key, not the failing
+    host) is decided at the failover, not here: keys come and go between turns.
+    """
+    if not isinstance(value, dict):
+        return None
+    preset = value.get("preset")
+    if not isinstance(preset, str) or not preset.strip():
+        return None
+    model = value.get("model")
+    model = model.strip() if isinstance(model, str) else ""
+    return {"preset": preset.strip(), "model": model}
+
+
 def validate_turn_options(request: dict) -> dict:
     """Agent options from configure / set_agent_options. Only keys present in the request are returned."""
     out = {}
@@ -143,6 +162,10 @@ def validate_turn_options(request: dict) -> dict:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
             out[key] = request[key]
+    # The model ranked second in Options › Models, tried first when a turn fails over (owner,
+    # 2026-09-20). Present-but-null clears it, which is why this is not `.get(...) is not None`.
+    if "fallback" in request:
+        out["fallback"] = validate_fallback(request["fallback"])
     if request.get("stall_timeout_s") is not None:
         out["stall_timeout_s"] = validate_stall_timeout(request["stall_timeout_s"])
     # The wait for the *first* usable chunk, which is prefill, queueing and routing rather than
@@ -342,7 +365,7 @@ class Agent:
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
-                 failover_hosted: bool = False,
+                 failover_hosted: bool = False, fallback: dict | None = None,
                  roles=None, board=None, security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
@@ -364,6 +387,10 @@ class Agent:
         # are tried whatever this says; Relay Free is added to the chain only with this on, or for
         # a pane that is already running on the hosted service and so has nothing left to opt into.
         self.failover_hosted = failover_hosted
+        # The model ranked second in Options › Models — `{"preset", "model"}` or None — which a
+        # failover tries before the catalog's order (owner, 2026-09-20): rank 2 is where `/swap`
+        # goes, and the user put it there to be the one that takes over.
+        self.fallback = validate_fallback(fallback)
         self._injected_provider = provider is not None
         self.provider = provider or self._hook_preempt(_provider_for(config, self.stall_timeout_s))
         self._apply_stall_timeout()
@@ -596,7 +623,7 @@ class Agent:
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
                 "first_token_timeout_s": self.first_token_timeout_s,
                 "max_program_writes": self.max_program_writes, "failover": self.failover,
-                "failover_hosted": self.failover_hosted}
+                "failover_hosted": self.failover_hosted, "fallback": self.fallback}
 
     def _apply_stall_timeout(self) -> None:
         """Push the pane's two deadlines onto the transport (also after a model switch)."""
@@ -1900,17 +1927,23 @@ class Agent:
         if swap["switches"] >= self.FAILOVER_PROVIDERS:
             return False
         try:
-            candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"],
-                                                        allow_hosted=swap["allow_hosted"])
+            # The model the user ranked second (Options › Models, the `fallback` option) goes
+            # first, on the same terms as any candidate; when it has no key, is the failing host,
+            # or has already been asked this turn, the catalog's order stands unchanged.
+            target = self.roles.fallback_candidate(self.fallback, swap["tier"], swap["tried"],
+                                                   swap["hosts"], allow_hosted=swap["allow_hosted"])
+            if target is None:
+                candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"],
+                                                            allow_hosted=swap["allow_hosted"])
+                target = candidates[0] if candidates else None
         except Exception as bad:                            # a failover must never break the turn
             logs.event(_log, "provider_failover_unavailable", level_name="error",
                        session=self.session_id, turn=record["turn_id"], step=step,
                        model=self.config.model, preset=self.preset.id if self.preset else "",
                        error=f"{type(bad).__name__}: {bad}"[:200])
             return False
-        if not candidates:
+        if target is None:
             return False
-        target = candidates[0]
         swap["tried"].add(target.preset_id)
         swap["hosts"].add(_host(target.config.base_url))
         swap["switches"] += 1
