@@ -43,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 echo "relay-profile: configuring"
+echo "relay-profile: project is $RELAY_PROFILE_PROJECT"
 echo "relay-profile: building target relay"
 mkdir -p "$out"
 cp "$FAKE_ROWS" "$out/rows.json"
@@ -122,6 +123,8 @@ class ProfileRunTests(unittest.TestCase):
         self.assertTrue(started["out"].endswith("-profile-build"))
         finished = self.h.wait("finished")
         self.assertIn("relay-profile: building target relay", self.h.lines())
+        # The script lives in Relay's checkout; the project it profiles is the board's.
+        self.assertIn(f"relay-profile: project is {self.h.root}", self.h.lines())
         summary = finished["summary"]
         self.assertEqual(summary["kind"], "build")
         self.assertEqual(len(summary["rows"]), 3)

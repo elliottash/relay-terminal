@@ -229,6 +229,35 @@ class BuildModeTests(unittest.TestCase):
         self.assertIn("ninja", meta["tool_versions"])
         self.assertEqual(meta["raw"][0], "ninja_log")
 
+    def test_it_builds_the_project_it_is_pointed_at(self):
+        """`RELAY_PROFILE_PROJECT`: the script lives in Relay's checkout, not the project's.
+
+        Without `--build-dir` it configures a Ninja directory of its own and builds; the project
+        it builds is the one the board worker named, which is how a board on any other project
+        gets a build profile at all.
+        """
+        out = Path(self.tmp.name) / "own-build"
+        env = dict(os.environ, RELAY_PROFILE_PROJECT=str(self.project),
+                   RELAY_PROFILE_BUILD_DIR=str(Path(self.tmp.name) / "own-ninja"))
+        result = subprocess.run([str(SCRIPT), "build", "--out", str(out)],
+                                capture_output=True, text=True, env=env, timeout=600)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("building everything", result.stdout)     # no `relay` target outside this repo
+        rows = json.loads((out / "rows.json").read_text())
+        names = [row["name"] for row in rows["rows"]]
+        self.assertTrue(any(name.endswith("alpha.cpp.o") for name in names), names)
+        self.assertTrue((Path(self.tmp.name) / "own-ninja" / ".ninja_log").is_file())
+
+    def test_a_project_with_no_cmakelists_is_a_sentence(self):
+        empty = Path(self.tmp.name) / "empty"
+        empty.mkdir(exist_ok=True)
+        env = dict(os.environ, RELAY_PROFILE_PROJECT=str(empty),
+                   RELAY_PROFILE_BUILD_DIR=str(Path(self.tmp.name) / "empty-ninja"))
+        result = subprocess.run([str(SCRIPT), "build", "--out", str(Path(self.tmp.name) / "empty-out")],
+                                capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("has no CMakeLists.txt", result.stderr)
+
     def test_a_directory_that_is_not_a_ninja_build_is_a_sentence(self):
         result = subprocess.run(
             [str(SCRIPT), "build", "--build-dir", str(self.project),

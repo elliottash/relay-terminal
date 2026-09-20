@@ -10,7 +10,7 @@
 #   scripts/relay-profile app --stop-after 30      the app under perf, stopped after 30 s
 #
 #   --out DIR         where the evidence goes (default docs/qa_evidence/<date>-profile-<mode>)
-#   --target NAME     build: the cmake target (default relay); app: names the run in meta.json
+#   --target NAME     build: the cmake target (default relay here, everything elsewhere)
 #   --rev REV         build --host: the commit to export and build there (default main)
 #   --host HOST       build: profile the build on that machine, through relay-remote-tests
 #   --stop-after SEC  app: stop the app after that many seconds (else Ctrl-C)
@@ -28,7 +28,13 @@
 # Machine setup, and each of these commands by hand: docs/PROFILING.md.
 set -uo pipefail
 
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# The project being profiled. Normally the checkout this script is in; the board worker sets
+# RELAY_PROFILE_PROJECT when it is asked to profile some *other* project, because the script lives
+# in Relay's checkout and a project that has no scripts/ of its own still gets profiled.
+home=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+root=${RELAY_PROFILE_PROJECT:-$home}
+[[ -d $root ]] || { echo "relay-profile: no such project directory: $root" >&2; exit 2; }
+root=$(cd -- "$root" && pwd)
 mode=${1:-}
 case $mode in
     build|tests|app) shift ;;
@@ -36,7 +42,7 @@ case $mode in
     *) echo "relay-profile: first argument is build, tests or app (--help)" >&2; exit 2 ;;
 esac
 
-out= target= rev=main host= stop_after= time_trace=0 build_dir= binary=$root/build/relay limit=25
+out= target= rev=main host= stop_after= time_trace=0 build_dir= binary=$home/build/relay limit=25
 names=()
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -86,7 +92,7 @@ fold() {
     local input=$1 full=${2:-}
     local args=(rows "$input" --limit "$limit" --json "$out/rows.json")
     [[ -n $full ]] && args+=(--full-json "$out/$full")
-    PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}" \
+    PYTHONPATH="$home/backend${PYTHONPATH:+:$PYTHONPATH}" \
         "$python" -m relay_core.profile_convert "${args[@]}"
 }
 
@@ -148,11 +154,13 @@ PY
 # ------------------------------------------------------------------------------- build
 profile_build() {
     local log= keep= note=
-    target=${target:-relay}
+    # `relay` in this repository, where one translation unit is three quarters of the build; in
+    # any other project, everything, because there is no target worth singling out.
+    [[ -n $target ]] || { [[ -f $root/src/main.cpp && -f $root/backend/worker.py ]] && target=relay; }
     if [[ -n $host ]]; then
         command_line="scripts/relay-profile build --host $host --rev $rev"
         echo "relay-profile: building $rev on $host through scripts/relay-remote-tests --build-only"
-        "$root/scripts/relay-remote-tests" --build-only --host "$host" --rev "$rev" \
+        "$home/scripts/relay-remote-tests" --build-only --host "$host" --rev "$rev" \
             --out "$out/remote" || true
         log=$out/remote/ninja_log
         [[ -f $log ]] || { echo "relay-profile: $host left no ninja_log in $out/remote" >&2; return 3; }
@@ -167,8 +175,12 @@ profile_build() {
         # not do (CLAUDE.md).  A separate directory of this tool's own, kept between runs so it
         # stays incremental.
         have ninja || { echo "relay-profile: ninja is not installed (scripts/relay-tooling-setup --install)" >&2; return 127; }
-        local dir=${RELAY_PROFILE_BUILD_DIR:-/tmp/claude-1000/relay-profile-build}
+        # One directory per project, so profiling two projects does not reconfigure one build
+        # over the other — and still never the shared `build/`.
+        local key; key=$(printf '%s' "$root" | cksum | cut -d' ' -f1)
+        local dir=${RELAY_PROFILE_BUILD_DIR:-/tmp/claude-1000/relay-profile-build/$(basename "$root")-$key}
         mkdir -p "$dir" || return 1
+            [[ -f $root/CMakeLists.txt ]] || { echo "relay-profile: $root has no CMakeLists.txt to build" >&2; return 3; }
         local args=(-S "$root" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo)
         if (( time_trace )) && have clang++; then
             args+=(-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS=-ftime-trace)
@@ -187,8 +199,8 @@ profile_build() {
         if (( time_trace )) && have ClangBuildAnalyzer && [[ -n $note ]]; then
             ClangBuildAnalyzer --start "$dir" >/dev/null 2>&1 && cba=1
         fi
-        echo "relay-profile: building target $target in $dir"
-        cmake --build "$dir" --target "$target" -j "${RELAY_JOBS:-8}" \
+        echo "relay-profile: building ${target:-everything} in $dir"
+        cmake --build "$dir" ${target:+--target "$target"} -j "${RELAY_JOBS:-8}" \
             > "$out/build.log" 2>&1 || {
             echo "relay-profile: the build failed; see $out/build.log" >&2
             grep -m5 -E "error|FAILED" "$out/build.log" >&2; }
@@ -206,13 +218,13 @@ profile_build() {
             grep -qc $'\t' "$keep" || cp "$log" "$keep"
         fi
         log=$keep
-        command_line="$command_line --target $target (local Ninja build in $dir)"
+        command_line="$command_line${target:+ --target $target} (local Ninja build in $dir)"
     fi
     [[ -f $log ]] || { echo "relay-profile: no .ninja_log to read" >&2; return 3; }
     [[ $log == "$out"/* ]] || cp "$log" "$out/ninja_log"
     local table
     table=$(fold "$out/ninja_log" build.json) || return 1
-    PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}" "$python" -m relay_core.profile_convert \
+    PYTHONPATH="$home/backend${PYTHONPATH:+:$PYTHONPATH}" "$python" -m relay_core.profile_convert \
         trace "$out/ninja_log" "$out/build.trace.json" >/dev/null
     tools_json ninja cmake clang++ ClangBuildAnalyzer > "$out/.tools.json"
     finish "$table" build.trace.json ninja_log build.json build.trace.json
@@ -229,7 +241,8 @@ profile_tests() {
         mkdir -p "$iso/$v"; chmod 700 "$iso/$v"; export "$v=$iso/$v"
     done
     export RELAY_KEYRING=off QT_QPA_PLATFORM=offscreen RELAY_LOCAL_MODELS="$iso/local-models.json"
-    export PYTHONPATH="$root/backend${PYTHONPATH:+:$PYTHONPATH}"
+    # The project's own backend first, then Relay's, which is where the converter lives.
+    export PYTHONPATH="$root/backend:$home/backend${PYTHONPATH:+:$PYTHONPATH}"
     local speedscope=$out/tests.speedscope.json raw=tests.speedscope.json
     if have py-spy; then
         echo "relay-profile: py-spy record --rate 250 -- $python -m unittest ${names[*]}"

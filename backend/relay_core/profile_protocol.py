@@ -252,6 +252,10 @@ class ProfileCommands:
                         "label": TARGETS[run.target]["label"]}, target=run.target, rid=rid)
             env = dict(os.environ)
             env.setdefault("PYTHONPATH", str(self.project / "backend"))
+            # The script lives in Relay's checkout even when the board is some other project's,
+            # so it is told which project it is profiling rather than inferring it from its own
+            # path (`scripts/relay-profile`, RELAY_PROFILE_PROJECT).
+            env["RELAY_PROFILE_PROJECT"] = str(self.project)
             job = self.jobs.start(run.command, str(self.project), env, argv=argv)
             run.job = job
             buffer = [""]
