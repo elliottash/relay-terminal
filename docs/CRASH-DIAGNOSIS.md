@@ -13,9 +13,14 @@ A crash and a quit look the same from the outside: the window is gone.
 grep -n "gui_start\|gui_quit\|gui_crash" ~/.local/share/relay/logs/relay.log
 ```
 
+- `gui_quit reason=window` — the ordinary quit: the last window closed, or Ctrl+Q. Not a crash.
 - `gui_quit reason=signal` — it was told to stop (`kill`, a logout, a session end). Not a crash.
 - A `gui_start` with **no** `gui_quit` before it, and the lines before it stopping mid-stream —
-  that run died without being asked to. That is the shape a crash leaves.
+  that run was never asked to stop. Either it crashed, and then it also says `gui_crash`, or it was
+  killed outright: SIGKILL, the OOM killer, the power. Nothing inside the process can write that
+  down, so the evidence is elsewhere — `sudo dmesg -T | grep -i oom-kill`, the user journal around
+  that second, and /var/log/apport.log (empty for SIGKILL, which generates no core). Under
+  `scripts/relay-debug` gdb says which: "killed" rather than "exited normally".
 - `gui_crash signal=… name=… addr=… build=…` followed by `gui_crash_frames_begin` — the crash
   report Relay now writes about itself. Read that first; the rest of this file is for when it is
   not enough.

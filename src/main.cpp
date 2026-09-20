@@ -237,6 +237,12 @@ static void migrateOutputTokenCeiling() {
 // A handler may only do async-signal-safe work, so it writes one byte to a pipe and the event loop
 // turns that into an ordinary quit(): aboutToQuit saves, and the destructors clean up.
 static int g_quitPipe[2] = {-1, -1};
+// Why this process is ending, for the one line aboutToQuit writes. "window" is the ordinary path
+// (the last window closed, or Ctrl+Q); a signal says so instead. What it is *for* is the case it
+// cannot cover: a run that ends with no `gui_quit` line at all was not asked to stop — it was
+// killed outright (SIGKILL, the OOM killer, the power) or it crashed, and a crash says `gui_crash`.
+// Without this line a normal quit and a kill looked identical in the log: it simply stopped.
+static const char *g_quitReason = "window";
 
 static void quitSignalHandler(int) {
     const char byte = 1;
@@ -250,7 +256,7 @@ static void installQuitSignals(QCoreApplication &app) {
     QObject::connect(notifier, &QSocketNotifier::activated, &app, [] {
         char drained[16];
         while (::read(g_quitPipe[0], drained, sizeof drained) > 0) {}
-        relay::log::info(QStringLiteral("gui_quit reason=signal"));
+        g_quitReason = "signal";
         QCoreApplication::quit();
     });
     struct sigaction action;
@@ -320,6 +326,14 @@ int main(int argc, char **argv) {
         // A quit that never closed a window (a session ending, `relay` told to stop) still saves
         // both halves: the layout and each pane's terminal text.
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] {
+            // First, before the saving: this line is the difference between "it was asked to stop"
+            // and "it stopped", and a crash in the save below must not cost it.
+            const QDateTime &started = relay::buildinfo::running().started;
+            relay::log::info(QStringLiteral("gui_quit reason=%1 pid=%2 uptime_s=%3 build=%4")
+                                 .arg(QString::fromLatin1(g_quitReason))
+                                 .arg(QCoreApplication::applicationPid())
+                                 .arg(started.isValid() ? started.secsTo(QDateTime::currentDateTime()) : -1)
+                                 .arg(relay::buildinfo::running().id));
             manager.saveScrollbacks();
             manager.flushClosed();      // before the layout's prune reads the recently-closed list
             manager.saveLayoutNow();
