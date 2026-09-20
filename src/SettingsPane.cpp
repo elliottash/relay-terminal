@@ -27,6 +27,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -59,8 +60,15 @@ public:
     // row of the same group, and that row's onDropBefore gets this row's id.
     QString dragGroup, rowId;
     std::function<void(const QString &)> onDropBefore;
+    // Told its new width, so a row of several buttons can put them under its words when the pane
+    // is too narrow for both side by side.
+    std::function<void(int width)> onResized;
     void enableDrag() { setAcceptDrops(true); setCursor(Qt::OpenHandCursor); }
 protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QFrame::resizeEvent(event);
+        if (onResized) onResized(event->size().width());
+    }
     void mousePressEvent(QMouseEvent *event) override {
         if (event->button() == Qt::LeftButton) m_pressed = event->pos();
         QFrame::mousePressEvent(event);
@@ -792,17 +800,35 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         break;
     }
     case SettingRow::Buttons: {
+        // The buttons live in one host so they can move as a block. In a wide pane they sit
+        // beside the words; when that would leave the words a column a few characters wide
+        // (owner report, 2026-09-20: "key / stored / in the / keyring" down the page and a
+        // clipped "replace key…"), the block drops under the words and the text gets the width.
+        auto *host = new QWidget;
+        auto *hostBox = new QHBoxLayout(host);
+        hostBox->setContentsMargins(0, 0, 0, 0);
+        hostBox->setSpacing(8);
         QPushButton *first = nullptr;
         for (int i = 0; i < row.buttonTexts.size(); ++i) {
             auto *button = new QPushButton(row.buttonTexts.at(i));
             button->setFocusPolicy(Qt::TabFocus);
+            button->setMinimumWidth(button->sizeHint().width());   // a label is never clipped
             connect(button, &QPushButton::clicked, this, [fn = row.onButton, after, i] {
                 if (fn) fn(i);
                 after();
             });
             if (!first) first = button;
-            box->addWidget(button);
+            hostBox->addWidget(button);
         }
+        box->addWidget(host);
+        constexpr int kWordsWant = 300;   // narrower than this beside the buttons, and they go below
+        line->onResized = [box, text, host](int width) {
+            const bool below = width - host->sizeHint().width() - 90 < kWordsWant;
+            if (below == host->property("below").toBool()) return;
+            host->setProperty("below", below);
+            if (below) { box->removeWidget(host); text->addSpacing(4); text->addWidget(host, 0, Qt::AlignLeft); }
+            else { text->removeWidget(host); box->addWidget(host); }
+        };
         if (first) entry.activate = [first] { first->click(); };
         break;
     }

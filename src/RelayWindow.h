@@ -1976,8 +1976,7 @@ private:
         // Owner (2026-09-20): only the providers you can use are listed — a key stored, Relay Free,
         // Claude Code and Codex on this machine — plus OpenRouter always, because it is the one key
         // the fallbacks and the Lite tier lean on. The rest wait behind "+ add provider". Listed
-        // providers are ordered by intelligence, the best of their catalog models first; those with
-        // no score keep the worker's order after them.
+        // providers keep the order they were added in, and drag to reorder.
         models.rows << headingRow(QStringLiteral("providers"));
         if (presets.isEmpty()) {
             relay::SettingRow none;
@@ -1986,11 +1985,6 @@ private:
             none.label = QStringLiteral("The agent worker has not answered yet. This page fills in once a pane's agent is up.");
             models.rows << none;
         }
-        auto providerIntelligence = [&catalog](const QString &id) {
-            int best = -1;
-            for (const relay::models::Entry &entry : catalog.ofPreset(id)) best = qMax(best, entry.intelligence);
-            return best;
-        };
         // The add-key flow, shared by the listed rows and "+ add provider".
         auto askForKey = [this](const QString &id, const QString &label) {
             if (!m_active) return;
@@ -2084,7 +2078,6 @@ private:
             const QString source = str(preset, "key_source");
             const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
             const QString limits = relay::models::limitsText(catalog.limits.value(id), now);
-            const int score = providerIntelligence(id);
             QString status;
             if (hosted) {
                 status = preset.value(QStringLiteral("available")).toBool()
@@ -2102,7 +2095,6 @@ private:
                 status = QStringLiteral("no key yet · get one at %1").arg(str(preset, "key_url"));
             }
             if (!limits.isEmpty()) status += QStringLiteral(" · ") + limits;
-            if (score >= 0) status += QStringLiteral(" · intelligence %1").arg(score);
             if (!str(preset, "note").isEmpty()) status += QStringLiteral(" · ") + str(preset, "note").toLower();
             relay::SettingRow row;
             row.kind = relay::SettingRow::Buttons;
