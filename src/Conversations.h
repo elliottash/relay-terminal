@@ -127,7 +127,7 @@ QString compactTokens(double tokens);
 // Every saved session, newest first, grouped by project, searchable; with "Subagent threads"
 // ticked (off by default) every subagent thread too, under its owner session or labelled with it.
 // It was a modal dialog (/conversations) and a resume picker (/resume) until 2026-09-18; it is now
-// one pane, opened by /resume, Ctrl+Shift+Y, /conversations and the palette. Other features can add
+// one pane, opened by /resume, Ctrl+Shift+M, /conversations and the palette. Other features can add
 // tabs beside the list (addTab), e.g. recently closed windows, tabs and panes.
 class SessionManager : public QWidget, public relay::PaneView {
     Q_OBJECT

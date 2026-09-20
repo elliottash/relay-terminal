@@ -1973,11 +1973,17 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 `column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
 no table of its own.
 
-A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
-thread_entries, tasks_done, tasks_total, created, updated, milestone, topic, implemented_by, text}`
-— enough to draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only
-the first eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends
-them all. `component` is not in the row: the card detail reads it from `front`.)
+A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private,
+priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
+implemented_by, text}` — enough to draw a card without reading the file. (Until 2026-09-18
+`board_tools._row` sent only the first eleven, so the pane's age and `☑ done/total` badges had
+nothing to draw; it now sends them all. `component` is not in the row: the card detail reads it
+from `front`.)
+
+`priority` (2026-09-20, #VKFV) is the row's flag: an integer −1…+3, `0` unflagged. The pane draws
+it as a ring at 0 and coloured discs at the rest (yellow at −1, white at +1, pale green at +2,
+bright green at +3), sorts on it, and writes it back through `board_priority` (19.3). In the card
+file it is `priority:` in the front matter, written only when nonzero.
 
 `updated` (2026-09-19) is when the card last changed on disk — its file's mtime, or its thread
 file's if that is later — as an ISO UTC timestamp. The pane's **Recently updated** sort keys on
@@ -2009,8 +2015,14 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | `board_create {id?, tab, status, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
 | `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
 | `board_move {id?, card, status?, tab?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
+| `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
 | `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
+
+`board_priority` (2026-09-20, #VKFV) is the pane's flag click: `priority` is one clamped integer
+(−1…+3, `0` clearing the flag), so like a drag's rank it needs no `base_hash` — the whole patch is
+the number — and it is not an agent tool; an agent or a cleanup sets the same field through
+`board_update_card`'s `fields`. The write is undoable like any other.
 
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
 is its first line (shortened) unless one is given. On a project with no Switchboard yet it answers
@@ -3654,7 +3666,7 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   thread's history in the same view, with "↑ owner session" and, for a nested thread, "↑ parent
   thread" links; "open in the subagents pane" goes to `RelayWindow::openSubagentTab`. Alt+Left
   goes back, F5 refreshes, Esc closes. A click on the button shows the "Next time: /status" hint.
-- `/resume [words]`, `/conversations [words]`, Ctrl+Shift+Y (`agent.resume`), `conversations.open`
+- `/resume [words]`, `/conversations [words]`, Ctrl+Shift+M (`agent.resume`), `conversations.open`
   and the palette's Resume and Conversations rows all open the session manager pane (`paneType`
   `sessions`), which replaced the resume picker (a modal over the `sessions` list of section 5,
   which is still answered for other clients) and the conversation dialog. Its "Subagent threads"

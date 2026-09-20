@@ -84,7 +84,7 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Ctrl+Shift+Y | Resume a saved session (`/resume`) |
+| Ctrl+Shift+M | Manage Sessions: resume a saved session (`/resume`) |
 | Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+E, Ctrl+Shift+E | New pane to the right (then ← ↑ ↓ places it) |
@@ -115,7 +115,7 @@ top right, or Ctrl+,) is what *persists*: a tab per section — General, Appeara
 Agent, Voice, Privacy, Keyboard — with every setting as a real control. The two open side by side:
 each key opens, focuses or closes its own pane and leaves the other where it is, so a setting can be
 read next to the action that uses it. The title bar has a button for each tool pane, left of the gear: Actions,
-Sessions and the Switchboard, each with the glyph its pane wears. Either search box reaches both: in Actions, an option shows as an
+Manage Sessions and the Switchboard, each with the glyph its pane wears. Either search box reaches both: in Actions, an option shows as an
 "Options › …" row that takes you to it. Type, ↑ ↓, Enter runs the action or changes the row; Esc
 closes and puts focus back where it was, so nothing there needs the mouse.
 
@@ -198,8 +198,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
-- **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/sessions`, `/conversations`, Actions ›
-  Sessions… and the list button in the title bar) opens every saved conversation, grouped by project and newest first, with a
+- **Manage Sessions: list and full-text search.** Ctrl+Shift+M (also `/resume`, `/sessions`, `/conversations`, Actions ›
+  Manage Sessions… and the list button in the title bar) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
   the agent's replies, its tool calls and their output) and **Relay's terminal history** (the
   commands Relay ran, their exit status and, on the Relay engine, their output); every hit says

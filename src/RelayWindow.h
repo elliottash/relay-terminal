@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
 // One window -- the tab row that doubles as the title bar, the splitter tree of panes inside each
@@ -2875,7 +2875,7 @@ private:
         {
             // One row for the session manager pane (#R6J0). /resume and /conversations both open it
             // now, so the old "Conversations…" row would be the same row twice; its words find this one.
-            PaletteItem sessions = actionItem(agent, QStringLiteral("Sessions…"),
+            PaletteItem sessions = actionItem(agent, QStringLiteral("Manage Sessions…"),
                                               QStringLiteral("Find and resume a session: every conversation and Relay's terminal "
                                                              "history, searchable, with subagent threads · /resume"),
                                               QStringLiteral("agent.resume"));
@@ -3717,7 +3717,7 @@ public:
     }
     // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
     // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
-    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+Y (agent.resume) and
+    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+M (agent.resume) and
     // conversations.open all come here through Pane::openConversations.
     using SessionsTabFactory = std::function<QWidget *(RelayWindow *window)>;
     struct SessionsTab { QString id, label; SessionsTabFactory make; };

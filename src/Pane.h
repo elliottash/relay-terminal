@@ -2506,7 +2506,7 @@ public:
         m_forkPending = true;
         send(request);
     }
-    // /resume, Ctrl+Shift+Y and the palette's Resume: the session manager pane (card #R6J0), which
+    // /resume, Ctrl+Shift+M and the palette's Resume: the session manager pane (card #R6J0), which
     // replaced the resume picker. "/resume words" opens it searching for them.
     void openResume(const QString &query = QString()) { openConversations(query); }
     void requestRecap() {
@@ -6735,7 +6735,7 @@ public:
     // pane and returns true (two workers must never autosave one session file).
     std::function<bool(const QString &sessionId, const QString &sessionDir)> onSessionOpenElsewhere;
 
-    // /resume, /conversations, Ctrl+Shift+Y and the palette: the session manager pane.
+    // /resume, /conversations, Ctrl+Shift+M and the palette: the session manager pane.
     void openConversations(const QString &initialQuery = QString()) {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
         if (onOpenSessions) onOpenSessions(initialQuery);
@@ -7106,9 +7106,9 @@ private:
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
-            {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
-            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Sessions: the same pane as /resume, under the name on its header")},
-            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
+            {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: resume, search, subagent threads (same as /conversations)")},
+            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: the same pane as /resume, under the name on its header")},
+            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: search every session and Relay's terminal history")},
             {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
             {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
