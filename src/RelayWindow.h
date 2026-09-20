@@ -2187,15 +2187,9 @@ private:
         // shows only the models you checked plus an id box that completes from the whole list;
         // one whose list is complete (Claude Code, Codex, a plan's three tiers) shows them all and
         // needs no box.
+        // No paragraph under the heading and no count under a provider (owner, 2026-09-20): the
+        // heading says what the checkboxes do, and the count is the provider row's hover.
         models.rows << headingRow(QStringLiteral("models in the picker"));
-        {
-            relay::SettingRow info;
-            info.kind = relay::SettingRow::Info;
-            info.id = QStringLiteral("info:models/shown");
-            info.label = QStringLiteral("A checked model is a row in every pane's model box and in the picker. "
-                                        "The reasoning levels are what the model accepts; the level itself is picked per pane.");
-            models.rows << info;
-        }
         constexpr int kOpenEnded = 6;   // more catalog models than this: an id box, only the checked shown
         for (const QString &presetId : catalog.presets()) {
             const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
@@ -2207,8 +2201,8 @@ private:
             head.kind = relay::SettingRow::Toggle;
             head.id = QStringLiteral("option:models/provider/") + presetId;
             head.label = catalog.presetLabels.value(presetId, presetId);
-            head.detail = collapsed ? QStringLiteral("hidden from the picker · check to show its models")
-                                    : QStringLiteral("%1 of %2 models in the picker").arg(shownCount).arg(rows.size());
+            head.tooltip = collapsed ? QStringLiteral("Hidden from the picker · check to show its models")
+                                     : QStringLiteral("%1 of %2 models in the picker · uncheck to hide them all").arg(shownCount).arg(rows.size());
             head.aliases = QStringLiteral("provider models picker show hide ") + rows.first().provider;
             head.strong = true;
             head.checked = !collapsed && shownCount > 0;
