@@ -423,6 +423,13 @@ QString tabSuffix(const Sample &sample)
         .arg(formatPercent2(sample.cpuPercent), formatPercent2(sample.ramPercent));
 }
 
+bool tabMetersFit(int barWidth, const QList<int> &fullLabelWidths)
+{
+    int total = 0;
+    for (int width : fullLabelWidths) total += width;
+    return total <= barWidth;
+}
+
 QString liveTag(const Sample &sample)
 {
     return readingText(sample);

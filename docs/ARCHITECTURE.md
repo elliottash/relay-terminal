@@ -150,6 +150,9 @@ The unspent pixels go to the stretch in the middle of the row. `Pane` owns the t
 `PaneChrome` owns everything else in the row, so the two halves meet over the ladder:
 `Pane::onHeaderWants` collects the chips' natural widths and `Pane::onHeaderFit` hands each chip the
 form and the room it was given (`PaneChrome::measureHeader`, `PaneChrome::applyHeaderFit`).
+This is the pane-header ladder only: independently, the tab strip's first give-way rung drops its
+entire CPU-and-memory suffix when full tab labels no longer fit, leaving the reading in the tab
+tooltip (card #VWSD).
 
 Layout rules:
 
@@ -462,7 +465,12 @@ bar's layout never shuffles; a tab with no terminal pane takes no suffix at all.
 pours each summed sample into a `relay::usage::RollingMean` at 2.5 Hz, but once every
 `kTabUpdateMs` (5 s) the label takes the window's mean — the mean of the `kTabWindowMs` (5 s)
 before it, invalid samples left out of the numbers as `combined()` leaves them out of a tab's —
-and between takes the text stands still. Only the tab whose text moved is relabelled.
+and between takes the text stands still. Only the tab whose text moved is relabelled. When the tab
+strip itself cannot fit every tab's full label, its first give-way rung (card #VWSD) drops the
+whole CPU-and-memory suffix from every tab, returning that room to names; the reading remains in
+the tab tooltip. `tabMetersFit()` is a pure comparison of the bar's usable width and every tab's
+full natural label width, reconstructed even while the suffix is hidden, so it cannot oscillate
+as hiding the suffix makes space. Widening the bar restores the current cached suffix.
 `appearance/pane_usage` turns off all four — chip, tab suffix, tab tooltip line and Sessions tag
 — through `relay::usage::metersEnabled()`, which is the one place the key is read; with it off
 `Pane::refreshUsage()` drops the pane's baseline and walks no `/proc` at all, so the setting stops

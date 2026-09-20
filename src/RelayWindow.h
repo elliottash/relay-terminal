@@ -833,8 +833,13 @@ protected:
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
             if (auto *chrome = chromeOf(static_cast<QWidget *>(object))) chrome->place();
         if (object == m_tabs->tabBar() && (event->type() == QEvent::Resize || event->type() == QEvent::MouseMove || event->type() == QEvent::Leave
-                                           || event->type() == QEvent::Enter || event->type() == QEvent::LayoutRequest))
-            QTimer::singleShot(0, this, [this] { placeTabBarControls(); });
+                                           || event->type() == QEvent::Enter || event->type() == QEvent::LayoutRequest)) {
+            const bool resized = event->type() == QEvent::Resize;
+            QTimer::singleShot(0, this, [this, resized] {
+                placeTabBarControls();
+                if (resized) relabelTabsForWidth();
+            });
+        }
         if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
             return QMainWindow::eventFilter(object, event);
         auto *widget = qobject_cast<QWidget *>(object);
@@ -6504,6 +6509,42 @@ private:
         return {};
     }
 
+    // Reconstruct the natural width of every label with its meter, even while the meter is not
+    // painted. Reading the currently shown labels would make the decision oscillate: hiding the
+    // suffix frees room, then immediately makes it eligible to return.
+    QList<int> tabsFullLabelWidths() const {
+        QTabBar *bar = m_tabs->tabBar();
+        const QFontMetrics metrics(bar->font());
+        QList<int> widths;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            const QString suffix = tabUsageSuffix(page);
+            // tabRect() carries QTabBar's style padding and close-button reservation; with this
+            // non-expanding bar it is the label's natural width. tabSizeHint() is protected.
+            int width = bar->tabRect(i).width();
+            if (!suffix.isEmpty() && !bar->tabText(i).contains(suffix))
+                width += metrics.horizontalAdvance(suffix);
+            widths << width;
+        }
+        return widths;
+    }
+
+    bool tabMetersHaveRoom() const {
+        QTabBar *bar = m_tabs->tabBar();
+        const QWidget *left = m_tabs->cornerWidget(Qt::TopLeftCorner);
+        const QWidget *right = m_tabs->cornerWidget(Qt::TopRightCorner);
+        const int usable = bar->width() - (left ? left->width() : 0) - (right ? right->width() : 0);
+        return relay::usage::tabMetersFit(usable, tabsFullLabelWidths());
+    }
+
+    void relabelTabsForWidth() {
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            const QString text = tabLabelText(page, paneTitlesIn(page));
+            if (text != m_tabs->tabText(i)) m_tabs->setTabText(i, text);
+        }
+    }
+
     // A tab's tooltip: the pane titles, where the tab's last active pane is, and the usage line,
     // which says what the memory figure is a sum of and names the processes behind the number.
     // It no longer has to say which of the label's numbers is which: since #6BGA the label spells
@@ -6539,7 +6580,7 @@ private:
         QString title = tabLabelFor(page, titles);
         if (const int panes = int(leavesIn(page).size()); panes > 1)
             title += QStringLiteral(" (%1)").arg(panes);   // "(pane count)", owner 2026-09-20
-        title += tabUsageSuffix(page);
+        if (tabMetersHaveRoom()) title += tabUsageSuffix(page);
         const QFontMetrics metrics(m_tabs->tabBar()->font());
         return metrics.elidedText(title, Qt::ElideRight, 260);
     }
@@ -7264,4 +7305,3 @@ private:
     QPointer<QFrame> m_dropZone;
     bool m_confirmedClose = false, m_skipRemember = false;
 };
-

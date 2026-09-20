@@ -219,6 +219,10 @@ QList<ReadingPart> readingParts(const Sample &sample, bool cpuOnly = false);
 // 00/00 all the same; the caller decides whether the tab has panes to measure at all.
 QString tabSuffix(const Sample &sample);
 
+// The tab bar's first give-way rung (#VWSD): retain every suffix only when the full, natural
+// widths of all tab labels fit its usable width. This deliberately knows no QWidget, so the
+// answer cannot feed back from labels whose suffix is currently hidden.
+bool tabMetersFit(int barWidth, const QList<int> &fullLabelWidths);
 
 // readingText() under its old name, for the session manager's rows. Empty when there is nothing
 // worth showing.

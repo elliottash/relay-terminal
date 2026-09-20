@@ -142,6 +142,14 @@ private Q_SLOTS:
         QCOMPARE(formatPercent2(100.0), QStringLiteral("100"));
     }
 
+    void tabMetersGiveWayAsAWholeSuffix() {
+        QVERIFY(tabMetersFit(100, {}));
+        QVERIFY(tabMetersFit(0, {}));
+        QVERIFY(tabMetersFit(100, {30, 70}));
+        QVERIFY(!tabMetersFit(99, {30, 70}));
+        QVERIFY(!tabMetersFit(0, {1}));
+    }
+
     void quietPanesShowNothing() {
         const qint64 mib = 1 << 20;
         Sample idle;

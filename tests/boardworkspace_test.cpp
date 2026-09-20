@@ -57,6 +57,7 @@ private slots:
     void attachTabIsTheOnlyWriterOfTheTabsProject();
     void theConfigureFunnelAlwaysSendsABoardBlock();
     void theBoardPanePaintsFromTheBoardMaterials();
+    void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
 };
 
 // A pane deep inside a project finds the project's board, and the answer is the project root
@@ -293,6 +294,23 @@ void BoardWorkspaceTests::theBoardPanePaintsFromTheBoardMaterials()
     QVERIFY2(jacks.contains(QStringLiteral("theme::BoardMetalDim")), "the jack rings are not unlit brass");
     // And its words stay on the legible text tokens: no material behind anything read (2.2).
     QVERIFY2(jacks.contains(QStringLiteral("theme::TextMuted")), "the empty board's words left the text tokens");
+}
+
+// The width rule lives in RelayWindow because Qt owns the tab geometry, but the decision itself
+// is pure in PaneUsage. Pin the two halves together: a narrow strip must remove the whole suffix,
+// and Resize must reconsider the labels so widening restores it.
+void BoardWorkspaceTests::tabMetersGiveWayOnlyWhenFullLabelsDoNotFit()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString fit = bodyOf(text, QStringLiteral("bool tabMetersHaveRoom() const {"));
+    QVERIFY2(!fit.isEmpty(), "RelayWindow::tabMetersHaveRoom() is gone");
+    QVERIFY(fit.contains(QStringLiteral("relay::usage::tabMetersFit(usable, tabsFullLabelWidths())")));
+    const QString label = bodyOf(text, QStringLiteral("QString tabLabelText(QWidget *page, const QStringList &titles) const {"));
+    QVERIFY2(!label.isEmpty(), "RelayWindow::tabLabelText() is gone");
+    QVERIFY(label.contains(QStringLiteral("if (tabMetersHaveRoom()) title += tabUsageSuffix(page);")));
+    const QString eventFilter = bodyOf(text, QStringLiteral("bool eventFilter(QObject *object, QEvent *event) override {"));
+    QVERIFY(eventFilter.contains(QStringLiteral("if (resized) relabelTabsForWidth();")));
 }
 
 QTEST_MAIN(BoardWorkspaceTests)
