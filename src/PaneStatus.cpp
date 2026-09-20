@@ -383,7 +383,8 @@ TypeStyle phoneStyle(const Tokens &tokens) {
 
 const QList<ToolButton> &toolButtons() {
     // The order they sit in, left to right, after the bell: the gear stays last (owner, 2026-09-18).
-    // The tooltip says what the click will do, so it flips while the pane is open.
+    // The join plug is not one of these: buildWindowChrome puts it after the gear, before the
+    // window buttons. The tooltip says what the click will do, so it flips while the pane is open.
     static const QList<ToolButton> list{
         {QStringLiteral("actions"), QStringLiteral("palette.open"),
          QStringLiteral("Actions: everything you can do now"), QStringLiteral("Close Actions"),

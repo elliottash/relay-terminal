@@ -5808,7 +5808,7 @@ private:
         });
     }
 
-    // ----- window header: Relay icon, bell, actions, minimize/maximize/close -----------------------
+    // ----- window header: Relay icon; bell, tool panes, plug and the window buttons ----------------
     // Both corner widgets sit on the tab row, so the tabs, the header buttons and the window
     // controls share one line the way Warp does.
     static bool nativeFrame() { return QSettings().value(QStringLiteral("window/native_frame"), false).toBool(); }
@@ -5846,6 +5846,31 @@ private:
         auto *rightRow = new QHBoxLayout(right);
         rightRow->setContentsMargins(6, 0, 6, 0);
         rightRow->setSpacing(2);
+        m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
+        connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
+        rightRow->addWidget(m_bell);
+        // The row's three hairlines: after the bell, and either side of the plug below, so the
+        // groups read as bell ‖ tool panes ending in the gear ‖ plug ‖ window buttons
+        // (owner, 2026-09-20).
+        rightRow->addSpacing(4);
+        rightRow->addWidget(new ChromeSeparator);
+        rightRow->addSpacing(4);
+        // The tool panes, one button each, ending in the gear (owner, 2026-09-18). The table is
+        // relay::panestatus::toolButtons(), so a button's glyph, its light, its tooltip and what its
+        // second click closes all come from the one pane type it owns. Each wears its pane's own
+        // header band while that pane is open, and closes it when clicked again.
+        for (const relay::panestatus::ToolButton &spec : relay::panestatus::toolButtons()) {
+            auto *button = new ChromeButton(relay::panestatus::typeStyle(spec.paneType, relay::panestatus::ColourMode::ByType,
+                                                                        relay::chrome::tokens()).glyph);
+            button->setPaneType(spec.paneType);
+            connect(button, &QToolButton::clicked, this, [this, spec] { runToolButton(spec); });
+            rightRow->addWidget(button);
+            m_toolButtons.insert(spec.paneType, button);
+        }
+        // The tool buttons end in the gear; the plug sits right of it, between hairlines.
+        rightRow->addSpacing(4);
+        rightRow->addWidget(new ChromeSeparator);
+        rightRow->addSpacing(4);
         // The plug: into somebody else's session. Joining with a code is the common case, so it
         // is the first entry; your own desktop's panes are the second (owner, 2026-09-18).
         m_connect = new ChromeButton(ChromeButton::Glyph::Connect);
@@ -5862,24 +5887,11 @@ private:
             menu.exec(m_connect->mapToGlobal(QPoint(0, m_connect->height())));
         });
         rightRow->addWidget(m_connect);
-        m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
-        connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
-        rightRow->addWidget(m_bell);
-        rightRow->addSpacing(6);
-        // The tool panes, one button each, ending in the gear (owner, 2026-09-18). The table is
-        // relay::panestatus::toolButtons(), so a button's glyph, its light, its tooltip and what its
-        // second click closes all come from the one pane type it owns. Each wears its pane's own
-        // header band while that pane is open, and closes it when clicked again.
-        for (const relay::panestatus::ToolButton &spec : relay::panestatus::toolButtons()) {
-            auto *button = new ChromeButton(relay::panestatus::typeStyle(spec.paneType, relay::panestatus::ColourMode::ByType,
-                                                                        relay::chrome::tokens()).glyph);
-            button->setPaneType(spec.paneType);
-            connect(button, &QToolButton::clicked, this, [this, spec] { runToolButton(spec); });
-            rightRow->addWidget(button);
-            m_toolButtons.insert(spec.paneType, button);
-        }
         if (!m_nativeFrame) {
-            rightRow->addSpacing(8);
+            // The third hairline vanishes with the window buttons it parts the plug from.
+            rightRow->addSpacing(4);
+            rightRow->addWidget(new ChromeSeparator);
+            rightRow->addSpacing(4);
             m_minimize = new ChromeButton(ChromeButton::Glyph::Minimize);
             m_minimize->setToolTip(QStringLiteral("Minimize"));
             connect(m_minimize, &QToolButton::clicked, this, [this] { showMinimized(); });

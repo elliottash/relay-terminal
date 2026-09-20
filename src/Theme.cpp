@@ -519,7 +519,8 @@ QToolButton#paneChromeButton:hover { color: @text; border-color: @borderStrong; 
 QToolButton#paneChromeButton[dest="agent"] { color: @agent; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
 /* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
-   on the left and the bell, the actions gear and the window buttons on the right. */
+   on the left and, on the right, the bell, a hairline, the tool-pane buttons ending in the
+   gear, a hairline, the join plug, a hairline and the window buttons. */
 QMainWindow#relayWindow { background: @bg; border: 1px solid @border; }
 QWidget#windowChromeLeft, QWidget#windowChromeRight { background: @bg; }
 QLabel#windowIcon { color: @accent; font-size: 13pt; padding: 0 2px; }

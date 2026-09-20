@@ -254,7 +254,7 @@ title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
 | Corner | Holds |
 |---|---|
 | Top left | The Relay icon |
-| Top right | Bell (notification centre); then one button per tool pane — Actions, Sessions, Switchboard, and the gear for Options — each drawn with its pane's own header glyph (`relay::chrome::paintTypeGlyph`) and running the pane's action, so it behaves exactly as the key does and its tooltip and "Next time" hint name that key; then minimize, maximize/restore and close |
+| Top right | Bell (notification centre); a hairline (`ChromeSeparator`); then one button per tool pane — Actions, Sessions, Switchboard, and the gear for Options — each drawn with its pane's own header glyph (`relay::chrome::paintTypeGlyph`) and running the pane's action, so it behaves exactly as the key does and its tooltip and "Next time" hint name that key; a hairline; the join plug ("Join a shared session"); a hairline; then minimize, maximize/restore and close |
 
 `ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
 does not depend on an emoji font and hover, disabled and close-button colours come from the theme.
@@ -268,8 +268,8 @@ does not depend on an emoji font and hover, disabled and close-button colours co
 - **Maximized** windows drop the padding and show the "restore" glyph (`changeEvent` →
   `updateChromeState()`).
 - **Fallback.** `window/native_frame` (Actions › System title bar) keeps the system decorations;
-  the header then shows only the bell and the gear, and the tab row no longer drags the window.
-  It applies to windows opened after the change.
+  the header's row then ends at the join plug — no trailing hairline, no window buttons — and
+  the tab row no longer drags the window. It applies to windows opened after the change.
 
 ### Pane titles and tab labels
 

@@ -2,8 +2,9 @@
 #pragma once
 
 // The window's own title bar, since Relay draws one instead of taking the desktop's: ChromeButton
-// paints the header glyphs (bell, gear, minimize, maximize, close, and the tab row's own buttons)
-// so they all sit at one stroke weight, and NotificationsPopup is the list behind the bell.
+// paints the header glyphs (bell, gear, the join plug, minimize, maximize, close, and the tab
+// row's own buttons) so they all sit at one stroke weight, ChromeSeparator is the hairline that
+// groups the header's right row, and NotificationsPopup is the list behind the bell.
 
 #include "Theme.h"
 #include "PaneChrome.h"   // relay::chrome::paintTypeGlyph: a tool pane's button wears its pane's glyph
@@ -27,9 +28,11 @@
 
 // ----- window header (Relay draws its own title bar) ------------------------------------------
 // The window has no OS title bar: the tab row is the title bar, with the Relay icon on the left
-// and the bell, the actions button and minimize/maximize/close on the right. Dragging the empty
-// part of the row moves the window, a double-click maximizes it, and a few pixels of padding
-// around the window stay grabbable for resizing (see RelayWindow::edgesAt).
+// and, on the right, the bell; a hairline (ChromeSeparator); the tool-pane buttons ending in the
+// Options gear; a hairline; the join plug; a hairline; minimize/maximize/close — the last
+// hairline and the window buttons only when Relay draws the frame. Dragging the empty part of
+// the row moves the window, a double-click maximizes it, and a few pixels of padding around the
+// window stay grabbable for resizing (see RelayWindow::edgesAt).
 //
 // "window/native_frame" (Actions › System title bar) gives the system decorations back for
 // desktops where they work better; it applies to windows opened after the change.
@@ -236,6 +239,28 @@ private:
     int m_badge = 0;
     bool m_dim = false;
     bool m_open = false;      // that pane is open in the window's current tab
+};
+
+// The hairline between the header's groups: after the bell, and either side of the join plug
+// (owner, 2026-09-20). A painted line rather than a stylesheet rule, so it reads the theme at
+// paint time the way ChromeButton does and a theme switch needs nothing but a repaint; the same
+// 1px border token QToolBar::separator wears.
+class ChromeSeparator final : public QWidget {
+public:
+    explicit ChromeSeparator(QWidget *parent = nullptr) : QWidget(parent) {
+        // Not a control: a press on it falls through to the header and drags the window.
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFixedSize(1, ChromeButton::kSize);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        // On the half-pixel so a 1px pen covers exactly one device column, and inset top and
+        // bottom so it reads as a tick between the glyphs rather than a full-height rule.
+        painter.setPen(QPen(relay::theme::Border, 1));
+        painter.drawLine(QPointF(0.5, 7.0), QPointF(0.5, height() - 7.0));
+    }
 };
 
 // The list behind the bell: newest first, one row per notification, click to go back to the pane
