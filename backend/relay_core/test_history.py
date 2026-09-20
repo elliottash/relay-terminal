@@ -820,7 +820,7 @@ def _grouped_findings(entry: dict, found: Sequence[dict]) -> list[dict]:
                 severity[finding["verdict"]] = finding["severity"]
     out: list[dict] = []
     for verdict, group in by_verdict.items():
-        names = [f["test"].rsplit(".", 1)[-1] for f in group[:3]]
+        names = [f["test"].split(":", 1)[-1].rsplit(".", 1)[-1] for f in group[:3]]
         shown = ", ".join(names) + ("…" if len(group) > 3 else "")
         phrase = _GROUP_PHRASES.get(verdict, verdict)
         out.append(_finding(entry["id"], verdict,
