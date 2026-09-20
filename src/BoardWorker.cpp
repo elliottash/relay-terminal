@@ -8,6 +8,9 @@ namespace relay {
 
 namespace {
 constexpr int kMaxBuffer = 8 * 1024 * 1024;
+// How many messages may wait for `ready`. A helper panel's first ask is one; a panel that somehow
+// asked a hundred times before the worker was up has a worse problem than a dropped message.
+constexpr int kMaxQueued = 32;
 }
 
 BoardWorker::BoardWorker(QString python, QString dataDir, QObject *parent)
@@ -66,6 +69,12 @@ void BoardWorker::handleLine(const QByteArray &line)
         m_ready = true;
         if (!m_configure.isEmpty())
             send(m_configure);
+        // Then whatever was said while the worker was starting, in the order it was said, behind
+        // the configure it would otherwise have overtaken (send()).
+        const QList<QJsonObject> waiting = m_queued;   // a handler may send more
+        m_queued.clear();
+        for (const QJsonObject &message : waiting)
+            writeLine(message);
         if (m_openPending) {
             m_openPending = false;
             open();
@@ -93,6 +102,7 @@ void BoardWorker::start(const QJsonObject &configure)
     m_pending.clear();
     m_configured = false;
     m_ready = false;
+    m_queued.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("RELAY_PANE_ID"), QStringLiteral("switchboard"));
     m_process.setProcessEnvironment(environment);
@@ -103,7 +113,28 @@ void BoardWorker::start(const QJsonObject &configure)
     // `configure` goes out when the worker answers `ready`, so it never races the handshake.
 }
 
+// Nothing overtakes `configure`. start() holds the configure back until the worker answers
+// `ready`, so that it never races the handshake — and until 2026-09-20 a message written in that
+// window went out *in front of* it, because the process is already running by then and the
+// configure is not. That is exactly what a helper panel's **first** ask does: it starts the tab's
+// worker and sends its `board_chat` in the same breath (§30.7, "started on the first ask"), and
+// the worker refused it with "Configure a provider and workspace first" while the panel sat there
+// running, waiting for an answer that was never coming. The Switchboard never hit it because
+// `open()` already waited for `ready`.
+//
+// So everything but the configure itself waits for `ready` and is then written in order.
 void BoardWorker::send(const QJsonObject &message)
+{
+    if (!m_ready
+        && message.value(QStringLiteral("type")).toString() != QStringLiteral("configure")) {
+        if (m_queued.size() < kMaxQueued)
+            m_queued.append(message);
+        return;
+    }
+    writeLine(message);
+}
+
+void BoardWorker::writeLine(const QJsonObject &message)
 {
     const QByteArray line = QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n';
     if (m_process.state() == QProcess::Running)
