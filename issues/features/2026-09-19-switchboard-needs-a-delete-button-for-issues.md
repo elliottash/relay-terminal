@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 priority: 2
 rank: zzzzzzzzzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-switchboard-delete-card/], related: [], github: null}
+links: {plans: [], commits: [47bb59fa], evidence: [docs/qa_evidence/2026-09-20-switchboard-delete-card/], related: [], github: null}
 ---
 # switchboard needs a delete button for issues
 

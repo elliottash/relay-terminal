@@ -73,3 +73,9 @@ Executing: the backend half is in — BoardTools.delete_card (owner-only, like s
 
 <!-- relay:entry 20260920T054805Z-x0 author=agent kind=event model=glm-5.3 turn=execute-cym9 -->
 - ✦ agent moved this card · Executing → Needs verification · the delete is in: worker, wire, GUI and docs, with unit tests and a live Xvfb run · evidence docs/qa_evidence/2026-09-20-switchboard-delete-card/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260920T062341Z-et author=agent kind=event model=glm-5.3 turn=execute-cym9 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-20-switchboa… → {"plans": [], "commits": ["47bb59fa"], "evidence": ["docs/qa_evidence/2026-09-20…
+
+<!-- relay:entry 20260920T062341Z-eu author=agent kind=progress model=glm-5.3 turn=execute-cym9 -->
+Landed as 47bb59fa (30 files; the board_delete elif in board_protocol.py had already reached main inside #HKAP's 56b921f6, taken from this tree while the delete was uncommitted). Two BoardPane.cpp hunks were left out of the commit on purpose: they carry #BXCN's in-flight kStackedWidth work and stay uncommitted. Along the way the live run caught a real fault and fixed it: the button path confirmed twice (CardDetail::remove then BoardView::deleteCard), leaving an unanswered second dialog; the confirm now lives in deleteCard alone.
