@@ -1,0 +1,38 @@
+Implementer notes — #3XZV (glm/glm-5.3, 2026-09-20)
+
+Landed in 4f5acd43 (board.py's part in 81ff60f8, see README):
+
+- backend/relay_core/board.py — stage statuses, section field, check warnings,
+  explicit-empty column_statuses, new default columns.
+- backend/relay_core/board_tools.py — manual-section validation
+  (_require_manual_section), section on _move/_create/_row, IMMUTABLE_FIELDS,
+  STAGE_MOVES + stage_advance, discussed hook in _comment, tool specs,
+  implemented_by stamped on executing/needs-verification.
+- backend/relay_core/board_protocol.py — stage hooks in _ask (plan-started /
+  discussed) and _card_answer (plan-written); section passthrough on
+  board_move/board_create.
+- src/BoardModel.{h,cpp} — Card::section, sectionForCard section override,
+  sections() keeps manual columns, new titles/meanings/ranks/defaults,
+  executeTask → needs-verification, verifyTask branches by lane.
+- src/BoardSections.cpp — addRefusal allows no statuses ("manual"), rows show
+  manual, message() writes the explicit empty list.
+- src/BoardPane.cpp — inVerifyLane (needs-verification + QA lanes), drop and
+  quick-add send section, status pick unparks, Execute → executing,
+  sectionTakesNewCards for manual sections.
+- Docs: SWITCHBOARD-FORMAT, SWITCHBOARD-DESIGN §3, AGENT-SESSIONS-PROTOCOL
+  (19.2/19.3/19.10/19.15), board_policy rule 5, WARP.md.
+- This board: columns → the new eight; 24 cards ready→planned /
+  in-progress→executing. Three cards were left to other sessions' in-flight
+  work (word-wrap #EH98 in a QA lane; #BRD3 and #8YQ9 live-executing in the
+  worktree) — their rename rides their own land.
+
+Notes for the verifier:
+
+- The three "needs a decision" risks in the plan were executed as the plan
+  assumed (two model checks in a row; one executing section collects plan
+  cards too; a parked card stays parked through stage moves).
+- board_ask fires plan-started INSTEAD of discussed when the mode is plan, so
+  a wordless Plan on an inbox card reads one stage event, not two.
+- land.py held the first commit attempt: #BRD3's uncommitted model-box work
+  sat in the same files after my snapshot; its 12 hunks were excluded and are
+  still uncommitted in the tree for that session to land.
