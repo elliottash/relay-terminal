@@ -4086,6 +4086,7 @@ private:
             modelBoxPicked(m_modelBox->itemData(index).toString());
         });
         routeRow->addWidget(m_modelBox);
+        if (m_effortBox) routeRow->addWidget(m_effortBox);   // the level, right of the model (owner, 2026-09-20)
         // Voice transcription: the chip toggles recording, the hold key is push-to-talk.
         m_mic = new QToolButton;
         m_mic->setObjectName(QStringLiteral("stripChip"));
@@ -4304,13 +4305,15 @@ private:
         m_quotaLabel->setTextFormat(Qt::PlainText);
         m_quotaLabel->hide();
         row->addWidget(m_quotaLabel);
-        m_effortBox = new QComboBox;
+        // As thin as its text, like the model box (owner, 2026-09-20): the level's word and the
+        // arrow, nothing more — the levels are short words already (low … xhigh).
+        m_effortBox = new CurrentTextComboBox;
+        m_effortBox->setObjectName(QStringLiteral("statusPicker"));
         for (const QString &level : efforts()) m_effortBox->addItem(level, level);
         m_effortBox->setAccessibleName(QStringLiteral("Reasoning effort"));
         m_effortBox->setToolTip(QStringLiteral("Reasoning effort for this pane (Alt+. / Alt+,)"));
         m_effortBox->setFocusPolicy(Qt::TabFocus);
-        m_effortBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        m_effortBox->setMinimumContentsLength(5);
+        m_effortBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         m_effort = QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
         if (!efforts().contains(m_effort)) m_effort = QStringLiteral("high");
         connect(m_effortBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
@@ -4323,7 +4326,8 @@ private:
         // the model chip's tooltip, not as a third picker") until then; refreshSessionControls
         // shows it whenever the model has levels and hides it when it has none.
         m_effortBox->setToolTip(QStringLiteral("Reasoning level for this pane (Alt+E opens it; Alt+. / Alt+, step)"));
-        row->addWidget(m_effortBox);
+        // Not added here: it goes to the right of the model box, which is added after these
+        // controls (owner, 2026-09-20).
     }
 
     void refreshSessionControls() {
