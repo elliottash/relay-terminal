@@ -588,6 +588,42 @@ checkbox agrees by construction.
 - **Its fold and its checkbox are ordinary.** It is not folded by default (Done and Deferred still
   are): the owner asked for the section in order to see it.
 
+### 4.11.1 The cards the agent closed itself are one row of the done list (#93WR, owner 2026-09-20)
+
+Owner, on the *medium* tier of the autonomy policy (v3, `backend/relay_core/board_policy.md`):
+*"medium folding seems like a no brainer"*. An agent that finishes a small piece of work and
+closes its own card leaves a real record — the card, its thread, its commits — and a done list
+that is mostly those cards is a done list nobody reads. So the record stays whole and the **list**
+folds.
+
+- **Self-closed is a marker, not a type.** When an agent closes its own card, Relay stamps
+  `verified_by` with the closing pane's signature, exactly as a QA close does. A card is
+  self-closed when its status is `done`, its `verified_by` is not empty, and it equals its
+  `implemented_by`. `board::selfClosed()` is the only place that rule is written, and everything
+  else — the section, the badge, the row — asks it.
+- **It lands in DONE, not VERIFIED.** 4.11's section is for a card *another* model checked; a
+  self-close is the implementer's own signature, so it falls through to Done. It wears no `✓`
+  badge either: nobody checked it, and the row that folds it says so instead.
+- **One row at the end of the section's cards**: `▸ 3 closed by the agent` (`1 closed by the
+  agent` at one), in the chevrons and the muted text a folded section header uses, indented to the
+  rows' `#ID` column and with no rule over it — it is the last of the cards, not a header. Its
+  tooltip: *"Cards the agent finished and closed itself, without a verifier. Enter or → to show
+  them."* Unfolded it reads `▾ 3 closed by the agent` and its cards follow it as ordinary rows,
+  with every ordinary row behaviour — open, move, flags, chips.
+- **It is not a card.** It carries no card id, so Execute, Verify, `m`, Delete, drag and the flag
+  clicks all step over it, and it is never counted as one. The **section header's count still
+  holds its cards** — DONE says 5 whether three of them are put away or not — because folding is
+  presentation.
+- **Keys**, mirroring a section's: a click or Enter toggles it, → shows its cards and steps into
+  the first, ← puts them away and stands on the row, and ← again folds the whole section. Folding
+  while the selection is inside moves the selection to the row.
+- **A filter shows what it matched.** With a filter (or a label chip) active nothing folds at all,
+  here as for a section header: a matching self-closed card is an ordinary row and there is no
+  fold row over it. A card reached by id — a `#ID` in a card or a thread, a helper's `card:` link,
+  the cleanup panel's anchors — opens its group and the section around it, so a reveal reveals.
+- **Folded by default, remembered per pane.** Which groups are open rides the layout node beside
+  the folded sections: `{"board": {"self_closed": ["done"]}}`.
+
 ### 4.12 The card reads as one page: a pencil, a seam, and a box that does the talking (#VZ69, owner 2026-09-19)
 
 Owner, on the card detail as 4.9 left it: *"there should be a promponent pencil edit button, rather

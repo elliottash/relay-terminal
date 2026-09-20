@@ -1,0 +1,7 @@
+2026-09-20-alpha-voice-mode.md: status=ready implemented_by= verified_by=
+2026-09-20-bravo-release-notes.md: status=done implemented_by=anthropic/claude-opus-5 verified_by=
+2026-09-20-charlie-old-glyph.md: status=dropped implemented_by= verified_by=
+2026-09-20-delta-tooltip-wording.md: status=done implemented_by=anthropic/claude-opus-5 verified_by=anthropic/claude-opus-5
+2026-09-20-echo-log-rotation.md: status=done implemented_by=anthropic/claude-opus-5 verified_by=anthropic/claude-opus-5
+2026-09-20-foxtrot-cache-header.md: status=done implemented_by=anthropic/claude-opus-5 verified_by=anthropic/claude-opus-5
+2026-09-20-golf-checked-by-codex.md: status=done implemented_by=anthropic/claude-opus-5 verified_by=openai/codex

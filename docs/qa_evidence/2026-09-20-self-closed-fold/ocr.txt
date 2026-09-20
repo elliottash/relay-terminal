@@ -1,0 +1,21 @@
+relay binary: /tmp/claude-1000/land/93wr-gui/verify/build/relay (2026-09-20 15:19:52.821023887 -0400)
+02 the fold row says 'closed by the agent': yes
+02 the ordinary closed card is an ordinary row: yes
+02 the cross-verified card is not in Done at all: yes
+02 and so is the dropped one: yes
+02 the self-closed cards are away: Delta: yes
+02 the self-closed cards are away: Echo: yes
+02 the self-closed cards are away: Foxtrot: yes
+02 the DONE header reads: | v¥ DONE 5 
+03 a click on the row shows Delta: yes
+03 a click on the row shows Echo: yes
+03 a click on the row shows Foxtrot: yes
+03 and the row is still there: yes
+03 the DONE header reads: | v¥ DONE 5 
+04 a second click puts them away again: yes
+04 and the row stays: yes
+06 End then Enter on the row shows its cards: yes
+07 and ← puts them away: yes
+07 with the row still standing: yes
+relay still alive at the end: yes
+no gui_crash in relay.log
