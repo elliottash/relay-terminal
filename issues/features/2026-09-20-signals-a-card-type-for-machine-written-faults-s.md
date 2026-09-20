@@ -1,13 +1,13 @@
 ---
 id: AQ6X
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, tests]
 assignee: agent
 rank: i1
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [], evidence: [], related: [R9G7, 7BM4], github: null}
+links: {plans: [], commits: [e3ca0447, 2048e4f6, 143d4943, 7503201d, fab65016, fe697501, d70e8306, 45353fbf, c489ae32, 1431abe8, 1efe81e8, 61c2f5a4, 444ec3e5, c8895fec, 13181dfa, '0beeadfc', b3275c21, 9e52957c, 190ca050, 72d830f9, 1e937bcc, 9cef1ab9, 8034facd, 5fde2cd5, bc471570, 567733ae, 6abcbe7e, b07a32ba, b9756872], evidence: [docs/qa_evidence/2026-09-20-signals-gui, docs/qa_evidence/2026-09-20-signal-threads], related: [R9G7, 7BM4], github: null}
 ---
 # Signals: a card type for machine-written faults such as failed tests
 
@@ -90,3 +90,22 @@ Still to tune against real history once #7BM4's file exists: the group threshold
 **Risks** — The four mass-failure thresholds are guesses (tune against `history.jsonl` once a week of runs exists). A background thread fixing code in the shared checkout lands through `land.py` like any session; it must claim late and dry-run (memory: land-py-claim-late). Reopen-vs-new at 30 days needs `resolved` signals kept that long (retention 30 days, decision 13 in the research). Owner question, not blocking: whether a signal thread may run when the user is typing in the same project (proposal: yes, it is its own worker).
 
 **Verify** — `tests/test_signals.py`: the state machine table-driven over execution sequences (open on second, resolve 2/20, not-evaluated advances nothing, regressed within 30 days, new after, dismissal expiry, group and run collapse, cap 10, promotion triggers and cap 5, the verification gate); `tests/test_tests_protocol.py` for the messages and the re-run rule; `tests/test_board_tools.py` for `board_signals` refusals; GUI `tests/boardmodel_test.cpp` for the fold row and the detail; an Xvfb run with a seeded red test: the row appears, a pane claims it, the fix resolves it after two passes, the thread shows in Sessions and the notification opens it.
+
+## Tasks
+
+- [x] Phase 1: signals.py fold and store, tree_digest, promotion and the move gate, signals_* messages, board_signals, re-run rule, guest path, tests
+- [x] Phase 2: the fold row and dismissed toggle on the bugs tab, signal page with four actions, `## Signal` strip, live evidence
+- [x] Phase 3: signal threads for orphaned signals, verify_signal, notification with open-thread action, Sessions row, Options row, board.yaml `signals.auto_work`
+- [ ] Protocol §32 and §32.10 (written in the working tree; blocked behind another session's §31.9 in the same hunk)
+
+## QA checklist
+
+- [ ] Make a Python test fail and run it twice through the Test suites pane or `tests_run`: the bugs tab shows `▸ 1 signal`; the row reads `broken`, the key, `×2`.
+- [ ] Fix the test and run it twice: the signal resolves silently and the row disappears; run it once only: it stays open (a not-executed key advances nothing).
+- [ ] Break a shared header so many tests fail: one `run:` or `build:` signal, not one per test.
+- [ ] In a pane, ask the agent to run tests that fail: the result text names the opened keys and the agent claims and fixes them in the same turn.
+- [ ] With nobody claiming an open signal and `signals.auto_work` on: a signal thread starts within one fold, a notification "Working on <key>" appears, clicking it opens the thread's history, the Sessions manager lists `⚑ signal · <key>` under the project, the chip on the signal reads live; on finish the notification reads Fixed / Gave up — promoted to #ID / Dismissed.
+- [ ] Turn "Work signals unasked" off in Options › Switchboard: no thread starts; `board.yaml` says `signals: {auto_work: false}`.
+- [ ] Dismiss a signal from its page as `environmental` with a 3-day expiry: it moves under `▸ N dismissed`; an agent trying `wont-fix` is refused.
+- [ ] Promote a signal: a bug card appears with the excerpt as its request and a `## Signal` strip; moving that card out of needs-verification while the signal is open is refused with `board_signal_open`; closing the card leaves the signal open.
+- [ ] A guest agent in the project can list, claim and release signals with `relay-board.py signals` and POLICY.md says how.
