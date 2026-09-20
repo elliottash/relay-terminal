@@ -395,12 +395,20 @@ def _run_order(executions: Sequence[H.Execution]) -> list[tuple[str, list[H.Exec
     An execution with no `run_id` is its own run — a single hand-typed `ctest` ingested from a
     JUnit file with no metadata is still one run, and folding them all together would invent a
     mass failure out of a month of separate ones.
+
+    Ties are broken by **where the row was in the input**, never by the run id: the store's
+    timestamps are whole seconds, two runs of one test finish inside one second all the time, and
+    a run id is `<stamp>-<random hex>` — so sorting by it would put an earlier run second as often
+    as not.  `test_history.read` returns the append-only log in file order, which is the real
+    chronology, so keeping it is the only tiebreak that is ever right.
     """
     runs: dict[str, list[H.Execution]] = {}
+    first: dict[str, int] = {}
     for index, row in enumerate(executions):
         key = row.run_id or f"@{row.ts}#{index}"
         runs.setdefault(key, []).append(row)
-    return sorted(runs.items(), key=lambda item: (str(item[1][0].ts), item[0]))
+        first.setdefault(key, index)
+    return sorted(runs.items(), key=lambda item: (str(item[1][0].ts), first[item[0]]))
 
 
 def _outcome(result: str) -> str:
@@ -515,7 +523,11 @@ def fold(executions: Iterable, events: Iterable = (), now=None, *,
     """
     at = _at(now, datetime.now(timezone.utc))
     rows = H._as_executions(executions)
-    rows.sort(key=lambda r: (str(r.ts), r.run_id, r.id))
+    # A **stable** sort on the timestamp alone: the store keeps whole seconds, so two runs a
+    # second apart are indistinguishable by `ts`, and the order they were appended in is the only
+    # honest tiebreak (see `_run_order`).  `executions` is therefore expected in log order, which
+    # is what `test_history.read` returns.
+    rows.sort(key=lambda r: str(r.ts))
     actions = [dict(e) for e in (events or []) if isinstance(e, dict)]
     actions.sort(key=lambda e: str(e.get("ts") or ""))
     run_session = {str(e.get("run_id") or ""): str(e.get("session") or "")

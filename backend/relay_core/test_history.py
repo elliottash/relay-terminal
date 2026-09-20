@@ -221,6 +221,13 @@ def read(path: str | os.PathLike, *, limit: int | None = None,
     A line that is not JSON is skipped rather than raising — the last line of an append-only file
     can be torn by a crash mid-write, and a store that cannot be read is worse than one that has
     lost its newest record.  An absent store is an empty list.  `limit` keeps the **newest** n.
+
+    "Oldest first" is by `ts`, **stably**, so rows sharing a timestamp keep the order they were
+    appended in.  The store keeps whole seconds and two runs of one test finish inside one second
+    all the time; the file is append-only, so its order is the real chronology, and anything else
+    as a tiebreak — the `run_id`, which is `<stamp>-<random hex>` — puts an earlier run second as
+    often as not.  `signals.fold` reads consecutive failures and passes out of this order, so it
+    is load-bearing there (card #AQ6X).
     """
     path = Path(path)
     try:
@@ -246,7 +253,7 @@ def read(path: str | os.PathLike, *, limit: int | None = None,
         if wanted is not None and one.id not in wanted:
             continue
         out.append(one)
-    out.sort(key=lambda e: (e.ts, e.run_id))
+    out.sort(key=lambda e: e.ts)                         # stable: see the docstring
     return out[-limit:] if limit else out
 
 

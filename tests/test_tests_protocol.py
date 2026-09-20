@@ -56,6 +56,9 @@ if log:
         handle.write(json.dumps(ARGS) + "\\n")
 
 TESTS = ["alpha", "beta", "slow"]
+#: `$CTEST_SHIM_FIXED` is how a test says "somebody has fixed it now": the named tests pass on
+#: this and every later invocation, which is what a signal resolving needs to be provable.
+FIXED = [n for n in (os.environ.get("CTEST_SHIM_FIXED") or "").split(",") if n]
 
 if "--show-only=json-v1" in ARGS:
     print(json.dumps({"kind": "ctestInfo", "version": {"major": 1, "minor": 0}, "tests": [
@@ -76,7 +79,7 @@ for index, name in enumerate(chosen, 1):
     print("    Start %d: %s" % (index, name), flush=True)
     if name == "slow":
         time.sleep(120)
-    ok = name != "beta"
+    ok = name != "beta" or name in FIXED
     seconds = 0.25 if ok else 0.5
     print("%d/%d Test #%d: %s .......   %s    %.2f sec"
           % (index, len(chosen), index, name, "Passed" if ok else "***Failed", seconds),
@@ -1104,6 +1107,33 @@ class SignalProtocolTest(TestsProtocolTest):
         result = self.tests.check_card("BBB3")
         self.assertEqual(result["blocks"], [])
         self.assertEqual(len(result["open_before"]), 1)
+
+    # ---- the whole life of one signal ------------------------------------------
+    def test_a_run_opens_it_a_pane_claims_it_and_the_fix_resolves_it_after_two_passes(self):
+        """The card's own Verify line, end to end through the real handler and a real `ctest`."""
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        self.assertEqual(self.signals()["ctest:beta"].state, "open")
+
+        self.send(type="signals_claim", key="ctest:beta", pane_token="pane-a")
+        self.assertEqual(self.signals()["ctest:beta"].session, "pane-a")
+
+        # Somebody fixes it. One passing run is not a fix (`RESOLVE_PASSES["broken"]` is 2) —
+        # and the run's own re-run does not count as the second, because a run that had no
+        # failures is not re-run at all.
+        os.environ["CTEST_SHIM_FIXED"] = "beta"
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        self.assertEqual(self.tests._run.rerun, [])
+        self.assertEqual(self.signals()["ctest:beta"].state, "open")
+        self.assertEqual(self.signals()["ctest:beta"].green_streak, 1)
+
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        signal = self.signals()["ctest:beta"]
+        self.assertEqual(signal.state, "resolved")
+        self.assertEqual(signal.session, "")                  # a resolved signal is nobody's
+        self.assertEqual([row["key"] for row in self.changed()[-1]["open"]], [])
 
     # ---- auto-promotion -------------------------------------------------------
     def test_a_signal_that_has_failed_three_runs_over_a_day_is_promoted_by_the_fold(self):

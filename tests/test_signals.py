@@ -328,6 +328,17 @@ class OneCauseTests(unittest.TestCase):
         self.assertEqual(sorted(overflow.members), ["ctest:f10", "ctest:f11"])
         self.assertEqual(S.MAX_SIGNALS_PER_RUN, 10)
 
+    def test_two_runs_in_one_second_are_ordered_by_the_log_not_by_their_run_ids(self):
+        # The store keeps whole seconds, and a run id is `<stamp>-<random hex>`: a fix that lands
+        # in the same second as the failure it fixes would read as having happened *first* if the
+        # id decided. `test_history.read` and the fold both sort stably on `ts` alone, so the
+        # append order — the real chronology — wins.
+        rows = [ex(day(1), "ctest:a", "fail", run="20260920T210939Z-de29"),
+                ex(day(1), "ctest:a", "fail", run="20260920T210939Z-de29-rerun"),
+                ex(day(1), "ctest:a", "pass", run="20260920T210939Z-a1cc", commit="c2")]
+        signal = fold(rows)["ctest:a"]
+        self.assertEqual((signal.state, signal.count, signal.green_streak), ("open", 2, 1))
+
     def test_separate_runs_are_separate_even_with_no_run_id(self):
         # A hand-typed `ctest` ingested from a JUnit file with no metadata is still one run: the
         # fold must not read a month of them as one mass failure.
