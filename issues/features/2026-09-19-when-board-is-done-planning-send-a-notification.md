@@ -6,7 +6,7 @@ assignee: agent
 priority: 2
 rank: zzzzzzzzzz
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-board-plan-notification], related: [], github: null}
+links: {plans: [], commits: [284aa746], evidence: [docs/qa_evidence/2026-09-20-board-plan-notification], related: [], github: null}
 ---
 # when board is done planning, send a notification, but dont instantly move the ac…
 
