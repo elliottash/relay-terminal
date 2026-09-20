@@ -3553,109 +3553,17 @@ void BoardView::layoutListTools()
 
 // ------------------------------------------------------------------------- the model box (#BRD3)
 
-// One row per preset the Switchboard agent could actually run on: a stored key, Relay Free
-// (usable on this machine), or a local model server. Guest rows are harnesses, not endpoints —
-// roles.validate_roles would refuse their ids — so they are never offered.
-static bool boardModelUsable(const QJsonObject &preset)
-{
-    if (preset.value(QStringLiteral("group")).toString() == QStringLiteral("guest"))
-        return false;
-    return preset.value(QStringLiteral("has_stored_key")).toBool()
-           || preset.value(QStringLiteral("local")).toBool()
-           || (preset.value(QStringLiteral("hosted")).toBool()
-               && preset.value(QStringLiteral("available")).toBool());
-}
-
-// A provider row's text, in the pane's model box's words (Pane::conciseModel): the service for
-// Relay Free, whose gateway model ids name nothing a person recognises; the model id otherwise,
-// with "· local" for a server on this machine.
-static QString boardModelText(const QJsonObject &preset)
-{
-    const QString label = preset.value(QStringLiteral("label")).toString();
-    if (preset.value(QStringLiteral("hosted")).toBool())
-        return label;
-    const QString model = preset.value(QStringLiteral("model")).toString();
-    if (model.isEmpty())
-        return label;
-    return model.section(QLatin1Char('/'), -1).toLower()
-           + (preset.value(QStringLiteral("local")).toBool() ? QStringLiteral(" · local") : QString());
-}
+// The rows, the current one and the tooltip are relay::helpermodel's (src/HelperModelBox.h): the
+// Switchboard agent is the *tab's* helper now, and Options, Actions and Sessions carry a box over
+// the same role and the same worker (#FEJQ §30.7). What is left here is this box — built with the
+// filter row so it exists before the panel it ends up in does — and what a pick means to the view.
 
 void BoardView::rebuildModelBox()
 {
     if (!m_modelBox)
         return;
     const QSignalBlocker block(m_modelBox);
-    m_modelBox->clear();
-    // The role as the worker last resolved it decides the current row, and its warning or note
-    // rides in the tooltip (a picked provider with no stored key falls back to Main, 13.7).
-    const QJsonObject role = m_roles.value(QStringLiteral("switchboard")).toObject();
-    const QString main = m_tiers.value(QStringLiteral("main")).toObject()
-                             .value(QStringLiteral("model")).toString();
-    m_modelBox->addItem(main.isEmpty() ? QStringLiteral("Follow Main")
-                                       : QStringLiteral("Follow Main — %1").arg(main),
-                        QStringLiteral("tier:"));
-    // Flash and Lite, with the model each lands on right now. A tier whose provider has no key
-    // steps towards Main — its `using` says so — and its row names the tier alone, with the
-    // tier's note as the row's own tooltip.
-    for (const QString &tier : {QStringLiteral("flash"), QStringLiteral("lite")}) {
-        const QJsonObject entry = m_tiers.value(tier).toObject();
-        if (entry.isEmpty())
-            continue;
-        const QString name = tier.left(1).toUpper() + tier.mid(1);
-        const QString model = entry.value(QStringLiteral("model")).toString();
-        const bool fellBack = entry.value(QStringLiteral("using")).toString() != tier;
-        m_modelBox->addItem(fellBack || model.isEmpty()
-                                ? name
-                                : QStringLiteral("%1 — %2").arg(name, model),
-                            QStringLiteral("tier:") + tier);
-        const QString note = entry.value(QStringLiteral("note")).toString();
-        if (!note.isEmpty())
-            m_modelBox->setItemData(m_modelBox->count() - 1, note, Qt::ToolTipRole);
-    }
-    bool separated = false;
-    for (const QJsonValue &value : m_presets) {
-        const QJsonObject preset = value.toObject();
-        if (!boardModelUsable(preset))
-            continue;
-        if (!separated) {
-            m_modelBox->insertSeparator(m_modelBox->count());
-            separated = true;
-        }
-        m_modelBox->addItem(boardModelText(preset),
-                            QStringLiteral("preset:") + preset.value(QStringLiteral("id")).toString());
-    }
-    // The Model roles dialog, where this same role is a row (its Advanced list) with an effort
-    // and a model id of its own — reachable with no provider at all, when it is needed most.
-    m_modelBox->insertSeparator(m_modelBox->count());
-    m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model roles…"),
-                        QStringLiteral("gear"));
-
-    // Which row is current: a tiered role reports the preset its tier landed on (`preset` is
-    // where it answered, not what was picked), so the tier wins; only a role with no tier and a
-    // preset of its own is pinned to a provider. Everything else follows Main.
-    QString wanted = QStringLiteral("tier:");
-    const QString preset = role.value(QStringLiteral("preset")).toString();
-    const QString tier = role.value(QStringLiteral("tier")).toString();
-    if (tier == QStringLiteral("flash") || tier == QStringLiteral("lite"))
-        wanted = QStringLiteral("tier:") + tier;
-    else if (tier.isEmpty()
-             && role.value(QStringLiteral("source")).toString() == QStringLiteral("configured")
-             && !preset.isEmpty())
-        wanted = QStringLiteral("preset:") + preset;
-    if (m_modelBox->findData(wanted) < 0)
-        wanted = QStringLiteral("tier:");
-    m_modelBox->setCurrentIndex(qMax(0, m_modelBox->findData(wanted)));
-
-    m_modelTip = QStringLiteral("The model the Switchboard agent runs on. A pick writes the "
-                                "switchboard role — the same setting the Model roles dialog "
-                                "edits — and reconfigures every open board's worker.");
-    const QString warning = role.value(QStringLiteral("warning")).toString();
-    const QString note = role.value(QStringLiteral("note")).toString();
-    if (!warning.isEmpty())
-        m_modelTip += QStringLiteral("\n\n") + warning;
-    if (!note.isEmpty())
-        m_modelTip += QStringLiteral("\n\n") + note;
+    m_modelTip = helpermodel::fill(m_modelBox, m_modelBoxState);
     m_modelBox->updateGeometry();   // the collapsed box's width follows the new current row
     syncModelBoxEnabled();
 }
@@ -3668,10 +3576,7 @@ void BoardView::syncModelBoxEnabled()
         return;
     const bool busy = !m_cardTurns.isEmpty() || cleanupRunning();
     m_modelBox->setEnabled(!busy);
-    m_modelBox->setToolTip(m_modelTip + (busy ? QStringLiteral("\n\nDisabled while the agent is "
-                                                               "working — a pick reconfigures its "
-                                                               "worker, which cannot move mid-turn.")
-                                              : QString()));
+    m_modelBox->setToolTip(m_modelTip + (busy ? helpermodel::busyNote() : QString()));
 }
 
 // The boxes follow the sections the model has right now — board.yaml's columns, whatever extra
@@ -3941,27 +3846,16 @@ void BoardView::handleEvent(const QJsonObject &event)
     }
     // The model box's events (#BRD3). They name no board and carry no `root` — they are about
     // the worker, not the cards — so they pass the guard above.
-    if (type == QStringLiteral("configured")) {
-        m_roles = event.value(QStringLiteral("roles")).toObject();
-        m_tiers = event.value(QStringLiteral("tiers")).toObject();
+    // `configured`, `presets` and `model_roles` — the last sent after a configure in which a role
+    // fell back (protocol 13), with the warning the box's tooltip carries. The holder takes all
+    // three, so the board and the helper panels read them the same way (#FEJQ).
+    if (m_modelBoxState.take(type, event)) {
         // Asked on every configure, not once: a stored or removed key reconfigures the workers
         // (RelayWindow::reconfigureBoardWorkers), and the answer is how the box hears of it.
-        send({{QStringLiteral("type"), QStringLiteral("presets")}});
-        rebuildModelBox();
-        return;
-    }
-    if (type == QStringLiteral("presets")) {
-        m_presets = event.value(QStringLiteral("presets")).toArray();
-        if (m_chat)
-            m_chat->setPresets(m_presets);   // the composer's microphone reads these (#8YQ9)
-        rebuildModelBox();
-        return;
-    }
-    // Sent after a configure in which a role fell back (protocol 13): the table again, with the
-    // warning the box's tooltip carries.
-    if (type == QStringLiteral("model_roles")) {
-        m_roles = event.value(QStringLiteral("roles")).toObject();
-        m_tiers = event.value(QStringLiteral("tiers")).toObject();
+        if (type == QStringLiteral("configured"))
+            send({{QStringLiteral("type"), QStringLiteral("presets")}});
+        if (m_chat && type == QStringLiteral("presets"))
+            m_chat->setPresets(m_modelBoxState.presets);   // the microphone reads these (#8YQ9)
         rebuildModelBox();
         return;
     }

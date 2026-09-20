@@ -55,7 +55,10 @@ target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 # get it. relay-toollabel: a turn's progress line is the call's concise line (protocol 23).
 # relay-voice: the composer has the same microphone chip as a terminal pane's (#8YQ9) — the
 # capture process and where a transcript lands in the text, nothing else.
-add_library(relay-helperchat STATIC src/HelperChat.cpp src/HelperChat.h)
+add_library(relay-helperchat STATIC src/HelperChat.cpp src/HelperChat.h
+    # The model box over the `switchboard` role: one set of rows for all four panels (#BRD3, #FEJQ).
+    src/HelperModelBox.cpp src/HelperModelBox.h
+    src/CurrentTextComboBox.h)   # the box itself, shared with the terminal pane
 target_include_directories(relay-helperchat PUBLIC src)
 target_link_libraries(relay-helperchat PUBLIC relay-editor relay-toollabel relay-voice ${RELAY_QT}::Widgets)
 target_compile_options(relay-helperchat PRIVATE -Wall -Wextra -Wpedantic)

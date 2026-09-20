@@ -21,6 +21,7 @@
 
 #include "BoardModel.h"
 #include "BoardSections.h"
+#include "HelperModelBox.h"   // the model box's rows, shared with the helper panels (#BRD3, #FEJQ)
 
 class QComboBox;
 class QFrame;
@@ -322,8 +323,10 @@ private:
     // through onModelPick. Disabled while a card turn or a cleanup runs, because the worker
     // refuses a configure mid-turn.
     CurrentTextComboBox *m_modelBox = nullptr;
-    QJsonArray m_presets;               // the last `presets` event's rows
-    QJsonObject m_roles, m_tiers;       // the last `configured` / `model_roles` summaries
+    // What the model box is built from: the `presets`, `configured` and `model_roles` events, in
+    // the holder the three helper panels use as well (src/HelperModelBox.h, #FEJQ) — four boxes
+    // over one role and one worker have to agree about which model that is.
+    relay::helpermodel::State m_modelBoxState;
     QString m_modelTip;                 // the box's tooltip without the busy line
     void rebuildModelBox();
     void syncModelBoxEnabled();
