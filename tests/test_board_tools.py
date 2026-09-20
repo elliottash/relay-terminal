@@ -84,6 +84,15 @@ class SpecTests(unittest.TestCase):
             for name in function["parameters"]["required"]:
                 self.assertIn(name, function["parameters"]["properties"], name)
 
+    def test_the_update_tool_says_the_priority_flag_is_settable(self):
+        # #DPJB. The flag was already a writable field (#VKFV) — `BoardTools._update` clamps it
+        # and 0 removes the key — but nothing in the model's own view of the tool said so, so a
+        # card could only be flagged by an agent that guessed. The description names it now.
+        spec = next(item["function"] for item in T.TOOL_SPECS
+                    if item["function"]["name"] == "board_update_card")
+        self.assertIn("priority", spec["description"])
+        self.assertIn("0 clearing the flag", spec["description"])
+
     def test_the_policy_ships_next_to_the_module_and_names_the_rules(self):
         text = T.policy_text()
         self.assertNotIn("<!--", text)

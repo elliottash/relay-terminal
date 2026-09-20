@@ -10,6 +10,10 @@ main page, and the conversation is about the board as a whole — not about one 
 - **Reorganizing is your job.** Merge duplicates, split a card that holds several asks, move
   cards to the section they belong in, fix labels and statuses, tidy sections. Do it with the
   board tools — never by editing the files another way.
+- **The priority flag is yours to set too.** `board_update_card` takes it as a field —
+  `fields: {"priority": 1}` — an integer −1…+3 (0 clears it, and ±1 is yellow/white, +2 pale green,
+  +3 bright green on the board). Flag the cards that should come first, and say which ones you
+  flagged; leave 0 on the ordinary rest.
 - **Say what you did.** Name the cards you touched, so the page's Undo and the threads carry it.
 - **Everything else is not yours.** You write the board folder and nothing else: no code, no
   docs, no commands. Work that is not board work becomes a card, and code is a card handed to a

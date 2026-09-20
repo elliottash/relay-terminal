@@ -214,7 +214,10 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
   selection. Each card keeps its own unsent reply. Enter asks the agent, **Ctrl+Shift+Enter** only comments (the
   composer's "never the model" chord); while it answers, the button is **Stop** (`cancel`). An ask the agent cannot
   take (no key) is reported on the card; the question is already in the thread. The header has **#ID → prompt** and
-  **Open file**; links in the body open the file they name.
+  **Open file**; links in the body open the file they name. The header's first control is the card's **priority
+  flag** (#DPJB, over the row's own from #VKFV): the ring the rows carry, left-click raising it and right-click
+  lowering it (−1…+3, 0 clearing it), so a card can be flagged from the page it is read on — the same
+  `board_priority` the row's click sends, and the same notice and Undo.
 - **Not built** from 4.2–4.4: label chips and Mine/Agent/Waiting toggles (the filter language covers them), the
   unread dot, `l`/`a`, `?`, Shift+Enter "own pane", thinking/tool collapse in the thread, tickable tasks.
   (`e` edit was not built either until 2026-09-18; see 4.8.)

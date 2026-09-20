@@ -179,6 +179,59 @@ void drawPriorityFlag(QPainter &painter, const QRect &box, int priority)
     }
 }
 
+// The same flag as a control of its own (#DPJB), for the card page: the detail's header draws it
+// with the row's own function, and a click shifts it exactly as a click on the row's does — a left
+// click raises, a right click lowers. `onStep` is wired to `BoardView::setCardPriority`, so the page
+// and the row write through one path and neither can drift from the other (clamped −1…+3).
+class PriorityFlagButton final : public QWidget {
+public:
+    explicit PriorityFlagButton(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("boardCardFlag"));
+        setCursor(Qt::PointingHandCursor);
+        setFocusPolicy(Qt::NoFocus);
+        setFixedSize(20, 20);           // the row's 15 px box, with the click's own room
+        setPriority(0);
+    }
+
+    int priority() const { return m_priority; }
+
+    void setPriority(int value)
+    {
+        m_priority = value;
+        // The row's own words, so the tooltip reads the same wherever the flag is clicked.
+        setToolTip(QStringLiteral("Priority %1 — left-click raises the flag, right-click lowers it")
+                       .arg(value > 0 ? QStringLiteral("+%1").arg(value)
+                                      : value < 0 ? QStringLiteral("−1")
+                                                  : QStringLiteral("0")));
+        update();
+    }
+
+    std::function<void(int step)> onStep;
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        drawPriorityFlag(painter, rect(), m_priority);
+    }
+
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        const bool left = event->button() == Qt::LeftButton;
+        if ((left || event->button() == Qt::RightButton) && onStep) {
+            onStep(left ? 1 : -1);
+            event->accept();
+            return;
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+private:
+    int m_priority = 0;
+};
+
 // The room the list keeps at its right: its frame plus the width a vertical scrollbar takes,
 // whether or not one is showing.
 int rowReserve(const QListWidget *list)
@@ -1286,6 +1339,14 @@ public:
 
         auto *top = new QHBoxLayout;
         top->setSpacing(6);
+        // The card's priority flag, at the head of the header exactly as at the head of a row
+        // (#DPJB): the list's own control, so a card can be flagged from the page it is read on.
+        m_flag = new PriorityFlagButton(this);
+        m_flag->onStep = [this](int step) {
+            if (onPriority)
+                onPriority(step);
+        };
+        top->addWidget(m_flag);
         m_ref = new QLabel(this);
         m_ref->setObjectName(QStringLiteral("boardCardRef"));
         top->addWidget(m_ref);
@@ -1612,6 +1673,9 @@ public:
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void(const QString &what, const QString &value)> onMove;
+    // One click on the card page's priority flag (#DPJB): +1 for a left click, −1 for a right
+    // one, exactly as the row's flag reports it. The view clamps and writes `board_priority`.
+    std::function<void(int step)> onPriority;
     // A path relative to the workspace (the card file) or to the card (a link in its body).
     std::function<void(const QString &path)> onOpenPath;
     // A `board_update` patch and the hash the edit started from, so the worker can refuse a
@@ -1623,6 +1687,9 @@ public:
     std::function<void()> onDeleteHint;      // the Delete button was clicked, not the key
 
     QString cardId() const { return m_id; }
+    // The flag the view just wrote (#DPJB), shown at once so the disc turns under the click
+    // rather than waiting for the worker's `board_changed`.
+    void setPriority(int value) { m_flag->setPriority(value); }
     QString path() const { return m_path; }
     bool editing() const { return m_editing; }
     QString hash() const { return m_hash; }
@@ -1794,6 +1861,8 @@ public:
             m_issueEdit->setPlainText(issue);
             m_titleEdit->setText(title);
         }
+        // `m_id` is set, so the flag is this card's; the row read the same key (#VKFV/#DPJB).
+        m_flag->setPriority(front.value(QStringLiteral("priority")).toInt());
         m_ref->setText(QStringLiteral("#") + m_id);
         m_title->setText(title);
         const int status = m_status->findData(card.value(QStringLiteral("status")).toString());
@@ -2687,6 +2756,7 @@ private:
         }
     }
 
+    PriorityFlagButton *m_flag = nullptr;   // the card page's priority flag (#DPJB)
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
     QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
     QComboBox *m_status = nullptr, *m_tab = nullptr;
@@ -3104,6 +3174,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             move.insert(QStringLiteral("section"), QString());
         send(move);
     };
+    // The card page's flag click (#DPJB) goes through the row's own function: one clamp, one
+    // `board_priority`, one notice, one undo record for both places the flag can be clicked.
+    m_detail->onPriority = [this](int step) { setCardPriority(m_detail->cardId(), step); };
     m_detail->onEdit = [this](const QJsonObject &patch, const QString &baseHash) {
         saveCardEdit(patch, baseHash);
     };
@@ -4554,6 +4627,10 @@ void BoardView::setCardPriority(QString id, int step)
     updated.priority = priority;
     m_model.upsert(updated);
     rebuild();
+    // The page shows the click at once if it is the card on screen (#DPJB); the worker's
+    // `board_changed` then confirms it, the way it settles the row.
+    if (detailOpen() && m_detail->cardId() == id)
+        m_detail->setPriority(priority);
     static const char *const names[5] = {"−1", "0", "+1", "+2", "+3"};
     const QString requestId = nextRequestId();
     m_pendingNotes.insert(requestId,

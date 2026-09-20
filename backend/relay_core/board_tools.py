@@ -196,6 +196,10 @@ TOOL_SPECS = [
          "Change a card's front matter fields or its body sections. Pass the `hash` from board_read as "
          "base_hash; the write is refused if the file changed meanwhile. id, type, status, rank, created, "
          "source and private are never writable here (status and rank move; the rest are the record). "
+         "`fields` carries the rest of the front matter — labels, assignee, waiting_on, milestone, "
+         "component and the like — and it is how a card's priority flag is set: `{\"priority\": 1}` is "
+         "an integer −1…+3 with 0 clearing the flag (#VKFV/#DPJB), the same flag the owner clicks on the "
+         "row and the card page. "
          "Rewriting text the user wrote is allowed, and the old and the new text are recorded in the "
          "card's thread so the change can be reverted.",
          {"id": _ID_ARG,

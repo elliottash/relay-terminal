@@ -1,0 +1,20 @@
+01 card page open:     #9ZAH, ref label at x=760 y=150
+01 flag click point:   x=744 y=150 (16 px left of the id)
+01 file on open:       priority: 2  (the fixture's +2)
+01 flag colours at +2: 1A1210:496 B0D6B2:52 566151:8 
+01 header words:       | @ #92ZAH #ID > prompt (t) Open file (0) x |
+02 file after up:      priority: 3  (expect priority: 3)
+02 flag colours at +3: 1A1210:496 7EC88C:52 425B42:8 
+02 notice after up:    Flagged #9ZAH at +3
+02b file after clamp:  priority: 3  (expect priority: 3, unchanged)
+03 after right click 1: priority: 2  colours: 1A1210:496 B0D6B2:52 566151:8 
+03 after right click 2: priority: 1  colours: 1A1210:496 ECE6E0:52 6E6764:8 
+03 after right click 3: (no priority key)  colours: 1A1210:520 422E21:8 30211A:8 
+03 after right click 4: priority: -1  colours: 1A1210:496 E5C07B:52 6C583B:8 
+03 notice at 0 (3rd):  Cleared the flag on #9ZAH
+03 notice at -1 (4th): Flagged #9ZAH at a1
+03 thread lines:       6 worker entries on the card
+06 file after Ctrl+Z:  (no priority key)  (expect the -1 undone: no key)
+05 alpha row flag:     priority: 1  (expect priority: 1)
+05 alpha page ref:     x=761 y=151, flag colours at +1: 1A1210:496 ECE6E0:52 6E6764:8 
+05b alpha after down:  (no priority key)  (expect the +1 cleared)
