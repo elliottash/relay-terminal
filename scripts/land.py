@@ -1484,6 +1484,11 @@ def read_message(value):
     try:
         if candidate.is_file():
             value = candidate.read_text(encoding="utf-8")
+        elif ("/" in value or value.endswith((".txt", ".md"))) and not any(c.isspace() for c in value):
+            # A path to a message file that does not exist would land as the subject line
+            # (134068fe, 2026-09-20: a `cat > msg.txt` earlier in an `&&` chain never ran).
+            raise Fail(f"-m {value} looks like a message file, and there is no such file: "
+                       "write it first, or pass the message text itself")
     except OSError:
         pass
     if not value.strip():

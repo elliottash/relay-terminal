@@ -225,6 +225,19 @@ class LandingHunks(LandCase):
         self.land("commit", "mine", "-m", "new file")
         self.assertEqual(self.tip_text("new/thing.py"), "print('hi')\n")
 
+    def test_a_message_file_that_does_not_exist_is_refused_not_landed_as_the_subject(self):
+        # 134068fe (2026-09-20): `cat > msg.txt` earlier in an `&&` chain never ran, and the
+        # path landed on main as the commit's subject line.
+        self.land("begin", "mine", "new/thing.py")
+        write(self.repo / "new/thing.py", "print('hi')\n")
+        tip = git(self.repo, "rev-parse", "main")
+        proc = self.land("commit", "mine", "-m", str(self.repo / "no-such-msg.txt"), expect=None)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("looks like a message file", proc.stderr)
+        self.assertEqual(git(self.repo, "rev-parse", "main"), tip)
+        # The same text with a space in it is a message, as before.
+        self.land("commit", "mine", "-m", "a message with a / in it")
+
     def test_a_file_written_before_begin_is_still_a_new_file(self):
         # How a session bootstraps a brand-new script: write it, then claim it.
         write(self.repo / "scripts/tool.py", "one\ntwo\n")
