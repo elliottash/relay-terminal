@@ -6,7 +6,7 @@ assignee: agent
 implemented_by: kimi/kimi-k3
 rank: zzzzzzzzzzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-separate-switchboards-across-tabs/], related: [], github: null}
+links: {plans: [], commits: [a17ef6ad], evidence: [docs/qa_evidence/2026-09-20-separate-switchboards-across-tabs/], related: [], github: null}
 ---
 # alloe separate switchboards across tabs
 

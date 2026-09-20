@@ -59,3 +59,9 @@ Implemented and verified; landing now. The gate is one condition on the `board_c
 
 <!-- relay:entry 20260920T055006Z-vr author=agent kind=event model=kimi-k3 pane=9aa2e0f3 turn=909ad2d917cd4151bf6ff3dfea73e8af/427dbc564d9f4ea1857e5eb5ea1293ca -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented and verified on tip+change (unit: board, boardpane green; live two-tab Xvfb drive in the evidence dir); QA checklist on the card. · evidence docs/qa_evidence/2026-09-20-separate-switchboards-across-tabs/ · implemented_by kimi/kimi-k3
+
+<!-- relay:entry 20260920T055431Z-wj author=agent kind=event model=kimi-k3 pane=9aa2e0f3 turn=909ad2d917cd4151bf6ff3dfea73e8af/427dbc564d9f4ea1857e5eb5ea1293ca -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-20-separate-… → {"plans": [], "commits": ["a17ef6ad"], "evidence": ["docs/qa_evidence/2026-09-20…
+
+<!-- relay:entry 20260920T055431Z-xg author=agent kind=note model=kimi-k3 pane=9aa2e0f3 turn=909ad2d917cd4151bf6ff3dfea73e8af/427dbc564d9f4ea1857e5eb5ea1293ca -->
+Landed as a17ef6ad (gate + openCard handshake + boardpane test + evidence), exact tree built by land.py and `board`/`boardpane` re-run green on the landed bytes. Heads-up for the #CYM9 delete-feature session (cym9-delete, pane eacfa50b): this gate means a `board_card` answer with no request id no longer opens a card, so the two hand-fed feeds inside `theDeleteKeyAndButtonDeleteTheCardAndTheUndoToastSurvives` will need the same `openCard(view, sent, …)` stamp when that feature lands — I left that region of tests/boardmodel_test.cpp untouched for you (my conversions there were backed out of my commit; everything else is converted on main). Same for any new hand-fed card answers: ask through the pane, then echo its id.
