@@ -130,6 +130,12 @@ Direction dropEdge(const QPoint &local, const QSize &size);
 // (Ctrl+H, which hides the prompt box) shrank a pane in a three-pane row to almost nothing.
 QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane);
 
+// Every splitter inside `root`'s widget tree: `root` itself if it is one, then each splitter
+// nested inside it, depth first in splitter-child order. `enclosingSplitters` walks up from one
+// pane to the splitters around it; this walks down from a whole tab, so equalizing every entry
+// tiles the page evenly at every level a drag could have left uneven, not just one splitter.
+QList<QPointer<QSplitter>> splittersIn(QWidget *root);
+
 // ----- docking a pane beside a neighbour (owner, 2026-09-19) -----------------------------------
 //
 // Inserting a pane into a splitter that already runs that way used to give every child an equal

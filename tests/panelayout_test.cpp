@@ -356,6 +356,26 @@ private Q_SLOTS:
         QCOMPARE(enclosingSplitters(outer).size(), 0);
     }
 
+    // ----- equalizing a whole page (owner report, 2026-09-19: pane sizes jiggle) ----------------
+
+    void splittersInWalksNestedSplittersDepthFirst() {
+        auto *outer = new QSplitter(Qt::Vertical);
+        auto *inner = new QSplitter(Qt::Horizontal);
+        inner->addWidget(new QLabel(QStringLiteral("A")));
+        inner->addWidget(new QLabel(QStringLiteral("B")));
+        outer->addWidget(inner);
+        outer->addWidget(new QLabel(QStringLiteral("C")));
+        std::unique_ptr<QSplitter> owner(outer);
+        const auto splitters = splittersIn(outer);
+        QCOMPARE(splitters.size(), 2);
+        QCOMPARE(splitters.at(0).data(), outer);
+        QCOMPARE(splitters.at(1).data(), inner);
+        QCOMPARE(splittersIn(nullptr).size(), 0);
+        // A plain widget with no splitter in it at all.
+        QLabel lone(QStringLiteral("D"));
+        QCOMPARE(splittersIn(&lone).size(), 0);
+    }
+
     // Taking control of the terminal hides the prompt box, which changes that pane's minimum size.
     // The splitter redistributes every pane when that happens; these are the sizes that go back.
     void restoreSizesPutsThePanesBackAfterAMinimumChanges() {

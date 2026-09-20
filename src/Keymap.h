@@ -232,6 +232,11 @@ private:
         add("pane.moveUp", "pane", "Move pane up (past the page edge, into a row of its own)", {QStringLiteral("Ctrl+Alt+Up")});
         add("pane.moveDown", "pane", "Move pane down (straight after a left/right move, beneath that neighbor; past the page edge, into a row of its own)", {QStringLiteral("Ctrl+Alt+Down")});
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
+        // Every splitter in the tab back to equal shares, top to bottom (owner report, 2026-09-19:
+        // pane sizes jiggle) -- a way back to a tidy layout after drags leave the panes uneven,
+        // digit 0 for "reset the sizes"; no other action binds a digit so this is free in all four
+        // presets, and Ctrl+Alt matches the rest of the pane-arranging family (moveLeft and friends).
+        add("pane.equalize", "pane", "Equalize pane sizes: every splitter in this tab back to equal shares", {QStringLiteral("Ctrl+Alt+0")});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});

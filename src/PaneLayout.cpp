@@ -188,6 +188,19 @@ QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane) {
     return splitters;
 }
 
+QList<QPointer<QSplitter>> splittersIn(QWidget *root) {
+    QList<QPointer<QSplitter>> splitters;
+    if (!root) return splitters;
+    if (auto *splitter = qobject_cast<QSplitter *>(root)) {
+        splitters.append(splitter);
+        for (int i = 0; i < splitter->count(); ++i) splitters += splittersIn(splitter->widget(i));
+        return splitters;
+    }
+    const auto children = root->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QWidget *child : children) splitters += splittersIn(child);
+    return splitters;
+}
+
 std::optional<Direction> moveToward(const QRect &pane, const QRect &anchor) {
     if (pane.right() <= anchor.left()) return Direction::Right;   // the anchor is on its right
     if (pane.left() >= anchor.right()) return Direction::Left;

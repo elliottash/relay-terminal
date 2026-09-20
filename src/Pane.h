@@ -14455,6 +14455,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // almost nothing (#G152), and the saved window layout stored that collapsed size. Run the
     // change with the enclosing splitters' sizes frozen and put them back, once straight away and
     // once after the layout has run, because the new minimum only reaches the splitter then.
+    //
+    // The queue strip's bubble height tracks the terminal's own height (bubbleSpan()), so a live
+    // splitter drag calls this on every resize tick while the strip is showing. The deferred
+    // restore queued by an earlier tick used to fire after a later tick had already moved the
+    // splitter on: it stamped that tick's now-stale sizes back over the current drag position,
+    // one frame late, every tick — the reported jiggle while resizing. `m_sizeGuardSerial` is
+    // bumped on every call and captured by the deferred restore, which skips itself once a newer
+    // call has run: only the latest tick's restore is left to fire.
     void keepPaneSizes(const std::function<void()> &change) {
         const QList<QPointer<QSplitter>> splitters = relay::panes::enclosingSplitters(this);
         QList<QList<int>> sizes;
@@ -14462,7 +14470,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         change();
         auto restore = [splitters, sizes] { relay::panes::restoreSizes(splitters, sizes); };
         restore();
-        if (!splitters.isEmpty()) QTimer::singleShot(0, this, restore);
+        const quint64 serial = ++m_sizeGuardSerial;
+        if (!splitters.isEmpty())
+            QTimer::singleShot(0, this, [this, serial, restore] { if (serial == m_sizeGuardSerial) restore(); });
     }
 
     void setNative(bool enabled, bool cancelLine = true) {
@@ -15050,6 +15060,7 @@ private:
     QPoint m_clickOrigin;
     int m_waitTicks = 0, m_echoTicks = 0;
     quint64 m_askSerial = 0;
+    quint64 m_sizeGuardSerial = 0;   // keepPaneSizes(): tells a stale deferred restore from the latest one
     QFrame *m_queueStrip = nullptr;
     bool m_transcriptDismissed = false;
     QTimer m_secretPoll;

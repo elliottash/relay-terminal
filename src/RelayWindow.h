@@ -1074,6 +1074,7 @@ private:
         // toward (#Q7Y9); otherwise it moves the pane down as it always did.
         else if (id == QStringLiteral("pane.moveDown")) { if (!dockBeneathNeighbor()) moveActive(relay::panes::Direction::Down); }
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
+        else if (id == QStringLiteral("pane.equalize")) equalizeActivePage();
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
         else if (id == QStringLiteral("closed.list")) openClosedList();
@@ -3139,6 +3140,7 @@ private:
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
+        items << actionItem(panes, QStringLiteral("Equalize pane sizes"), QStringLiteral("Every splitter in this tab back to equal shares"), QStringLiteral("pane.equalize"));
         items << actionItem(panes, QStringLiteral("Move tab to new window"), QStringLiteral("Keeps its panes running"), QStringLiteral("tab.moveToNewWindow"));
         items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Then ↓ docks it beneath · or drag the ⠿ grip"), QStringLiteral("pane.moveLeft"));
         items << actionItem(panes, QStringLiteral("Move pane right"), QStringLiteral("Then ↓ docks it beneath"), QStringLiteral("pane.moveRight"));
@@ -6727,6 +6729,24 @@ private:
         updateTitles();
         // No beneath-dock chord to arm (#Q7Y9): it docks the pane beneath the neighbour it just
         // moved toward, and past the page's edge there is no neighbour on that side.
+    }
+
+    // Ctrl+Alt+0 (owner report, 2026-09-19: pane sizes jiggle): every splitter in the active tab
+    // back to equal shares, top to bottom, so a page a drag has left lopsided goes back to a tidy
+    // grid in one key. The same "identical
+    // entries, let Qt turn them into ratios of the real width" trick insertBeside's equal-shares
+    // fallback and movePastPageEdge's outer wrapper use, just applied to every splitter in the
+    // page rather than one.
+    void equalizeActivePage() {
+        QWidget *page = m_active ? pageOf(m_active) : (m_tabs ? m_tabs->currentWidget() : nullptr);
+        const QList<QPointer<QSplitter>> splitters = relay::panes::splittersIn(page);
+        for (const auto &splitter : splitters) {
+            if (!splitter) continue;
+            QList<int> equal;
+            for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
+            splitter->setSizes(equal);
+        }
+        if (!splitters.isEmpty()) notice(QStringLiteral("Panes equalized"), 2000);
     }
 
     QWidget *neighborOf(QWidget *current, relay::panes::Direction direction) const {
