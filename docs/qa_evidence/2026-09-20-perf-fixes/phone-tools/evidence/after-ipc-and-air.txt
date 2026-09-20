@@ -1,0 +1,65 @@
+# #3H5T item 2, after 13772bdf. Raw readings, 2026-09-20, Pixel 8 on a LAN share.
+
+== GUI -> worker, whole session: the share no longer flips the option ==
+$ grep -o '"stream_tool_output":[a-z]*' gui2worker.jsonl | sort | uniq -c
+      1 "stream_tool_output":false          # the configure, and nothing else
+
+== worker -> GUI, one ztools20x2 turn (20 calls x 2,000 lines) ==
+--- worker2gui.jsonl [426394:457269] bytes=30874
+message                       n     bytes      avg   share
+tool_result(counted)         20      8971      448   29.1%
+tool_started                 20      7651      382   24.8%
+turn_summary                  1      5872     5872   19.0%
+tool_output(counted)         20      1820       91    5.9%
+requests                      3      1807      602    5.9%
+context                      11      1551      141    5.0%
+delta                        21      1031       49    3.3%
+status                       11       684       62    2.2%
+route                         2       632      316    2.0%
+queue_changed                 3       416      138    1.3%
+queued                        1       152      152    0.5%
+agent_started                 1       116      116    0.4%
+agent_finished                1        89       89    0.3%
+done                          1        83       83    0.3%
+(before, the same scene with the share open: 1,356,185 B, 81 % of it tool text)
+
+== on the air, the same turn, counted inside the live page ==
+rx by RRP type:
+  screen_snapshot 159 x 1,186,639      # finding 1, not this fix; the marker loop scrolls 1/s
+  history         159 x    40,824      # finding 3, not this fix
+  agent            74 x    23,882
+  pane_state        6 x     6,083
+  panes             2 x       763
+every worker event the phone received:
+  tool_started    20 x 8,871     status         11 x 1,542
+  turn_summary     1 x 5,437     queue_changed   3 x   613
+  delta           21 x 2,585     queued          1 x   216
+  context         11 x 2,253     agent_started   1 x   188
+  requests         3 x 1,861     agent_finished  1 x   161
+                                 done            1 x   155
+  -- no tool_output, no tool_result --
+(before: agent x90 = 1,360,576 B, 93 % of everything the phone received)
+
+== the same turn without the marker loop, comparable with the profile's scenario (b) ==
+  screen_snapshot  14 x 107,161
+  agent            76 x  24,314
+  pane_state        4 x   4,013
+  history           2 x   1,447
+  screen_diff       1 x   1,136
+  panes             1 x     380
+  total                 138,451 B       (before: 1,460,642 B)
+
+== desktop -> phone paint, ZG markers, same turn ==
+{"n":127,"min":7,"median":72,"p90":123,"max":319,"over5s":0}
+all (ms): 7 10 12 13 16 16 16 17 17 17 18 18 19 20 20 21 22 24 25 26 26 29 29 32 32 33 36 36 37
+37 39 40 42 42 42 43 44 44 46 50 52 52 53 54 54 54 56 57 57 59 60 61 62 62 63 63 64 64 65 69 69
+70 71 72 72 72 72 74 75 75 76 77 77 78 80 80 82 83 84 85 87 88 88 90 92 94 95 96 97 97 98 100 101
+102 102 103 104 105 106 106 107 108 109 109 109 110 110 111 111 112 116 117 121 122 123 124 133
+134 140 140 146 150 150 180 184 240 319
+(before: n=45, median 100, p90 149, max 3,100; three markers 1.1-3.1 s late)
+
+== what the phone showed while all that did NOT arrive ==
+thread-body.hidden == true    thread-body.children.length == 0    terminal-pane.hidden == false
+#screen-wrap holds all twenty of the desktop's own lines:
+  "> ran cat . 2,000 lines . exit 0"   x20
+  "All batches done."   "20 tool calls . 1 s  (Ctrl+click)"
