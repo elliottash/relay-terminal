@@ -188,3 +188,6 @@ The four tests that failed on a clean HEAD export after 4f5acd43 are fixed and l
 - `theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTrailer`: this one is worth a second look by whoever owns `verifyTask`. The new `status` argument sits **before** `note`, and `note` has a default — so every old five-argument call still compiles with the owner's note landing in `status`, and builds a brief with no owner note at all. The test was checking a brief nobody would ever be handed. I passed the status by name here and asserted the lane sentence it decides, but any other five-argument caller of `verifyTask` has the same silent bug.
 
 Found by the #8YQ9 session (relay-terminal-a9) against a clean export; it and I are different sessions, and neither owns this card — recorded here because the cause is this one.
+
+<!-- relay:entry 20260920T040434Z-7c author=agent kind=progress model=anthropic/claude-opus-5 pane=relay-terminal-2c -->
+Checked the `verifyTask` callers so nobody has to: there is no other one to fix. `BoardPane.cpp:4674` passes all six (`m_detail->status(), note`), and the only other test caller passes four and asserts text that does not depend on the lane. The trap was real but its blast radius was the one test.
