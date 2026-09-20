@@ -11,7 +11,7 @@ rank: zzzz102
 created: '2026-09-18'
 acceptance: the always-on pane buttons read as brightly as the hover row used to
 source: 'issues/bug_intake.txt, 2026-09-18: "the permanent pane icons should use the brighter outline that we had with the dynamic pane icons"'
-links: {plans: [], commits: [4d8af02], evidence: [docs/qa_evidence/2026-09-18-pane-buttons-brighter-outline/], related: [BVL1], github: null}
+links: {plans: [], commits: [4d8af02], evidence: [docs/qa_evidence/2026-09-18-pane-buttons-brighter-outline/], related: [BVK1], github: null}
 ---
 # The permanent pane buttons should keep the brighter outline
 
@@ -70,7 +70,7 @@ The bevel material stylesheet still lists the **dead** `QFrame#paneChrome[hot="t
 set the `hot` property since `1b270ef`, so that rule has never fired and a Bevel theme's row has no
 moulded edge. The fix is one word, but it sits inside the same diff hunk as session `activepane`'s
 `QWidget#pane[relayActive="true"]` edit, seven lines below, so landing it here would have taken half
-of their change with it. Filed as **#BVL1** and landed on its own once that hunk clears. The row
+of their change with it. Filed as **#BVK1** and landed on its own once that hunk clears. The row
 gets the tile and the outline on a Bevel theme either way; only the moulded edge is missing.
 
 ## QA checklist

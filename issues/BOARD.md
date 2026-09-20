@@ -209,7 +209,7 @@
 | `#W8PC` | [A pane drew one theme's palette on another theme's ground](changes/2026-09-19-a-pane-drew-one-themes-palette-on-anothers.md) | discussing | owner |  |  |
 | `#09HE` | [`cd..` reads as a sentence: the router calls a mistyped command an agent request and drops its note](changes/2026-09-19-cd-reads-as-a-sentence-the-router-calls-a-mistyp.md) | discussing |  |  | [6](threads/09HE.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | planned |  |  | [2](threads/9MYY.md) |
-| `#BVL1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | planned | agent |  |  |
+| `#BVK1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | planned | agent |  |  |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | planned | agent | 0/5 |  |
 | `#K3RT` | [Inline output other than your own line still keeps the colours it was printed in](changes/2026-09-19-inline-output-other-than-your-own-line-does-not.md) | planned | agent |  | [4](threads/K3RT.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  | [1](threads/JN7X.md) |
