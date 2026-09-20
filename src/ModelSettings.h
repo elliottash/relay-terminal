@@ -70,14 +70,6 @@ public:
     std::function<void(QJsonObject request)> send;
     std::function<void()> onRolesChanged;                            // persist + set_agent_options
     std::function<void()> openKeys;
-    // Never called since 2026-09-20. They belonged to the Default provider box and the Main row,
-    // which went to Options › Models with the rest of the tiers (rank 1 of the main list is the
-    // default provider now). Pane::openRolesDialog still assigns all three, and src/Pane.h was
-    // another session's file on the day the rows went, so the members stay — as plain
-    // std::functions nothing invokes — until that assignment is removed; then delete them.
-    std::function<void(const QString &presetId)> onProviderChosen;
-    std::function<void(const QString &model)> onMainModelChosen;
-    std::function<void(const QString &level)> onMainEffortChosen;
 
     // `presets` is the worker's `presets` event: each row carries `models`, that provider's catalog
     // ({id, label, efforts, effort_labels}), which is what a pinned row's model box lists.

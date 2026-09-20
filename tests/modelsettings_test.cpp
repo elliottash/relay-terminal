@@ -335,15 +335,11 @@ private Q_SLOTS:
         QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("local"));
     }
 
-    // Pane::openRolesDialog still assigns the three callbacks of the removed rows (src/Pane.h was
-    // another session's file when the rows went), so they still exist — and nothing calls them, and
-    // nothing in this dialog writes a `tiers/…` key or the pane's own model any more.
+    // Nothing in this dialog writes a `tiers/…` key or the pane's own model any more: the tiers are
+    // the five lists on Options › Models.
     void theRemovedRowsCallbacksAreNeverCalledAndNoTierSettingIsWritten() {
         RolesDialog dialog;
         int calls = 0, changed = 0;
-        dialog.onProviderChosen = [&calls](const QString &) { ++calls; };
-        dialog.onMainModelChosen = [&calls](const QString &) { ++calls; };
-        dialog.onMainEffortChosen = [&calls](const QString &) { ++calls; };
         dialog.onRolesChanged = [&changed] { ++changed; };
         open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
                           QStringLiteral("glm-coding"), {{QStringLiteral("models"), glmModels()}}));
