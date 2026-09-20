@@ -2003,6 +2003,49 @@ private:
             }
             m_active->storeKey(id, key);
         };
+        // The custom-endpoint form (owner, 2026-09-20: "like in warp custom providers"): a name,
+        // an OpenAI-compatible base URL, a key, the model ids. Saved through the pane's worker.
+        auto askForCustom = [this](const QJsonObject &existing) {
+            if (!m_active) return;
+            QDialog dialog(this);
+            dialog.setWindowTitle(existing.isEmpty() ? QStringLiteral("custom provider") : QStringLiteral("edit custom provider"));
+            auto *form = new QFormLayout(&dialog);
+            auto *name = new QLineEdit(existing.value(QStringLiteral("name")).toString());
+            name->setPlaceholderText(QStringLiteral("my proxy"));
+            auto *url = new QLineEdit(existing.value(QStringLiteral("base_url")).toString());
+            url->setPlaceholderText(QStringLiteral("https://host/v1  (OpenAI-compatible; /chat/completions is appended)"));
+            auto *key = new QLineEdit;
+            key->setEchoMode(QLineEdit::Password);
+            key->setPlaceholderText(existing.isEmpty() ? QStringLiteral("API key (optional for a loopback URL)")
+                                                       : QStringLiteral("leave empty to keep the stored key"));
+            QStringList ids;
+            for (const auto &item : existing.value(QStringLiteral("model_ids")).toArray()) ids << item.toString();
+            auto *models = new QLineEdit(ids.join(QStringLiteral(", ")));
+            models->setPlaceholderText(QStringLiteral("model ids, comma-separated; the first is the default"));
+            auto *effort = new QComboBox;
+            effort->addItem(QStringLiteral("none · send no reasoning setting"), QStringLiteral("none"));
+            effort->addItem(QStringLiteral("openrouter · reasoning.effort"), QStringLiteral("openrouter"));
+            effort->addItem(QStringLiteral("kimi · reasoning_effort"), QStringLiteral("kimi"));
+            effort->setCurrentIndex(qMax(0, effort->findData(existing.value(QStringLiteral("effort_style")).toString(QStringLiteral("none")))));
+            form->addRow(QStringLiteral("name"), name);
+            form->addRow(QStringLiteral("base url"), url);
+            form->addRow(QStringLiteral("api key"), key);
+            form->addRow(QStringLiteral("models"), models);
+            form->addRow(QStringLiteral("reasoning"), effort);
+            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            dialog.resize(560, dialog.sizeHint().height());
+            if (dialog.exec() != QDialog::Accepted) return;
+            QJsonObject provider{{QStringLiteral("name"), name->text().trimmed()},
+                                 {QStringLiteral("base_url"), url->text().trimmed()},
+                                 {QStringLiteral("models"), models->text().trimmed()},
+                                 {QStringLiteral("effort_style"), effort->currentData().toString()}};
+            if (!existing.isEmpty()) provider.insert(QStringLiteral("id"), existing.value(QStringLiteral("id")).toString());
+            if (!key->text().trimmed().isEmpty()) provider.insert(QStringLiteral("api_key"), key->text().trimmed());
+            m_active->saveCustomProvider(provider);
+        };
         QList<QJsonObject> listed, waiting;
         for (const auto &value : presets) {
             const QJsonObject preset = value.toObject();
@@ -2010,6 +2053,7 @@ private:
             if (id.isEmpty() || preset.value(QStringLiteral("local")).toBool()) continue;   // Options › Local models
             const bool guest = id.startsWith(QStringLiteral("guest:"));
             const bool usable = preset.value(QStringLiteral("has_stored_key")).toBool()
+                || preset.value(QStringLiteral("custom")).toBool()
                 || (preset.value(QStringLiteral("hosted")).toBool() && preset.value(QStringLiteral("available")).toBool())
                 || (guest && preset.value(QStringLiteral("installed")).toBool(true));
             (usable || id == QStringLiteral("openrouter") ? listed : waiting) << preset;
@@ -2061,7 +2105,8 @@ private:
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
             row.infoUrl = guest ? (id == QStringLiteral("guest:claude") ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
                                                                          : QStringLiteral("https://developers.openai.com/codex"))
-                                : str(preset, "key_url");
+                        : preset.value(QStringLiteral("custom")).toBool() ? str(preset, "base_url")
+                                                                          : str(preset, "key_url");
             row.dragGroup = QStringLiteral("providers");
             row.onDropBefore = [id, curated](const QString &draggedRowId) {
                 relay::models::curation::moveProviderBefore(draggedRowId.section(QLatin1Char(':'), 1), id);
@@ -2084,6 +2129,17 @@ private:
                     if (index == 0) m_active->runLoginCommand(login);
                     else m_active->testKey(id);
                 };
+            } else if (preset.value(QStringLiteral("custom")).toBool()) {
+                // A custom endpoint (§28.6): edit reopens the form, delete removes it and its key.
+                row.buttonTexts = QStringList{QStringLiteral("edit…"), QStringLiteral("test"), QStringLiteral("delete")};
+                row.onButton = [this, id, label, preset, askForCustom](int index) {
+                    if (!m_active) return;
+                    if (index == 0) askForCustom(preset);
+                    else if (index == 1) m_active->testKey(id);
+                    else if (QMessageBox::question(this, QStringLiteral("Delete provider"),
+                                 QStringLiteral("Delete %1 and its stored key?").arg(label)) == QMessageBox::Yes)
+                        m_active->deleteCustomProvider(id);
+                };
             } else {
                 row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
                 if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
@@ -2098,24 +2154,28 @@ private:
             }
             models.rows << row;
         }
-        if (!waiting.isEmpty()) {
-            // The providers without a key, one pick away: the picker lists them with where a key
-            // comes from, and the pick goes straight to the key box.
+        {
+            // The providers without a key, one pick away — and "custom endpoint…" first, always
+            // (owner, 2026-09-20): a name, a base URL, a key and model ids, like Warp's custom
+            // providers. A built-in pick goes straight to the key box.
+            QStringList names; for (const QJsonObject &preset : std::as_const(waiting)) names << str(preset, "provider").toLower();
+            names.removeDuplicates();
             models.rows << buttonRow(QStringLiteral("models.addProvider"), QStringLiteral("+ add provider"),
-                QStringLiteral("%1 more: %2").arg(waiting.size()).arg([&] {
-                    QStringList names; for (const QJsonObject &preset : std::as_const(waiting)) names << str(preset, "provider").toLower();
-                    names.removeDuplicates(); return names.join(QStringLiteral(", ")); }()),
-                QStringLiteral("add…"), [this, waiting, askForKey, str] {
+                names.isEmpty() ? QStringLiteral("a custom endpoint") : QStringLiteral("a custom endpoint, or %1").arg(names.join(QStringLiteral(", "))),
+                QStringLiteral("add…"), [this, waiting, askForKey, askForCustom, str] {
                     QList<relay::agentui::PickerRow> rows;
+                    rows << relay::agentui::PickerRow{{QStringLiteral("custom endpoint…"), QStringLiteral("any OpenAI-compatible url"), QString()},
+                                                      QStringLiteral("A name, a base URL, a key and model ids"), QStringLiteral("custom")};
                     for (const QJsonObject &preset : waiting)
                         rows << relay::agentui::PickerRow{{str(preset, "label").toLower(), str(preset, "plan").toLower(), str(preset, "key_url")},
                                                           str(preset, "note"), str(preset, "id")};
                     const auto result = relay::agentui::pick(this, QStringLiteral("add provider"),
-                        QStringLiteral("Pick a provider; the next step asks for its key."),
+                        QStringLiteral("Pick a provider; the next step asks for its key, or for the endpoint."),
                         {QStringLiteral("provider"), QStringLiteral("plan"), QStringLiteral("key page")}, rows,
-                        {{QStringLiteral("add"), QStringLiteral("add key…"), true}});
+                        {{QStringLiteral("add"), QStringLiteral("add…"), true}});
                     if (result.row < 0) return;
-                    const QJsonObject preset = waiting.at(result.row);
+                    if (result.row == 0) { askForCustom(QJsonObject()); return; }
+                    const QJsonObject preset = waiting.at(result.row - 1);
                     askForKey(str(preset, "id"), str(preset, "label").toLower());
                 });
         }

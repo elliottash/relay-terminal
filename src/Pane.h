@@ -777,6 +777,15 @@ public:
     // Options › Models › "change login" on Claude Code or Codex: the CLI's own login runs in this
     // pane's terminal, where it can open a browser and ask what it asks.
     void runLoginCommand(const QString &command) { submitTerminal(command, true); }
+    // Options › Models › "+ add provider" › custom (owner, 2026-09-20: "like in warp custom
+    // providers"): a named OpenAI-compatible endpoint with a key and model ids becomes a preset row
+    // (protocol §28.6). The worker answers custom_provider_saved / _deleted and pushes `presets`.
+    void saveCustomProvider(const QJsonObject &provider) {
+        send({{"type", "custom_provider_save"}, {"id", QStringLiteral("custom-%1").arg(++m_requestId)}, {"provider", provider}});
+    }
+    void deleteCustomProvider(const QString &providerId) {
+        send({{"type", "custom_provider_delete"}, {"id", QStringLiteral("custom-%1").arg(++m_requestId)}, {"provider_id", providerId}});
+    }
     // Options › Models changed what the picker shows or in what order: every box re-reads it.
     void modelsCurationChanged() { rememberFallback(modelCatalog()); refreshPickers(); }
     // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
@@ -9461,6 +9470,13 @@ private:
             // which is why building the answer is `appcommands::answerFor` and not two copies.
             send(relay::appcommands::answerFor(event, onAppCommand));
         } else if (type == QStringLiteral("keybindings_updated")) {
+        } else if (type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {
+            const QString error = event.value(QStringLiteral("error")).toString();
+            const QString name = event.value(QStringLiteral("provider")).toObject().value(QStringLiteral("name")).toString();
+            if (!error.isEmpty()) status(QStringLiteral("Custom provider: ") + error);
+            else if (type == QStringLiteral("custom_provider_saved")) status(QStringLiteral("Custom provider saved: %1").arg(name));
+            else status(QStringLiteral("Custom provider removed."));
+            relay::SettingsWatch::instance().notify();   // the row appears or goes as the fresh presets land
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
             refreshPresets();   // Options › Models: the provider's models become usable rows
