@@ -1,0 +1,12 @@
+# router.py with the #EB4A fix (working copy)
+
+auto  'another session like that, same issue?'      route=agent valid=False explain_invalid=False invalid_reason='command not found: another'
+agent 'another session like that, same issue?'      route=agent valid=False explain_invalid=False invalid_reason='command not found: another'
+auto  'same issue as before?'                       route=agent valid=False explain_invalid=False invalid_reason='command not found: same'
+agent 'same issue as before?'                       route=agent valid=False explain_invalid=False invalid_reason='command not found: same'
+auto  'the other session too?'                      route=agent valid=False explain_invalid=False invalid_reason='command not found: the'
+agent 'the other session too?'                      route=agent valid=False explain_invalid=False invalid_reason='command not found: the'
+auto  'gti status'                                  route=agent valid=False explain_invalid=True  invalid_reason='command not found: gti'
+agent 'gti status'                                  route=agent valid=False explain_invalid=True  invalid_reason='command not found: gti'
+auto  'git status'                                  route=shell valid=True  explain_invalid=True  invalid_reason=''
+agent 'git status'                                  route=agent valid=True  explain_invalid=True  invalid_reason=''
