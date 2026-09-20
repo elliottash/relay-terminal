@@ -194,6 +194,7 @@ private slots:
     void checkIsUnscopedAndASectionsTriageNamesItsSection();
     void aProblemDraftsAFixInTheComposerWithoutSendingIt();
     void theSurveysImportButtonSendsBoardImportApply();
+    void theSurveyOffersToLookOnGithubAndThatLookWritesNothing();
     void theContextChipFollowsTheConversation();
     void thePageAgentsEventsNeverReachACardThread();
 };
@@ -2868,6 +2869,66 @@ void BoardModelTests::theSurveysImportButtonSendsBoardImportApply()
     QCOMPARE(keys.size(), 1);
     QCOMPARE(keys.first().toString(), QStringLiteral("todo-md:TODO.md#0"));
     QVERIFY(survey->isHidden());
+}
+
+// Owner, 2026-09-19: "if its .git, it should offer to look on github.com for an issues corpus to
+// sync". Looking is `forge_sync_plan` (19.14, landed by #GDQN), which writes to neither side; the
+// sync itself is #ZKR0's surface, so the panel never sends `forge_sync_run`.
+void BoardModelTests::theSurveyOffersToLookOnGithubAndThatLookWritesNothing()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({}));
+    view.handleEvent(QJsonObject{
+        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
+        {"hints", QJsonArray{}}, {"counts", QJsonObject{{"items", 0}}}, {"proposals", QJsonArray{}},
+        {"git", QJsonObject{{"is_repo", true}, {"primary", "origin"}, {"forge", "github"},
+                            {"owner", "relay"}, {"repo", "relay-terminal"},
+                            {"url", "git@github.com:relay/relay-terminal.git"}}}});
+
+    auto *look = view.findChild<QToolButton *>(QStringLiteral("boardChatForgeLook"));
+    QVERIFY(look);
+    sent.clear();
+    look->click();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("forge_sync_plan"));
+    // The repo comes from the probe's own `git` block, so a board with no `github:` in its
+    // board.yaml — which a board created a minute ago will not have — can still be asked.
+    QCOMPARE(sent.last().value("repo").toString(), QStringLiteral("relay/relay-terminal"));
+    const QString request = sent.last().value("id").toString();
+    QVERIFY(!request.isEmpty());
+    QVERIFY(!look->isEnabled());                 // one look at a time
+
+    view.handleEvent(QJsonObject{{"event", "forge_sync_planned"}, {"id", request},
+                                 {"root", "/tmp/workspace/issues"}, {"repo", "relay/relay-terminal"},
+                                 {"dry_run", true}, {"cards", 3}, {"creates", 2}, {"pushed", 0},
+                                 {"pulled", 5}, {"conflicts", 0}, {"needs_confirm", false},
+                                 {"cap", 50}, {"idle", 0}, {"errors", QJsonArray{}}});
+    QVERIFY(look->isEnabled());
+    bool reported = false;
+    for (QLabel *line : view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"))->findChildren<QLabel *>())
+        if (line->text().contains(QStringLiteral("5 issues would become cards"))
+            && line->text().contains(QStringLiteral("Nothing was written")))
+            reported = true;
+    QVERIFY(reported);
+
+    // Looking is the whole offer: the sync that would write is a different card's surface.
+    for (const QJsonObject &message : sent)
+        QVERIFY(message.value("type").toString() != QStringLiteral("forge_sync_run"));
+
+    // A forge that cannot be read says so on the same line, and the button comes back.
+    sent.clear();
+    look->click();
+    const QString second = sent.last().value("id").toString();
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", second}, {"root", "/tmp/workspace/issues"},
+                                 {"code", "forge_auth"}, {"text", "No GitHub credential is stored."}});
+    QVERIFY(look->isEnabled());
+    bool explained = false;
+    for (QLabel *line : view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"))->findChildren<QLabel *>())
+        if (line->text().contains(QStringLiteral("no credential")))
+            explained = true;
+    QVERIFY(explained);
 }
 
 // `context` rides along tagged `chat: true` (19.18) so the page's chip follows the conversation

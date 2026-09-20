@@ -581,6 +581,10 @@ void BoardChatPanel::setChatState(const QJsonObject &chat)
 // same comment on BoardView::updateCleanupButton).
 void BoardChatPanel::setRunning(bool running)
 {
+    // A sync takes the board's busy guard (19.14), which this conversation holds while it turns:
+    // the look waits rather than coming back as a refusal the owner has to read.
+    if (m_forgeLook != nullptr && m_forgeRequest.isEmpty())
+        m_forgeLook->setEnabled(!running);
     m_running = running;
     if (m_send != nullptr) {
         m_send->setText(running ? QStringLiteral("Stop") : QStringLiteral("Send"));
@@ -1049,6 +1053,11 @@ void BoardChatPanel::showSurvey(const QJsonObject &event)
     clearLayout(m_surveyLayout);
     m_import = nullptr;
     m_importKeys.clear();
+    // Deleted with the layout above (deleteLater), so these must not be followed again.
+    m_forgeLook = nullptr;
+    m_forgeResult = nullptr;
+    m_forgeRepo.clear();
+    m_forgeRequest.clear();
 
     const QJsonObject counts = event.value(QStringLiteral("counts")).toObject();
     const QJsonArray hints = event.value(QStringLiteral("hints")).toArray();
@@ -1141,8 +1150,31 @@ void BoardChatPanel::showSurvey(const QJsonObject &event)
         QObject::connect(link, &QLabel::linkActivated, this, [](const QString &target) {
             QDesktopServices::openUrl(QUrl(target));
         });
-        addLine(QStringLiteral("A link only: two-way sync with GitHub issues is not built yet "
-                               "(#GDQN, #ZKR0), so nothing is fetched or synced from here."));
+        // The offer the card asks for (owner, 2026-09-19: "if its .git, it should offer to look
+        // on github.com for an issues corpus to sync"). Looking is `forge_sync_plan` (19.14),
+        // which #GDQN landed: it reads both sides and reports what a sync *would* do, writing to
+        // neither. Bringing them in is the sync, and its surface is #ZKR0 — so this offers the
+        // look and says plainly where the rest lives. Nothing here ever sends `forge_sync_run`.
+        m_forgeRepo = QStringLiteral("%1/%2").arg(git.value(QStringLiteral("owner")).toString(),
+                                                  git.value(QStringLiteral("repo")).toString());
+        auto *lookRow = new QHBoxLayout;
+        lookRow->setSpacing(6);
+        m_forgeLook = new QToolButton(m_survey);
+        m_forgeLook->setObjectName(QStringLiteral("boardChatForgeLook"));
+        m_forgeLook->setText(QStringLiteral("Look for issues on GitHub"));
+        m_forgeLook->setToolTip(QStringLiteral("Count what is on %1 and what a sync would do. It "
+                                               "reads both sides and writes to neither — no card "
+                                               "is created and no issue is touched. Syncing them "
+                                               "is a separate surface (#ZKR0).").arg(m_forgeRepo));
+        m_forgeLook->setCursor(Qt::PointingHandCursor);
+        m_forgeLook->setFocusPolicy(Qt::NoFocus);
+        m_forgeLook->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        m_forgeLook->setEnabled(!m_running);
+        lookRow->addWidget(m_forgeLook, 0);
+        lookRow->addStretch(1);
+        m_surveyLayout->addLayout(lookRow);
+        QObject::connect(m_forgeLook, &QToolButton::clicked, this, [this] { lookForIssues(); });
+        m_forgeResult = addLine(QStringLiteral("Nothing is fetched until you ask."));
     } else if (!git.value(QStringLiteral("url")).toString().isEmpty()) {
         addLine(QStringLiteral("Primary remote (%1): %2")
                     .arg(git.value(QStringLiteral("primary")).toString(),
@@ -1225,8 +1257,99 @@ void BoardChatPanel::showSurvey(const QJsonObject &event)
     m_survey->show();
 }
 
+// `forge_sync_plan` (19.14): what a sync between this board and its GitHub issues *would* do.
+// It is a dry run by construction — the protocol says it "writes to neither side" — so this is
+// safe to offer on a board the owner has only just made, which is exactly when the survey asks.
+void BoardChatPanel::lookForIssues()
+{
+    if (m_forgeRepo.isEmpty() || !m_forgeRequest.isEmpty())
+        return;
+    m_forgeRequest = nextRequestId ? nextRequestId() : QString();
+    if (m_forgeLook != nullptr) {
+        m_forgeLook->setEnabled(false);
+        m_forgeLook->setText(QStringLiteral("Looking\u2026"));
+    }
+    if (m_forgeResult != nullptr)
+        m_forgeResult->setText(QStringLiteral("Asking github.com about %1\u2026").arg(m_forgeRepo));
+    QJsonObject message{{QStringLiteral("type"), QStringLiteral("forge_sync_plan")},
+                        {QStringLiteral("repo"), m_forgeRepo}};
+    if (!m_forgeRequest.isEmpty())
+        message.insert(QStringLiteral("id"), m_forgeRequest);
+    send(message);
+}
+
+// Put the button back, whatever the answer was.
+static void settleForgeButton(QToolButton *button)
+{
+    if (button == nullptr)
+        return;
+    button->setText(QStringLiteral("Look again"));
+    button->setEnabled(true);
+}
+
+void BoardChatPanel::showForgePlan(const QJsonObject &event)
+{
+    m_forgeRequest.clear();
+    settleForgeButton(m_forgeLook);
+    if (m_forgeResult == nullptr)
+        return;
+    const int creates = event.value(QStringLiteral("creates")).toInt();
+    const int pushed = event.value(QStringLiteral("pushed")).toInt();
+    const int pulled = event.value(QStringLiteral("pulled")).toInt();
+    const int conflicts = event.value(QStringLiteral("conflicts")).toInt();
+    QStringList parts;
+    if (pulled > 0)
+        parts << QStringLiteral("%1 issue%2 would become card%2").arg(pulled)
+                     .arg(pulled == 1 ? QString() : QStringLiteral("s"));
+    if (creates > 0)
+        parts << QStringLiteral("%1 card%2 would become issue%2").arg(creates)
+                     .arg(creates == 1 ? QString() : QStringLiteral("s"));
+    if (pushed > 0)
+        parts << QStringLiteral("%1 card%2 would be updated there").arg(pushed)
+                     .arg(pushed == 1 ? QString() : QStringLiteral("s"));
+    if (conflicts > 0)
+        parts << QStringLiteral("%1 conflict%2").arg(conflicts)
+                     .arg(conflicts == 1 ? QString() : QStringLiteral("s"));
+    const QString what = parts.isEmpty()
+        ? QStringLiteral("%1 and this board already agree \u2014 there is nothing to bring in.")
+              .arg(m_forgeRepo)
+        : QStringLiteral("%1: %2.").arg(m_forgeRepo, parts.join(QStringLiteral(", ")));
+    // Said every time, not only when there is something: a count that looked like a result and
+    // then wrote nothing would be the more surprising of the two.
+    m_forgeResult->setText(what + QStringLiteral("  Nothing was written on either side \u2014 "
+                                                 "syncing them is its own surface (#ZKR0). Ask "
+                                                 "here and the agent can bring the same issues in "
+                                                 "as ordinary cards."));
+}
+
+void BoardChatPanel::showForgeError(const QJsonObject &event)
+{
+    m_forgeRequest.clear();
+    settleForgeButton(m_forgeLook);
+    if (m_forgeResult == nullptr)
+        return;
+    const QString code = event.value(QStringLiteral("code")).toString();
+    QString text = event.value(QStringLiteral("text")).toString();
+    if (code == QStringLiteral("forge_auth"))
+        text = QStringLiteral("GitHub has no credential here yet, so nothing could be read. ")
+               + text;
+    else if (code == QStringLiteral("forge_rate_limited"))
+        text = QStringLiteral("GitHub is rate limiting this token. %1")
+                   .arg(event.value(QStringLiteral("retry_at_text")).toString().isEmpty()
+                            ? text
+                            : QStringLiteral("Try again %1.")
+                                  .arg(event.value(QStringLiteral("retry_at_text")).toString()));
+    if (text.trimmed().isEmpty())
+        text = QStringLiteral("GitHub could not be read.");
+    m_forgeResult->setText(text + QStringLiteral("  Nothing was written on either side."));
+}
+
 void BoardChatPanel::hideSurvey()
 {
+    m_forgeLook = nullptr;
+    m_forgeResult = nullptr;
+    m_forgeRepo.clear();
+    m_forgeRequest.clear();
     if (m_survey != nullptr)
         m_survey->hide();
     m_import = nullptr;
@@ -1529,6 +1652,20 @@ bool BoardChatPanel::handleEvent(const QString &type, const QJsonObject &event)
         // its own, so the head is told here; `settleTurn` and the next `chat` block clear it.
         m_surveyTurn = true;
         showSurvey(event);
+        return true;
+    }
+    if (type == QStringLiteral("forge_sync_planned")) {
+        if (m_forgeRequest.isEmpty()
+            || event.value(QStringLiteral("id")).toString() != m_forgeRequest)
+            return false;
+        showForgePlan(event);
+        return true;
+    }
+    if (type == QStringLiteral("error") && !m_forgeRequest.isEmpty()
+        && event.value(QStringLiteral("id")).toString() == m_forgeRequest) {
+        // Every way a look can fail comes back as one `error` (19.14): no credential, a rate
+        // limit, an unreachable forge, a board pointed at another repository, the busy guard.
+        showForgeError(event);
         return true;
     }
     if (type == QStringLiteral("transcribed")) {

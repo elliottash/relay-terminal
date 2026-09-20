@@ -141,6 +141,15 @@ private:
     void showSurvey(const QJsonObject &event);
     void hideSurvey();
     void applyImport();                      // `board_import_apply {keys}` for the ticked rows
+    // The survey's GitHub offer (#8YQ9 task `t:qt`, owner 2026-09-19: "if its .git, it should
+    // offer to look on github.com for an issues corpus to sync"). Looking is `forge_sync_plan`
+    // (19.14), which #GDQN landed and which **writes to neither side** — it reports what a sync
+    // would do and stops. Bringing the issues in is the sync itself, and that surface is #ZKR0's
+    // card, not this one: the card says "offer only, never auto-sync", so nothing here sends
+    // `forge_sync_run`.
+    void lookForIssues();
+    void showForgePlan(const QJsonObject &event);
+    void showForgeError(const QJsonObject &event);
 
     // ---- the microphone (protocol 16, the composer's chip in a pane) -----------------------
     void toggleVoice();
@@ -194,6 +203,12 @@ private:
     QVBoxLayout *m_surveyLayout = nullptr;
     QToolButton *m_import = nullptr;
     QStringList m_importKeys;                // the ticked proposals' source keys
+    // The GitHub look-up: `owner/name` from the survey's `git` block (so the board needs no
+    // `github:` in board.yaml to be asked), the button, the line its answer is written on, and
+    // the request id that tells our answer from another pane's.
+    QString m_forgeRepo, m_forgeRequest;
+    QToolButton *m_forgeLook = nullptr;
+    QLabel *m_forgeResult = nullptr;
     QHBoxLayout *m_composerRow = nullptr;
     RichEditor *m_composer = nullptr;
     QToolButton *m_mic = nullptr;
