@@ -379,7 +379,10 @@ class WorkerTests(unittest.TestCase):
     def test_a_thread_that_ends_with_the_check_still_red_promotes_and_says_gave_up(self):
         self.folded()
         self.folded()
-        event = self.commands.signal_thread_ended("th1")
+        # `verify=False`: this project's key is not runnable from here (no build tree), so the
+        # worker's own run of it would refuse and change nothing. `verify_signal` is exercised
+        # against a real runnable key by docs/qa_evidence/2026-09-20-signal-threads/loop.py.
+        event = self.commands.signal_thread_ended("th1", verify=False)
         self.assertEqual(event["state"], "finished")
         self.assertEqual(event["outcome"], "gave-up")
         card = event["card"]
@@ -400,10 +403,43 @@ class WorkerTests(unittest.TestCase):
                   H.Execution(ts="2026-09-20T11:01:00Z", id="ctest:beta", result="pass",
                               run_id="r4", runner="ctest", duration=0.2)],
                  self.commands.store_path())
-        event = self.commands.signal_thread_ended("th1")
+        event = self.commands.signal_thread_ended("th1", verify=False)
         self.assertEqual(event["outcome"], "fixed")
         self.assertNotIn("card", event)
         self.assertEqual(self.commands.signal_state()["ctest:beta"].state, "resolved")
+
+    def test_the_worker_runs_the_check_itself_before_it_judges(self):
+        """A thread's own `ctest` is a subprocess in its own shell and lands in no store, so the
+        fold has seen nothing since the failure. Unless the worker runs the key, every thread that
+        fixed its test still reads as open — which is how the live run of
+        docs/qa_evidence/2026-09-20-signal-threads/loop.py first came out `gave-up`."""
+        self.folded()
+        self.folded()
+        asked: list[list[str]] = []
+
+        def fake_run(ids, **kw):
+            asked.append(list(ids))
+            H.append([H.Execution(ts=H.now_iso(), id=ids[0], result="pass",
+                                  run_id=f"v{len(asked)}", runner="ctest", duration=0.1)],
+                     self.commands.store_path())
+            return {"tests": [{"id": ids[0], "result": "pass"}]}
+
+        self.commands.run_and_wait = fake_run
+        event = self.commands.signal_thread_ended("th1")
+        # Two runs, because `RESOLVE_PASSES["broken"]` is 2 and nothing else resolves a signal.
+        self.assertEqual(asked, [["ctest:beta"], ["ctest:beta"]])
+        self.assertEqual(event["outcome"], "fixed")
+        self.assertEqual(self.commands.signal_state()["ctest:beta"].state, "resolved")
+
+    def test_a_check_that_fails_again_stops_after_one_run(self):
+        self.folded()
+        self.folded()
+        asked: list[list[str]] = []
+        self.commands.run_and_wait = lambda ids, **kw: (
+            asked.append(list(ids)) or {"tests": [{"id": ids[0], "result": "fail"}]})
+        event = self.commands.signal_thread_ended("th1")
+        self.assertEqual(len(asked), 1, "a failure ends it: running it again proves nothing")
+        self.assertEqual(event["outcome"], "gave-up")
 
     def test_the_agents_own_instance_never_picks_anything_up(self):
         plain = TP.TestsCommands(self.project, self.root, lambda event: None)

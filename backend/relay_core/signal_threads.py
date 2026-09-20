@@ -144,9 +144,10 @@ def task_text(signal: "S.Signal", *, project: str, board_folder: str = "",
         "Nobody else will take it while you hold it.",
         "",
         "How this ends, in the order you should try:",
-        f"1. Fix the cause and run the check until the signal resolves. It resolves on "
-        f"{S.RESOLVE_PASSES.get(signal.kind, 2)} consecutive passing executions of that key and "
-        "on nothing else, so run it that many times.",
+        f"1. Fix the cause. Relay runs the check itself when you stop, "
+        f"{S.RESOLVE_PASSES.get(signal.kind, 2)} time(s) — that is what resolves the signal and "
+        "nothing else does — so run it yourself to see whether your fix works, and stop when it "
+        "passes. Your report does not close anything; the check does.",
         f"2. If the failure is not the code's fault and you can *show* that it is not: "
         f"`python3 {script} {board}signals dismiss {signal.key} --reason environmental|"
         "flaky-known --comment '<what you checked>' --until <YYYY-MM-DD, at most a week out>`.",

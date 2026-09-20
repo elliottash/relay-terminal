@@ -925,7 +925,7 @@ class TestsCommands:
         except Exception:                                    # pragma: no cover - defensive
             pass
 
-    def signal_thread_ended(self, thread_id: str) -> dict | None:
+    def signal_thread_ended(self, thread_id: str, *, verify: bool = True) -> dict | None:
         """One signal thread's agent has stopped: say how it went, and free the key.
 
         The **check's** verdict decides, not the agent's report (`SignalThreads.outcome_for`).  A
@@ -943,6 +943,15 @@ class TestsCommands:
             return None
         signals = self.signal_state()
         signal = signals.get(key)
+        # The check decides — so the check is **run**.  A signal thread is a subagent with
+        # `run_command`: whatever `ctest` it ran was a subprocess in its own shell and landed in no
+        # store, so the fold has seen nothing since the failure that opened the signal.  Without
+        # this, a thread that really fixed its test still read as `open` and was promoted as a
+        # give-up (found by the live run in docs/qa_evidence/2026-09-20-signal-threads).
+        if signal is not None and signal.state == "open" and verify:
+            self.verify_signal(signal)
+            signals = self.signal_state()
+            signal = signals.get(key)
         outcome = ST.SignalThreads.outcome_for(signal)
         card = signal.card if signal is not None else ""
         if outcome == "stopped" and signal is not None and signal.state == "open":
@@ -953,6 +962,30 @@ class TestsCommands:
                                   reason=S.GAVE_UP if outcome == "gave-up" else outcome)
         self.fold_signals()
         return finished.event("finished") if finished is not None else None
+
+    def verify_signal(self, signal, *, timeout: float = 300.0) -> int:
+        """Run one signal's key until it has passed enough times to resolve.  The passes seen.
+
+        `RESOLVE_PASSES[kind]` consecutive passing executions resolve a signal and **nothing else
+        does** (decision 4), so a thread that says it fixed something is answered by that many runs
+        of that one key — recorded in the history like any other run, which is what makes the fold
+        see them.  A failure ends it early: the fix did not work, and running it again proves
+        nothing.  A key this project cannot run from here (not collected, no build directory) is
+        left exactly as it was, because a verdict from a check that did not run is not a verdict.
+        """
+        from . import signals as S
+        need = max(1, S.RESOLVE_PASSES.get(signal.kind, 2) - max(0, signal.green_streak))
+        passes = 0
+        for _ in range(need):
+            try:
+                result = self.run_and_wait([signal.key], timeout=timeout)
+            except TestsError:
+                return passes
+            rows = result.get("tests") or []
+            if not rows or any(row.get("result") != "pass" for row in rows):
+                return passes
+            passes += 1
+        return passes
 
     def _promote_gave_up(self, key: str) -> str:
         """The bug card for a signal its thread could not fix, or "" (the cap, or no board)."""
