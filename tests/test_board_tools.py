@@ -6,6 +6,7 @@ calls a model or touches the network or the keyring.
 """
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -76,7 +77,9 @@ class SpecTests(unittest.TestCase):
                                         "board_update_card", "board_move_card",
                                         "board_import_items", "board_comment", "board_claim",
                                         # protocol 31 (#7BM4): the tests a card names
-                                        "tests_check", "tests_run"))
+                                        "tests_check", "tests_run",
+                                        # protocol 32 (#AQ6X): the faults the machine tracks
+                                        "board_signals"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
@@ -2600,6 +2603,288 @@ class TestsToolsTest(BoardToolsTest):
         self.assertEqual(Path(commands.project), self.repo)
         self.assertEqual(Path(commands.board_root), self.root)
         self.assertIs(self.tools._tests(), commands)
+
+
+# --------------------------------------------------------------- signals (protocol 32, #AQ6X)
+
+class SignalToolTests(BoardToolsTest):
+    """`board_signals`: the list, the four writes, their refusals, and the release on pane close.
+
+    The executions are written straight into the history store — this is the tool's behaviour, not
+    the fold's, which `tests/test_signals.py` covers — so no test here runs a test.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from relay_core import signals as S
+        from relay_core import test_history as H
+        self.S, self.H = S, H
+        self.store = H.default_path(self.repo, self.root)
+        self.signal_log = S.default_path(self.repo, self.root)
+
+    def fail(self, key="ctest:panelayout", days=(1, 2), message="AssertionError: 3 != 17"):
+        """Two consecutive failing executions of `key`: enough to open its signal."""
+        rows = [self.H.Execution(ts=f"2026-09-{day:02d}T10:00:00Z", id=key, result="fail",
+                                 runner=key.split(":")[0], run_id=f"r{day}", commit=f"c{day}",
+                                 message=message, excerpt=message + "\n  at Pane::layout")
+                for day in days]
+        self.H.append(rows, self.store)
+        return rows
+
+    def run_event(self, run_id, session):
+        self.S.append_event({"ts": "2026-09-01T10:00:00Z", "action": "run", "run_id": run_id,
+                             "session": session}, self.signal_log)
+
+    def actions(self):
+        return [(e["action"], e.get("key")) for e in self.S.read_events(self.signal_log)]
+
+    # ---- list ----------------------------------------------------------------
+    def test_a_board_with_no_signals_lists_none_in_a_sentence(self):
+        result = self.tools.run("board_signals", {"action": "list"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["open"], [])
+        self.assertEqual((result["pending_count"], result["dismissed_count"]), (0, 0))
+        self.assertIn("every check", result["text"])
+
+    def test_the_list_carries_the_open_signal_and_its_excerpt(self):
+        self.fail()
+        result = self.tools.run("board_signals", {"action": "list"})
+        self.assertEqual([row["key"] for row in result["open"]], ["ctest:panelayout"])
+        self.assertEqual(result["open"][0]["count"], 2)
+        self.assertIn("ctest:panelayout", result["text"])
+        self.assertIn("AssertionError", result["text"])
+
+    def test_one_failure_is_pending_and_not_listed_as_open(self):
+        self.fail(days=(1,))
+        result = self.tools.run("board_signals", {"action": "list"})
+        self.assertEqual(result["open"], [])
+        self.assertEqual(result["pending_count"], 1)
+
+    # ---- refusals ------------------------------------------------------------
+    def test_an_unknown_action_and_an_unknown_argument_are_refused(self):
+        self.assertIn("error", self.tools.run("board_signals", {"action": "resolve"}))
+        self.assertIn("error", self.tools.run("board_signals", {"action": "list", "wat": 1}))
+
+    def test_every_action_but_list_needs_a_key(self):
+        for action in ("claim", "release", "dismiss", "promote"):
+            with self.subTest(action=action):
+                result = self.tools.run("board_signals", {"action": action})
+                self.assertIn("needs `key`", result["error"])
+
+    def test_a_key_with_no_open_signal_is_refused_by_name(self):
+        result = self.tools.run("board_signals", {"action": "claim", "key": "ctest:nothing"})
+        self.assertEqual(result["code"], "signal_not_found")
+        self.assertEqual(result["key"], "ctest:nothing")
+
+    # ---- claim ---------------------------------------------------------------
+    def test_a_claim_writes_this_panes_token_and_says_what_closes_it(self):
+        self.fail()
+        result = self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        self.assertTrue(result["claimed"])
+        self.assertEqual(result["session"], self.pane_token)
+        self.assertIn("2 consecutive passing executions", result["text"])
+        self.assertEqual(self.actions(), [("claim", "ctest:panelayout")])
+        listed = self.tools.run("board_signals", {"action": "list"})
+        self.assertEqual(listed["open"][0]["session"], self.pane_token)
+
+    def test_a_signal_another_session_holds_is_refused_and_force_takes_it(self):
+        self.fail()
+        other = T.BoardTools(self.board, autonomy="auto",
+                             context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                             state_path=self.repo / ".relay" / "other.json",
+                             pane_token="9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33")
+        other.begin_turn("t-other")
+        self.assertNotIn("error", other.run("board_signals", {"action": "claim",
+                                                              "key": "ctest:panelayout"}))
+        refused = self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        self.assertEqual(refused["code"], "board_claimed_elsewhere")
+        self.assertEqual(refused["session"], "9c1d77ab")
+        self.assertEqual(refused["key"], "ctest:panelayout")
+        taken = self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout",
+                                                "force": True})
+        self.assertEqual(taken["session"], self.pane_token)
+
+    # ---- release -------------------------------------------------------------
+    def test_a_release_frees_it_and_gave_up_files_the_card(self):
+        self.fail()
+        self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        plain = self.tools.run("board_signals", {"action": "release", "key": "ctest:panelayout",
+                                                 "reason": "the user asked for something else"})
+        self.assertTrue(plain["released"])
+        self.assertNotIn("card", plain)
+        self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        gave_up = self.tools.run("board_signals", {"action": "release", "key": "ctest:panelayout",
+                                                  "reason": self.S.GAVE_UP})
+        self.assertTrue(gave_up["released"])
+        self.assertTrue(gave_up["promoted"])
+        card = self.board.card_by_id(gave_up["card"])
+        self.assertEqual(card.front["links"]["signal"], "ctest:panelayout")
+
+    # ---- dismiss -------------------------------------------------------------
+    def test_an_agent_dismissal_is_limited_to_two_reasons_a_comment_and_a_week(self):
+        self.fail()
+        future = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+        ok = self.tools.run("board_signals", {"action": "dismiss", "key": "ctest:panelayout",
+                                              "reason": "environmental", "comment": "socket path",
+                                              "until": future})
+        self.assertTrue(ok["dismissed"])
+        self.assertIn("blocks no card", ok["text"])
+        self.assertEqual(self.tools.run("board_signals", {"action": "list"})["dismissed_count"], 1)
+        far = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+        for args, code in (
+                ({"reason": "wont-fix", "comment": "c", "until": future}, "signal_reason"),
+                ({"reason": "environmental", "comment": "", "until": future}, "signal_comment"),
+                ({"reason": "environmental", "comment": "c"}, "signal_until"),
+                ({"reason": "environmental", "comment": "c", "until": far}, "signal_until")):
+            with self.subTest(code=code):
+                refused = self.tools.run("board_signals",
+                                         {"action": "dismiss", "key": "ctest:panelayout", **args})
+                self.assertEqual(refused["code"], code, refused)
+
+    # ---- promote -------------------------------------------------------------
+    def test_a_promotion_writes_a_bug_card_with_the_excerpt_and_the_signal_section(self):
+        self.fail()
+        result = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
+        self.assertTrue(result["promoted"])
+        card = self.board.card_by_id(result["card"])
+        self.assertEqual(card.type, "work")
+        self.assertEqual(card.status, "inbox")
+        self.assertEqual(self.tools._tab_of(card), "bugs")
+        self.assertIn(self.S.SIGNAL_LABEL, card.front["labels"])
+        self.assertIn("bug", card.front["labels"])
+        self.assertEqual(card.front["links"]["signal"], "ctest:panelayout")
+        self.assertIn("AssertionError: 3 != 17", B.section_text(card.body, B.ISSUE_HEADING))
+        section = B.section_text(card.body, self.S.SIGNAL_HEADING)
+        self.assertIn("`ctest:panelayout`", section)
+        self.assertIn("closing this card does not close the signal", section)
+        self.assertEqual([str(p) for p in self.board.check()], [])
+        # …and the signal now names the card, so a second promotion is a no-op.
+        again = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
+        self.assertFalse(again["promoted"])
+        self.assertEqual(again["card"], result["card"])
+
+    def test_the_sixth_open_promoted_card_is_refused_so_the_backlog_does_not_fill(self):
+        for index in range(self.S.MAX_PROMOTED_OPEN):
+            key = f"ctest:k{index}"
+            self.fail(key=key, message=f"kind{index} broke")
+            self.assertTrue(self.tools.run("board_signals",
+                                           {"action": "promote", "key": key})["promoted"])
+        self.fail(key="ctest:one-too-many", message="kindX broke")
+        refused = self.tools.run("board_signals", {"action": "promote",
+                                                   "key": "ctest:one-too-many"})
+        self.assertEqual(refused["code"], "signal_promote_cap")
+        self.assertEqual(refused["limit"], self.S.MAX_PROMOTED_OPEN)
+
+    def test_the_signal_section_is_rewritten_in_place_not_stacked_up(self):
+        self.fail()
+        promoted = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
+        self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        signals = self.S.state(self.repo, self.root)
+        self.assertTrue(self.S.rewrite_section(self.board, signals["ctest:panelayout"]))
+        body = self.board.card_by_id(promoted["card"]).body
+        self.assertEqual(body.count(f"## {self.S.SIGNAL_HEADING}"), 1)
+        self.assertIn("claimed by session", body)
+        # Idempotent: nothing to write the second time.
+        signals = self.S.state(self.repo, self.root)
+        self.assertFalse(self.S.rewrite_section(self.board, signals["ctest:panelayout"]))
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    # ---- the gate ------------------------------------------------------------
+    def gated_card(self, status="needs-verification", session=None):
+        card_id = self.create(title="A card that broke something")
+        card = self.board.card_by_id(card_id)
+        card.set("status", status)
+        if session is not None:
+            card.set("session", session)
+        self.board.save(card)
+        return card_id
+
+    def test_a_card_cannot_leave_needs_verification_under_a_signal_its_own_run_opened(self):
+        self.fail()
+        self.run_event("r1", self.pane_token)
+        card_id = self.gated_card(session=self.pane_token)
+        refused = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                    "reason": "shipped"})
+        self.assertEqual(refused["code"], "board_signal_open")
+        self.assertEqual([s["key"] for s in refused["signals"]], ["ctest:panelayout"])
+        self.assertEqual(self.board.card_by_id(card_id).status, "needs-verification")
+
+    def test_a_signal_open_before_this_card_is_listed_and_refuses_nothing(self):
+        self.fail()
+        self.run_event("r1", "somebody-elses-pane")
+        card_id = self.gated_card(session=self.pane_token)
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                  "reason": "shipped"})
+        self.assertNotIn("error", moved, moved)
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_the_card_a_signal_was_promoted_from_is_gated_by_that_signal(self):
+        self.fail()
+        promoted = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
+        card = self.board.card_by_id(promoted["card"])
+        card.set("status", "needs-verification")
+        self.board.save(card)
+        refused = self.tools.run("board_move_card", {"id": promoted["card"], "status": "done",
+                                                    "reason": "shipped"})
+        self.assertEqual(refused["code"], "board_signal_open")
+
+    def test_a_dismissed_signal_never_blocks_which_is_the_owners_override(self):
+        self.fail()
+        self.run_event("r1", self.pane_token)
+        future = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+        self.tools.run("board_signals", {"action": "dismiss", "key": "ctest:panelayout",
+                                         "reason": "environmental", "comment": "c",
+                                         "until": future})
+        card_id = self.gated_card(session=self.pane_token)
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                   "reason": "shipped"})
+        self.assertNotIn("error", moved, moved)
+
+    def test_a_move_that_does_not_leave_needs_verification_is_never_gated(self):
+        self.fail()
+        self.run_event("r1", self.pane_token)
+        card_id = self.gated_card(status="inbox", session=self.pane_token)
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "executing",
+                                                  "reason": "starting"})
+        self.assertNotIn("error", moved, moved)
+
+    def test_a_board_with_no_signal_store_gates_nothing(self):
+        card_id = self.gated_card(session=self.pane_token)
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                  "reason": "shipped"})
+        self.assertNotIn("error", moved, moved)
+
+    # ---- the pane closing ----------------------------------------------------
+    def test_release_claims_gives_back_the_signals_this_pane_held_too(self):
+        self.fail()
+        self.fail(key="ctest:other", message="kindX broke")
+        self.tools.run("board_signals", {"action": "claim", "key": "ctest:panelayout"})
+        card_id = self.create()
+        self.tools.run("board_claim", {"id": card_id})
+        released = self.tools.release_claims("the pane closed")
+        self.assertEqual(released, [card_id])
+        signals = self.S.state(self.repo, self.root)
+        self.assertEqual(signals["ctest:panelayout"].session, "")
+        self.assertIn(("release", "ctest:panelayout"), self.actions())
+        self.assertNotIn(("release", "ctest:other"), self.actions())
+
+    def test_a_worker_with_no_pane_token_releases_no_signal(self):
+        self.fail()
+        tools = T.BoardTools(self.board, state_path=self.repo / ".relay" / "none.json",
+                             pane_token=None)
+        tools.begin_turn("t-none")
+        self.assertEqual(tools.release_signal_claims(), [])
+
+    # ---- the numbers the tool's own description quotes ----------------------
+    def test_the_spec_quotes_the_rule_it_describes(self):
+        self.assertEqual(T.S_AGENT_DISMISS_MAX_DAYS, self.S.AGENT_DISMISS_MAX_DAYS)
+        self.assertEqual(T.SIGNAL_ACTIONS, ("list", "claim", "release", "dismiss", "promote"))
+        spec = next(item["function"] for item in T.TOOL_SPECS
+                    if item["function"]["name"] == "board_signals")
+        self.assertEqual(spec["parameters"]["properties"]["action"]["enum"],
+                         list(T.SIGNAL_ACTIONS))
+        self.assertIn("board_claimed_elsewhere", spec["description"])
+        self.assertIn("7 days", spec["description"])
 
 
 if __name__ == "__main__":       # pragma: no cover

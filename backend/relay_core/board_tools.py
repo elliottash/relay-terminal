@@ -164,6 +164,17 @@ _ID_ARG = {"type": "string", "description": "Card id, four characters (e.g. K7Q2
 #: is higher (`tests_protocol.MAX_IDS`): a person selecting rows in the pane knows what they
 #: picked, and a model naming fifty tests is already naming more than it can read back.
 MAX_AGENT_TEST_IDS = 50
+
+#: `board_signals` (#AQ6X protocol 32).  The actions, and the two numbers the spec quotes, read
+#: from `signals` so the tool's description cannot drift from the rule it describes.  Imported
+#: lazily everywhere else in this module — `signals` pulls in `test_history` — but these three
+#: names are needed while the specs are being built, and they are plain values.
+SIGNAL_ACTIONS = ("list", "claim", "release", "dismiss", "promote")
+S_AGENT_DISMISS_MAX_DAYS = 7          # signals.AGENT_DISMISS_MAX_DAYS, asserted in the tests
+#: The one status a signal gates (decision 6): a card does not land while a fault its own pane's
+#: runs opened is still failing.  Spelt here rather than imported from `tests_protocol`, which is
+#: the tests' gate and pulls in a subprocess-running discovery module.
+SIGNAL_GATE_FROM = "needs-verification"
 #: How long that call waits before the run is stopped, and what a tool call may ask for.
 DEFAULT_TEST_TIMEOUT = 300
 MAX_TEST_TIMEOUT = 1800
@@ -345,6 +356,38 @@ TOOL_SPECS = [
                               "description": "How long to wait before the run is stopped "
                                              "(default 300)."}},
          ["ids"]),
+    spec("board_signals",
+         "The faults the machine is tracking, and what you may do about one (protocol 32, "
+         "#AQ6X). A *signal* is one keyed item per failing check — `ctest:<name>`, "
+         "`unittest:<module.Class.test>`, `build:<target>` — opened on its second consecutive "
+         "failing execution and closed only by that check passing again: you cannot mark one "
+         "fixed, you run it. `list` answers with the open ones, newest to your own card first, "
+         "with each one's kind, count and excerpt. `claim` says this pane is on one, exactly as "
+         "board_claim takes a card, and a signal another session holds is refused with "
+         "board_claimed_elsewhere. `release` gives it back — with reason `gave-up` when you could "
+         "not fix it, which files it as a bug card. `dismiss` hides one you have shown is not the "
+         "code's fault: `environmental` or `flaky-known` only, with a comment and an expiry of at "
+         f"most {S_AGENT_DISMISS_MAX_DAYS} days, because every dismissal expires and the rest are "
+         "the user's. `promote` files it as a bug card when it needs a person.",
+         {"action": {"type": "string", "enum": list(SIGNAL_ACTIONS),
+                     "description": "list, claim, release, dismiss or promote."},
+          "key": {"type": "string",
+                  "description": "The signal's key, as `list` gives it — everything but `list` "
+                                 "needs one."},
+          "reason": {"type": "string",
+                     "description": "On `release`, why you are letting go: `gave-up` files it as "
+                                    "a bug card, anything else simply frees it. On `dismiss`, "
+                                    "`environmental` or `flaky-known`."},
+          "comment": {"type": "string",
+                      "description": "On `dismiss`, one line on what you checked and why this "
+                                     "failure is not the code's fault. Required."},
+          "until": {"type": "string",
+                    "description": "On `dismiss`, the date it comes back (YYYY-MM-DD), at most "
+                                   f"{S_AGENT_DISMISS_MAX_DAYS} days out."},
+          "force": {"type": "boolean",
+                    "description": "On `claim`, take a signal another session holds. Only when "
+                                   "the user says to, or that session is plainly gone."}},
+         ["action"]),
 ]
 
 #: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
@@ -1540,6 +1583,7 @@ class BoardTools:
                        "board_merge_cards": self._merge, "board_split_card": self._split,
                        "board_sections": self._sections,
                        "tests_check": self._tests_check, "tests_run": self._tests_run,
+                       "board_signals": self._signals,
                        "board_import_items": self._import_items}[name]
             return handler(dict(args))
         except BoardToolError as exc:
@@ -2090,6 +2134,11 @@ class BoardTools:
         if status not in B.STATUS_FOLDER[card.type]:
             raise BoardToolError(f"unknown {card.type} status {args.get('status')!r}; use one of "
                                  f"{', '.join(B.STATUS_FOLDER[card.type])}.")
+        # Before anything is written: an open signal this pane's own runs opened stops the
+        # card landing (#AQ6X decision 6). It is refused, not warned about, because the machine
+        # state wins over the card's — and it is checked here, where every status change of every
+        # write path already funnels through.
+        self._signal_gate(card, old_status, status)
         # `section` parks the card in a manual section — a column that collects nothing — and an
         # empty string takes it out (#3XZV). Its status is left alone either way.
         section_arg = args.get("section")
@@ -2567,6 +2616,221 @@ class BoardTools:
             raise BoardToolError(str(exc), code="tests_refused") from exc
         return {"text": TP.format_run(result), **result}
 
+    # ---- the faults the machine tracks (protocol 32, #AQ6X) --------------------
+    def _signal_state(self):
+        """`(signals module, {key: Signal})` for this board.  Reads two files, runs nothing.
+
+        No discovery: `removed` is a verdict about what the project still *collects*, and
+        collecting it means a `ctest --show-only` subprocess.  The fold that runs after a test
+        run has that list already (`tests_protocol`); a tool call does not need it, and a signal
+        listed here that has since left discovery is at worst one stale row.
+        """
+        from . import signals as S
+        return S, S.state(self.board.repo, self.board.root)
+
+    def _signals(self, args: dict) -> dict:
+        """`board_signals`: list the open faults, or claim, release, dismiss or promote one.
+
+        The refusals are `board_claim`'s, deliberately: a signal is claimed with the same pane
+        token, a second claimant gets the same `board_claimed_elsewhere` naming the holder, and
+        `force` is the same escape hatch with the same rule about asking first (R11).
+        """
+        allowed = {"action", "key", "reason", "comment", "until", "force"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_signals takes {', '.join(sorted(allowed))}.")
+        action = str(args.get("action") or "").strip().lower()
+        if action not in SIGNAL_ACTIONS:
+            raise BoardToolError(f"board_signals action is one of {', '.join(SIGNAL_ACTIONS)}.")
+        force = args.get("force")
+        if force is not None and not isinstance(force, bool):
+            raise BoardToolError("force must be true or false.")
+        S, signals = self._signal_state()
+        if action == "list":
+            return self._signals_list(S, signals)
+        if action != "list" and self.readonly:
+            raise BoardToolError(
+                "This turn writes nothing by design — the owner has not confirmed anything yet. "
+                "Say what you would do; the write happens once the owner answers.",
+                code="board_readonly_turn")
+        if action != "list" and self.enforce_limits and self.autonomy == "off":
+            raise BoardToolError("Switchboard writes are turned off for this workspace "
+                                 "(autonomy: off).", code="board_autonomy_off")
+        key = str(args.get("key") or "").strip()
+        if not key:
+            raise BoardToolError(f"board_signals {action} needs `key`: the signal's key, as "
+                                 "`list` gives it (e.g. ctest:panelayout).")
+        signal = signals.get(key)
+        if signal is None or signal.state in ("resolved", "removed"):
+            raise BoardToolError(
+                f"There is no open signal {key!r}. Call board_signals with action list to see "
+                "what is open — a signal resolves by its check passing, so one that is gone was "
+                "fixed.", code="signal_not_found", key=key)
+        path = S.default_path(self.board.repo, self.board.root)
+        if action == "claim":
+            return self._signal_claim(S, signal, path, bool(force))
+        if action == "release":
+            return self._signal_release(S, signal, path, args.get("reason"))
+        if action == "dismiss":
+            return self._signal_dismiss(S, signal, path, args)
+        return self._signal_promote(S, signals, signal, path, "by hand")
+
+    def _signals_list(self, S, signals: dict) -> dict:
+        """What `list` answers with: the open rows in R11's order, plus the two counts."""
+        payload = S.summary(signals.values(), session=self.pane_token or "")
+        lines = []
+        for row in payload["open"]:
+            marks = "".join(m for m in (" regressed" if row.get("regressed") else "",
+                                        " stale" if row.get("stale") else ""))
+            held = f" · held by {row['session'][:8]}" if row.get("session") else ""
+            card = f" · card #{row['card']}" if row.get("card") else ""
+            lines.append(f"- {row['key']} · {row['kind']} · {row['count']} failure(s) · "
+                         f"last {row['last_seen']}{marks}{held}{card}")
+            if row.get("message"):
+                lines.append(f"    {row['message'][:200]}")
+        text = "\n".join(lines) or "No open signals: every check this project records is passing."
+        return {**payload, "text": text,
+                "promotable": [s.key for s in S.sort_signals(
+                    [s for s in signals.values() if s.promote])]}
+
+    def _signal_claim(self, S, signal, path: Path, force: bool) -> dict:
+        token = self.pane_token or ""
+        held = signal.session
+        if held and held != token and not force:
+            raise BoardToolError(
+                f"{signal.key} is held by another session ({held[:8]}): it has failed "
+                f"{signal.count} time(s) and that session has been on it since its last action. "
+                "That session's work is not yours to take: say what you are doing instead, and "
+                "ask the user before you repeat this call with force: true.",
+                code="board_claimed_elsewhere", key=signal.key, session=held[:8],
+                last_seen=signal.last_seen)
+        S.append_event({"action": "claim", "key": signal.key, "session": token}, path)
+        return {"claimed": True, "key": signal.key, "session": token or None,
+                "kind": signal.kind, "count": signal.count, "excerpt": signal.excerpt,
+                **({} if token else {"warning": NO_TOKEN_NOTE}),
+                "text": (f"{signal.key} is yours: {signal.count} failing execution(s), "
+                         f"{signal.kind}. It resolves on "
+                         f"{S.RESOLVE_PASSES.get(signal.kind, 2)} consecutive passing "
+                         "executions of that key and on nothing else, so run it to close it.")}
+
+    def _signal_release(self, S, signal, path: Path, reason) -> dict:
+        if reason is not None and not isinstance(reason, str):
+            raise BoardToolError("reason must be text.")
+        reason = _one_line(reason, "reason", MAX_REASON) if (reason or "").strip() else ""
+        S.append_event({"action": "release", "key": signal.key, "reason": reason,
+                        "session": self.pane_token or ""}, path)
+        out = {"released": True, "key": signal.key, "reason": reason or None}
+        if reason == S.GAVE_UP:
+            # Promotion trigger (a) of R9: the agent that held it could not fix it, so it is a
+            # person's problem now and the card is written in the same call.
+            promoted = self._signal_promote(S, None, signal, path, S.GAVE_UP, released=True)
+            out.update({k: v for k, v in promoted.items() if k != "released"})
+            return out
+        out["text"] = f"{signal.key} is free again."
+        return out
+
+    def _signal_dismiss(self, S, signal, path: Path, args: dict) -> dict:
+        try:
+            dismissal = S.check_dismissal(args.get("reason"), args.get("comment"),
+                                          args.get("until"), by_agent=True)
+        except S.SignalError as exc:
+            raise BoardToolError(str(exc), code=exc.code, key=signal.key) from exc
+        S.append_event({"action": "dismiss", "key": signal.key,
+                        "by": self.pane_token or "", **dismissal}, path)
+        return {"dismissed": True, "key": signal.key, **dismissal,
+                "text": (f"{signal.key} is dismissed as {dismissal['reason']} until "
+                         f"{dismissal['until']}. It keeps counting underneath and comes back "
+                         "then; it blocks no card in the meantime.")}
+
+    def _signal_promote(self, S, signals, signal, path: Path, reason: str,
+                        released: bool = False) -> dict:
+        """Write the bug card for a signal, through the ordinary card write path (R9).
+
+        `status: inbox` in the bugs tab, the failure excerpt as the card's own words, the label
+        `signal`, `links.signal` back to the key, and the machine-owned `## Signal` section.  The
+        signal records the card id, and from then on the card cannot leave `needs-verification`
+        while the signal is open (`_signal_gate`) — closing the card resolves nothing.
+        """
+        if signal.card:
+            return {"promoted": False, "key": signal.key, "card": signal.card,
+                    "text": f"{signal.key} is already card #{signal.card}."}
+        if signals is None:
+            _, signals = self._signal_state()
+        promoted = [s for s in S.promoted_open(signals.values()) if s.key != signal.key]
+        if len(promoted) >= S.MAX_PROMOTED_OPEN:
+            raise BoardToolError(
+                f"{S.MAX_PROMOTED_OPEN} promoted signal cards are already open "
+                f"({', '.join('#' + s.card for s in promoted[:S.MAX_PROMOTED_OPEN])}): this one "
+                "stays in the signal list until one of them is closed, so the backlog does not "
+                "fill with machine-written cards.",
+                code="signal_promote_cap", key=signal.key, limit=S.MAX_PROMOTED_OPEN)
+        category = self._category_for_tab("bugs")
+        cards = self.board.cards()
+        taken = [c.id for c in cards if c.id]
+        card = B.new_card("work", S.card_title(signal), "inbox", card_id=B.new_id(taken),
+                          request=S.card_request(signal),
+                          rank=self.board.next_rank([c for c in cards if c.status == "inbox"]),
+                          labels=["bug", S.SIGNAL_LABEL],
+                          source=f"signal {signal.key}, {datetime.now().strftime('%Y-%m-%d')}")
+        links = dict(card.front.get("links") or {})
+        links["signal"] = signal.key
+        card.set("links", links)
+        signal.card = card.front["id"]
+        card.body = B.append_body_section(card.body, S.SIGNAL_HEADING,
+                                          S.signal_section(signal))
+        try:
+            card_path = B.write_new_card(self.board, card, category)
+        except B.BoardError as exc:
+            raise BoardToolError(str(exc)) from exc
+        self.creates_this_turn += 1
+        self.writes_this_turn += 1
+        rel = str(card_path.relative_to(self.board.repo))
+        size = self._thread_size(card)
+        self._append(card, f"- ✦ signal {signal.key} became this card · {reason} · {rel}",
+                     kind="event")
+        write_id = self._record("create", card, f"promoted {signal.key}", None, size)
+        S.append_event({"action": "promote", "key": signal.key, "card": card.id,
+                        "reason": reason, "session": self.pane_token or ""}, path)
+        return {"promoted": True, "released": released, "key": signal.key, "card": card.id,
+                "path": rel, "write_id": write_id,
+                "text": (f"{signal.key} is now card #{card.id} in the bugs tab ({reason}). The "
+                         "signal stays open until the check passes: closing the card does not "
+                         "close it, and the card cannot leave needs-verification while it is "
+                         "open.")}
+
+    def _signal_gate(self, card: B.Card, old_status: str, status: str) -> None:
+        """Decision 6 and 8: refuse a move out of `needs-verification` under an open signal.
+
+        Only a signal this card is answerable for: the one it was promoted from, and the ones
+        **first seen in a run by the pane holding this card** (`signals.blocking`).  A signal that
+        was already open before this pane started is listed as `open_before` and refuses nothing —
+        a session answers for what its own work broke, not for the state of the tree it found —
+        and a dismissed signal never blocks, which is the owner's override.
+
+        A board with no signal store, or a fold that cannot be computed, gates nothing: this is a
+        rule about a fault that is *known*, and an unreadable private file is not a fault.
+        """
+        if old_status != SIGNAL_GATE_FROM or status == old_status:
+            return
+        try:
+            S, signals = self._signal_state()
+            blocks, before = S.blocking(signals.values(), card=card.id or "",
+                                        session=str(card.front.get("session") or ""))
+        except Exception:                                  # pragma: no cover - unreadable store
+            return
+        if not blocks:
+            return
+        shown = ", ".join(s.key for s in blocks[:3]) + ("…" if len(blocks) > 3 else "")
+        raise BoardToolError(
+            f"#{card.id} cannot leave {_column_label(old_status)} while "
+            f"{len(blocks)} signal(s) this pane's own runs opened are still failing ({shown}): a "
+            "signal resolves by its check passing, so run them and fix them, or dismiss one you "
+            "have shown is not the code's fault (board_signals). "
+            + (f"{len(before)} other signal(s) were open before this card and do not block it."
+               if before else ""),
+            code="board_signal_open", id=card.id or "",
+            signals=[s.to_dict() for s in blocks],
+            open_before=[s.to_dict() for s in before])
+
     # ---- releasing a claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed") ----
     def _release_on_close(self, card: B.Card, status: str) -> str:
         """Drop the card's `session` when the write about to happen leaves it closed.
@@ -2638,6 +2902,31 @@ class BoardTools:
                 self._log_release_failure(path, exc)
         if released:
             self.claimed = [c for c in self.claimed if c not in released]
+        self.release_signal_claims(reason)
+        return released
+
+    def release_signal_claims(self, reason: str = "the pane closed") -> list[str]:
+        """Drop every *signal* this pane holds, for the same reason cards are dropped (#AQ6X).
+
+        A signal's claim is the same pane token as a card's (R11), so the pane going takes both
+        with it: otherwise the next session reads a fault as somebody else's and nobody runs it.
+        One append per signal to the private event log — no card is touched, nothing is announced
+        on the pipe, and a store it cannot read is skipped rather than failing a shutdown.
+        """
+        token = (self.pane_token or "").strip()
+        if not token:
+            return []
+        try:
+            from . import signals as S
+            signals = S.state(self.board.repo, self.board.root)
+            path = S.default_path(self.board.repo, self.board.root)
+            released = [key for key, signal in signals.items() if signal.session == token]
+            for key in released:
+                S.append_event({"action": "release", "key": key, "session": token,
+                                "reason": reason}, path)
+        except Exception as exc:          # a store this cannot read is not worth a failed shutdown
+            self._log_release_failure(Path(str(self.board.root)), exc)
+            return []
         return released
 
     def _log_release_failure(self, path: Path, exc: BaseException) -> None:

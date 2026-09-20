@@ -941,6 +941,36 @@ def card_request(signal: Signal) -> str:
     return f"{head}\n\n```\n{body[:MAX_EXCERPT]}\n```"
 
 
+def rewrite_section(board, signal: Signal) -> bool:
+    """Put `signal_section(signal)` on the signal's card, in place.  True when it wrote.
+
+    The `## Signal` section is the machine's, so it is *replaced* rather than appended to: a
+    signal that opens, is claimed, regresses and resolves leaves one current paragraph, not five
+    historical ones (R9, and the same rule as `tests_protocol`'s `### Check` block).  Every other
+    byte of the card is a person's and is not touched, and a card that has gone is not an error —
+    somebody deleted it, and the signal is still a signal.
+    """
+    if not signal.card:
+        return False
+    card = board.card_by_id(signal.card)
+    if card is None:
+        return False
+    wanted = signal_section(signal)
+    span = B.section_span(card.body, SIGNAL_HEADING)
+    if span is not None:
+        if card.body[span[0]:span[1]].strip("\n") == wanted.strip("\n"):
+            return False
+        body = card.body[:span[0]] + wanted + "\n" + card.body[span[1]:]
+    else:
+        body = B.append_body_section(card.body, SIGNAL_HEADING, wanted)
+    card.body = body
+    try:
+        board.save(card)
+    except (B.BoardError, OSError):                        # pragma: no cover - unwritable board
+        return False
+    return True
+
+
 def card_title(signal: Signal) -> str:
     """One line for the bug card: the key, and what kind of failure it is."""
     what = {"flaky": "is flaky", "group": "and the tests that fail with it",
