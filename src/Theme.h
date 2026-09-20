@@ -142,6 +142,9 @@ struct ThemeChoice {
 // call and after refreshThemes().
 QList<ThemeChoice> availableThemes();
 void refreshThemes();
+// One of those at random, never `avoid` (pass the theme in use, so a press always changes
+// something). Empty when there is no other theme to pick — see src/Theme.cpp.
+QString randomThemeId(const QString &avoid = QString());
 // The theme in use. `activeThemeId()` is what QSettings stores under `theme/name`.
 const ThemeSpec &active();
 QString activeThemeId();

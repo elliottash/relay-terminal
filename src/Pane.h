@@ -7327,7 +7327,7 @@ private:
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
             {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
-            {QStringLiteral("theme"), QStringLiteral("[name]"), QStringLiteral("Theme for this tab and new ones: pick from every theme, or name one")},
+            {QStringLiteral("theme"), QStringLiteral("[name|random]"), QStringLiteral("Theme for this tab and new ones: pick from every theme, name one, or take one at random")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
         {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Switchboard")},
@@ -7773,6 +7773,15 @@ private:
             // bare command for a list. Matched on the id, then the name, then a part of either.
             const QList<relay::theme::ThemeChoice> themes = relay::theme::availableThemes();
             if (!args.isEmpty()) {
+                // `random` is answered before any name match, because a theme file may be called
+                // anything and this word is the command's own (Options › Appearance › Randomize,
+                // card #R4ND).
+                if (args.compare(QStringLiteral("random"), Qt::CaseInsensitive) == 0
+                    || args.compare(QStringLiteral("randomize"), Qt::CaseInsensitive) == 0
+                    || args.compare(QStringLiteral("shuffle"), Qt::CaseInsensitive) == 0) {
+                    randomTheme();
+                    return;
+                }
                 const auto find = [&](auto test) { for (const auto &t : themes) if (test(t)) return t.id; return QString(); };
                 QString id = find([&](const auto &t) { return t.id.compare(args, Qt::CaseInsensitive) == 0 || t.name.compare(args, Qt::CaseInsensitive) == 0; });
                 if (id.isEmpty()) id = find([&](const auto &t) { return t.id.contains(args, Qt::CaseInsensitive) || t.name.contains(args, Qt::CaseInsensitive); });
@@ -7783,9 +7792,14 @@ private:
             QList<relay::agentui::PickerRow> rows;
             for (const auto &t : themes)
                 rows << relay::agentui::PickerRow{{t.name, t.id == relay::theme::activeThemeId() ? QStringLiteral("current") : QString()}, t.description, t.id};
+            // Last row, after the themes it picks from (card #R4ND).
+            rows << relay::agentui::PickerRow{{QStringLiteral("Random"), QString()},
+                                              QStringLiteral("A theme at random, never the one you are on"),
+                                              QStringLiteral("random")};
             const auto result = relay::agentui::pick(this, QStringLiteral("Theme"), QStringLiteral("The theme for this tab, and for new tabs unless Options › Appearance says a command changes one tab only."),
                                                      {QStringLiteral("Theme"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
-            if (result.row >= 0 && result.row < themes.size()) chooseTheme(themes.at(result.row).id);
+            if (result.row == themes.size()) randomTheme();
+            else if (result.row >= 0 && result.row < themes.size()) chooseTheme(themes.at(result.row).id);
         }
         else if (name == QStringLiteral("rename")) {
             // With a name it renames straight away; without one it opens the same editor a double
@@ -11576,6 +11590,17 @@ private:
                 closeInline(); clearFix();
             }
         });
+    }
+
+    // /theme random, and the picker's last row: a theme other than the one in front of you,
+    // switched to exactly as a named one is (card #R4ND).
+    void randomTheme() {
+        const QString id = relay::theme::randomThemeId(relay::theme::activeThemeId());
+        if (id.isEmpty()) {
+            status(QStringLiteral("There is only one theme installed, so there is nothing to randomize."));
+            return;
+        }
+        chooseTheme(id);
     }
 
     // /light, /dark, /theme: through the window when it listens (a tab's own theme), else app-wide.

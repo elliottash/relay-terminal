@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QSet>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
@@ -105,6 +106,31 @@ private Q_SLOTS:
             // rather than leaving it the one flat rectangle in the window.
             QVERIFY2(!css.contains(QStringLiteral("QToolButton#workChip, QMenu,")), id);
         }
+    }
+
+    // Options > Appearance > Randomize, and /theme random (card #R4ND). Two things have to hold
+    // for the button to feel like a button: what comes back is a theme that exists, and it is
+    // never the one already on screen — a "randomize" that lands on your own theme reads as a
+    // press that did nothing. The draw is also checked for reach: over many presses every other
+    // theme comes up, so a picker stuck on one file fails here.
+    void randomizeNeverGivesYouTheThemeYouAreOn() {
+        QStringList ids;
+        for (const ThemeChoice &choice : availableThemes()) ids << choice.id;
+        QVERIFY(ids.size() >= 2);
+        const QString on = ids.first();
+        QSet<QString> seen;
+        for (int i = 0; i < 300; ++i) {
+            const QString id = randomThemeId(on);
+            QVERIFY(!id.isEmpty());
+            QVERIFY2(id != on, qPrintable(id));
+            QVERIFY2(ids.contains(id), qPrintable(id));
+            // It is a theme, not just an id: the caller switches straight to it.
+            QVERIFY2(setActiveTheme(id, false), qPrintable(id));
+            seen << id;
+        }
+        QCOMPARE(seen.size(), ids.size() - 1);
+        // With nothing to avoid, every theme is on offer.
+        QVERIFY(ids.contains(randomThemeId()));
     }
 
     void theThemeItAsksForIsGone() {

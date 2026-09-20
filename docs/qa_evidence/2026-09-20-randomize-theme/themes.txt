@@ -1,0 +1,3 @@
+after press 1: name=relay-dark
+after press 2: name=ibm-beige
+after /theme random: name=relay-dark

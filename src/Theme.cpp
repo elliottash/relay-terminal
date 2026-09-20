@@ -12,6 +12,7 @@
 #include <QLayout>
 #include <QPalette>
 #include <QPlainTextEdit>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -890,6 +891,18 @@ QList<ThemeChoice> availableThemes() {
         out.append({id, theme.name.isEmpty() ? id : theme.name, theme.description, theme.builtin});
     }
     return out;
+}
+
+// A theme picked at random, never `avoid` — Options › Appearance › Randomize and `/theme random`
+// (card #R4ND). Excluding the theme you are on is what makes a second press feel like it did
+// something: with a handful of themes installed, one press in four would otherwise change nothing.
+// Empty when there is nothing else to pick (one theme installed, or none).
+QString randomThemeId(const QString &avoid) {
+    QStringList ids;
+    for (const ThemeChoice &choice : availableThemes())
+        if (choice.id != avoid) ids << choice.id;
+    if (ids.isEmpty()) return {};
+    return ids.at(QRandomGenerator::global()->bounded(ids.size()));
 }
 
 QString themeDataDir() {

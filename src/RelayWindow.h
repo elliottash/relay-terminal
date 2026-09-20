@@ -2556,6 +2556,20 @@ private:
                 notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
             });
         }
+        // "Randomize" (card #R4ND, owner 2026-09-20): a theme you did not pick, and a different one
+        // every press. It is a button and not a stored mode — what it lands on *is* the theme, as
+        // if it had been chosen from the list above — so there is nothing here to reset.
+        {
+            relay::SettingRow shuffle = buttonRow(QStringLiteral("option:theme_random"), QStringLiteral("Randomize"),
+                                                  QStringLiteral("Take a theme at random: never the one you are on, and a "
+                                                                 "different one each press"),
+                                                  QStringLiteral("Randomize"), [this] { randomizeTheme(); });
+            shuffle.aliases = QStringLiteral("random randomise shuffle surprise dice any theme");
+            // Undoable in one click — the list above is right there — so an agent asked to
+            // randomize the theme may press it (owner decision 2, card #FEJQ).
+            shuffle.agentSafeButtons = {0};
+            appearance.rows << shuffle;
+        }
         // Owner, 2026-09-19: "add an option, on by default, that themes are tab specific. and add
         // an option, off by default, to start tabs with a new theme."
         appearance.rows << toggleRow(QStringLiteral("theme/per_tab"), QStringLiteral("Each tab keeps its own theme"),
@@ -6094,6 +6108,25 @@ private:
         else if (asDefault) relay::theme::setActiveTheme(id, true);
         m_tabs->tabBar()->update();
         m_manager->scheduleSave();
+        return true;
+    }
+
+    // Options › Appearance › Randomize (card #R4ND). A theme other than the one in front of you,
+    // applied the way the picker applies one — this tab now, and the default for the next tab —
+    // and then named in a notice, because a theme you cannot name is one you cannot ask for again.
+    bool randomizeTheme() {
+        const QString id = relay::theme::randomThemeId(relay::theme::activeThemeId());
+        if (id.isEmpty()) {
+            notice(QStringLiteral("There is only one theme installed, so there is nothing to randomize."), 6000);
+            return false;
+        }
+        if (!chooseTheme(id, m_tabs->currentWidget(), true)) {
+            notice(QStringLiteral("That theme could not be read."), 6000);
+            return false;
+        }
+        notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
+        // WARP.md's standing rule: the button duplicates a faster path, so it teaches it.
+        hint(QStringLiteral("theme.random"), QStringLiteral("Next time: /theme random in any prompt box"));
         return true;
     }
 
