@@ -4563,6 +4563,27 @@ public:
     // the hash that answer carried. What is in flight is kept here, keyed by the request id.
     QString nextTestsWriteId() { return QStringLiteral("ts%1-").arg(quintptr(this), 0, 36) + QString::number(++m_testsWriteSeq); }
 
+    // Where a card about a failing test is filed: the board's **bugs tab**, by its id. A tab id is
+    // not the folder it writes into — this repo's `bugs` tab keeps its cards in `changes/` — and
+    // the worker refuses a tab the board does not have, so the answer is read off the board this
+    // tab is showing. With no bugs tab, the first work folder, which is where quick add files a
+    // card too; with no board pane in the tab, `features`, the worker's own default.
+    QString bugsTabOf(QWidget *page) const {
+        QString first;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
+                for (const relay::board::Tab &tab : tool->board()->model().tabs()) {
+                    if (tab.folder.isEmpty() || tab.type != QStringLiteral("work")
+                        || tab.id == QStringLiteral("planning"))
+                        continue;
+                    if (tab.id == QStringLiteral("bugs")) return tab.id;
+                    if (first.isEmpty()) first = tab.id;
+                }
+                break;
+            }
+        return first.isEmpty() ? QStringLiteral("features") : first;
+    }
+
     // One `## Tests` line, in the shape section 31.5 writes down: the invocation in backticks,
     // then the source file after an em dash when the worker knows one.
     static QString testsSectionLine(const relay::tests::TestRow &row) {
@@ -4578,7 +4599,7 @@ public:
     void makeCardForTest(ToolPane *tool, const relay::tests::TestRow &row) {
         QWidget *page = pageOf(tool);
         if (!page || boardWorkspaceOfTab(page).isEmpty()) {
-            statusBar()->showMessage(QStringLiteral("This tab is not attached to a project, so there is no board to file a card on."), 9000);
+            notice(QStringLiteral("This tab is not attached to a project, so there is no board to file a card on."), 9000);
             return;
         }
         const QString kind = row.flaky ? QStringLiteral("Flaky test") : QStringLiteral("Failing test");
@@ -4591,7 +4612,7 @@ public:
         sendToHelper(page, QString(),
                      {{QStringLiteral("type"), QStringLiteral("board_create")},
                       {QStringLiteral("id"), id},
-                      {QStringLiteral("tab"), QStringLiteral("changes")},
+                      {QStringLiteral("tab"), bugsTabOf(page)},
                       {QStringLiteral("status"), QStringLiteral("inbox")},
                       {QStringLiteral("card_type"), QStringLiteral("work")},
                       {QStringLiteral("labels"), QJsonArray{QStringLiteral("bug"), QStringLiteral("tests")}},
@@ -4610,7 +4631,7 @@ public:
         for (QWidget *leaf : leavesIn(page))
             if (auto *found = dynamic_cast<ToolPane *>(leaf); found && found->board()) { board = found; break; }
         if (!board) {
-            statusBar()->showMessage(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
+            notice(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
             return;
         }
         const QString card = pickCard(board->board()->model(),
@@ -4669,7 +4690,7 @@ public:
         const TestsCardWrite pending = m_testsWrites.take(requestId);
         const QString type = event.value(QStringLiteral("event")).toString();
         if (type == QStringLiteral("error")) {
-            statusBar()->showMessage(QStringLiteral("The board refused that: ") + event.value(QStringLiteral("text")).toString(), 9000);
+            notice(QStringLiteral("The board refused that: ") + event.value(QStringLiteral("text")).toString(), 9000);
             return true;
         }
         const QString card = event.value(QStringLiteral("card_id")).toString();
@@ -4690,7 +4711,7 @@ public:
                                                     {QStringLiteral("text"), pending.section}}}}}});
             return true;
         }
-        if (!pending.note.isEmpty()) statusBar()->showMessage(pending.note, 9000);
+        if (!pending.note.isEmpty()) notice(pending.note, 9000);
         // The card's `## Tests` names one more test, so the pane's `cards` column is a fold out of
         // date: one fresh inventory puts it right.
         if (auto *view = testSuitesViewOf(pending.pane.data())) view->requestList();
