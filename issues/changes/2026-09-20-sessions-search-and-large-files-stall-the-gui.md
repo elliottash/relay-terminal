@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m5
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/panes/], related: [PF4K], github: null}
+links: {plans: [], commits: [93599e123c237cb479aaf2810cf0ccc42af59ddb], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/panes/], related: [PF4K], github: null}
 ---
 # Sessions search costs 100–190 ms per key; a 15,000-line file freezes the file pane for 2 s
 

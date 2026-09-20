@@ -16,3 +16,7 @@ of the sessions cost — the rest was Qt re-measuring the three ResizeToContents
 per setFirstColumnSpanned() and once per setExpanded(). Numbers, commands and the harness in
 docs/qa_evidence/2026-09-20-perf-fixes/panes/MEASUREMENTS.md; new tests in tests/conversations_test.cpp and
 tests/filepanes_test.cpp, and two benches that are skipped unless RELAY_PERF_BENCH=1.
+
+<!-- relay:entry 20260920T223200Z-c1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 22:32
+landed as 93599e123c237cb479aaf2810cf0ccc42af59ddb (12 files, land session `pf-panes`); recorded on the card.
