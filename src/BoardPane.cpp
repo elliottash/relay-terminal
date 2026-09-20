@@ -2639,7 +2639,6 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->installEventFilter(this);
     syncColumnHeader();
     listLayout->addWidget(m_list, 1);
-    buildChatPanel(listLayout);
     m_splitter->addWidget(m_listPane);
 
     m_detail = new CardDetail(m_splitter);
@@ -2679,6 +2678,12 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         closeSections();
     };
     layout->addWidget(m_sections, 1);
+
+    // The page agent's panel (#8YQ9), under everything the list page shows. **Not** inside the
+    // splitter: `rebuild()` hides that whole widget when the board has no cards, and a board with
+    // no cards is precisely the board the survey has something to say about — put there, the
+    // survey could never be seen on the only board that gets one.
+    buildChatPanel(layout);
 
     m_keys = new QLabel(this);
     m_keys->setObjectName(QStringLiteral("boardKeys"));
@@ -4161,6 +4166,15 @@ void BoardView::rebuild()
         m_splitter->hide();
         m_keys->hide();
     }
+    syncChatVisible();
+}
+
+// The page agent belongs to the list page: it is there whenever the board is, including a board
+// with no cards yet, and it is away while a card or the sections page has the pane.
+void BoardView::syncChatVisible()
+{
+    if (m_chat)
+        m_chat->setVisible(m_open && !m_sectionsOpen && !detailOpen());
 }
 
 // The gear at the end of the section checkboxes: the section list itself, editable. It is a page
@@ -4362,7 +4376,8 @@ void BoardView::updateDetailLayout()
         "<b>v</b> verify &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
-        "&nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
+        "&nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>a</b> ask the agent &nbsp; "
+        "<b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b>/<b>Tab</b> reply &nbsp; "
@@ -4377,6 +4392,7 @@ void BoardView::updateDetailLayout()
         m_head->setVisible(detailOpen());
         applyRightInset();
     }
+    syncChatVisible();
     if (!detailOpen()) {
         m_listPane->setVisible(true);
         placeNotice();      // back to the bottom of the list
@@ -4866,15 +4882,7 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         undoLast();
         return true;
     }
-    // Ctrl+/ puts the keyboard in the page agent's composer from anywhere on the board (#8YQ9).
-    // It is the pair of `/`, which goes to the filter: one key for narrowing the list, one for
-    // asking about it. An open card goes back first, because the panel is the list page's.
-    if (mods == Qt::ControlModifier && key->key() == Qt::Key_Slash) {
-        if (detailOpen() && m_listPane->isHidden())
-            closeDetail();
-        focusChat();
-        return true;
-    }
+
     if (mods != Qt::NoModifier && mods != Qt::ShiftModifier)
         return false;
     const QString text = key->text();
@@ -4884,6 +4892,16 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     }
     if (text == QStringLiteral("/")) {
         focusFilter();
+        return true;
+    }
+    // `a` asks the page agent (#8YQ9): it puts the keyboard in the panel's composer, as `/` puts
+    // it in the filter — one key for narrowing the list, one for asking about it. It is a bare
+    // letter and not a chord on purpose: Ctrl+/ is already `help.shortcuts`, and the window's
+    // event filter matches the keymap and accepts that key before the board ever sees it.
+    if (text == QStringLiteral("a")) {
+        if (detailOpen())
+            closeDetail();      // the panel is the list page's
+        focusChat();
         return true;
     }
     // `e` edits the open card wherever the keyboard is inside the pane — the rows, the card's

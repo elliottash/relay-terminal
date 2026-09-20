@@ -8,6 +8,7 @@
 #include "Voice.h"
 
 #include <QCheckBox>
+#include <QIcon>
 #include <QDesktopServices>
 #include <QDir>
 #include <QEvent>
@@ -21,6 +22,8 @@
 #include <QLabel>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -285,6 +288,38 @@ QString problemCount(int count)
 // queue, then the composer. Everything is a row in one panel inside the list page — a pane or
 // in-pane surface, never a floating strip (owner's standing rule; the cleanup panel above it is
 // built the same way).
+// The composer's microphone, drawn rather than set as text or loaded from a file.
+//
+// It was the emoji U+1F3A4 until the live Xvfb run showed it as a missing-glyph box: the UI font
+// has no such glyph and Qt does not fall back to the colour-emoji font for a QToolButton's label.
+// A terminal pane uses `<theme data>/icons/mic.svg` through `Pane::stripIcon`, but that path
+// comes from `theme::themeDataDir()`, which lives in `src/Theme.cpp` — carried by
+// `relay-highlight`, which `relay-board` does not link. Adding that edge for one icon would make
+// the board library depend on the shell highlighter; drawing the shape costs nothing, needs no
+// font and no asset, and cannot go missing.
+static QIcon micIcon(const QColor &ink)
+{
+    constexpr int kSize = 14;
+    QPixmap pixmap(kSize * 2, kSize * 2);        // 2x, so it stays crisp on a scaled desktop
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(ink, 1.3);
+    pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(pen);
+    // The capsule, the cradle under it, the stem and the foot: a microphone at 14 px is those
+    // four strokes and nothing else survives the scaling anyway.
+    painter.setBrush(ink);
+    painter.drawRoundedRect(QRectF(5.0, 2.0, 4.0, 6.5), 2.0, 2.0);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawArc(QRectF(3.0, 5.0, 8.0, 6.0), 0, -180 * 16);
+    painter.drawLine(QPointF(7.0, 11.0), QPointF(7.0, 12.5));
+    painter.drawLine(QPointF(5.0, 12.5), QPointF(9.0, 12.5));
+    painter.end();
+    return QIcon(pixmap);
+}
+
 BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
 {
     setObjectName(QStringLiteral("boardChatPanel"));
@@ -427,13 +462,15 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     m_composer->onSubmit = [this](const QString &) { sendPrompt(); };
     m_composerRow->addWidget(m_composer, 1);
 
-    // The microphone, protocol 16: record, `transcribe`, insert the text at the cursor. A glyph
-    // rather than the pane's SVG — the icon lives under theme::themeDataDir(), which is
-    // src/Theme.cpp, and relay-board links no Theme.cpp (only the header's inline tokens). The
-    // stylesheet can still give #boardChatMic an icon of its own.
+    // The microphone, protocol 16: record, `transcribe`, insert the text at the cursor. The
+    // pane's own SVG, from the same place `Pane::stripIcon` reads it, so the two composers wear
+    // one microphone. It was an emoji glyph until the live run showed it as a missing-glyph box:
+    // the UI font has no U+1F3A4 and Qt does not fall back to the colour-emoji font for a
+    // QToolButton's text.
     m_mic = new QToolButton(this);
     m_mic->setObjectName(QStringLiteral("boardChatMic"));
-    m_mic->setText(QStringLiteral("\U0001F3A4"));
+    m_mic->setIcon(micIcon(theme::TextMuted));
+    m_mic->setIconSize(QSize(14, 14));
     m_mic->setAccessibleName(QStringLiteral("Voice transcription"));
     m_mic->setCursor(Qt::PointingHandCursor);
     m_mic->setFocusPolicy(Qt::NoFocus);
@@ -555,9 +592,7 @@ void BoardChatPanel::setChatState(const QJsonObject &chat)
     m_clock.start();
 
     // Whatever streamed but this block does not know about yet stays on screen: a `delta` that
-    // arrived after the worker built the block would otherwise blink out for a frame. When the
-    // block's last entry *is* this turn's answer — PageAgent._collect keeps it current — the block
-    // is the better copy and the local one goes, so the answer is never drawn twice.
+    // arrived after the worker built the block would otherwise blink out for a frame.
     if (!running) {
         m_streamed.clear();
         m_thinking.clear();
@@ -565,10 +600,18 @@ void BoardChatPanel::setChatState(const QJsonObject &chat)
         m_thinkingMs = 0;
         setProgress(QString());
     } else if (!m_history.isEmpty() && !turn.isEmpty()) {
+        // The block's last entry *is* this turn's answer — `PageAgent._collect` keeps it current
+        // while the turn runs. It is the better copy, so it becomes the live one and leaves the
+        // history: the running turn is the live block and nothing else. Clearing `m_streamed`
+        // instead would leave the same answer in the history *and* an empty live block under it,
+        // which is what queueing a second prompt used to do — the answer appeared to split in
+        // two the moment the block arrived.
         const QJsonObject last = m_history.last().toObject();
         if (last.value(QStringLiteral("role")).toString() == QStringLiteral("agent")
-            && last.value(QStringLiteral("turn")).toString() == turn)
-            m_streamed.clear();
+            && last.value(QStringLiteral("turn")).toString() == turn) {
+            m_streamed = last.value(QStringLiteral("text")).toString();
+            m_history.removeLast();
+        }
     }
 
     setRunning(running);
@@ -1546,10 +1589,14 @@ void BoardChatPanel::updateVoiceChip()
     m_mic->style()->polish(m_mic);
     if (recording) {
         const qint64 seconds = m_capture->elapsedMs() / 1000;
-        m_mic->setText(QStringLiteral("\U0001F3A4 ") + clockText(seconds));
+        m_mic->setIcon(micIcon(theme::Error));
+        m_mic->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_mic->setText(QLatin1Char(' ') + clockText(seconds));
         m_mic->setToolTip(QStringLiteral("Listening… click to transcribe"));
     } else {
-        m_mic->setText(QStringLiteral("\U0001F3A4"));
+        m_mic->setIcon(micIcon(theme::TextMuted));
+        m_mic->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        m_mic->setText(QString());
         m_mic->setToolTip(m_transcribing
                               ? QStringLiteral("Transcribing…")
                               : QStringLiteral("Speak instead of typing. The transcript goes into "

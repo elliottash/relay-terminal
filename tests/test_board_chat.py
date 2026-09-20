@@ -228,6 +228,32 @@ class QueueTest(ChatTestBase):
                          [(t, s, o) for t, s, o in self.ended if s])
 
 
+class DrainStateTest(ChatTestBase):
+    def test_the_queue_stops_listing_a_prompt_once_it_is_running(self):
+        """A prompt drained off the queue has no `board_chat_started` of its own — that answers a
+        `board_chat` message — so the page only learns it started from the state that follows."""
+        self.chat.ask("first")
+        self.chat.ask("second")
+        self.assertEqual([i["text"] for i in self.chat.state()["queue"]], ["second"])
+        self.agent.gate.set()
+        self.wait_idle()
+        states = [e["chat"] for e in self.of("board_chat_state")]
+        # The queue empties when the prompt starts, and the page is told so then. Before the
+        # drain announced itself the only state carrying an empty queue was the one sent when
+        # *everything* had finished, so the page drew a queue row for the prompt it was already
+        # streaming, for the whole of that turn.
+        #
+        # The assertion is about the queue and not about `running`: a stub agent finishes its
+        # turn before the announcement is even written, so whether the drained turn is still
+        # marked running here is a race and says nothing. What the page draws is the queue.
+        emptied = [i for i, chat in enumerate(states) if not chat["queue"]]
+        self.assertTrue(emptied, [[i["text"] for i in chat["queue"]] for chat in states])
+        self.assertLess(emptied[0], len(states) - 1,
+                        "the queue only reads empty in the very last state: the page was never "
+                        "told the queued prompt had started")
+        self.assertEqual(self.chat.state()["queue"], [])
+
+
 class SurveyFileTest(ChatTestBase):
     def test_mark_and_read_the_state_file(self):
         board = B.Board(self.root, self.repo)

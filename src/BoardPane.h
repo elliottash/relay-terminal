@@ -136,9 +136,9 @@ public:
     void requestCleanup();
     bool cleanupRunning() const { return !m_cleanupRun.isEmpty(); }
     // The Switchboard page agent (#8YQ9, protocol 19.18): the conversation about the whole board,
-    // at the bottom of the list page. Ctrl+/ puts the keyboard in its composer from anywhere on
-    // the board; the Check button and every section's ⚠ run the board's own `check()` and show
-    // what they find as lines that pre-fill that composer with a fix request.
+    // at the bottom of the list page. `a` puts the keyboard in its composer from anywhere on the
+    // board; the Check button and every section's ⚠ run the board's own `check()` and show what
+    // they find as lines that pre-fill that composer with a fix request.
     void focusChat();
     // `board_check {section}` — a section's ⚠ — or the unscoped Check button when `columnId` is
     // empty. The answer arrives as `board_problems {items, section}`.
@@ -183,6 +183,7 @@ private:
     // true when the panel took it, so a card thread never sees one — the `cleanup: true`
     // precedent below.
     bool handleChatEvent(const QString &type, const QJsonObject &event);
+    void syncChatVisible();
     void startCleanup(bool dryRun);
     void endCleanup();                        // the run is over, whatever ended it
     void updateCleanupButton();

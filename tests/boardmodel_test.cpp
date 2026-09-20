@@ -13,6 +13,7 @@
 #include <QFocusEvent>
 #include <QFrame>
 #include <QKeyEvent>
+#include <QSplitter>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -197,6 +198,8 @@ private slots:
     void theSurveyOffersToLookOnGithubAndThatLookWritesNothing();
     void theContextChipFollowsTheConversation();
     void thePageAgentsEventsNeverReachACardThread();
+    void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
+    void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -2966,6 +2969,78 @@ void BoardModelTests::thePageAgentsEventsNeverReachACardThread()
     QCOMPARE(document->toPlainText(), before);
     QVERIFY(!document->toPlainText().contains(QStringLiteral("reorganising the board")));
     QTRY_VERIFY(chatLog(view)->toPlainText().contains(QStringLiteral("reorganising the board")));
+}
+
+// The survey is the page agent's opening turn on a board that was *just created* (19.18) — a
+// board with no cards at all. `rebuild()` hides the splitter for exactly that board, so a panel
+// built inside it could never be seen on the only board that gets a survey.
+void BoardModelTests::anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(900, 700);
+    view.handleEvent(openedWithChat({}, chatState(false)));
+
+    QWidget *panel = chatPanel(view);
+    QWidget *splitter = view.findChild<QSplitter *>();
+    QVERIFY(panel && splitter);
+    QVERIFY(splitter->isHidden());          // no cards: the list and its tools are away
+    QVERIFY(!panel->isHidden());            // the conversation is not
+    QVERIFY(!composerOf(view)->isHidden());
+
+    // And the survey it is there for can be seen and acted on.
+    view.handleEvent(QJsonObject{
+        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
+        {"hints", QJsonArray{}}, {"counts", QJsonObject{{"items", 1}}},
+        {"proposals", QJsonArray{QJsonObject{
+            {"title", "Write the README"},
+            {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                   {"key", "todo-md:TODO.md#0"}}}}}},
+        {"git", QJsonObject{{"is_repo", false}}}});
+    QWidget *survey = view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"));
+    QVERIFY(survey && !survey->isHidden());
+    QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardChatImport")));
+
+    // A card open in a narrow pane keeps the page to itself, as the tools row already does.
+    view.resize(500, 700);
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(view.detailOpen());
+    QVERIFY(panel->isHidden());
+    view.closeDetail();
+    QVERIFY(!panel->isHidden());
+}
+
+// `a` asks the page agent, as `/` filters the list. Not a chord: Ctrl+/ is `help.shortcuts` in
+// the keymap and the window's event filter accepts it before the board is ever offered it.
+void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(900, 700);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    QPlainTextEdit *box = composerOf(view);
+    QVERIFY(box);
+    QVERIFY(!box->hasFocus());
+    QTest::keyClick(&view, Qt::Key_A);
+    QTRY_VERIFY(box->hasFocus());
+
+    // Typing into the composer is typing, not a shortcut: the key reaches the box.
+    QTest::keyClicks(box, QStringLiteral("and a"));
+    QCOMPARE(box->toPlainText(), QStringLiteral("and a"));
+
+    // From an open card it goes back to the list first, because the panel is the list page's.
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(view.detailOpen());
+    QTest::keyClick(&view, Qt::Key_A);
+    QVERIFY(!view.detailOpen());
+    QTRY_VERIFY(box->hasFocus());
+
+    // The key line teaches it.
+    auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
+    QVERIFY(keys);
+    QVERIFY(keys->text().contains(QStringLiteral("ask the agent")));
 }
 
 QTEST_MAIN(BoardModelTests)

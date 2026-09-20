@@ -418,6 +418,12 @@ class PageAgent:
             self._emit({"event": "error", "chat": True, "text":
                         f"The queued prompt could not start ({type(exc).__name__})."})
             self._drain()
+            return
+        # Say so. The turn that just started has no `board_chat_started` of its own — that answers
+        # a `board_chat` message, and this one came off the queue — so without this the page would
+        # go on listing the running prompt as though it were still waiting its turn, right up
+        # until the turn ended. Announced after `_start`, so the state carries the new turn id.
+        self._announce_state()
 
     def wrap(self, emit):
         """The emit the agent's turn reports through: every event tagged with its turn."""
