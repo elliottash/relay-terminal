@@ -1,0 +1,32 @@
+2026-09-20T05:32:09.592Z INFO relay.gui gui_start version=0.1.0 build=2026-09-20.01H.07 pid=2470695 level=info
+2026-09-20T05:32:09.617Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-live/run, 0775 instead of 0700"
+2026-09-20T05:32:09.621Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-live/run, 0775 instead of 0700"
+2026-09-20T05:32:09.644Z INFO relay.gui worker_start pane=5014d4c4 workspace_set=1
+2026-09-20T05:32:09.734Z INFO relay.gui event type=ready pane=5014d4c4
+2026-09-20T05:32:09.765Z INFO relay.gui event type=configured pane=5014d4c4 model=mock-opus
+2026-09-20T05:32:19.245Z INFO relay.gui event type=agent_started pane=5014d4c4 turn_id=472116963e6c438a90a951ff70e5a777
+2026-09-20T05:32:19.323Z INFO relay.gui event type=turn_summary pane=5014d4c4 turn_id=472116963e6c438a90a951ff70e5a777 outcome=done stop_reason=limit ms=78
+2026-09-20T05:32:19.326Z INFO relay.gui event type=agent_finished pane=5014d4c4 outcome=done stop_reason=limit
+2026-09-20T05:32:22.873Z INFO relay.gui event type=agent_started pane=5014d4c4 turn_id=a0ec115dd42740638e5e4f880c936311
+2026-09-20T05:32:22.902Z INFO relay.gui event type=turn_summary pane=5014d4c4 turn_id=a0ec115dd42740638e5e4f880c936311 outcome=done ms=32
+2026-09-20T05:32:22.903Z INFO relay.gui event type=agent_finished pane=5014d4c4 outcome=done
+2026-09-20T05:32:26.437Z INFO relay.gui event type=agent_started pane=5014d4c4 turn_id=093ad95a205a42bba4464f816a36aa6c
+2026-09-20T05:32:26.451Z INFO relay.gui event type=turn_summary pane=5014d4c4 turn_id=093ad95a205a42bba4464f816a36aa6c outcome=done ms=15
+2026-09-20T05:32:26.452Z INFO relay.gui event type=agent_finished pane=5014d4c4 outcome=done
+2026-09-20T05:32:39.353Z INFO relay.gui event type=agent_started pane=5014d4c4 turn_id=115a799660ab4a32b4c236fbbb7ad763
+2026-09-20T05:32:53.809Z INFO relay.gui gui_start version=0.1.0 build=2026-09-20.01H.07 pid=2479641 level=info
+2026-09-20T05:32:53.826Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-live/run, 0775 instead of 0700"
+2026-09-20T05:32:53.829Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-live/run, 0775 instead of 0700"
+2026-09-20T05:32:53.848Z INFO relay.gui worker_start pane=0c5492c9 workspace_set=1
+2026-09-20T05:32:53.923Z INFO relay.gui event type=ready pane=0c5492c9
+2026-09-20T05:32:53.957Z INFO relay.gui event type=configured pane=0c5492c9 model=mock-opus
+2026-09-20T05:32:56.750Z INFO relay.gui runtime_sweep removed=2 kept_alive=2 kept_young=0 errors=0
+2026-09-20T05:33:04.254Z INFO relay.gui event type=agent_started pane=0c5492c9 turn_id=1e888cae6e9646bb8b2214ae1192ff9b
+2026-09-20T05:33:04.283Z INFO relay.gui event type=turn_summary pane=0c5492c9 turn_id=1e888cae6e9646bb8b2214ae1192ff9b outcome=done ms=28
+2026-09-20T05:33:04.284Z INFO relay.gui event type=agent_finished pane=0c5492c9 outcome=done
+2026-09-20T05:33:07.992Z INFO relay.gui event type=agent_started pane=0c5492c9 turn_id=c63d2268f8ee4baf8f0b369a0a51ddff
+2026-09-20T05:33:08.036Z INFO relay.gui event type=turn_summary pane=0c5492c9 turn_id=c63d2268f8ee4baf8f0b369a0a51ddff outcome=done stop_reason=limit ms=42
+2026-09-20T05:33:08.039Z INFO relay.gui event type=agent_finished pane=0c5492c9 outcome=done stop_reason=limit
+2026-09-20T05:33:32.787Z INFO relay.gui event type=agent_started pane=0c5492c9 turn_id=447a4437cdd3459ea3cde5b80d14d702
+2026-09-20T05:33:35.276Z INFO relay.gui gui_quit reason=signal pid=2479641 uptime_s=41 build=2026-09-20.01H.07
+2026-09-20T05:33:36.328Z ERROR relay.gui worker_exit pane=0c5492c9 code=0 crashed=0

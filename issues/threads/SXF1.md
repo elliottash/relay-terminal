@@ -41,3 +41,109 @@ Answer to "will this work with the agents?" — yes, Continue is already agent-n
 Let me put that answer on the card:
 
 Noted on **#SXF1**. In short: yes — `/continue` already works with the agents; this card is about giving it the Ctrl+Enter gesture, and the only real work is marking a turn that was cut off by a restart so the same key covers it. If you want it built, **Execute** hands the card to a terminal pane.
+
+<!-- relay:entry 20260920T024539Z-1t author=owner kind=comment mode=plan -->
+Plan this card.
+
+<!-- relay:entry 20260920T025112Z-yt author=agent kind=event model=glm-5.3 pane=switchboard turn=aa63e2079a07462ba10d703b3dc973c4/9feb8bd2147a416b866da4608b815f45 -->
+- ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260920T025117Z-04 author=agent kind=comment mode=plan model=glm-5.3 turn=aa63e2079a07462ba10d703b3dc973c4/9feb8bd2147a416b866da4608b815f45 -->
+The card's thread already did the scoping; now let me pin down the exact code for the plan.
+
+
+
+
+
+
+
+
+
+The routing point is clear (`Pane::interruptAgentWithPrompt`, Pane.h:906–915: empty box → "Type a prompt first."). Let me pin down the continueTurn hint text and the `state_loaded` handler shape.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The session file's checkpoints carry an `ended` field — that looks like the persisted "turn was cut off" signal. Let me verify.
+
+`checkpoints.span()` already documents the "turn still running" case. Now: when is the session file written mid-turn? Let me see the save path around agent.py:2595–2630 and who calls it.
+
+Mid-turn autosave exists (`MID_TURN_SAVE_S = 10.0`), so a killed turn *is* in the session file with a checkpoint lacking `ended`. Two last checks: does the worker emit `ready` after `state_loaded` (ordering for clearing the GUI flag), and the exact `state_loaded` payload.
+
+
+
+
+
+
+
+
+
+
+
+
+
+I have everything verified. Writing the plan onto the card.
+
+Planned on **#SXF1**: Ctrl+Enter on an empty prompt box routes to the existing `continueTurn()`, gated on the two cases in the card — `m_limitReached` for the limit case, and a new `m_turnCutOff` the worker derives on `resume` from the checkpoint `ended` stamps already persisted in the session file (`state_loaded` gains a `turn_open` field, so the protocol doc gets one line). No binding changes, so send-now on a non-empty box is untouched, and the `/continue` slow path teaches the new key per the standing hint rule.
+
+Nothing needs your input — **Execute** hands it to a terminal pane as-is.
+
+<!-- relay:entry 20260920T031437Z-w8 author=owner kind=comment mode=plan -->
+Plan this card.
+
+<!-- relay:entry 20260920T031437Z-w9 author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Inbox → Planning · a Plan turn started
+
+<!-- relay:entry 20260920T031450Z-c4 author=owner kind=event pane=switchboard -->
+- ✦ owner updated this card · assignee: (unset) → agent
+
+<!-- relay:entry 20260920T031450Z-xz author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Planning → Executing · Execute: handed to a terminal pane
+
+<!-- relay:entry 20260920T031451Z-04 author=owner kind=progress pane=switchboard -->
+Execute · handed to a new terminal pane beside the Switchboard, whose agent works on it and records its commits in `links.commits`.
+
+<!-- relay:entry 20260920T031503Z-g8 author=agent kind=progress model=glm-5.3 pane=12e7d518 turn=1d5a748e0a184aed8ec5e87d05a45f3d/fb585b44e0944b56a58267d7782abbae -->
+Starting execution of the plan: worker predicate + state_loaded field, GUI flag + routing, hint surfaces, tests, build.
+
+<!-- relay:entry 20260920T032205Z-8d author=owner kind=progress pane=switchboard -->
+Execute · handed to a new terminal pane beside the Switchboard, whose agent works on it and records its commits in `links.commits`.
+
+<!-- relay:entry 20260920T033547Z-6a author=agent kind=event model=glm-5.3 pane=fae91646 turn=0feb685b80de4da58a4644ed44f89145/56f0bdb111b74e5ca67669777cbd16b2 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": [], "github": null} → {"commits": ["d9cde60524af4b8def16916aa505875d321299de"], "evidence": [], "githu…
+
+<!-- relay:entry 20260920T033547Z-vr author=agent kind=progress model=glm-5.3 pane=fae91646 turn=0feb685b80de4da58a4644ed44f89145/56f0bdb111b74e5ca67669777cbd16b2 -->
+Worker half landed as d9cde605: `conv_index.turn_left_open` (pure cut-off predicate, `session_unfinished` now ORs it in), `Agent.resume` → `state_loaded {turn_open}`, protocol §5 + event list, and tests — predicate (finished/cut-off/waiting-message/legacy), resume event (open, completed, pre-`ended` legacy). The commit's own verify gate ran the four cases green in the exact landed tree. Note: a previous execution pane had already written the worker edits into the tree uncommitted; I claimed them with land.py `--from-head` and landed them, selecting only this card's two protocol-doc hunks (two other uncommitted doc hunks — #BRD3's and another session's — were left in the tree for their owners). Next: GUI flag + routing + surfaces, then build and ctest.
+
+<!-- relay:entry 20260920T033913Z-9r author=agent kind=event model=glm-5.3 pane=fae91646 turn=0feb685b80de4da58a4644ed44f89145/56f0bdb111b74e5ca67669777cbd16b2 -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de"], "evidence": [], "githu… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…
+
+<!-- relay:entry 20260920T033913Z-t5 author=agent kind=progress model=glm-5.3 pane=fae91646 turn=0feb685b80de4da58a4644ed44f89145/56f0bdb111b74e5ca67669777cbd16b2 -->
+GUI half landed as 472ae1a2: `m_turnCutOff` (set from `state_loaded {turn_open}`, cleared with `m_limitReached` and on every done), routing in `interruptAgentWithPrompt` via the extracted `relay::continueturn::sendNowContinues` rule (new `src/ContinueTurn.h` + `tests/continueturn_test.cpp`, the queuesubmit pattern — the plan's "drive a Pane" harness does not exist headless, so the rule was extracted to be testable), and the surfaces: Keymap descriptions, the `/continue` slow-path hint and ▸ Continue link now teach `agent.interrupt`'s first binding, palette row matches. land.py's build gate caught a missing `relay::` namespace qualifier before anything landed; after the fix the exact tree built and `ctest -R continueturn` passed. Next and last: the live Xvfb check (limit stop, kill-and-restart, hint) with evidence.
+
+<!-- relay:entry 20260920T053526Z-dm author=agent kind=event model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…; appended to `## QA checklist`
+
+<!-- relay:entry 20260920T053533Z-qx author=agent kind=progress model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
+Live check complete, ALL PASS at tip c0af1554 (this pane picked up the finish after fae91646's turn ended): re-ran the full Xvfb drive against `build/relay` — A limit-stop Ctrl+Enter sends `Continue`; B kill -9 mid-turn → relaunch → "Session loaded" → Ctrl+Enter sends `Continue` (worker had sent `state_loaded {turn_open: true}`); C `/continue` shows the "Next time: Ctrl+Return · continue a stopped turn from an empty prompt box" hint. Evidence + harness under docs/qa_evidence/2026-09-20-ctrl-enter-continue/. Three harness traps found and fixed in drive.py (a lock deadlock that froze the mock mid-record; the hung turn must complete one tool step first because the mid-turn autosave only fires at step boundaries; the limit line's own hints open the 20 s ShortcutHints global gap that silently swallowed `continue.slow`). Re-ran targeted tests in the current tree: `ctest -R continueturn` 1/1, the three Python cases (turn_left_open, session_unfinished, resume turn_open) 3/3 OK.
+
+<!-- relay:entry 20260920T053534Z-6t author=agent kind=note model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
+Owner reported during execution: "sometimes it still says 'type a prompt first'" and "ctrl+enter still doesn't do continue in an idle pane". Checked: the instance the owner was typing in (pid 118616) was started 2026-09-19 15:54 — about eight hours before the three commits landed (23:39–23:48) — so it predates the feature entirely; a restart of Relay picks it up. Also by design (the plan's scope decision): Ctrl+Enter continues only a turn that stopped at its limit or was cut off by a restart — after a normally finished turn, an Esc stop, or a kill before the turn's first autosave, the empty box keeps "Type a prompt first." (nothing is left open to continue).
+
+<!-- relay:entry 20260920T053539Z-9w author=agent kind=event model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
+- ✦ agent moved this card · Executing → Needs verification · All three plan surfaces landed (d9cde605, 472ae1a2, 78416e39) and the live Xvfb check passes every case: limit stop, kill-and-restart, and the teaching hint; targeted tests green in the current tree. · evidence docs/qa_evidence/2026-09-20-ctrl-enter-continue/ · implemented_by glm/glm-5.3
