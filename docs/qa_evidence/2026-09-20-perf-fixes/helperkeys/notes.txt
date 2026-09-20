@@ -1,0 +1,11 @@
+PASS the Actions pane is open ("actions" in 01-actions-pane.png)
+PASS the helper panel opened on it (Alt+Q) ("helper" in 02-helper-panel.png)
+PASS the helper's request carries set_keybinding (stub dump)
+PASS the helper's request carries the app tools (stub dump)
+PASS app_action_list answered with pane.close on its current key, Ctrl+W (stub dump)
+PASS the rebind is in keybindings.json ({'pane.close': ['Ctrl+Alt+Shift+K']})
+PASS the running app reloaded the keys ("shortcuts reloaded" in 04-notice.png)
+PASS the helper said what it had done (05-answered.png)
+PASS the Actions pane shows Close pane on the new key (06-actions-row.png)
+
+9 passed, 0 failed
