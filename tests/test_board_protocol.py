@@ -20,7 +20,6 @@ import fake_cards
 import fake_github as FG
 from relay_core import board as B
 from relay_core import board_protocol as P
-from relay_core import board_turns
 from relay_core import board_tools as T
 from relay_core import forge_github as GH
 from relay_core import forge_sync as F
@@ -426,26 +425,23 @@ class AskTests(ProtocolTest):
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_ask", "card": card_id, "text": "  "})
 
-    def test_the_board_block_sets_how_many_cards_may_run_at_once(self):
-        """Options › Agent › Switchboard → `board.limits.max_card_turns` (19.16)."""
-        self.assertEqual(self.commands.cards.max_running, 3)
+    def test_a_stale_board_block_caps_nothing(self):
+        """An older GUI still sends `board.limits.max_card_turns`; the worker ignores it, and
+        no number of running card turns is refused (owner, 2026-09-19, #0Z13)."""
         self.commands.configure(str(self.repo), {"board": {"limits": {"max_card_turns": 1}}})
         self.cards = fake_cards.CardAgents(self.commands, str(self.repo), self.events)
-        self.assertEqual(self.commands.cards.max_running, 1)
         first = self.make_card()
         second = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
         self.cards.hold(first)
+        self.cards.hold(second)
         self.send(type="board_ask", card=first, mode="plan")
-        self.assertTrue(self.cards.wait_running())
         events = self.send(type="board_ask", id="a2", card=second, mode="plan")
-        refusal = [e for e in events if e.get("code") == "board_busy"][0]
-        self.assertEqual(refusal["cards"], [first])
-        self.assertIn(f"#{first}", refusal["text"])
-        self.cards.agent(first).release()
+        self.assertTrue(self.cards.wait_running(2))
+        self.assertEqual([e for e in events if e.get("code") == "board_busy"], [])
+        self.assertEqual(sorted(self.commands.cards.running_cards()), sorted([first, second]))
+        for card_id in (first, second):
+            self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
-        # A silly number is clamped rather than refused: the pane must still open.
-        self.commands.configure(str(self.repo), {"board": {"limits": {"max_card_turns": 99}}})
-        self.assertEqual(self.commands.cards.max_running, board_turns.MAX_CARD_TURNS_CEILING)
 
     def test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs(self):
         card_id = self.make_card()
@@ -479,19 +475,16 @@ class AskTests(ProtocolTest):
         self.assertTrue(self.cards.wait())
         self.assertEqual(self.commands.cards.running_cards(), [])
 
-    def test_the_fourth_card_is_refused_with_the_running_ones_named(self):
-        ids = [self.make_card(title=f"Card {n}", text=f"body {n}") for n in range(4)]
+    def test_the_fifth_card_runs_too_no_card_turn_is_refused_for_number(self):
+        ids = [self.make_card(title=f"Card {n}", text=f"body {n}") for n in range(5)]
         for card_id in ids:
             self.cards.hold(card_id)
-        for card_id in ids[:3]:
-            self.send(type="board_ask", card=card_id, mode="plan")
-        self.assertTrue(self.cards.wait_running(3))
-        events = self.send(type="board_ask", id="a4", card=ids[3], mode="plan")
-        refusal = [e for e in events if e.get("code") == "board_busy"][0]
-        self.assertEqual(sorted(refusal["cards"]), sorted(ids[:3]))
-        for card_id in ids[:3]:
-            self.assertIn(f"#{card_id}", refusal["text"])
-        for card_id in ids[:3]:
+        for card_id in ids:
+            events = self.send(type="board_ask", card=card_id, mode="plan")
+            self.assertEqual([e for e in events if e.get("code") == "board_busy"], [])
+        self.assertTrue(self.cards.wait_running(5))
+        self.assertEqual(sorted(self.commands.cards.running_cards()), sorted(ids))
+        for card_id in ids:
             self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
 

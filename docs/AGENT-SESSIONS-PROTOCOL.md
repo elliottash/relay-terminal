@@ -2616,20 +2616,15 @@ turn with no change to the tools themselves.
 |---|---|
 | a turn is already running on **that card** | two agents writing one card's `## Plan` would each undo the other, and its thread would interleave two answers |
 | a **cleanup** is running | it merges, splits and moves the very cards the turns are talking about (19.9) |
-| **`board.limits.max_card_turns`** turns are already running (default 3) | a board of a hundred cards must not open a hundred paid streams from a hundred clicks |
 
-A cleanup, an import and a GitHub sync are refused in turn while any card turn runs. The error
+There is no concurrent cap: as many cards run at once as the owner asks (owner, 2026-09-19,
+*"remove the cap on number of agents in the switchboard"*). The cap this section described until
+now — 3 by default, 12 at most, set by `board.limits.max_card_turns` — was removed the day after
+it landed; a `board` block from an older GUI still carrying that key is ignored. A cleanup, an
+import and a GitHub sync are refused in turn while any card turn runs. The error
 gains **`cards`**, the ids running right now, beside the `card_id` and `cleanup_running` it already
 carried; its text names them ("busy with turns on #A, #B and #C"). Nothing is written to a card by
 a refused ask, exactly as before.
-
-**How many at once** is `board.limits.max_card_turns` in the `board` block of `configure` (19.1),
-beside the write ceilings — `BoardTools` ignores the keys that are not its own, so one block
-carries every limit the GUI has an option for. Options › Agent › Switchboard ("Cards the agent
-works at once") writes it, 1 to `board_turns.MAX_CARD_TURNS_CEILING` (12), and a value outside that
-is clamped rather than refused: a board block is settings, and the pane must still open. Lowering
-it never stops a turn that is already running — it is a gate on starting — and the window re-sends
-`configure` to each live Switchboard worker when the option changes, so it applies without a restart.
 
 **Conversations.** A card's session outlives its turn, so a second question on an unchanged card
 continues where it left off — which the single conversation could only do for whichever card was

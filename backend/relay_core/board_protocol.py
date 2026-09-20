@@ -85,16 +85,6 @@ MAX_CLEANUP_ROSTER = 400
 MAX_CLEANUP_NOTE = 4000
 
 
-def _card_turn_limit(settings: dict) -> int:
-    """`board.limits.max_card_turns`, or the module default.  Out-of-range values are clamped
-    rather than refused: a board block is settings, and a pane must still open."""
-    limits = settings.get("limits")
-    value = limits.get("max_card_turns") if isinstance(limits, dict) else None
-    if not isinstance(value, int) or isinstance(value, bool):
-        return board_turns.MAX_RUNNING
-    return max(1, min(board_turns.MAX_CARD_TURNS_CEILING, value))
-
-
 def _turn_phrase(mode: str | None) -> str:
     """What a running card turn is called in a refusal: "a plan", "a question", "a turn"."""
     return {"plan": "a plan", "discuss": "a question"}.get(mode or "", "a turn")
@@ -273,10 +263,6 @@ class BoardCommands:
             self.tools = None
         else:
             self.tools = self._build(board, state, settings, actor="owner")
-        # `limits.max_card_turns`: how many cards the agent may work at once (19.16). It rides in
-        # the same block as the write ceilings — `BoardTools` ignores the keys that are not its
-        # own — so one `board` block carries every limit the GUI has an option for.
-        self.cards.set_max_running(_card_turn_limit(settings))
         if agent:
             self._attach_agent_tools(workspace, settings)
         return self.state_block()
@@ -1102,16 +1088,15 @@ class BoardCommands:
         """What may start now (19.16).  True when it refused, with `board_busy` sent.
 
         Turns on **different cards run at the same time**, each on its own agent and
-        conversation (`relay_core.board_turns`); three at once by default.  Three things are
-        still refused rather than queued:
+        conversation (`relay_core.board_turns`) — as many as the owner clicks; the concurrent
+        cap was removed the day after it landed (owner, 2026-09-19).  Two things are still
+        refused rather than queued:
 
         * a **second turn on the same card** — two agents writing one card's `## Plan` would
           each undo the other, and the thread would interleave two answers;
         * **anything while a cleanup runs**, and a cleanup while anything runs — a cleanup
           merges, splits and moves cards across the whole board, including the ones being
           talked about;
-        * a **fourth** concurrent card turn, so a board full of cards cannot open a dozen
-          paid streams with a dozen clicks.
 
         The GUI shows the refusal and offers Stop; `board_cancel {card}` stops one card's turn.
         """
@@ -1128,9 +1113,6 @@ class BoardCommands:
         elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
             # A cleanup wants the board to itself.
             running = _cards_phrase(running_cards) if running_cards else "an agent turn"
-            busy_card = running_cards[0] if running_cards else None
-        elif card_id is not None and self.cards.full():
-            running = _cards_phrase(running_cards)
             busy_card = running_cards[0] if running_cards else None
         else:
             return False

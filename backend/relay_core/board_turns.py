@@ -16,9 +16,12 @@ What it does need is its own conversation and its own scope, which is exactly wh
 So each card gets a `CardSession`: its own `Agent` built from the pane agent's provider config,
 its own `BoardTools` instance — and therefore its own `card_scope`, which is why nothing in
 `board_tools.py` changes — and one thread that calls `agent.ask()`.  Turns on *different* cards
-run at the same time, up to `MAX_RUNNING`; a second turn on the *same* card is still refused,
-because two agents writing one card's `## Plan` would each undo the other.  A whole-board
-cleanup stays exclusive: it rewrites cards the card turns are talking about.
+run at the same time, as many as the owner clicks: the concurrent cap (`MAX_RUNNING` 3, ceiling
+12, the `board.limits.max_card_turns` option) was removed the day it landed (owner, 2026-09-19,
+*"remove the cap on number of agents in the switchboard"* — every turn is a stream the owner
+started on purpose, the way a dozen panes are).  A second turn on the *same* card is still
+refused, because two agents writing one card's `## Plan` would each undo the other.  A
+whole-board cleanup stays exclusive: it rewrites cards the card turns are talking about.
 
 Sessions outlive their turn, so a follow-up Discuss on a card continues that card's conversation
 instead of reseeding — the thing the old single conversation could only do for the most recent
@@ -33,18 +36,9 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Callable
 
-#: Card turns running at once.  Three is a working desk: the owner plans a couple of cards while
-#: discussing a third.  Every one of them is a paid provider stream, so this is deliberately not
-#: "as many as you can click" — the one past the limit is refused with the running cards named.
-#: Options › Agent › Switchboard sets it per install (`board.limits.max_card_turns`, 19.16).
-MAX_RUNNING = 3
-
-#: The most the option may ask for.  Not a technical limit — a thread and a conversation each are
-#: cheap — but a spending one: every running turn is a provider stream nobody is reading yet.
-MAX_CARD_TURNS_CEILING = 12
-
 #: Card conversations kept for a follow-up.  Each is an `Agent` holding its messages, so this is
 #: a memory ceiling, not a policy: past it the least recently used card reseeds from its file.
+#: A *running* card's session is never dropped, however many are running.
 MAX_SESSIONS = 6
 
 #: Turn events that are tagged with the card they belong to (protocol 19.10, unchanged).
@@ -91,7 +85,7 @@ class CardTurns:
 
     def __init__(self, emit: Callable[[dict], None], build: Callable[[str, Callable], tuple],
                  on_answer: Callable[[CardSession, str | None, str], None] | None = None,
-                 *, max_running: int = MAX_RUNNING, max_sessions: int = MAX_SESSIONS):
+                 *, max_sessions: int = MAX_SESSIONS):
         #: Where a card turn's events go.  The worker's raw emit, deliberately: these events are
         #: tagged here, and they are not the pane agent's turns — the subagent manager and the
         #: pane-title code must not read them as a main turn ending.
@@ -100,8 +94,7 @@ class CardTurns:
         self._build = build
         #: Called on a finished turn with the answer text, to append it to the card's thread.
         self._on_answer = on_answer
-        self._max_running = max(1, int(max_running))
-        self._max_sessions = max(self._max_running, int(max_sessions))
+        self._max_sessions = max(1, int(max_sessions))
         self._lock = threading.RLock()
         self._sessions: "OrderedDict[str, CardSession]" = OrderedDict()
 
@@ -121,24 +114,9 @@ class CardTurns:
     def count(self) -> int:
         return len(self.running())
 
-    def full(self) -> bool:
-        return self.count() >= self._max_running
-
     def session(self, card_id: str) -> CardSession | None:
         with self._lock:
             return self._sessions.get(card_id)
-
-    @property
-    def max_running(self) -> int:
-        return self._max_running
-
-    def set_max_running(self, value: int) -> int:
-        """The owner's number, from `board.limits.max_card_turns`.  Turns already running are
-        never stopped by lowering it: the limit is a gate on starting, and the ones over it
-        simply finish."""
-        self._max_running = max(1, min(MAX_CARD_TURNS_CEILING, int(value)))
-        self._max_sessions = max(self._max_running, self._max_sessions)
-        return self._max_running
 
     def mode_of(self, card_id: str) -> str | None:
         session = self.session(card_id)
@@ -149,8 +127,9 @@ class CardTurns:
               seed_hash: str | None = None) -> str:
         """Run `prompt` on this card's own agent, on its own thread.  Returns the turn id.
 
-        The caller has already checked `is_running` and `full` and written the owner's entry to
-        the thread; what is left here is the conversation, the scope and the thread.
+        The caller has already checked `is_running` and written the owner's entry to the
+        thread; what is left here is the conversation, the scope and the thread.  How many
+        cards may run at once is not checked anywhere: there is no cap (2026-09-19).
         """
         # A turn whose terminal event has gone out but whose thread has not unwound yet: the
         # pane sends the next ask the moment it sees `done`, and handing one agent two turns
@@ -161,11 +140,6 @@ class CardTurns:
             session = self._sessions.get(card_id)
             if session is not None and session.active:
                 raise ValueError(f"A turn is already running on #{card_id}.")
-            # The caller (`BoardCommands._busy_error`) checks this first, so it can refuse with a
-            # sentence naming the cards. Checked again here because the limit guards spending: a
-            # second caller must not be able to open a stream past it.
-            if len([s for s in self._sessions.values() if s.active]) >= self._max_running:
-                raise ValueError(f"{self._max_running} card turns are already running.")
             if session is None:
                 session = self._new_session(card_id)
             self._sessions.move_to_end(card_id)

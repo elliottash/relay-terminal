@@ -2218,20 +2218,6 @@ private:
             agent.rows << hiddenFolder;
         }
         {
-            // Protocol 19.16: a card's Plan or Discuss runs on that card's own agent, so several
-            // cards can be worked at once. Every one of them is a paid provider stream, which is
-            // why there is a number here at all; the one past it is refused on the card, naming
-            // the cards that are running.
-            relay::SettingRow cardTurns =
-                numberRow(QStringLiteral("board/max_card_turns"),
-                          QStringLiteral("Cards the agent works at once"),
-                          QStringLiteral("Plan or Discuss turns running together on different cards"),
-                          3, 1, 12);
-            cardTurns.aliases = QStringLiteral("switchboard cards parallel concurrent plan discuss turns at once");
-            alsoBoardWorkers(cardTurns);
-            agent.rows << cardTurns;
-        }
-        {
             // The personal inbox board was dropped 2026-09-19 (#916B): a card filed in a tab with
             // no project attached now goes here if it is set, else through the project picker.
             relay::SettingRow defaultProject =
@@ -4629,12 +4615,6 @@ public:
         // a turn like any other, and its agent is built from this one's provider and deadlines.
         const QJsonObject limits = Pane::turnOptions();
         for (auto it = limits.begin(); it != limits.end(); ++it) configure.insert(it.key(), it.value());
-        // How many cards this board may work at once (protocol 19.16), in the block that already
-        // carries the board's other ceilings.
-        configure.insert(QStringLiteral("board"), QJsonObject{
-            {QStringLiteral("limits"), QJsonObject{
-                {QStringLiteral("max_card_turns"),
-                 std::clamp(settings.value(QStringLiteral("board/max_card_turns"), 3).toInt(), 1, 12)}}}});
         // Only this board root's worker: another project's board in the same window keeps its own.
         if (relay::BoardWorker *worker = boardWorker(workspace)) worker->start(configure);
     }

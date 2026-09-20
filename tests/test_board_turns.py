@@ -140,50 +140,19 @@ class RunningTests(PoolTest):
         self.gates["AAAA"].set()
         self.wait_idle()
 
-    def test_the_cap_is_the_number_running_not_the_number_of_cards(self):
-        pool = board_turns.CardTurns(self.events.append, self.build, max_running=2)
-        self.addCleanup(pool.drop)
-        for card in ("AAAA", "BBBB"):
+    def test_as_many_cards_run_at_once_as_are_started(self):
+        """No concurrent cap (owner, 2026-09-19: 'remove the cap on number of agents in the
+        switchboard').  Five is past both the old default of 3 and the old ceiling's reach in
+        one test; the point is that nothing counts them."""
+        for card in ("AAAA", "BBBB", "CCCC", "DDDD", "EEEE"):
             self.hold(card)
-            pool.start(card, "plan", "go")
-        self.assertTrue(pool.full())
-        self.assertEqual(sorted(pool.running_cards()), ["AAAA", "BBBB"])
-        self.gates["AAAA"].set()
-        deadline = time.time() + 5
-        while time.time() < deadline and pool.count() > 1:
-            time.sleep(0.005)
-        self.assertFalse(pool.full())        # one finished; the third may start now
-        pool.start("CCCC", "plan", "go")
-        self.assertTrue(pool.full())
-        self.gates["BBBB"].set()
-        deadline = time.time() + 5
-        while time.time() < deadline and pool.count():
-            time.sleep(0.005)
-
-    def test_the_cap_is_the_owners_number_and_a_running_turn_is_never_cut_off(self):
-        """Options › Agent › Switchboard, through `board.limits.max_card_turns` (19.16)."""
-        self.assertEqual(self.pool.max_running, board_turns.MAX_RUNNING)
-        self.assertEqual(self.pool.set_max_running(1), 1)
-        self.hold("AAAA")
-        self.hold("BBBB")
-        self.pool.start("AAAA", "plan", "one")
-        self.wait_running()
-        with self.assertRaises(ValueError) as caught:
-            self.pool.start("BBBB", "plan", "two")
-        self.assertIn("1 card turns are already running", str(caught.exception))
-        self.assertTrue(self.pool.full())
-        # Raising it lets the next one in; lowering it never stops what is already running.
-        self.pool.set_max_running(2)
-        self.pool.start("BBBB", "plan", "two")
-        self.wait_running(2)
-        self.pool.set_max_running(1)
-        self.assertEqual(len(self.pool.running_cards()), 2)
-        self.gates["AAAA"].set()
-        self.gates["BBBB"].set()
+            self.pool.start(card, "plan", "go")
+        self.wait_running(5)
+        self.assertEqual(sorted(self.pool.running_cards()), ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE"])
+        for card in ("AAAA", "BBBB", "CCCC", "DDDD", "EEEE"):
+            self.gates[card].set()
         self.wait_idle()
-        # Out of range is clamped, not refused: a board block is settings, and the pane must open.
-        self.assertEqual(self.pool.set_max_running(0), 1)
-        self.assertEqual(self.pool.set_max_running(9999), board_turns.MAX_CARD_TURNS_CEILING)
+        self.assertEqual(len(self.answers), 5)
 
     def test_the_scope_is_opened_for_the_turn_and_closed_after_it(self):
         self.pool.start("AAAA", "plan", "one")
@@ -256,7 +225,7 @@ class SessionTests(PoolTest):
         self.wait_idle()
 
     def test_the_least_recently_used_conversation_is_dropped_past_the_cap(self):
-        pool = board_turns.CardTurns(self.events.append, self.build, max_running=2, max_sessions=2)
+        pool = board_turns.CardTurns(self.events.append, self.build, max_sessions=2)
         self.addCleanup(pool.drop)
         for card in ("AAAA", "BBBB", "CCCC"):
             pool.start(card, "discuss", "hello")
