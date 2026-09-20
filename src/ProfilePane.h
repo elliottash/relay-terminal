@@ -116,6 +116,7 @@ private:
     void applySummary(const QJsonObject &summary);
     void updateChrome();
     void appendLine(const QString &line);
+    int logTailHeight() const;
 
     ProfileTableModel *m_model = nullptr;
     QLabel *m_title = nullptr;

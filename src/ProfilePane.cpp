@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QTextCursor>
 #include <QStringList>
 #include <QTableView>
 #include <QTextBrowser>
@@ -257,7 +258,7 @@ void ProfilePane::buildUi() {
     m_log->setObjectName(QStringLiteral("filePreviewMarkdown"));
     m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_log->setMinimumHeight(60);
-    m_log->setMaximumHeight(120);
+    m_log->setMaximumHeight(logTailHeight());
     layout->addWidget(m_log, 1);
 
     auto *buttons = new QHBoxLayout;
@@ -385,8 +386,17 @@ void ProfilePane::appendLine(const QString &line) {
     while (m_lines.size() > kMaxLines) m_lines.removeFirst();
     if (m_log) {
         m_log->setPlainText(m_lines.join(QStringLiteral("\n")));
-        m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
+        // To the end by cursor, not by scrollbar maximum: a pixel maximum leaves the top line cut
+        // in half, which reads as a broken widget rather than as a log.
+        m_log->moveCursor(QTextCursor::End);
+        m_log->ensureCursorVisible();
     }
+}
+
+// Four whole lines of the log, plus the frame: a maximum in pixels cuts the top line in half.
+int ProfilePane::logTailHeight() const {
+    const int line = m_log ? m_log->fontMetrics().lineSpacing() : fontMetrics().lineSpacing();
+    return line * 4 + 14;
 }
 
 QString ProfilePane::headerText() const { return paneTitle(); }
@@ -418,8 +428,9 @@ void ProfilePane::updateChrome() {
     }
     if (m_flameButton) m_flameButton->setEnabled(!m_flame.isEmpty());
     if (m_attach) m_attach->setEnabled(!m_markdown.isEmpty());
-    // The log is the whole pane while there is no table yet, and a tail once there is.
-    if (m_log) m_log->setMaximumHeight(m_rows.isEmpty() ? 16777215 : 120);
+    // The log is the whole pane while there is no table yet, and a whole number of lines once
+    // there is.
+    if (m_log) m_log->setMaximumHeight(m_rows.isEmpty() ? 16777215 : logTailHeight());
 }
 
 void ProfilePane::stopRun() {
