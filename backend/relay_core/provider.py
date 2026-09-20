@@ -415,6 +415,25 @@ class ProviderStalled(ProviderError):
 class Cancelled(RuntimeError):
     pass
 
+
+class ProviderPreempted(RuntimeError):
+    """The retry wait of a refused request was ended by the caller, not by the provider.
+
+    Raised out of ``complete()`` from between two attempts (card #DC4J): the provider refused the
+    request (429, a 5xx) and the transport was waiting to ask again when ``preempt_check`` said the
+    caller has somewhere better to send it — the agent's pending model switch. Nothing has been
+    streamed and nothing is open, so the same step can be asked of another provider at once. Not a
+    ``ProviderError``: it is neither a failure to report nor a reason to fail over.
+
+    ``status`` is the refusal being waited out, ``attempt`` the retry that was about to be made,
+    ``waited`` how much of its wait had passed.
+    """
+    def __init__(self, status: int, attempt: int, waited: float):
+        super().__init__(f"Provider HTTP {status}: the retry wait was ended for a model switch.")
+        self.status = status
+        self.attempt = attempt
+        self.waited = waited
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """Never forward an Authorization header to a redirected endpoint."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -512,6 +531,10 @@ class ChatProvider:
         self._retry_budget = None   # an explicit wall-clock cap on the retry loop, else derived
         self._retry_origin = None   # monotonic start of the logical call the budget is measured from
         self._retries_used = 0      # retries already spent by this logical call
+        # Asked every RETRY_WAIT_TICK during a retry wait (card #DC4J): True ends the wait with
+        # ProviderPreempted, so the caller can send the step elsewhere. The agent installs the
+        # check that says whether a model switch is waiting to land; None never pre-empts.
+        self.preempt_check: Callable[[], bool] | None = None
         self._lock = threading.Lock()
 
     @property
@@ -839,6 +862,7 @@ class ChatProvider:
     HTTP_RETRY_JITTER = 0.25            # each backoff waits 75-100 % of the computed delay
     RETRY_AFTER_MAX_S = 60.0            # a Retry-After header is honoured up to a minute
     HTTP_RETRY_BUDGET_FACTOR = 2.0      # default wall-clock budget: twice the first-token deadline
+    RETRY_WAIT_TICK = 0.1               # how often a retry wait asks `preempt_check` (card #DC4J)
 
     def _open(self, opener, request, emit, cancel: threading.Event, started: float):
         """Open the response, asking again when the provider's answer is "not now".
@@ -886,8 +910,30 @@ class ChatProvider:
                 if getattr(exc, "fp", None) is not None:
                     hard_close(exc.fp)
                 self._note_progress()
-                if cancel.wait(delay):
-                    raise Cancelled("Stopped.") from None
+                self._wait_retry(cancel, delay, exc.code, retries)
+
+    def _wait_retry(self, cancel: threading.Event, delay: float, status: int, attempt: int) -> None:
+        """Wait out one retry delay, unless a stop or a model switch ends it first.
+
+        A stop raises ``Cancelled`` as it always did. A model switch (card #DC4J) is asked about
+        every ``RETRY_WAIT_TICK`` through ``preempt_check``, and raises ``ProviderPreempted``: the
+        owner clicking another model while a 429 is being waited out wants that model asked *now*,
+        not after the wait, and nothing about the refused request needs finishing first. With no
+        check installed (a side call, the key test, a bare transport) the wait is one plain sleep.
+        """
+        check = self.preempt_check
+        started = time.monotonic()
+        end = started + delay
+        while True:
+            if cancel.is_set():
+                raise Cancelled("Stopped.") from None
+            if check is not None and check():
+                raise ProviderPreempted(status, attempt, time.monotonic() - started) from None
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return
+            if cancel.wait(min(remaining, self.RETRY_WAIT_TICK) if check is not None else remaining):
+                raise Cancelled("Stopped.") from None
 
     def _http_retry_wait(self, exc: urllib.error.HTTPError, attempt: int,
                          elapsed: float = 0.0) -> float | None:

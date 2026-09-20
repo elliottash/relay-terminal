@@ -11,7 +11,7 @@ import urllib.error
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from relay_core.provider import (CONNECT_TIMEOUT, MAX_OUTPUT_TOKENS, ChatProvider, ProviderConfig,
-                                 ProviderError, ProviderStalled, ProviderTruncated, Cancelled,
+                                 ProviderError, ProviderStalled, ProviderTruncated, Cancelled, ProviderPreempted,
                                  validate_stall_timeout)
 
 
@@ -510,6 +510,8 @@ class RetryTests(unittest.TestCase):
                     return self.refuse(429, '0')
                 if mount == '/slow/v1':
                     return self.refuse(429, '2')
+                if mount == '/switch/v1':
+                    return self.refuse(429, '30')
                 if mount == '/server/v1' and seen == 1:
                     return self.refuse(500)
                 if mount == '/notimpl/v1':
@@ -617,6 +619,35 @@ class RetryTests(unittest.TestCase):
         provider = self.provider('/slow/v1')
         cancel = threading.Event()
         threading.Timer(0.2, cancel.set).start()
+        with self.assertRaises(Cancelled):
+            self.complete(provider, cancel)
+        self.assertFalse(provider.response_open())
+
+    def test_a_model_switch_ends_the_retry_wait_at_once(self):
+        # Card #DC4J: the agent installs `preempt_check`, which says whether a set_model is waiting
+        # to land. While a Retry-After: 30 is being waited out, the answer turning True ends the
+        # wait with ProviderPreempted within a tick, nothing more is sent, and nothing is left open.
+        provider = self.provider('/switch/v1')
+        switching = threading.Event()
+        provider.preempt_check = switching.is_set
+        threading.Timer(0.2, switching.set).start()
+        started = time.monotonic()
+        events = []
+        with self.assertRaises(ProviderPreempted) as caught:
+            provider.complete([{'role': 'user', 'content': 'hello'}], [], events.append, threading.Event())
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertGreaterEqual(caught.exception.waited, 0.15)
+        self.assertEqual((caught.exception.status, caught.exception.attempt), (429, 1))
+        self.assertEqual(self.seen('/switch/v1'), 1)
+        self.assertFalse(provider.response_open())
+        self.assertTrue(any(e['event'] == 'provider_retry' and e['reason'] == 'http' for e in events))
+        self.assertIsNone(provider._retry_origin)          # the logical call is over
+
+    def test_a_stop_wins_over_a_model_switch_during_the_wait(self):
+        provider = self.provider('/switch/v1')
+        provider.preempt_check = lambda: True
+        cancel = threading.Event()
+        cancel.set()
         with self.assertRaises(Cancelled):
             self.complete(provider, cancel)
         self.assertFalse(provider.response_open())

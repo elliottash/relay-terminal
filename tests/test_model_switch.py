@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -561,3 +562,129 @@ class CrossProviderTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RefusingServer:
+    """Two endpoints on one port (card #DC4J): ``/old/v1`` refuses every request with a 429 and a
+    ``Retry-After: 30``; ``/new/v1`` answers at once; ``/stream/v1`` starts an answer and holds it
+    until ``release`` is set. Records the bodies each one saw."""
+
+    def __init__(self, test):
+        self.bodies, self.entered, self.release = {}, threading.Event(), threading.Event()
+        outer = self
+
+        def sse(delta=None, finish=None):
+            return ('data: ' + json.dumps({'choices': [{'delta': delta or {}, 'finish_reason': finish}]})
+                    + '\n\n').encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                mount = self.path.rsplit('/chat', 1)[0]
+                outer.bodies.setdefault(mount, []).append(
+                    json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                outer.entered.set()
+                if mount == '/old/v1':
+                    self.send_response(429); self.send_header('Retry-After', '30')
+                    self.send_header('Content-Length', '0'); self.end_headers()
+                    return
+                if mount == '/stream/v1':
+                    self.send_response(200); self.send_header('Content-Type', 'text/event-stream')
+                    self.end_headers()
+                    self.wfile.write(sse({'content': 'partial on old'})); self.wfile.flush()
+                    outer.release.wait(5)
+                    self.wfile.write(sse(finish='stop') + b'data: [DONE]\n\n')
+                    return
+                body = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': 'finished on new'},
+                                                'finish_reason': 'stop'}],
+                                   'usage': {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}}).encode()
+                self.send_response(200); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        test.addCleanup(self.server.server_close)
+        test.addCleanup(self.server.shutdown)
+        test.addCleanup(self.release.set)
+        self.base = f'http://127.0.0.1:{self.server.server_port}'
+
+    def seen(self, mount) -> int:
+        return len(self.bodies.get(mount, []))
+
+
+class RetryPreemptionTests(unittest.TestCase):
+    """A model switch during the retries of a refused request takes effect at once (card #DC4J).
+
+    Before this, a pane whose provider answered 429 sat out every Retry-After while the picker's
+    choice waited for a step boundary that never came; the owner had to Esc the turn to switch.
+    """
+    setUp = ModelSwitchMidTurnTests.setUp
+    make_agent = ModelSwitchMidTurnTests.make_agent
+    index = ModelSwitchMidTurnTests.index
+
+    def test_a_switch_during_a_retry_wait_re_issues_the_step_on_the_new_model_at_once(self):
+        srv = RefusingServer(self)
+        agent = self.make_agent(config=ProviderConfig(srv.base + '/old/v1', 'old', 'key-old'))
+        self.sup.submit('hello', 'now')
+        refused = self.rec.wait(lambda e: e['event'] == 'provider_retry' and e['reason'] == 'http')
+        self.assertIn('429', refused['text'])
+        self.assertIn('30 s', refused['text'])                 # the wait it would have sat out
+        started = time.monotonic()
+        self.cmds.handle('set_model', {'base_url': srv.base + '/new/v1', 'model': 'new',
+                                       'api_key': 'key-new', 'id': 'm1'})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['id'], changed['model'], changed['applies'], changed['in_flight_model']),
+                         ('m1', 'new', 'next_step', 'old'))
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertLess(time.monotonic() - started, 1.0)      # not after the 30 s Retry-After
+        self.assertEqual((applied['model'], applied['from_model'], applied['at'], applied['step']),
+                         ('new', 'old', 'step', 1))
+        finished = self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(finished['outcome'], 'done')
+        self.assertLess(time.monotonic() - started, 2.0)
+        # The transcript line the GUI prints for it: what was refused, where the step went.
+        switch = next(e for e in self.rec.of('provider_retry') if e['reason'] == 'switch')
+        self.assertEqual((switch['status'], switch['attempt'], switch['step'], switch['from_model'], switch['to_model']),
+                         (429, 1, 1, 'old', 'new'))
+        self.assertIn('switching to new now', switch['text'])
+        self.assertLess(self.index(lambda e: e['event'] == 'provider_retry' and e['reason'] == 'http'),
+                        self.index(lambda e: e['event'] == 'provider_retry' and e['reason'] == 'switch'))
+        self.assertLess(self.index(lambda e: e['event'] == 'provider_retry' and e['reason'] == 'switch'),
+                        self.index(lambda e: e['event'] == 'model_applied'))
+        self.assertLess(self.index(lambda e: e['event'] == 'model_applied'),
+                        self.index(lambda e: e['event'] == 'done'))
+        # One refused request on the old provider and never another; the same step went to the new
+        # one (whose plain-text wrap-up then draws the completion check, as any takeover's does,
+        # #B9V4) and the answer came from it. The pane's own model is now the new one, permanently.
+        self.assertEqual(srv.seen('/old/v1'), 1)
+        self.assertGreaterEqual(srv.seen('/new/v1'), 1)
+        self.assertEqual({body['model'] for body in srv.bodies['/new/v1']}, {'new'})
+        self.assertTrue(any(m['role'] == 'user' and 'hello' in str(m['content'])
+                            for m in srv.bodies['/new/v1'][0]['messages']))
+        self.assertIn('finished on new', ''.join(e['text'] for e in self.rec.of('delta')))
+        self.assertEqual((agent.config.model, agent.config.base_url), ('new', srv.base + '/new/v1'))
+        self.assertEqual(self.hooked, ['new'])
+        self.assertEqual(len(self.rec.of('model_applied')), 1)
+        self.assertFalse(agent.provider.response_open())
+
+    def test_a_switch_while_the_reply_is_streaming_still_waits_and_says_so(self):
+        # The existing rule for a request that has started answering: it finishes on the model it
+        # started on, and the switch lands after it. The pane is told in the status line.
+        srv = RefusingServer(self)
+        agent = self.make_agent(config=ProviderConfig(srv.base + '/stream/v1', 'old', 'key-old'))
+        self.sup.submit('hello', 'now')
+        self.rec.wait(lambda e: e['event'] == 'delta' and 'partial on old' in e['text'])
+        self.cmds.handle('set_model', {'base_url': srv.base + '/new/v1', 'model': 'new', 'api_key': 'key-new'})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual(changed['applies'], 'next_step')
+        status = self.rec.wait(lambda e: e['event'] == 'status' and 'takes over' in e['text'])
+        self.assertEqual(status['text'], 'new takes over from the next step · old is answering now')
+        self.assertFalse(any(e['event'] == 'model_applied' for e in self.rec.events))
+        srv.release.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['model'], applied['at']), ('new', 'turn_end'))
+        self.assertFalse(any(e['event'] == 'provider_retry' for e in self.rec.events))
+        self.assertEqual((srv.seen('/stream/v1'), srv.seen('/new/v1')), (1, 0))
+        self.assertEqual(agent.config.model, 'new')

@@ -39,6 +39,7 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
 
 - `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider, keeping the conversation. Event `model_changed {model, preset, context_window, effort, applies, in_flight_model?, will_compact?}`, or `model_switch_refused` (below).
   - **Accepted while a turn runs** (issue 3ES1, 2026-09-18; until then it was refused with `agent_busy`). The request already in flight is never aborted: it finishes on the model it started on. The switch lands at the next step boundary of the tool loop — every tool call of the previous response has its result — before the next provider request and before the auto-compaction check, so that request goes to the new model with the whole conversation. `model_changed` then says `applies: "next_step"` and names `in_flight_model`, and `context_window` is the new model's.
+  - **A refused request is not waited out for a switch** (card #DC4J, 2026-09-20). "Never aborted" covers a request that is *answering*. When the provider has refused the request — 429, 408, 409, a 5xx: the transport's own retries (15.2.1) — and is waiting to ask it again, a `set_model` ends that wait at once. The worker emits `provider_retry {turn_id, reason: "switch", step, attempt, max_attempts, status, from_model, to_model, text}` (what was refused, where the step is going), lands the switch at the same step boundary as any other (`model_applied {at: "step"}`, the takeover note, `context`) and asks that same step of the new model. Nothing had been streamed, so nothing is repeated, and `model_changed` still says `applies: "next_step"` — the next step is simply now. The first attempt's connect and its wait for the response headers are not interrupted (nothing exists to close until they arrive), and a request whose response is open finishes on the model it started on, as before: the worker then says so in a `status` line, `<new> takes over from the next step · <old> is answering now`. A switch during a plan, image or failed-over turn keeps waiting for the turn's end and leaves those retries alone. A switch back to the model in force during the wait drops the pending one; if the wait had already ended for it, the step is asked again at once.
   - When the switch lands the worker emits `model_applied {turn_id, at: "step"|"turn_end"|"now", step?, model, from_model, preset, context_window, effort, history_converted?, compacted?}` followed by `context`. `at: "turn_end"` means the turn ended without another request (it answered, stopped, failed or hit a limit): the new model applies from the next turn, and the event comes after `agent_finished`, so `done`/`error`/`cancelled` stay the turn's last events. The worker's own follow-ups of a switch (subagents that inherit the main model, role defaults, `agent_role: "main"`) happen at that moment, not when the request arrives. A landing at `"step"` adds a Relay handoff note to the conversation — the model taking over is told the request above is still open and to continue it with tools — and that turn's open requests count for the completion check (2026-09-20, #B9V4): a takeover must not read as a fresh start, so a wrap-up in plain text draws the check instead of ending the turn. A switch off a guest harness that lands mid-turn ends the harness at the landing, as an idle switch does at once (29.3).
   - Two switches before the next request: the last one wins, and only it is applied. A switch back to the model in force drops the pending one (`applies: "now"`, no `model_applied`).
   - An image turn (issue EM1E) stays on its vision model to the end: a switch during one says `applies: "turn_end"` and `in_flight_model` is the vision model.
@@ -596,6 +597,8 @@ without the JSON object gives `unaddressed: []` plus `error`.
    as `cancelled`; the escalated prompt then runs as the next turn. A `set_model` accepted mid-turn (section 2)
    lands at the start of a step, before its `status`: `compaction_started`/`compacted {reason: "model_switch"}` when
    its smaller window needs them, then `model_applied {at: "step"}` (or `model_switch_refused`) → `context`.
+   One that ended a refused request's retry wait (card #DC4J) is preceded by `provider_retry {reason: "switch"}`,
+   and the step it lands at is the one the refusal interrupted, asked again of the new model.
 4. optional `completion_check` (then back to 3), at most twice
 5. `requests` (turn end) → `turn_summary` → `done {open_items, stop_reason?}` | `cancelled {open_items}` |
    `error {text, open_items}`
@@ -665,7 +668,7 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 
 | Field | Type | Meaning |
 |---|---|---|
-| `tier` | `main`/`flash`/`lite`/`local` | follow a tier (13.7); exclusive with the endpoint fields below |
+| `tier` | `high`/`main`/`flash`/`lite`/`local` | follow a tier (13.7); exclusive with the endpoint fields below |
 | `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `minimax`, `openrouter`, `openai`, `anthropic`, `gemini`) |
 | `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
 | `model` | string | with `preset`: a different model id on that provider |
@@ -727,7 +730,7 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
 - Not implemented on purpose (owner: "later"): routing between the Main and Flash agent by estimated task
   difficulty.
 
-### 13.7 Main / Flash / Lite / Local tiers (v1.4, 2026-09-17; Local added v1.5, 2026-09-18)
+### 13.7 High / Main / Flash / Lite / Local tiers (v1.4, 2026-09-17; Local added v1.5, 2026-09-18; High added v3.9, 2026-09-20)
 
 Eight roles were too many knobs for one screen, so the roles modal shows **three** models — Main, Flash and
 Lite — and every role follows one of them. Source: owner, 2026-09-17 ("lets have main, flash, and lite
@@ -738,6 +741,7 @@ presets … then advanced options, which would then reveal the specific actions"
 
 | Tier | Used for | Where it comes from |
 |---|---|---|
+| `high` | plan mode (`planning`), and any role pinned to it | the `tiers.high` override, else the pane's own model at `max` reasoning |
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`) |
 | `flash` | terminal use, fast panes, summaries, suggestions | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit | `TIER_DEFAULTS[<main preset>]["lite"]` |
@@ -746,8 +750,18 @@ presets … then advanced options, which would then reveal the specific actions"
 **Options.** `configure` and `set_agent_options` accept `tiers`, an object keyed by tier name. `main` is
 rejected — it is the pane's own model. Each value is `null` (restore the provider's default) or
 `{preset?, base_url?, model?, extra?, effort?}` with the same meaning as a `roles` entry. `roles.<name>`
-additionally accepts `{"tier": "main"|"flash"|"lite"|"local", "effort"?}`, which is exclusive with
+additionally accepts `{"tier": "high"|"main"|"flash"|"lite"|"local", "effort"?}`, which is exclusive with
 `preset`/`base_url`/`model`/`extra`; giving both is an error.
+
+**The High tier** (v3.9, 2026-09-20; owner: "there needs to be a 'high' default on top of main, used by
+the planner by default") sits above Main and is listed first in `tier_defaults.tiers`, so the roles modal
+draws it above the Main row. With no `tiers.high` override it is the pane's own model pushed to `max`
+reasoning — the same endpoint, key and preset, only the effort raised — which is what the `planning`
+role's default was in 13.11 and now comes from the tier (`ROLE_TIERS["planning"] == "high"`, resolved once
+in `roles.RoleResolver._high_default`); like Local it has no `TIER_DEFAULTS` row, so `providers` stays
+three wide. A `tiers.high` override resolves exactly as Flash and Lite do (a provider alone means that
+provider's Main model, since none has a bigger one to name), and one whose key is missing steps straight
+down to Main with the note `"No stored key for the High model; using Main."`.
 
 **The Local tier** (v1.5, 2026-09-18; owner: "add a `/local` command that switches to your chosen local
 LLM (make that as a 4th category with main, flash, lite, local)") is the one tier that belongs to no
@@ -935,9 +949,11 @@ the old default, which was also the old top of the range — migrates to 0 once 
 Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
 default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
 first model request, the way an image turn decides its model (17.3). The role's **default is the pane's
-own model pushed to `max` reasoning**: `roles.RoleResolver._default` applies
-`apply_effort(main.extra, style, "max")` to the pane's own config, so a plan is investigated harder
-without changing the pane's model, preset or key. `planning` is an ordinary settable role —
+own model pushed to `max` reasoning**: since v3.9 (2026-09-20) that default is the High tier's (13.7) —
+`ROLE_TIERS["planning"] == "high"`, and `roles.RoleResolver._high_default` applies
+`apply_effort(main.extra, style, "max")` to the pane's own config — so a plan is investigated harder
+without changing the pane's model, preset or key, and `tiers.high` moves plan mode to another model
+for every pane. `planning` is an ordinary settable role —
 `roles.planning` takes the same fields as any other (13.2) — and a model the user picked by hand always
 wins over the default, swapping for the turn whatever the pane's effort is.
 
@@ -1330,7 +1346,7 @@ started answer does not, because that text is already on the user's screen.
 New event, emitted before the retried model call:
 
 `provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended" |
-"route_dropped", attempt, max_attempts, seconds, step, text}`
+"route_dropped" | "switch", attempt, max_attempts, seconds, step, text}`
 
 `seconds` is sent only for `"stall"`; `step` is sent by everything the agent emits and not by
 `"http"` or `"failover_ended"` (the transport does not know the step, and the restore is not at one);
@@ -1338,7 +1354,9 @@ New event, emitted before the retried model call:
 emits without knowing the turn. `"http"` is the transport's retry of a refused request (below);
 `"failover"` and `"failover_ended"` are the move to another provider and the return from it
 (15.2.2), and name the model and preset they move from and to. `"route_dropped"` is a plan or image
-turn giving up its routed model and finishing on the pane's own (15.2.3).
+turn giving up its routed model and finishing on the pane's own (15.2.3). `"switch"` is a refused
+request's retry wait ended by a `set_model` (section 2, card #DC4J): it names the `status` being
+waited out, `from_model` and `to_model`, and the `model_applied` of that switch follows it.
 
 Since 2026-09-19 the transport itself also retries a *refused* request from a provider that is not
 a local model server: HTTP 408, 409, 429, 500, 502, 503, 504 and 529, and only those. A status the
@@ -4868,9 +4886,10 @@ message kinds, and record the flags they use against the versions they were veri
 **A guest is a preset.** The worker's `presets` answer (13.7) carries one row per guest the
 registry knows, `{id: "guest:<id>", label: "<display name>", guest: "<id>", harness: <bool>,
 installed: <bool>, binary, version, group: "guest", has_stored_key: false, key_source: "guest",
-model: "", base_url: "harness://<id>", local: false, hosted: false, efforts: []}`. `harness` is
-true when the adapter exists and the binary is installed; a row with `harness: false` is what the
-GUI falls back to Tier B for (29.4).
+model: "", base_url: "harness://<id>", local: false, hosted: false, efforts: [], limits?}`.
+`harness` is true when the adapter exists and the binary is installed; a row with
+`harness: false` is what the GUI falls back to Tier B for (29.4). `limits` is present once the
+guest has reported its subscription usage to any pane of this worker (see **Usage limits** below).
 
 **Configuring one.** `configure {preset: "guest:claude", guest: {model?, resume?, fork?,
 permissions?}}` (and `set_model {preset: "guest:…", guest: {…}}` from any other preset) builds a
@@ -4949,6 +4968,37 @@ beside `context_pct` — codex reports both in `thread/tokenUsage/updated`, clau
 `result`'s `modelUsage` and the turn's prompt — and they ride the `context` event under
 `guest_context`, beside Relay's own measurement of Relay's own window. Two windows, two numbers,
 one event: the chip can say "13k of 258k" instead of "5%".
+
+**Usage limits: the subscription's rolling windows, per guest.** Both guests run on the
+person's own plan, and both say how much of it is spent. The adapter emits a `limits` harness
+event whenever the guest reports fresh figures and the provider turns each one into
+
+```
+{"event": "usage_limits", "preset": "guest:claude" | "guest:codex", "guest": "<id>",
+ "windows": [{"kind": "5h" | "weekly", "used_percent": <0-100 float>,
+              "resets_at": <unix seconds int> | null}, ...],
+ "status"?: "allowed" | "allowed_warning" | "rejected"}
+```
+
+so the model picker can show "5h: 62% left, resets 14:30 · weekly: 40% left, resets Tue" per
+provider. `windows` is in that order, at most one row per kind, and only the kinds the guest
+named. The last figures per guest are kept on the worker (`guest_harness_provider.last_limits`)
+and ride on the guest's `presets` row as `limits: {windows, status?, updated_at}`, so a picker
+opened in another pane has them without waiting for a turn; a limit belongs to the account, not
+to a pane. Where the numbers come from, verified against the installed binaries on 2026-09-20:
+Claude Code 2.1.278 writes one `rate_limit_event` per turn to a stream-json host, after the
+model's `message_stop`, as `rate_limit_info: {status, resetsAt, rateLimitType: five_hour |
+seven_day, unifiedWindows: {five_hour: {utilization, resetsAt}, seven_day: {…}}}` with
+`utilization` a 0–1 fraction (the top-level type and reset only say which window governs), and
+the adapter also keeps the newest one that arrived between turns to report with the next.
+codex-cli 0.155.1's app-server has `account/rateLimits/read` (asked once when the thread starts,
+an error answer ignored) and the sparse `account/rateLimits/updated` notification, both carrying
+a `RateLimitSnapshot {primary?, secondary?: {usedPercent, windowDurationMins?, resetsAt?},
+planType?, rateLimitReachedType?}`; codex sends one after every model response. The adapter
+merges updates into the last snapshot (an absent or null window keeps what was known, as the
+schema asks) and reads the kind off `windowDurationMins` — on a Pro plan with a weekly allowance
+only, *primary* is the 10080-minute window and `secondary` is null — falling back to the guest's
+own order when there is no duration. `rateLimitReachedType` set is `status: "rejected"`.
 
 **What a headless guest is deliberately not given** (owner, 2026-09-19). It gets no `--settings`
 file: 26.4's hook and statusline entries exist to tell a pane what a TUI will not, and every one of

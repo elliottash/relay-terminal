@@ -35,7 +35,7 @@ from .presets import (apply_effort, context_window_for, effort_style, infer_effo
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
-                       ProviderStalled, ProviderTruncated, make_provider, message_images,
+                       ProviderPreempted, ProviderStalled, ProviderTruncated, make_provider, message_images,
                        validate_first_token_timeout, validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
@@ -365,7 +365,7 @@ class Agent:
         # a pane that is already running on the hosted service and so has nothing left to opt into.
         self.failover_hosted = failover_hosted
         self._injected_provider = provider is not None
-        self.provider = provider or _provider_for(config, self.stall_timeout_s)
+        self.provider = provider or self._hook_preempt(_provider_for(config, self.stall_timeout_s))
         self._apply_stall_timeout()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
                                      policy=security.policy_from(security_options or {}))
@@ -701,8 +701,8 @@ class Agent:
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider:
-            self.provider = _with_first_token(_provider_for(config, self.stall_timeout_s),
-                                              self.first_token_timeout_s)
+            self.provider = self._hook_preempt(_with_first_token(_provider_for(config, self.stall_timeout_s),
+                                                                 self.first_token_timeout_s))
         self._adopt_model(config, preset, context_window)
 
     def _adopt_model(self, config: ProviderConfig, preset, context_window: int | None = None) -> None:
@@ -726,6 +726,26 @@ class Agent:
         self.messages = adapt_history(self.messages, self._effort_style())
 
     # ----- a model switch while a turn runs (issue 3ES1) --------------------------------
+    def _hook_preempt(self, provider):
+        """Let this transport end a retry wait for a model switch (card #DC4J).
+
+        `ChatProvider` asks `preempt_check` between two attempts of a refused request; the answer
+        is whether a `set_model` is waiting to land at a step boundary, which is exactly when the
+        wait is pointless. A stand-in transport without the attribute, and a guest harness, are
+        left alone: their retries end when they end. Returns the provider, for the assignments.
+        """
+        if hasattr(provider, "preempt_check"):
+            provider.preempt_check = self._switch_waiting
+        return provider
+
+    def _switch_waiting(self) -> bool:
+        """Whether a mid-turn switch would land at a step boundary right now: the transport's
+        cue to stop waiting out a refusal (card #DC4J). The same gate `apply_pending_model` has for
+        ``at="step"``, so a switch that is going to wait for the turn's end anyway - during a plan
+        or image turn, or a failed-over one - leaves the retries alone."""
+        with self._model_lock:
+            return self._pending_model is not None and not (self._routed or self._failover)
+
     def switch_fit(self, config: ProviderConfig, window: int) -> dict:
         """How the conversation fits a model it may switch to: the numbers the context bar shows for
         it, and a verdict. ``compacts``: over that model's auto-compaction limit, so the switch
@@ -789,10 +809,17 @@ class Agent:
                     pre_land: Callable | None = None) -> dict:
         """Accept a set_model while a turn runs; it lands at the next step boundary.
 
-        The request already in flight is never aborted: it finishes on the model it started on, and
-        the one after it goes to the new model with the conversation so far (history converted by
-        `adapt_history`; compacted first, by the model in force, when it is over the new window's
-        limit). Two switches before that request: the last one wins. Switching back to the model in
+        A request that has started answering is never aborted: it finishes on the model it started
+        on, and the one after it goes to the new model with the conversation so far (history
+        converted by `adapt_history`; compacted first, by the model in force, when it is over the
+        new window's limit). A request the provider has *refused* is another matter (card #DC4J):
+        while the transport waits to ask again after a 429 or a 5xx, `_switch_waiting` is True, so
+        the wait ends at once with `ProviderPreempted`, `ask` comes back round to its step boundary
+        and lands the switch there, and the same step is asked of the new model — nothing had been
+        streamed. The first attempt's connect and its wait for headers are not interrupted: urllib
+        holds nothing to close until the headers arrive, and once a response is open the answer
+        may already be under way (reasoning first), which this pane does not throw away for a
+        switch. Two switches before that request: the last one wins. Switching back to the model in
         force just drops the pending one. Returns what the `model_changed` event says about it.
 
         ``on_applied(agent)`` replaces `on_model_applied` for this switch (a role switch follows it
@@ -826,7 +853,21 @@ class Agent:
             outcome = {"applies": applies, "in_flight_model": running, "context_window": window}
             if self.switch_fit(config, window)["compacts"]:
                 outcome["will_compact"] = True
+            if applies == "next_step" and self._reply_open():
+                # The one case the switch cannot take effect now: the model in force is answering
+                # (text or reasoning may already be on screen), so it finishes this step. Said in
+                # the status line; a refused request being waited out is pre-empted instead, and
+                # its `provider_retry {reason: "switch"}` says so when it happens (card #DC4J).
+                self.emit({"event": "status",
+                           "text": f"{config.model} takes over from the next step · {running} is answering now"})
             return outcome
+
+    def _reply_open(self) -> bool:
+        """Whether the provider in force holds an open response right now: the step it is on has
+        started answering and is left to finish (12.6). A transport without the query (a stand-in,
+        a guest harness) says nothing, and no status line is added for it."""
+        check = getattr(self.provider, "response_open", None)
+        return callable(check) and bool(check())
 
     def pending_model_compacts(self) -> bool:
         """Whether the waiting switch needs a compaction first (a network call: the turn supervisor
@@ -1368,7 +1409,16 @@ class Agent:
                 self._maybe_compact()
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
-                message = self._model_call(record, ctx, steps + 1)
+                try:
+                    message = self._model_call(record, ctx, steps + 1)
+                except ProviderPreempted as exc:
+                    # The provider refused this step and was waiting to ask again when a model
+                    # switch arrived (card #DC4J). Nothing was streamed and nothing is open, so go
+                    # back round: the step boundary above lands the switch (`model_applied`, the
+                    # takeover note) and this same step is asked of the new model. A switch dropped
+                    # meanwhile (switched back) lands nothing, and the step is simply asked again.
+                    self._preempted_step(record, exc, steps + 1)
+                    continue
                 steps += 1
                 ctx["since_todos"] += 1
                 self._close_thinking(record)
@@ -1534,8 +1584,8 @@ class Agent:
         """
         if not swap["adopted"]:
             return
-        self.provider = _with_first_token(_provider_for(target.config, self.stall_timeout_s),
-                                          self.first_token_timeout_s)
+        self.provider = self._hook_preempt(_with_first_token(_provider_for(target.config, self.stall_timeout_s),
+                                                             self.first_token_timeout_s))
         self.effort = None
         self._adopt_model(target.config, swap["to_preset"])
 
@@ -1874,8 +1924,8 @@ class Agent:
         # The note belongs in the transcript, not inside the thinking overlay the dead call opened.
         self._close_thinking(record)
         target_preset = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
-        self.provider = _with_first_token(_provider_for(target.config, self.stall_timeout_s),
-                                          self.first_token_timeout_s)
+        self.provider = self._hook_preempt(_with_first_token(_provider_for(target.config, self.stall_timeout_s),
+                                                             self.first_token_timeout_s))
         # Not `self.config = ...`: the new provider also needs the history in its own dialect, its
         # own context window and this pane's effort in its own words.
         self._adopt_model(target.config, target_preset)
@@ -2006,6 +2056,28 @@ class Agent:
                            "seconds": exc.seconds, "step": step,
                            "text": f"{exc} Retrying this turn once; the request stays open."})
                 self.emit({"event": "status", "text": f"No response for {exc.seconds:g} s · retrying once"})
+
+    def _preempted_step(self, record: dict, exc: ProviderPreempted, step: int) -> None:
+        """Account for a retry wait a model switch ended (card #DC4J) and say so in the transcript.
+
+        The `provider_retry` names where the step is going (`to_model`, `from_model`, as a
+        failover's does); the `model_applied` that follows is the switch itself landing.
+        """
+        with self._model_lock:
+            pending = self._pending_model
+            to_model = pending["config"].model if pending is not None else None
+        record["retries"] = record.get("retries", 0) + 1
+        self._ensure_no_open_response(record["turn_id"], "switch")
+        logs.event(_log, "provider_retry_preempted", session=self.session_id, turn=record["turn_id"],
+                   step=step, model=self.config.model, host=_host(self.config.base_url),
+                   status=exc.status, attempt=exc.attempt, waited_s=round(exc.waited, 2),
+                   to_model=to_model)
+        where = f"switching to {to_model} now" if to_model else "asking again now"
+        self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "switch",
+                   "attempt": exc.attempt, "max_attempts": ChatProvider.HTTP_RETRY_ATTEMPTS,
+                   "step": step, "status": exc.status, "from_model": self.config.model,
+                   "to_model": to_model,
+                   "text": f"Provider HTTP {exc.status} for {self.config.model} · {where} instead of waiting"})
 
     def _ensure_no_open_response(self, turn_id, how: str) -> bool:
         """Socket hygiene: no provider connection may outlive its turn (issue SQAM).
