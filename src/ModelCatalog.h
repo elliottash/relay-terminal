@@ -27,6 +27,7 @@
 // already holds and QSettings, which is what makes tests/modelcatalog_test.cpp possible.
 #include <QHash>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -44,6 +45,11 @@ struct Entry {
     QStringList efforts;  // reasoning levels the model accepts; empty = no knob
     int intelligence = -1;   // the owner's ruling (presets.INTELLIGENCE); -1 unknown
     QString openrouter;      // the same model's OpenRouter slug, when it has one (presets.OPENROUTER_TWINS)
+    // What each reasoning level is called by the provider it is sent to (owner, 2026-09-20:
+    // "for codex planning you pick xhigh, not max"): Relay stores its own four levels and
+    // shows these. Empty for a row that sent none; `effortLabel` falls back to the level.
+    QHash<QString, QString> effortLabels;
+    QString effortLabel(const QString &level) const { return effortLabels.value(level, level); }
     bool usable = false;     // a stored key, a local server, a runnable harness, Relay Free available
     bool guest = false, local = false, hosted = false, custom = false;
     // "<label> · <provider>" — one line for a row, a status bar, a tooltip.
@@ -91,6 +97,10 @@ QList<Sort> allSorts();
 namespace curation {
 QStringList shownKeys();
 bool isShown(const Entry &entry);                                   // absent list → usable entries
+// The same answer against a key list the caller has already read. `shownKeys()` builds a
+// QSettings, which re-stats the whole XDG search path, and the catalog has hundreds of entries on
+// an OpenRouter key — asking per entry is what `shown()` below used to do (card #PPR4).
+bool isShown(const Entry &entry, const QStringList &shown);
 void setShown(const QString &key, bool on, const Catalog &catalog);  // first change materialises the list
 void resetShown();
 
@@ -136,6 +146,28 @@ QStringList providerOrder();
 void noteProviders(const QStringList &listedIds);
 void moveProviderBefore(const QString &id, const QString &beforeId);   // beforeId empty = to the end
 
+// The five tier lists (owner, 2026-09-20), which replaced the single priority list and its line:
+// main, high, flash, lite, local. Each is an ordered list of entries, a model and the reasoning
+// level it runs at there. Rank 1 is what the tier runs on; the rest are its fallbacks, in order. A
+// model in no list is only ever used when picked by hand. Stored as models/tier/<tier>, a list of
+// "<preset>|<model>|<level>" (level may be empty: the model's own default).
+struct TierEntry {
+    QString key;      // "<preset>|<model>"
+    QString effort;   // a Relay level, or empty
+};
+QStringList tierIds();                                   // main, high, flash, lite, local — page order
+QString tierLabel(const QString &tier);                  // "main models"
+bool tierListsSet();                                     // whether any list has been stored
+QList<TierEntry> tierList(const QString &tier);
+void setTierList(const QString &tier, const QList<TierEntry> &entries);
+void addToTier(const QString &tier, const QString &key, const QString &effort = QString());
+void removeFromTier(const QString &tier, const QString &key);
+void moveInTier(const QString &tier, const QString &key, int toIndex);
+void setTierEffort(const QString &tier, const QString &key, const QString &effort);
+// Apply one of the worker's `tier_list_defaults` ({tier: [{preset, model, effort}]}).
+void applyTierDefaults(const QJsonObject &lists);
+void clearTierLists();
+
 // A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
 QStringList collapsedProviders();
 bool isCollapsed(const QString &preset);
@@ -173,6 +205,8 @@ Entry mainDefault(const Catalog &catalog, qint64 now = 0);
 Entry fallback(const Catalog &catalog, qint64 now = 0);
 // Ranks 2 … threshold of the live list, in order: the failover chain the worker is sent.
 QList<Entry> fallbacks(const Catalog &catalog, qint64 now = 0);
+// A tier's list as live catalog entries, in order: usable and not exhausted.
+QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now = 0);
 // The best "percent left" over a preset's windows, or -1 with no figures.
 double percentLeft(const Catalog &catalog, const QString &preset);
 // When a reset lands, in the words the limits line uses: today's "14:30", "tue" within a week,

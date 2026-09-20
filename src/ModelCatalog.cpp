@@ -161,6 +161,10 @@ Catalog catalogFrom(const QJsonArray &presets) {
             for (const auto &level : row.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
             entry.intelligence = row.value(QStringLiteral("intelligence")).isDouble() ? row.value(QStringLiteral("intelligence")).toInt() : -1;
             entry.openrouter = str(row, "openrouter");
+            {
+                const QJsonObject labels = row.value(QStringLiteral("effort_labels")).toObject();
+                for (auto it = labels.begin(); it != labels.end(); ++it) entry.effortLabels.insert(it.key(), it.value().toString());
+            }
             entry.usable = usable;
             entry.guest = guest;
             entry.local = local;
@@ -235,11 +239,12 @@ namespace curation {
 
 QStringList shownKeys() { return list(kShown); }
 
-bool isShown(const Entry &entry) {
-    const QStringList keys = shownKeys();
-    if (keys.isEmpty()) return entry.usable;
-    return entry.usable && keys.contains(entry.key);
+bool isShown(const Entry &entry, const QStringList &shown) {
+    if (shown.isEmpty()) return entry.usable;
+    return entry.usable && shown.contains(entry.key);
 }
+
+bool isShown(const Entry &entry) { return isShown(entry, shownKeys()); }
 
 void setShown(const QString &key, bool on, const Catalog &catalog) {
     QStringList keys = shownKeys();
@@ -261,6 +266,10 @@ QStringList priority() { return list(kPriority); }
 
 QStringList ranked(const Catalog &catalog) {
     QStringList out;
+    // The main list leads (owner, 2026-09-20), then the other tiers' models, then the rest.
+    for (const QString &tier : tierIds())
+        for (const TierEntry &entry : tierList(tier))
+            if (catalog.find(entry.key) && !out.contains(entry.key)) out << entry.key;
     for (const QString &key : priority())
         if (catalog.find(key) && !out.contains(key)) out << key;
     // The default order behind the explicit list.
@@ -404,6 +413,76 @@ void moveProviderBefore(const QString &id, const QString &beforeId) {
     store(kProviderOrder, order);
 }
 
+QStringList tierIds() {
+    return {QStringLiteral("main"), QStringLiteral("high"), QStringLiteral("flash"), QStringLiteral("lite"), QStringLiteral("local")};
+}
+QString tierLabel(const QString &tier) { return tier + QStringLiteral(" models"); }
+static QString tierKey(const QString &tier) { return QStringLiteral("models/tier/") + tier; }
+bool tierListsSet() {
+    QSettings settings;
+    for (const QString &tier : tierIds()) if (settings.contains(tierKey(tier))) return true;
+    return false;
+}
+QList<TierEntry> tierList(const QString &tier) {
+    QList<TierEntry> out;
+    for (const QString &item : list(tierKey(tier))) {
+        const int last = item.lastIndexOf(QLatin1Char('|'));
+        if (last <= 0) continue;
+        TierEntry entry{item.left(last), item.mid(last + 1)};
+        QString preset, model;
+        if (Catalog::splitKey(entry.key, &preset, &model)) out << entry;
+    }
+    return out;
+}
+void setTierList(const QString &tier, const QList<TierEntry> &entries) {
+    QStringList items;
+    for (const TierEntry &entry : entries) items << entry.key + QLatin1Char('|') + entry.effort;
+    // An emptied list is stored as empty, not forgotten: "no fallbacks here" is a choice, and a
+    // forgotten key would bring the defaults back.
+    QSettings().setValue(tierKey(tier), items);
+}
+void addToTier(const QString &tier, const QString &key, const QString &effort) {
+    QList<TierEntry> entries = tierList(tier);
+    for (const TierEntry &entry : entries) if (entry.key == key) return;
+    entries << TierEntry{key, effort};
+    setTierList(tier, entries);
+}
+void removeFromTier(const QString &tier, const QString &key) {
+    QList<TierEntry> entries = tierList(tier);
+    entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const TierEntry &e) { return e.key == key; }), entries.end());
+    setTierList(tier, entries);
+}
+void moveInTier(const QString &tier, const QString &key, int toIndex) {
+    QList<TierEntry> entries = tierList(tier);
+    int from = -1;
+    for (int i = 0; i < entries.size(); ++i) if (entries.at(i).key == key) from = i;
+    if (from < 0) return;
+    const TierEntry moved = entries.takeAt(from);
+    entries.insert(qBound(0, toIndex > from ? toIndex - 1 : toIndex, entries.size()), moved);
+    setTierList(tier, entries);
+}
+void setTierEffort(const QString &tier, const QString &key, const QString &effort) {
+    QList<TierEntry> entries = tierList(tier);
+    for (TierEntry &entry : entries) if (entry.key == key) entry.effort = effort;
+    setTierList(tier, entries);
+}
+void applyTierDefaults(const QJsonObject &lists) {
+    for (const QString &tier : tierIds()) {
+        QList<TierEntry> entries;
+        for (const auto &value : lists.value(tier).toArray()) {
+            const QJsonObject item = value.toObject();
+            const QString preset = item.value(QStringLiteral("preset")).toString(), model = item.value(QStringLiteral("model")).toString();
+            if (preset.isEmpty() || model.isEmpty()) continue;
+            entries << TierEntry{Catalog::keyFor(preset, model), item.value(QStringLiteral("effort")).toString()};
+        }
+        setTierList(tier, entries);
+    }
+}
+void clearTierLists() {
+    QSettings settings;
+    for (const QString &tier : tierIds()) settings.remove(tierKey(tier));
+}
+
 QStringList collapsedProviders() { return list(kCollapsed); }
 bool isCollapsed(const QString &preset) { return collapsedProviders().contains(preset); }
 void setCollapsed(const QString &preset, bool on) {
@@ -431,9 +510,16 @@ void setSort(Sort sort) {
 
 QList<Entry> shown(const Catalog &catalog) {
     QList<Entry> out;
+    // The curated list is read once, not once per entry (card #PPR4). `isShown()` builds a
+    // QSettings, and a pane refreshes its pickers on every `changed()` — which is what a turn
+    // start is — so with an OpenRouter catalog this walk was a few hundred QSettings
+    // constructions, each re-stating the whole XDG search path, on the GUI thread. That is the
+    // 65–81 ms hitch at the start of a turn the #PF4K profile measured and could not place
+    // (finding 5; the stack is in docs/qa_evidence/2026-09-20-perf-fixes/toolout/stall.txt).
+    const QStringList keys = curation::shownKeys();
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
-        if (entry && curation::isShown(*entry)) out << *entry;
+        if (entry && curation::isShown(*entry, keys)) out << *entry;
     }
     return out;
 }
@@ -524,17 +610,31 @@ QList<Entry> live(const Catalog &catalog, qint64 now) {
     return out;
 }
 
+QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    QList<Entry> out;
+    for (const curation::TierEntry &item : curation::tierList(tier)) {
+        const Entry *entry = catalog.find(item.key);
+        if (entry && entry->usable && !exhausted(catalog, entry->preset, now)) out << *entry;
+    }
+    return out;
+}
+
+// Once the tier lists exist the main list is the order: rank 1 is Main, the rest its fallbacks.
+// Before that (an install that has not seen the worker's defaults yet) the old ranked list and its
+// threshold answer, so nothing is ever without a default.
 Entry mainDefault(const Catalog &catalog, qint64 now) {
-    const QList<Entry> list = live(catalog, now);
+    const QList<Entry> list = curation::tierListsSet() ? liveTier(catalog, QStringLiteral("main"), now) : live(catalog, now);
     return list.isEmpty() ? Entry() : list.first();
 }
 
 Entry fallback(const Catalog &catalog, qint64 now) {
-    const QList<Entry> list = live(catalog, now);
+    const QList<Entry> list = curation::tierListsSet() ? liveTier(catalog, QStringLiteral("main"), now) : live(catalog, now);
     return list.size() < 2 ? Entry() : list.at(1);
 }
 
 QList<Entry> fallbacks(const Catalog &catalog, qint64 now) {
+    if (curation::tierListsSet()) return liveTier(catalog, QStringLiteral("main"), now).mid(1);
     const QList<Entry> list = live(catalog, now);
     return list.mid(1, qMax(0, curation::fallbackThreshold() - 1));
 }

@@ -125,6 +125,28 @@ private Q_SLOTS:
         QCOMPARE(shown(catalog).size(), 7);
     }
 
+    // `shown()` reads the curated list once and hands it to every entry (card #PPR4): asking per
+    // entry built a QSettings per entry, which is the 65–81 ms hitch the #PF4K profile measured at
+    // the start of a turn. The hoist is only safe while the two forms cannot disagree.
+    void theCuratedListIsReadOnceAndBothFormsAgree() {
+        const Catalog catalog = catalogFrom(presets());
+        curation::setShown(QStringLiteral("kimi-code|kimi-for-coding-highspeed"), false, catalog);
+        const QStringList keys = curation::shownKeys();
+        QCOMPARE(keys.size(), 6);
+        for (const Entry &entry : catalog.entries)
+            QCOMPARE(curation::isShown(entry, keys), curation::isShown(entry));
+        QCOMPARE(shown(catalog).size(), 6);
+        // With no list at all both still mean "every usable entry".
+        curation::resetShown();
+        const QStringList none = curation::shownKeys();
+        QVERIFY(none.isEmpty());
+        for (const Entry &entry : catalog.entries) {
+            QCOMPARE(curation::isShown(entry, none), entry.usable);
+            QCOMPARE(curation::isShown(entry, none), curation::isShown(entry));
+        }
+        QCOMPARE(shown(catalog).size(), 7);
+    }
+
     void defaultRankPutsTheDefaultProviderFirst() {
         QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
         const Catalog catalog = catalogFrom(presets());
@@ -256,6 +278,53 @@ private Q_SLOTS:
         QCOMPARE(curation::providerOrder(), (QStringList{QStringLiteral("kimi-code"), QStringLiteral("glm-coding"), QStringLiteral("relay-free")}));
         curation::moveProviderBefore(QStringLiteral("kimi-code"), QString());
         QCOMPARE(curation::providerOrder().last(), QStringLiteral("kimi-code"));
+    }
+
+    void tierListsAreOrderedEntriesWithALevel() {
+        const Catalog catalog = catalogFrom(presets());
+        QVERIFY(!curation::tierListsSet());
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("high"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("guest:claude|opus"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"));   // once only
+        QVERIFY(curation::tierListsSet());
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 3);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(fallback(catalog).key, QStringLiteral("kimi-code|k3"));
+        QCOMPARE(fallbacks(catalog).size(), 2);                       // every entry after Main, no line
+        curation::moveInTier(QStringLiteral("main"), QStringLiteral("guest:claude|opus"), 0);
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("guest:claude|opus"));
+        curation::setTierEffort(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("low"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).last().effort, QStringLiteral("low"));
+        curation::removeFromTier(QStringLiteral("main"), QStringLiteral("guest:claude|opus"));
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("glm-coding|glm-5.3"));
+        // The picker's priority order leads with the lists.
+        QCOMPARE(curation::ranked(catalog).first(), QStringLiteral("glm-coding|glm-5.3"));
+        // An emptied list stays a choice: no fallbacks, and the defaults do not come back.
+        curation::setTierList(QStringLiteral("high"), {});
+        QVERIFY(curation::tierListsSet());
+        QVERIFY(liveTier(catalog, QStringLiteral("high")).isEmpty());
+        // The worker's defaults apply as lists.
+        curation::applyTierDefaults(QJsonObject{{QStringLiteral("flash"), QJsonArray{QJsonObject{
+            {QStringLiteral("preset"), QStringLiteral("glm-coding")}, {QStringLiteral("model"), QStringLiteral("glm-5.3-flash")},
+            {QStringLiteral("effort"), QStringLiteral("low")}}}}});
+        QCOMPARE(curation::tierList(QStringLiteral("flash")).first().key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QVERIFY(curation::tierList(QStringLiteral("main")).isEmpty());   // defaults replace every list
+    }
+
+    void effortLabelsAreTheProvidersWords() {
+        QJsonArray rows = presets();
+        QJsonObject openai = rows.at(2).toObject();
+        QJsonArray models = openai.value(QStringLiteral("models")).toArray();
+        QJsonObject astra = models.at(0).toObject();
+        astra.insert(QStringLiteral("effort_labels"), QJsonObject{{QStringLiteral("max"), QStringLiteral("xhigh")}, {QStringLiteral("high"), QStringLiteral("high")}});
+        models.replace(0, astra); openai.insert(QStringLiteral("models"), models); rows.replace(2, openai);
+        const Catalog catalog = catalogFrom(rows);
+        const Entry *entry = catalog.find(QStringLiteral("openai|gpt-6-astra"));
+        QVERIFY(entry);
+        QCOMPARE(entry->effortLabel(QStringLiteral("max")), QStringLiteral("xhigh"));
+        QCOMPARE(entry->effortLabel(QStringLiteral("low")), QStringLiteral("low"));   // no label: the level itself
     }
 
     void sortRoundTrips() {
