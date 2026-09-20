@@ -10,6 +10,19 @@
 <title>Relay</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192" type="image/png">
+<!-- iOS never reads the manifest's icons for the Home Screen: it takes this link, and only a
+     PNG. It draws no background behind it and rounds the corners itself, so the file is opaque
+     and full bleed. Home-Screen install is also what unlocks Web Push on iOS (section 9), which
+     is why these exist at all. app/icons/*.png are rendered from app/icon.svg — the same mark as
+     the desktop — and docs/RELEASING.md has the command. -->
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<!-- The body already pads by env(safe-area-inset-*), so the dark app may run under the status bar. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Without this the Home Screen label is the <title> of whatever page was open when it was added. -->
+<meta name="apple-mobile-web-app-title" content="Relay">
 <link rel="stylesheet" href="./style.css">
 <!-- The pane view (REMOTE-PROTOCOL.md section 16): the desktop pane drawn from pane_state.
      pane-theme.css is generated from src/Theme.cpp by scripts/gen-web-theme.py. -->

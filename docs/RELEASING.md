@@ -160,6 +160,50 @@ To publish:
 The repository must be public for Pages on a free plan, and for the release downloads and
 install commands on the site to work for anyone.
 
+## Hosted rendezvous (join.relay-terminal.ai)
+
+The rendezvous and the phone's web app are one service on elliott-main-1
+(`relay-rendezvous.service`, code in `/opt/relay-rendezvous`, database in
+`/var/lib/relay-rendezvous`, a Cloudflare Tunnel straight to `127.0.0.1:8791`). It is not part of
+a Relay release: it is deployed **whenever anything under `app/`, `remote/` or `rendezvous/`
+changes on `main`**, because a phone loads its client from there and talks the protocol version
+the desktop it pairs with speaks. Leaving it behind is invisible — the app keeps loading, just
+the old one.
+
+```
+rendezvous/deploy.sh -n            # what rsync would change, then stop
+rendezvous/deploy.sh               # export main, rsync, restart, verify
+rendezvous/deploy.sh --check       # verify only: is what is served exactly main?
+rendezvous/deploy.sh --rollback    # put /opt/relay-rendezvous.prev back and restart
+```
+
+It deploys a **clean export of a revision** (`main` by default, or any rev given as an argument),
+never this checkout's working tree, which usually holds another session's half-finished edit. It
+keeps the previous tree in `/opt/relay-rendezvous.prev`, waits for `/v1/health` on the box,
+checks `https://join.relay-terminal.ai/v1/health` from here, and compares the sha256 of every
+served `app/` file with the export; if the service does not come back it prints the journal and
+rolls back by itself. `--check` is the same comparison with no deploy, and is what to run after
+anyone else has touched the box.
+
+A restart drops the live sockets through the rendezvous: phones reconnect, but a share in flight
+does not survive it. `/v1/health` reports the attached desktop and channel counts — look before
+deploying. If `main`'s `relay-rendezvous.service` differs from the unit installed on the box the
+script prints the diff; `--install-unit` copies it over and reloads systemd.
+
+The app's icons (`app/icons/*.png`) are rendered from `app/icon.svg`, so the phone's Home Screen
+wears the same mark as the desktop. iOS takes the Home-Screen image only from
+`<link rel="apple-touch-icon">` and only as a PNG, and only an installed PWA gets Web Push, so
+`tests/test_web_manifest.py` guards both. After editing the SVG, re-render them:
+
+```
+rsvg-convert -w 192 -h 192 app/icon.svg -o app/icons/icon-192.png
+rsvg-convert -w 512 -h 512 app/icon.svg -o app/icons/icon-512.png
+# maskable-512.png: the mark at 410px centred on a 512px square of #0e0f12 (the theme colour),
+# which keeps it inside the 80% safe zone a circular crop leaves.
+# apple-touch-icon.png: the mark at 180px on the same colour, opaque and full bleed — iOS
+# rounds the corners itself and draws nothing behind it.
+```
+
 ## Before the first public beta (owner)
 
 - Replace the screenshots in `site/assets/` (taken from QA evidence) with clean ones: they show
