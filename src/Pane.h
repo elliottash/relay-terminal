@@ -757,6 +757,16 @@ public:
             if (item.toObject().value(QStringLiteral("group")).toString() == QStringLiteral("guest")) rows.append(item);
         return rows;
     }
+    // Every preset row the worker sent, guests and local servers included: what Options › Models
+    // builds its catalog from (owner, 2026-09-20).
+    QJsonArray allPresets() const { return m_presets; }
+    // Options › Models drives the keyring through this pane's worker, with the requests the keys
+    // dialog sends; the events come back through handleEvent and re-draw every Options pane.
+    void storeKey(const QString &preset, const QString &key) { send({{"type", "store_key"}, {"preset", preset}, {"api_key", key}}); }
+    void testKey(const QString &preset) { send({{"type", "test_key"}, {"preset", preset}}); }
+    void removeKey(const QString &preset) { send({{"type", "remove_key"}, {"preset", preset}}); }
+    // Options › Models changed what the picker shows or in what order: every box re-reads it.
+    void modelsCurationChanged() { refreshPickers(); }
     // Options changed `guests/<guest>/model` or `…/effort`. A pane that is on that guest right now
     // asks its harness to move (`set_model` with the `guest` block, as `/model claude opus` does);
     // every other pane picks the new default up the next time it starts the guest.
@@ -4410,10 +4420,13 @@ private:
         if (type == QStringLiteral("key_tested") || type == QStringLiteral("key_removed")
             || type == QStringLiteral("agent_tools_imported")) {
             if (m_keysDialog) m_keysDialog->handleEvent(event);
-            else if (type == QStringLiteral("key_tested"))
+            if (type == QStringLiteral("key_tested"))
                 status(event.value(QStringLiteral("ok")).toBool()
                            ? QStringLiteral("Key works for ") + event.value(QStringLiteral("preset")).toString()
                            : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
+            // Options › Models shows the same rows (owner, 2026-09-20): a removed key leaves the
+            // provider unusable, so the fresh `presets` answer re-draws every Options pane.
+            if (type == QStringLiteral("key_removed")) refreshPresets();
             return true;
         }
         if (type == QStringLiteral("skills") || type == QStringLiteral("skills_refined") || type == QStringLiteral("skills_import_preview")
@@ -9332,6 +9345,7 @@ private:
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
+            refreshPresets();   // Options › Models: the provider's models become usable rows
         } else if (type == QStringLiteral("queued")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             if (m_pendingPrompts.contains(requestId)) m_itemPrompts.insert(event.value(QStringLiteral("id")).toString(), m_pendingPrompts.take(requestId));

@@ -36,6 +36,7 @@
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
 #include "LocalModelsSettings.h"
+#include "ModelCatalog.h"      // Options › Models: providers, the checklist, the order (owner, 2026-09-20)
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
 #include "Logging.h"
@@ -1670,124 +1671,298 @@ private:
         return row;
     }
 
-    // Options › Claude Code and Codex (owner, 2026-09-19: "you should be able to pick the model
-    // and reasoning effort for those"). Two rows per guest, stored as `guests/<guest>/model` and
-    // `guests/<guest>/effort`; "Default" removes the key and leaves the choice to the CLI. The
-    // lists are the worker's (its `guest:` preset rows, 29.3): claude's aliases, and codex's own
-    // catalog once `codex debug models` has answered — until then, and for any name the list does
-    // not hold, the model is a text row. Both routes read the same two keys: the harness gets them
-    // in the `guest` block, the terminal launch as `--model` / `--effort` (codex: `-m` and
-    // `-c model_reasoning_effort=`), and a pane already on that guest is moved at once.
-    relay::SettingsSection guestAgentsSection() {
-        relay::SettingsSection section;
-        section.id = QStringLiteral("guests");
-        section.title = QStringLiteral("Claude Code and Codex");
-        section.blurb = QStringLiteral(
-            "Claude Code and Codex are picked in a pane's model box like any model, and run with "
-            "your own login. These are the model and the reasoning effort each one starts with. "
-            "Default leaves the choice to the CLI's own settings. /model claude opus and /effort "
-            "change them for one pane while it runs.");
-        const QJsonArray presets = m_active ? m_active->guestPresets() : QJsonArray();
-        const QList<QPair<QString, QString>> guests{{QStringLiteral("claude"), QStringLiteral("Claude Code")},
-                                                    {QStringLiteral("codex"), QStringLiteral("Codex")}};
-        const QString useDefault = QStringLiteral("default");
-        for (const auto &entry : guests) {
-            const QString guest = entry.first, name = entry.second;
-            QJsonObject preset;
-            for (const auto &item : presets)
-                if (item.toObject().value(QStringLiteral("guest")).toString() == guest) preset = item.toObject();
-            relay::SettingRow heading;
-            heading.kind = relay::SettingRow::Heading;
-            heading.id = QStringLiteral("heading:guests/") + guest;
-            heading.label = name;
-            section.rows << heading;
-            if (!preset.isEmpty() && !preset.value(QStringLiteral("installed")).toBool()) {
-                relay::SettingRow missing;
-                missing.kind = relay::SettingRow::Info;
-                missing.id = QStringLiteral("info:guests/") + guest;
-                missing.label = QStringLiteral("%1 is not installed: no `%2` on PATH.").arg(name, guest);
-                section.rows << missing;
-                continue;
-            }
-            const QString modelKey = guestSettingKey(guest, QStringLiteral("model"));
-            const QString effortKey = guestSettingKey(guest, QStringLiteral("effort"));
-            const QString model = QSettings().value(modelKey).toString().trimmed();
-            const QString effort = QSettings().value(effortKey).toString().trimmed();
-            auto store = [this, guest](const QString &key, const QString &value, const QString &useDefault) {
-                if (value.isEmpty() || value == useDefault) QSettings().remove(key);
-                else QSettings().setValue(key, value);
-                for (Pane *pane : allPanes()) pane->guestOptionsChanged(guest);
-                refreshSettingsPanes();
-            };
-            const QJsonArray models = preset.value(QStringLiteral("models")).toArray();
-            QStringList efforts;
-            for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) efforts << level.toString();
-            if (models.isEmpty()) {
-                // No list yet (codex's catalog is fetched in the background) or no worker at all:
-                // the name is typed, exactly as the CLI's own --model takes it.
-                relay::SettingRow row = textRow(modelKey, QStringLiteral("Model"),
-                    QStringLiteral("The model %1 starts on, as its own --model takes it").arg(name),
-                    QStringLiteral("default: the CLI's own"),
-                    [store, modelKey, useDefault](const QString &value) { store(modelKey, value.trimmed(), useDefault); });
-                row.aliases = QStringLiteral("claude codex guest model opus sonnet fable gpt");
-                section.rows << row;
+    // Options › Models (owner, 2026-09-20): one page for everything about models, top to bottom
+    // the way it is set up — the providers and their keys, then which of each provider's models
+    // the picker shows, then their order, then the defaults. It replaced the API keys and Model
+    // roles doors and the separate "Claude Code and Codex" page: those two are providers here like
+    // any other, and a guest's model, reasoning level and permission posture sit under its rows.
+    // The rows come from relay::models (the catalog every pane's box and the picker read), so a
+    // check here is a row there the moment it lands.
+    relay::SettingsSection modelsSection() {
+        relay::SettingsSection models;
+        models.id = QStringLiteral("models");
+        models.title = QStringLiteral("Models");
+        models.blurb = QStringLiteral("Relay is bring-your-own-key: a key lives in the desktop keyring and requests on "
+                                      "it go to that provider and never touch Relay's server. Relay Free, the included "
+                                      "allowance, is the one exception: its prompts go through Relay's hosted service. "
+                                      "Claude Code and Codex run with your own login. /models opens this page; "
+                                      "Ctrl+Shift+M and /model open the picker.");
+        Pane *pane = m_active;
+        QSettings settings;
+        const QJsonArray presets = pane ? pane->allPresets() : QJsonArray();
+        const relay::models::Catalog catalog = relay::models::catalogFrom(presets);
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        auto curated = [this] {
+            refreshSettingsPanes();
+            for (Pane *each : allPanes()) each->modelsCurationChanged();
+        };
+        auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
+
+        // ----- 1. providers ---------------------------------------------------------------------
+        models.rows << headingRow(QStringLiteral("providers"));
+        if (presets.isEmpty()) {
+            relay::SettingRow none;
+            none.kind = relay::SettingRow::Info;
+            none.id = QStringLiteral("info:models/none");
+            none.label = QStringLiteral("The agent worker has not answered yet. This page fills in once a pane's agent is up.");
+            models.rows << none;
+        }
+        for (const auto &value : presets) {
+            const QJsonObject preset = value.toObject();
+            const QString id = str(preset, "id");
+            if (id.isEmpty() || preset.value(QStringLiteral("local")).toBool()) continue;   // Options › Local models
+            const QString label = str(preset, "label").toLower();
+            const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
+            const bool guest = id.startsWith(QStringLiteral("guest:"));
+            const QString source = str(preset, "key_source");
+            const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
+            const QString limits = relay::models::limitsText(catalog.limits.value(id), now);
+            QString status;
+            if (hosted) {
+                status = preset.value(QStringLiteral("available")).toBool()
+                    ? QStringLiteral("included, no key needed") + (limits.isEmpty() ? QString() : QStringLiteral(" · ") + limits)
+                    : QStringLiteral("needs python3-cryptography");
+            } else if (guest) {
+                status = !preset.value(QStringLiteral("installed")).toBool(true)
+                    ? QStringLiteral("not installed: no `%1` on PATH").arg(id.mid(6))
+                    : preset.value(QStringLiteral("harness")).toBool()
+                    ? QStringLiteral("on this machine, runs with your own login") + (limits.isEmpty() ? QString() : QStringLiteral(" · ") + limits)
+                    : QStringLiteral("on this machine; runs as a program in the pane's terminal");
+            } else if (source == QStringLiteral("env")) {
+                status = QStringLiteral("key from RELAY_%1_API_KEY").arg(id.toUpper().replace(QLatin1Char('-'), QLatin1Char('_')));
+            } else if (hasKey) {
+                status = QStringLiteral("key stored in the keyring");
             } else {
-                QStringList values{useDefault}, labels{QStringLiteral("Default (the CLI's own)")};
-                for (const auto &item : models) {
-                    const QJsonObject entryModel = item.toObject();
-                    const QString id = entryModel.value(QStringLiteral("id")).toString();
-                    if (id.isEmpty()) continue;
-                    values << id;
-                    labels << entryModel.value(QStringLiteral("label")).toString(id);
-                    if (id == model) {
-                        // The efforts this model takes, when the guest says: codex's differ by model.
-                        QStringList own;
-                        for (const auto &level : entryModel.value(QStringLiteral("efforts")).toArray()) own << level.toString();
-                        if (!own.isEmpty()) efforts = own;
-                    }
-                }
-                if (!model.isEmpty() && !values.contains(model)) { values << model; labels << model; }   // typed by hand earlier
-                relay::SettingRow row = choiceRow(QStringLiteral("option:") + modelKey, QStringLiteral("Model"),
-                    QStringLiteral("The model %1 starts on").arg(name), values, labels,
-                    model.isEmpty() ? useDefault : model, useDefault,
-                    [store, modelKey, useDefault](const QString &value) { store(modelKey, value, useDefault); });
-                row.aliases = QStringLiteral("claude codex guest model opus sonnet fable gpt");
-                section.rows << row;
+                status = QStringLiteral("no key yet · get one at %1").arg(str(preset, "key_url"));
             }
-            QStringList values{useDefault}, labels{QStringLiteral("Default (the CLI's own)")};
-            for (const QString &level : std::as_const(efforts)) { values << level; labels << level; }
-            if (!effort.isEmpty() && !values.contains(effort)) { values << effort; labels << effort; }
-            relay::SettingRow row = choiceRow(QStringLiteral("option:") + effortKey, QStringLiteral("Reasoning effort"),
-                QStringLiteral("How hard %1 thinks before it answers; /effort changes it for one pane").arg(name),
-                values, labels, effort.isEmpty() ? useDefault : effort, useDefault,
-                [store, effortKey, useDefault](const QString &value) { store(effortKey, value, useDefault); });
-            row.aliases = QStringLiteral("claude codex guest reasoning effort thinking low medium high max");
-            section.rows << row;
-            {
+            if (!str(preset, "note").isEmpty()) status += QStringLiteral(" · ") + str(preset, "note").toLower();
+            relay::SettingRow row;
+            row.id = QStringLiteral("provider:") + id;
+            row.label = label;
+            row.detail = status;
+            row.aliases = QStringLiteral("provider key api keyring ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
+            if (hosted || guest) {
+                // Nothing to add or remove; Relay Free's Test makes one real call.
+                if (hosted && preset.value(QStringLiteral("available")).toBool()) {
+                    row.kind = relay::SettingRow::Buttons;
+                    row.buttonTexts = QStringList{QStringLiteral("test")};
+                    row.onButton = [this, id](int) { if (m_active) m_active->testKey(id); };
+                } else {
+                    row.kind = relay::SettingRow::Info;
+                    row.label = label + QStringLiteral(" · ") + status;
+                }
+            } else {
+                row.kind = relay::SettingRow::Buttons;
+                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
+                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
+                row.onButton = [this, id, label](int index) {
+                    if (!m_active) return;
+                    if (index == 0) {
+                        bool ok = false;
+                        // Password echo: the key is never rendered and never leaves this call.
+                        const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
+                            QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
+                            QLineEdit::Password, QString(), &ok).trimmed();
+                        if (!ok || key.isEmpty()) return;
+                        if (key.contains(QRegularExpression(QStringLiteral("\\s")))) {
+                            QMessageBox::warning(this, QStringLiteral("API key"), QStringLiteral("An API key cannot contain spaces."));
+                            return;
+                        }
+                        m_active->storeKey(id, key);
+                    } else if (index == 1) {
+                        m_active->testKey(id);
+                    } else if (QMessageBox::question(this, QStringLiteral("Remove key"),
+                                   QStringLiteral("Remove the stored key for %1 from the keyring?").arg(label)) == QMessageBox::Yes) {
+                        m_active->removeKey(id);
+                    }
+                };
+            }
+            models.rows << row;
+        }
+
+        // ----- 2. which models the picker shows -------------------------------------------------
+        models.rows << headingRow(QStringLiteral("models in the picker"));
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:models/shown");
+            info.label = QStringLiteral("A checked model is a row in every pane's model box and in the picker. Only providers "
+                                        "you can use are listed; add a key above to see a provider's models. The reasoning "
+                                        "levels are what the model accepts; the level itself is picked per pane.");
+            models.rows << info;
+        }
+        for (const QString &presetId : catalog.presets()) {
+            const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
+            if (rows.isEmpty() || !rows.first().usable || rows.first().local) continue;
+            relay::SettingRow group;
+            group.kind = relay::SettingRow::Info;
+            group.id = QStringLiteral("info:models/group/") + presetId;
+            group.label = catalog.presetLabels.value(presetId, presetId);
+            models.rows << group;
+            for (const relay::models::Entry &entry : rows) {
+                relay::SettingRow row;
+                row.kind = relay::SettingRow::Toggle;
+                row.id = QStringLiteral("option:models/shown/") + entry.key;
+                row.label = entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
+                QStringList notes;
+                if (!entry.tier.isEmpty()) notes << QStringLiteral("the provider's %1 model").arg(entry.tier);
+                notes << (entry.efforts.isEmpty() ? QStringLiteral("no reasoning setting")
+                                                  : QStringLiteral("reasoning: ") + entry.efforts.join(QStringLiteral(" · ")));
+                if (entry.intelligence >= 0) notes << QStringLiteral("intelligence %1").arg(entry.intelligence);
+                row.detail = notes.join(QStringLiteral(" · ")) + QStringLiteral(" · id ") + entry.model;
+                row.aliases = QStringLiteral("model picker show hide ") + entry.model + QLatin1Char(' ') + entry.provider;
+                row.checked = relay::models::curation::isShown(entry);
+                row.onToggle = [catalog, key = entry.key, curated](bool on) {
+                    relay::models::curation::setShown(key, on, catalog);
+                    curated();
+                };
+                models.rows << row;
+                if (entry.custom) {
+                    relay::SettingRow remove;
+                    remove.kind = relay::SettingRow::Buttons;
+                    remove.id = QStringLiteral("models/custom/") + entry.key;
+                    remove.label = QStringLiteral("remove %1").arg(entry.label);
+                    remove.detail = QStringLiteral("Forget this id; the provider's own list is unaffected");
+                    remove.buttonTexts = QStringList{QStringLiteral("remove")};
+                    remove.onButton = [key = entry.key, curated](int) { relay::models::curation::removeCustom(key); curated(); };
+                    models.rows << remove;
+                }
+            }
+            // A model the catalog does not list (owner's example: GPT Luna), by the id the API takes.
+            relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("add a model by id"),
+                QStringLiteral("The model id as %1 takes it; it joins the picker at once").arg(rows.first().provider),
+                QStringLiteral("model id"), [catalog, presetId, curated](const QString &value) {
+                    const QString id = value.trimmed();
+                    if (id.isEmpty()) return;
+                    relay::models::curation::addCustom(presetId, id, catalog);
+                    QSettings().remove(QStringLiteral("models/add/") + presetId);   // the box empties: the row is below now
+                    curated();
+                });
+            add.text.clear(); add.changed = false;
+            models.rows << add;
+            if (const QString guest = presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6) : QString(); !guest.isEmpty()) {
                 // What the guest does when it wants to run a command or change a file. Relay's own
                 // agent has no per-action approvals and neither does a guest by default (the
-                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's
-                // checkout is a fair reason to want the question, so it is offered rather than
-                // assumed. It applies to the picker's route, where Relay is the guest's editor and
-                // can draw the question; a guest running as a program in the terminal asks there,
-                // in its own words, and this row does not reach it.
+                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's checkout
+                // is a fair reason to want the question, so it is offered rather than assumed.
                 const QString key = guestSettingKey(guest, QStringLiteral("permissions"));
                 const QString current = QSettings().value(key).toString().trimmed();
                 relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
-                    QStringLiteral("When it wants to use a tool"),
+                    QStringLiteral("when it wants to use a tool"),
                     QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
                                    "Ask me puts each one to you as a card: Allow, Allow for session, "
-                                   "Deny, or Deny and stop the turn").arg(name),
+                                   "Deny, or Deny and stop the turn").arg(rows.first().provider),
                     {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
-                    {QStringLiteral("Just run it"), QStringLiteral("Ask me"),
-                     QStringLiteral("Refuse it")},
+                    {QStringLiteral("just run it"), QStringLiteral("ask me"), QStringLiteral("refuse it")},
                     current.isEmpty() ? QStringLiteral("bypass") : current, QStringLiteral("bypass"),
-                    [store, key](const QString &value) { store(key, value, QStringLiteral("bypass")); });
+                    [this, key, guest](const QString &value) {
+                        if (value.isEmpty() || value == QStringLiteral("bypass")) QSettings().remove(key);
+                        else QSettings().setValue(key, value);
+                        for (Pane *each : allPanes()) each->guestOptionsChanged(guest);
+                        refreshSettingsPanes();
+                    });
                 ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
-                section.rows << ask;
+                models.rows << ask;
             }
         }
-        return section;
+
+        // ----- 3. priority ----------------------------------------------------------------------
+        models.rows << headingRow(QStringLiteral("priority"));
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:models/priority");
+            info.label = QStringLiteral("Rank 1 is Main: new panes start on it. Rank 2 is the fallback: /swap goes there and "
+                                        "back. This is also the picker's default order.");
+            models.rows << info;
+        }
+        const QList<relay::models::Entry> ranked = relay::models::shown(catalog);
+        for (int i = 0; i < ranked.size(); ++i) {
+            const relay::models::Entry &entry = ranked.at(i);
+            relay::SettingRow row;
+            row.kind = relay::SettingRow::Buttons;
+            row.id = QStringLiteral("models/rank/") + entry.key;
+            row.label = QStringLiteral("%1. %2").arg(i + 1).arg(entry.displayName());
+            row.detail = i == 0 ? QStringLiteral("main · new panes start here")
+                       : i == 1 ? QStringLiteral("fallback · /swap goes here")
+                                : QString();
+            row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
+            row.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
+            row.onButton = [this, catalog, key = entry.key, curated](int index) {
+                relay::models::curation::move(key, index == 0 ? -1 : 1, catalog);
+                applyMainDefault(catalog);
+                curated();
+            };
+            models.rows << row;
+        }
+        models.rows << buttonRow(QStringLiteral("models.resetOrder"), QStringLiteral("reset the order"),
+                                 QStringLiteral("Back to the default: the default provider's main and flash models, then each provider's main"),
+                                 QStringLiteral("reset"), [this, catalog, curated] {
+            relay::models::curation::resetPriority();
+            curated();
+        });
+
+        // ----- 4. defaults ----------------------------------------------------------------------
+        models.rows << headingRow(QStringLiteral("defaults"));
+        {
+            // The levels the current provider offers, so this row and the Model roles modal beside
+            // it always name the same ones (owner report, 2026-09-18: four here, three there). A
+            // provider with no effort knob at all leaves Relay's four, because the default outlives
+            // it: it is what the next pane on the next provider starts at.
+            const QString effort = settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
+            const QStringList levels = m_active ? m_active->offeredEfforts() : Pane::efforts();
+            const QStringList offered = levels.isEmpty() ? Pane::efforts() : levels;
+            const QString note = m_active ? m_active->effortNote() : QString();
+            models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
+                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane")
+                                         + (note.isEmpty() ? QString() : QStringLiteral(" · ") + note),
+                                     offered, offered, Pane::nearestEffort(offered, effort),
+                                     QStringLiteral("high"), [this](const QString &value) {
+                QSettings().setValue(QStringLiteral("agent/effort"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
+            });
+        }
+        models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
+                                 QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
+        {
+            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a working provider"),
+                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on another "
+                                                                 "provider with a stored key and then Relay Free — that turn only. "
+                                                                 "The pane keeps the model you chose"), true);
+            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
+            models.rows << failover;
+            // Relay Free is the one failover target that is not already the user's own: another
+            // company's terms and a shared allowance, so it is opt-in even when failover is on
+            // (owner, 2026-09-19). A pane already running on Relay Free is unaffected.
+            relay::SettingRow hosted = toggleRow(QStringLiteral("agent/failover_hosted"),
+                                                 QStringLiteral("Allow Relay Free as a fallback when my own provider keeps failing"),
+                                                 QStringLiteral("Off: only your own providers with a stored key are tried. "
+                                                                "On: Relay's hosted service is the last resort, and the turn's "
+                                                                "conversation goes through it"), false);
+            hosted.aliases = QStringLiteral("failover relay free hosted fallback last resort");
+            models.rows << hosted;
+        }
+        models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
+                                 QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
+                                                "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
+                                 0, 0, 131072);
+        models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
+                                 QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
+                                 QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
+        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("per-job models (advanced)"),
+                                 QStringLiteral("The high / main / flash / lite / local tiers and what each job — plan mode, subagents, "
+                                                "summaries, chores — runs on"),
+                                 QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
+        return models;
+    }
+    // Rank 1 of the priority list is what a new pane starts on: the same two keys a switch writes.
+    // A guest at rank 1 is left alone — a fresh pane starting a harness unasked is a surprise.
+    static void applyMainDefault(const relay::models::Catalog &catalog) {
+        const relay::models::Entry main = relay::models::mainDefault(catalog);
+        if (main.key.isEmpty() || main.guest) return;
+        QSettings settings;
+        settings.setValue(QStringLiteral("provider/preset"), main.preset);
+        settings.setValue(QStringLiteral("provider/model"), main.model);
     }
     // One spelling of the key, shared with Pane::guestSetting.
     static QString guestSettingKey(const QString &guest, const QString &key) {
@@ -2011,69 +2186,11 @@ private:
         }
         sections << appearance;
 
-        relay::SettingsSection models;
-        models.id = QStringLiteral("models");
-        models.title = QStringLiteral("Models");
-        models.blurb = QStringLiteral("Relay is bring-your-own-key: a key lives in the desktop keyring and requests on "
-                                      "it go to that provider and never touch Relay's server. Relay Free, the included "
-                                      "allowance, is the one exception: its prompts go through Relay's hosted service.");
-        models.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("API keys"),
-                                 QStringLiteral("One row per provider: status, add or replace, remove, test"),
-                                 QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
-        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("Model roles"),
-                                 QStringLiteral("Default provider, the Main / Flash / Lite models, and what each job uses"),
-                                 QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
-        {
-            // The levels the current provider offers, so this row and the Model roles modal beside
-            // it always name the same ones (owner report, 2026-09-18: four here, three there). A
-            // provider with no effort knob at all leaves Relay's four, because the default outlives
-            // it: it is what the next pane on the next provider starts at.
-            const QString effort = settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
-            const QStringList levels = m_active ? m_active->offeredEfforts() : Pane::efforts();
-            const QStringList offered = levels.isEmpty() ? Pane::efforts() : levels;
-            const QString note = m_active ? m_active->effortNote() : QString();
-            models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
-                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane")
-                                         + (note.isEmpty() ? QString() : QStringLiteral(" · ") + note),
-                                     offered, offered, Pane::nearestEffort(offered, effort),
-                                     QStringLiteral("high"), [this](const QString &value) {
-                QSettings().setValue(QStringLiteral("agent/effort"), value);
-                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
-            });
-        }
-        models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
-                                 QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
-        {
-            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a working provider"),
-                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on another "
-                                                                 "provider with a stored key and then Relay Free — that turn only. "
-                                                                 "The pane keeps the model you chose"), true);
-            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
-            models.rows << failover;
-            // Relay Free is the one failover target that is not already the user's own: another
-            // company's terms and a shared allowance, so it is opt-in even when failover is on
-            // (owner, 2026-09-19). A pane already running on Relay Free is unaffected.
-            relay::SettingRow hosted = toggleRow(QStringLiteral("agent/failover_hosted"),
-                                                 QStringLiteral("Allow Relay Free as a fallback when my own provider keeps failing"),
-                                                 QStringLiteral("Off: only your own providers with a stored key are tried. "
-                                                                "On: Relay's hosted service is the last resort, and the turn's "
-                                                                "conversation goes through it"), false);
-            hosted.aliases = QStringLiteral("failover relay free hosted fallback last resort");
-            models.rows << hosted;
-        }
-        models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
-                                 QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
-                                                "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
-                                 0, 0, 131072);
-        models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
-                                 QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
-                                 QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
-        sections << models;
+        sections << modelsSection();
 
         // Right after Models, because a local endpoint is one more thing the model dropdown can
         // offer — it just has no key, so it is not in the API keys dialog (card #24XJ).
         sections << localModels().section();
-        sections << guestAgentsSection();
 
         relay::SettingsSection terminal;
         terminal.id = QStringLiteral("terminal");
