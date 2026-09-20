@@ -1,9 +1,9 @@
 ---
 id: 7M6E
 type: work
-status: planned
+status: executing
 labels: [bug, switchboard, performance]
-assignee: null
+assignee: claude-code
 rank: m1
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
