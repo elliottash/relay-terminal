@@ -14,3 +14,8 @@ landed. `relay::theme::randomThemeId(avoid)` behind a Randomize button in Option
 `randomizeNeverGivesYouTheThemeYouAreOn` (300 draws, every other theme comes up, never the one in
 use) passes; live screenshots and the drive script are in
 `docs/qa_evidence/2026-09-20-randomize-theme/`. Moved to needs-verification with a QA checklist.
+
+<!-- relay:entry 20260920T161500Z-c1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 16:15
+landed as `dae8796e` (land.py verify built the exact tree). Screenshots, the drive script and the
+run notes are in `docs/qa_evidence/2026-09-20-randomize-theme/`.
