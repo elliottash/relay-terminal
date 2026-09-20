@@ -70,6 +70,8 @@
 #include <QAbstractScrollArea>
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
+#include <QSysInfo>
 #include <QFileSystemModel>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -1913,22 +1915,6 @@ private:
         // folder is something you do, so it is in Actions (Relay › Open the log folder).
         general.rows << headingRow(QStringLiteral("Diagnostics"));
         {
-            // Which build this window is running, and whether the one on disk has moved on (owner,
-            // 2026-09-19). A rebuild never reaches a running Relay, nor the windows it opens.
-            const relay::buildinfo::Running &build = relay::buildinfo::running();
-            const QString onDisk = relay::buildinfo::idOnDisk();
-            relay::SettingRow info;
-            info.kind = relay::SettingRow::Info;
-            info.id = QStringLiteral("info:build");
-            info.label = QStringLiteral("Build %1 · version %2 · running since %3 · %4")
-                             .arg(build.id, QStringLiteral(RELAY_VERSION), build.started.toString(QStringLiteral("HH:mm")),
-                                  QCoreApplication::applicationFilePath());
-            if (onDisk != build.id)
-                info.label += QStringLiteral("\nA newer build is on disk: %1. Quit and reopen Relay to run it; New window "
-                                             "stays on this one, a launch from the taskbar starts the new one.").arg(onDisk);
-            general.rows << info;
-        }
-        {
             QStringList ids, labels;
             QString about;
             const QString current = relay::log::levelName(relay::log::level());
@@ -2716,6 +2702,83 @@ private:
         }
         sections << shortcuts;
 
+        // ----- About (owner, 2026-09-20: "i think there should be an about section in the
+        // options") -------------------------------------------------------------------------
+        // What this Relay *is*, which is what you go looking for when you want to say which build
+        // you saw something in. The build line lived under General › Diagnostics, where nobody
+        // thought to look for it; Diagnostics keeps what you *set* (the log level), and this page
+        // holds what you *read*. Nothing here is a setting, so the page gets no "Reset to
+        // defaults" row — resetRow() builds that from rows that declare a default, and none of
+        // these do.
+        relay::SettingsSection about;
+        about.id = QStringLiteral("about");
+        about.title = QStringLiteral("About");
+        about.blurb = QStringLiteral("Which Relay this is. The Copy button below puts all of it on the clipboard in "
+                                     "one block, which is what a bug report wants.");
+        {
+            relay::SettingRow identity;
+            identity.kind = relay::SettingRow::Info;
+            identity.id = QStringLiteral("info:about.identity");
+            identity.aliases = QStringLiteral("about version licence license agpl free software source");
+            identity.label = QStringLiteral("Relay %1 — a terminal whose panes have their own agents.\n"
+                                            "Free software under the GNU Affero General Public License, version 3 or "
+                                            "later (the LICENSE file beside the source says it in full).")
+                                 .arg(QStringLiteral(RELAY_VERSION));
+            about.rows << identity;
+        }
+        {
+            // Which build this window is running, and whether the one on disk has moved on (owner,
+            // 2026-09-19). A rebuild never reaches a running Relay, nor the windows it opens.
+            const relay::buildinfo::Running &build = relay::buildinfo::running();
+            const QString onDisk = relay::buildinfo::idOnDisk();
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:build");
+            info.aliases = QStringLiteral("about build number version running since binary path rebuild");
+            info.label = QStringLiteral("Build %1 · version %2 · running since %3 · %4")
+                             .arg(build.id, QStringLiteral(RELAY_VERSION), build.started.toString(QStringLiteral("HH:mm")),
+                                  QCoreApplication::applicationFilePath());
+            if (onDisk != build.id)
+                info.label += QStringLiteral("\nA newer build is on disk: %1. Quit and reopen Relay to run it; New window "
+                                             "stays on this one, a launch from the taskbar starts the new one.").arg(onDisk);
+            about.rows << info;
+        }
+        {
+            relay::SettingRow parts;
+            parts.kind = relay::SettingRow::Info;
+            parts.id = QStringLiteral("info:about.parts");
+            parts.aliases = QStringLiteral("about engine core libvterm ghostty qt platform kernel architecture");
+            // defaultEngineCore() is empty unless --engine-core or RELAY_ENGINE_CORE named one, so
+            // it is the *core* rather than the engine; say it the way the pane header already does.
+            const QString core = relay::defaultEngineCore();
+            parts.label = QStringLiteral("Terminal engine: %1 · Qt %2 · %3 · %4")
+                              .arg(core.isEmpty() ? QStringLiteral("Relay engine")
+                                                  : QStringLiteral("Relay engine (%1)").arg(core),
+                                   QString::fromLatin1(qVersion()),
+                                   QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture());
+            about.rows << parts;
+        }
+        about.rows << buttonRow(QStringLiteral("about.copy"), QStringLiteral("Copy this page"),
+                                QStringLiteral("Version, build, engine and platform, as one block to paste into a bug report"),
+                                QStringLiteral("Copy"), [this] {
+            const relay::buildinfo::Running &build = relay::buildinfo::running();
+            const QString onDisk = relay::buildinfo::idOnDisk();
+            QStringList block;
+            block << QStringLiteral("Relay %1").arg(QStringLiteral(RELAY_VERSION))
+                  << QStringLiteral("build: %1").arg(build.id)
+                  << QStringLiteral("binary: %1").arg(QCoreApplication::applicationFilePath())
+                  << QStringLiteral("engine: %1").arg(relay::defaultEngineCore().isEmpty()
+                                                          ? QStringLiteral("relay")
+                                                          : QStringLiteral("relay/%1").arg(relay::defaultEngineCore()))
+                  << QStringLiteral("qt: %1").arg(QString::fromLatin1(qVersion()))
+                  << QStringLiteral("system: %1 (%2)").arg(QSysInfo::prettyProductName(),
+                                                           QSysInfo::currentCpuArchitecture());
+            if (onDisk != build.id) block << QStringLiteral("build on disk: %1").arg(onDisk);
+            QGuiApplication::clipboard()->setText(block.join(QLatin1Char('\n')));
+            notice(QStringLiteral("Copied: Relay %1, build %2.").arg(QStringLiteral(RELAY_VERSION), build.id), 5000);
+        });
+        sections << about;
+
         // Last on every page: a way to put that page back to what Relay ships with (owner,
         // 2026-09-18). It is built from each section's own rows, so it reaches exactly the options
         // you are looking at and nothing on another tab, and a page where nothing declares a
@@ -3182,6 +3245,19 @@ private:
         items << actionItem(app, QStringLiteral("Options…"),
                             QStringLiteral("What persists: appearance, models, terminal, agent, voice, privacy, keyboard"),
                             QStringLiteral("app.settings"));
+        {
+            // "Which build am I on" is a question you ask in words, not by hunting through tabs, and
+            // the page it opens is all Info rows — which the Options search skips on purpose, since
+            // a search result there is something you press. So the palette is where it is findable.
+            const relay::buildinfo::Running &build = relay::buildinfo::running();
+            PaletteItem item; item.key = QStringLiteral("app.about"); item.section = app;
+            item.label = QStringLiteral("About Relay");
+            item.detail = QStringLiteral("Version %1 · build %2 · licence · what it is built on")
+                              .arg(QStringLiteral(RELAY_VERSION), build.id);
+            item.aliases = QStringLiteral("about version build number licence license agpl qt engine platform diagnostics");
+            item.run = [this] { openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("about")); };
+            items << item;
+        }
         {
             PaletteItem themes; themes.key = QStringLiteral("theme.reload"); themes.section = app;
             themes.label = QStringLiteral("Reload themes"); themes.detail = QStringLiteral("Pick up a theme file you added or edited");
