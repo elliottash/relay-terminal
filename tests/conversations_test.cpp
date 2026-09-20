@@ -9,6 +9,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QFrame>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHeaderView>
@@ -1352,6 +1353,13 @@ private slots:
         auto *composer = manager.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
         QVERIFY(composer);
         QVERIFY(composer->hasFocus());
+        // The box is a terminal pane's prompt box (owner, 2026-09-20): one frame around the
+        // editor and its chips, no Send button, and a placeholder that names the helper now that
+        // the help sentence over it is gone.
+        auto *box = manager.findChild<QFrame *>(QStringLiteral("boardChatBox"));
+        QVERIFY(box && box->isAncestorOf(composer));
+        QVERIFY(!manager.findChild<QToolButton *>(QStringLiteral("boardChatSend")));
+        QVERIFY(composer->placeholderText().startsWith(QStringLiteral("Ask the Sessions helper")));
         composer->setPlainText(QStringLiteral("which sessions touched Pane.h?"));
         QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
         QApplication::sendEvent(composer, &enter);

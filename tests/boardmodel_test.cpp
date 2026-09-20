@@ -275,6 +275,7 @@ private slots:
     void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
     void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
     void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
+    void theHelpersPromptBoxIsTheSameShapeAsAPanes();
     void theCardPageCarriesTheSameModelBoxAsTheListPage();
     void theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped();
     // The panel outside the Switchboard (#FEJQ): one worker, four panels.
@@ -3206,20 +3207,32 @@ void BoardModelTests::aPromptSendsBoardChatAndASecondOneQueuesInsteadOfBeingRefu
                                  {"text", "then sort it"}, {"chat", true}});
     QCOMPARE(queueRows(view).size(), 1);
 
-    // While a turn runs the send button is Stop, and it stops that turn and not the queue.
-    auto *send = view.findChild<QToolButton *>(QStringLiteral("boardChatSend"));
-    QVERIFY(send);
-    QCOMPARE(send->text(), QStringLiteral("Stop"));
+    // There is no Send button anywhere in the panel (owner, 2026-09-20: "[remove] the send button
+    // on all, make it like the pane agent"). Enter sent both prompts above; what stops a turn is
+    // the busy strip's ✕ Stop, which is on screen only while one runs.
+    QVERIFY(!view.findChild<QToolButton *>(QStringLiteral("boardChatSend")));
+    auto *busy = view.findChild<QWidget *>(QStringLiteral("boardChatBusy"));
+    auto *stop = view.findChild<QToolButton *>(QStringLiteral("boardChatStop"));
+    QVERIFY(busy && stop);
+    QVERIFY(!busy->isHidden());
+    QCOMPARE(stop->text(), QStringLiteral("✕ Stop"));
     sent.clear();
-    send->click();
+    stop->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
 
     view.handleEvent(QJsonObject{{"event", "board_chat_cancelled"}, {"stopped", true},
                                  {"chat", chatState(false, QJsonArray{
                                      QJsonObject{{"id", "c1"}, {"text", "then sort it"}}})}});
     QVERIFY(!view.chatRunning());
-    QCOMPARE(send->text(), QStringLiteral("Send"));
+    QVERIFY(busy->isHidden());                              // and the strip goes with the turn
     QCOMPARE(queueRows(view).size(), 1);                    // the queue survived the stop
+
+    // Esc in the box is the keyboard's way to the same call, as it is in a pane's prompt box.
+    view.handleEvent(QJsonObject{{"event", "board_chat_started"}, {"turn_id", "chat-9f1c2b"},
+                                 {"model", "switchboard"}, {"chat", chatState(true)}});
+    sent.clear();
+    QTest::keyClick(composerOf(view), Qt::Key_Escape);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
 }
 
 // The worker's queue is authoritative (19.18): a click sends the op and the redraw comes back as
@@ -3584,12 +3597,14 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
     QVERIFY(tools && !tools->isAncestorOf(box));
 
-    // Two rows of the panel's column, in the pane's order: the box, then a strip holding the
-    // context chip, the model and the microphone. Neither row is a widget of its own, so each is
-    // found by what it holds.
+    // Two rows of the prompt box's own column, in the pane's order: the editor, then a strip
+    // holding the context chip, the model and the microphone. Neither row is a widget of its own,
+    // so each is found by what it holds.
     QCOMPARE(box->parentWidget(), composer->parentWidget());
     QCOMPARE(mic->parentWidget(), composer->parentWidget());
-    QLayout *column = panel->layout();
+    auto *frame = panel->findChild<QFrame *>(QStringLiteral("boardChatBox"));
+    QVERIFY(frame);
+    QLayout *column = frame->layout();
     QLayout *strip = nullptr;
     for (QLayout *candidate : panel->findChildren<QLayout *>())
         if (candidate->indexOf(box) >= 0)
@@ -3621,6 +3636,96 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     box->setCurrentIndex(0);
     emit box->activated(0);
     QVERIFY(!picked.isEmpty());
+}
+
+// The prompt box is a terminal pane's, not a text field on a page (owner, 2026-09-20: "i dont
+// like the helper agent prompt UI … there is the useless help sentence, and then a bunch of
+// wasted space, and then the tiny text box. and the buttons dont look as good." — and of the card
+// page's buttons: "put buttons like that in a row above the chat box").
+void BoardModelTests::theHelpersPromptBoxIsTheSameShapeAsAPanes()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.onSend = [](const QJsonObject &) {};
+    view.resize(900, 700);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    QWidget *panel = chatPanel(view);
+    QVERIFY(panel);
+    auto *box = panel->findChild<QFrame *>(QStringLiteral("boardChatBox"));
+    QPlainTextEdit *composer = composerOf(view);
+    QVERIFY(box && composer);
+
+    // One frame, and the editor is inside it and fills its width — not a field beside the chips,
+    // and with no border of its own inside the frame's.
+    QVERIFY(box->isAncestorOf(composer));
+    QVERIFY2(composer->width() >= box->width() - 40,
+             qPrintable(QStringLiteral("editor %1 px in a %2 px frame")
+                            .arg(composer->width()).arg(box->width())));
+    QCOMPARE(composer->frameShape(), QFrame::NoFrame);
+
+    // The busy strip is the frame's first row, above the editor, and hidden while nothing runs —
+    // the place a pane's "Relaying · …" line has.
+    auto *busy = panel->findChild<QWidget *>(QStringLiteral("boardChatBusy"));
+    QVERIFY(busy && box->isAncestorOf(busy));
+    QVERIFY(busy->isHidden());
+    QVERIFY(busy->mapTo(box, QPoint(0, 0)).y() < composer->mapTo(box, QPoint(0, 0)).y());
+
+    // Nothing on the chip strip but the chips: the Send button is gone everywhere (owner: "[remove]
+    // the send button on all, make it like the pane agent"), and the chips are one height.
+    auto *mic = panel->findChild<QToolButton *>(QStringLiteral("boardChatMic"));
+    auto *context = panel->findChild<QLabel *>(QStringLiteral("boardChatContext"));
+    QVERIFY(mic && context);
+    QVERIFY(!panel->findChild<QToolButton *>(QStringLiteral("boardChatSend")));
+    QLayout *strip = nullptr;
+    for (QLayout *candidate : box->findChildren<QLayout *>())
+        if (candidate->indexOf(mic) >= 0)
+            strip = candidate;
+    QVERIFY(strip);
+    QVERIFY(strip->itemAt(0)->spacerItem() != nullptr);     // the stretch that pushes them right
+    QCOMPARE(strip->indexOf(mic), strip->count() - 1);      // the microphone ends it, as in a pane
+    view.handleEvent(chatEvent(QStringLiteral("context"),
+                               {{"used", 48000}, {"window", 200000}, {"percent", 24.0}}));
+    QVERIFY(!context->isHidden());
+    QCoreApplication::processEvents();
+    // One row: the chips share a centre line, the way a pane's do. Their *heights* are equal
+    // because the stylesheet gives `boardChatContext` and `boardChatMic` the chip rules
+    // `stripChipLabel` and `stripChip` have (src/Theme.cpp) — a sheet this test does not load, so
+    // that half is checked in the evidence screenshots.
+    const int chipMid = context->mapTo(box, QPoint(0, 0)).y() + context->height() / 2;
+    const int micMid = mic->mapTo(box, QPoint(0, 0)).y() + mic->height() / 2;
+    QVERIFY2(qAbs(chipMid - micMid) <= 1,
+             qPrintable(QStringLiteral("context centred at %1, microphone at %2")
+                            .arg(chipMid).arg(micMid)));
+
+    // The actions that need no typing are on the head row above the box, not in it.
+    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
+    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
+    QVERIFY(check && cleanup);
+    QVERIFY(!box->isAncestorOf(check));
+    QVERIFY(!box->isAncestorOf(cleanup));
+    QVERIFY(check->mapTo(panel, QPoint(0, 0)).y() < box->mapTo(panel, QPoint(0, 0)).y());
+
+    // No help sentence and no empty block: while the conversation is empty the log has no height
+    // at all, and the box's placeholder is what says whose box it is.
+    auto *log = chatLog(view);
+    QVERIFY(log);
+    QVERIFY(log->isHidden());
+    QVERIFY(!log->toPlainText().contains(QStringLiteral("Ask about the board itself")));
+    QCOMPARE(composer->placeholderText(),
+             QStringLiteral("Ask the Switchboard agent — Enter sends, a second prompt queues"));
+
+    // One turn later it is there, and no taller than the cap it has always had.
+    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
+                                 {"chat", QJsonObject{{"running", false},
+                                                      {"history", QJsonArray{
+                                                          QJsonObject{{"role", "user"}, {"text", "how many?"}},
+                                                          QJsonObject{{"role", "agent"}, {"text", "Two."}}}}}}});
+    QTRY_VERIFY(!log->isHidden());
+    QVERIFY(log->toPlainText().contains(QStringLiteral("Two.")));
+    QVERIFY2(log->maximumHeight() <= 320,
+             qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
 }
 
 namespace {
@@ -3914,9 +4019,19 @@ void BoardModelTests::aHelperOpensAsOneRowThatExpandsIntoTheWholePanel()
     QVERIFY(!ask->isVisible());
     QVERIFY(panel.composerHasFocus());                      // the row said Ask; the cursor is there
 
-    // The log is sized to the pane it is in, not to the board's list page.
+    // An empty conversation takes no height at all — the help sentence that used to fill it is
+    // gone (owner, 2026-09-20), so there is nothing to show and nothing to reserve.
     auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
     QVERIFY(log);
+    QVERIFY(log->isHidden());
+
+    // With a conversation in it, it is sized to the pane it is in and not to the board's list
+    // page: at most ~40 % of the pane, and never more than the 320 the board keeps.
+    panel.setChatState(QJsonObject{{"running", false},
+                                   {"history", QJsonArray{
+                                       QJsonObject{{"role", "user"}, {"text", QString(400, QLatin1Char('x'))}},
+                                       QJsonObject{{"role", "agent"}, {"text", QString(2000, QLatin1Char('y'))}}}}});
+    QTRY_VERIFY(!log->isHidden());
     QVERIFY2(log->maximumHeight() < 320,
              qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
     QVERIFY(log->maximumHeight() >= 3 * QFontMetrics(log->font()).lineSpacing());

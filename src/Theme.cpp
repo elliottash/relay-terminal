@@ -665,9 +665,12 @@ QWidget#boardView { background: @boardFace; }
 QWidget#boardListPane, QWidget#boardHead, QWidget#boardDetail { background: transparent; }
 QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
-QToolButton#boardAddButton, QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
-QToolButton#boardAddButton:hover, QToolButton#boardCleanup:hover { border-color: @accent; }
-QToolButton#boardCleanup { color: @muted; }
+QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardAddButton:hover { border-color: @accent; }
+/* Clean up lives on the helper panel's head row beside Check (19.9), so it wears what that row
+   wears — the card page's Plan/Execute face, one look for every no-typing action above a box. */
+QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
+QToolButton#boardCleanup:hover { border-color: @accent; }
 /* While a cleanup runs the same button is Stop. Colour and border only: a rule that changed the
    font here would paint one width and measure another (tests/buttonfit_test.cpp). */
 /* Violet, not amber: this is the Switchboard's agent working, and amber is reserved for what is
@@ -686,7 +689,11 @@ QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
    list above it is what it is talking about. */
 QWidget#boardChatPanel { background: transparent; border-top: 1px solid @boardMetalDim; }
 QLabel#boardChatHead { color: @muted; font-family: "@mono"; font-size: 9pt; }
-QToolButton#boardChatCheck { background: @raised; color: @muted; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
+/* The head row's actions — Check, and the Clean up the board reparents in beside it. They wear
+   the card page's Plan/Execute face (`QPushButton#boardReplyButton`), because they are the same
+   kind of thing in the same place: an action above a prompt box that needs no typing (owner,
+   2026-09-20). One look, so every action row in the app reads the same. */
+QToolButton#boardChatCheck { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
 QToolButton#boardChatCheck:hover { color: @text; border-color: @accent; }
 QTextBrowser#boardChatLog { background: transparent; color: @text; border: none; }
 QTextBrowser#boardChatLog QScrollBar:vertical { width: 8px; margin: 0; }
@@ -711,18 +718,23 @@ QLabel#boardChatFinding:hover { color: @text; }
 QCheckBox#boardChatProposal { color: @text; spacing: 5px; }
 QToolButton#boardChatImport { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardChatImport:hover { border-color: @accent; }
-/* The composer: the same furniture as a terminal pane's — the box, the microphone chip and the
-   context-left chip — so the two composers are one thing the owner has learned once. */
-QPlainTextEdit#boardChatComposer { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 4px 6px; }
-QPlainTextEdit#boardChatComposer:focus { border-color: @accentBorder; }
-QToolButton#boardChatMic { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; color: @muted; }
+/* The prompt box, rule for rule the pane's (owner, 2026-09-20: "make it like the pane agent").
+   One rounded frame on @surface with the accent border while the cursor is in it, a borderless
+   editor in the prompt font inside it, and the chips under that at the pane's chip height — so a
+   helper's box and a terminal pane's are the same control in two places. The values are copied
+   from `QFrame#composer`, `QPlainTextEdit#composerEditor`, `QToolButton#stripChip` and
+   `QLabel#stripChipLabel` above rather than shared with them, because those selectors are what
+   theme::polishWindow() stamps onto a *pane's* widgets and a panel is not a pane. */
+QFrame#boardChatBox { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QFrame#boardChatBox[relayActive="true"] { background: @raised; border: 1px solid @accentBorder; }
+QPlainTextEdit#boardChatComposer { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
+QToolButton#boardChatMic { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
+                           color: @muted; font-size: 9pt; min-height: 17px; }
 QToolButton#boardChatMic:hover { color: @text; border-color: @accent; }
 QToolButton#boardChatMic[recording="true"] { color: @error; border-color: @error; }
-QLabel#boardChatContext { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 2px 6px; }
-QLabel#boardChatContext[warn="true"] { color: @warning; }
-QToolButton#boardChatSend { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 6px; padding: 4px 10px; }
-QToolButton#boardChatSend:hover { border-color: @accent; }
-QToolButton#boardChatSend[running="true"] { color: @agent; border-color: @agentBorder; }
+QLabel#boardChatContext { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
+                          color: @muted; font-size: 9pt; }
+QLabel#boardChatContext[warn="true"] { color: @warning; border-color: @warning; }
 /* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
    a hairline over the rows; the pane's header carries nothing but the way back from a card. */
 QWidget#boardListTools { background: transparent; border-bottom: 1px solid @boardMetalDim; }

@@ -18,8 +18,10 @@
 #include <QFocusEvent>
 #include <QFont>
 #include <QFontMetrics>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonValue>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLocale>
 #include <QMessageBox>
@@ -44,6 +46,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace relay {
@@ -121,15 +124,20 @@ QString clockText(qint64 seconds)
 // What a `card:`, `option:` or `session:` link names, however the model spelled it. `card:K7Q2`
 // has no authority, so Qt puts K7Q2 in the path; `card://K7Q2` puts it in the host. Both are
 // written by hand in an answer, so both have to arrive somewhere.
-// The composer's fallbacks, widest first: the board says "the board", a helper says "this pane"
-// (#FEJQ, and the same words as its collapsed row). RichEditor picks the widest that fits.
+// The composer's fallbacks, widest first. RichEditor picks the widest that fits.
+//
+// The placeholder is now the only thing that says what the box is for: the paragraph that used to
+// stand above an empty conversation is gone (owner, 2026-09-20: "there is the useless help
+// sentence, and then a bunch of wasted space, and then the tiny text box"). So the widest rung
+// names the agent — "Ask the Switchboard agent", "Ask the Options helper" — rather than a topic,
+// because the head above it already says where the panel is, and carries the two things the
+// sentence taught: Enter sends, a second prompt queues.
 QStringList askPlaceholders(const QString &pane)
 {
-    const QString about = pane == helperpane::switchboard() ? QStringLiteral("the board")
-                                                            : QStringLiteral("this pane");
-    return {QStringLiteral("Ask about %1 — Enter sends, a second prompt queues").arg(about),
-            QStringLiteral("Ask about %1 — Enter sends").arg(about),
-            QStringLiteral("Ask about %1…").arg(about),
+    const QString who = helperpane::title(pane);
+    return {QStringLiteral("Ask the %1 — Enter sends, a second prompt queues").arg(who),
+            QStringLiteral("Ask the %1 — Enter sends").arg(who),
+            QStringLiteral("Ask the %1…").arg(who),
             QStringLiteral("Ask…")};
 }
 
@@ -330,11 +338,20 @@ QString problemCount(int count)
 
 // ------------------------------------------------------------------------------- construction
 
-// Top to bottom: who this is and the board-wide buttons, then whatever a Check turned up, then the
-// survey's offer, then the conversation, then the strip that says what the turn is doing, then the
-// queue, then the composer. Everything is a row in one panel inside the list page — a pane or
-// in-pane surface, never a floating strip (owner's standing rule; the cleanup panel above it is
-// built the same way).
+// Top to bottom: the **head row** — who this is, and the actions that need no typing (Check,
+// Clean up, the fold) — then whatever a Check turned up, then the survey's offer, then the
+// conversation, then the queue, then the **prompt box**: one frame holding the busy strip, the
+// editor and the chip strip, exactly as a terminal pane's is.
+//
+// That division is the owner's rule, given on 2026-09-20 of the card page's Plan and Execute and
+// applied to every prompt box in the app: "move those buttons out of there … because they
+// actually dont do anything in the chat box. can we instead put buttons like that in a row above
+// the chat box. they are actions the agent can take that dont require typing. we put the 'clean
+// up' button there for the main switchboard agent, for example." So the box holds the text and
+// the chips that qualify it, and the row above it holds everything else.
+//
+// Everything is a row in one panel inside the list page — a pane or in-pane surface, never a
+// floating strip (owner's standing rule; the cleanup panel above it is built the same way).
 // The composer's microphone, drawn rather than set as text or loaded from a file.
 //
 // It was the emoji U+1F3A4 until the live Xvfb run showed it as a missing-glyph box: the UI font
@@ -572,8 +589,50 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
             onOpenFile(path);
     });
 
+    // ---- the queue (19.18): worker-side, in delivery order ------------------------------------
+    // The board's box (#FEJQ). The FIFO itself is the worker's and serves every panel — a second
+    // ask from any pane queues exactly as it always did — but the rows that *reorder* it are a
+    // page the board has room for, and a helper folded to one row has nowhere to draw them. A
+    // helper's queued ask is reported on the pane's status line instead, from `board_chat_queued`.
+    // Above the prompt box and outside it: the box holds this turn's text, not the waiting ones.
+    if (isBoard()) {
+        m_queueBox = new QWidget(this);
+        m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
+        m_queueBox->setAttribute(Qt::WA_StyledBackground);
+        m_queueLayout = new QVBoxLayout(m_queueBox);
+        m_queueLayout->setContentsMargins(0, 0, 0, 0);
+        m_queueLayout->setSpacing(2);
+        m_queueBox->hide();
+        layout->addWidget(m_queueBox);
+    }
+
+    // ---- the prompt box: one frame, the shape a terminal pane's has -------------------------
+    //
+    // Owner, 2026-09-20, comparing this panel with a pane: "i dont like the helper agent prompt
+    // UI … there is the useless help sentence, and then a bunch of wasted space, and then the
+    // tiny text box. and the buttons dont look as good." A pane's prompt box is one rounded frame
+    // (`QFrame#composer`, src/Pane.h) holding the busy line, a **borderless** editor in the
+    // prompt font, and a strip of chips under it — so this is that frame, rule for rule
+    // (`QFrame#boardChatBox`, src/Theme.cpp). What is left outside it is what does not need
+    // typing: the head row above carries Check and Clean up, and nothing sits in the box but the
+    // text and the chips that qualify it.
+    m_box = new QFrame(this);
+    m_box->setObjectName(QStringLiteral("boardChatBox"));
+    m_box->setAttribute(Qt::WA_StyledBackground);
+    // Ignored across, as a pane's frame is (#G152): the chip strip is wider than a narrow pane,
+    // and a frame that set the panel's minimum width would push the splitter around every time
+    // the model's name changed. The strip is squeezed instead.
+    m_box->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto *boxLayout = new QVBoxLayout(m_box);
+    // The pane's own padding, which theme::polishWindow() puts on `QFrame#composer` — the frame
+    // is what gives the editor its air, which is why the editor itself needs none.
+    boxLayout->setContentsMargins(14, 10, 14, 8);
+    boxLayout->setSpacing(4);
+
     // ---- the busy strip: what the turn is doing this second, and the one control that stops it -
-    m_busy = new QWidget(this);
+    // The frame's first row, where a pane's "Relaying · …" line is, and on screen only while a
+    // turn runs — an empty strip above the box would be the wasted space again.
+    m_busy = new QWidget(m_box);
     m_busy->setObjectName(QStringLiteral("boardChatBusy"));
     m_busy->setAttribute(Qt::WA_StyledBackground);
     auto *busyRow = new QHBoxLayout(m_busy);
@@ -601,44 +660,27 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     m_stop->setFocusPolicy(Qt::NoFocus);
     busyRow->addWidget(m_stop, 0);
     m_busy->hide();
-    layout->addWidget(m_busy);
+    boxLayout->addWidget(m_busy);
     QObject::connect(m_stop, &QToolButton::clicked, this, [this] { stopTurn(); });
 
-    // ---- the queue (19.18): worker-side, in delivery order ------------------------------------
-    // The board's box (#FEJQ). The FIFO itself is the worker's and serves every panel — a second
-    // ask from any pane queues exactly as it always did — but the rows that *reorder* it are a
-    // page the board has room for, and a helper folded to one row has nowhere to draw them. A
-    // helper's queued ask is reported on the pane's status line instead, from `board_chat_queued`.
-    if (isBoard()) {
-        m_queueBox = new QWidget(this);
-        m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
-        m_queueBox->setAttribute(Qt::WA_StyledBackground);
-        m_queueLayout = new QVBoxLayout(m_queueBox);
-        m_queueLayout->setContentsMargins(0, 0, 0, 0);
-        m_queueLayout->setSpacing(2);
-        m_queueBox->hide();
-        layout->addWidget(m_queueBox);
-    }
-
-    // ---- the composer -------------------------------------------------------------------------
-    // The shape a pane's prompt box has (src/Pane.h): the box is a row of its own and fills the
-    // panel's width, and the chips that qualify it — context, model, microphone — sit on a strip
-    // under it, with Send at that strip's end.
-    //
-    // They shared one row until 2026-09-20, and at panel width that left the box a stub barely
-    // wider than its "Ask…" fallback placeholder (owner: "the place where I type is that small
-    // thing at the bottom left"). A QHBoxLayout hands every widget its size hint before it
-    // distributes stretch, and the model box's hint is its current row's text ("Follow Main —
-    // deepseek/deepseek-chat"), so there was no stretch left to give the box beside it.
-    m_composer = new RichEditor(this);
+    // ---- the editor --------------------------------------------------------------------------
+    // Borderless and transparent (`QPlainTextEdit#boardChatComposer` in src/Theme.cpp), in the
+    // prompt font, growing from two lines to eight exactly as a pane's does. It had a box of its
+    // own inside the panel until 2026-09-20, which is what made it read as "the tiny text box at
+    // the bottom": a border inside a frame draws the eye to the smaller of the two rectangles.
+    // The frame is the box now, and the editor is the text in it.
+    m_composer = new RichEditor(m_box);
     m_composer->setObjectName(QStringLiteral("boardChatComposer"));
-    m_composer->setAutoHeight(1, 6);
+    // No frame of its own, on top of the stylesheet's `border: none`. The qss carries the look;
+    // this is the invariant a test can hold on to, and it survives a theme whose sheet forgets.
+    m_composer->setFrameShape(QFrame::NoFrame);
+    m_composer->setAutoHeight(2, 8);
     m_composer->setPlaceholders(askPlaceholders(m_pane));
     m_composer->installEventFilter(this);
     // Every route sends: this box has one destination (owner's words to the page agent), so the
     // chords that mean "terminal" or "agent" in a pane must not silently do nothing here.
     m_composer->onSubmit = [this](const QString &) { sendPrompt(); };
-    layout->addWidget(m_composer);
+    boxLayout->addWidget(m_composer);
 
     // The strip under the box. Nothing sits at its left, so a stretch pushes the chips to the
     // right end, where a pane's context chip, model box and microphone are.
@@ -651,7 +693,7 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     // the `chat: true` tagging (19.18) precisely so this can exist. First on the strip, so the
     // model box `addComposerWidget` inserts before the microphone lands between the two, exactly
     // as it does in a pane.
-    m_context = new QLabel(this);
+    m_context = new QLabel(m_box);
     m_context->setObjectName(QStringLiteral("boardChatContext"));
     m_context->hide();
     m_composerRow->addWidget(m_context, 0);
@@ -661,7 +703,7 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     // one microphone. It was an emoji glyph until the live run showed it as a missing-glyph box:
     // the UI font has no U+1F3A4 and Qt does not fall back to the colour-emoji font for a
     // QToolButton's text.
-    m_mic = new QToolButton(this);
+    m_mic = new QToolButton(m_box);
     m_mic->setObjectName(QStringLiteral("boardChatMic"));
     m_mic->setIcon(micIcon(theme::TextMuted));
     m_mic->setIconSize(QSize(14, 14));
@@ -671,19 +713,13 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     m_composerRow->addWidget(m_mic, 0);
     QObject::connect(m_mic, &QToolButton::clicked, this, [this] { toggleVoice(); });
 
-    m_send = new QToolButton(this);
-    m_send->setObjectName(QStringLiteral("boardChatSend"));
-    m_send->setCursor(Qt::PointingHandCursor);
-    m_send->setFocusPolicy(Qt::NoFocus);   // Tab stays with the composer
-    m_send->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    m_composerRow->addWidget(m_send, 0);
-    QObject::connect(m_send, &QToolButton::clicked, this, [this] {
-        if (m_running)
-            stopTurn();
-        else
-            sendPrompt();
-    });
-    layout->addLayout(m_composerRow);
+    // No Send (owner, 2026-09-20: "[remove] the send button on all, make it like the pane
+    // agent"). A pane's prompt box has never had one: **Enter** sends, the placeholder says so,
+    // and stopping a turn is the busy strip's ✕ Stop or Esc in the box — the same two ways a
+    // pane ends one. A button whose label swapped to Stop was a second control saying what the
+    // strip above it already said.
+    boxLayout->addLayout(m_composerRow);
+    layout->addWidget(m_box);
 
     // A streamed answer re-renders at most 25 times a second; a fast provider sends deltas far
     // faster than that and the log is a whole QTextDocument each time.
@@ -768,18 +804,26 @@ void HelperChatPanel::updateAskRow()
 // The log is sized to the pane it is in, not to the board's list page (#FEJQ): at most ~40 % of
 // the pane's height, and never less than three lines — below that an answer is a slot, not a
 // conversation. The board keeps its 320, which is what the page was built around.
+//
+// And never taller than what it holds (owner, 2026-09-20): a QTextBrowser's size hint is a
+// generic rectangle and its policy is Expanding, so a two-line answer used to be drawn at the top
+// of a 320 px well with the rest of it empty — the "bunch of wasted space" between the panel's
+// head and its box. The cap is the ceiling; the document's own height is what is asked for.
+// rebuildLog() hides the log outright while the conversation is empty, so the floor here is one
+// line and not three: three lines of nothing is the same complaint, one size smaller.
 void HelperChatPanel::updateLogHeight()
 {
     if (m_log == nullptr)
         return;
-    if (isBoard()) {
-        m_log->setMaximumHeight(320);
-        return;
-    }
+    const int margin = 2 * int(m_log->document()->documentMargin());
     const int line = QFontMetrics(m_log->font()).lineSpacing();
-    const int floor = 3 * line + 2 * int(m_log->document()->documentMargin());
-    const QWidget *pane = parentWidget() != nullptr ? parentWidget() : this;
-    m_log->setMaximumHeight(qMin(320, qMax(floor, pane->height() * 2 / 5)));
+    int cap = 320;
+    if (!isBoard()) {
+        const QWidget *pane = parentWidget() != nullptr ? parentWidget() : this;
+        cap = qMin(320, qMax(3 * line + margin, pane->height() * 2 / 5));
+    }
+    const int content = int(std::ceil(m_log->document()->size().height())) + margin;
+    m_log->setMaximumHeight(qBound(line + margin, content, cap));
 }
 
 void HelperChatPanel::expand()
@@ -852,13 +896,14 @@ void HelperChatPanel::addToolWidget(QWidget *widget)
     widget->show();
 }
 
-// The model box, once #BRD3 has landed one: among the chips, left of the microphone, where a
-// pane's is. Never at the end — Send is the last thing on the row and stays there.
+// The model box (#BRD3): on the chip strip inside the prompt box, between the context chip and
+// the microphone, which is exactly where a pane's sits — context, model, microphone, right to the
+// frame's edge. The microphone is the last thing on the strip and stays there.
 void HelperChatPanel::addComposerWidget(QWidget *widget)
 {
     if (widget == nullptr || m_composerRow == nullptr)
         return;
-    widget->setParent(this);
+    widget->setParent(m_box != nullptr ? static_cast<QWidget *>(m_box) : this);
     const int at = m_mic != nullptr ? m_composerRow->indexOf(m_mic) : -1;
     if (at >= 0)
         m_composerRow->insertWidget(at, widget);
@@ -920,9 +965,9 @@ void HelperChatPanel::setChatState(const QJsonObject &chat)
     rebuildLog();
 }
 
-// Send or Stop, one button. A property and not a font: a stylesheet rule with a pseudo-state that
-// changed the font would paint one width and measure another (tests/buttonfit_test.cpp, and the
-// same comment on BoardView::updateCleanupButton).
+// The busy strip is the whole of "a turn is running": it appears inside the prompt box, names
+// what the turn is doing and carries the one control that ends it. There is no Send button to
+// swap to Stop any more (owner, 2026-09-20).
 void HelperChatPanel::setRunning(bool running)
 {
     // A sync takes the board's busy guard (19.14), which this conversation holds while it turns:
@@ -930,16 +975,6 @@ void HelperChatPanel::setRunning(bool running)
     if (m_forgeLook != nullptr && m_forgeRequest.isEmpty())
         m_forgeLook->setEnabled(!running);
     m_running = running;
-    if (m_send != nullptr) {
-        m_send->setText(running ? QStringLiteral("Stop") : QStringLiteral("Send"));
-        m_send->setToolTip(running
-            ? QStringLiteral("Stop this turn. The queue carries on with the next prompt.")
-            : QStringLiteral("Ask the page agent (Enter). A prompt typed while it answers joins "
-                             "the queue rather than being refused."));
-        m_send->setProperty("running", running);
-        m_send->style()->unpolish(m_send);
-        m_send->style()->polish(m_send);
-    }
     if (m_busy != nullptr)
         m_busy->setVisible(running);
     if (auto *clock = findChild<QTimer *>(clockTimerName())) {
@@ -1111,17 +1146,15 @@ void HelperChatPanel::rebuildLog()
         any = true;
     }
 
-    // What an empty panel invites, in the words of the pane it is in (#FEJQ). The board's line is
-    // about the board; a helper in Options or Sessions that asked to be told "what duplicates
-    // what" would be inviting a question it cannot answer.
-    if (!any)
-        insertLine(cursor, isBoard()
-            ? QStringLiteral("Ask about the board itself — what is where, what duplicates what, "
-                             "how to reorganize it. Enter sends; a second prompt queues behind "
-                             "the first.")
-            : QStringLiteral("Ask about this pane — what a row does, where a setting is, what an "
-                             "action would do, and it can do it for you. Enter sends; a second "
-                             "prompt queues behind the first."), muted, 0);
+    // An empty conversation takes **no height at all** (owner, 2026-09-20: "there is the useless
+    // help sentence, and then a bunch of wasted space, and then the tiny text box"). The
+    // paragraph that used to invite a question is gone — the placeholder in the box says the same
+    // thing, in the box it is about — and with nothing to show the log is hidden rather than left
+    // as an empty block over the prompt. The moment a turn arrives it is back, growing with its
+    // content up to its cap (updateLogHeight).
+    m_log->setVisible(any);
+    if (any)
+        updateLogHeight();
 
     // Follow the stream while it runs; otherwise leave the reader where they were.
     bar->setValue(m_running || atBottom ? bar->maximum() : was);
@@ -1204,6 +1237,26 @@ bool HelperChatPanel::eventFilter(QObject *object, QEvent *event)
         auto *focus = static_cast<QFocusEvent *>(event);
         if (focus->reason() == Qt::MouseFocusReason && onHint && !m_askKeys.isEmpty())
             onHint(m_askHint, m_askKeys);
+    }
+    // The accent border a pane's prompt box wears while that pane is the live one. Here the live
+    // box is the one the cursor is in — one panel per pane, four of them in a window — so the
+    // frame takes the same `relayActive` property from the editor's focus and the qss rule is the
+    // one `QFrame#composer` has. Repolished by hand: a dynamic property does not restyle itself.
+    if (object == m_composer && m_box != nullptr
+        && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+        m_box->setProperty("relayActive", event->type() == QEvent::FocusIn);
+        m_box->style()->unpolish(m_box);
+        m_box->style()->polish(m_box);
+    }
+    // Esc in the box ends the turn, as it does in a pane's prompt box ("Esc stops", the busy
+    // line's own words). The ✕ on the busy strip is the mouse's way to the same call; with no
+    // turn running Esc is left alone, so a panel in a pane does not swallow the key the pane
+    // wants.
+    if (object == m_composer && event->type() == QEvent::KeyPress && m_running
+        && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape
+        && static_cast<QKeyEvent *>(event)->modifiers() == Qt::NoModifier) {
+        stopTurn();
+        return true;
     }
     // A collapsed panel expands on focus as well as on a click (#FEJQ): Tab reaching the ask row
     // is the keyboard saying the same thing the click says, and it lands in the composer. Only a

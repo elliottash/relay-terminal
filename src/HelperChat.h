@@ -47,6 +47,7 @@
 #include <QWidget>
 #include <functional>
 
+class QFrame;
 class QHBoxLayout;
 class QLabel;
 class QResizeEvent;
@@ -168,8 +169,13 @@ public:
     // mouse path teaches (WARP.md's standing rule). The board's own is `board.chat` / Ctrl+/.
     void setAskShortcut(const QString &hintId, const QString &keys);
 
-    // The panel's button row (Clean up, Check) and its composer row (the model box, once #BRD3
-    // has landed one). Widgets are reparented in; the panel never owns or styles them.
+    // The head row's action buttons (Clean up, Check) and the prompt box's chip strip (the model
+    // box). Widgets are reparented in; the panel never owns or styles them.
+    //
+    // The head row is where an action that needs no typing belongs (owner, 2026-09-20, of the
+    // card page's Plan/Execute: "move those buttons out of there … we put the 'clean up' button
+    // there for the main switchboard agent, for example"). The box below holds the text and the
+    // chips that qualify it, and nothing else.
     void addToolWidget(QWidget *widget);
     void addComposerWidget(QWidget *widget);
 
@@ -262,10 +268,10 @@ private:
     QList<QueueItem> m_queue;
 
     // The widgets. Object names are the qss hooks and what a test finds the panel by, and they
-    // are the **same names in every pane** (`boardChatComposer`, `boardChatSend`, …): the board's
+    // are the **same names in every pane** (`boardChatComposer`, `boardChatLog`, …): the board's
     // tests and the QA drivers find the panel by them, and a helper's panel is the same panel.
     QLabel *m_head = nullptr;                // "Switchboard agent" / "Sessions helper" + the clock
-    QHBoxLayout *m_toolRow = nullptr;        // Clean up, Check, and whatever else belongs here
+    QHBoxLayout *m_toolRow = nullptr;        // Clean up, Check: the actions that need no typing
     QToolButton *m_check = nullptr;
     QTextBrowser *m_log = nullptr;
     QWidget *m_busy = nullptr;               // the running strip: what it is doing, and Stop
@@ -285,11 +291,14 @@ private:
     QString m_forgeRepo, m_forgeRequest;
     QToolButton *m_forgeLook = nullptr;
     QLabel *m_forgeResult = nullptr;
-    QHBoxLayout *m_composerRow = nullptr;
+    // The prompt box: one rounded frame holding the busy line, the editor and the chip strip,
+    // styled as `QFrame#composer` is in a terminal pane (owner, 2026-09-20). No Send — Enter
+    // sends, and while a turn runs the busy strip's ✕ Stop and Esc in the box end it.
+    QFrame *m_box = nullptr;
+    QHBoxLayout *m_composerRow = nullptr;    // the chip strip: context, model, microphone
     RichEditor *m_composer = nullptr;
     QToolButton *m_mic = nullptr;
     QLabel *m_context = nullptr;             // "72% left", the pane's chip idiom
-    QToolButton *m_send = nullptr;
 
     // The collapsed state (#FEJQ): one row that is the whole panel until it is asked for, the
     // control that folds it back, and everything else in one widget so showing or hiding the

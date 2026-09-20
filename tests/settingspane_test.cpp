@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFrame>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QPushButton>
@@ -1095,6 +1096,13 @@ private slots:
         QVERIFY(body->isVisible());
         auto *composer = pane.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
         QVERIFY(composer && composer->hasFocus());
+        // And the box it lands in is a terminal pane's prompt box (owner, 2026-09-20): one frame
+        // around the editor and its chips, no Send button, and the placeholder says whose box it
+        // is now that the help sentence above it is gone.
+        auto *box = pane.findChild<QFrame *>(QStringLiteral("boardChatBox"));
+        QVERIFY(box && box->isAncestorOf(composer));
+        QVERIFY(!pane.findChild<QToolButton *>(QStringLiteral("boardChatSend")));
+        QVERIFY(composer->placeholderText().startsWith(QStringLiteral("Ask the Options helper")));
         composer->setPlainText(QStringLiteral("where do I turn thinking off?"));
         QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
         QApplication::sendEvent(composer, &enter);
