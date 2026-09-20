@@ -1,7 +1,7 @@
-card N8P8 ready
-card PC0S inbox
-card 0AWG executing
-promoted card 325F issues/changes/2026-09-20-delta-promoted-from-a-failing-test.md
+card 6ZZM ready
+card 2D6F inbox
+card 5YXR executing
+promoted card KS5S issues/changes/2026-09-20-delta-promoted-from-a-failing-test.md
 executions 8 -> issues/.private/tests/history.jsonl
 open ['ctest:panelayout', 'ctest:themes']
 dismissed ['ctest:voice']

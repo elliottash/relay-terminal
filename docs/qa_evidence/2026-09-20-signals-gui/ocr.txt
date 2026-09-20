@@ -1,4 +1,4 @@
-relay binary: /tmp/claude-1000/-home-elliott-repos-relay-terminal/501201b7-0147-4e7f-a867-125a2e45d722/scratchpad/aq6x-gui/tree/build/relay (2026-09-20 17:20:51.138563284 -0400)
+relay binary: /tmp/claude-1000/-home-elliott-repos-relay-terminal/501201b7-0147-4e7f-a867-125a2e45d722/scratchpad/aq6x-gui/tree2/build/relay (2026-09-20 17:27:13.589539092 -0400)
 01 the fold row says '2 signals': yes
 01 and the dismissed toggle says '1 dismissed': yes
 01 the signals themselves are away: yes
@@ -26,5 +26,5 @@ relay binary: /tmp/claude-1000/-home-elliott-repos-relay-terminal/501201b7-0147-
 relay still alive at the end: yes
 no gui_crash in relay.log
 --- signals events after the run
-{"action":"dismiss","by":"owner","comment":"this host has no sound card","key":"ctest:voice","reason":"environmental","ts":"2026-09-20T21:21:02Z","until":"2026-09-27","v":1}
-{"action":"claim","key":"ctest:panelayout","session":"board-sb23vpzckiz4-","ts":"2026-09-20T21:21:59Z","v":1}
+{"action":"dismiss","by":"owner","comment":"this host has no sound card","key":"ctest:voice","reason":"environmental","ts":"2026-09-20T21:28:39Z","until":"2026-09-27","v":1}
+{"action":"claim","key":"ctest:panelayout","session":"board-sb21td94poqo-","ts":"2026-09-20T21:29:36Z","v":1}
