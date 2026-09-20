@@ -1,0 +1,29 @@
+----- before (79cae3ef^) / reply -----
+reply: 24.0s   screen stream 679,798 B   everything 679,909 B
+    snapshot       x190      674,390 B   avg   3,549 B
+    diff           x11         5,408 B   avg     491 B
+    status         x2            111 B   avg      55 B
+----- after (79cae3ef + the frameOf guard) / reply -----
+reply: 24.0s   screen stream 108,088 B   everything 108,199 B
+    diff+scroll    x190      102,680 B   avg     540 B
+    diff           x11         5,408 B   avg     491 B
+    status         x2            111 B   avg      55 B
+----- before (79cae3ef^) / prose -----
+prose: 24.0s   screen stream 534,898 B   everything 535,009 B
+    snapshot       x190      530,180 B   avg   2,790 B
+    diff           x11         4,718 B   avg     428 B
+    status         x2            111 B   avg      55 B
+----- after (79cae3ef + the frameOf guard) / prose -----
+prose: 24.0s   screen stream 94,288 B   everything 94,399 B
+    diff+scroll    x190       89,570 B   avg     471 B
+    diff           x11         4,718 B   avg     428 B
+    status         x2            111 B   avg      55 B
+----- before (79cae3ef^) / firehose -----
+firehose: 30.0s   screen stream 75,853 B   everything 75,964 B
+    snapshot       x27        75,427 B   avg   2,793 B
+    diff           x1            426 B   avg     426 B
+    status         x2            111 B   avg      55 B
+----- after (79cae3ef + the frameOf guard) / firehose -----
+firehose: 30.0s   screen stream 72,636 B   everything 72,747 B
+    snapshot       x26        72,636 B   avg   2,793 B
+    status         x2            111 B   avg      55 B

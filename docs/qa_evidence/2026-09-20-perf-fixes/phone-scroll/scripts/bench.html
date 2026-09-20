@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- #3H5T bench: the real app/screen.js on the owner's Pixel 8, fed the same stream twice —
+     once as the whole-screen snapshots the desktop used to send, once as the shift it sends now. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>screen bench</title><link rel="stylesheet" href="./style.css">
+<style>html,body{margin:0;height:100%;background:#000;color:#ddd;font:14px system-ui}
+#terminal-pane{display:flex;flex-direction:column;height:80vh}#screen-wrap{flex:1;overflow:auto}</style>
+</head><body>
+<div id="terminal-pane"><div id="screen-wrap"></div></div>
+<pre id="out">ready</pre>
+<script type="module">
+import { ScreenView } from './screen.js';
+const ROWS = 24, COLS = 80;
+const root = document.getElementById('screen-wrap');
+const view = new ScreenView(root);
+view.onNeedHistory = () => {};                 // no desktop here; the seam is not what is measured
+let base = 5000;
+const text = (n) => `${String(n).padStart(3)} relay the frame carries rows of style runs so the `
+  + `client needs no second emulator, line ${n}`;
+const row = (screenRow, absolute) => ({ row: screenRow, segs: [
+  [String(absolute).padStart(4), (1 << 24) | 6, 0, 0], [' ', 0, 0, 0],
+  ['relay', 0, 0, 1], [' ' + text(absolute).slice(8, 72), 0, 0, 0]] });
+const live = () => Array.from({ length: ROWS }, (_, n) => row(n, base + n));
+view.apply({ t: 'screen_snapshot', rows: ROWS, cols: COLS, alt: false, base, history: base,
+             cursor: { row: ROWS - 1, col: 0, visible: true }, lines: live() });
+
+// The wire, not just the model: the page really receives text and JSON.parses it (app/rrp.js),
+// and that cost is per byte, which is the whole point of the change. Both streams are built up
+// front so the loop does exactly what the client does — parse, then apply.
+function buildStream(kind, frames) {
+  let at = base, out = [];
+  for (let n = 0; n < frames; n++) {
+    at += 1;
+    const cursor = { row: ROWS - 1, col: 0, visible: true };
+    const rows = () => Array.from({ length: ROWS }, (_, r) => row(r, at + r));
+    const message = kind === 'snapshot'
+      ? { t: 'screen_snapshot', pane: 'pane-1', seq: n, rows: ROWS, cols: COLS, alt: false,
+          base: at, history: at, cursor, lines: rows() }
+      : { t: 'screen_diff', pane: 'pane-1', seq: n, base: at, history: at, cursor,
+          scroll: { top: 0, bottom: ROWS, by: 1 }, lines: [row(ROWS - 1, at + ROWS - 1)] };
+    out.push(JSON.stringify(message));
+  }
+  return out;
+}
+
+window.bench = (kind, frames = 200, everyMs = 100) => new Promise((done) => {
+  const stream = buildStream(kind, frames);
+  const bytes = stream.reduce((total, text) => total + new Blob([text]).size, 0);
+  const started = performance.now();
+  let n = 0;
+  const tick = setInterval(() => {
+    view.apply(JSON.parse(stream[n])); n += 1;
+    if (n >= frames) {
+      clearInterval(tick);
+      base += frames;
+      const report = { kind, frames: n, bytes, ms: Math.round(performance.now() - started),
+                       lastRow: root.querySelector('.screen-grid > .screen-row:last-child').textContent.trim() };
+      document.getElementById('out').textContent = JSON.stringify(report);
+      done(report);
+    }
+  }, everyMs);
+});
+window.column = () => [...root.querySelectorAll('.screen-grid > .screen-row')].map((n) => n.textContent);
+document.getElementById('out').textContent = 'ready';
+</script></body></html>

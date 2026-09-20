@@ -1,0 +1,22 @@
+=== snapshot: non-idle JS 1098 ms over the 20 s stream ===
+       464.6 ms  (program)
+       204.5 ms  toBottom screen.js:311
+       165.2 ms  Blob :0
+        74.4 ms  (garbage collector)
+        51.3 ms  span screen.js:586
+        33.8 ms  replaceChildren :0
+        25.3 ms  (anonymous)
+        17.9 ms  append :0
+        13.6 ms  paintRow screen.js:553
+
+=== scroll: non-idle JS 810 ms over the 20 s stream ===
+       407.9 ms  (program)
+       170.9 ms  Blob :0
+       132.7 ms  toBottom screen.js:311
+        20.1 ms  (anonymous)
+        19.1 ms  insertBefore :0
+        17.5 ms  span screen.js:586
+         6.1 ms  paintRow screen.js:553
+         5.6 ms  shiftRows screen.js:263
+         5.5 ms  atBottom screen.js:307
+
