@@ -16,3 +16,6 @@ Questions for the owner, each with a recommendation (detail in docs/SIGNALS-RESE
 10. Which sources after tests? **Recommend:** `check` problems and build failures in the first version, then crashes, then CI; lint only with a baseline; QA verdicts never.
 11. Fold into #7BM4 or stay its own card? **Recommend: its own card**, after #7BM4 step 1, and strike "flaky tests become cards" there.
 12. The name. **Recommend: keep "signal"**; "alert" would promise a notification, which a signal must not send.
+
+<!-- relay:entry 20260920T195746Z-8f author=agent kind=decision -->
+Owner, in the terminal, on the twelve questions: "6 -- i think yes by default, but its optional.OK to all the others". All recommendations accepted except agent pickup of unclaimed signals, which is on by default and optional (thread question 9; it was numbered 6 in the terminal summary). Recorded in the card's Decisions. Next: a plan, once #7BM4 step 1 has fixed the run-history format.

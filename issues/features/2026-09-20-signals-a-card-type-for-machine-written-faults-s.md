@@ -3,7 +3,6 @@ id: AQ6X
 type: work
 status: discussing
 labels: [feature, switchboard, tests]
-waiting_on: owner
 rank: i1
 created: '2026-09-20'
 source: pane, 2026-09-20
@@ -31,7 +30,7 @@ the signals feature seems like it requires more investigation. so can you do mor
 5. Age alone never promotes; impact or repeated occurrence does.
 6. When the card and the signal disagree the machine state wins: a card linked to an open signal cannot leave `needs-verification`, and a card closed while the test is red leaves the signal open.
 
-## Proposal (revised, for discussion)
+## Proposal (revised; decided 2026-09-20, see Decisions)
 - **Key** = source plus the check's own identity (`ctest:panelayout`, `unittest:<module.Class.test>`, `check:<code>:<path>`, `build:<target>`, `crash:<signal>:<top in-repo frame>`). The failure fingerprint (numbers, hex, paths, timestamps stripped) is an annotation for grouping and for "this now fails differently", never part of the key.
 - **Open** on the second consecutive failing execution. Relay re-runs up to ten failed tests once: fail-fail is `broken` and opens at once; fail-pass stays `pending` with a flaky mark and opens as `flaky` on a transition count over its last 21 executions.
 - **Resolve** silently on 2 (broken) or 20 (flaky) consecutive passing executions; not-built, skipped and timed-out executions advance nothing. A key unseen for 7 days is `stale` and is re-run first, not closed by a timer.
@@ -44,4 +43,19 @@ the signals feature seems like it requires more investigation. so can you do mor
 - **Relation to #7BM4**: own card, scheduled after #7BM4's step 1 (the history file and the JUnit writer, in progress now). #7BM4's "flaky tests become cards" is replaced by promotion here so it is not built twice.
 
 ## Decisions
-None yet: twelve questions are on the thread, each with a recommendation.
+Owner, 2026-09-20, on the twelve questions in the thread: "6 -- i think yes by default, but its optional.OK to all the others". (Question 6 in the terminal summary was thread question 9, whether agents work unclaimed signals unasked.)
+
+1. **Store**: a local append-only file under the board's private folder, not git; signals are per machine.
+2. **Not a card type**: a keyed record the board draws; it gets a card id only on promotion.
+3. **Opens** pending on the first failure, open on the second consecutive failing execution of that key; Relay re-runs the failed tests once when the failed set is fast (about a minute by recorded duration), otherwise waits for the next natural run.
+4. **Resolves** on 2 consecutive passing executions (broken) or 20 (flaky); a run that did not execute the key counts as nothing.
+5. **Promotion** to a bug card: the claiming agent gave up with a reason, or three failing runs over at least 24 hours unclaimed, or confirmed flaky. Never age alone. At most five promoted cards open.
+6. **The signal wins** over its card: a card linked to an open signal cannot leave needs-verification, and closing the card does not close the signal. The owner's override is a dismissal.
+7. **Agent dismissal**: `environmental` and `flaky-known` only, with a comment and an expiry of at most 7 days; `wont-fix`, `expected` and longer expiries are the owner's; every dismissal expires.
+8. **Blocking verification**: only a signal first seen in a run by the pane holding that card; older ones are listed as "open before this card".
+9. **Agents work unclaimed signals unasked, by default, and it can be turned off** (owner: "yes by default, but its optional"). Reverses the recommendation of an explicit-sweep-only model. The plan fixes the mechanics; the starting point: a setting on the board (and in Options), default on, never when the board's `autonomy` is off; the pane whose run opened a signal claims it first; signals no run of a live pane owns are picked up by an idle pane agent of that project, at most three at a time per project; every pickup is a `session` claim, so it is visible and two panes never chase one test.
+10. **Sources**: tests, `check` problems and build failures in the first version; then crashes, then CI; lint only against a baseline; QA verdicts never.
+11. **Its own card**, after #7BM4's step 1 (run history and JUnit writer); #7BM4's "flaky tests become cards" is replaced by promotion here.
+12. **Name**: signal.
+
+Still to tune against real history once #7BM4's file exists: the group threshold (3 keys with one fingerprint), the red-run rule (more than half of ten or more), the cap of ten signals per run, the 21-execution flakiness window.
