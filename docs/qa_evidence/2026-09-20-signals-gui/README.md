@@ -47,6 +47,10 @@ worker left it — the dismissal the fixture wrote and the claim the GUI made:
 `fixture.txt` is what the fixture wrote and what `signals.state()` folded out of it before the GUI
 ever saw it, so the two can be compared.
 
+The shots were taken again after `72d830f9`, which moved the pane's one `signals_list` from the
+`board` handler to "when the pane is on screen": the rows still arrive, which is what that commit
+had to be proved not to break.
+
 ## Read on the shots
 
 Two assertions are about type tesseract does not read at this size, and the shots hold both: the
