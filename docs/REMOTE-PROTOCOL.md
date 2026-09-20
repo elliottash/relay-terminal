@@ -779,7 +779,7 @@ of today no web client draws them and they are not in `GUEST_EVENTS`: an owner's
 participant both see a question only as the text the desktop printed into the mirrored terminal.
 The owner can still answer from a paired device: a remote line is routed first, exactly as a line
 typed at the desk is, and the ask takes it when the router sends it to the agent
-(`relay::input::cardTakesRemoteLine`, `Pane::takeRemoteRoute`). A line the router sends to the
+(`relay::input::askTakesRemoteLine`, `Pane::takeRemoteRoute`). A line the router sends to the
 **shell** runs in the shell — an ask nobody has answered no longer locks a phone out of the
 terminal, which is what the old rule did by handing the ask every line before routing it (owner,
 2026-09-19). A device that cannot ask the router at all — `route: false`, or a worker that is not
