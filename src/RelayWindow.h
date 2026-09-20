@@ -1324,7 +1324,13 @@ private:
             fillBox();
             listenToHelper(page, guard, [viewGuard, state, fillBox](const QJsonObject &event) {
                 if (!viewGuard) return;
-                const QString type = event.value(QStringLiteral("type")).toString();
+                // A worker **event** names itself in `event`, not in `type` — `type` is what a
+                // message going the other way carries (BoardView::handleEvent reads the same
+                // field). Reading `type` here handed every panel an untyped event: a `delta`
+                // arrived, the panel took it as proof that a turn was running and then matched
+                // none of the branches, so the Options helper sat at "running" with an empty log
+                // while the worker's log said the turn was done in 628 ms.
+                const QString type = event.value(QStringLiteral("event")).toString();
                 viewGuard->helperEvent(type, event);
                 // The `presets` rows are the composer microphone's too (the "voice needs an
                 // OpenRouter key" offer), which is why the panel is given them as well.

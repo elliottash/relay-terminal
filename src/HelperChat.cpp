@@ -554,7 +554,10 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     auto *busyRow = new QHBoxLayout(m_busy);
     busyRow->setContentsMargins(0, 0, 0, 0);
     busyRow->setSpacing(6);
-    auto *busyLabel = new QLabel(QStringLiteral("✦ Switchboard agent"), m_busy);
+    // It says where it is, exactly as the head does: this strip is under the log of an Options or
+    // Sessions panel as often as under the board's, and "Switchboard agent" there was the one
+    // place the panel still called itself by the board's name (#FEJQ).
+    auto *busyLabel = new QLabel(QStringLiteral("✦ ") + helperpane::title(m_pane), m_busy);
     busyLabel->setObjectName(QStringLiteral("boardChatBusyLabel"));
     busyRow->addWidget(busyLabel, 0);
     // A page-agent turn reads the whole board before it says a word, and a panel that only said
@@ -777,7 +780,9 @@ void HelperChatPanel::setPane(const QString &pane)
     m_pane = pane;
     if (m_composer != nullptr)
         m_composer->setPlaceholders(askPlaceholders(m_pane));
-    setRunning(m_running);      // redraws the head, which is the only thing that named the pane
+    if (auto *busy = findChild<QLabel *>(QStringLiteral("boardChatBusyLabel")))
+        busy->setText(QStringLiteral("✦ ") + helperpane::title(m_pane));
+    setRunning(m_running);      // redraws the head
     updateAskRow();
 }
 
@@ -1076,10 +1081,17 @@ void HelperChatPanel::rebuildLog()
         any = true;
     }
 
+    // What an empty panel invites, in the words of the pane it is in (#FEJQ). The board's line is
+    // about the board; a helper in Options or Sessions that asked to be told "what duplicates
+    // what" would be inviting a question it cannot answer.
     if (!any)
-        insertLine(cursor, QStringLiteral("Ask about the board itself — what is where, what "
-                                          "duplicates what, how to reorganize it. Enter sends; a "
-                                          "second prompt queues behind the first."), muted, 0);
+        insertLine(cursor, isBoard()
+            ? QStringLiteral("Ask about the board itself — what is where, what duplicates what, "
+                             "how to reorganize it. Enter sends; a second prompt queues behind "
+                             "the first.")
+            : QStringLiteral("Ask about this pane — what a row does, where a setting is, what an "
+                             "action would do, and it can do it for you. Enter sends; a second "
+                             "prompt queues behind the first."), muted, 0);
 
     // Follow the stream while it runs; otherwise leave the reader where they were.
     bar->setValue(m_running || atBottom ? bar->maximum() : was);
