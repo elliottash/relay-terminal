@@ -234,7 +234,8 @@ void BoardSectionsTests::aNewSectionNeedsANameAndStatusesNobodyElseCollects()
     const Model model = board();
     SectionPlan plan = SectionPlan::from(model);
     QVERIFY(!plan.addRefusal(QString(), {QStringLiteral("deferred")}).isEmpty());
-    QVERIFY(plan.addRefusal(QStringLiteral("Parked"), {}).contains(QStringLiteral("at least one")));
+    // No statuses is a manual section (#3XZV): one you fill by hand with a drop, so it is allowed.
+    QVERIFY(plan.addRefusal(QStringLiteral("Parked"), {}).isEmpty());
     // A status belongs to one section: two would draw the same card twice.
     QVERIFY(plan.addRefusal(QStringLiteral("Parked"), {QStringLiteral("ready")})
                 .contains(QStringLiteral("already collected")));

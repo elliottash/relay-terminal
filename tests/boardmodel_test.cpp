@@ -175,7 +175,7 @@ private slots:
     void anEditIsKeptWhenTheCardChangedUnderIt();
     void theBoxDiscussesAndTheRowPlansOrLeavesTheBoard();
     void aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen();
-    void executeHandsTheCardToAPaneAndMovesItToInProgress();
+    void executeHandsTheCardToAPaneAndMovesItToExecuting();
     void theExecuteTaskCarriesTheBoardsConventions();
     void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
     void aViewIgnoresEventsFromAnotherProjectsBoard();
@@ -2084,7 +2084,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     QVERIFY(strip->isHidden());
 }
 
-void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToInProgress()
+void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     QList<QJsonObject> sent;
@@ -2120,7 +2120,8 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToInProgress()
     QCOMPARE(sent.at(0).value("base_hash").toString(), QString(64, QLatin1Char('a')));
     QCOMPARE(sent.at(0).value("patch").toObject().value("fields").toObject().value("assignee").toString(),
              QStringLiteral("agent"));
-    QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("in-progress"));
+    // The stage lifecycle (#3XZV, 4f5acd43): what Execute moves a card into is `executing`.
+    QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("executing"));
     QVERIFY(sent.at(2).value("text").toString().startsWith(QStringLiteral("Execute ·")));
     QVERIFY(error->isHidden());
 
@@ -2147,7 +2148,10 @@ void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()
     QVERIFY(task.contains(QStringLiteral("implemented_by")));
     QVERIFY(task.contains(QStringLiteral("links.commits")));
     QVERIFY(task.contains(QStringLiteral("Put #XS6Q in the message of every commit")));
-    QVERIFY(task.contains(QStringLiteral("needs-qa-llm")));
+    // The convention the brief carries is the lifecycle's: land it into needs-verification with
+    // the evidence and the checklist, and its verifier moves it on to QA (#3XZV).
+    QVERIFY2(task.contains(QStringLiteral("needs-verification")), qPrintable(task));
+    QVERIFY(task.contains(QStringLiteral("## QA checklist")));
     QVERIFY(task.endsWith(QStringLiteral("The owner adds, verbatim:\nbackend first")));
     QVERIFY(relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"), false, false)
                 .contains(QStringLiteral("no plan and no acceptance")));
@@ -2305,10 +2309,15 @@ void BoardModelTests::theExecuteTaskAsksForTheImplementedByTrailer()
 
 void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTrailer()
 {
+    // The lane decides what a pass and a failure do (#3XZV), so the status is an argument: from
+    // needs-verification a pass goes on to QA. Passed by name here, because it sits before the
+    // owner's note and a note landing in it silently builds a brief with no note at all.
     const QString task = relay::board::verifyTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
                                                   QStringLiteral("Codex"),
                                                   QStringLiteral("anthropic/claude-opus-5"),
+                                                  QStringLiteral("needs-verification"),
                                                   QStringLiteral("check the Xvfb run too"));
+    QVERIFY2(task.contains(QStringLiteral("verify lane (needs-verification)")), qPrintable(task));
     QVERIFY(task.startsWith(QStringLiteral("Verify #T71W: Signatures\n")));
     QVERIFY(task.contains(QStringLiteral("you are its verifier (Codex)")));
     QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
