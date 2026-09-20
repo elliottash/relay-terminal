@@ -231,19 +231,19 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   beside the model and remembered per model, ★ favorites and the ten most recent picks above the
   rest, and each provider's subscription windows ("5h 62% left, resets 14:30") under the list.
   `/model <name>` switches without the dialog. The box itself lists the same rows in priority order.
-- **Model roles: High, Main, Flash, Lite.** Options › Models › **per-job models (advanced)** asks
-  for one thing: your default provider. Everything else follows from it — **High** for plan mode
-  (Main at max reasoning unless you pick a model), **Main** for agent turns and subagents,
-  **Flash** for driving programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
-  glm-5.3 / glm-5.3-flash / Gemini 3.8 Flash; Kimi gives kimi-k3 / kimi-k2.7-code-highspeed / Gemini
-  3.8 Flash; Anthropic gives Opus 5 / Sonnet 5 / Haiku 4.5. Each row is editable, and the rows can name
-  a **different provider** than the default one: point Flash at Z.AI while Main stays on Kimi and you
-  get `glm-5.3-flash`, that provider's own Flash model, without typing a model id. The lists name the
-  company — Kimi, Z.AI (GLM), OpenRouter, OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) — and
-  offer only providers you hold a key for.
-  **Advanced options** opens one row per job — agent turns, subagents, terminal use, new panes,
-  suggestions, summaries, Switchboard threads, chores, the request audit, images — each showing the
-  model it resolves to ("Flash · glm-5.3-flash") and following its tier until you pin it.
+- **Model roles: main, high, flash, lite, local.** The tiers are five ordered lists on Options ›
+  Models: **main** for agent turns and subagents, **high** for plan mode (main at max reasoning
+  unless you list a model), **flash** for driving programs and quick side calls, **lite** for
+  titles, labels and duplicate checks, **local** for a model served on this machine. Each entry is a
+  model plus a reasoning level; the first one is what the tier runs on, the rest are its fallbacks
+  in order, and the first entry of the main list is your default provider.
+  **per-job models (advanced)**, on the same page, opens one row per job — agent turns, plan mode,
+  subagents, terminal use, new panes, suggestions, summaries, Switchboard threads, chores, the
+  request audit — plus the vision model. Each row shows the model it resolves to ("flash ·
+  glm-5.3-flash") and follows its tier until you choose "its own provider…"; then you pick the
+  provider, one of its models from a list, and a reasoning level in that provider's own words
+  (xhigh on OpenAI). Providers are named as companies — Kimi, Z.AI (GLM), OpenRouter, OpenAI
+  (ChatGPT), Anthropic (Claude), Google (Gemini) — and only the ones you hold a key for are offered.
   Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
   budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails

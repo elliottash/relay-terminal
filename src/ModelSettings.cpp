@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelSettings.h"
 
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -9,6 +10,7 @@
 #include <QFont>
 #include <QFrame>
 #include <QGridLayout>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -339,23 +341,21 @@ QString KeysDialog::presetLabelFor(const QString &id) const {
 
 // ===== RolesDialog ==============================================================================
 //
-// Four rows — Main, Flash, Lite, Local — over one default provider, plus an Advanced disclosure with
-// one row per job. Settings:
-//   provider/preset            the default provider (also the pane's own model)
-//   provider/model             the pane's own model, which is what the Main row's Model… sets
-//   agent/effort               the pane's reasoning effort, which is what the Main row's effort sets
-//   tiers/<flash|lite>/{preset,model,effort}   an override for that tier; unset = the provider default
-//   tiers/local/preset         a saved local endpoint id; unset = the first one in the registry
-//   roles/<role>/tier          "", "main", "flash", "lite" or "local"
-//   roles/<role>/{preset,model,effort}         a provider of this job's own, exclusive with the tier
-// The worker resolves all of it (backend/relay_core/roles.py) and reports what each tier and role
-// landed on, which is what the rows display.
+// "per-job models": one row per job (protocol 13.7) and the vision row. Nothing else.
 //
-// The Main row is the exception, and the reason it stood empty until 2026-09-18 ("you also still
-// cant pick the main model options"): `tiers.main` is rejected by roles.py on purpose, because the
-// Main tier is not something the worker resolves — it is the pane. So that row writes nothing here.
-// Its Model… and its effort go back to the pane through onMainModelChosen / onMainEffortChosen, and
-// its provider is the Default provider box above, driving the same chooseProvider().
+// Until 2026-09-20 the top half of this dialog was a Default provider box, a recommended-pairs line
+// and a row per tier (Main / Flash / Lite / Local: Model…, a provider, an effort). The owner moved
+// all of that to Options › Models, which now holds five ordered lists — main, high, flash, lite,
+// local (relay::models::curation::tierList, src/ModelCatalog.h). An entry there is a model plus a
+// reasoning level, rank 1 is what the tier runs on, the rest are its fallbacks, and rank 1 of the
+// main list is the default provider. Two places to say the same thing was one too many, so the
+// rows went and what was behind "Advanced options" is now the whole dialog. Settings it writes:
+//   roles/<role>/tier          "" (the job's built-in tier), "high", "main", "flash", "lite", "local"
+//   roles/<role>/{preset,model,effort}         a provider of this job's own, exclusive with the tier
+// tierIds() / tierSetting() stay because Pane::tiersObject and the Switchboard's model box build the
+// protocol objects from them; this dialog no longer writes a `tiers/…` key.
+// The worker resolves all of it (backend/relay_core/roles.py) and reports what each role landed
+// on, which is what the rows display.
 
 namespace {
 
@@ -453,52 +453,28 @@ void RolesDialog::writeRolePreset(const QString &role, const QString &presetId) 
 
 RolesDialog::RolesDialog(QWidget *parent) : QDialog(parent) {
     setObjectName(QStringLiteral("rolesDialog"));
-    setWindowTitle(QStringLiteral("Relay · Model roles"));
-    resize(880, 780);   // wide enough for a row's four controls beside its text, and tall
-                        // enough for the tiers plus a good part of the Advanced list
+    setWindowTitle(QStringLiteral("Relay · per-job models"));
+    resize(1120, 680);   // a pinned row is five cells wide: text, tier, provider, model, effort
     auto *layout = new QVBoxLayout(this);
 
-    auto *providerRow = new QWidget;
-    auto *providerBox = new QHBoxLayout(providerRow);
-    providerBox->setContentsMargins(0, 0, 0, 0);
-    providerBox->addWidget(new QLabel(QStringLiteral("Default provider")));
-    m_providerBox = new QComboBox;
-    m_providerBox->setAccessibleName(QStringLiteral("Default provider"));
-    m_providerBox->setMinimumWidth(320);
-    providerBox->addWidget(m_providerBox, 1);
+    auto *top = new QHBoxLayout;
+    top->addWidget(hint(QStringLiteral(
+        "Each job follows a tier — high, main, flash, lite or local — until you give it a provider of "
+        "its own. The tiers themselves are the five lists on Options › Models: the first model in a "
+        "list is what that tier runs on and the rest are its fallbacks, so changing a list moves every "
+        "job that follows it. A provider picked here moves only that job.")), 1);
     auto *keys = new QPushButton(QStringLiteral("API keys…"));
     connect(keys, &QPushButton::clicked, this, [this] { if (openKeys) openKeys(); });
-    providerBox->addWidget(keys);
-    layout->addWidget(providerRow);
-    m_recommended = hint(QString());
-    layout->addWidget(m_recommended);
-    connect(m_providerBox, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
-        if (!m_filling) chooseProvider(m_providerBox->itemData(index).toString());
-    });
-
+    top->addWidget(keys, 0, Qt::AlignTop);
+    layout->addLayout(top);
     layout->addWidget(separator());
-    m_tiers = new QWidget;
-    new QVBoxLayout(m_tiers);
-    layout->addWidget(m_tiers);
 
-    m_disclosure = new QPushButton;
-    m_disclosure->setFlat(true);
-    m_disclosure->setCursor(Qt::PointingHandCursor);
-    // Once opened, Advanced options stays open: someone who cares about per-job models cares every
-    // time. QSettings roles/advanced_open.
-    m_showAdvanced = QSettings().value(QStringLiteral("roles/advanced_open"), false).toBool();
-    connect(m_disclosure, &QPushButton::clicked, this, [this] {
-        m_showAdvanced = !m_showAdvanced;
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), m_showAdvanced);
-        rebuild();
-    });
-    layout->addWidget(m_disclosure, 0, Qt::AlignLeft);
-    m_advanced = new QWidget;
-    new QVBoxLayout(m_advanced);
+    m_rows = new QWidget;
+    new QVBoxLayout(m_rows);
     auto *scroll = new QScrollArea;
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setWidget(m_advanced);
+    scroll->setWidget(m_rows);
     layout->addWidget(scroll, 1);
 
     auto *close = new QDialogButtonBox(QDialogButtonBox::Close);
@@ -515,43 +491,41 @@ void RolesDialog::setPresets(const QJsonArray &presets, const QJsonObject &tierC
 }
 
 void RolesDialog::setResolved(const QJsonObject &tiers, const QJsonObject &roles) {
-    m_resolvedTiers = tiers;
+    Q_UNUSED(tiers);   // the tiers are shown on Options › Models now; the rows here are per job
     m_resolvedRoles = roles;
     rebuild();
 }
 
+// The pane's own provider. Nothing here chooses it any more — that is rank 1 of the main list on
+// Options › Models — but it is still where a job lands before the worker has resolved anything, so
+// it decides which effort levels such a row can offer, and it stays listed among the providers
+// even if its key went away.
 void RolesDialog::setProvider(const QString &presetId) {
     if (presetId == m_provider) return;
     m_provider = presetId;
     rebuild();
 }
 
-bool RolesDialog::hasKey(const QString &presetId) const {
-    for (const auto &value : std::as_const(m_presets)) {
-        const QJsonObject preset = value.toObject();
-        if (str(preset, "id") == presetId) return preset.value(QStringLiteral("has_stored_key")).toBool();
-    }
-    return false;
+QJsonObject RolesDialog::presetRow(const QString &presetId) const {
+    for (const auto &value : std::as_const(m_presets))
+        if (str(value.toObject(), "id") == presetId) return value.toObject();
+    return {};
 }
 
 QString RolesDialog::presetLabel(const QString &presetId) const {
-    for (const auto &value : std::as_const(m_presets))
-        if (str(value.toObject(), "id") == presetId) return str(value.toObject(), "label");
-    return presetId;
+    const QJsonObject preset = presetRow(presetId);
+    return preset.isEmpty() ? presetId : str(preset, "label");
 }
 
 // Preset labels name the provider and its default model ("OpenRouter · DeepSeek V4.1 Flash"), which
-// is the right thing in the keys modal — you hold a key per plan — and the wrong thing here: these
-// rows choose a *provider*, and the model beside it is the tier's, not the preset's. So everything in
-// this dialog names the company (presets.py `provider`): Kimi, Z.AI (GLM), OpenAI (ChatGPT)…
+// is the right thing in the keys modal — you hold a key per plan — and the wrong thing here: a row's
+// provider box chooses a *provider*, and the model is the box beside it. So everything in this
+// dialog names the company (presets.py `provider`): Kimi, Z.AI (GLM), OpenAI (ChatGPT)…
 QString RolesDialog::providerName(const QString &presetId) const {
-    for (const auto &value : std::as_const(m_presets)) {
-        const QJsonObject preset = value.toObject();
-        if (str(preset, "id") != presetId) continue;
-        const QString name = str(preset, "provider");
-        return name.isEmpty() ? presetLabel(presetId).split(QStringLiteral(" · ")).first() : name;
-    }
-    return presetId;
+    const QJsonObject preset = presetRow(presetId);
+    if (preset.isEmpty()) return presetId;
+    const QString name = str(preset, "provider");
+    return name.isEmpty() ? presetLabel(presetId).split(QStringLiteral(" · ")).first() : name;
 }
 
 // The same company can be offered twice — a Kimi Code key and a Moonshot platform key are different
@@ -562,20 +536,12 @@ QString RolesDialog::providerChoice(const QString &presetId) const {
     for (const auto &value : choosableProviders())
         if (providerName(str(value.toObject(), "id")) == name) ++sharing;
     if (sharing < 2) return name;
-    const QString plan = [&] {
-        for (const auto &value : std::as_const(m_presets))
-            if (str(value.toObject(), "id") == presetId) return str(value.toObject(), "plan");
-        return QString();
-    }();
+    const QString plan = str(presetRow(presetId), "plan");
     return plan.isEmpty() ? name : name + QStringLiteral(" · ") + plan;
 }
 
-QString RolesDialog::shortProviderLabel(const QString &presetId) const {
-    return providerChoice(presetId);
-}
-
-// Only providers you hold a key for are worth offering: picking one you cannot reach just moves the
-// pane onto a row that falls back. The exception is the provider already in use (and, on a fresh
+// Only providers you hold a key for are worth offering: pinning a job to one you cannot reach just
+// gives a row that falls back. The exception is the provider already in use (and, on a fresh
 // install where nothing has a key, every provider — otherwise the dialog would offer nothing at all
 // and the API keys… button beside it would have nothing to come back to).
 QJsonArray RolesDialog::choosableProviders() const {
@@ -590,93 +556,119 @@ QJsonArray RolesDialog::choosableProviders() const {
     return all;
 }
 
-QJsonObject RolesDialog::tierDefault(const QString &tier) const {
-    return m_catalog.value(QStringLiteral("providers")).toObject().value(m_provider).toObject()
-        .value(tier).toObject();
-}
-
-void RolesDialog::chooseProvider(const QString &presetId) {
-    if (presetId.isEmpty() || presetId == m_provider) return;
-    const QString previous = m_provider;
-    m_provider = presetId;
-    // Switching the default provider re-derives the tiers that followed it, and drops an override that
-    // named the *old* provider: its model does not exist on the new one. An override pointing somewhere
-    // else is the whole point of the row — Main on Kimi with Flash on Z.AI — so it is kept.
-    QSettings settings;
-    for (const QString &tier : tierIds()) {
-        // The Local tier never followed the default provider, so a new one cannot invalidate it —
-        // even when the provider being left behind is itself a local endpoint (card #JH22).
-        if (tier == QStringLiteral("local")) continue;
-        const QString pinned = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
-        if (!pinned.isEmpty() && pinned != previous && pinned != presetId) continue;
-        for (const QString &field : {QStringLiteral("preset"), QStringLiteral("model"), QStringLiteral("effort")})
-            settings.remove(tierSetting(tier, field));
-    }
-    if (onProviderChosen) onProviderChosen(presetId);
-    if (onRolesChanged) onRolesChanged();
-    rebuild();
-}
-
 // ----- the rows ---------------------------------------------------------------------------------
 //
-// Every row is four cells of one grid — the text, Model…, the provider, the effort — so Main, Flash,
-// Lite, Local and the vision row line up down the dialog. A row with nothing to put in a cell leaves
-// it empty rather than shuffling the rest of the row left.
+// Every row is five cells of one grid — the text, what the job follows, then its own provider, model
+// and effort — so the rows line up down the dialog. A row with nothing to put in a cell leaves it
+// empty rather than shuffling the rest of the row left.
 
-// The list of providers a row can be sent to. `neutral` is the row's "nothing of my own" entry — the
-// tier's provider, or the default one — and is left out for the Main row, which always names one.
+// The list of providers a row can be sent to. `neutral` is the row's "nothing of my own" entry (the
+// vision row's Automatic); a job row has none, because the way back is its tier box.
 // A provider whose key has gone away is still listed while the row points at it: the row would
-// otherwise read as the default while the worker quietly used something else.
+// otherwise read as something else while the worker quietly fell back.
 void RolesDialog::fillProviders(QComboBox *box, const QString &neutral, const QString &selected) const {
     if (!neutral.isEmpty()) box->addItem(neutral, QString());
+    const bool anyUsable = [this] {
+        for (const auto &value : std::as_const(m_presets))
+            if (usable(value.toObject())) return true;
+        return false;
+    }();
     for (const auto &value : std::as_const(m_presets)) {
         const QJsonObject item = value.toObject();
         const QString id = str(item, "id");
         const bool stored = usable(item);
-        if (!stored && id != selected) continue;
+        // With no key anywhere every provider is listed, marked, so the box is never empty.
+        if (!stored && id != selected && anyUsable) continue;
         box->addItem(stored ? providerChoice(id) : providerChoice(id) + QStringLiteral("  (no key)"), id);
     }
     const int index = box->findData(selected);
     box->setCurrentIndex(index >= 0 ? index : 0);
-    box->setMinimumWidth(140);
+    box->setMinimumWidth(165);
 }
 
-// The default provider's own list, which the box at the top of the dialog and the Main row below it
-// both show: the same providers, the same selection, either one drives chooseProvider().
-void RolesDialog::fillDefaultProviders(QComboBox *box) const {
-    for (const auto &value : choosableProviders()) {
-        const QJsonObject preset = value.toObject();
-        const bool stored = usable(preset);
-        const QString id = str(preset, "id");
-        box->addItem(stored ? providerChoice(id) : providerChoice(id) + QStringLiteral("  (no key)"), id);
-        box->setItemData(box->count() - 1, stored, Qt::UserRole + 1);
-    }
-    const int index = box->findData(m_provider);
-    if (index >= 0) box->setCurrentIndex(index);
+// The provider a job is pinned to when its tier box is moved to "its own provider…": the one it is
+// already running on, so that the pick changes nothing until the boxes that then appear are used.
+// Failing that (no key for it, or nothing resolved yet) the first provider that can be reached, and
+// with no key at all the first one listed — the row then reads "(no key)", which is the truth.
+QString RolesDialog::ownProviderFor(const QString &role) const {
+    const QString current = rolePreset(role);
+    if (usable(presetRow(current))) return current;
+    const QJsonArray offered = choosableProviders();
+    for (const auto &value : offered)
+        if (usable(value.toObject())) return str(value.toObject(), "id");
+    return offered.isEmpty() ? QString() : str(offered.first().toObject(), "id");
 }
 
-// One reasoning-effort picker, for a tier, a job or the pane itself. `presetId` is the provider that
-// will serve the row: it decides both the levels offered and the note under them, because the levels
-// are what that endpoint can actually be asked for (presets.py `effort_levels`). `stored` is the
-// level in QSettings, which may well be one this provider does not have — the answer to that is
-// nearestOffered(), not silence. Returns nullptr when the provider has no effort knob at all, and
-// then the row simply has no effort cell.
-QComboBox *RolesDialog::effortBox(const QString &presetId, const QString &stored, const QString &name,
-                                  const QString &tip, bool allowDefault,
+// One model of one provider, from the per-model catalog the preset row carries (`models`, presets.py
+// MODEL_CATALOG: id, label, efforts, effort_labels…). An empty id is the provider's default model.
+QJsonObject RolesDialog::modelRow(const QString &presetId, const QString &modelId) const {
+    const QJsonObject preset = presetRow(presetId);
+    const QString id = modelId.isEmpty() ? str(preset, "model") : modelId;
+    for (const auto &value : preset.value(QStringLiteral("models")).toArray())
+        if (str(value.toObject(), "id") == id) return value.toObject();
+    return {};
+}
+
+// The levels one model can be asked for. The catalog row decides where there is one — Kimi documents
+// reasoning_effort for kimi-k3 alone, so its other models carry [] — and the preset's own list is the
+// answer for a model id the catalog has never heard of.
+QStringList RolesDialog::effortsFor(const QString &presetId, const QString &modelId) const {
+    const QJsonObject preset = presetRow(presetId);
+    if (preset.isEmpty()) return {};
+    const QJsonObject row = modelRow(presetId, modelId);
+    const QJsonObject source = row.contains(QStringLiteral("efforts")) ? row : preset;
+    // A provider Relay has never heard of carries no `efforts` at all, and then all four are
+    // offered — the same fallback the pane's own picker makes (Pane::effortsFor).
+    if (!source.contains(QStringLiteral("efforts"))) return allEfforts();
+    QStringList levels;
+    for (const auto &level : source.value(QStringLiteral("efforts")).toArray()) levels << level.toString();
+    return levels;
+}
+
+// What the provider itself calls a Relay level (`effort_labels`; owner, 2026-09-20: "for codex
+// planning you pick xhigh, not max; for glm 5.3 you pick max"). The box shows this word and stores
+// the Relay level, so moving the job to another provider keeps the setting meaningful.
+QString RolesDialog::effortLabel(const QString &presetId, const QString &modelId, const QString &level) const {
+    const QString key = QStringLiteral("effort_labels");
+    const QString own = modelRow(presetId, modelId).value(key).toObject().value(level).toString();
+    if (!own.isEmpty()) return own;
+    const QString general = presetRow(presetId).value(key).toObject().value(level).toString();
+    return general.isEmpty() ? level : general;
+}
+
+QString RolesDialog::effortNoteFor(const QString &presetId) const {
+    return str(presetRow(presetId), "effort_note");
+}
+
+// One reasoning-effort picker. `presetId` and `modelId` are what will serve the row: they decide the
+// levels offered, the words shown for them and the note under them, because the levels are what that
+// endpoint can actually be asked for. `stored` is the level in QSettings, which may well be one this
+// model does not have — the answer to that is nearestOffered(), not silence. Returns nullptr when
+// there is no effort knob at all, and then the row simply has no effort cell.
+QComboBox *RolesDialog::effortBox(const QString &presetId, const QString &modelId, const QString &stored,
+                                  const QString &name, const QString &tip,
                                   std::function<void(const QString &)> onPick) {
-    const QStringList levels = effortsFor(presetId);
+    const QStringList levels = effortsFor(presetId, modelId);
     if (levels.isEmpty()) return nullptr;
     auto *box = new QComboBox;
     box->setAccessibleName(name);
-    box->setMinimumWidth(110);
+    box->setMinimumWidth(130);
     QString tooltip = tip;
     // The provider's own line about the levels it does not have ("medium is sent as high."), so a
     // level that reads as one thing and is sent as another is never a mystery.
     const QString note = effortNoteFor(presetId);
     if (!note.isEmpty()) tooltip += QStringLiteral("\n%1: %2").arg(providerName(presetId), note);
     box->setToolTip(tooltip);
-    if (allowDefault) box->addItem(QStringLiteral("Model default"), QString());
-    for (const QString &level : levels) box->addItem(level, level);
+    box->addItem(QStringLiteral("model default"), QString());
+    for (const QString &level : levels) {
+        const QString label = effortLabel(presetId, modelId, level);
+        box->addItem(label, level);
+        if (label != level)
+            box->setItemData(box->count() - 1,
+                             QStringLiteral("%1 calls this %2; Relay's level is %3.")
+                                 .arg(providerName(presetId), label, level),
+                             Qt::ToolTipRole);
+    }
     int index = box->findData(stored);
     if (index < 0 && !stored.isEmpty()) index = box->findData(nearestOffered(levels, stored));
     box->setCurrentIndex(index >= 0 ? index : 0);
@@ -687,180 +679,73 @@ QComboBox *RolesDialog::effortBox(const QString &presetId, const QString &stored
     return box;
 }
 
-void RolesDialog::buildTierRow(QGridLayout *grid, int line, const QString &tier, const QJsonObject &spec) {
-    QSettings settings;
-    const QJsonObject resolved = m_resolvedTiers.value(tier).toObject();
-    const QJsonObject fallback = tierDefault(tier);
-    const QString label = str(spec, "label");
-    const QString model = resolved.contains(QStringLiteral("model")) ? str(resolved, "model")
-                                                                     : str(fallback, "model");
-    const QString preset = resolved.contains(QStringLiteral("preset")) ? str(resolved, "preset")
-                                                                       : str(fallback, "preset");
-
-    const bool isMain = tier == QStringLiteral("main");
-    QString detail = str(spec, "hint");
-    // Main is not a tier the worker resolves — it *is* the pane — so the row says so, and the reader
-    // is not left thinking its provider cell is a private override like Flash's and Lite's.
-    if (isMain) detail += QStringLiteral(" · on the default provider above");
-    else if (!preset.isEmpty() && preset != m_provider) detail += QStringLiteral(" · on ") + shortProviderLabel(preset);
-    QWidget *text = rowText(QStringLiteral("%1 · %2").arg(label, model.isEmpty() ? QStringLiteral("—") : model),
-                            {detail}, true, str(resolved, "note"));
-    grid->addWidget(text, line, 0);
-
-    if (tier == QStringLiteral("local")) {
-        // A model server on this machine (card #24XJ): the only thing to choose is *which* saved
-        // endpoint. No Model… and no effort box — a local server serves one model and an
-        // OpenAI-compatible endpoint has no effort knob Relay can rely on (its `efforts` is empty).
-        auto *endpoint = new QComboBox;
-        endpoint->setAccessibleName(QStringLiteral("Local model"));
-        endpoint->setMinimumWidth(140);
-        endpoint->setToolTip(QStringLiteral("Which model server on this machine serves this tier. "
-                                            "Unset, it is the first saved endpoint."));
-        const QString override = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
-        for (const auto &value : std::as_const(m_presets)) {
-            const QJsonObject item = value.toObject();
-            if (!item.value(QStringLiteral("local")).toBool()) continue;
-            endpoint->addItem(providerChoice(str(item, "id")), str(item, "id"));
-        }
-        if (endpoint->count() == 0) {
-            endpoint->addItem(QStringLiteral("No local model is set up."));
-            endpoint->setEnabled(false);
-            text->setEnabled(false);
-        } else {
-            const int index = endpoint->findData(override);
-            endpoint->setCurrentIndex(index >= 0 ? index : 0);
-            connect(endpoint, QOverload<int>::of(&QComboBox::activated), this, [this, endpoint](int i) {
-                QSettings().setValue(tierSetting(QStringLiteral("local"), QStringLiteral("preset")),
-                                     endpoint->itemData(i).toString());
-                if (onRolesChanged) onRolesChanged();
-                rebuild();
-            });
-        }
-        grid->addWidget(endpoint, line, 2);
-        return;
-    }
-
-    // Model…: a model id on the provider this row already uses. For Main that is the pane's own
-    // model, which no `tiers` entry can carry (roles.py rejects `tiers.main`), so it goes back to
-    // the pane as a set_model instead of into QSettings here.
-    auto *edit = new QPushButton(QStringLiteral("Model…"));
-    edit->setAccessibleName(label + QStringLiteral(" model"));
-    edit->setToolTip(isMain
-        ? QStringLiteral("Model id on %1 for this pane; empty restores that provider's default model.")
-              .arg(providerName(m_provider))
-        : QStringLiteral("Model id on %1; empty restores the provider's default for this tier.")
-              .arg(providerName(preset.isEmpty() ? m_provider : preset)));
-    connect(edit, &QPushButton::clicked, this, [this, tier, label, isMain] {
-        bool ok = false;
-        const QString key = isMain ? QStringLiteral("provider/model") : tierSetting(tier, QStringLiteral("model"));
-        const QString current = QSettings().value(key).toString();
-        const QString value = QInputDialog::getText(this, label + QStringLiteral(" model"),
-            isMain ? QStringLiteral("Model id (empty: the provider's default model)")
-                   : QStringLiteral("Model id (empty: the provider's default for this tier)"),
-            QLineEdit::Normal, current, &ok).trimmed();
-        if (!ok) return;
-        if (isMain) {
-            if (onMainModelChosen) onMainModelChosen(value);
-            rebuild();
-            return;
-        }
-        QSettings settings;
-        if (value.isEmpty()) {
-            settings.remove(tierSetting(tier, QStringLiteral("model")));
-            settings.remove(tierSetting(tier, QStringLiteral("preset")));
-        } else {
-            settings.setValue(tierSetting(tier, QStringLiteral("model")), value);
-            // The tier stays on whichever provider it already used, so a model id alone is enough.
-            if (settings.value(tierSetting(tier, QStringLiteral("preset"))).toString().isEmpty())
-                settings.setValue(tierSetting(tier, QStringLiteral("preset")),
-                                  str(tierDefault(tier), "preset"));
-        }
-        if (onRolesChanged) onRolesChanged();
-        rebuild();
-    });
-    grid->addWidget(edit, line, 1);
-
-    auto *provider = new QComboBox;
-    if (isMain) {
-        provider->setAccessibleName(QStringLiteral("Main provider"));
-        provider->setToolTip(QStringLiteral("Main runs on the default provider — it is this pane's own "
-                                            "model — so this is the box at the top of the dialog, and "
-                                            "changing either one changes both."));
-        fillDefaultProviders(provider);
-        provider->setMinimumWidth(140);
-        connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider](int i) {
-            chooseProvider(provider->itemData(i).toString());
-        });
-    } else {
-        provider->setToolTip(QStringLiteral("Which provider serves this tier. Choosing one alone gives "
-                                            "that provider's own %1 model.").arg(label));
-        fillProviders(provider, QStringLiteral("Default provider"),
-                      settings.value(tierSetting(tier, QStringLiteral("preset"))).toString());
-        connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider, tier](int i) {
-            const QString chosen = provider->itemData(i).toString();
-            QSettings settings;
-            if (chosen.isEmpty()) {
-                settings.remove(tierSetting(tier, QStringLiteral("preset")));
-                settings.remove(tierSetting(tier, QStringLiteral("model")));
-            } else {
-                settings.setValue(tierSetting(tier, QStringLiteral("preset")), chosen);
-                settings.remove(tierSetting(tier, QStringLiteral("model")));   // that provider's own default
-            }
+// The model cell of a row that has a provider of its own: that provider's catalog as a list, so a
+// model is picked, not typed. Only a provider that sent no `models` — a local endpoint, a custom one,
+// a worker older than the catalog — falls back to Model… and a free-text id.
+QWidget *RolesDialog::modelCell(const QString &role, const QString &title, const QString &presetId) {
+    const QString name = title + QStringLiteral(" model");
+    const QString key = roleSetting(role, QStringLiteral("model"));
+    const QString stored = QSettings().value(key).toString().trimmed();
+    const QJsonArray models = presetRow(presetId).value(QStringLiteral("models")).toArray();
+    if (models.isEmpty()) {
+        auto *edit = new QPushButton(QStringLiteral("Model…"));
+        edit->setAccessibleName(name);
+        edit->setToolTip(QStringLiteral("%1 lists no models of its own, so type a model id; empty gives "
+                                        "its default model.").arg(providerName(presetId))
+                         + (stored.isEmpty() ? QString() : QStringLiteral("\nNow: ") + stored));
+        connect(edit, &QPushButton::clicked, this, [this, key, name, presetId] {
+            bool ok = false;
+            const QString value = QInputDialog::getText(this, name,
+                QStringLiteral("Model id on %1 (empty: that provider's default model)").arg(providerName(presetId)),
+                QLineEdit::Normal, QSettings().value(key).toString(), &ok).trimmed();
+            if (!ok) return;
+            if (value.isEmpty()) QSettings().remove(key);
+            else QSettings().setValue(key, value);
             if (onRolesChanged) onRolesChanged();
             rebuild();
         });
+        return edit;
     }
-    grid->addWidget(provider, line, 2);
-
-    // Reasoning effort. Providers whose OpenAI-compatible endpoint has no effort knob (Anthropic,
-    // MiniMax) report an empty list, and then there is nothing to offer. Main has no "Model default"
-    // entry: the pane always runs at some level, and that level is also `agent/effort`, the one
-    // Options › Default reasoning effort shows.
-    QComboBox *effort = nullptr;
-    if (isMain) {
-        effort = effortBox(m_provider,
-                           QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString(),
-                           QStringLiteral("Main effort"),
-                           QStringLiteral("Reasoning effort for this pane, and the default for new ones."),
-                           false, [this](const QString &level) {
-                               if (!level.isEmpty() && onMainEffortChosen) onMainEffortChosen(level);
-                           });
-    } else {
-        effort = effortBox(preset.isEmpty() ? m_provider : preset,
-                           settings.value(tierSetting(tier, QStringLiteral("effort"))).toString(),
-                           label + QStringLiteral(" effort"),
-                           QStringLiteral("Reasoning effort for the %1 tier.").arg(label),
-                           true, [this, tier](const QString &level) {
-                               if (level.isEmpty()) QSettings().remove(tierSetting(tier, QStringLiteral("effort")));
-                               else QSettings().setValue(tierSetting(tier, QStringLiteral("effort")), level);
-                               if (onRolesChanged) onRolesChanged();
-                           });
+    auto *box = new QComboBox;
+    box->setAccessibleName(name);
+    // The box stays a fixed, modest width so the row's text keeps its room — a catalog label can be
+    // forty characters and OpenRouter's list runs to hundreds — and the popup is as wide as it needs.
+    box->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    box->setMinimumContentsLength(21);
+    box->setMaxVisibleItems(18);
+    box->setToolTip(QStringLiteral("Which of %1's models runs this job.").arg(providerName(presetId)));
+    const QJsonObject standard = modelRow(presetId, QString());
+    const QString standardId = str(presetRow(presetId), "model");
+    const QString standardName = standard.isEmpty() || str(standard, "label").isEmpty() ? standardId
+                                                                                        : str(standard, "label");
+    box->addItem(standardName.isEmpty() ? QStringLiteral("provider default")
+                                        : QStringLiteral("provider default (%1)").arg(standardName),
+                 QString());
+    for (const auto &value : models) {
+        const QJsonObject row = value.toObject();
+        const QString id = str(row, "id");
+        if (id.isEmpty()) continue;
+        box->addItem(str(row, "label").isEmpty() ? id : str(row, "label"), id);
+        box->setItemData(box->count() - 1, id, Qt::ToolTipRole);
     }
-    if (effort) grid->addWidget(effort, line, 3);
-}
-
-QStringList RolesDialog::effortsFor(const QString &presetId) const {
-    for (const auto &value : std::as_const(m_presets)) {
-        const QJsonObject preset = value.toObject();
-        if (str(preset, "id") != presetId) continue;
-        // A provider Relay has never heard of carries no `efforts` at all, and then all four are
-        // offered — the same fallback the pane's own picker makes (Pane::effortsFor).
-        if (!preset.contains(QStringLiteral("efforts"))) return allEfforts();
-        QStringList levels;
-        for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) levels << level.toString();
-        return levels;
-    }
-    return {};
-}
-
-QString RolesDialog::effortNoteFor(const QString &presetId) const {
-    for (const auto &value : std::as_const(m_presets))
-        if (str(value.toObject(), "id") == presetId) return str(value.toObject(), "effort_note");
-    return {};
+    // An id typed before the catalog existed, or one the provider has since dropped, is still what
+    // the job runs on: it is shown as itself instead of the box pretending to be on the default.
+    if (!stored.isEmpty() && box->findData(stored) < 0) box->addItem(stored, stored);
+    box->setCurrentIndex(std::max(0, box->findData(stored)));
+    box->view()->setMinimumWidth(box->view()->sizeHintForColumn(0) + 32);
+    box->view()->setTextElideMode(Qt::ElideMiddle);
+    connect(box, QOverload<int>::of(&QComboBox::activated), this, [this, box, key](int i) {
+        const QString chosen = box->itemData(i).toString();
+        if (chosen.isEmpty()) QSettings().remove(key);
+        else QSettings().setValue(key, chosen);
+        if (onRolesChanged) onRolesChanged();
+        rebuild();
+    });
+    return box;
 }
 
 // Which provider will serve one job: the one it is pinned to, else the one the worker says it
-// resolved to, else the default. It decides the effort levels the row can offer, so it has to be
+// resolved to, else the pane's. It decides the effort levels the row can offer, so it has to be
 // the endpoint that will really take the call and not just the row's own setting.
 QString RolesDialog::rolePreset(const QString &role) const {
     const QString pinned = QSettings().value(roleSetting(role, QStringLiteral("preset"))).toString();
@@ -871,30 +756,30 @@ QString RolesDialog::rolePreset(const QString &role) const {
 
 void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject &action) {
     const QString role = str(action, "role");
+    const QString title = str(action, "label");
     const QString defaultTier = str(action, "tier");
     const QJsonObject resolved = m_resolvedRoles.value(role).toObject();
-    // Every advanced row shows what it actually resolves to, e.g. "Flash · glm-5.3-flash — condensing
-    // a long turn". Until the worker has resolved anything (no key yet) there is no model to name, and
-    // then the row is just what the job is for, said once.
+    // Every row shows what it actually resolves to, e.g. "flash · glm-5.3-flash — condensing a long
+    // turn". Until the worker has resolved anything (no key yet) there is no model to name, and then
+    // the row is just what the job is for, said once.
     const QString tier = str(resolved, "tier");
     const QString model = str(resolved, "model");
     QString effective = model;
-    if (!tier.isEmpty() && !model.isEmpty())
-        effective = QStringLiteral("%1 · %2").arg(tier.left(1).toUpper() + tier.mid(1), model);
+    if (!tier.isEmpty() && !model.isEmpty()) effective = QStringLiteral("%1 · %2").arg(tier, model);
     const QString what = effective.isEmpty() ? str(action, "hint")
                                              : effective + QStringLiteral(" — ") + str(action, "hint");
-    grid->addWidget(rowText(str(action, "label"), {what, str(resolved, "note")}, false), line, 0);
+    grid->addWidget(rowText(title, {what, str(resolved, "note")}, true), line, 0);
 
     if (role == QStringLiteral("route_assist")) {
         // Pinned on purpose: routing has a sub-second budget. Gemini 3.5 Flash-Lite measured a
         // 0.64 s median and 6/6 correct across the owner's examples, against 2.3-4.9 s for 3.8 Flash.
-        // It is its own override, so changing the Lite tier never moves it by accident.
+        // It is its own override, so changing the lite list never moves it by accident.
         auto *pinned = new QCheckBox(QStringLiteral("Pinned"));
         pinned->setChecked(QSettings().value(roleSetting(role, QStringLiteral("tier"))).toString().isEmpty());
         pinned->setToolTip(QStringLiteral(
             "Command routing stays on google/gemini-3.5-flash-lite: measured 0.64 s median and 6/6 correct, "
             "against 2.3-4.9 s for Gemini 3.8 Flash. The routing budget is under a second, so this is an "
-            "explicit override and the Lite tier does not change it."));
+            "explicit override and the lite tier does not change it."));
         connect(pinned, &QCheckBox::toggled, this, [this, role](bool on) {
             QSettings settings;
             if (on) settings.remove(roleSetting(role, QStringLiteral("tier")));
@@ -915,80 +800,76 @@ void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject 
     QSettings settings;
     const QString storedTier = settings.value(roleSetting(role, QStringLiteral("tier"))).toString();
     const QString storedPreset = settings.value(roleSetting(role, QStringLiteral("preset"))).toString();
+    const QString storedModel = settings.value(roleSetting(role, QStringLiteral("model"))).toString().trimmed();
     const bool pinned = !storedPreset.isEmpty();
 
-    // The tier choice. Owner, 2026-09-18: "i might want to pick kimi k3 for main agents and glm 5.3
-    // flash for subagents" — so a provider of this job's own is a choice beside the tiers, not a
-    // wizard behind them. The two are exclusive (protocol 13.7 rejects the pair), which is why
-    // picking either clears the other; "Own provider" is what this box shows while the other one is
-    // in charge, and picking it changes nothing.
+    // What the job follows. Owner, 2026-09-18: "i might want to pick kimi k3 for main agents and glm
+    // 5.3 flash for subagents" — so a provider of this job's own is a choice beside the tiers, in the
+    // same box. The two are exclusive (protocol 13.7 rejects the pair), which is why picking either
+    // clears the other. The tier names are the lower-case ones Options › Models heads its lists with.
     auto *choice = new QComboBox;
-    choice->setAccessibleName(str(action, "label"));
-    choice->setMinimumWidth(150);
-    choice->setToolTip(QStringLiteral("Which tier this job follows. Changing that tier then moves it, "
-                                      "along with every other job that follows the same one."));
-    const QString followLabel = defaultTier.isEmpty()
-        ? QStringLiteral("Default")
-        : QStringLiteral("Same as tier (%1)").arg(defaultTier.left(1).toUpper() + defaultTier.mid(1));
-    choice->addItem(followLabel, QString());
-    for (const QString &id : tierIds())
-        choice->addItem(id.left(1).toUpper() + id.mid(1), id);
-    if (pinned) choice->addItem(QStringLiteral("Own provider"), QStringLiteral("custom"));
+    choice->setAccessibleName(title);
+    choice->setMinimumWidth(165);
+    choice->setToolTip(QStringLiteral("Which tier this job follows. Changing that tier's list on Options › "
+                                      "Models then moves it, along with every other job that follows it."));
+    choice->addItem(defaultTier.isEmpty() ? QStringLiteral("default")
+                                          : QStringLiteral("default (%1)").arg(defaultTier),
+                    QString());
+    QHash<QString, QString> tierHints;
+    for (const auto &value : m_catalog.value(QStringLiteral("tiers")).toArray())
+        tierHints.insert(str(value.toObject(), "id"), str(value.toObject(), "hint"));
+    for (const QString &id : tierIds()) {
+        choice->addItem(id, id);
+        if (!tierHints.value(id).isEmpty())
+            choice->setItemData(choice->count() - 1, tierHints.value(id), Qt::ToolTipRole);
+    }
+    choice->addItem(QStringLiteral("its own provider…"), QStringLiteral("custom"));
     const int index = choice->findData(pinned ? QStringLiteral("custom") : storedTier);
     choice->setCurrentIndex(index >= 0 ? index : 0);
-    connect(choice, QOverload<int>::of(&QComboBox::activated), this, [this, choice, role](int i) {
+    connect(choice, QOverload<int>::of(&QComboBox::activated), this, [this, choice, role, pinned](int i) {
         const QString chosen = choice->itemData(i).toString();
-        if (chosen == QStringLiteral("custom")) return;   // the provider box is in charge; nothing to do
-        writeRoleTier(role, chosen);
+        if (chosen == QStringLiteral("custom")) {
+            if (pinned) return;   // already on a provider of its own; the boxes beside it are in charge
+            const QString target = ownProviderFor(role);
+            if (target.isEmpty()) {   // no provider is known at all: put the box back where it was
+                rebuild();
+                return;
+            }
+            writeRolePreset(role, target);
+        } else {
+            writeRoleTier(role, chosen);
+        }
         if (onRolesChanged) onRolesChanged();
         rebuild();
     });
     grid->addWidget(choice, line, 1);
 
-    // Model…: only once the job has a provider of its own. A model id without one would have to be
-    // read against whichever endpoint the tier lands on today, which is exactly the confusion the
-    // tier/endpoint split exists to avoid.
-    auto *edit = new QPushButton(QStringLiteral("Model…"));
-    edit->setAccessibleName(str(action, "label") + QStringLiteral(" model"));
-    edit->setEnabled(pinned);
-    edit->setToolTip(pinned
-        ? QStringLiteral("Model id on %1; empty gives that provider's default model.").arg(providerName(storedPreset))
-        : QStringLiteral("Give this job a provider of its own first; until then it uses the tier's model."));
-    connect(edit, &QPushButton::clicked, this, [this, role, action, storedPreset] {
-        bool ok = false;
-        const QString value = QInputDialog::getText(this, str(action, "label") + QStringLiteral(" model"),
-            QStringLiteral("Model id on %1 (empty: that provider's default model)").arg(providerName(storedPreset)),
-            QLineEdit::Normal, QSettings().value(roleSetting(role, QStringLiteral("model"))).toString(),
-            &ok).trimmed();
-        if (!ok) return;
-        QSettings settings;
-        if (value.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("model")));
-        else settings.setValue(roleSetting(role, QStringLiteral("model")), value);
-        if (onRolesChanged) onRolesChanged();
-        rebuild();
-    });
-    grid->addWidget(edit, line, 2);
-
-    auto *provider = new QComboBox;
-    provider->setAccessibleName(str(action, "label") + QStringLiteral(" provider"));
-    provider->setToolTip(QStringLiteral("A provider for this job alone. Choosing one alone gives that "
-                                        "provider's default model; it stops following any tier."));
-    fillProviders(provider, QStringLiteral("Same as tier"), storedPreset);
-    connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider, role](int i) {
-        writeRolePreset(role, provider->itemData(i).toString());
-        if (onRolesChanged) onRolesChanged();
-        rebuild();
-    });
-    grid->addWidget(provider, line, 3);
+    // The provider and the model appear only once the job has a provider of its own. A model id
+    // without one would have to be read against whichever endpoint the tier lands on today, which is
+    // exactly the confusion the tier/endpoint split exists to avoid.
+    if (pinned) {
+        auto *provider = new QComboBox;
+        provider->setAccessibleName(title + QStringLiteral(" provider"));
+        provider->setToolTip(QStringLiteral("The provider for this job alone. Changing it gives that "
+                                            "provider's default model; pick a tier on the left to go back."));
+        fillProviders(provider, QString(), storedPreset);
+        connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider, role](int i) {
+            writeRolePreset(role, provider->itemData(i).toString());
+            if (onRolesChanged) onRolesChanged();
+            rebuild();
+        });
+        grid->addWidget(provider, line, 2);
+        grid->addWidget(modelCell(role, title, storedPreset), line, 3);
+    }
 
     // A job that follows its built-in default has no entry in the `roles` object at all, so an effort
     // stored for it would never be sent (Pane::rolesObject). Rather than accept a setting that does
     // nothing, the box waits until the row names a tier or a provider of its own.
     const bool hasOwnTarget = pinned || tierIds().contains(storedTier);
-    if (QComboBox *effort = effortBox(rolePreset(role),
+    if (QComboBox *effort = effortBox(rolePreset(role), pinned ? storedModel : model,
                                       settings.value(roleSetting(role, QStringLiteral("effort"))).toString(),
-                                      str(action, "label") + QStringLiteral(" effort"),
-                                      QStringLiteral("Reasoning effort for this job."), true,
+                                      title + QStringLiteral(" effort"),
+                                      QStringLiteral("Reasoning effort for this job."),
                                       [this, role](const QString &level) {
                                           if (level.isEmpty()) QSettings().remove(roleSetting(role, QStringLiteral("effort")));
                                           else QSettings().setValue(roleSetting(role, QStringLiteral("effort")), level);
@@ -996,7 +877,7 @@ void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject 
                                       })) {
         if (!hasOwnTarget) {
             effort->setEnabled(false);
-            effort->setToolTip(QStringLiteral("This job follows its tier's reasoning effort. Name a tier "
+            effort->setToolTip(QStringLiteral("This job follows its tier's reasoning level. Name a tier "
                                               "or a provider of its own to set one here."));
         }
         grid->addWidget(effort, line, 4);
@@ -1005,10 +886,10 @@ void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject 
 
 // Image context (issue EM1E): the vision model, chosen separately from the pane's own model.
 //
-// It sits with the three tiers rather than in Advanced, because it is a model the user picks, not a
-// tier a job follows: a turn carrying an image goes here whenever the pane's model cannot read one.
-// Left at "Automatic" it is the provider's own image model (GLM-5.3 → GLM-5.3-Flash); with nothing
-// to fall back to, an image turn is refused with a message instead of failing at the provider.
+// It is not a job that follows a tier: a turn carrying an image goes here whenever the pane's model
+// cannot read one. Left at "Automatic" it is the provider's own image model (GLM-5.3 →
+// GLM-5.3-Flash); with nothing to fall back to, an image turn is refused with a message instead of
+// failing at the provider. So its first box is a provider, where a job's is a tier.
 void RolesDialog::buildVisionRow(QGridLayout *grid, int line) {
     const QString role = QStringLiteral("vision");
     const QJsonObject resolved = m_resolvedRoles.value(role).toObject();
@@ -1025,28 +906,6 @@ void RolesDialog::buildVisionRow(QGridLayout *grid, int line) {
     grid->addWidget(text, line, 0);
 
     const QString storedPreset = QSettings().value(roleSetting(role, QStringLiteral("preset"))).toString();
-    const bool pinned = !storedPreset.isEmpty();
-
-    auto *edit = new QPushButton(QStringLiteral("Model…"));
-    edit->setAccessibleName(QStringLiteral("Vision model"));
-    edit->setEnabled(pinned);
-    edit->setToolTip(pinned
-        ? QStringLiteral("Model id on %1; empty gives that provider's default model.").arg(providerName(storedPreset))
-        : QStringLiteral("Pick a provider for images first; Automatic uses your own provider's image model."));
-    connect(edit, &QPushButton::clicked, this, [this, role, storedPreset] {
-        bool ok = false;
-        const QString value = QInputDialog::getText(this, QStringLiteral("Vision model"),
-            QStringLiteral("Model id on %1 (empty: that provider's default model)").arg(providerName(storedPreset)),
-            QLineEdit::Normal, QSettings().value(roleSetting(role, QStringLiteral("model"))).toString(),
-            &ok).trimmed();
-        if (!ok) return;
-        QSettings settings;
-        if (value.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("model")));
-        else settings.setValue(roleSetting(role, QStringLiteral("model")), value);
-        if (onRolesChanged) onRolesChanged();
-        rebuild();
-    });
-    grid->addWidget(edit, line, 1);
 
     auto *choice = new QComboBox;
     choice->setAccessibleName(QStringLiteral("Vision provider"));
@@ -1063,82 +922,43 @@ void RolesDialog::buildVisionRow(QGridLayout *grid, int line) {
         if (onRolesChanged) onRolesChanged();
         rebuild();
     });
-    grid->addWidget(choice, line, 2);
+    grid->addWidget(choice, line, 1);
+    // The model is read against a provider, so it waits for one — the same rule as a job's.
+    if (!storedPreset.isEmpty()) grid->addWidget(modelCell(role, QStringLiteral("Vision"), storedPreset), line, 3);
 }
 
 void RolesDialog::rebuild() {
     if (m_filling) return;
     m_filling = true;
-
-    m_providerBox->clear();
-    fillDefaultProviders(m_providerBox);
-
-    // The recommendation names a plan to go and buy, so here — unlike the pick lists — the plan is
-    // always spelled out, whether or not you happen to hold the other key from the same company.
-    auto recommend = [this](const QString &id) {
-        for (const auto &value : std::as_const(m_presets)) {
-            const QJsonObject preset = value.toObject();
-            if (str(preset, "id") != id || str(preset, "plan").isEmpty()) continue;
-            return providerName(id) + QStringLiteral(" · ") + str(preset, "plan");
+    auto *layout = qobject_cast<QVBoxLayout *>(m_rows->layout());
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (item->widget()) {
+            // Hidden as well as retired: deleteLater waits for the event loop, and until then the old
+            // rows would still paint underneath the new ones.
+            item->widget()->hide();
+            item->widget()->deleteLater();
         }
-        return providerName(id);
-    };
-    QStringList pairs;
-    for (const auto &value : m_catalog.value(QStringLiteral("recommended")).toArray()) {
-        const QJsonArray pair = value.toArray();
-        if (pair.size() == 2)
-            pairs << QStringLiteral("%1 + %2").arg(recommend(pair.at(0).toString()),
-                                                   recommend(pair.at(1).toString()));
+        delete item;
     }
-    m_recommended->setText(pairs.isEmpty()
-        ? QString()
-        : QStringLiteral("Recommended: %1. The second key covers the Lite tier and command routing; "
-                         "without it those fall back to your own provider.").arg(pairs.join(QStringLiteral(", "))));
-
-    auto clear = [](QWidget *host) {
-        auto *layout = qobject_cast<QVBoxLayout *>(host->layout());
-        while (QLayoutItem *item = layout->takeAt(0)) {
-            if (item->widget()) item->widget()->deleteLater();
-            delete item;
-        }
-        return layout;
-    };
-    // One grid per section, thrown away and rebuilt each time: the rows' cells are its children, so
-    // deleting the panel takes every widget in it and the columns line up again from scratch.
+    // One grid, thrown away and rebuilt each time: the rows' cells are its children, so deleting the
+    // panel takes every widget in it and the columns line up again from scratch.
     auto *panel = new QWidget;
     auto *grid = new QGridLayout(panel);
     grid->setContentsMargins(0, 0, 0, 0);
     grid->setHorizontalSpacing(8);
     grid->setColumnStretch(0, 1);
+    grid->setColumnMinimumWidth(0, 300);   // the job's name and its hint, which wraps
     int line = 0;
-    for (const auto &value : m_catalog.value(QStringLiteral("tiers")).toArray())
-        buildTierRow(grid, line++, str(value.toObject(), "id"), value.toObject());
-    buildVisionRow(grid, line);   // image context (issue EM1E): a model for pictures, beside the tiers
-    clear(m_tiers)->addWidget(panel);
-
-    m_disclosure->setText(m_showAdvanced ? QStringLiteral("▾ Advanced options")
-                                         : QStringLiteral("▸ Advanced options"));
-    QVBoxLayout *advanced = clear(m_advanced);
-    m_advanced->setVisible(m_showAdvanced);
-    if (m_showAdvanced) {
-        advanced->addWidget(hint(QStringLiteral(
-            "Each job follows one of the tiers above until you give it a provider of its own. Changing a "
-            "tier moves every job still following it; a provider here moves only this one.")));
-        auto *jobs = new QWidget;
-        auto *rows = new QGridLayout(jobs);
-        rows->setContentsMargins(0, 0, 0, 0);
-        rows->setHorizontalSpacing(8);
-        rows->setColumnStretch(0, 1);
-        int job = 0;
-        // "vision" has its own row beside the tiers (image context), so it is not repeated here.
-        for (const auto &value : std::as_const(m_actions)) {
-            const QJsonObject action = value.toObject();
-            if (str(action, "role") == QStringLiteral("vision")) continue;
-            buildActionRow(rows, job++, action);
-        }
-        advanced->addWidget(jobs);
-        advanced->addStretch(1);
+    // "vision" is in the worker's job list too, but it follows no tier, so it gets its own kind of
+    // row at the end instead of a job row.
+    for (const auto &value : std::as_const(m_actions)) {
+        const QJsonObject action = value.toObject();
+        if (str(action, "role") == QStringLiteral("vision")) continue;
+        buildActionRow(grid, line++, action);
     }
+    buildVisionRow(grid, line);
+    layout->addWidget(panel);
+    layout->addStretch(1);
     m_filling = false;
 }
 

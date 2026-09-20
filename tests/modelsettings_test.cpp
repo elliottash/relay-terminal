@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The roles modal picks a *provider*, so its lists name companies ("Kimi", "Z.AI (GLM)") and offer
-// only providers whose key is actually stored. Owner, 2026-09-18: "in model roles, it shouldn't show
-// options where you don't have a key assigned … it should not say the model name".
+// The two model modals. The keys modal lists a row per plan. The per-job models modal (RolesDialog)
+// is one row per job plus the vision row: a job follows a tier or has a provider of its own, and the
+// provider lists name companies ("Kimi", "Z.AI (GLM)") and offer only providers whose key is
+// actually stored. Owner, 2026-09-18: "in model roles, it shouldn't show options where you don't
+// have a key assigned … it should not say the model name". The tiers themselves — main, high,
+// flash, lite, local — are the five lists on Options › Models (owner, 2026-09-20), so nothing here
+// covers a default-provider box or a tier row any more: the first test below says they are gone.
 #include "ModelSettings.h"
 
 #include <QApplication>
@@ -10,6 +14,7 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QLabel>
 #include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
@@ -129,11 +134,14 @@ QPushButton *buttonNamed(const QDialog &dialog, const QString &text) {
 
 QJsonObject tierSpec(const QString &id, const QString &label) {
     return {{QStringLiteral("id"), id}, {QStringLiteral("label"), label},
-            {QStringLiteral("hint"), QStringLiteral("what it is for")}};
+            {QStringLiteral("hint"), QStringLiteral("what ") + id + QStringLiteral(" is for")}};
 }
 
+// The worker's tier catalog. The dialog takes only the tiers' hints from it now; `recommended` is
+// still sent, and is what the removed "Recommended: …" line used to print.
 QJsonObject catalog() {
-    return {{QStringLiteral("tiers"), QJsonArray{tierSpec(QStringLiteral("main"), QStringLiteral("Main")),
+    return {{QStringLiteral("tiers"), QJsonArray{tierSpec(QStringLiteral("high"), QStringLiteral("High")),
+                                                 tierSpec(QStringLiteral("main"), QStringLiteral("Main")),
                                                  tierSpec(QStringLiteral("flash"), QStringLiteral("Flash")),
                                                  tierSpec(QStringLiteral("lite"), QStringLiteral("Lite")),
                                                  tierSpec(QStringLiteral("local"), QStringLiteral("Local"))}},
@@ -147,26 +155,30 @@ QStringList itemsOf(const QComboBox *box) {
     return out;
 }
 
-// The tier rows' provider combos, in row order; the default-provider box is told apart by its name.
-// A rebuild retires the old rows with deleteLater, so those have to be collected first or they are
-// still children of the dialog and answer findChildren.
-QList<QComboBox *> tierProviderBoxes(const RolesDialog &dialog) {
-    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    QList<QComboBox *> out;
-    for (QComboBox *box : dialog.findChildren<QComboBox *>()) {
-        if (box->accessibleName() == QLatin1String("Default provider")) continue;
-        if (box->count() > 0 && box->itemText(0) == QLatin1String("Default provider")) out << box;
-    }
-    return out;
+// One row of a provider's per-model catalog, as presets.py catalog_rows() sends it.
+QJsonObject modelRow(const QString &id, const QString &label, const QJsonArray &efforts,
+                     const QJsonObject &labels = {}) {
+    return {{QStringLiteral("id"), id}, {QStringLiteral("label"), label},
+            {QStringLiteral("tier"), QJsonValue::Null}, {QStringLiteral("efforts"), efforts},
+            {QStringLiteral("effort_labels"), labels}};
 }
 
-// The Local tier's own combo (card #JH22): it lists saved local endpoints, not providers, so it
-// carries its own accessible name and never appears among the provider boxes above.
-QComboBox *localTierBox(const RolesDialog &dialog) {
-    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    for (QComboBox *box : dialog.findChildren<QComboBox *>())
-        if (box->accessibleName() == QLatin1String("Local model")) return box;
-    return nullptr;
+// A copy of `rows` with one preset's fields replaced.
+QJsonArray with(QJsonArray rows, const QString &id, const QJsonObject &fields) {
+    for (int i = 0; i < rows.size(); ++i) {
+        QJsonObject row = rows.at(i).toObject();
+        if (row.value(QStringLiteral("id")).toString() != id) continue;
+        for (auto it = fields.begin(); it != fields.end(); ++it) row.insert(it.key(), it.value());
+        rows.replace(i, row);
+    }
+    return rows;
+}
+
+// GLM's catalog: the default model (the preset's `model`) and its Flash sibling.
+QJsonArray glmModels() {
+    const QJsonArray levels{QStringLiteral("low"), QStringLiteral("high")};
+    return {modelRow(QStringLiteral("model-of-glm-coding"), QStringLiteral("GLM 5.3"), levels),
+            modelRow(QStringLiteral("glm-5.3-flash"), QStringLiteral("GLM 5.3 Flash"), levels)};
 }
 
 // A copy of `rows` with one preset's effort list and note replaced: what that provider's endpoint can
@@ -183,7 +195,7 @@ QJsonArray withEfforts(QJsonArray rows, const QString &id, const QJsonArray &lev
     return rows;
 }
 
-// One job for the Advanced list, as roles.py action_catalog() sends it.
+// One job, as roles.py action_catalog() sends it.
 QJsonArray actions(const QString &tier = QStringLiteral("flash")) {
     return {QJsonObject{{QStringLiteral("role"), QStringLiteral("summaries")},
                         {QStringLiteral("label"), QStringLiteral("Summaries")},
@@ -193,7 +205,7 @@ QJsonArray actions(const QString &tier = QStringLiteral("flash")) {
 }
 
 // The rows are rebuilt on every change, and the retired widgets only go away when the deferred
-// deletes run — so every lookup flushes them first, exactly as tierProviderBoxes() does.
+// deletes run — so every lookup flushes them first, or the old rows still answer findChildren.
 QComboBox *comboNamed(const QDialog &dialog, const QString &name) {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     for (QComboBox *box : dialog.findChildren<QComboBox *>())
@@ -242,6 +254,22 @@ void answerModelPrompt(const QString &text, bool accept = true) {
 class ModelSettingsTests : public QObject {
     Q_OBJECT
 
+    // The dialog as the pane opens it: presets, the tier catalog, one job, the pane's provider.
+    static void open(RolesDialog &dialog, const QJsonArray &rows, const QString &provider = QStringLiteral("kimi")) {
+        dialog.setPresets(rows, catalog(), actions());
+        dialog.setProvider(provider);
+    }
+
+    // Moves the Summaries job onto a provider of its own, the way a user does: through its tier box.
+    static void pin(RolesDialog &dialog) { pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("custom")); }
+
+    static QString stored(const QString &role, const QString &field) {
+        return QSettings().value(RolesDialog::roleSetting(role, field)).toString();
+    }
+    static bool has(const QString &role, const QString &field) {
+        return QSettings().contains(RolesDialog::roleSetting(role, field));
+    }
+
 private Q_SLOTS:
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
@@ -251,179 +279,200 @@ private Q_SLOTS:
 
     void init() { QSettings().clear(); }
 
-    void defaultProviderOffersOnlyProvidersWithAKeyAndNamesTheCompany() {
+    // ----- what the dialog is (owner, 2026-09-20) ------------------------------------------------
+
+    // The default-provider box, the recommended line and the Main / Flash / Lite / Local rows went to
+    // Options › Models, where the tiers are five ordered lists. What was behind "Advanced options"
+    // is the dialog: the job rows are there without opening anything.
+    void theDialogIsThePerJobRowsAndTheTierRowsAreGone() {
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        auto *box = dialog.findChild<QComboBox *>();
-        QVERIFY(box);
-        QCOMPARE(box->accessibleName(), QStringLiteral("Default provider"));
-        QCOMPARE(itemsOf(box), QStringList({QStringLiteral("Kimi"), QStringLiteral("Z.AI (GLM)")}));
-        QCOMPARE(box->currentText(), QStringLiteral("Kimi"));
-        // No model ids, and no rows for providers with no key.
-        for (const QString &item : itemsOf(box)) {
-            QVERIFY(!item.contains(QStringLiteral("K3")));
-            QVERIFY(!item.contains(QStringLiteral("GPT")));
-            QVERIFY(!item.contains(QStringLiteral("no key")));
+        open(dialog, presetsWithLocal({QStringLiteral("kimi"), QStringLiteral("glm-coding")}));
+        QVERIFY(dialog.windowTitle().contains(QStringLiteral("per-job models")));
+        for (const char *gone : {"Default provider", "Main provider", "Main effort", "Flash effort",
+                                 "Lite effort", "Local model"})
+            QVERIFY2(!comboNamed(dialog, QLatin1String(gone)), gone);
+        for (const char *gone : {"Main model", "Flash model", "Lite model"})
+            QVERIFY2(!modelButton(dialog, QLatin1String(gone)), gone);
+        for (QPushButton *button : dialog.findChildren<QPushButton *>())
+            QVERIFY2(!button->text().contains(QStringLiteral("Advanced options")), qPrintable(button->text()));
+        for (QLabel *label : dialog.findChildren<QLabel *>())
+            QVERIFY2(!label->text().startsWith(QStringLiteral("Recommended:")), qPrintable(label->text()));
+        // No disclosure to open first: roles/advanced_open is not set, and the job row is there.
+        QVERIFY(!QSettings().contains(QStringLiteral("roles/advanced_open")));
+        QVERIFY(comboNamed(dialog, QStringLiteral("Summaries")));
+        QVERIFY(comboNamed(dialog, QStringLiteral("Vision provider")));
+        QVERIFY(buttonNamed(dialog, QStringLiteral("API keys…")));
+    }
+
+    // A job follows one of the five tiers, named as Options › Models names its lists — lower-case —
+    // or has a provider of its own. The first entry is the job's built-in tier, which stores nothing.
+    void aJobsTierBoxListsTheFiveTiersInLowerCaseThenItsOwnProvider() {
+        RolesDialog dialog;
+        open(dialog, presets({QStringLiteral("kimi")}));
+        QComboBox *choice = comboNamed(dialog, QStringLiteral("Summaries"));
+        QVERIFY(choice);
+        QCOMPARE(itemsOf(choice), QStringList({QStringLiteral("default (flash)"), QStringLiteral("high"),
+                                               QStringLiteral("main"), QStringLiteral("flash"),
+                                               QStringLiteral("lite"), QStringLiteral("local"),
+                                               QStringLiteral("its own provider…")}));
+        QCOMPARE(choice->currentIndex(), 0);
+        // The same ids the pane and the Switchboard build the protocol objects from.
+        for (const QString &tier : RolesDialog::tierIds()) QVERIFY(choice->findData(tier) > 0);
+        // Each tier says what it is for, from the worker's catalog.
+        QCOMPARE(choice->itemData(choice->findData(QStringLiteral("high")), Qt::ToolTipRole).toString(),
+                 QStringLiteral("what high is for"));
+        pick(choice, QStringLiteral("high"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("high"));
+        pick(comboNamed(dialog, QStringLiteral("Summaries")), QString());
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("tier")));
+    }
+
+    // Every job can follow the Local tier too, by the same list.
+    void aJobRowOffersTheLocalTier() {
+        RolesDialog dialog;
+        open(dialog, presetsWithLocal({QStringLiteral("kimi")}));
+        pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("local"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("local"));
+    }
+
+    // Pane::openRolesDialog still assigns the three callbacks of the removed rows (src/Pane.h was
+    // another session's file when the rows went), so they still exist — and nothing calls them, and
+    // nothing in this dialog writes a `tiers/…` key or the pane's own model any more.
+    void theRemovedRowsCallbacksAreNeverCalledAndNoTierSettingIsWritten() {
+        RolesDialog dialog;
+        int calls = 0, changed = 0;
+        dialog.onProviderChosen = [&calls](const QString &) { ++calls; };
+        dialog.onMainModelChosen = [&calls](const QString &) { ++calls; };
+        dialog.onMainEffortChosen = [&calls](const QString &) { ++calls; };
+        dialog.onRolesChanged = [&changed] { ++changed; };
+        open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
+                          QStringLiteral("glm-coding"), {{QStringLiteral("models"), glmModels()}}));
+        pin(dialog);
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("glm-coding"));
+        pick(comboNamed(dialog, QStringLiteral("Summaries model")), QStringLiteral("glm-5.3-flash"));
+        pick(comboNamed(dialog, QStringLiteral("Summaries effort")), QStringLiteral("low"));
+        pick(comboNamed(dialog, QStringLiteral("Vision provider")), QStringLiteral("glm-coding"));
+        pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("main"));
+        QCOMPARE(calls, 0);
+        QCOMPARE(changed, 6);
+        QSettings settings;
+        for (const QString &key : settings.allKeys())
+            QVERIFY2(key.startsWith(QStringLiteral("roles/")), qPrintable(key));
+    }
+
+    // ----- a provider of the job's own -------------------------------------------------------------
+
+    // Owner, 2026-09-18: "i might want to pick kimi k3 for main agents and glm 5.3 flash for
+    // subagents". So a provider of the job's own is a choice in the same box as the tiers, and the
+    // two are exclusive. Until it is picked the row has no provider box and no model box at all.
+    void itsOwnProviderPinsTheJobWhereItAlreadyRunsAndDropsTheTier() {
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("tier")),
+                             QStringLiteral("flash"));
+        RolesDialog dialog;
+        int changed = 0;
+        dialog.onRolesChanged = [&changed] { ++changed; };
+        open(dialog, presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}));
+        // The worker says the job's tier landed on Z.AI, so that is where "its own provider…" starts:
+        // the pick changes nothing until the boxes it reveals are used.
+        dialog.setResolved({}, {{QStringLiteral("summaries"),
+                                 QJsonObject{{QStringLiteral("tier"), QStringLiteral("flash")},
+                                             {QStringLiteral("preset"), QStringLiteral("glm-coding")},
+                                             {QStringLiteral("model"), QStringLiteral("glm-5.3-flash")}}}});
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries provider")));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries model")));
+        QVERIFY(!modelButton(dialog, QStringLiteral("Summaries model")));
+        pin(dialog);
+        QVERIFY(changed > 0);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("glm-coding"));
+        // Protocol 13.7 takes a tier or an endpoint, never both.
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("tier")));
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries"))->currentText(), QStringLiteral("its own provider…"));
+        QComboBox *provider = comboNamed(dialog, QStringLiteral("Summaries provider"));
+        QVERIFY(provider);
+        // Companies, not model names, and no neutral entry: the way back is the tier box.
+        QCOMPARE(itemsOf(provider), QStringList({QStringLiteral("Kimi"), QStringLiteral("Z.AI (GLM)")}));
+        QCOMPARE(provider->currentText(), QStringLiteral("Z.AI (GLM)"));
+        pick(provider, QStringLiteral("kimi"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        // Picking the entry again while pinned changes nothing.
+        pin(dialog);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        // And back: naming a tier drops the job's own endpoint, and its boxes with it.
+        pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("lite"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("lite"));
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("preset")));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries provider")));
+    }
+
+    // With nothing resolved yet the job is pinned to the pane's provider; when that one has no key,
+    // to the first provider that has.
+    void itsOwnProviderStartsOnAProviderThatCanBeReached() {
+        RolesDialog dialog;
+        open(dialog, presets({QStringLiteral("glm-coding")}), QStringLiteral("kimi"));
+        pin(dialog);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("glm-coding"));
+    }
+
+    void aProviderBoxOffersOnlyProvidersWithAKeyAndNamesTheCompany() {
+        RolesDialog dialog;
+        open(dialog, presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}));
+        pin(dialog);
+        for (const char *name : {"Summaries provider", "Vision provider"}) {
+            QComboBox *box = comboNamed(dialog, QLatin1String(name));
+            QVERIFY(box);
+            QVERIFY(itemsOf(box).contains(QStringLiteral("Kimi")));
+            QVERIFY(itemsOf(box).contains(QStringLiteral("Z.AI (GLM)")));
+            // No model ids, and no rows for providers with no key.
+            for (const QString &item : itemsOf(box)) {
+                QVERIFY(!item.contains(QStringLiteral("K3")));
+                QVERIFY(!item.contains(QStringLiteral("GPT")));
+                QVERIFY(!item.contains(QStringLiteral("no key")));
+            }
         }
     }
 
     void twoPlansFromOneCompanyAreToldApartByThePlan() {
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("kimi-code")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        auto *box = dialog.findChild<QComboBox *>();
-        QCOMPARE(itemsOf(box), QStringList({QStringLiteral("Kimi · Pay-as-you-go"),
-                                            QStringLiteral("Kimi · Coding Plan")}));
+        open(dialog, presets({QStringLiteral("kimi"), QStringLiteral("kimi-code")}));
+        pin(dialog);
+        QCOMPARE(itemsOf(comboNamed(dialog, QStringLiteral("Summaries provider"))),
+                 QStringList({QStringLiteral("Kimi · Pay-as-you-go"), QStringLiteral("Kimi · Coding Plan")}));
     }
 
-    void withNoKeysAtAllEveryProviderIsStillOfferedSoTheDialogIsNotEmpty() {
+    void withNoKeysAtAllEveryProviderIsStillOfferedSoTheRowIsNotEmpty() {
         RolesDialog dialog;
-        dialog.setPresets(presets({}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        auto *box = dialog.findChild<QComboBox *>();
+        open(dialog, presets({}));
+        pin(dialog);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        QComboBox *box = comboNamed(dialog, QStringLiteral("Summaries provider"));
         QCOMPARE(box->count(), 4);
         QVERIFY(box->itemText(0).startsWith(QStringLiteral("Kimi")));
         QVERIFY(box->itemText(0).endsWith(QStringLiteral("(no key)")));
     }
 
-    void aTierOffersTheKeyedProvidersAndStoresTheOneChosen() {
-        RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        const QList<QComboBox *> rows = tierProviderBoxes(dialog);
-        QCOMPARE(rows.size(), 2);          // Flash and Lite; Main is the pane's own model
-        QComboBox *flash = rows.first();
-        QCOMPARE(itemsOf(flash), QStringList({QStringLiteral("Default provider"), QStringLiteral("Kimi"),
-                                              QStringLiteral("Z.AI (GLM)")}));
-        const int zai = flash->findData(QStringLiteral("glm-coding"));
-        QVERIFY(zai > 0);
-        flash->setCurrentIndex(zai);
-        Q_EMIT flash->activated(zai);
-        // A provider and no model: the worker turns that into that provider's Flash model
-        // (presets.provider_tier_model), which is the whole point of picking a provider here.
-        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
-                                                           QStringLiteral("preset"))).toString(),
-                 QStringLiteral("glm-coding"));
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("flash"),
-                                                              QStringLiteral("model"))));
-    }
-
-    void changingTheDefaultProviderKeepsATierPinnedToADifferentProvider() {
-        QSettings().setValue(RolesDialog::tierSetting(QStringLiteral("flash"), QStringLiteral("preset")),
-                             QStringLiteral("glm-coding"));
-        QSettings().setValue(RolesDialog::tierSetting(QStringLiteral("lite"), QStringLiteral("preset")),
-                             QStringLiteral("openai"));
-        RolesDialog dialog;
-        QString chosen;
-        dialog.onProviderChosen = [&chosen](const QString &id) { chosen = id; };
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding"),
-                                   QStringLiteral("openai")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("openai"));
-        auto *box = dialog.findChild<QComboBox *>();
-        const int kimi = box->findData(QStringLiteral("kimi"));
-        QVERIFY(kimi >= 0);
-        box->setCurrentIndex(kimi);
-        Q_EMIT box->activated(kimi);
-        QCOMPARE(chosen, QStringLiteral("kimi"));
-        // Main moves to Kimi; Flash stays on Z.AI — that pairing is the reason the row exists.
-        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
-                                                           QStringLiteral("preset"))).toString(),
-                 QStringLiteral("glm-coding"));
-        // Lite followed the provider being left behind, so it goes back to following the default.
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("lite"),
-                                                              QStringLiteral("preset"))));
-    }
-
-    void aTierKeepsShowingAProviderWhoseKeyWentAway() {
-        QSettings().setValue(RolesDialog::tierSetting(QStringLiteral("flash"), QStringLiteral("preset")),
+    void aJobKeepsShowingAProviderWhoseKeyWentAway() {
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("preset")),
                              QStringLiteral("glm-coding"));
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QComboBox *flash = tierProviderBoxes(dialog).first();
-        QCOMPARE(flash->currentText(), QStringLiteral("Z.AI (GLM)  (no key)"));
+        open(dialog, presets({QStringLiteral("kimi")}));
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries provider"))->currentText(),
+                 QStringLiteral("Z.AI (GLM)  (no key)"));
     }
 
-    // A model server on this machine has no key and needs none, so the roles modal offers it like
-    // any reachable provider — and never as "(no key)", which would read as something to fix.
+    // A model server on this machine has no key and needs none, so the dialog offers it like any
+    // reachable provider — and never as "(no key)", which would read as something to fix.
     void aLocalEndpointIsChoosableWithoutAStoredKey() {
         RolesDialog dialog;
-        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        auto *box = dialog.findChild<QComboBox *>();
-        QVERIFY(box->findData(QStringLiteral("local:bonsai")) >= 0);
+        open(dialog, presetsWithLocal({QStringLiteral("kimi")}));
+        pin(dialog);
+        QComboBox *box = comboNamed(dialog, QStringLiteral("Summaries provider"));
         QVERIFY(itemsOf(box).contains(QStringLiteral("Bonsai 2 27B")));
         for (const QString &item : itemsOf(box)) QVERIFY(!item.contains(QStringLiteral("no key")));
-        // And a tier can be pinned to it too.
-        QComboBox *flash = tierProviderBoxes(dialog).first();
-        const int local = flash->findData(QStringLiteral("local:bonsai"));
-        QVERIFY(local > 0);
-        flash->setCurrentIndex(local);
-        Q_EMIT flash->activated(local);
-        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
-                                                            QStringLiteral("preset"))).toString(),
-                 QStringLiteral("local:bonsai"));
-    }
-
-    // The fourth tier (card #JH22). It belongs to no provider, so its row offers the saved local
-    // endpoints and nothing else — no hosted provider, no model box, no effort box.
-    void theLocalTierRowListsOnlyLocalEndpointsAndStoresTheOneChosen() {
-        RolesDialog dialog;
-        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
-                          catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QComboBox *local = localTierBox(dialog);
-        QVERIFY(local);
-        QCOMPARE(itemsOf(local), QStringList({QStringLiteral("Bonsai 2 27B")}));
-        QVERIFY(local->isEnabled());
-        // The hosted providers the other rows offer are not choices here.
-        QCOMPARE(local->findData(QStringLiteral("kimi")), -1);
-        QCOMPARE(local->findData(QStringLiteral("glm-coding")), -1);
-        local->setCurrentIndex(0);
-        Q_EMIT local->activated(0);
-        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("local"),
-                                                            QStringLiteral("preset"))).toString(),
-                 QStringLiteral("local:bonsai"));
-        // And the Local row is not one of the provider rows: those are still Flash and Lite only.
-        QCOMPARE(tierProviderBoxes(dialog).size(), 2);
-    }
-
-    void theLocalTierRowIsDisabledWhenThisMachineServesNothing() {
-        RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QComboBox *local = localTierBox(dialog);
-        QVERIFY(local);
-        QCOMPARE(itemsOf(local), QStringList({QStringLiteral("No local model is set up.")}));
-        QVERIFY(!local->isEnabled());
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("local"),
-                                                               QStringLiteral("preset"))));
-    }
-
-    // Every job in Advanced can follow the Local tier too, by the same list the tier rows use.
-    void anAdvancedRowOffersTheLocalTier() {
-        const QJsonArray actions{QJsonObject{{QStringLiteral("role"), QStringLiteral("summaries")},
-                                             {QStringLiteral("label"), QStringLiteral("Summaries")},
-                                             {QStringLiteral("hint"), QStringLiteral("condensing")},
-                                             {QStringLiteral("tier"), QStringLiteral("flash")},
-                                             {QStringLiteral("settable"), true}}};
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
-        RolesDialog dialog;
-        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi")}), catalog(), actions);
-        dialog.setProvider(QStringLiteral("kimi"));
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QComboBox *choice = nullptr;
-        for (QComboBox *box : dialog.findChildren<QComboBox *>())
-            if (box->accessibleName() == QLatin1String("Summaries")) choice = box;
-        QVERIFY(choice);
-        const int local = choice->findData(QStringLiteral("local"));
-        QVERIFY(local > 0);
-        choice->setCurrentIndex(local);
-        Q_EMIT choice->activated(local);
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("tier"))).toString(),
-                 QStringLiteral("local"));
+        pick(box, QStringLiteral("local:bonsai"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("local:bonsai"));
+        // A local server sends no catalog and has no effort knob: a typed id, and no effort box.
+        QVERIFY(modelButton(dialog, QStringLiteral("Summaries model")));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries effort")));
     }
 
     // …but it is not an API key to hold, so it stays out of the keys modal entirely: that dialog
@@ -504,266 +553,266 @@ private Q_SLOTS:
         auto *list = keys.findChild<QTreeWidget *>();
         QCOMPARE(keysRow(list, QStringLiteral("relay-free"))->text(1), QStringLiteral("Needs python3-cryptography"));
         RolesDialog roles;
-        roles.setPresets(presetsWithHosted({QStringLiteral("kimi")}, false), catalog(), {});
-        roles.setProvider(QStringLiteral("kimi"));
-        auto *box = roles.findChild<QComboBox *>();
-        QCOMPARE(box->findData(QStringLiteral("relay-free")), -1);
+        open(roles, presetsWithHosted({QStringLiteral("kimi")}, false));
+        pin(roles);
+        QCOMPARE(comboNamed(roles, QStringLiteral("Summaries provider"))->findData(QStringLiteral("relay-free")), -1);
+        QCOMPARE(comboNamed(roles, QStringLiteral("Vision provider"))->findData(QStringLiteral("relay-free")), -1);
     }
 
-    // The roles modal offers Relay Free like any reachable provider — named as the company, never
-    // as "(no key)" — and a tier can be pinned to it.
+    // The dialog offers Relay Free like any reachable provider — named as the company, never as
+    // "(no key)" — and a job can be pinned to it.
     void theRolesModalOffersRelayFreeWithoutAKey() {
         RolesDialog dialog;
-        dialog.setPresets(presetsWithHosted({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("relay-free"));
-        auto *box = dialog.findChild<QComboBox *>();
-        QCOMPARE(box->accessibleName(), QStringLiteral("Default provider"));
+        open(dialog, presetsWithHosted({QStringLiteral("kimi")}), QStringLiteral("relay-free"));
+        pin(dialog);
+        // The pane runs on Relay Free, so that is where the job's own provider starts.
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("relay-free"));
+        QComboBox *box = comboNamed(dialog, QStringLiteral("Summaries provider"));
         QCOMPARE(itemsOf(box), QStringList({QStringLiteral("Relay"), QStringLiteral("Kimi")}));
         QCOMPARE(box->currentText(), QStringLiteral("Relay"));
         for (const QString &item : itemsOf(box)) QVERIFY(!item.contains(QStringLiteral("no key")));
-        QComboBox *flash = tierProviderBoxes(dialog).first();
-        const int hosted = flash->findData(QStringLiteral("relay-free"));
-        QVERIFY(hosted > 0);
-        flash->setCurrentIndex(hosted);
-        Q_EMIT flash->activated(hosted);
-        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
-                                                            QStringLiteral("preset"))).toString(),
-                 QStringLiteral("relay-free"));
-    }
-
-    // ----- the Main row (owner, 2026-09-18: "you also still cant pick the main model options") -----
-
-    // Main used to be a dead label reading "this pane's model". It now carries the same three
-    // controls as Flash and Lite, and says whose provider it is using rather than implying a private
-    // override: the Main tier is the pane, so its provider is the default one.
-    void theMainRowCarriesAModelAProviderAndAnEffort() {
-        RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QVERIFY(modelButton(dialog, QStringLiteral("Main model")));
-        QVERIFY(modelButton(dialog, QStringLiteral("Main model"))->isEnabled());
-        QComboBox *provider = comboNamed(dialog, QStringLiteral("Main provider"));
-        QVERIFY(provider);
-        // The same list as the box at the top, and no "Default provider" entry: Main *is* the default.
-        QCOMPARE(itemsOf(provider), QStringList({QStringLiteral("Kimi"), QStringLiteral("Z.AI (GLM)")}));
-        QCOMPARE(provider->currentText(), QStringLiteral("Kimi"));
-        // …so it is not one of the per-tier override boxes either.
-        QCOMPARE(tierProviderBoxes(dialog).size(), 2);
-        QComboBox *effort = comboNamed(dialog, QStringLiteral("Main effort"));
-        QVERIFY(effort);
-        // No "Model default": the pane always runs at some level, and that level is `agent/effort`.
-        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("low"), QStringLiteral("high")}));
-    }
-
-    void theMainRowsProviderIsTheDefaultProviderAndSwitchingItSwitchesBoth() {
-        RolesDialog dialog;
-        QString chosen;
-        dialog.onProviderChosen = [&chosen](const QString &id) { chosen = id; };
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        pick(comboNamed(dialog, QStringLiteral("Main provider")), QStringLiteral("glm-coding"));
-        QCOMPARE(chosen, QStringLiteral("glm-coding"));
-        QCOMPARE(dialog.findChild<QComboBox *>()->currentText(), QStringLiteral("Z.AI (GLM)"));
-        // And nothing was written under tiers/main: roles.py rejects `tiers.main` on purpose.
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("main"),
-                                                               QStringLiteral("preset"))));
-    }
-
-    // The row acts through the pane, which is the only thing that can change the pane's own model:
-    // the dialog itself writes nothing, not even `provider/model` (Pane::setMainModel does that).
-    void theMainRowsModelAndEffortGoBackToThePane() {
-        RolesDialog dialog;
-        QString model, level;
-        int models = 0;
-        dialog.onMainModelChosen = [&model, &models](const QString &value) { model = value; ++models; };
-        dialog.onMainEffortChosen = [&level](const QString &value) { level = value; };
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        answerModelPrompt(QStringLiteral("kimi-k3-turbo"));
-        modelButton(dialog, QStringLiteral("Main model"))->click();
-        QCOMPARE(models, 1);
-        QCOMPARE(model, QStringLiteral("kimi-k3-turbo"));
-        QVERIFY(!QSettings().contains(QStringLiteral("provider/model")));
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("main"),
-                                                               QStringLiteral("model"))));
-        pick(comboNamed(dialog, QStringLiteral("Main effort")), QStringLiteral("high"));
-        QCOMPARE(level, QStringLiteral("high"));
-        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("main"),
-                                                               QStringLiteral("effort"))));
-    }
-
-    // Cancelling the prompt changes nothing at all.
-    void cancellingTheMainModelPromptTellsThePaneNothing() {
-        RolesDialog dialog;
-        int models = 0;
-        dialog.onMainModelChosen = [&models](const QString &) { ++models; };
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        answerModelPrompt(QStringLiteral("kimi-k3-turbo"), false);
-        modelButton(dialog, QStringLiteral("Main model"))->click();
-        QCOMPARE(models, 0);
-    }
-
-    // ----- reasoning effort lists -------------------------------------------------------------
-
-    // The levels are the provider's own (presets.py `effort_levels`), and a level stored while some
-    // other provider was in use lands on the nearest one offered — never silently on "Model default",
-    // which read as "no reasoning setting" when the pane was in fact running at high.
-    void aStoredEffortTheProviderDoesNotOfferShowsTheNearestOneOffered() {
-        QSettings().setValue(QStringLiteral("agent/effort"), QStringLiteral("medium"));
-        QSettings().setValue(RolesDialog::tierSetting(QStringLiteral("flash"), QStringLiteral("effort")),
-                             QStringLiteral("medium"));
-        RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        // Kimi offers low and high; medium is one step from each, and a tie goes up.
-        QCOMPARE(comboNamed(dialog, QStringLiteral("Main effort"))->currentText(), QStringLiteral("high"));
-        QCOMPARE(comboNamed(dialog, QStringLiteral("Flash effort"))->currentText(), QStringLiteral("high"));
-    }
-
-    // Relay Free caps at medium, so a stored "max" comes down to it rather than disappearing.
-    void aLevelAboveTheProvidersCapComesDownToTheCap() {
-        QSettings().setValue(QStringLiteral("agent/effort"), QStringLiteral("max"));
-        RolesDialog dialog;
-        dialog.setPresets(withEfforts(presets({QStringLiteral("kimi")}), QStringLiteral("kimi"),
-                                      {QStringLiteral("low"), QStringLiteral("medium")},
-                                      QStringLiteral("high and max are sent as medium.")),
-                          catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QComboBox *effort = comboNamed(dialog, QStringLiteral("Main effort"));
-        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("low"), QStringLiteral("medium")}));
-        QCOMPARE(effort->currentText(), QStringLiteral("medium"));
-        // And the provider's one-line note is on the picker, so the fold is not a mystery.
-        QVERIFY(effort->toolTip().contains(QStringLiteral("high and max are sent as medium.")));
-        QVERIFY(comboNamed(dialog, QStringLiteral("Flash effort"))
-                    ->toolTip().contains(QStringLiteral("high and max are sent as medium.")));
-    }
-
-    // A provider with no effort knob at all (`efforts` empty) gets no picker rather than an empty one.
-    void aProviderWithNoEffortKnobGetsNoEffortPicker() {
-        RolesDialog dialog;
-        dialog.setPresets(withEfforts(presets({QStringLiteral("kimi")}), QStringLiteral("kimi"), {}),
-                          catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
-        QVERIFY(!comboNamed(dialog, QStringLiteral("Main effort")));
-        QVERIFY(!comboNamed(dialog, QStringLiteral("Flash effort")));
-    }
-
-    // ----- Advanced: a provider per job ---------------------------------------------------------
-
-    // Owner, 2026-09-18: "i think advanced options should be separate from the providers. i might
-    // want to pick kimi k3 for main agents and glm 5.3 flash for subagents". So a job's provider is
-    // a box beside its tier, not a wizard behind it, and the two are exclusive.
-    void anAdvancedRowPicksItsOwnProviderInlineAndDropsTheTier() {
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
-        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("tier")),
-                             QStringLiteral("flash"));
-        RolesDialog dialog;
-        int changed = 0;
-        dialog.onRolesChanged = [&changed] { ++changed; };
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), actions());
-        dialog.setProvider(QStringLiteral("kimi"));
-        QComboBox *provider = comboNamed(dialog, QStringLiteral("Summaries provider"));
-        QVERIFY(provider);
-        QCOMPARE(itemsOf(provider), QStringList({QStringLiteral("Same as tier"), QStringLiteral("Kimi"),
-                                                 QStringLiteral("Z.AI (GLM)")}));
-        QCOMPARE(provider->currentText(), QStringLiteral("Same as tier"));
-        pick(provider, QStringLiteral("glm-coding"));
-        QVERIFY(changed > 0);
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("preset"))).toString(),
-                 QStringLiteral("glm-coding"));
-        // Protocol 13.7 takes a tier or an endpoint, never both.
-        QVERIFY(!QSettings().contains(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                               QStringLiteral("tier"))));
-        // The tier box says so rather than pretending the job still follows Flash.
-        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries"))->currentText(), QStringLiteral("Own provider"));
-        // And back: naming a tier drops the job's own endpoint.
-        pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("lite"));
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("tier"))).toString(),
-                 QStringLiteral("lite"));
-        QVERIFY(!QSettings().contains(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                               QStringLiteral("preset"))));
     }
 
     // The old two-step "Pin to a model…" wizard is gone: there is one way in, and it is the row.
     void thereIsNoPinToAModelWizardLeft() {
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), actions());
-        dialog.setProvider(QStringLiteral("kimi"));
+        open(dialog, presets({QStringLiteral("kimi")}));
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         for (QComboBox *box : dialog.findChildren<QComboBox *>())
             QVERIFY(!itemsOf(box).contains(QStringLiteral("Pin to a model…")));
     }
 
-    // A model id is read against a provider, so the button waits for one; then it stores the id for
-    // that job alone.
-    void anAdvancedRowsModelWaitsForAProviderOfItsOwn() {
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
+    // ----- the model of a pinned job ---------------------------------------------------------------
+
+    // A pinned job's model is picked from that provider's own catalog — the `models` its preset row
+    // carries — instead of typed into a Model… box. The list shows the labels and stores the ids.
+    void aPinnedJobsModelIsPickedFromThatProvidersCatalog() {
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), actions());
-        dialog.setProvider(QStringLiteral("kimi"));
-        QVERIFY(!modelButton(dialog, QStringLiteral("Summaries model"))->isEnabled());
+        int changed = 0;
+        dialog.onRolesChanged = [&changed] { ++changed; };
+        open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
+                          QStringLiteral("glm-coding"), {{QStringLiteral("models"), glmModels()}}));
+        pin(dialog);
         pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("glm-coding"));
+        QVERIFY(!modelButton(dialog, QStringLiteral("Summaries model")));   // no free-text box
+        QComboBox *model = comboNamed(dialog, QStringLiteral("Summaries model"));
+        QVERIFY(model);
+        QCOMPARE(itemsOf(model), QStringList({QStringLiteral("provider default (GLM 5.3)"),
+                                              QStringLiteral("GLM 5.3"), QStringLiteral("GLM 5.3 Flash")}));
+        QCOMPARE(model->currentIndex(), 0);
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("model")));
+        changed = 0;
+        pick(model, QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(changed, 1);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("model")), QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries model"))->currentText(), QStringLiteral("GLM 5.3 Flash"));
+        // Back to the provider's default: the key goes rather than holding an empty string.
+        pick(comboNamed(dialog, QStringLiteral("Summaries model")), QString());
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("model")));
+        // Another provider's models are another list, so moving the job drops the stored id.
+        pick(comboNamed(dialog, QStringLiteral("Summaries model")), QStringLiteral("glm-5.3-flash"));
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("kimi"));
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("model")));
+    }
+
+    // An id typed before the catalog existed is still what the job runs on, so it is listed as
+    // itself rather than the box reading "provider default".
+    void aStoredModelTheCatalogDoesNotListIsStillShown() {
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("preset")),
+                             QStringLiteral("glm-coding"));
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("model")),
+                             QStringLiteral("glm-4-legacy"));
+        RolesDialog dialog;
+        open(dialog, with(presets({QStringLiteral("glm-coding")}), QStringLiteral("glm-coding"),
+                          {{QStringLiteral("models"), glmModels()}}));
+        QComboBox *model = comboNamed(dialog, QStringLiteral("Summaries model"));
+        QVERIFY(model);
+        QCOMPARE(model->currentText(), QStringLiteral("glm-4-legacy"));
+        QCOMPARE(model->count(), 4);
+    }
+
+    // The free-text fallback is only for a provider that sent no `models`: then it is Model… and a
+    // typed id, stored for that job alone.
+    void aProviderThatSentNoModelsFallsBackToATypedId() {
+        RolesDialog dialog;
+        open(dialog, presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}));
+        QVERIFY(!modelButton(dialog, QStringLiteral("Summaries model")));   // waits for a provider
+        pin(dialog);
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("glm-coding"));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries model")));
         QPushButton *edit = modelButton(dialog, QStringLiteral("Summaries model"));
+        QVERIFY(edit);
         QVERIFY(edit->isEnabled());
         answerModelPrompt(QStringLiteral("glm-5.3-flash"));
         edit->click();
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("model"))).toString(),
-                 QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("model")), QStringLiteral("glm-5.3-flash"));
+        // Cancelling the prompt changes nothing.
+        answerModelPrompt(QStringLiteral("something-else"), false);
+        modelButton(dialog, QStringLiteral("Summaries model"))->click();
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("model")), QStringLiteral("glm-5.3-flash"));
         // Moving the job back to a tier takes the hand-picked model with it.
         pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("flash"));
-        QVERIFY(!QSettings().contains(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                               QStringLiteral("model"))));
+        QVERIFY(!has(QStringLiteral("summaries"), QStringLiteral("model")));
+    }
+
+    // ----- reasoning effort lists -------------------------------------------------------------
+
+    // Owner, 2026-09-20: "for codex planning you pick xhigh, not max; for glm 5.3 you pick max". The
+    // box shows the provider's own word for each level (`effort_labels`) and stores Relay's level, so
+    // the setting still means something when the job moves to another provider.
+    void anEffortBoxShowsTheProvidersOwnWordAndStoresTheRelayLevel() {
+        const QJsonArray levels{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")};
+        const QJsonObject words{{QStringLiteral("low"), QStringLiteral("low")},
+                                {QStringLiteral("high"), QStringLiteral("high")},
+                                {QStringLiteral("max"), QStringLiteral("xhigh")}};
+        RolesDialog dialog;
+        open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("openai")}), QStringLiteral("openai"),
+                          {{QStringLiteral("efforts"), levels}, {QStringLiteral("effort_labels"), words}}));
+        pin(dialog);
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("openai"));
+        QComboBox *effort = comboNamed(dialog, QStringLiteral("Summaries effort"));
+        QVERIFY(effort);
+        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("model default"), QStringLiteral("low"),
+                                               QStringLiteral("high"), QStringLiteral("xhigh")}));
+        QVERIFY(!itemsOf(effort).contains(QStringLiteral("max")));
+        const int xhigh = effort->findText(QStringLiteral("xhigh"));
+        QCOMPARE(effort->itemData(xhigh).toString(), QStringLiteral("max"));
+        QVERIFY(effort->itemData(xhigh, Qt::ToolTipRole).toString().contains(QStringLiteral("max")));
+        effort->setCurrentIndex(xhigh);
+        Q_EMIT effort->activated(xhigh);
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("effort")), QStringLiteral("max"));
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries effort"))->currentText(), QStringLiteral("xhigh"));
+        // The same stored level on a provider with no word of its own reads as Relay's: Kimi offers
+        // low and high, so max comes down to high, shown as "high".
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("kimi"));
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries effort"))->currentText(), QStringLiteral("high"));
+    }
+
+    // The picked model's own catalog row decides, where it has one: its levels and its words win over
+    // the provider's, and a model with no levels at all gets no effort box.
+    void thePickedModelsOwnLevelsAndWordsWinOverTheProviders() {
+        const QJsonArray models{
+            modelRow(QStringLiteral("model-of-openai"), QStringLiteral("GPT-6 Astra"),
+                     {QStringLiteral("high"), QStringLiteral("max")},
+                     {{QStringLiteral("high"), QStringLiteral("high")}, {QStringLiteral("max"), QStringLiteral("xhigh")}}),
+            modelRow(QStringLiteral("gpt-6-mini"), QStringLiteral("GPT-6 mini"), {})};
+        RolesDialog dialog;
+        open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("openai")}), QStringLiteral("openai"),
+                          {{QStringLiteral("models"), models}}));
+        pin(dialog);
+        pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("openai"));
+        // The provider default is the first row, so its levels apply — not the preset's low/high.
+        QCOMPARE(itemsOf(comboNamed(dialog, QStringLiteral("Summaries effort"))),
+                 QStringList({QStringLiteral("model default"), QStringLiteral("high"), QStringLiteral("xhigh")}));
+        pick(comboNamed(dialog, QStringLiteral("Summaries model")), QStringLiteral("gpt-6-mini"));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries effort")));
+    }
+
+    // The levels are the provider's own (presets.py `effort_levels`), and a level stored while some
+    // other provider was in use lands on the nearest one offered — never silently on "model default",
+    // which read as "no reasoning setting" when the job was in fact running at high.
+    void aStoredEffortTheProviderDoesNotOfferShowsTheNearestOneOffered() {
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("tier")),
+                             QStringLiteral("flash"));
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("effort")),
+                             QStringLiteral("medium"));
+        RolesDialog dialog;
+        open(dialog, presets({QStringLiteral("kimi")}));
+        // Kimi offers low and high; medium is one step from each, and a tie goes up.
+        QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries effort"))->currentText(), QStringLiteral("high"));
+    }
+
+    // Relay Free caps at medium, so a stored "max" comes down to it rather than disappearing.
+    void aLevelAboveTheProvidersCapComesDownToTheCap() {
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("tier")),
+                             QStringLiteral("flash"));
+        QSettings().setValue(RolesDialog::roleSetting(QStringLiteral("summaries"), QStringLiteral("effort")),
+                             QStringLiteral("max"));
+        RolesDialog dialog;
+        open(dialog, withEfforts(presets({QStringLiteral("kimi")}), QStringLiteral("kimi"),
+                                 {QStringLiteral("low"), QStringLiteral("medium")},
+                                 QStringLiteral("high and max are sent as medium.")));
+        QComboBox *effort = comboNamed(dialog, QStringLiteral("Summaries effort"));
+        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("model default"), QStringLiteral("low"),
+                                               QStringLiteral("medium")}));
+        QCOMPARE(effort->currentText(), QStringLiteral("medium"));
+        // And the provider's one-line note is on the picker, so the fold is not a mystery.
+        QVERIFY(effort->toolTip().contains(QStringLiteral("high and max are sent as medium.")));
+    }
+
+    // A provider with no effort knob at all (`efforts` empty) gets no picker rather than an empty one.
+    void aProviderWithNoEffortKnobGetsNoEffortPicker() {
+        RolesDialog dialog;
+        open(dialog, withEfforts(presets({QStringLiteral("kimi")}), QStringLiteral("kimi"), {}));
+        QVERIFY(comboNamed(dialog, QStringLiteral("Summaries")));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Summaries effort")));
     }
 
     // A job with neither a tier nor a provider of its own has no entry in the `roles` object at all
     // (Pane::rolesObject), so an effort stored for it would never be sent: the box waits instead of
     // accepting a setting that does nothing.
-    void anAdvancedRowsEffortWaitsUntilTheRowNamesATierOrAProvider() {
-        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
+    void aJobsEffortWaitsUntilTheRowNamesATierOrAProvider() {
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), actions());
-        dialog.setProvider(QStringLiteral("kimi"));
+        open(dialog, presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}));
         QComboBox *effort = comboNamed(dialog, QStringLiteral("Summaries effort"));
         QVERIFY(effort);
         QVERIFY(!effort->isEnabled());
         pick(comboNamed(dialog, QStringLiteral("Summaries")), QStringLiteral("flash"));
         effort = comboNamed(dialog, QStringLiteral("Summaries effort"));
         QVERIFY(effort->isEnabled());
-        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("Model default"), QStringLiteral("low"),
+        QCOMPARE(itemsOf(effort), QStringList({QStringLiteral("model default"), QStringLiteral("low"),
                                                QStringLiteral("high")}));
         pick(effort, QStringLiteral("low"));
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("effort"))).toString(),
-                 QStringLiteral("low"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("effort")), QStringLiteral("low"));
         // The tier stays: an effort is a refinement of the row's target, not a target of its own.
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
-                                                            QStringLiteral("tier"))).toString(),
-                 QStringLiteral("flash"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("tier")), QStringLiteral("flash"));
+        // A provider of the job's own is a target too.
+        pin(dialog);
+        QVERIFY(comboNamed(dialog, QStringLiteral("Summaries effort"))->isEnabled());
     }
 
-    // The vision row takes a provider the same way, which is what retired the wizard's last caller.
+    // ----- vision ----------------------------------------------------------------------------------
+
+    // The vision row follows no tier: its first box is a provider, Automatic until one is picked, and
+    // its model waits for that provider exactly as a job's does.
     void theVisionRowPicksItsProviderInline() {
         RolesDialog dialog;
-        dialog.setPresets(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}), catalog(), {});
-        dialog.setProvider(QStringLiteral("kimi"));
+        open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
+                          QStringLiteral("glm-coding"), {{QStringLiteral("models"), glmModels()}}));
         QComboBox *provider = comboNamed(dialog, QStringLiteral("Vision provider"));
         QVERIFY(provider);
         QCOMPARE(itemsOf(provider), QStringList({QStringLiteral("Automatic"), QStringLiteral("Kimi"),
                                                  QStringLiteral("Z.AI (GLM)")}));
-        QVERIFY(!modelButton(dialog, QStringLiteral("Vision model"))->isEnabled());
-        pick(provider, QStringLiteral("glm-coding"));
-        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("vision"),
-                                                            QStringLiteral("preset"))).toString(),
-                 QStringLiteral("glm-coding"));
-        QVERIFY(modelButton(dialog, QStringLiteral("Vision model"))->isEnabled());
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Vision model")));
+        QVERIFY(!modelButton(dialog, QStringLiteral("Vision model")));
+        // Kimi sent no catalog: a typed id.
+        pick(provider, QStringLiteral("kimi"));
+        QCOMPARE(stored(QStringLiteral("vision"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        QVERIFY(modelButton(dialog, QStringLiteral("Vision model")));
+        // Z.AI sent one: a list.
+        pick(comboNamed(dialog, QStringLiteral("Vision provider")), QStringLiteral("glm-coding"));
+        QVERIFY(!modelButton(dialog, QStringLiteral("Vision model")));
+        pick(comboNamed(dialog, QStringLiteral("Vision model")), QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(stored(QStringLiteral("vision"), QStringLiteral("model")), QStringLiteral("glm-5.3-flash"));
+        QVERIFY(!has(QStringLiteral("vision"), QStringLiteral("tier")));
         pick(comboNamed(dialog, QStringLiteral("Vision provider")), QString());
-        QVERIFY(!QSettings().contains(RolesDialog::roleSetting(QStringLiteral("vision"),
-                                                               QStringLiteral("preset"))));
+        QVERIFY(!has(QStringLiteral("vision"), QStringLiteral("preset")));
+        QVERIFY(!has(QStringLiteral("vision"), QStringLiteral("model")));
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Vision model")));
+    }
+
+    // The worker's job list names "vision" too; it gets the vision row, not a second, tier-shaped one.
+    void visionIsNotRepeatedAsAJobRow() {
+        QJsonArray jobs = actions();
+        jobs.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("vision")},
+                                {QStringLiteral("label"), QStringLiteral("Images")},
+                                {QStringLiteral("hint"), QStringLiteral("reading pictures")},
+                                {QStringLiteral("tier"), QStringLiteral("flash")},
+                                {QStringLiteral("settable"), true}});
+        RolesDialog dialog;
+        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), jobs);
+        QVERIFY(!comboNamed(dialog, QStringLiteral("Images")));
+        QVERIFY(comboNamed(dialog, QStringLiteral("Vision provider")));
     }
 };
 

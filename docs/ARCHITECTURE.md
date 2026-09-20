@@ -1770,8 +1770,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   (`route_assist`), and panes that run the Flash agent themselves (`configure {agent_role}` /
   `set_agent_role`).
 - **Naming and what is offered** (2026-09-18, `#P7QK`). A *preset* is a plan you hold a key for, so the
-  keys modal lists one row per plan and uses `label` ("Kimi · K3"). The roles modal picks a **provider**
-  whose model the tier decides, so it uses `provider` — Kimi, Z.AI (GLM), OpenRouter, OpenAI (ChatGPT),
+  keys modal lists one row per plan and uses `label` ("Kimi · K3"). The per-job models modal picks a
+  **provider** and then, beside it, one of that provider's models, so it uses `provider` — Kimi, Z.AI (GLM), OpenRouter, OpenAI (ChatGPT),
   Anthropic (Claude), Google (Gemini), MiniMax — and appends `· <plan>` only when two presets of one
   company are both offered. Its lists hold providers with a stored key, always including the one in
   use, and fall back to everything marked "(no key)" only when nothing has a key at all.
@@ -1782,10 +1782,23 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   is two picks and no typing, and changing the default provider keeps an override that names a
   different provider.
 - GUI: `src/ModelSettings.*` (the `relay-modelsettings` library, so the dialogs are testable
-  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog` (default provider, the tier rows high /
-  main / flash / lite / local, an Advanced disclosure with one row per job showing the model it
-  resolves to). Reached from Options › Models ("per-job models (advanced)") and the palette
-  (`agent.modelRoles`). The high tier (owner, 2026-09-20) is plan mode's default: Main at max
+  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog`, titled "per-job models" and per-job
+  only since 2026-09-20. The tiers are not in it: they are the five ordered lists on Options ›
+  Models — main, high, flash, lite, local (`relay::models::curation::tierList`, built in
+  `RelayWindow::modelsSection`) — where an entry is a model plus a reasoning level, rank 1 is what
+  the tier runs on, the rest are its fallbacks, and rank 1 of the main list is the default
+  provider. So the dialog's Default provider box, its recommended-pairs line and its Main / Flash /
+  Lite / Local rows are gone, and what sat behind "Advanced options" is the whole dialog: one row
+  per job showing the model it resolves to, a box for what it follows (`default (<its tier>)`,
+  high, main, flash, lite, local, or "its own provider…"), and — once it has a provider of its own
+  — that provider, a model picked from the provider's catalog (`models` on the preset row; Model…
+  and a typed id only when the provider sent none) and a reasoning level shown in the provider's
+  own word (`effort_labels`: xhigh on OpenAI) and stored as Relay's. "its own provider…" pins the
+  job to the provider it already resolves to, so the pick alone changes nothing. The vision row is
+  the same minus the tier. `onProviderChosen` / `onMainModelChosen` / `onMainEffortChosen` are
+  still members only because `Pane::openRolesDialog` assigns them; nothing calls them. Reached
+  from Options › Models ("per-job models (advanced)") and the palette (`agent.modelRoles`). The
+  high tier (owner, 2026-09-20) is plan mode's default: Main at max
   reasoning unless `tiers.high` names a model. Plus the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands. The "New panes use the
