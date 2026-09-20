@@ -43,6 +43,18 @@ class CardDetail;
 class ColumnHeader;
 class RowList;
 
+namespace board {
+
+// Below this width the open card takes the whole Switchboard pane instead of squeezing the list
+// (BoardView::updateDetailLayout); at or above it the list and the card sit side by side. It
+// lives here, out of BoardPane.cpp, because the pane layout asks for it too (card #BXCN): this is
+// the width "equalize" gives a board pane before dividing the rest, and the floor Execute and
+// Verify keep the board pane above while the panes beside it shrink. A hand drag is still free to
+// go below it — it is what the organize and dock arithmetic ask for, not a minimumSizeHint.
+inline constexpr int kCardSplitWidth = 900;
+
+}  // namespace board
+
 class BoardView : public QWidget {
 public:
     explicit BoardView(const QString &workspace, QWidget *parent = nullptr);

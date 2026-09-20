@@ -256,6 +256,59 @@ private Q_SLOTS:
         QVERIFY(sizesAfterDock({300, 0, 690}, 1).isEmpty());   // an anchor with no room to give
     }
 
+    // A floor the anchor is owed (card #BXCN: the Switchboard's list/card split). The newcomer
+    // still takes its half, but what the anchor could not spare comes proportionally from the
+    // panes beside it — docking beside the board narrows them, not the board's split.
+    void dockingKeepsTheAnchorAboveItsFloor() {
+        // Floor 0 divides the anchor's share alone: exactly the answer without a floor.
+        QCOMPARE(sizesAfterDock({300, 690}, 1, 0), sizesAfterDock({300, 690}, 1));
+        // A board of 1200 beside a terminal of 800, Execute docks into the board: the newcomer's
+        // half (600) is 300 from the board (down to its 900 floor) and 300 from the terminal.
+        QCOMPARE(sizesAfterDock({1200, 800}, 0, 900), QList<int>({900, 600, 500}));
+        // Three panes, the board in the middle: both ends pay their proportional share of the
+        // shortfall, and the widest absorbs the rounding.
+        QCOMPARE(sizesAfterDock({300, 1200, 500}, 1, 900), QList<int>({188, 900, 600, 312}));
+        // The panes beside cannot cover the newcomer's half: they pay what they have, the anchor
+        // still keeps its floor, and nothing is created or lost.
+        QCOMPARE(sizesAfterDock({1000, 100}, 0, 900), QList<int>({900, 200, 0}));
+        // An anchor already below its floor keeps what it has; the newcomer's half comes from the
+        // panes beside it rather than pushing the anchor further down.
+        QCOMPARE(sizesAfterDock({400, 600}, 0, 900), QList<int>({400, 200, 400}));
+        // Nothing is created or lost in any of them.
+        for (const QList<int> &sizes : {QList<int>{1200, 800}, QList<int>{300, 1200, 500},
+                                        QList<int>{1000, 100}, QList<int>{400, 600}})
+            for (int i = 0; i < sizes.size(); ++i) {
+                const QList<int> after = sizesAfterDock(sizes, i, 900);
+                QCOMPARE(after.size(), sizes.size() + 1);
+                QCOMPARE(std::accumulate(after.cbegin(), after.cend(), 0),
+                         std::accumulate(sizes.cbegin(), sizes.cend(), 0));
+            }
+    }
+
+    // The sizes Ctrl+Alt+0 writes (card #BXCN): equal shares, except a Switchboard pane takes its
+    // list/card split and the other panes divide what is left.
+    void equalizingGivesTheBoardPaneItsSplit() {
+        // All-zero floors: the plain equal division of the total, today's behaviour.
+        QCOMPARE(sizesAfterEqualize({100, 900, 300}, {0, 0, 0}), QList<int>({434, 433, 433}));
+        // A floor the equal share already covers pins nothing: still equal.
+        QCOMPARE(sizesAfterEqualize({1000, 1000}, {900, 0}), QList<int>({1000, 1000}));
+        // Three panes in 1500 px: the board keeps its 900 and the terminals have 300 each.
+        QCOMPARE(sizesAfterEqualize({500, 500, 500}, {900, 0, 0}), QList<int>({900, 300, 300}));
+        // A board wider than its floor is tidied back to exactly the floor, not past it.
+        QCOMPARE(sizesAfterEqualize({1200, 400}, {900, 0}), QList<int>({900, 700}));
+        // The remainder of an awkward total goes to the panes that share the left-over space.
+        QCOMPARE(sizesAfterEqualize({901, 300, 300}, {900, 0, 0}), QList<int>({900, 301, 300}));
+        // Two boards in a tab too narrow for both: floors cannot be afforded, plain equal shares.
+        QCOMPARE(sizesAfterEqualize({500, 500}, {900, 900}), QList<int>({500, 500}));
+        // A lone pane in its own splitter is left the whole splitter, floor or no floor.
+        QCOMPARE(sizesAfterEqualize({700}, {900}), QList<int>({700}));
+        // What cannot be divided says so: no sizes, a splitter not laid out, floors that do not
+        // match the sizes.
+        QVERIFY(sizesAfterEqualize({}, {}).isEmpty());
+        QVERIFY(sizesAfterEqualize({0, 0}, {0, 0}).isEmpty());
+        QVERIFY(sizesAfterEqualize({300, 300}, {0}).isEmpty());
+    }
+
     // The arithmetic against a real QSplitter, the way RelayWindow::insertBeside uses it: read the
     // sizes, insert, set them. The panes that were not the anchor come out with the widths they
     // had, which is the whole of the fix; equal shares would have made all four 250.

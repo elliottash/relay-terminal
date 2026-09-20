@@ -8,12 +8,14 @@
 // See issues/changes/needs_qa_llm/2026-09-17-pane-move-keys-and-drag-broken.md.
 #pragma once
 
+#include <QFontMetrics>
 #include <QList>
 #include <QPoint>
 #include <QPointer>
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 #include <Qt>
 
 #include <optional>
@@ -62,6 +64,11 @@ void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor);
 //      below the host's own width elides the host with a whole ellipsis;
 //   4. the usage chip collapses to CPU alone: no memory half and no separator;
 //   5. nothing else gives. The subagent badge stays whole and the state glyph stays, always.
+//
+// One thing gives way outside the ladder (owner, 2026-09-20): a title that would elide may
+// instead cross a second line — twoLineTitle() splits it at the spaces the granted width can
+// hold, and the header grows downward by one line. The ladder itself stays width-only and never
+// hears about the wrap, so its answer cannot chase the header's height.
 //
 // The live state's word used to be rung 3, between the title and the ssh chip. Card #0STR took
 // the word off the header altogether (owner, 2026-09-19: "clean up the headers of tabs and panes.
@@ -119,6 +126,13 @@ struct HeaderFit {
 
 HeaderFit headerFit(int headerWidth, const HeaderWants &wants);
 
+// The title split onto two lines that fit `px`, or an empty list when a split does not help.
+// Greedy, at spaces: the first line takes as many whole words as the granted width holds, and the
+// rest goes on the second, elided when it will not fit whole — so two lines always show at least
+// as much of the title as the one elided line they replace. A title with nowhere to break (a
+// path, one long word) or one that fits `px` whole returns empty and stays on its single line.
+QStringList twoLineTitle(const QString &title, const QFontMetrics &metrics, int px);
+
 // The edge of a pane that a drop at `local` (a point inside a pane of `size`) belongs to: the
 // nearest edge wins. Dropping just past the divider between two panes therefore names the edge
 // they already share, and the dragged pane keeps its place.
@@ -153,7 +167,26 @@ QList<QPointer<QSplitter>> splittersIn(QWidget *root);
 // An empty list means there is nothing to keep: no sizes, an index outside them, or an anchor with
 // no room to give (a splitter that has not been laid out yet reads as zeros). The caller then
 // falls back rather than writing a size of 0 for the pane it just docked.
-QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex);
+//
+// `anchorFloor` (card #BXCN) is a width the anchor is owed — a Switchboard pane's list/card split
+// (relay::board::kCardSplitWidth). The newcomer still takes half the anchor's share, but never
+// more than the anchor can spare and stay above its floor; the half it could not take from the
+// anchor it takes from the panes beside it, proportionally, so docking beside the board narrows
+// them and not the board's split. 0 — the default, and what every caller that is not Execute or
+// Verify passes — divides the anchor's share alone and behaves exactly as before.
+QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex, int anchorFloor = 0);
+
+// The sizes for Ctrl+Alt+0, "every splitter in this tab back to equal shares": equal shares,
+// except that an entry whose floor exceeds its equal share is pinned at the floor and the
+// remainder is divided equally among the rest — so "equalize panes" gives a Switchboard pane the
+// width its list/card split needs (card #BXCN) and the other panes share what is left. `floors`
+// is one entry per size, 0 for a pane owed nothing (and all-zero in a vertical splitter, where
+// the floor is not a height). When the floors cannot be afforded — their sum eats the total —
+// the answer is plain equal shares, today's behaviour, because the tidy grid is still better
+// than a page the floors have squeezed out of shape. Same contract otherwise: the list has as
+// many entries as it is given and sums to the same total, ready for setSizes().
+QList<int> sizesAfterEqualize(const QList<int> &sizes, const QList<int> &floors);
+
 
 // Put sizes recorded from enclosingSplitters() back. A splitter that has gone away, or whose
 // children changed in between so the sizes no longer describe it, is skipped.

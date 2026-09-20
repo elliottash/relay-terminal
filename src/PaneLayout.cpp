@@ -170,6 +170,28 @@ HeaderFit headerFit(int headerWidth, const HeaderWants &wants) {
     return fit;
 }
 
+// The two-line title (owner, 2026-09-20; the rules are on the declaration in PaneLayout.h). The
+// first word always starts the first line even if it alone is wider than `px` — a line that
+// cannot hold its first word is what the one-line elide is for, so a split that would clip a
+// word mid-glyph returns empty instead.
+QStringList twoLineTitle(const QString &title, const QFontMetrics &metrics, int px) {
+    if (px <= 0) return {};
+    const QStringList words = title.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (words.size() < 2 || metrics.horizontalAdvance(words.first()) > px) return {};
+    QString first, rest;
+    for (int i = 0; i < words.size(); ++i) {
+        const QString candidate = first.isEmpty() ? words.at(i) : first + QLatin1Char(' ') + words.at(i);
+        if (!first.isEmpty() && metrics.horizontalAdvance(candidate) > px) {
+            rest = QStringList(words.mid(i)).join(QLatin1Char(' '));
+            break;
+        }
+        first = candidate;
+    }
+    if (rest.isEmpty()) return {};   // everything fitted the first line: nothing to wrap
+    if (metrics.horizontalAdvance(rest) > px) rest = metrics.elidedText(rest, Qt::ElideRight, px);
+    return {first, rest};
+}
+
 Direction dropEdge(const QPoint &local, const QSize &size) {
     const double fx = double(local.x()) / std::max(1, size.width());
     const double fy = double(local.y()) / std::max(1, size.height());
@@ -215,17 +237,105 @@ bool chordKeyKeepsWindow(int key, const QString &actionId) {
            || actionId == QLatin1String("pane.moveDown");
 }
 
-QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex) {
+QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex, int anchorFloor) {
     if (anchorIndex < 0 || anchorIndex >= sizes.size()) return {};
     const int share = sizes.at(anchorIndex);
     if (share <= 0) return {};
+    // Without a floor the anchor keeps half the share (the floor of the two halves, the newcomer
+    // the ceil). A floor (card #BXCN) raises what the anchor keeps — up to the floor, or its
+    // whole share when it is already narrower than that — and what it did not give the newcomer
+    // comes proportionally from the panes beside it, so docking beside a Switchboard pane narrows
+    // them and not the board's split.
+    const int half = share / 2;
+    const int keep = std::max(half, std::min(share, std::max(0, anchorFloor)));
+    const int give = share - keep;
+    const int wants = share - half;                 // the newcomer's half, the ceil of the two
+    qint64 others = 0;
+    for (int i = 0; i < sizes.size(); ++i)
+        if (i != anchorIndex) others += std::max(0, sizes.at(i));
+    qint64 lift = std::min<qint64>(wants - give, others);
+    if (give + lift <= 0) {
+        // Nothing anywhere for a floor to protect: divide the share alone, as before.
+        QList<int> plain;
+        plain.reserve(sizes.size() + 1);
+        for (int i = 0; i < sizes.size(); ++i) {
+            if (i != anchorIndex) { plain.append(sizes.at(i)); continue; }
+            plain.append(half);
+            plain.append(share - half);
+        }
+        return plain;
+    }
     QList<int> out;
     out.reserve(sizes.size() + 1);
+    int widestSizes = -1, widestOut = -1;
+    qint64 keptTotal = 0;
     for (int i = 0; i < sizes.size(); ++i) {
-        if (i != anchorIndex) { out.append(sizes.at(i)); continue; }
-        out.append(share / 2);
-        out.append(share - share / 2);
+        if (i != anchorIndex) {
+            if (lift > 0 && others > 0) {
+                out.append(int((qint64(sizes.at(i)) * (others - lift) + others / 2) / others));
+                if (widestSizes < 0 || sizes.at(i) > sizes.at(widestSizes)) {
+                    widestSizes = i;
+                    widestOut = out.size() - 1;
+                }
+            } else {
+                out.append(sizes.at(i));
+            }
+            keptTotal += out.last();
+            continue;
+        }
+        out.append(keep);
+        out.append(int(give + lift));
     }
+    // The proportional scaling rounds; the widest of the panes that paid absorbs what is left
+    // over, so the list still sums to what the splitter had. The anchor and newcomer are exact.
+    if (widestOut >= 0)
+        out[widestOut] += int(others - lift) - int(keptTotal);
+    return out;
+}
+
+QList<int> sizesAfterEqualize(const QList<int> &sizes, const QList<int> &floors) {
+    if (sizes.isEmpty() || floors.size() != sizes.size()) return {};
+    qint64 total = 0, floorTotal = 0;
+    for (int i = 0; i < sizes.size(); ++i) {
+        total += std::max(0, sizes.at(i));
+        floorTotal += std::max(0, floors.at(i));
+    }
+    if (total <= 0) return {};
+    const int n = sizes.size();
+    const auto plainEqual = [&]() {
+        QList<int> equal;
+        equal.reserve(n);
+        for (int i = 0; i < n; ++i) equal.append(int(total / n));
+        for (int i = 0; i < int(total % n); ++i) equal[i] += 1;   // floor then ceil, like a halving
+        return equal;
+    };
+    // Unaffordable floors (their sum eats the total) equalize plainly rather than squeeze the
+    // page out of shape: two Switchboard panes in one narrow tab each get their equal share.
+    if (floorTotal >= total) return plainEqual();
+    const qint64 equal = total / n;
+    QList<bool> pinned;
+    pinned.reserve(n);
+    qint64 pinnedTotal = 0;
+    int restCount = 0;
+    for (int i = 0; i < n; ++i) {
+        const bool pin = qint64(std::max(0, floors.at(i))) > equal;
+        pinned.append(pin);
+        if (pin) pinnedTotal += std::max(0, floors.at(i));
+        else ++restCount;
+    }
+    // Only reachable with floors below the equal share everywhere: nothing to pin.
+    if (restCount == 0) return plainEqual();
+    // The pinned entries take their floor; the rest divide what is left equally, and so land at
+    // or above the equal share, which already covers their own floors.
+    const qint64 restTotal = total - pinnedTotal;
+    const qint64 restShare = restTotal / restCount;
+    QList<int> out;
+    out.reserve(n);
+    for (int i = 0; i < n; ++i)
+        out.append(pinned.at(i) ? std::max(0, floors.at(i)) : int(restShare));
+    qint64 left = restTotal - restShare * restCount;
+    for (int i = 0; left > 0 && i < n; ++i)
+        if (!pinned.at(i)) { out[i] += 1; --left; }
     return out;
 }
 

@@ -4760,7 +4760,9 @@ public:
             Pane *pane = nullptr;
             try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}}); }
             catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return QString(); }
-            w->insertBeside(guard, pane, Qt::Horizontal, false);
+            // The board keeps its list/card split (#BXCN): the new terminal's half comes out of
+            // the panes beside the board, not out of the board itself.
+            w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
             w->setActive(pane);
             focusLeaf(pane);
             pane->startBoardTask(task, card);
@@ -4786,7 +4788,7 @@ public:
             Pane *pane = nullptr;
             try { pane = w->createPane(spec); }
             catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
-            w->insertBeside(guard, pane, Qt::Horizontal, false);
+            w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
             w->setActive(pane);
             focusLeaf(pane);
             // A guest verifier goes through the pane's own Tier A / Tier B decision: the
@@ -5561,9 +5563,31 @@ private:
         m_tabs->setCurrentIndex((m_tabs->currentIndex() + delta + m_tabs->count()) % m_tabs->count());
     }
 
+    // The width a Switchboard pane is owed when the layout is organized (#BXCN): its list/card
+    // split needs relay::board::kCardSplitWidth, so "equalize" and an Execute/Verify dock beside
+    // the board keep it at or above that and shrink the panes around it. 0 for every other pane.
+    // A hand drag is still free to narrow the board: this is what the arithmetic asks for, not a
+    // minimumSizeHint.
+    int boardSplitFloor(QWidget *leaf) const {
+        auto *tool = dynamic_cast<ToolPane *>(leaf);
+        if (!tool || tool->kind() != ToolPane::Kind::Board || !tool->board()) return 0;
+        // The threshold is the VIEW's width (BoardView::updateDetailLayout), and the pane's own
+        // layout margins take their slice off the leaf before the view sees a pixel: the floor
+        // owes the view kCardSplitWidth plus that slice, read off the layout so a chrome change
+        // keeps the split above the floor instead of silently landing 2 px under it.
+        int chrome = 2;
+        if (const QLayout *layout = tool->layout())
+            chrome = layout->contentsMargins().left() + layout->contentsMargins().right();
+        return relay::board::kCardSplitWidth + chrome;
+    }
+
     // Put `pane` beside `anchor` in the given orientation, reusing the anchor's splitter when
-    // it already runs that way, otherwise wrapping the anchor in a new splitter.
-    void insertBeside(QWidget *anchor, QWidget *pane, Qt::Orientation orientation, bool before) {
+    // it already runs that way, otherwise wrapping the anchor in a new splitter. `anchorFloor`
+    // (card #BXCN) is a width the anchor is owed after the dock — only Execute and Verify pass
+    // one (the Switchboard's split); the newcomer's half then comes out of the panes beside the
+    // anchor rather than out of the anchor itself.
+    void insertBeside(QWidget *anchor, QWidget *pane, Qt::Orientation orientation, bool before,
+                      int anchorFloor = 0) {
         QWidget *parent = anchor->parentWidget();
         if (auto *splitter = dynamic_cast<QSplitter *>(parent); splitter && splitter->orientation() == orientation) {
             const int index = splitter->indexOf(anchor);
@@ -5572,7 +5596,7 @@ private:
             // which is when the list still describes the splitter. An empty answer means there is
             // nothing worth keeping — a splitter not yet laid out — and equal shares are then as
             // good as any.
-            const QList<int> kept = relay::panes::sizesAfterDock(splitter->sizes(), index);
+            const QList<int> kept = relay::panes::sizesAfterDock(splitter->sizes(), index, anchorFloor);
             splitter->insertWidget(before ? index : index + 1, pane);
             if (kept.size() == splitter->count()) {
                 splitter->setSizes(kept);
@@ -5594,10 +5618,22 @@ private:
             anchor->show(); wrapper->show();
             // Size after the layout settles; sizes set on a hidden splitter follow size hints instead.
             QPointer<QSplitter> guard(wrapper);
-            QTimer::singleShot(0, wrapper, [guard] {
-                if (!guard) return;
-                const int total = guard->orientation() == Qt::Horizontal ? guard->width() : guard->height();
-                guard->setSizes({total / 2, total - total / 2});
+            QPointer<QWidget> anchorGuard(anchor), paneGuard(pane);
+            QTimer::singleShot(0, wrapper, [guard, anchorGuard, paneGuard, before, anchorFloor] {
+                if (!guard || !anchorGuard || !paneGuard) return;
+                const bool horizontal = guard->orientation() == Qt::Horizontal;
+                const int total = horizontal ? guard->width() : guard->height();
+                // 50/50, unless the anchor is owed a floor (#BXCN): it keeps the lesser of the
+                // floor and what leaves the newcomer its own minimum, and never less than half.
+                int anchorShare = total / 2;
+                if (anchorFloor > 0) {
+                    const int newcomerMin = horizontal ? paneGuard->minimumSizeHint().width()
+                                                       : paneGuard->minimumSizeHint().height();
+                    anchorShare = std::max(total / 2, std::min(anchorFloor, std::max(0, total - newcomerMin)));
+                }
+                anchorShare = qBound(0, anchorShare, std::max(0, total));
+                if (before) guard->setSizes({total - anchorShare, anchorShare});
+                else guard->setSizes({anchorShare, total - anchorShare});
             });
         }
         pane->show();
@@ -6923,6 +6959,24 @@ private:
         const QList<QPointer<QSplitter>> splitters = relay::panes::splittersIn(page);
         for (const auto &splitter : splitters) {
             if (!splitter) continue;
+            const QList<int> sizes = splitter->sizes();
+            qint64 total = 0;
+            for (int size : sizes) total += size;
+            // The Switchboard's split comes first (#BXCN): a board pane in the splitter takes its
+            // 900 px floor and the panes beside it divide the rest equally. Vertical splitters
+            // pass all-zero floors — the floor is a width, not a height.
+            QList<int> floors;
+            if (splitter->orientation() == Qt::Horizontal)
+                for (int i = 0; i < splitter->count(); ++i) floors.append(boardSplitFloor(splitter->widget(i)));
+            else
+                for (int i = 0; i < splitter->count(); ++i) floors.append(0);
+            const QList<int> sized = relay::panes::sizesAfterEqualize(sizes, floors);
+            if (!sized.isEmpty()) {
+                splitter->setSizes(sized);
+                continue;
+            }
+            // Not laid out yet (or nothing to divide): identical entries, let Qt turn them into
+            // ratios of the real width.
             QList<int> equal;
             for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
             splitter->setSizes(equal);
