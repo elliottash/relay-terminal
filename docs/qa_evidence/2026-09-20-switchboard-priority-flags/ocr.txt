@@ -1,0 +1,26 @@
+01 ids:               0BGB PJQJ SAN9 SY7G
+01 bravo=#SY7G charlie=#PJQJ
+01 title starts at 818; the id column ends at ~810 (48 px of id column + padding before it)
+01 leftmost word on Bravo's row before the title: #5776
+01 age badges (N d / N w tokens): 0
+01 label chips seen:  bug 
+feature 
+gui 
+voice 
+01 header words:      = CARD CREATED UPDATED 
+02 charlie flag at:   739 342 (charlie starts at priority 1)
+02 file after up:     priority: 2  (expect priority: 2)
+02 notice after up:   Flagged #P|Q) at +2
+03 file after down:   priority: 1  (expect priority: 1 again)
+03 notice after down: Flagged #P|QJ at +1
+04 priority-high order (expect Bravo Charlie Alpha in Ready): Bravo Charlie Alpha 
+05 priority-low order  (expect Alpha Charlie Bravo in Ready): Alpha Charlie Bravo 
+06 back to manual      (rank a,b,c: Bravo Charlie Alpha):     Bravo Charlie Alpha 
+07 count line:        1 shown
+07 bug keeps:         Charlie 
+08 unticked keeps:    Alpha Bravo Charlie 
+05 files' priorities:
+   SAN9 
+   SY7G priority: 3 
+   PJQJ priority: 1 
+   0BGB priority: -1 
