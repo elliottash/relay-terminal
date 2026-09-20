@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: 'Owner, 2026-09-20, comparing the main pane''s prompt box with the helper panels'
-links: {plans: [], commits: [502f2b22, ce29cb8e], evidence: ['docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/'], related: [8YQ9, FEJQ, BRD3, VZ69], github: null}
+links: {plans: [], commits: [502f2b22, ce29cb8e, 17cfe0b4], evidence: ['docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/'], related: [8YQ9, FEJQ, BRD3, VZ69], github: null}
 ---
 # Every agent prompt box looks and behaves like the main pane's
 

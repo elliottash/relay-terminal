@@ -61,3 +61,14 @@ card page, the Options helper expanded and idle, the Sessions helper expanded, a
 `ctest --test-dir build -R '^board$|^boardpane$|^settings$|^conversations$'` — 4/4 pass.
 
 Moved to `needs-verification`.
+
+<!-- relay:entry 20260920T222000Z-c2 author=claude-code kind=event -->
+### Claude Code · 2026-09-20 22:20
+the card, its thread and the evidence folder landed as `17cfe0b4`, with
+`docs/SWITCHBOARD-DESIGN.md` 4.13a. `issues/BOARD.md` is left to whoever lands it next: the
+regenerated index in the working tree carries this card, but the file had moved on main and
+merging a generated index risks writing back another session's card states.
+
+Three commits carry the change and none of them ends in the Co-Authored-By line this session was
+told to add — it was missed on the first two and then kept consistent rather than rewriting a
+shared branch's history. Noted here so the trail is not silent about it.
