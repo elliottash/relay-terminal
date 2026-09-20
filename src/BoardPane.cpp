@@ -418,12 +418,68 @@ FoldShape foldShape(const QFont &font, int width)
     return shape;
 }
 
+// One signal's row (#AQ6X): the kind as a word — a glyph cannot say "flaky" — then the key in the
+// same mono the `#ID` column uses, and at the right end the failure count, when it was last seen,
+// its marks, and the claim chip a card wears. A member of a group is one step further in, under
+// the row it belongs to.
+struct SignalShape {
+    QRect kindRect, keyRect, tailRect, chipRect;
+    QString tail;          // "×4 · 3 h ago · regressed"
+    QString chip;          // "⧉ abcdef12", empty when nobody has claimed it
+    bool chipLive = true;
+    int height = 0;
+};
+
+SignalShape signalShape(const board::Signal &signal, const QFont &font, int width, int indent,
+                        const QDateTime &now, bool chipLive)
+{
+    SignalShape shape;
+    const QFont small = smaller(font, 0.85);
+    const QFontMetrics metrics(small);
+    const QFontMetrics mono(monoFont(font, 0.85));
+    shape.height = qMax(22, metrics.height() + 8);
+    QStringList tail;
+    const QString count = board::signalCountWord(signal.count);
+    if (!count.isEmpty())
+        tail << count;
+    const QString age = board::signalAge(signal.lastSeen, now);
+    if (!age.isEmpty())
+        tail << age;
+    tail << board::signalMarks(signal, now);
+    shape.tail = tail.join(QStringLiteral(" · "));
+    shape.chip = signal.session.isEmpty() ? QString()
+                                          : board::sessionChip(signal.session, chipLive);
+    shape.chipLive = chipLive;
+
+    int x = kRowPadX + kGlyphWidth + 4 + indent * 14;
+    const int kindWidth = metrics.horizontalAdvance(QStringLiteral("broken")) + 10;
+    shape.kindRect = QRect(x, 0, kindWidth, shape.height);
+    x += kindWidth;
+    int right = width - kRowPadX;
+    if (!shape.chip.isEmpty()) {
+        const int chipWidth = metrics.horizontalAdvance(shape.chip) + 12;
+        shape.chipRect = QRect(right - chipWidth, (shape.height - metrics.height() - 4) / 2,
+                               chipWidth, metrics.height() + 4);
+        right -= chipWidth + 8;
+    }
+    if (!shape.tail.isEmpty()) {
+        const int tailWidth = metrics.horizontalAdvance(shape.tail);
+        shape.tailRect = QRect(right - tailWidth, 0, tailWidth, shape.height);
+        right -= tailWidth + 10;
+    }
+    shape.keyRect = QRect(x, 0, qMax(20, right - x), shape.height);
+    Q_UNUSED(mono);
+    return shape;
+}
+
 // Paints the single list: a section header or one card per row. It reads the card from the model
 // by id, so a row holds nothing but the id and a refill never copies card data into the view.
 class RowDelegate final : public QStyledItemDelegate {
 public:
-    RowDelegate(const board::Model *model, const QList<board::Row> *rows, QListWidget *list)
-        : QStyledItemDelegate(list), m_model(model), m_rows(rows), m_list(list)
+    RowDelegate(const board::Model *model, const QList<board::Row> *rows, QListWidget *list,
+                const board::SignalsState *signalsState)
+        : QStyledItemDelegate(list), m_model(model), m_rows(rows), m_list(list),
+          m_signals(signalsState)
     {
     }
 
@@ -439,6 +495,10 @@ public:
     {
         return card.session.isEmpty() || !paneExists || paneExists(card.session);
     }
+    bool sessionLive(const QString &token) const
+    {
+        return token.isEmpty() || !paneExists || paneExists(token);
+    }
 
     // The row's width comes from the list with room for its scrollbar kept whether or not the
     // scrollbar is showing: measured at one width and painted at another, the elision would be
@@ -453,8 +513,16 @@ public:
             return QSize(width, 0);
         if (row->kind == board::Row::Section)
             return QSize(width, sectionShape(option.font, width, index.row() == 0, false).height);
-        if (row->kind == board::Row::Fold)
+        if (row->kind == board::Row::Fold || row->kind == board::Row::SignalFold
+            || row->kind == board::Row::DismissedFold)
             return QSize(width, foldShape(option.font, width).height);
+        if (row->kind == board::Row::Signal) {
+            const board::Signal *signal = m_signals ? m_signals->signalFor(row->signalKey) : nullptr;
+            return QSize(width, signal ? signalShape(*signal, option.font, width, row->indent,
+                                                     QDateTime::currentDateTimeUtc(),
+                                                     sessionLive(signal->session)).height
+                                       : 0);
+        }
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
@@ -475,8 +543,11 @@ public:
         painter->setRenderHint(QPainter::Antialiasing);
         if (row->kind == board::Row::Section)
             paintSection(painter, option, rect, *row, index.row() == 0);
-        else if (row->kind == board::Row::Fold)
+        else if (row->kind == board::Row::Fold || row->kind == board::Row::SignalFold
+                 || row->kind == board::Row::DismissedFold)
             paintFold(painter, option, rect, *row);
+        else if (row->kind == board::Row::Signal)
+            paintSignal(painter, option, rect, *row);
         else
             paintCard(painter, option, rect, *row);
         painter->restore();
@@ -629,6 +700,73 @@ private:
                           metrics.elidedText(row.title, Qt::ElideRight, shape.titleRect.width()));
     }
 
+    // One signal (#AQ6X). It reads as a row of the list — the same selection band as a card — but
+    // it carries no flag, no dates and no `#ID`: it is not a card, and the row should not pretend
+    // it is one. The claim chip at its end is the card's own chip (board::sessionChip), so who has
+    // a signal and who has a card look the same.
+    void paintSignal(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
+                     const board::Row &row) const
+    {
+        const board::Signal *signal = m_signals ? m_signals->signalFor(row.signalKey) : nullptr;
+        if (!signal)
+            return;
+        const bool live = sessionLive(signal->session);
+        const SignalShape shape = signalShape(*signal, option.font, rect.width(), row.indent,
+                                              QDateTime::currentDateTimeUtc(), live);
+        const QPoint origin = rect.topLeft();
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hover = option.state & QStyle::State_MouseOver;
+        const bool focused = m_list->hasFocus();
+        if (selected || hover) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+                                       : mix(theme::BoardFace, theme::Text, 0.05));
+            painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+        }
+        if (selected) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
+                                            rect.height() - 6), 1, 1);
+        }
+        const QFont small = smaller(option.font, 0.85);
+        const QFontMetrics metrics(small);
+        painter->setFont(small);
+        // A signal that was fixed and came back is the loudest thing in this block, so its kind
+        // wears the amber that means "a human should look"; a dismissed one is muted to the ink of
+        // history, because for now it is not work.
+        painter->setPen(signal->regressed ? theme::Warning
+                        : signal->dismissed() ? theme::TextMuted
+                                              : theme::Tool);
+        painter->drawText(shape.kindRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          board::signalKindWord(signal->kind));
+        painter->setFont(monoFont(option.font, 0.85));
+        painter->setPen(signal->dismissed() ? theme::TextMuted : theme::Text);
+        const QFontMetrics mono(monoFont(option.font, 0.85));
+        painter->drawText(shape.keyRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          mono.elidedText(signal->key, Qt::ElideMiddle, shape.keyRect.width()));
+        if (!shape.tail.isEmpty()) {
+            painter->setFont(small);
+            painter->setPen(theme::TextMuted);
+            painter->drawText(shape.tailRect.translated(origin),
+                              Qt::AlignRight | Qt::AlignVCenter, shape.tail);
+        }
+        if (!shape.chip.isEmpty()) {
+            const QRect box = shape.chipRect.translated(origin);
+            const auto [ink, edge] = badgeInk(live ? board::Badge::Session
+                                                   : board::Badge::SessionClosed);
+            painter->setFont(small);
+            if (edge.isValid()) {
+                painter->setPen(QPen(edge, 1.0));
+                painter->setBrush(theme::Surface);
+                painter->drawRoundedRect(QRectF(box).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+            }
+            painter->setPen(ink);
+            painter->drawText(box, Qt::AlignCenter,
+                              metrics.elidedText(shape.chip, Qt::ElideRight, box.width() - 6));
+        }
+    }
+
     void paintCard(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
                    const board::Row &row) const
     {
@@ -711,6 +849,7 @@ private:
     const board::Model *m_model;
     const QList<board::Row> *m_rows;
     QListWidget *m_list;
+    const board::SignalsState *m_signals = nullptr;   // signals (#AQ6X); null in no case today
 };
 
 // The section checkboxes at the top of the list page have to wrap: a pane can be ~350 px wide and
@@ -983,6 +1122,11 @@ public:
     // The self-closed fold row (#93WR): a click shows its cards or puts them away. The row is not
     // a card — it never starts a drag and nothing can be dropped on it.
     std::function<void(const QString &columnId)> onToggleFold;
+    // The two signal toggles and one signal row (#AQ6X): "signals" or "dismissed" for the first,
+    // the signal's key for the second. A signal row opens its page on a click, as Enter does —
+    // it is not a card, so there is nothing for a click to select and then wait on.
+    std::function<void(const QString &which)> onToggleSignalFold;
+    std::function<void(const QString &key)> onOpenSignal;
     // The ⚠ on a section header (#8YQ9): check that section's cards and show what it found.
     std::function<void(const QString &columnId)> onTriageSection;
     // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
@@ -1066,6 +1210,23 @@ protected:
         if (row && row->kind == board::Row::Fold && event->button() == Qt::LeftButton) {
             if (onToggleFold)
                 onToggleFold(row->columnId);
+            event->accept();
+            return;
+        }
+        // The signal rows (#AQ6X): the two toggles behave like the fold row above, and a signal
+        // itself opens its page.
+        if (row && event->button() == Qt::LeftButton
+            && (row->kind == board::Row::SignalFold || row->kind == board::Row::DismissedFold)) {
+            if (onToggleSignalFold)
+                onToggleSignalFold(row->kind == board::Row::SignalFold
+                                           ? QStringLiteral("signals")
+                                           : QStringLiteral("dismissed"));
+            event->accept();
+            return;
+        }
+        if (row && row->kind == board::Row::Signal && event->button() == Qt::LeftButton) {
+            if (onOpenSignal)
+                onOpenSignal(row->signalKey);
             event->accept();
             return;
         }
@@ -3136,7 +3297,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     listLayout->addWidget(m_columnHeader);
     m_list = new RowList(&m_rows, m_listPane);
     m_columnHeader->setList(m_list);
-    auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
+    auto *delegate = new RowDelegate(&m_model, &m_rows, m_list, &m_signalsState);
     delegate->adds = [this](const QString &columnId) { return sectionTakesNewCards(columnId); };
     delegate->turnMode = [this](const QString &cardId) {
         return m_cardTurns.value(cardId).mode;
@@ -3167,6 +3328,13 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.selfClosedFold"), QStringLiteral("Enter"));
         toggleSelfClosed(columnId);
     };
+    // The signals block (#AQ6X): the same click-is-Enter rule, and the same one-off hint.
+    m_list->onToggleSignalFold = [this](const QString &which) {
+        if (onHint)
+            onHint(QStringLiteral("board.signalsFold"), QStringLiteral("Enter"));
+        toggleSignalFold(which);
+    };
+    m_list->onOpenSignal = [this](const QString &key) { openSignal(key); };
     m_list->onAddInSection = [this](const QString &columnId) {
         if (onHint)
             onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
@@ -3233,8 +3401,46 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail = new CardDetail(m_splitter);
     m_detail->hide();
     m_splitter->addWidget(m_detail);
+    // A signal's page (#AQ6X) sits in the same half of the splitter as the card's, and only ever
+    // one of the two is up: a card and a signal are both "the thing being read", and two pages
+    // side by side would leave no list.
+    m_signalDetail = new board::SignalDetail(m_splitter);
+    m_signalDetail->hide();
+    m_signalDetail->paneExists = [this](const QString &token) {
+        return !paneExists || paneExists(token);
+    };
+    m_signalDetail->onClose = [this] { closeSignal(); };
+    m_signalDetail->onEscape = [this] {
+        const QString key = m_signalDetail->key();
+        closeSignal();
+        if (board::rowOfSignal(m_rows, key) >= 0)
+            selectSignal(key);
+    };
+    m_signalDetail->onOpenCard = [this](const QString &id) { openCard(id); };
+    m_signalDetail->onFocusPane = [this](const QString &token) {
+        if (onFocusPane && !token.isEmpty())
+            onFocusPane(token);
+    };
+    m_signalDetail->onClaim = [this] {
+        sendSignal(QStringLiteral("signals_claim"),
+                   {{QStringLiteral("pane_token"), paneClaimToken()}});
+    };
+    // The owner taking a signal back by hand. `gave-up` is the agents' word and is what promotes
+    // a signal (decision 5); a release from this page says only that it is free again.
+    m_signalDetail->onRelease = [this] {
+        sendSignal(QStringLiteral("signals_release"),
+                   {{QStringLiteral("reason"), QStringLiteral("released")}});
+    };
+    m_signalDetail->onPromote = [this] { sendSignal(QStringLiteral("signals_promote"), {}); };
+    m_signalDetail->onDismiss = [this](const QString &reason, const QString &comment,
+                                       const QString &until) {
+        sendSignal(QStringLiteral("signals_dismiss"), {{QStringLiteral("reason"), reason},
+                                                       {QStringLiteral("comment"), comment},
+                                                       {QStringLiteral("until"), until}});
+    };
     m_splitter->setStretchFactor(0, 3);
     m_splitter->setStretchFactor(1, 2);
+    m_splitter->setStretchFactor(2, 2);
     m_splitter->hide();                 // until the first `board` event: the loading line instead
     layout->addWidget(m_splitter, 1);
 
@@ -4333,6 +4539,70 @@ void BoardView::handleEvent(const QJsonObject &event)
         rebuildModelBox();
         return;
     }
+    // Signals (#AQ6X, protocol §32.1): the worker folds its record and pushes the whole state
+    // after every change, and answers `signals_list` with the same shape. It carries no card id
+    // and belongs to no thread, so it is taken here, before all of the card traffic.
+    if (m_signalsState.take(type, event)) {
+        // A page open on a key the board no longer has is closed: nothing stays up on a signal
+        // that has been resolved, removed or dismissed out of the list.
+        if (signalOpen()) {
+            if (const board::Signal *signal = m_signalsState.signalFor(m_signalDetail->key()))
+                m_signalDetail->showSignal(*signal);
+            else
+                closeSignal();
+        }
+        rebuild();
+        // A promotion is one of the two things R12 lets reach a human unasked: the card is in the
+        // inbox, and the notice says which signal opened it.
+        for (const board::Signal &promoted : m_signalsState.promoted()) {
+            if (promoted.card.isEmpty())
+                continue;
+            showNotice(QStringLiteral("#%1 opened from the signal %2")
+                               .arg(promoted.card, promoted.key), false);
+            break;
+        }
+        return;
+    }
+    // A `signals_*` write this pane asked for went through (§32.2). The state event that follows
+    // redraws the row and the page; this is only the line that says it happened.
+    if (type == QStringLiteral("signals_written")) {
+        const QString kind = event.value(QStringLiteral("kind")).toString();
+        const QString key = event.value(QStringLiteral("key")).toString();
+        const QString card = event.value(QStringLiteral("card")).toString();
+        m_signalRequests.remove(requestId);
+        if (mine || m_signalRequests.isEmpty()) {
+            const QString what = kind == QStringLiteral("claim") ? QStringLiteral("Claimed %1")
+                                 : kind == QStringLiteral("release") ? QStringLiteral("Released %1")
+                                 : kind == QStringLiteral("dismiss") ? QStringLiteral("Dismissed %1")
+                                 : kind == QStringLiteral("promote")
+                                         ? QStringLiteral("Promoted %1")
+                                         : QStringLiteral("Wrote %1");
+            showNotice(card.isEmpty() ? what.arg(key)
+                                      : what.arg(key) + QStringLiteral(" · #%1").arg(card), false);
+        }
+        return;
+    }
+    // A `signals_*` write this pane asked for and the worker refused (§32.2). It goes on the page
+    // the action was pressed on, the way a card's refusal goes under the card, and never through
+    // the card paths below: this error names a signal, not a card, and no thread is waiting on it.
+    // `board_claimed_elsewhere` carries the holder (#R9G7), and the page names them rather than
+    // saying only "no".
+    if (type == QStringLiteral("error") && mine && m_signalRequests.contains(requestId)) {
+        const QString key = m_signalRequests.take(requestId);
+        const QString code = event.value(QStringLiteral("code")).toString();
+        const QString holder = event.value(QStringLiteral("session")).toString();
+        QString what = event.value(QStringLiteral("text")).toString();
+        if (code == QStringLiteral("board_claimed_elsewhere"))
+            what = holder.isEmpty()
+                           ? QStringLiteral("Another session is working on this signal.")
+                           : QStringLiteral("%1 is working on this signal. Ask them, or take "
+                                            "another one.").arg(board::sessionChip(holder, true));
+        if (signalOpen() && m_signalDetail->key() == key)
+            m_signalDetail->showError(what);
+        else
+            showNotice(what, true);
+        return;
+    }
     // The worker said something about itself: it died, its pipe overflowed, it would not start.
     // Until 2026-09-20 this only ever reached `statusBar()->showMessage`, which this layout does
     // not show, so a Switchboard that never loaded said "Loading the Switchboard…" for ever
@@ -4484,6 +4754,8 @@ void BoardView::handleEvent(const QJsonObject &event)
             if (!item.folder.isEmpty())
                 tabs << qMakePair(item.id, item.title);
         m_detail->setChoices(statuses, tabs);
+        // A card and a signal never share the page (#AQ6X): the card takes it.
+        m_signalDetail->hide();
         m_detail->show(event);
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Turns run per card (19.16), so the card you open may already be working: give it back
@@ -4889,10 +5161,15 @@ void BoardView::selectRow(int index)
     if (index < 0 || index >= m_rows.size() || index >= m_list->count())
         return;
     QListWidgetItem *item = m_list->item(index);
-    // Exactly one of the two is ever set (#93WR): a fold row is selectable but is not a card, so
-    // standing on it empties the card selection and every card action is inert.
-    m_selectedFold = m_rows.at(index).kind == board::Row::Fold ? m_rows.at(index).columnId
-                                                              : QString();
+    // Exactly one of the four is ever set (#93WR, #AQ6X): a fold row, a signal row and the two
+    // signal toggles are selectable but are not cards, so standing on one empties the card
+    // selection and every card action is inert.
+    const board::Row &row = m_rows.at(index);
+    m_selectedFold = row.kind == board::Row::Fold ? row.columnId : QString();
+    m_selectedSignal = row.kind == board::Row::Signal ? row.signalKey : QString();
+    m_selectedSignalFold = row.kind == board::Row::SignalFold ? QStringLiteral("signals")
+                           : row.kind == board::Row::DismissedFold ? QStringLiteral("dismissed")
+                                                                   : QString();
     m_selected = item->data(kCardRole).toString();
     m_list->setCurrentItem(item);
     item->setSelected(true);
@@ -4914,6 +5191,18 @@ void BoardView::refill()
             m_collapsed.insert(section.id);
     }
     m_rows = m_model.rows(m_collapsed, m_hidden, m_selfClosedOpen);
+    // The signals block (#AQ6X) goes at the very top, above the first section header. It is the
+    // board's, not a section's: every section of a new pane starts folded, so a row inside one
+    // would be hidden exactly when a test has just gone red, and a signal has no status to sit
+    // under. A filter is about cards, so the block gets out of its way — the same rule that stops
+    // a section folding while a search is on.
+    if (m_model.filter().trimmed().isEmpty() && m_model.labelFilter().isEmpty()) {
+        const QList<board::Row> block =
+                m_signalsState.rows(m_signalFolds.contains(QStringLiteral("signals")),
+                                    m_signalFolds.contains(QStringLiteral("dismissed")));
+        for (int i = int(block.size()) - 1; i >= 0; --i)
+            m_rows.prepend(block.at(i));
+    }
 
     if (!m_model.filter().trimmed().isEmpty())
         m_list->placeholder = QStringLiteral("No card matches this filter.\nEsc clears it.");
@@ -4952,6 +5241,42 @@ void BoardView::refill()
                                                   "without a verifier. Enter or ← to put them "
                                                   "away."));
             if (row.columnId == selectedFold()) {
+                m_list->setCurrentItem(item);
+                item->setSelected(true);
+            }
+            continue;
+        }
+        // The signals block (#AQ6X): the two toggles and one row per signal. Selectable, because
+        // Enter and ←/→ work on them, and never draggable — a signal is not a card and cannot be
+        // moved into a section.
+        if (row.kind == board::Row::SignalFold || row.kind == board::Row::DismissedFold) {
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            const bool signalsRow = row.kind == board::Row::SignalFold;
+            item->setToolTip(signalsRow ? board::signalsFoldTip(row.collapsed)
+                                        : board::dismissedFoldTip(row.collapsed));
+            if (selectedSignalFold() == (signalsRow ? QStringLiteral("signals")
+                                                    : QStringLiteral("dismissed"))) {
+                m_list->setCurrentItem(item);
+                item->setSelected(true);
+            }
+            continue;
+        }
+        if (row.kind == board::Row::Signal) {
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            if (const board::Signal *signal = m_signalsState.signalFor(row.signalKey)) {
+                QString tip = board::signalRowLine(*signal, QDateTime::currentDateTimeUtc());
+                if (!signal->session.isEmpty()) {
+                    const QString chip = board::sessionChip(signal->session, true);
+                    tip += (paneExists && !paneExists(signal->session))
+                                   ? QStringLiteral("\nClaimed by %1, which has closed").arg(chip)
+                                   : QStringLiteral("\nClaimed by %1").arg(chip);
+                }
+                if (!signal->card.isEmpty())
+                    tip += QStringLiteral("\nPromoted to #%1").arg(signal->card);
+                tip += QStringLiteral("\nEnter opens it.");
+                item->setToolTip(tip);
+            }
+            if (row.signalKey == selectedSignal()) {
                 m_list->setCurrentItem(item);
                 item->setSelected(true);
             }
@@ -5037,7 +5362,7 @@ void BoardView::rebuild()
 void BoardView::syncChatVisible()
 {
     if (m_chat)
-        m_chat->setVisible(m_open && !m_sectionsOpen && !detailOpen());
+        m_chat->setVisible(m_open && !m_sectionsOpen && !detailOpen() && !signalOpen());
 }
 
 // The gear at the end of the section checkboxes: the section list itself, editable. It is a page
@@ -5191,6 +5516,152 @@ void BoardView::setOpenSelfClosed(const QJsonArray &state)
         rebuild();
 }
 
+// --------------------------------------------------------------------- signals (#AQ6X)
+//
+// Two toggles and one row per signal, above the sections; a page in the card detail's place; four
+// messages out (protocol §32.2). Nothing here writes the record: the worker folds it and pushes
+// `signals_changed`, so every one of these ends in a message or in a redraw, never in a state of
+// its own that the worker could disagree with.
+
+QString BoardView::selectedSignalFold() const
+{
+    return m_selected.isEmpty() && m_selectedFold.isEmpty() && m_selectedSignal.isEmpty()
+                   ? m_selectedSignalFold
+                   : QString();
+}
+
+QString BoardView::selectedSignal() const
+{
+    return m_selected.isEmpty() && m_selectedFold.isEmpty() ? m_selectedSignal : QString();
+}
+
+QString BoardView::signalFoldOf(const QString &key) const
+{
+    const board::Signal *signal = m_signalsState.signalFor(key);
+    if (!signal)
+        return QString();
+    return signal->dismissed() ? QStringLiteral("dismissed") : QStringLiteral("signals");
+}
+
+void BoardView::toggleSignalFold(QString which)
+{
+    if (which != QStringLiteral("signals") && which != QStringLiteral("dismissed"))
+        return;
+    const bool hadFocus = m_list->hasFocus();
+    if (m_signalFolds.contains(which))
+        m_signalFolds.remove(which);
+    else
+        m_signalFolds.insert(which);
+    rebuild();
+    const int fold = which == QStringLiteral("signals") ? board::rowOfSignalFold(m_rows)
+                                                        : board::rowOfDismissedFold(m_rows);
+    if (!m_selected.isEmpty() && board::rowOfCard(m_rows, m_selected) >= 0)
+        return;               // a card is selected and still on screen: nothing to move
+    if (fold < 0) {
+        m_selectedSignalFold.clear();
+        return;               // the row has gone (a filter, or the last signal resolved)
+    }
+    m_selected.clear();
+    m_selectedFold.clear();
+    m_selectedSignal.clear();
+    m_selectedSignalFold = which;
+    if (hadFocus)
+        selectRow(fold);
+}
+
+QJsonArray BoardView::openSignals() const
+{
+    QStringList ids(m_signalFolds.begin(), m_signalFolds.end());
+    ids.sort();
+    return QJsonArray::fromStringList(ids);
+}
+
+void BoardView::setOpenSignals(const QJsonArray &state)
+{
+    m_signalFolds.clear();
+    for (const QJsonValue &value : state) {
+        const QString id = value.toString();
+        // Only the two ids this version knows: a saved node from a later one must not open
+        // something at random.
+        if (id == QStringLiteral("signals") || id == QStringLiteral("dismissed"))
+            m_signalFolds.insert(id);
+    }
+    if (m_open)
+        rebuild();
+}
+
+void BoardView::selectSignal(const QString &key)
+{
+    if (key.isEmpty())
+        return;
+    // A signal behind a folded toggle cannot be stood on, so reaching one by key opens what holds
+    // it — the same rule a self-closed card's group follows (#93WR).
+    if (board::rowOfSignal(m_rows, key) < 0) {
+        const QString which = signalFoldOf(key);
+        if (which.isEmpty())
+            return;
+        if (!m_signalFolds.contains(which)) {
+            m_signalFolds.insert(which);
+            rebuild();
+        }
+    }
+    const int at = board::rowOfSignal(m_rows, key);
+    if (at < 0)
+        return;
+    selectRow(at);
+}
+
+void BoardView::openSignal(const QString &key)
+{
+    const board::Signal *signal = m_signalsState.signalFor(key);
+    if (!signal)
+        return;
+    selectSignal(key);
+    // A card and a signal never share the pane: whichever is opened takes the page.
+    if (detailOpen())
+        m_detail->hide();
+    m_signalDetail->showSignal(*signal);
+    updateDetailLayout();
+    m_signalDetail->setFocus();
+}
+
+void BoardView::closeSignal()
+{
+    if (m_signalDetail->isHidden())
+        return;
+    m_signalDetail->hide();
+    updateDetailLayout();
+    focusInput();
+}
+
+bool BoardView::signalOpen() const
+{
+    return m_signalDetail && !m_signalDetail->isHidden();
+}
+
+QString BoardView::paneClaimToken() const
+{
+    // The Switchboard pane runs no agent of its own, so it claims under its own view token: two
+    // board panes never chase one test, and a signal thread (#AQ6X phase 3) claims under its
+    // thread id instead. No pane has this token, so the chip reads `closed`, which is honest.
+    return QStringLiteral("board-") + m_requestPrefix;
+}
+
+void BoardView::sendSignal(const QString &type, const QJsonObject &fields)
+{
+    const QString key = m_signalDetail->key();
+    if (key.isEmpty())
+        return;
+    const QString id = nextRequestId();
+    m_signalRequests.insert(id, key);
+    QJsonObject message{{QStringLiteral("type"), type}, {QStringLiteral("id"), id},
+                        {QStringLiteral("key"), key}};
+    for (auto at = fields.constBegin(); at != fields.constEnd(); ++at)
+        message.insert(at.key(), at.value());
+    send(message);
+}
+
+
 QJsonArray BoardView::collapsedSections() const
 {
     QStringList ids(m_collapsed.begin(), m_collapsed.end());
@@ -5318,27 +5789,41 @@ void BoardView::updateDetailLayout()
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     if (m_keys->text() != keys)
         m_keys->setText(keys);
-    // The header exists only while a card is open, and then it says one thing: the way back.
-    if (m_head->isHidden() == detailOpen()) {
-        m_head->setVisible(detailOpen());
+    // A signal's page (#AQ6X) has four actions and no thread, so a stacked pane says its own line
+    // rather than the card's. Both pages live in the same half of the splitter and only one is
+    // ever up (openSignal and the `board_card` handler hide the other), so "a page is open" is
+    // the two together, and everything below reads `pageOpen` rather than `detailOpen()`.
+    static const QString signalKeys = QStringLiteral(
+        "<b>Esc</b> back to the board &nbsp; <b>Claim</b> take it &nbsp; <b>Release</b> give it "
+        "back &nbsp; <b>Dismiss</b> with a reason and an expiry &nbsp; <b>Promote</b> open a card");
+    const bool pageOpen = detailOpen() || signalOpen();
+    if (signalOpen() && stacked && m_keys->text() != signalKeys)
+        m_keys->setText(signalKeys);
+    // The header exists only while a page is open, and then it says one thing: the way back.
+    if (m_head->isHidden() == pageOpen) {
+        m_head->setVisible(pageOpen);
         applyRightInset();
     }
     syncChatVisible();
-    if (!detailOpen()) {
+    if (!pageOpen) {
         m_listPane->setVisible(true);
         placeNotice();      // back to the bottom of the list
         return;
     }
     const bool wasStacked = m_listPane->isHidden();
     m_listPane->setVisible(!stacked);
-    placeNotice();          // the top of the pane while the card has it, the bottom otherwise
+    placeNotice();          // the top of the pane while the page has it, the bottom otherwise
     if (stacked)
         return;
-    if (!m_detailSized || wasStacked) {
+    if (!m_detailSized || wasStacked || m_sizedForSignal != signalOpen()) {
         const int total = qMax(1, m_splitter->width());
         const int detail = qBound(360, total * 45 / 100, total - 300);
-        m_splitter->setSizes({total - detail, detail});
+        // Three children now (the list, the card, the signal): the one that is away gets nothing,
+        // so switching between the two pages never leaves a sliver of the other one.
+        m_splitter->setSizes({total - detail, signalOpen() ? 0 : detail,
+                              signalOpen() ? detail : 0});
         m_detailSized = true;
+        m_sizedForSignal = signalOpen();
     }
 }
 
@@ -5668,6 +6153,7 @@ void BoardView::closeDetail()
 {
     m_follow->stop();
     m_detail->hide();
+    m_signalDetail->hide();
     updateDetailLayout();
     watchCardFiles();   // the card that was open no longer needs a watch of its own (#N5JJ)
     focusInput();
@@ -5687,6 +6173,8 @@ void BoardView::selectCard(const QString &id)
 {
     m_selected = id;
     m_selectedFold.clear();
+    m_selectedSignal.clear();
+    m_selectedSignalFold.clear();
     // A card the fold row is holding cannot be stood on until the row is open (#93WR), so a card
     // reached by id — a `#ID` in a card's or a thread's text, a link from the helper, the cleanup
     // panel's anchors — opens what holds it: its self-closed group, and the section around it.
@@ -5895,6 +6383,20 @@ void BoardView::shiftSection(int delta)
 // lands on the fold row, ← again folds the whole section.
 void BoardView::foldSelected()
 {
+    // The signals block (#AQ6X): ← on its toggle puts it away, and ← on a signal row goes back to
+    // the toggle that holds it and puts the whole block away — exactly what ← does from a
+    // self-closed card (#93WR).
+    if (!selectedSignalFold().isEmpty()) {
+        if (m_signalFolds.contains(selectedSignalFold()))
+            toggleSignalFold(selectedSignalFold());
+        return;
+    }
+    if (!selectedSignal().isEmpty()) {
+        const QString which = signalFoldOf(selectedSignal());
+        if (!which.isEmpty() && m_signalFolds.contains(which))
+            toggleSignalFold(which);
+        return;
+    }
     if (!selectedFold().isEmpty()) {
         const QString columnId = selectedFold();
         if (m_selfClosedOpen.contains(columnId))
@@ -5921,6 +6423,21 @@ void BoardView::foldSelected()
 // rather than jumping back to whatever was folded at the top.
 void BoardView::unfoldNearest()
 {
+    // On a signals toggle (#AQ6X), → shows its rows and steps onto the first of them. On a signal
+    // row it does nothing: a signal has nothing to unfold, and its page is Enter's.
+    if (!selectedSignalFold().isEmpty()) {
+        const QString which = selectedSignalFold();
+        if (!m_signalFolds.contains(which))
+            toggleSignalFold(which);
+        const int fold = which == QStringLiteral("signals") ? board::rowOfSignalFold(m_rows)
+                                                           : board::rowOfDismissedFold(m_rows);
+        const int first = board::stepRow(m_rows, fold, 1);
+        if (first >= 0 && m_rows.at(first).kind == board::Row::Signal)
+            selectRow(first);
+        return;
+    }
+    if (!selectedSignal().isEmpty())
+        return;
     // On the self-closed fold row (#93WR), → is that row's own key: it shows its cards, and on an
     // open row it steps into the first of them, the way ← steps back out.
     if (!selectedFold().isEmpty()) {
@@ -6154,9 +6671,14 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         case Qt::Key_Return:
         case Qt::Key_Enter:
             // Enter on the self-closed fold row (#93WR) toggles it; a fold row is not a card and
-            // has nothing to open.
+            // has nothing to open. The signals block (#AQ6X) reads the same way: its toggles
+            // toggle, and a signal row opens its page.
             if (!selectedFold().isEmpty())
                 toggleSelfClosed(selectedFold());
+            else if (!selectedSignalFold().isEmpty())
+                toggleSignalFold(selectedSignalFold());
+            else if (!selectedSignal().isEmpty())
+                openSignal(selectedSignal());
             else
                 openSelected();
             return true;

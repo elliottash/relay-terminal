@@ -21,6 +21,7 @@
 
 #include "BoardModel.h"
 #include "BoardSections.h"
+#include "BoardSignals.h"   // signals: the machine's own faults as rows this list draws (#AQ6X)
 #include "HelperModelBox.h"   // the model box's rows, shared with the helper panels (#BRD3, #FEJQ)
 
 class QComboBox;
@@ -135,6 +136,39 @@ public:
     void setOpenSelfClosed(const QJsonArray &state);
     // By value, for the reason toggleSection is: every caller names a section out of `m_rows`.
     void toggleSelfClosed(QString columnId);
+
+    // ---- signals (#AQ6X, src/BoardSignals.h, protocol §32)
+    //
+    // The machine's own faults — a failing test, a broken build — as two toggles and a row each,
+    // spliced in **above the first section header** rather than inside a section. They are the
+    // board's, not a status's: every section of a new pane starts folded, so a signals row inside
+    // one would be invisible exactly when it matters, and a signal has no status the owner moves.
+    // A filter is about cards, so the block gets out of its way, as a folded section does.
+    // Not called `signals()`: Qt's moc keyword macro makes that word `public:`.
+    const board::SignalsState &signalsState() const { return m_signalsState; }
+    // The page one signal opens, in the card detail's place. Public so a test drives the four
+    // actions through the same path the owner's click takes.
+    board::SignalDetail *signalDetail() const { return m_signalDetail; }
+    // Which of the two rows are open, for the layout node: `["signals"]`, `["signals",
+    // "dismissed"]`. Same shape and the same home as the folded set and `self_closed`
+    // (`{"board": {"signals": [...]}}`); default folded, so an empty array is the default and an
+    // id this version does not know is ignored.
+    QJsonArray openSignals() const;
+    void setOpenSignals(const QJsonArray &state);
+    // "signals" or "dismissed"; by value, for the reason toggleSection's argument is.
+    void toggleSignalFold(QString which);
+    // Which of the two toggles the selection stands on ("signals", "dismissed"), or empty. As
+    // with `selectedFold()`, a card or a signal selected by any other path wins.
+    QString selectedSignalFold() const;
+    // The signal row the selection stands on, or empty. A signal row is not a card, so
+    // `selectedCard()` is empty while it is selected and every card action is inert.
+    QString selectedSignal() const;
+    void selectSignal(const QString &key);
+    // Enter or a click on a signal row: its page, in the card detail's place. A key the board does
+    // not have does nothing.
+    void openSignal(const QString &key);
+    void closeSignal();
+    bool signalOpen() const;
     // Which section's fold row the selection is standing on, or empty. A fold row is not a card,
     // so `selectedCard()` is empty while it is selected and every card action is inert — and a
     // card selected by any other path wins, which is what keeps the two from both being set.
@@ -344,6 +378,29 @@ private:
     // m_selected is ever set: the fold row is a selectable row that is not a card.
     QString m_selectedFold;
     QSet<QString> m_selfClosedOpen;   // sections whose self-closed cards are showing (#93WR)
+    // ---- signals (#AQ6X). The state is the worker's, replaced whole by every `signals_changed`;
+    // `m_signalFolds` holds "signals" and "dismissed" for the two toggles that are open, and
+    // exactly one of m_selected / m_selectedFold / m_selectedSignal / m_selectedSignalFold is
+    // ever set — a signal row is a row that is not a card.
+    board::SignalsState m_signalsState;
+    QSet<QString> m_signalFolds;
+    QString m_selectedSignal, m_selectedSignalFold;
+    board::SignalDetail *m_signalDetail = nullptr;
+    // request id -> the signal it was sent about, so a refusal lands on the page that asked
+    // rather than as a notice over a list nobody is looking at.
+    QHash<QString, QString> m_signalRequests;
+    // What this pane claims signals under. The Switchboard pane runs no agent of its own, so it
+    // claims under its own view token: two board panes never chase one test, and a signal thread
+    // (#AQ6X phase 3) will claim under its thread id instead. An unknown token reads `closed` on
+    // the chip, which is honest — there is no pane to reveal.
+    QString paneClaimToken() const;
+    // One `signals_*` write about the signal the page is open on (protocol §32.2): the key and a
+    // request id of this pane's own, so the worker's refusal comes back to the page that asked
+    // rather than to a notice over a list nobody is looking at.
+    void sendSignal(const QString &type, const QJsonObject &fields);
+    // Which of the two toggles holds this signal: "dismissed" for a dismissed one, "signals"
+    // otherwise. Empty for a key the board does not have.
+    QString signalFoldOf(const QString &key) const;
     // The card turns running right now, by card id (protocol 19.16). Several cards can be
     // planning or discussing at once, and only one of them is on screen, so what each turn has
     // said so far and what it is doing this second are held here rather than in the card view.
@@ -478,6 +535,9 @@ private:
     // would delete the items under it, so a rebuild waits for the drag to end.
     bool m_dragActive = false, m_rebuildPending = false;
     bool m_detailSized = false;     // the split was sized for the open card already
+    // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
+    // the other one re-divides the splitter instead of leaving it sized for the first.
+    bool m_sizedForSignal = false;
     bool m_replyOnOpen = false;     // `c` before the card arrived: focus its reply box then
     bool m_editOnOpen = false;      // `e` before the card arrived: start editing it then
     // That edit is a card the quick-add field has just made, whose `## Issue` is the one line

@@ -15,6 +15,8 @@
 #include <QLocale>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
+#include <QSet>
+#include <QTextDocument>
 #include <QTimeZone>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -280,9 +282,7 @@ bool SignalsState::take(const QString &type, const QJsonObject &event)
     m_promoted.clear();
     m_byKey.clear();
     m_pending = event.value(QStringLiteral("pending_count")).toInt();
-    QList<Signal> open, groups;
-    QMap<QString, QList<Signal>> members;   // group key -> its member signals, in the same order
-    QStringList memberKeys;
+    QList<Signal> open;
     for (const QJsonValue &value : event.value(QStringLiteral("open")).toArray()) {
         const Signal signal = Signal::fromJson(value.toObject());
         if (signal.key.isEmpty())
@@ -290,8 +290,6 @@ bool SignalsState::take(const QString &type, const QJsonObject &event)
         m_byKey.insert(signal.key, signal);
         if (signal.dismissed())
             m_dismissed << signal;          // a worker that sends one in `open` is taken at its word
-        else if (signal.isGroup())
-            groups << signal;
         else
             open << signal;
     }
@@ -307,30 +305,30 @@ bool SignalsState::take(const QString &type, const QJsonObject &event)
         if (!signal.key.isEmpty())
             m_promoted << signal;
     }
-    // One cause, one item: a group comes first and the keys it names follow it, so a run of
-    // twenty failures with one fingerprint reads as one thing with twenty parts rather than
-    // twenty things. A member the event did not send as its own row is simply not drawn.
-    std::sort(groups.begin(), groups.end(), before);
+    // One list, one order (R11), and then one rule on top of it: **a group is followed by the keys
+    // it names**, wherever the sort put it, so a run of twenty failures with one fingerprint reads
+    // as one thing with twenty parts rather than twenty things. The group's own order is kept for
+    // its members — it grouped them — and a member the event did not send as a row of its own is
+    // simply not drawn. Members are taken out of their own place in the list, never listed twice.
     std::sort(open.begin(), open.end(), before);
-    for (const Signal &group : std::as_const(groups)) {
-        for (const QString &key : group.members) {
-            for (const Signal &signal : std::as_const(open)) {
-                if (signal.key != key)
-                    continue;
-                members[group.key] << signal;
-                memberKeys << key;
-                break;
-            }
-        }
-    }
-    for (const Signal &group : std::as_const(groups)) {
-        m_open << group;
-        for (const Signal &member : members.value(group.key))
-            m_open << member;
-    }
+    QSet<QString> claimed;
     for (const Signal &signal : std::as_const(open))
-        if (!memberKeys.contains(signal.key))
-            m_open << signal;
+        if (signal.isGroup())
+            for (const QString &key : signal.members)
+                claimed.insert(key);
+    for (const Signal &signal : std::as_const(open)) {
+        if (!signal.isGroup() && claimed.contains(signal.key))
+            continue;                     // it comes out under its group, below
+        m_open << signal;
+        if (!signal.isGroup())
+            continue;
+        for (const QString &key : signal.members)
+            for (const Signal &member : std::as_const(open))
+                if (member.key == key && !member.isGroup()) {
+                    m_open << member;
+                    break;
+                }
+    }
     // Soonest to expire first: a dismissal about to run out is the one thing in this list that is
     // about to become work again (R12: the only other thing that reaches a human unasked).
     std::sort(m_dismissed.begin(), m_dismissed.end(), [](const Signal &a, const Signal &b) {
@@ -430,8 +428,10 @@ QToolButton *actionButton(QWidget *parent, const QString &text, const QString &t
 
 SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
 {
-    setObjectName(QStringLiteral("boardDetail"));   // the card page's own frame: one widget family
-    setAttribute(Qt::WA_StyledBackground);
+    // Its own name, not the card page's `boardDetail`: `QObject::findChild` looks at every child
+    // of a level before it recurses, so a label named like the card's — at depth 3 here against
+    // the card's depth 4 — is what a test asking the view for `boardCardError` would find.
+    setObjectName(QStringLiteral("boardSignalDetail"));
     setMinimumWidth(320);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 10, 12, 10);
@@ -440,12 +440,16 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     auto *top = new QHBoxLayout;
     top->setSpacing(6);
     m_key = new QLabel(this);
-    m_key->setObjectName(QStringLiteral("boardCardTitle"));
+    m_key->setObjectName(QStringLiteral("boardSignalKey"));
     m_key->setWordWrap(true);
-    m_key->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QFont keyFont = m_key->font();
+    keyFont.setPointSizeF(keyFont.pointSizeF() * 1.15);
+    keyFont.setWeight(QFont::DemiBold);
+    keyFont.setFamily(QFontDatabase::systemFont(QFontDatabase::FixedFont).family());
+    m_key->setFont(keyFont);
     top->addWidget(m_key, 1);
     m_close = new QToolButton(this);
-    m_close->setObjectName(QStringLiteral("boardCardClose"));
+    m_close->setObjectName(QStringLiteral("boardCardClose"));   // the × of a page, one look
     m_close->setText(QStringLiteral("×"));
     m_close->setToolTip(QStringLiteral("Back to the board (Esc)"));
     m_close->setCursor(Qt::PointingHandCursor);
@@ -459,7 +463,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     // Kind, state, when it was first and last seen, how often — the signal's whole front matter,
     // in the muted ink the card page's fields use.
     m_fields = new QLabel(this);
-    m_fields->setObjectName(QStringLiteral("boardCardMeta"));
+    m_fields->setObjectName(QStringLiteral("boardSignalFields"));
     m_fields->setWordWrap(true);
     m_fields->setTextFormat(Qt::RichText);
     m_fields->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
@@ -470,7 +474,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_fields);
 
     m_marks = new QLabel(this);
-    m_marks->setObjectName(QStringLiteral("boardCardVerifyLine"));
+    m_marks->setObjectName(QStringLiteral("boardSignalMarks"));
     m_marks->setWordWrap(true);
     m_marks->hide();
     layout->addWidget(m_marks);
@@ -478,7 +482,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     // The promoted card, as the `#ID` link the card's own `## Signal` section points back with:
     // the two halves of a promotion are one click from each other (decision 6).
     m_card = new QLabel(this);
-    m_card->setObjectName(QStringLiteral("boardCardMeta"));
+    m_card->setObjectName(QStringLiteral("boardSignalCard"));
     m_card->setTextFormat(Qt::RichText);
     m_card->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
     m_card->hide();
@@ -489,7 +493,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_card);
 
     m_members = new QLabel(this);
-    m_members->setObjectName(QStringLiteral("boardCardMeta"));
+    m_members->setObjectName(QStringLiteral("boardSignalMembers"));
     m_members->setWordWrap(true);
     m_members->hide();
     layout->addWidget(m_members);
@@ -507,7 +511,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_excerpt, 1);
 
     m_error = new QLabel(this);
-    m_error->setObjectName(QStringLiteral("boardCardError"));
+    m_error->setObjectName(QStringLiteral("boardSignalError"));
     m_error->setWordWrap(true);
     m_error->hide();
     layout->addWidget(m_error);
@@ -525,7 +529,9 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     auto *formRow = new QHBoxLayout;
     formRow->setSpacing(6);
     m_reason = new QComboBox(m_form);
-    m_reason->setObjectName(QStringLiteral("boardPicker"));
+    // Not `boardPicker`, which the card page's status and category combos wear: a test that walks
+    // every picker in the view must not find the dismissal's reason among them.
+    m_reason->setObjectName(QStringLiteral("boardSignalReason"));
     for (const QString &reason : dismissReasons())
         m_reason->addItem(dismissReasonTitle(reason), reason);
     m_reason->setToolTip(QStringLiteral("Why: an agent may only write Environmental or Known "
@@ -585,7 +591,7 @@ SignalDetail::SignalDetail(QWidget *parent) : QWidget(parent)
     layout->addLayout(actions);
 }
 
-void SignalDetail::show(const Signal &signal, const QDateTime &now)
+void SignalDetail::showSignal(const Signal &signal, const QDateTime &now)
 {
     const bool same = signal.key == m_signal.key && !m_signal.key.isEmpty();
     m_signal = signal;
@@ -652,11 +658,14 @@ void SignalDetail::render()
                                            m_signal.card.toHtmlEscaped(), theme::Link.name()));
     m_card->setVisible(!m_signal.card.isEmpty());
 
+    m_members->setTextFormat(Qt::RichText);
     m_members->setText(m_signal.members.isEmpty()
                                ? QString()
-                               : QStringLiteral("Stands for %1: %2")
+                               : QStringLiteral("<span style=\"color:%1\">Stands for %2: %3</span>")
+                                         .arg(theme::TextMuted.name())
                                          .arg(m_signal.members.size())
-                                         .arg(m_signal.members.join(QStringLiteral(", "))));
+                                         .arg(m_signal.members.join(QStringLiteral(", "))
+                                                      .toHtmlEscaped()));
     m_members->setVisible(!m_signal.members.isEmpty());
 
     m_excerpt->setPlainText(m_signal.excerpt.isEmpty()
@@ -672,7 +681,11 @@ void SignalDetail::render()
 
 void SignalDetail::showError(const QString &text)
 {
-    m_error->setText(text);
+    // Red, and its own ink rather than `QLabel#boardCardError`'s: see the object names above.
+    m_error->setTextFormat(Qt::RichText);
+    m_error->setText(text.isEmpty() ? QString()
+                                    : QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                              .arg(theme::Error.name(), text.toHtmlEscaped()));
     m_error->setVisible(!text.isEmpty());
 }
 
@@ -684,7 +697,12 @@ void SignalDetail::clearError()
 
 QString SignalDetail::error() const
 {
-    return m_error->isHidden() ? QString() : m_error->text();
+    // The words, not the markup showError wrapped them in.
+    if (m_error->isHidden())
+        return QString();
+    QTextDocument document;
+    document.setHtml(m_error->text());
+    return document.toPlainText();
 }
 
 void SignalDetail::claim()
@@ -778,6 +796,9 @@ void SignalDetail::submitDismiss()
         return;
     }
     clearError();
+    // The form closes on the way out: the dismissal is written, and a form left open invites a
+    // second one. A refusal re-opens nothing — it lands on the error line above.
+    closeDismiss();
     if (onDismiss)
         onDismiss(dismissReason(), dismissComment(), dismissUntil());
 }

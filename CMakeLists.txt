@@ -833,6 +833,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-boardsections-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardsections COMMAND relay-boardsections-tests)
     set_tests_properties(boardsections PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Signals (#AQ6X): the fold over the worker's `signals_changed`, the rows it draws and the
+    # page's four actions. The state holds no widgets; the pane half is driven with fake events,
+    # exactly as boardmodel_test.cpp drives the card rows.
+    add_executable(relay-boardsignals-tests tests/signals_test.cpp)
+    target_link_libraries(relay-boardsignals-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardsignals COMMAND relay-boardsignals-tests)
+    set_tests_properties(boardsignals PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # Which project's Switchboard a pane is looking at. The rule itself is pure (QTemporaryDir);
     # RelayWindow::boardWorkspace() needs a whole window, so the test reads that one function as
     # text, exactly as tests/settingspane_test.cpp reads settingsSections().

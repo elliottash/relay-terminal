@@ -173,8 +173,9 @@ public:
     std::function<void(const QString &token)> onFocusPane;
     std::function<bool(const QString &token)> paneExists;
 
-    // Show this signal. `now` is passed in so the ages are the list's, and a test can fix them.
-    void show(const Signal &signal, const QDateTime &now = QDateTime::currentDateTimeUtc());
+    // Show this signal (and the page, if it was away). `now` is passed in so the ages are the
+    // list's and a test can fix them. Not called `show`: that would hide `QWidget::show()`.
+    void showSignal(const Signal &signal, const QDateTime &now = QDateTime::currentDateTimeUtc());
     QString key() const { return m_signal.key; }
     const Signal &signal() const { return m_signal; }
 
