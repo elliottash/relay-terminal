@@ -32,6 +32,33 @@ do you understand what i am doing? are there other project / SWE tooling that we
   profiling system." Both machines are runners: spark (aarch64, Ubuntu 24.04, g++ 13, Qt5) and
   sphinxpad (x86_64, Ubuntu 26.04, clang, Qt5 and Qt6). Setup is `scripts/relay-tooling-setup`.
 
+- 2026-09-20, owner, on recording profiling (this card's `t:ea`). The question started as
+  *"should we also keep a record of whether an implementation has been profiled"*, passed through a
+  per-card `profiled_by` stamp, and landed on **no card-indexed profiling state at all**:
+  *"yeah maybe not"*, and then the reason — **"the issue there is, many old cards become
+  irrelevant to a project."**
+  1. **No per-card profiled stamp, and no new front-matter field.** A `verified_by`-style stamp was
+     considered and dropped. `verified_by` is written once and never invalidated when the feature
+     later changes; a profile stamp that decayed would turn a card from a record of work into a
+     live view of the code, and closed cards would start reopening.
+  2. **No recurring queue is ever built by scanning cards.** Cards age out: when this board was
+     last audited against the code, 8 of 43 open cards described work that was already done.
+     Anything asked repeatedly over a project's life must be indexed on an object whose lifetime
+     matches the code, not on work items.
+  3. **The benchmark registry is that object.** A benchmark is a test whose result is a number
+     rather than a pass, so it belongs in the Test suites pane and the `## Tests` section under the
+     same source-hash staleness already decided here for tests. *"Profile all unprofiled cards"*
+     becomes *"run the stale benchmarks"*. The owner's own brief for Check already says
+     "staleness / slowness", so the slow dimension was in scope from the start.
+  4. **Card → benchmark is allowed; benchmark → card is refused.** A card may cite a benchmark as
+     provenance, one line in `## Tests`. Nothing queries from that side, so when the card stops
+     describing anything the citation dies quietly with it. The registry must never hold pointers
+     back to cards, or the object meant to outlive them inherits their rot.
+  5. **Profiling generates cards rather than being tracked by them.** A profile run that finds a
+     hotspot files a card, closed when the hotspot goes: forward in time, always relevant,
+     self-closing. Identical machinery to the flaky-tests-become-cards item already queued here,
+     pointed at a different signal.
+
 ## Plan
 **Goal** — The Switchboard becomes the project's control panel, not only its tracker: every
 recurring engineering activity (running and auditing tests, profiling, later dependencies,

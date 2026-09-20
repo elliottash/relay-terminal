@@ -72,3 +72,16 @@ wins. Row 8 of the table stands, but the **format** of the section is #7BM4's, n
 invent: a Markdown list, one line per test, an invocation plus an identifier, with Check appending
 dated blocks under it. This card's docs task (`t:s6`) must describe that format and link #7BM4
 rather than writing a second one. Commented on #7BM4 so its implementer knows before `t:q5` lands.
+
+<!-- relay:entry 20260920T210744Z-k2 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 21:07
+**No profiling section. The set stays at eleven.**
+
+The owner asked whether a card should record that an implementation was profiled. The answer is no,
+and the reason applies to this card's whole design: *"many old cards become irrelevant to a
+project."* Profiling state belongs on an object whose lifetime matches the code, not on a work item
+that ages out. Recorded in full on #7BM4, whose `t:ea` owns profiling.
+
+Worth keeping in mind for the section set generally: a section earns its place when it records what
+a **stage produced**, which is a fact that stays true. A section that would have to be kept
+*current* against the code does not belong on a card at all.
