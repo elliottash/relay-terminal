@@ -49,6 +49,19 @@ struct AppChange {
 
 namespace appcommands {
 
+// The answer to one `app_command`, ready to go straight back down the pipe it arrived on (§30.3).
+//
+// There are two pipes and one executor. A pane's worker sends its commands down the pane's own
+// connection (`src/Pane.h`) and the tab's helper worker down the helper's (`src/RelayWindow.h`),
+// and both are answered here so that the two routes cannot drift: until 2026-09-20 only the pane
+// route existed, and every write the helper attempted sat out §30.3's 20-second deadline and came
+// back `no_reply` while looking, on the GUI side, like nothing at all.
+//
+// `execute` is the window's executor for this connection, or unset when there is no window left to
+// act in — then the call ends in an error the transcript can show rather than in that deadline.
+QJsonObject answerFor(const QJsonObject &command,
+                      const std::function<QJsonObject(const QJsonObject &)> &execute);
+
 // Whether an agent may run this action without being asked (owner decision 2, §30.2). It starts
 // with the reversible ones — opening or revealing anything, testing a key, refreshing or detecting
 // local servers, copying a page, reordering models, undo — and everything else is off until the

@@ -7,6 +7,7 @@
 // window sets, which is what lets it sit below them here. QueueRowDelegate draws the queue rows.
 
 #include "AppPaths.h"
+#include "AppCommands.h"   // appcommands::answerFor: one `app_command` answered down this pane's pipe (#FEJQ, §30.3)
 #include "CopyOnSelect.h"
 #include "CurrentTextComboBox.h"
 #include "ModelCatalog.h"
@@ -9408,13 +9409,10 @@ private:
         } else if (type == QStringLiteral("app_command")) {
             // The window does it and answers; the answer goes back down this pane's own pipe
             // (#FEJQ, §30.3). A pane whose window has gone still answers, so the worker's tool
-            // call ends in an error rather than in the 20-second `no_reply` deadline.
-            QJsonObject result = onAppCommand ? onAppCommand(event) : QJsonObject{};
-            if (result.isEmpty())
-                result = QJsonObject{{"type", "app_command_result"}, {"id", event.value(QStringLiteral("id")).toString()},
-                                     {"ok", false}, {"error", QStringLiteral("failed")},
-                                     {"message", QStringLiteral("This pane has no window to act in.")}};
-            send(result);
+            // call ends in an error rather than in the 20-second `no_reply` deadline. The tab's
+            // helper worker is answered the same way from its own pipe (RelayWindow::boardWorker),
+            // which is why building the answer is `appcommands::answerFor` and not two copies.
+            send(relay::appcommands::answerFor(event, onAppCommand));
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());

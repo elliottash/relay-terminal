@@ -476,6 +476,41 @@ private Q_SLOTS:
         QVERIFY(noteLabels().isEmpty());
     }
 
+    // ----- the answer, on whichever pipe the command came out of (§30.3) ----------------------
+    //
+    // There are two pipes and one executor: a pane's worker (src/Pane.h) and the tab's helper
+    // worker (RelayWindow::boardWorker). Only the pane's was wired until 2026-09-20, so every
+    // write the helper attempted waited out the 20-second deadline and answered `no_reply`. Both
+    // routes now build the answer here, which is what keeps them from drifting apart again.
+    void theAnswerIsBuiltTheSameWayOnEitherPipe() {
+        const QJsonObject command{{QStringLiteral("id"), QStringLiteral("r9")},
+                                  {QStringLiteral("command"), QStringLiteral("set_option")},
+                                  {QStringLiteral("row"), QStringLiteral("option:thinking")},
+                                  {QStringLiteral("value"), false}};
+        // The helper's command, executed and answered: the same request id, the row's value
+        // before and after, and a change the person can undo.
+        const QJsonObject answer = relay::appcommands::answerFor(
+            command, [this](const QJsonObject &sent) { return run(sent, QStringLiteral("helper")); });
+        QCOMPARE(answer.value(QStringLiteral("type")).toString(), QStringLiteral("app_command_result"));
+        QCOMPARE(answer.value(QStringLiteral("id")).toString(), QStringLiteral("r9"));
+        QVERIFY(answer.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(answer.value(QStringLiteral("previous")).toBool(), true);
+        QCOMPARE(answer.value(QStringLiteral("value")).toBool(), false);
+        QVERIFY(!answer.value(QStringLiteral("change_id")).toString().isEmpty());
+        QCOMPARE(state.thinking, false);
+        QCOMPARE(app.changes().size(), 1);
+        QCOMPARE(app.changes().first().who, QStringLiteral("helper"));
+
+        // And with no window left to act in there is still an answer, so the tool call ends in an
+        // error the transcript can show rather than in the deadline.
+        const QJsonObject orphan = relay::appcommands::answerFor(command, {});
+        QCOMPARE(orphan.value(QStringLiteral("type")).toString(), QStringLiteral("app_command_result"));
+        QCOMPARE(orphan.value(QStringLiteral("id")).toString(), QStringLiteral("r9"));
+        QVERIFY(!orphan.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(orphan.value(QStringLiteral("error")).toString(), QStringLiteral("failed"));
+        QVERIFY(!orphan.value(QStringLiteral("message")).toString().isEmpty());
+    }
+
     void anUnknownCommandIsRefusedRatherThanIgnored() {
         const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
                                         {QStringLiteral("command"), QStringLiteral("launch_rockets")}});

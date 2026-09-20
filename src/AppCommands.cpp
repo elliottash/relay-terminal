@@ -105,6 +105,20 @@ QString target(const QJsonObject &command, const char *first, const char *second
 }
 
 }  // namespace
+
+QJsonObject answerFor(const QJsonObject &command,
+                      const std::function<QJsonObject(const QJsonObject &)> &execute) {
+    QJsonObject result = execute ? execute(command) : QJsonObject{};
+    if (result.isEmpty())
+        result = QJsonObject{{QStringLiteral("type"), QStringLiteral("app_command_result")},
+                             {QStringLiteral("id"), command.value(QStringLiteral("id")).toString()},
+                             {QStringLiteral("ok"), false},
+                             {QStringLiteral("error"), QStringLiteral("failed")},
+                             {QStringLiteral("message"),
+                              QStringLiteral("There is no window left to act in.")}};
+    return result;
+}
+
 }  // namespace appcommands
 
 // ----- the catalog (§30.2) ------------------------------------------------------------------------

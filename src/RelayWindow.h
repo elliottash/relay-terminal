@@ -5001,6 +5001,22 @@ public:
         // project has its own worker and its own conversation, and neither redraws the other.
         worker->onEvent = [guard, tab](const QJsonObject &event) {
             if (!guard) return;
+            // An `app_command` out of the *helper* (§30.3). A pane's worker is answered in
+            // src/Pane.h; this is the other pipe, and until it was here every write the helper
+            // attempted — app_option_set, app_action_run, app_open, app_undo — waited out the
+            // 20-second deadline and came back `no_reply`, with nothing on screen to say why.
+            // The answer goes back down this worker's own pipe: there is no routing field on the
+            // wire. `who` is "helper", which is what the change log and the notification say.
+            if (event.value(QStringLiteral("type")).toString() == QStringLiteral("app_command")) {
+                relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data();
+                if (!worker) return;
+                QPointer<RelayWindow> window(guard);
+                worker->send(relay::appcommands::answerFor(event, [window](const QJsonObject &command) {
+                    return window ? window->executeAppCommand(command, QStringLiteral("helper"))
+                                  : QJsonObject{};
+                }));
+                return;
+            }
             QWidget *page = guard->pageOfTabId(tab);
             if (!page) return;
             for (QWidget *leaf : leavesIn(page))

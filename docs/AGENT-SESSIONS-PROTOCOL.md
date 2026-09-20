@@ -5531,12 +5531,15 @@ decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "O
 - **Secrets never cross this channel in either direction.** A secret row's value is not in the
   catalog, `app_option_get` will not produce one, and `app_option_set` refuses it before the
   request is built. Keys are the keystore's, as everywhere else (13.2).
+- **Two pipes, one answer.** A pane's worker sends its `app_command` down the pane's connection
+  and the tab's helper down the helper's; `src/Pane.h` answers the first and
+  `RelayWindow::boardWorker`'s event handler the second, both through
+  `relay::appcommands::answerFor`. It is one function because it was briefly one route: until
+  2026-09-20 nothing executed a `BoardWorker`'s `app_command` — its events went to the board views
+  and the helper panels and no further — so every write the helper attempted waited out the 20 s
+  deadline and answered `no_reply`, while the GUI showed nothing at all. The helper's `who` is
+  `"helper"`, which is what the change log and the notification say.
 - **Not built yet, and the section says so rather than describing it:**
-  - **The helper worker's `app_command` is not answered.** The GUI routes a *pane* worker's
-    `app_command` to the window's executor (`src/Pane.h`), but a `BoardWorker`'s events go to the
-    board views and the helper panels, neither of which executes one, so the helper's
-    `app_option_set`, `app_action_run`, `app_open` and `app_undo` wait out the 20 s deadline and
-    answer `no_reply`. Its read tools — the ones that never leave the worker — are unaffected.
   - **The helper's conversation does not survive a restart.** It lives as long as its worker, which
     lives as long as the tab; nothing writes it under the tab id, and the top-level `tab` on its
     `configure` is carried for that purpose but not yet read by the backend.
