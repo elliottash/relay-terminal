@@ -90,7 +90,10 @@ void showTargetMenu(QWidget *anchor, std::function<void(const QString &)> chosen
         auto *detail = new QLabel(target.detail, row);
         detail->setObjectName(QStringLiteral("panelKeys"));
         detail->setWordWrap(true);
-        detail->setMaximumWidth(380);
+        // A word-wrapped label's size hint is as narrow as the layout will let it be, and a menu
+        // beside a pane 460 px wide squeezed these to five lines each and ran off the screen. The
+        // wrap width is fixed instead, so every entry is two lines and the menu is a menu.
+        detail->setFixedWidth(330);
         layout->addWidget(detail);
         action->setDefaultWidget(row);
         action->setToolTip(target.detail);
