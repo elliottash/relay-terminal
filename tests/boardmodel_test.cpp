@@ -199,6 +199,7 @@ private slots:
     void everySectionSaysWhatItIsFor();
     void theRowListIsHeadersThenCards();
     void badgesSayWhatTheCardCarries();
+    void aClaimedCardCarriesThePanesSession();
     void aRowDropsItsLeastImportantBadgesFirst();
     void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
     void threadEntriesSayHowLongAgo();
@@ -659,6 +660,41 @@ void BoardModelTests::badgesSayWhatTheCardCarries()
     QCOMPARE(all.at(3).kind, relay::board::Badge::Waiting);
     // In a section of one status, and on a plain card, there is nothing to repeat.
     QVERIFY(relay::board::badges(Card::fromJson(row("M3XJ", "ready", "features")), false).isEmpty());
+}
+
+// A pane claims a card (#R9G7): `board_claim` writes its session token into the front matter and
+// the row carries it, so the list says who is already on the card before a second agent starts on
+// it. The chip is the token's first eight characters behind the session glyph, and it says
+// `closed` once the pane that claimed it has gone — the claim is still the record of who took it.
+void BoardModelTests::aClaimedCardCarriesThePanesSession()
+{
+    QJsonObject json = row("K7Q2", "executing", "features");
+    json.insert(QStringLiteral("session"), QStringLiteral("9f3a7c21d4e5b6a7"));
+    const Card card = Card::fromJson(json);
+    QCOMPARE(card.session, QStringLiteral("9f3a7c21d4e5b6a7"));
+    // A card nobody claimed has no session and no chip.
+    QVERIFY(Card::fromJson(row("M3XJ", "ready", "features")).session.isEmpty());
+    QVERIFY(relay::board::sessionChip(QString(), true).isEmpty());
+
+    QCOMPARE(relay::board::sessionChip(card.session, true), QStringLiteral("\u29C9 9f3a7c21"));
+    QCOMPARE(relay::board::sessionChip(card.session, false),
+             QStringLiteral("\u29C9 9f3a7c21 closed"));
+
+    // Last in reading order, after the facts about the card itself.
+    const QList<relay::board::Badge> live = relay::board::badges(card, false);
+    QCOMPARE(live.size(), 1);
+    QCOMPARE(live.last().kind, relay::board::Badge::Session);
+    QCOMPARE(live.last().text, QStringLiteral("\u29C9 9f3a7c21"));
+    const QList<relay::board::Badge> gone = relay::board::badges(card, false, false);
+    QCOMPARE(gone.last().kind, relay::board::Badge::SessionClosed);
+    QCOMPARE(gone.last().text, QStringLiteral("\u29C9 9f3a7c21 closed"));
+
+    // The live claim is the last badge a narrow row gives up; the closed one goes early, with
+    // the labels, because it is history rather than news.
+    QVERIFY(relay::board::badgeDropOrder(relay::board::Badge::Session)
+            > relay::board::badgeDropOrder(relay::board::Badge::Status));
+    QVERIFY(relay::board::badgeDropOrder(relay::board::Badge::SessionClosed)
+            < relay::board::badgeDropOrder(relay::board::Badge::Assignee));
 }
 
 void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()

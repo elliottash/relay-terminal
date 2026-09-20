@@ -684,7 +684,18 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
     return lines.join(QLatin1Char('\n'));
 }
 
-QList<Badge> badges(const Card &card, bool showStatus)
+QString sessionChip(const QString &token, bool live)
+{
+    if (token.isEmpty())
+        return {};
+    // The first eight characters are what every other surface shows of a session token (the
+    // thread's "Executing (xxxxxxxx)", SessionInfo's copyable id), so the chip and the thread
+    // entry read as the same pane.
+    const QString id = QStringLiteral("⧉ ") + token.left(8);
+    return live ? id : id + QStringLiteral(" closed");
+}
+
+QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive)
 {
     QList<Badge> out;
     if (showStatus && !card.status.isEmpty()) {
@@ -717,6 +728,11 @@ QList<Badge> badges(const Card &card, bool showStatus)
         out << Badge{Badge::Thread, QStringLiteral("✎ %1").arg(card.threadEntries)};
     if (card.isPrivate)
         out << Badge{Badge::Private, QStringLiteral("private")};
+    // Who has the card (#R9G7). Last, after the facts about the card itself: the claim is about
+    // right now, and it is the thing a second agent scanning the list is looking for.
+    if (!card.session.isEmpty())
+        out << Badge{sessionLive ? Badge::Session : Badge::SessionClosed,
+                     sessionChip(card.session, sessionLive)};
     return out;
 }
 
@@ -736,6 +752,13 @@ int badgeDropOrder(Badge::Kind kind)
         return 6;
     case Badge::Private:
         return 7;
+    // A pane that has gone is history; the pane still working on the card is not. The live chip
+    // sits with `waiting:` at the top, because "somebody else is already on this" is why a row
+    // is being read at all.
+    case Badge::SessionClosed:
+        return 3;
+    case Badge::Session:
+        return 9;
     case Badge::Status:
         return 8;
     // A verified row is in the Verified section precisely because of this badge; it goes with
@@ -902,6 +925,9 @@ Card Card::fromJson(const QJsonObject &object)
     card.rank = object.value(QStringLiteral("rank")).toString();
     card.path = object.value(QStringLiteral("path")).toString();
     card.implementedBy = object.value(QStringLiteral("implemented_by")).toString();
+    // Which pane holds the card (#R9G7): `board_claim` writes the claiming pane's session token
+    // into the front matter, and the row carries it so the list can show who is on it.
+    card.session = object.value(QStringLiteral("session")).toString();
     card.verifiedBy = object.value(QStringLiteral("verified_by")).toString();
     card.text = object.value(QStringLiteral("text")).toString();
     card.milestone = object.value(QStringLiteral("milestone")).toString();

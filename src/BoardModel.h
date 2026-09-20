@@ -32,6 +32,11 @@ struct Card {
     // (#T71W). Empty on everything else, and that is what puts a `done` card in Verified rather
     // than in Done — the section is derived, not a status of its own.
     QString verifiedBy;
+    // The pane that claimed this card (#R9G7): the session token of the terminal pane whose
+    // agent is working on it, written into the card's front matter by `board_claim`. Empty on a
+    // card nobody has claimed. The pane it names may be long gone — the token outlives the pane,
+    // so whoever draws it asks the window whether that pane is still open.
+    QString session;
     // The manual section this card is parked in (#3XZV): the id of a configured column that
     // collects nothing. Empty everywhere else — the card sits in its status's own section. It
     // wins over the status for as long as that column exists, so a parked card stays put while
@@ -142,13 +147,20 @@ QString issueHeading();
 // One badge on a card row (design 4.2): what it says and how the pane colours it.
 struct Badge {
     enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private,
-                Verified };
+                Verified, Session, SessionClosed };
     Kind kind;
     QString text;
 };
 // The badges a card carries, in reading order. `showStatus` is for sections that collect several
-// statuses (Waiting, Needs QA, Done), where the exact one is otherwise invisible.
-QList<Badge> badges(const Card &card, bool showStatus);
+// statuses (Waiting, Needs QA, Done), where the exact one is otherwise invisible. `sessionLive`
+// is whether the pane the card's `session` names is still open (#R9G7): a closed one still shows
+// its token — the thread's link is the history of who took the card — but says so and is muted.
+QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive = true);
+
+// The chip a claimed card wears, on a row and on the card page (#R9G7): "⧉ xxxxxxxx" for a live
+// pane, "⧉ xxxxxxxx closed" once that pane has gone. The glyph is the one SessionInfo already
+// uses for a session id (U+29C9). Empty for a card with no `session`.
+QString sessionChip(const QString &token, bool live);
 
 // Which badge a narrow row gives up first: the lowest number goes first. Labels and the thread
 // count are pleasant to have; `waiting:` and the exact status are why the row is being read.
