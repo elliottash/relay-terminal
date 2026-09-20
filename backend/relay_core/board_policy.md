@@ -14,7 +14,8 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    correct or tidy it. The title is yours. `source` says where it came from.
 3. **Questions** for the user go on the card as a `question` comment: numbered, each with your
    recommendation. Set the card to `discussing` with `waiting_on: owner`, and in your reply name the
-   card rather than burying the questions in the terminal.
+   card rather than burying the questions in the terminal or the board page's chat — wherever you
+   ask, the card is where the question waits.
 4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
    their own words in quotation marks, and into the card's `## Decisions` section.
 5. **Work.** When a card is handed over, Relay moves it to `executing` with `assignee: agent`. When it

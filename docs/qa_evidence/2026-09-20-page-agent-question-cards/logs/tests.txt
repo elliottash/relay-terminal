@@ -1,0 +1,72 @@
+== tests/test_board_chat.py (the page agent's suite, brief pins included) ==
+test_the_brief_teaches_the_question_move (test_board_chat.BriefTest.test_the_brief_teaches_the_question_move) ... ok
+test_the_survey_prompt_keeps_its_question_in_chat (test_board_chat.BriefTest.test_the_survey_prompt_keeps_its_question_in_chat) ... ok
+test_the_queue_stops_listing_a_prompt_once_it_is_running (test_board_chat.DrainStateTest.test_the_queue_stops_listing_a_prompt_once_it_is_running)
+A prompt drained off the queue has no `board_chat_started` of its own — that answers a ... ok
+test_a_bad_model_is_refused_before_anything_runs (test_board_chat.ImportToolTest.test_a_bad_model_is_refused_before_anything_runs) ... ok
+test_a_card_turn_is_refused_while_the_page_agent_runs (test_board_chat.ImportToolTest.test_a_card_turn_is_refused_while_the_page_agent_runs) ... ok
+test_a_check_can_be_scoped_to_one_section (test_board_chat.ImportToolTest.test_a_check_can_be_scoped_to_one_section) ... ok
+test_a_prompt_starts_a_turn_with_the_board_as_context (test_board_chat.ImportToolTest.test_a_prompt_starts_a_turn_with_the_board_as_context) ... ok
+test_a_prompt_while_the_page_agent_runs_queues (test_board_chat.ImportToolTest.test_a_prompt_while_the_page_agent_runs_queues) ... ok
+test_a_readonly_turn_refuses_every_write (test_board_chat.ImportToolTest.test_a_readonly_turn_refuses_every_write) ... ok
+test_cancel_stops_the_turn (test_board_chat.ImportToolTest.test_cancel_stops_the_turn) ... ok
+test_the_agent_imports_through_the_same_never_twice_path (test_board_chat.ImportToolTest.test_the_agent_imports_through_the_same_never_twice_path) ... ok
+test_the_import_tool_needs_keys (test_board_chat.ImportToolTest.test_the_import_tool_needs_keys) ... ok
+test_the_page_scope_allows_merge_and_refuses_the_shell (test_board_chat.ImportToolTest.test_the_page_scope_allows_merge_and_refuses_the_shell) ... ok
+test_a_bad_model_is_refused_before_anything_runs (test_board_chat.ModelNudgeTest.test_a_bad_model_is_refused_before_anything_runs) ... ok
+test_a_card_turn_is_refused_while_the_page_agent_runs (test_board_chat.ModelNudgeTest.test_a_card_turn_is_refused_while_the_page_agent_runs) ... ok
+test_a_check_can_be_scoped_to_one_section (test_board_chat.ModelNudgeTest.test_a_check_can_be_scoped_to_one_section) ... ok
+test_a_configure_that_changes_nothing_leaves_the_live_agent_alone (test_board_chat.ModelNudgeTest.test_a_configure_that_changes_nothing_leaves_the_live_agent_alone) ... ok
+test_a_configure_that_moves_the_switchboard_role_rebuilds_the_conversation (test_board_chat.ModelNudgeTest.test_a_configure_that_moves_the_switchboard_role_rebuilds_the_conversation) ... ok
+test_a_prompt_starts_a_turn_with_the_board_as_context (test_board_chat.ModelNudgeTest.test_a_prompt_starts_a_turn_with_the_board_as_context) ... ok
+test_a_prompt_while_the_page_agent_runs_queues (test_board_chat.ModelNudgeTest.test_a_prompt_while_the_page_agent_runs_queues) ... ok
+test_cancel_stops_the_turn (test_board_chat.ModelNudgeTest.test_cancel_stops_the_turn) ... ok
+test_invalidate_before_the_first_turn_is_harmless (test_board_chat.ModelNudgeTest.test_invalidate_before_the_first_turn_is_harmless) ... ok
+test_a_bad_model_is_refused_before_anything_runs (test_board_chat.ProtocolChatTest.test_a_bad_model_is_refused_before_anything_runs) ... ok
+test_a_card_turn_is_refused_while_the_page_agent_runs (test_board_chat.ProtocolChatTest.test_a_card_turn_is_refused_while_the_page_agent_runs) ... ok
+test_a_check_can_be_scoped_to_one_section (test_board_chat.ProtocolChatTest.test_a_check_can_be_scoped_to_one_section) ... ok
+test_a_prompt_starts_a_turn_with_the_board_as_context (test_board_chat.ProtocolChatTest.test_a_prompt_starts_a_turn_with_the_board_as_context) ... ok
+test_a_prompt_while_the_page_agent_runs_queues (test_board_chat.ProtocolChatTest.test_a_prompt_while_the_page_agent_runs_queues) ... ok
+test_cancel_stops_the_turn (test_board_chat.ProtocolChatTest.test_cancel_stops_the_turn) ... ok
+test_a_full_queue_refuses (test_board_chat.QueueTest.test_a_full_queue_refuses) ... ok
+test_a_model_switch_keeps_the_conversation (test_board_chat.QueueTest.test_a_model_switch_keeps_the_conversation) ... ok
+test_a_prompt_starts_a_turn_and_streams_tagged_events (test_board_chat.QueueTest.test_a_prompt_starts_a_turn_and_streams_tagged_events) ... ok
+test_a_second_prompt_queues_and_then_runs_in_order (test_board_chat.QueueTest.test_a_second_prompt_queues_and_then_runs_in_order) ... ok
+test_stop_cancels_the_turn_and_the_queue_carries_on (test_board_chat.QueueTest.test_stop_cancels_the_turn_and_the_queue_carries_on) ... ok
+test_the_history_collects_the_answer_for_a_reopened_page (test_board_chat.QueueTest.test_the_history_collects_the_answer_for_a_reopened_page) ... ok
+test_the_queue_is_announced_and_removable (test_board_chat.QueueTest.test_the_queue_is_announced_and_removable) ... ok
+test_the_survey_turn_is_readonly_and_reported (test_board_chat.QueueTest.test_the_survey_turn_is_readonly_and_reported) ... ok
+test_a_corrupt_file_reads_as_absent (test_board_chat.SurveyFileTest.test_a_corrupt_file_reads_as_absent) ... ok
+test_mark_and_read_the_state_file (test_board_chat.SurveyFileTest.test_mark_and_read_the_state_file) ... ok
+test_a_bad_model_is_refused_before_anything_runs (test_board_chat.SurveyProtocolTest.test_a_bad_model_is_refused_before_anything_runs) ... ok
+test_a_board_that_predates_the_survey_is_never_surveyed (test_board_chat.SurveyProtocolTest.test_a_board_that_predates_the_survey_is_never_surveyed) ... ok
+test_a_card_turn_is_refused_while_the_page_agent_runs (test_board_chat.SurveyProtocolTest.test_a_card_turn_is_refused_while_the_page_agent_runs) ... ok
+test_a_check_can_be_scoped_to_one_section (test_board_chat.SurveyProtocolTest.test_a_check_can_be_scoped_to_one_section) ... ok
+test_a_created_board_is_marked_pending_and_surveys_on_open (test_board_chat.SurveyProtocolTest.test_a_created_board_is_marked_pending_and_surveys_on_open) ... ok
+test_a_github_remote_is_reported_as_a_link_only (test_board_chat.SurveyProtocolTest.test_a_github_remote_is_reported_as_a_link_only) ... ok
+test_a_prompt_starts_a_turn_with_the_board_as_context (test_board_chat.SurveyProtocolTest.test_a_prompt_starts_a_turn_with_the_board_as_context) ... ok
+test_a_prompt_while_the_page_agent_runs_queues (test_board_chat.SurveyProtocolTest.test_a_prompt_while_the_page_agent_runs_queues) ... ok
+test_cancel_stops_the_turn (test_board_chat.SurveyProtocolTest.test_cancel_stops_the_turn) ... ok
+
+----------------------------------------------------------------------
+Ran 47 tests in 0.260s
+
+OK
+
+== tests/test_board_tools.py :: PromptSectionTests (the policy pins) ==
+test_no_board_means_no_prompt_text (test_board_tools.PromptSectionTests.test_no_board_means_no_prompt_text) ... ok
+test_rule_3_covers_wherever_the_agent_asks (test_board_tools.PromptSectionTests.test_rule_3_covers_wherever_the_agent_asks) ... ok
+test_suggest_mode_says_the_writes_are_proposals (test_board_tools.PromptSectionTests.test_suggest_mode_says_the_writes_are_proposals) ... ok
+test_the_policy_is_offered_with_the_tab_list_and_the_autonomy (test_board_tools.PromptSectionTests.test_the_policy_is_offered_with_the_tab_list_and_the_autonomy) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.002s
+
+OK
+
+== tests/test_board_turns.py (the sibling card-turn briefs, regression check) ==
+..............
+----------------------------------------------------------------------
+Ran 14 tests in 0.106s
+
+OK

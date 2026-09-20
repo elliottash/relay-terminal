@@ -952,6 +952,13 @@ class PromptSectionTests(BoardToolsTest):
         self.assertIn("Autonomy: auto", text)
         self.assertIn("board_rate_limited", text)
 
+    def test_rule_3_covers_wherever_the_agent_asks(self):
+        # #WT9V: the board page's chat was a second place a question could hide in, so rule 3
+        # names it — the card is where a question waits wherever the agent asks.
+        text = T.prompt_section(self.tools)
+        self.assertIn("board page's chat", text)
+        self.assertIn("the question waits", text)
+
     def test_suggest_mode_says_the_writes_are_proposals(self):
         tools = T.BoardTools(self.board, autonomy="suggest", state_path=self.repo / ".relay" / "r.json")
         self.assertIn("proposals", T.prompt_section(tools))

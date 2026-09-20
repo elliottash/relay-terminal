@@ -142,6 +142,29 @@ class ChatTestBase(unittest.TestCase):
         wait_idle(self.chat)
 
 
+class BriefTest(unittest.TestCase):
+    """The page agent's brief, pinned the way the cleanup brief is (drift bit #2MF1's cases):
+    the question move — ask on a card, never only in chat (#WT9V) — and the survey's one
+    exception must both survive edits to `board_chat_brief.md`."""
+
+    def test_the_brief_teaches_the_question_move(self):
+        text = board_chat.chat_brief()
+        self.assertNotIn("<!--", text)
+        for phrase in ("`question` comment", "`waiting_on: owner`", "no card covers",
+                       "one line naming the card", "Ask before a restructure",
+                       "questions on the card(s)", "writes nothing"):
+            self.assertIn(phrase, text)
+
+    def test_the_survey_prompt_keeps_its_question_in_chat(self):
+        # The survey turn is read-only by design (`board_readonly_turn`): its one question is
+        # the confirmation, so it stays in chat — the brief's question move must not talk the
+        # agent into writing during it.
+        prompt = board_chat.survey_prompt(Path("/b"), Path("/p"),
+                                          {"git": {}, "trackers": [], "hints": []}, [])
+        self.assertIn("writes nothing", prompt)
+        self.assertIn("the owner's answer is the confirmation", prompt)
+
+
 class QueueTest(ChatTestBase):
     def test_a_prompt_starts_a_turn_and_streams_tagged_events(self):
         what, ident = self.chat.ask("How many cards are in Inbox?")
