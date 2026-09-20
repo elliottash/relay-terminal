@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -88,23 +89,25 @@ private Q_SLOTS:
         QCOMPARE(picker.list()->topLevelItem(0)->text(3), QStringLiteral("45"));
     }
 
-    void theReasoningColumnIsTheListsLevelOrThePanes() {
+    void theLevelListFollowsTheHighlightedModel() {
         curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("low"));
         ModelPicker picker(context());
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
-        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("low"));   // the list's level
-        QCOMPARE(picker.selectedEffort(), QStringLiteral("low"));
+        QCOMPARE(picker.levelList()->count(), 3);
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("low"));                 // the list's level
+        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("low"));
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
-        QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("high"));  // in no list: the pane's own
-        QCOMPARE(picker.selectedEffort(), QString());                              // …so the pick keeps it
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("high"));                // in no list: the pane's own
+        picker.levelList()->setCurrentRow(2);
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                 // a separate pick
         picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
-        QCOMPARE(picker.list()->currentItem()->text(2), QString());               // no knob
+        QCOMPARE(picker.selectedEffort(), QString());                             // no knob
         QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().isEmpty());
         picker.selectKey(QStringLiteral("guest:claude|opus"));
         QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().contains(QStringLiteral("5h 62% left")));
     }
 
-    void aPickReturnsTheKeyAndTheListsLevel() {
+    void aPickReturnsTheKeyAndTheLevel() {
         curation::addToTier(QStringLiteral("high"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("max"));
         ModelPicker picker(context());
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
@@ -197,6 +200,7 @@ private Q_SLOTS:
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
         QCOMPARE(picker.list()->currentItem()->text(2), QStringLiteral("xhigh"));   // the provider's word
+        QCOMPARE(picker.levelList()->currentItem()->text(), QStringLiteral("xhigh"));
         QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                   // Relay's level is what is returned
     }
 

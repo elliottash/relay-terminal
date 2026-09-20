@@ -85,6 +85,11 @@ struct SettingRow {
     // stays one line per model (owner, 2026-09-20).
     QString tooltip;
     QString infoUrl;
+    // A heading that folds the rows under it, down to the next heading (owner, 2026-09-20:
+    // "make the sections collapsible"). The fold is remembered per heading id; `collapsedByDefault`
+    // is what it is before anyone clicked (providers, once one is set up).
+    bool collapsible = false;
+    bool collapsedByDefault = false;
     int number = 0, minimum = 0, maximum = 0;               // Number
     QString suffix;
     std::function<void(int)> onNumber;
@@ -309,6 +314,7 @@ private:
     QWidget *optionJumpRow(const SettingsSection &section, const SettingRow &row);
     void applyMode();
     QWidget *groupHeader(const QString &text, const QString &key = QString());
+    static bool headingCollapsed(const SettingRow &row);
     void addActionsList(QVBoxLayout *into);
     void setCurrent(int index, bool scroll);
     void switchTab(int delta);

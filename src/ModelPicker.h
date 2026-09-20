@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // The model picker (owner, 2026-09-20): Ctrl+Alt+M, /model, and the "more models…" row of the
-// pane's model box. Warp's shape: a filter over one list and a sort menu. It picks a *model*
-// only (owner, later that day): the level is the composer's own level box beside the model box,
-// for mouse and keys alike, and a pick takes the level the tier lists give that model. opencode's additions: favorites and the ten most recent picks
+// pane's model box. Warp's shape: a filter over one list and a sort menu. The reasoning level is
+// a second, separate pick (owner, 2026-09-20: "split the model picker into model and effort"): a
+// short list beside the models, preset to the level the tier lists give the highlighted model,
+// else the pane's own. → moves into it, ← back; Enter uses both. opencode's additions: favorites and the ten most recent picks
 // above the rest, sections that give way to one flat list the moment you type, and the reasoning
 // level remembered per model.
 //
@@ -23,6 +24,7 @@ class QLineEdit;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QListWidget;
 class QEvent;
 
 namespace relay {
@@ -55,7 +57,8 @@ public:
     QTreeWidget *list() const { return m_list; }
     QComboBox *sortBox() const { return m_sort; }
     QString selectedKey() const;
-    QString selectedEffort() const;   // the level the lists give the highlighted model; empty = keep
+    QListWidget *levelList() const { return m_levels; }
+    QString selectedEffort() const;   // the level list's pick; empty when the model has no knob
     void selectKey(const QString &key);
     void accept() override;
 
@@ -72,6 +75,7 @@ private:
     QLineEdit *m_filter = nullptr;
     QComboBox *m_sort = nullptr;
     QTreeWidget *m_list = nullptr;
+    QListWidget *m_levels = nullptr;   // the reasoning level, a separate pick beside the model (owner, 2026-09-20)
     QLabel *m_limits = nullptr;
     QPushButton *m_favorite = nullptr;
     QPushButton *m_use = nullptr;

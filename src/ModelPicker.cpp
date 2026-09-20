@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -60,7 +61,20 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_list->header()->setSectionResizeMode(ColModel, QHeaderView::Stretch);
     for (int c = ColProvider; c < ColCount; ++c) m_list->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     m_list->setTextElideMode(Qt::ElideRight);
-    layout->addWidget(m_list, 1);
+    auto *lists = new QHBoxLayout;
+    lists->addWidget(m_list, 1);
+    // The level, as its own pick beside the models: the highlighted model's levels in the
+    // provider's words, the lists' level for it preselected. Enter here uses model and level.
+    auto *levelColumn = new QVBoxLayout;
+    levelColumn->addWidget(new QLabel(QStringLiteral("reasoning")));
+    m_levels = new QListWidget;
+    m_levels->setObjectName(QStringLiteral("modelLevels"));
+    m_levels->setAccessibleName(QStringLiteral("reasoning level"));
+    m_levels->setFixedWidth(120);
+    m_levels->setUniformItemSizes(true);
+    levelColumn->addWidget(m_levels, 1);
+    lists->addLayout(levelColumn);
+    layout->addLayout(lists, 1);
 
     m_limits = new QLabel;
     m_limits->setObjectName(QStringLiteral("modelLimits"));
@@ -104,6 +118,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         reject();
         if (openModelsPage) openModelsPage();
     });
+    connect(m_levels, &QListWidget::itemActivated, this, [this](QListWidgetItem *) { accept(); });
+    m_levels->installEventFilter(this);
     connect(m_use, &QPushButton::clicked, this, [this] { accept(); });
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 
@@ -125,6 +141,12 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
             QCoreApplication::sendEvent(m_list, event);
             return true;
         }
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+        if (key->key() == Qt::Key_Right && m_levels->count() > 0) { m_levels->setFocus(); return true; }   // → the level
+    }
+    if (watched == m_levels && event->type() == QEvent::KeyPress) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == Qt::Key_Left) { m_filter->setFocus(); return true; }                           // ← the models
         if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
     }
     return QDialog::eventFilter(watched, event);
@@ -216,11 +238,8 @@ QString ModelPicker::selectedKey() const {
 }
 
 QString ModelPicker::selectedEffort() const {
-    const QString key = selectedKey();
-    const Entry *entry = key.isEmpty() ? nullptr : m_context.catalog.find(key);
-    if (!entry || entry->efforts.isEmpty()) return QString();
-    const QString listed = curation::listEffortFor(key);
-    return entry->efforts.contains(listed) ? listed : QString();
+    QListWidgetItem *item = m_levels ? m_levels->currentItem() : nullptr;
+    return item ? item->data(Qt::UserRole).toString() : QString();
 }
 
 void ModelPicker::selectKey(const QString &key) {
@@ -236,7 +255,21 @@ void ModelPicker::onRowChanged() {
     m_use->setEnabled(entry != nullptr);
     m_favorite->setEnabled(entry != nullptr);
     m_favorite->setText(entry && curation::isFavorite(key) ? QStringLiteral("★ unfavorite") : QStringLiteral("☆ favorite"));
+    m_levels->clear();
     if (!entry) { m_limits->clear(); return; }
+    if (entry->efforts.isEmpty()) {
+        auto *none = new QListWidgetItem(QStringLiteral("no setting"), m_levels);
+        none->setFlags(Qt::NoItemFlags);
+    } else {
+        const QString listed = curation::listEffortFor(key);
+        const QString chosen = entry->efforts.contains(listed) ? listed
+                             : entry->efforts.contains(m_context.currentEffort) ? m_context.currentEffort : entry->efforts.last();
+        for (const QString &level : entry->efforts) {
+            auto *item = new QListWidgetItem(entry->effortLabel(level), m_levels);
+            item->setData(Qt::UserRole, level);
+            if (level == chosen) m_levels->setCurrentItem(item);
+        }
+    }
     const QString limits = limitsText(m_context.catalog.limits.value(entry->preset),
                                       m_context.now > 0 ? m_context.now : QDateTime::currentSecsSinceEpoch());
     m_limits->setText(limits.isEmpty() ? QString() : entry->provider + QStringLiteral(": ") + limits);

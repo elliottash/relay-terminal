@@ -1380,6 +1380,32 @@ public:
         m_modelBox->setFocus(Qt::ShortcutFocusReason);
         m_modelBox->showPopup();
     }
+    // The filter behind passHotkeysThrough: a key with a modifier that the keymap knows closes
+    // the popup untouched and is re-posted to the window. Plain keys (arrows, Enter, Esc, typing
+    // to jump) stay the popup's own.
+    class PopupHotkeys final : public QObject {
+    public:
+        PopupHotkeys(QComboBox *box, QWidget *target) : QObject(box), m_box(box), m_target(target) {}
+    protected:
+        bool eventFilter(QObject *, QEvent *event) override {
+            if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride) return false;
+            auto *key = static_cast<QKeyEvent *>(event);
+            const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+            if (!mods || Keymap::instance().match(key).isEmpty()) return false;
+            if (event->type() == QEvent::ShortcutOverride) { event->accept(); return true; }   // ours, not the view's
+            m_box->hidePopup();
+            QCoreApplication::postEvent(m_target, new QKeyEvent(QEvent::KeyPress, key->key(), key->modifiers(), key->text()));
+            return true;
+        }
+    private:
+        QComboBox *m_box;
+        QWidget *m_target;
+    };
+    void passHotkeysThrough(QComboBox *box) {
+        if (!box || !box->view()) return;
+        auto *filter = new PopupHotkeys(box, window());
+        box->view()->installEventFilter(filter);
+    }
     // Alt+E (agent.effortBox): the level box beside the model box drops open.
     void openEffortBox() {
         if (!m_effortBox || !m_effortBox->isVisible() || m_effortBox->count() == 0) { status(QStringLiteral("This model has no reasoning setting.")); return; }
@@ -4087,6 +4113,12 @@ private:
         });
         routeRow->addWidget(m_modelBox);
         if (m_effortBox) routeRow->addWidget(m_effortBox);   // the level, right of the model (owner, 2026-09-20)
+        // A chord pressed while one of the two boxes is open (owner, 2026-09-20: "if the model box
+        // is open and I press Alt+E, get to the effort without changing anything, and vice versa;
+        // in general an open box doesn't interrupt other hotkeys"): the popup closes with nothing
+        // picked and the key goes on to the window, which runs it as it would have.
+        passHotkeysThrough(m_modelBox);
+        if (m_effortBox) passHotkeysThrough(m_effortBox);
         // Voice transcription: the chip toggles recording, the hold key is push-to-talk.
         m_mic = new QToolButton;
         m_mic->setObjectName(QStringLiteral("stripChip"));

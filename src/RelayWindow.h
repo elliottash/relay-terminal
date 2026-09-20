@@ -2195,7 +2195,20 @@ private:
         // Claude Code and Codex on this machine — plus OpenRouter always, because it is the one key
         // the fallbacks and the Lite tier lean on. The rest wait behind "+ add provider". Listed
         // providers keep the order they were added in, and drag to reorder.
-        models.rows << headingRow(QStringLiteral("providers"));
+        {
+            // Folds by default once a provider is set up (owner, 2026-09-20): from then on the
+            // page opens on the models, and the keys are one click away.
+            relay::SettingRow head = headingRow(QStringLiteral("providers"));
+            head.collapsible = true;
+            bool anySetUp = false;
+            for (const auto &value : presets) {
+                const QJsonObject preset = value.toObject();
+                anySetUp = anySetUp || preset.value(QStringLiteral("has_stored_key")).toBool() || preset.value(QStringLiteral("custom")).toBool()
+                    || (preset.value(QStringLiteral("harness")).toBool() && preset.value(QStringLiteral("logged_in")).toBool());
+            }
+            head.collapsedByDefault = anySetUp;
+            models.rows << head;
+        }
         if (presets.isEmpty()) {
             relay::SettingRow none;
             none.kind = relay::SettingRow::Info;
@@ -2405,7 +2418,7 @@ private:
         // needs no box.
         // No paragraph under the heading and no count under a provider (owner, 2026-09-20): the
         // heading says what the checkboxes do, and the count is the provider row's hover.
-        models.rows << headingRow(QStringLiteral("models in the picker"));
+        { relay::SettingRow head = headingRow(QStringLiteral("models in the picker")); head.collapsible = true; models.rows << head; }
         constexpr int kOpenEnded = 6;   // more catalog models than this: an id box, only the checked shown
         for (const QString &presetId : catalog.presets()) {
             const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
@@ -2534,6 +2547,7 @@ private:
         const bool listsSet = relay::models::curation::tierListsSet();
         for (const QString &tier : relay::models::curation::tierIds()) {
             relay::SettingRow heading = headingRow(relay::models::curation::tierLabel(tier));
+            heading.collapsible = true;
             models.rows << heading;
             const QList<relay::models::curation::TierEntry> list = relay::models::curation::tierList(tier);
             int rank = 0;
@@ -2644,7 +2658,7 @@ private:
         }
 
         // ----- 4. defaults ----------------------------------------------------------------------
-        models.rows << headingRow(QStringLiteral("defaults"));
+        { relay::SettingRow head = headingRow(QStringLiteral("defaults")); head.collapsible = true; models.rows << head; }
         {
             relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a fallback model"),
                                                   QStringLiteral("A turn whose model keeps failing, after its retries, continues down "

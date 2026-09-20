@@ -555,8 +555,18 @@ void SettingsPane::buildPage(QWidget *page, const SettingsSection &section) {
         layout->addWidget(mutedLabel(section.blurb, "settingsBlurb"));
         layout->addSpacing(6);
     }
-    for (const SettingRow &row : section.rows) layout->addWidget(settingRow(row));
+    bool folded = false;   // under a collapsed heading, until the next heading
+    for (const SettingRow &row : section.rows) {
+        if (row.kind == SettingRow::Heading) folded = row.collapsible && headingCollapsed(row);
+        QWidget *widget = settingRow(row);
+        layout->addWidget(widget);
+        if (folded && row.kind != SettingRow::Heading) widget->hide();
+    }
     layout->addStretch(1);
+}
+
+bool SettingsPane::headingCollapsed(const SettingRow &row) {
+    return QSettings().value(QStringLiteral("options/collapsed/") + row.id, row.collapsedByDefault).toBool();
 }
 
 QWidget *SettingsPane::groupHeader(const QString &text, const QString &key) {
@@ -594,7 +604,28 @@ void SettingsPane::addActionsList(QVBoxLayout *into) {
 }
 
 QWidget *SettingsPane::settingRow(const SettingRow &row) {
-    if (row.kind == SettingRow::Heading) return groupHeader(row.label);
+    if (row.kind == SettingRow::Heading) {
+        if (!row.collapsible) return groupHeader(row.label);
+        // A folding heading: the disclosure mark, the words, and a click that flips the fold and
+        // redraws every Options pane (the rows under it are hidden in buildPage).
+        const bool folded = headingCollapsed(row);
+        auto *head = new ClickRow;
+        head->setObjectName(QStringLiteral("settingsRow"));
+        head->setAttribute(Qt::WA_StyledBackground);
+        head->setProperty("rowId", row.id);
+        head->setCursor(Qt::PointingHandCursor);
+        auto *box = new QHBoxLayout(head);
+        box->setContentsMargins(0, 0, 0, 0);
+        auto *label = mutedLabel((folded ? QStringLiteral("▸ ") : QStringLiteral("▾ ")) + row.label, "settingsHeading");
+        box->addWidget(label, 1);
+        head->onClick = [id = row.id, folded, dflt = row.collapsedByDefault] {
+            QSettings settings;
+            const QString key = QStringLiteral("options/collapsed/") + id;
+            if (!folded == dflt) settings.remove(key); else settings.setValue(key, !folded);
+            SettingsWatch::instance().notify();
+        };
+        return head;
+    }
     if (row.kind == SettingRow::Subheading) {
         // A group inside a section (one provider's models): the words as written, bold, with a
         // little air above — a heading is the section's own name and stays the louder of the two.
