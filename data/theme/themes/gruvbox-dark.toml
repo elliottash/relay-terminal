@@ -37,7 +37,7 @@ tool = "#d79921"
 # at 4.5:1 is this one: dE 47 from the olive, 40 from the grey-teal shell.
 link = "#21ba73"
 shell = "#8cab9f"
-agent = "#d791a4"
+agent = "#c88fc2"
 
 [syntax]
 command = "#8cab9f"
@@ -47,7 +47,7 @@ string = "#b8bb26"
 path = "#21ba73"
 operator = "#ada296"
 variable = "#d791a4"
-agent = "#d791a4"
+agent = "#c88fc2"
 token = "#8cab9f"
 
 [terminal]

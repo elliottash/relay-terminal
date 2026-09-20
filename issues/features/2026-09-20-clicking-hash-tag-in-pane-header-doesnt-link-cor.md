@@ -2,7 +2,7 @@
 id: GE0Z
 type: work
 status: planned
-rank: zzzzzzzzzzzzzzz
+rank: zzzzzzzzzzzzzzzr
 created: '2026-09-20'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---

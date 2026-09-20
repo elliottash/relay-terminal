@@ -171,9 +171,10 @@ struct ActionItem {
     QString key, section, label, detail, shortcut, aliases;
     bool checked = false, stayOpen = false;
     // Whether an agent may run this action (card #FEJQ, protocol §30.2). Off by default, so an
-    // action added tomorrow is not something an agent may do today; the catalog builder sets it
-    // from relay::appcommands::actionIsAgentSafe(), which is the owner's list of the reversible
-    // ones (open or reveal anything, test a key, refresh a server, copy a page, reorder, undo).
+    // action added tomorrow is not something an agent may do today. It is the *override*: the
+    // policy itself is relay::appcommands::actionIsAgentSafe(), the owner's list of the reversible
+    // ones (open or reveal anything, test a key, refresh a server, copy a page, reorder, undo),
+    // and an item may only widen it for itself — never narrow it, since the table is checked too.
     bool agentSafe = false;
     std::function<void()> run;
     std::function<QList<ActionItem>()> children;

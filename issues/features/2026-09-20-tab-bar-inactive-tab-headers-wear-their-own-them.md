@@ -9,7 +9,7 @@ session: 1aae9fc9-47dd-4eb6-8898-feca80412fc1
 rank: zzzzzzzzzzzy
 created: '2026-09-20'
 source: Relay pane agent, 2026-09-20
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-tab-theme-marks/], related: [R4ND], github: null}
+links: {plans: [], commits: [260fb350], evidence: [docs/qa_evidence/2026-09-20-tab-theme-marks/], related: [R4ND], github: null}
 ---
 # Tab bar: inactive tab headers wear their own theme
 

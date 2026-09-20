@@ -74,3 +74,6 @@ It asks the executor to reproduce with logging at each hand-off first — the li
 
 <!-- relay:entry 20260920T053332Z-s7 author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260920T191650Z-r5 author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · reordered · moved in the Switchboard

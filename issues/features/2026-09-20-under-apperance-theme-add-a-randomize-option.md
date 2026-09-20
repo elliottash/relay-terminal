@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: Claude Code in a Relay pane, 2026-09-20
-links: {plans: [], commits: [dae8796e], evidence: [docs/qa_evidence/2026-09-20-randomize-theme/], related: [], github: null}
+links: {plans: [], commits: [dae8796e, 260fb350], evidence: [docs/qa_evidence/2026-09-20-randomize-theme/, docs/qa_evidence/2026-09-20-tab-theme-marks/], related: [3C7N], github: null}
 ---
 # Options › Appearance: a Randomize button that takes a theme at random
 
