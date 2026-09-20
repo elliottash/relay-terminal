@@ -416,12 +416,20 @@ class StreamTests(unittest.TestCase):
         # worker event verbatim: `label`, `ms` and `diff` therefore need no new allow-list entry,
         # and none is added. Nothing about the shape of what a phone may see changes either - a
         # write's diff is the same file text `tool_started.preview` has carried all along.
+        #
+        # This harness is the **transcript-only** shape: DemoPaneSource has no `on_screen`, so the
+        # hub advertises no `screen` and the client draws the agent-companion transcript, which is
+        # the one surface that renders a tool's own output. That is why the two tool events still
+        # arrive here while a share carrying the screen is sent neither (#3H5T, protocol 6.4;
+        # the screen side is `test_tool_text_is_not_sent_to_a_client_that_draws_the_screen` in
+        # tests/test_remote_gui_host.py).
         label = {"kind": "edit", "running": "editing x.py", "title": "edited x.py",
                  "stats": ["+1 −1"], "ok": True, "path": "src/x.py", "inline_diff": True,
                  "open": {"type": "fold"}}
 
         async def main():
             async with Harness() as harness:
+                self.assertFalse(harness.host.screens)     # no on_screen: the transcript shape
                 client, paired, _, _ = await harness.pair()
                 await client.close()
                 client = client_mod.Client(harness.base)
@@ -429,6 +437,12 @@ class StreamTests(unittest.TestCase):
                 await client.expect("panes")
                 await client.send({"t": "pane_focus", "pane": "pane-1"})
                 await asyncio.sleep(0.1)
+                harness.source._emit("pane-1", {"event": "tool_output", "call_id": "c1",
+                                                "text": "one\ntwo\n"})
+                message = await asyncio.wait_for(client.inbox.get(), 10)
+                while message["t"] != "agent" or message["event"]["event"] != "tool_output":
+                    message = await asyncio.wait_for(client.inbox.get(), 10)
+                self.assertEqual(message["event"]["text"], "one\ntwo\n")
                 harness.source._emit("pane-1", {
                     "event": "tool_result", "tool": "edit_file", "call_id": "c1", "ms": 60,
                     "result": {"path": "src/x.py", "added": 1, "removed": 1},

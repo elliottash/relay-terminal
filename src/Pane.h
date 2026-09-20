@@ -496,12 +496,6 @@ public:
         });
         m_assistHold.setSingleShot(true); m_assistHold.setInterval(400);
         connect(&m_assistHold, &QTimer::timeout, this, [this] { releaseHeldDecision(); });
-        // A phone watching this pane prints a running call's output from the event itself, so a
-        // share starting or ending changes whether the worker may keep that text off the wire
-        // (protocol 23.10, #PPR4). The window shares panes under a tab without asking this pane,
-        // which is why this is the signal and not the share button.
-        connect(&relay::RemoteShare::instance(), &relay::RemoteShare::sharingChanged, this,
-                [this] { sendToolStreamOption(); });
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
         connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); });
         connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateGhost(); });
@@ -4611,23 +4605,32 @@ private:
     }
 
     // Whether anything on this side still reads the *text* of a tool's output, which is what the
-    // worker is told with `stream_tool_output` (protocol 23.10, card #PPR4). Two surfaces do: the
-    // stream under the row that Agent options › Show tool output turns on, and a phone —
-    // `app/app.js` prints a running call's output straight from the event and has no fold to fetch
-    // it with. Everything else here wants the count and nothing else: the call's own line (#TK9C),
-    // the Activity pane's running row, and both folds, which fetch the real text with
-    // `tool_output_get` when they are opened. Off, the worker sends the counts instead of ~66 KB
-    // of UTF-8 per call.
+    // worker is told with `stream_tool_output` (protocol 23.10, card #PPR4). Exactly one surface
+    // does: the stream under the row that Agent options › Show tool output turns on. Everything
+    // else here wants the count and nothing else: the call's own line (#TK9C), the Activity pane's
+    // running row, and both folds, which fetch the real text with `tool_output_get` when they are
+    // opened. Off, the worker sends the counts instead of ~66 KB of UTF-8 per call.
+    //
+    // A share used to be the second surface — `|| sharedWithPhone()`, on the belief that a phone
+    // prints a running call's output from the event. Measured on the owner's Pixel 8 on 2026-09-20
+    // (#3H5T) it does not: the phone reads the *screen*, not the events. `app/app.js` draws tool
+    // text only in its transcript renderer, which is the agent-companion fallback for a desktop
+    // with no terminal and is switched off whenever the desktop advertises a `screen` — which a
+    // pane share always does. So the arm bought 28 KB per tool call on the IPC wire and 1.33 MB
+    // per tool-heavy turn on the air, for text the phone parsed and dropped while screen frames
+    // queued behind it. The hub now refuses to forward it at all to a share carrying the screen
+    // (`may_forward_with_screen`, remote/wire.py), so a phone behind a GUI that has Show tool
+    // output *on* is covered too, and a future client wanting a transcript beside a screen asks
+    // for the text there rather than having this side guess.
     bool needsToolOutputText() const { return needsToolOutputText(showToolOutput()); }
     // The same answer from a `showToolOutput()` the caller has already read: the tool_output path
     // asks per chunk and the setting is not free to read (#057J).
-    bool needsToolOutputText(bool show) const { return show || sharedWithPhone(); }
+    bool needsToolOutputText(bool show) const { return show; }
 
     // Tell the worker which of the two shapes to send, whenever the answer above can change: at
-    // configure (withSessionFields below), when Options toggles Show tool output, and when this
-    // pane starts or stops being shared. Sends nothing when the worker already has this answer,
-    // which is what lets the tool_output handler call it on a mismatch without chattering at a
-    // worker too old to know the option.
+    // configure (withSessionFields below) and when Options toggles Show tool output. Sends nothing
+    // when the worker already has this answer, which is what lets the tool_output handler call it
+    // on a mismatch without chattering at a worker too old to know the option.
     void sendToolStreamOption() {
         const bool want = needsToolOutputText();
         if (!m_configured || m_toolStreamSent == int(want)) return;
@@ -10169,8 +10172,8 @@ private:
             m_toolPartialLine = count.partial;
             // The shape that arrived is not the shape this pane needs: ask again. Options tells
             // only the *active* pane that Show tool output was toggled (`toggleRow`,
-            // src/RelayWindow.h), and a tab can be shared without this pane being asked, so a
-            // second pane would otherwise keep counting until its next configure. The setting is
+            // src/RelayWindow.h), so a second pane would otherwise keep counting — or keep being
+            // sent text nobody reads — until its next configure. The setting is
             // read once for both decisions — it is a QSettings construction on this path and that
             // was 5 % of a tool-heavy turn (#057J) — and sendToolStreamOption() sends nothing when
             // the worker already agrees, so a worker too old to know the option is not nagged.

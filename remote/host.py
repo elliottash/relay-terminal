@@ -949,6 +949,12 @@ class Host:
         self.notifier.on_agent(pane, event)
         if not wire.may_forward(name):
             return                      # denied by default; see remote/wire.py
+        if self.screens and not wire.may_forward_with_screen(name):
+            # This share draws the pane's own terminal, and Relay prints a tool's output into it:
+            # the text would cross the air twice and be dropped once, and the screen frames behind
+            # it would wait (#3H5T). Dropped before the ring, so a client that resumes after a gap
+            # does not get them on replay either.
+            return
         message = self.stream(f"agent:{pane}").add(
             {"t": "agent", "pane": pane, "event": self._scrub(event)})
         # Most events are for anyone watching the pane; the ones naming other conversations are

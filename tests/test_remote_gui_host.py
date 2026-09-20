@@ -302,6 +302,41 @@ class AgentEventTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_tool_text_is_not_sent_to_a_client_that_draws_the_screen(self):
+        """Card #3H5T, protocol 6.4. A GUI pane share always advertises `screen`, and the client's
+        transcript renderer is switched off whenever it does — so `tool_output` and `tool_result`
+        crossed the air to be parsed and dropped: 1.33 MB of a 1.46 MB tool-heavy turn on the
+        owner's Pixel 8, with screen frames queued behind them. The pane's own terminal already
+        carries the output; `tool_output_get` still fetches the whole of it on demand.
+
+        `tool_started` is the control: the line the phone draws for a running call is not tool
+        *text*, and it must still arrive."""
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await client.expect("screen_snapshot")
+                self.assertTrue(harness.host.screens)        # what this rule keys on
+                harness.source.agent_event("p1", {"event": "tool_started", "tool": "run_command",
+                                                  "call_id": "c1", "preview": "RUN COMMAND\n\nseq"})
+                harness.source.agent_event("p1", {"event": "tool_output", "call_id": "c1",
+                                                  "text": "one\ntwo\n"})
+                harness.source.agent_event("p1", {"event": "tool_result", "tool": "run_command",
+                                                  "call_id": "c1",
+                                                  "result": {"output": "one\ntwo\n", "exit_code": 0}})
+                harness.source.agent_event("p1", {"event": "status", "text": "marker"})
+                seen = []
+                while True:
+                    message = await asyncio.wait_for(client.inbox.get(), 10)
+                    if message["t"] != "agent":
+                        continue
+                    seen.append(message["event"]["event"])
+                    if message["event"].get("text") == "marker":
+                        break
+                self.assertEqual(seen, ["tool_started", "status"])
+                await client.close()
+        run(main())
+
     def test_an_event_for_an_unshared_pane_is_dropped(self):
         async def main():
             async with Harness() as harness:

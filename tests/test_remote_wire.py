@@ -59,6 +59,24 @@ class AllowListTests(unittest.TestCase):
     def test_an_unknown_event_is_not_forwarded(self):
         self.assertFalse(wire.may_forward("some_new_event_nobody_classified"))
 
+    def test_tool_text_is_not_forwarded_to_a_share_that_carries_the_screen(self):
+        """Card #3H5T. The client's transcript renderer is off whenever there is a screen, so the
+        text would be parsed and dropped — 1.33 MB of a 1.46 MB tool-heavy turn on the owner's
+        Pixel 8. A share with no screen is the agent-companion shape and still gets both."""
+        for name in ("tool_output", "tool_result"):
+            self.assertTrue(wire.may_forward(name), name)          # a transcript-only share
+            self.assertFalse(wire.may_forward_with_screen(name), name)
+
+    def test_the_screen_redundant_list_is_a_subset_of_what_may_be_forwarded(self):
+        # Otherwise the screen rule would be the only classification an event ever got, and the
+        # allow-list above would stop being the single gate.
+        self.assertEqual(sorted(wire.SCREEN_REDUNDANT_EVENTS - wire.FORWARDED_EVENTS), [])
+
+    def test_everything_else_is_forwarded_to_a_screen_share_unchanged(self):
+        for name in sorted(wire.FORWARDED_EVENTS - wire.SCREEN_REDUNDANT_EVENTS):
+            self.assertTrue(wire.may_forward_with_screen(name), name)
+        self.assertFalse(wire.may_forward_with_screen("some_new_event_nobody_classified"))
+
     def test_client_types_never_overlap_the_forbidden_list(self):
         self.assertEqual(sorted(set(wire.CLIENT_TYPES) & wire.NEVER_FROM_CLIENT), [])
 

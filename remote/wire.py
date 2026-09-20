@@ -410,6 +410,29 @@ def may_forward(event: str) -> bool:
     return event in FORWARDED_EVENTS
 
 
+# Events a client that draws the desktop's **screen** already has, in the terminal, and so must not
+# be sent twice (card #3H5T). The transcript renderer in `app/app.js` is the agent-companion
+# fallback: `transcribe()` is the only reader of a `tool_output`'s text and it runs only when the
+# desktop does *not* advertise `screen` (`app/app.js:728`), because `openTerminal()` hides the whole
+# transcript when it does (`app/app.js:480-482`). Measured on the owner's Pixel 8 on 2026-09-20: a
+# tool-heavy turn put **1.33 MB of 1.46 MB** on the air as `agent` messages the phone parsed and
+# threw away, and because RRP is one ordered Noise stream, three of that turn's forty-five screen
+# markers painted 1.1-3.1 s late behind them. Same reasoning as GUEST_EVENTS below, applied to the
+# owner's own devices: "those already reach them on the screen, because Relay prints them into the
+# terminal."
+#
+# A share with no screen — a source with no `on_screen`, which is the headless/agent-companion
+# shape — still gets the text, because there the transcript is the only thing the client can draw.
+# A future client that mounts a transcript *beside* a screen has to ask for the text, and this is
+# where that opt-in would be read.
+SCREEN_REDUNDANT_EVENTS = frozenset({"tool_output", "tool_result"})
+
+
+def may_forward_with_screen(event: str) -> bool:
+    """Whether a share whose clients draw the desktop's screen should be sent this event."""
+    return event in FORWARDED_EVENTS and event not in SCREEN_REDUNDANT_EVENTS
+
+
 # The owner's three levels (2026-09-18) are about *conversations*, not only about buttons: a
 # viewer observes this conversation and a partner types in it, and neither is shown the ones
 # before it. `pane_state` drops its `sessions` block below `full` for that reason, and these

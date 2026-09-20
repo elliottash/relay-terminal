@@ -279,6 +279,20 @@ viewer observes this conversation and a partner types in it. Everything else is 
 to hold in both streams: `pane_state` drops its `sessions` block below `full`, and without a floor
 here the same titles would arrive as worker events a moment later.
 
+**A share that carries the screen does not carry tool text** (`SCREEN_REDUNDANT_EVENTS` /
+`may_forward_with_screen` in `remote/wire.py`, applied in `Host._agent_event`). When the desktop
+advertises the `screen` feature, `tool_output` and `tool_result` are dropped before the ring —
+never forwarded, never replayed after a gap — because Relay prints a tool's output into the
+terminal the client is already drawing, and the client's transcript renderer is switched off
+whenever there is a screen. Measured on a Pixel 8 on 2026-09-20 (card #3H5T): a tool-heavy turn put
+**1.33 MB of 1.46 MB** on the air as text the phone parsed and threw away, and three of its
+forty-five screen markers painted 1.1–3.1 s late behind that queue, RRP being one ordered stream.
+A share with **no** screen — a source with no `on_screen`, the headless/agent-companion shape —
+gets both events exactly as before: there the transcript is all the client has. The fold still
+works on either: `tool_output_get` (below) answers from the desktop's own store and is untouched.
+A future client that wants a transcript *beside* a screen asks for the text, and
+`may_forward_with_screen` is where that opt-in is read.
+
 **(security)** The hub forwards an allow-list, never everything. `key_stored`, `key_removed`,
 `key_tested`, `warp_imported`, `presets`, `model_roles`, `configured`, `agent_options`, the
 `skills_*` family, `fork_state` and `state_loaded` **must not** be forwarded in any phase — key

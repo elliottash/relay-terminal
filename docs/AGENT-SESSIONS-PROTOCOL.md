@@ -4287,14 +4287,25 @@ carries `stored: true` and no `text`, and is never trimmed.
 forwarded only while a view is subscribed (`agent_subscribe`) — that is, only while something is
 reading them — so its payload keeps its text.
 
-**When the GUI asks for it** (`src/Pane.h`, `needsToolOutputText()`). Two surfaces read the text:
-the stream under the row that Options › Agent › **Show tool output** turns on, and a **phone**,
-which prints a running call's output straight from the event (`app/app.js`) and has no fold to
-fetch it with. Everything else wants the count — the call's own line, the Activity pane's running
-row, and both folds. So the pane sends `stream_tool_output: !(showToolOutput() ||
-sharedWithPhone())` on every `configure`, when Options toggles Show tool output, and when a share
-starts or ends. A GUI that has not been updated sends nothing and gets the text, and so does the
-phone behind one that has.
+**When the GUI asks for it** (`src/Pane.h`, `needsToolOutputText()`). **One** surface reads the
+text: the stream under the row that Options › Agent › **Show tool output** turns on. Everything
+else wants the count — the call's own line, the Activity pane's running row, and both folds, which
+fetch the real text with `tool_output_get` when they are opened. So the pane sends
+`stream_tool_output: !showToolOutput()` on every `configure` and when Options toggles Show tool
+output. A GUI that has not been updated sends nothing and gets the text.
+
+This paragraph said until 2026-09-20 that a **phone** was the second such surface, and the pane
+flipped the option on and off as a share started and ended. It was measured on the owner's Pixel 8
+that day (card #3H5T, `docs/qa_evidence/2026-09-20-perf-fixes/phone/RESULTS.md`) and it is not
+true: `app/app.js` draws a running call's output only in its transcript renderer, which is the
+agent-companion fallback for a desktop with no terminal and is switched off whenever the desktop
+advertises a `screen` — which a Relay pane share always does. The phone watching a pane sees the
+pane's own screen, on which Relay has already printed the output. So the share arm bought 28 KB of
+UTF-8 per tool call on the IPC wire, and 1.33 MB per tool-heavy turn on the air, for a client that
+parsed it and dropped it. The hub now refuses to forward `tool_output` / `tool_result` to a share
+that carries the screen at all (`may_forward_with_screen` in `remote/wire.py`,
+[REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md) section 6.4), and a future client that wants a transcript
+beside a screen asks for the text there rather than having the desktop guess.
 
 **Reading either shape.** A surface that wants the line count takes it from `lines` when `counted`
 is set and from `text` otherwise — `relay::calllines::toolOutputCount()` in `src/CallLines.cpp` is
