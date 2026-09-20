@@ -4935,7 +4935,14 @@ private:
             if (action == QStringLiteral("splitRight")) w->runAction(QStringLiteral("pane.splitRight"));
             else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
             else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.splitSameHost"));
+            else if (action == QStringLiteral("equalize")) w->runAction(QStringLiteral("pane.equalize"));
             else if (action == QStringLiteral("close")) w->closePane(guard, true);
+        };
+        // Grey the menu's "Equalize pane sizes" while this pane is alone in its tab: any other
+        // leaf counts (an explorer beside it splits the tab just the same).
+        pane->hasPaneSiblings = [guard]() -> bool {
+            auto *w = windowOf(guard);
+            return w && w->leavesIn(w->pageOf(guard)).size() > 1;
         };
         pane->onPlanWritten = [guard](const QString &path, Pane *) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, true); };
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };

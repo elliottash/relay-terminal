@@ -656,6 +656,9 @@ public:
     std::function<QString(int *panes)> onShareTab;
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
+    // Whether the tab holds a pane besides this one: the menu's "Equalize pane sizes"
+    // (pane.equalize) is greyed while this pane is alone, because equalizing then moves nothing.
+    std::function<bool()> hasPaneSiblings;
     // Dragging the pane's header moves the whole pane; the window decides where it lands (owner,
     // 2026-09-17). Same pair as PaneChrome's grip, so both handles take one path through the window.
     std::function<void(const QPoint &global)> onHeaderDragMove;
@@ -2282,6 +2285,9 @@ public:
         state.canReadOutput = terminalCan(relay::TerminalBackend::ScreenText) || terminalCan(relay::TerminalBackend::Scrollback);
         state.canInject = terminalCan(relay::TerminalBackend::DisplayInjection);
         state.canZoom = terminalCan(relay::TerminalBackend::FontZoom);
+        // "Equalize pane sizes" (pane.equalize) only moves anything once the tab holds a pane
+        // besides this one to share the space out to.
+        state.canEqualize = hasPaneSiblings && hasPaneSiblings();
         state.remoteHost = relay::panestatus::remoteHost(remoteCommandLine());   // "New pane on <host>" (#S5SH)
         if (m_backend) {
             state.hasSelection = !m_backend->selectedText().isEmpty();
@@ -2328,6 +2334,7 @@ public:
             {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
             {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
             {QStringLiteral("splitSameHost"), QStringLiteral("ssh.splitSameHost")},
+            {QStringLiteral("equalize"), QStringLiteral("pane.equalize")},
             {QStringLiteral("close"), QStringLiteral("pane.close")},
         };
         const QString action = actions.value(id);
@@ -2370,7 +2377,7 @@ public:
             if (!m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
             return;
         }
-        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, splitSameHost, close
+        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, splitSameHost, equalize, close
     }
 
     // "Save output as…": the scrollback and the visible screen as plain text.

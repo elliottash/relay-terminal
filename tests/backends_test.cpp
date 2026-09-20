@@ -84,8 +84,21 @@ private Q_SLOTS:
                                   QStringLiteral("find"), QStringLiteral("clearScrollback"), QStringLiteral("reset"),
                                   QStringLiteral("saveOutput"), QStringLiteral("zoomIn"), QStringLiteral("zoomOut"),
                                   QStringLiteral("zoomReset"), QStringLiteral("splitRight"), QStringLiteral("splitDown"),
-                                  QStringLiteral("close")})
+                                  QStringLiteral("equalize"), QStringLiteral("close")})
             QVERIFY2(ids.contains(id), qPrintable(id));
+    }
+
+    // pane.equalize: carried in every menu, greyed while the tab holds this pane alone —
+    // equalizing then has nothing to share the space with — and live once a sibling exists.
+    void menuCarriesEqualizeGreyedWhileThePaneIsAlone() {
+        relay::TerminalMenuState state = relayEngineState();
+        const auto items = relay::terminalContextMenu(state);
+        const QStringList ids = menuIds(items);
+        QVERIFY(ids.contains(QStringLiteral("equalize")));
+        QCOMPARE(ids.indexOf(QStringLiteral("equalize")), ids.indexOf(QStringLiteral("close")) - 1);
+        QVERIFY(!enabledOf(items, QStringLiteral("equalize")));
+        state.canEqualize = true;
+        QVERIFY(enabledOf(relay::terminalContextMenu(state), QStringLiteral("equalize")));
     }
 
     // A backend that can do less offers the same menu minus what it cannot do.

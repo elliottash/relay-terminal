@@ -60,6 +60,7 @@ struct TerminalMenuState {
     bool hasTurn = false;            // the pane has a finished agent turn to open
     bool canTakeControl = false;     // the terminal is running, so the keyboard can be handed over
     bool canClosePane = true;
+    bool canEqualize = false;        // the tab holds another pane, so "Equalize pane sizes" moves something
     QString remoteHost;              // the host of the ssh/mosh session in the pane, or empty (#S5SH)
 };
 

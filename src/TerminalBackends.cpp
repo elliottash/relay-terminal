@@ -88,6 +88,9 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     // The same ssh command line again, beside this one; with connection sharing, no second login.
     if (!state.remoteHost.isEmpty())
         add("splitSameHost", QStringLiteral("New pane on %1").arg(state.remoteHost));
+    // pane.equalize: every splitter in the tab back to equal shares; greyed while this pane is
+    // alone in its tab, because equalizing then has nothing to share the space with.
+    add("equalize", QStringLiteral("Equalize pane sizes"), state.canEqualize);
     add("close", QStringLiteral("Close pane"), state.canClosePane);
 
     while (!items.isEmpty() && items.last().isSeparator())
