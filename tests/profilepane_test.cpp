@@ -172,6 +172,9 @@ void ProfilePaneTest::buildAndProfileHeadersDiffer() {
              QStringLiteral("Output"));
     QCOMPARE(model->headerData(relay::profile::ColSelf, Qt::Horizontal).toString(),
              QStringLiteral("Compile"));
+    // Two identical numbers is not a column: a build step's total *is* its compile time, so the
+    // Total column is put away and the output paths get the room.
+    QVERIFY(pane.table()->isColumnHidden(relay::profile::ColTotal));
 
     ProfilePane other;
     other.startWaitingFor(QStringLiteral("tests"));
@@ -184,6 +187,7 @@ void ProfilePaneTest::buildAndProfileHeadersDiffer() {
              QStringLiteral("Function"));
     QCOMPARE(other.tableModel()->headerData(relay::profile::ColSelf, Qt::Horizontal).toString(),
              QStringLiteral("Self"));
+    QVERIFY(!other.table()->isColumnHidden(relay::profile::ColTotal));
 }
 
 void ProfilePaneTest::stopSendsTheRequest() {

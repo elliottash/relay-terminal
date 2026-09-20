@@ -49,7 +49,7 @@ const QVector<ProfileTarget> &profileTargets() {
     static const QVector<ProfileTarget> targets{
         {QStringLiteral("build"), QStringLiteral("Build (this machine)"),
          QStringLiteral("Per-target compile times, from a Ninja build of its own — never the "
-                        "shared build/. Minutes cold, seconds warm.")},
+                        "build directory the sessions share. Minutes cold, seconds warm.")},
         {QStringLiteral("build-remote"), QStringLiteral("Build (sphinxpad)"),
          QStringLiteral("The same table for the committed tree, built on the second runner. "
                         "About four minutes cold.")},
@@ -373,6 +373,9 @@ void ProfilePane::applySummary(const QJsonObject &summary) {
         if (!row.name.isEmpty()) m_rows.append(row);
     }
     if (m_model) m_model->refresh();
+    // A build step's `total` is its `self` — there is no call stack — so the column would be the
+    // same number twice, and the output paths are what need the room.
+    if (m_table) m_table->setColumnHidden(ColTotal, m_kind == QLatin1String("build"));
 }
 
 void ProfilePane::appendLine(const QString &line) {
