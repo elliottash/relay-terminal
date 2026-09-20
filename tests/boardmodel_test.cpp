@@ -7,6 +7,7 @@
 #include "Projects.h"
 #include "BoardPane.h"
 #include "BoardChat.h"   // the page agent's panel (#8YQ9, protocol 19.18)
+#include "Theme.h"      // the real stylesheet, for the action-row face (#PBX1)
 
 #include <QApplication>
 #include <QCheckBox>
@@ -276,6 +277,8 @@ private slots:
     void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
     void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
     void theHelpersPromptBoxIsTheSameShapeAsAPanes();
+    void everyButtonOnAnActionRowWearsTheCardPagesFace();
+    void everyActionOnTheSwitchboardsRowHasALetter();
     void theCardPageCarriesTheSameModelBoxAsTheListPage();
     void theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped();
     // The panel outside the Switchboard (#FEJQ): one worker, four panels.
@@ -1906,7 +1909,9 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 
     QToolButton *button = cleanupButton(view);
     QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    // The label carries the letter that clicks it from the list (#PBX1, owner: "it should
+    // have the letter hotkeys for each switchboard action as well").
+    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
     sent.clear();
     button->click();
 
@@ -1918,7 +1923,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     const QString runId = sent.last().value("id").toString();
     QVERIFY(!runId.isEmpty());
     QVERIFY(view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Stop"));
+    QCOMPARE(button->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
 
     view.handleEvent(cleanupStarted(runId, true));
     QVERIFY(view.cleanupRunning());
@@ -1955,7 +1960,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     view.handleEvent(cleanupEvent(QStringLiteral("done")));
     view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), twoChanges(true)));
     QVERIFY(!view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
     auto *panel = view.findChild<QWidget *>(QStringLiteral("boardCleanupPanel"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     auto *body = view.findChild<QTextBrowser *>(QStringLiteral("boardCleanupBody"));
@@ -2054,7 +2059,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
                                    {"card_id", "K7Q2"},
                                    {"text", "the agent is answering about #K7Q2"}});
     QVERIFY(!second.cleanupRunning());
-    QCOMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up"));
+    QCOMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up (u)"));
     QVERIFY(second.notice().contains(QStringLiteral("answering on #K7Q2")));
     QVERIFY(second.notice().contains(QStringLiteral("did not start")));
 
@@ -2088,7 +2093,7 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
     button->click();
     const QString runId = sent.last().value("id").toString();
     view.handleEvent(cleanupStarted(runId, false));
-    QCOMPARE(button->text(), QStringLiteral("Stop"));
+    QCOMPARE(button->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
 
     sent.clear();
     button->click();
@@ -2099,7 +2104,7 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
     view.handleEvent(cleanupEvent(QStringLiteral("cancelled")));
     view.handleEvent(cleanupSummary(runId, false, QStringLiteral("cancelled"), twoChanges(false)));
     QVERIFY(!view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     QVERIFY(head->text().contains(QStringLiteral("stopped part way")));
     QVERIFY(view.notice().isEmpty());    // the progress line goes with the run
@@ -3766,6 +3771,181 @@ void BoardModelTests::theHelpersPromptBoxIsTheSameShapeAsAPanes()
                                                       {"seconds", 42}, {"survey", true}}}});
     QVERIFY(!busy->isHidden());
     QCOMPARE(busyLabel->text(), QStringLiteral("\u2726 Switchboard agent \u00b7 0:42 \u00b7 survey"));
+}
+
+// Every button on an action row wears the card page's face, whoever put it there (owner,
+// 2026-09-20: "make the buttons consistent, can you use the styling from the card agent" — and,
+// of the colours, "not the colors though"). The face is a dynamic property the stylesheet keys
+// on, so a session that adds a button keeps its object name (its own tests find it by that) and
+// still gets the shape; the colours stay whatever its own rule gives it, which is why Execute's
+// accent outline survives.
+void BoardModelTests::everyButtonOnAnActionRowWearsTheCardPagesFace()
+{
+    // The face *is* a stylesheet, so this test loads the real one — and puts back what it found.
+    // Nothing else in this file measures pixels, and none of it should inherit a sheet.
+    struct Sheet {
+        QString was = qApp->styleSheet();
+        ~Sheet() { qApp->setStyleSheet(was); }
+    } sheet;
+    relay::theme::applyTheme(*qApp);
+
+    QList<QJsonObject> sent;
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.onSend = [&sent](const QJsonObject &message) { sent.append(message); };
+    view.resize(1100, 760);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    QWidget *panel = chatPanel(view);
+    QVERIFY(panel);
+    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
+    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
+    QVERIFY(check && cleanup);
+
+    // A button another session reparents in — this is exactly what BoardView does with Tests and
+    // Profile — arrives with nothing on it and comes out wearing the row's face, under its own
+    // name. The panel is reached as the panel, not as a BoardView method, because that is how the
+    // other sessions reach it.
+    // No Q_OBJECT on the panel (nothing in these headers has one), so the cast is static: the
+    // object name `boardChatPanel` is that class's and no other's.
+    auto *panelApi = static_cast<relay::HelperChatPanel *>(panel);
+    auto *guest = new QToolButton;
+    guest->setObjectName(QStringLiteral("someOtherSessionsButton"));
+    guest->setText(QStringLiteral("Tests"));
+    QVERIFY(!guest->property("actionRow").toBool());
+    panelApi->addToolWidget(guest);
+    QCOMPARE(guest->objectName(), QStringLiteral("someOtherSessionsButton"));
+    QVERIFY2(guest->property("actionRow").toBool(),
+             "addToolWidget must stamp the row's face property on the button it adopts");
+    QCoreApplication::processEvents();
+
+    // Polished, it is the same height and the same type as Check beside it.
+    QCOMPARE(guest->sizeHint().height(), check->sizeHint().height());
+    QCOMPARE(guest->font(), check->font());
+
+    // And the card page's Plan is that height too: one row, three places (the Switchboard's head
+    // row, the card page's action row, and whatever a session adds).
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
+                                     {"title", "K7Q2 card"}, {"status", "inbox"},
+                                     {"tab", "features"}, {"body", "text"},
+                                     {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    QPushButton *plan = nullptr;
+    QPushButton *execute = view.findChild<QPushButton *>(QStringLiteral("boardExecute"));
+    for (QPushButton *button : view.findChildren<QPushButton *>(QStringLiteral("boardReplyButton")))
+        if (button->text().startsWith(QStringLiteral("Plan")))
+            plan = button;
+    QVERIFY(plan && execute);
+    QVERIFY(plan->property("actionRow").toBool());
+    QVERIFY(execute->property("actionRow").toBool());
+    QCoreApplication::processEvents();
+    QCOMPARE(plan->sizeHint().height(), check->sizeHint().height());
+    QCOMPARE(plan->font(), check->font());
+
+    // The colours are not imposed (owner: "not the colors though"). Execute leaves the board and
+    // says so with the agent's outline, and the shared rule must not have flattened it: the
+    // stylesheet still gives it the agent's ink where Plan gets the ordinary text colour.
+    const QString sheetText = qApp->styleSheet();
+    QVERIFY(sheetText.contains(QStringLiteral("QPushButton#boardExecute { padding: 4px 12px; color: ")));
+    QVERIFY(sheetText.contains(QStringLiteral("QPushButton[actionRow=\"true\"], QToolButton[actionRow=\"true\"]")));
+    // …and the shared rule declares no colour at all, which is what leaves Execute alone.
+    const int at = sheetText.indexOf(QStringLiteral("QPushButton[actionRow=\"true\"]"));
+    const QString rule = sheetText.mid(at, sheetText.indexOf(QLatin1Char('}'), at) - at);
+    QVERIFY2(!rule.contains(QStringLiteral("color")) && !rule.contains(QStringLiteral("background")),
+             qPrintable(rule));
+
+    delete guest;
+}
+
+// Every action on the Switchboard agent's row has a letter, the way the card page's Plan and
+// Execute do (owner, 2026-09-20: "it should have the letter hotkeys for each switchboard action
+// as well"). The letter is a property the button's maker sets; the panel writes the suffix into
+// the label, answers the key, and tells the page's key line about it.
+void BoardModelTests::everyActionOnTheSwitchboardsRowHasALetter()
+{
+    QList<QJsonObject> sent;
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.onSend = [&sent](const QJsonObject &message) { sent.append(message); };
+    view.resize(1100, 760);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    QWidget *panel = chatPanel(view);
+    QVERIFY(panel);
+    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
+    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
+    QVERIFY(check && cleanup);
+    QCOMPARE(check->text(), QStringLiteral("Check (k)"));
+    QCOMPARE(cleanup->text(), QStringLiteral("Clean up (u)"));
+    // `fullLabel` is what a row that runs out of room shortens from (CardDetail::fitButtons), so
+    // the keys are the first thing to go and no word is ever cut.
+    QCOMPARE(check->property("fullLabel").toString(), QStringLiteral("Check (k)"));
+    QCOMPARE(cleanup->property("fullLabel").toString(), QStringLiteral("Clean up (u)"));
+
+    // The letters are the page's, and the page did not already spend them.
+    auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
+    QVERIFY(keys);
+    QVERIFY2(keys->text().contains(QStringLiteral("<b>k</b> check")), qPrintable(keys->text()));
+    QVERIFY2(keys->text().contains(QStringLiteral("<b>u</b> clean up")), qPrintable(keys->text()));
+
+    // Pressing one on the list clicks its button: Check asks the worker for a board check.
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+    list->setFocus();
+    sent.clear();
+    QTest::keyClick(list, Qt::Key_K);
+    QVERIFY(!sent.isEmpty());
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_check"));
+    sent.clear();
+    QTest::keyClick(list, Qt::Key_U);
+    QVERIFY(!sent.isEmpty());
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_cleanup"));
+
+    // A button a session adds with a letter of its own is answered the same way, and says so in
+    // the key line — the row's rule, not two names written out in BoardView.
+    // No Q_OBJECT on the panel (nothing in these headers has one), so the cast is static: the
+    // object name `boardChatPanel` is that class's and no other's.
+    auto *panelApi = static_cast<relay::HelperChatPanel *>(panel);
+    auto *guest = new QToolButton;
+    guest->setObjectName(QStringLiteral("someOtherSessionsButton"));
+    guest->setText(QStringLiteral("Tests"));
+    guest->setProperty("actionKey", QStringLiteral("s"));
+    int clicks = 0;
+    QObject::connect(guest, &QToolButton::clicked, panel, [&clicks] { ++clicks; });
+    panelApi->addToolWidget(guest);
+    QCOMPARE(guest->text(), QStringLiteral("Tests (s)"));
+    view.resize(1100, 761);          // the key line is rewritten with the page's layout
+    QCoreApplication::processEvents();
+    QVERIFY2(keys->text().contains(QStringLiteral("<b>s</b> tests")), qPrintable(keys->text()));
+    QTest::keyClick(list, Qt::Key_S);
+    QCOMPARE(clicks, 1);
+
+    // The mouse path teaches the letter once (WARP.md's standing rule); the key path has just
+    // used it and says nothing.
+    QString hintedId, hintedKeys;
+    view.onHint = [&](const QString &id, const QString &text) { hintedId = id; hintedKeys = text; };
+    check->click();
+    QCOMPARE(hintedId, QStringLiteral("board.action.boardChatCheck"));
+    QCOMPARE(hintedKeys, QStringLiteral("k"));
+    hintedId.clear();
+    QTest::keyClick(list, Qt::Key_K);
+    QVERIFY2(hintedId.isEmpty(), "a key press must not teach the key it just used");
+
+    // A keyless button is left alone: no suffix, and it adds nothing to the key line. (Tests and
+    // Profile are keyless on main today — their makers have not set a letter on them.)
+    auto *quiet = new QToolButton;
+    quiet->setObjectName(QStringLiteral("quietButton"));
+    quiet->setText(QStringLiteral("Profile"));
+    panelApi->addToolWidget(quiet);
+    QCOMPARE(quiet->text(), QStringLiteral("Profile"));
+    view.resize(1100, 762);
+    QCoreApplication::processEvents();
+    QVERIFY(!keys->text().contains(QStringLiteral("profile")));
+
+    delete guest;
+    delete quiet;
 }
 
 namespace {

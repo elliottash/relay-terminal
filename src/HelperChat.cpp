@@ -9,6 +9,7 @@
 #include "ToolLabel.h"
 #include "Voice.h"
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
 #include <QIcon>
@@ -535,6 +536,11 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
         m_check->setCursor(Qt::PointingHandCursor);
         m_check->setFocusPolicy(Qt::NoFocus);
         m_check->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        // `k` — a free letter on the list page, which already spends n, e, p, x, v, m, c, y, t,
+        // a, o and `/` (BoardView::handleBoardKey). The label carries it the way the card page's
+        // "Plan (p)" does, and `adoptActionButton` is what writes the suffix.
+        m_check->setProperty("actionKey", QStringLiteral("k"));
+        adoptActionButton(m_check);
         m_toolRow->addWidget(m_check);
         QObject::connect(m_check, &QToolButton::clicked, this, [this] {
             send({{QStringLiteral("type"), QStringLiteral("board_check")}});
@@ -912,8 +918,106 @@ void HelperChatPanel::addToolWidget(QWidget *widget)
         m_check = nullptr;
     }
     widget->setParent(this);
+    adoptActionButton(widget);
     m_toolRow->addWidget(widget);
     widget->show();
+}
+
+// A button joining the head row, from wherever. Two things happen to it and nothing else: it is
+// stamped as being *on an action row*, which is how src/Theme.cpp gives it the card page's shape
+// without knowing its name, and — if its maker asked for one — its letter is written into its
+// label and answered by `triggerActionKey`. The object name, the colours its own rule gives it,
+// the tooltip and the slot behind it are the maker's and are not touched (owner, 2026-09-20:
+// "make the buttons consistent, can you use the styling from the card agent" — "(not the colors
+// though)").
+void HelperChatPanel::adoptActionButton(QWidget *widget)
+{
+    auto *button = qobject_cast<QAbstractButton *>(widget);
+    if (button == nullptr)
+        return;
+    if (!button->property("actionRow").toBool()) {
+        button->setProperty("actionRow", true);
+        // Qt reads a widget's stylesheet rules once and caches them: a property set after the
+        // widget was polished changes nothing until the style is asked again.
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+    }
+    const QString key = button->property("actionKey").toString().trimmed();
+    if (key.isEmpty())
+        return;
+    // `fullLabel` is the label with its key, the property CardDetail::fitButtons() shortens from,
+    // so a row that runs out of room sheds the keys before it cuts a word. Written once: a second
+    // adoption of the same button (the board hands Clean up over after a re-layout) must not end
+    // up with "Clean up (u) (u)".
+    if (button->property("fullLabel").toString().isEmpty()) {
+        button->setText(QStringLiteral("%1 (%2)").arg(button->text(), key));
+        button->setProperty("fullLabel", button->text());
+        QObject::connect(button, &QAbstractButton::clicked, this, [this, button] {
+            // The mouse path teaches the key (WARP.md's standing rule); the key path has just
+            // used it and says nothing. The hint id is the button's own name, so Check and Clean
+            // up are counted apart and a session's own button brings its own id.
+            if (m_actionKeyPress || !onHint)
+                return;
+            const QString letter = button->property("actionKey").toString();
+            if (!letter.isEmpty())
+                onHint(QStringLiteral("board.action.") + button->objectName(), letter);
+        });
+    }
+}
+
+// The keyed buttons of the head row, in the order they sit in it.
+QList<QAbstractButton *> HelperChatPanel::actionButtons() const
+{
+    QList<QAbstractButton *> keyed;
+    if (m_toolRow == nullptr)
+        return keyed;
+    for (int i = 0; i < m_toolRow->count(); ++i) {
+        auto *button = qobject_cast<QAbstractButton *>(m_toolRow->itemAt(i)->widget());
+        if (button != nullptr && !button->property("actionKey").toString().trimmed().isEmpty())
+            keyed.append(button);
+    }
+    return keyed;
+}
+
+// One letter, pressed on the page this panel sits on. A hidden or disabled button does not answer
+// it — the key can do no more than the mouse can — and a panel that is not on screen answers
+// nothing at all, so a card open over the list does not fire the list page's actions.
+bool HelperChatPanel::triggerActionKey(const QString &letter)
+{
+    if (letter.isEmpty() || !isVisible() || m_collapsed)
+        return false;
+    for (QAbstractButton *button : actionButtons()) {
+        if (button->property("actionKey").toString() != letter)
+            continue;
+        if (button->isHidden() || !button->isEnabled())
+            return false;
+        m_actionKeyPress = true;
+        button->click();
+        m_actionKeyPress = false;
+        return true;
+    }
+    return false;
+}
+
+// What the page's key line says about this row. Built from the buttons rather than written out,
+// so a session that adds a keyed button gets its entry in the line for free — and one that adds
+// a keyless button adds nothing. The word is the button's own label without its key suffix, in
+// the lower case the rest of the line uses.
+QString HelperChatPanel::actionKeyLine() const
+{
+    QString line;
+    for (QAbstractButton *button : actionButtons()) {
+        QString what = button->property("fullLabel").toString();
+        if (what.isEmpty())
+            what = button->text();
+        const int at = what.lastIndexOf(QStringLiteral(" ("));
+        if (at > 0)
+            what = what.left(at);
+        line += QStringLiteral(" &nbsp; <b>%1</b> %2")
+                    .arg(button->property("actionKey").toString().toHtmlEscaped(),
+                         what.trimmed().toLower().toHtmlEscaped());
+    }
+    return line;
 }
 
 // The model box (#BRD3): on the chip strip inside the prompt box, between the context chip and

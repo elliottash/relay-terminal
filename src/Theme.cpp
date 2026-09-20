@@ -667,10 +667,50 @@ QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 9pt; padding
 QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardAddButton:hover { border-color: @accent; }
-/* Clean up lives on the helper panel's head row beside Check (19.9), so it wears what that row
-   wears — the card page's Plan/Execute face, one look for every no-typing action above a box. */
-QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
-QToolButton#boardCleanup:hover { border-color: @accent; }
+/* ---- the action row: one shape for every no-typing button above a prompt box ---------------
+   An action row is the row of buttons over a prompt box that need no typing: the card page's
+   Plan / Execute / Verify, and the Switchboard agent's Check, Clean up and whatever another
+   session reparents in beside them (HelperChatPanel::addToolWidget). Whoever makes the button,
+   the row gives it one shape — owner, 2026-09-20: "make the buttons consistent, can you use the
+   styling from the card agent", and then, of the colours, "not the colors though". So this rule
+   carries the card button's geometry and type **only** and declares no colour: a widget joining
+   a row is stamped with the dynamic property `actionRow`, and each button's own object-name rule
+   — an id selector, which outranks this one whatever the order — keeps the ground, the border
+   colour and the ink its maker gave it. Execute's accent outline stays an outline; a plain button
+   stays plain. Keyed on the property and not on three object names, so a session that puts a
+   button on the row gets the shape without touching this file, and without renaming its button
+   (other sessions' tests find theirs by object name). The border *width* is part of the shape
+   and is here, because a button two pixels shorter than its neighbour is the flatness the owner
+   was looking at; the border *colour* is not, so a button that declares none is framed in its
+   own ink — loud enough to say "give this one a rule", which is what the plain-ground list
+   below is for. A button not on a row at all (Clean up lives in the list tools until the panel
+   adopts it) never matches this and keeps its own frame. */
+QPushButton[actionRow="true"], QToolButton[actionRow="true"] {
+    border-width: 1px; border-style: solid; border-radius: 6px; padding: 4px 12px;
+    font-weight: normal; }
+/* The three pixels are Qt's, not a design choice. QStyleSheetStyle adds QSize(3, 3) to a
+   *QToolButton* that has a box rule and nothing to a QPushButton — the comment in
+   qstylesheetstyle.cpp reads "### broken QToolButton" — so identical padding paints a tool
+   button three pixels taller. The Switchboard's row is tool buttons and the card page's is push
+   buttons, so the push buttons carry those three pixels and the two rows come out one height.
+   It is a constant, not a ratio, so this holds at any desktop font size. The second selector is
+   what beats `QPushButton#boardReplyButton` and `#boardExecute`, which are id rules and would
+   otherwise put their own padding back; the first catches a push button on any other row. */
+QPushButton[actionRow="true"],
+QWidget#boardCardActions QPushButton { padding: 5px 12px 6px 12px; }
+/* The plain ground the row's ordinary buttons stand on: Check and Clean up (19.9), and the
+   Tests and Profile another session puts there (#7BM4) — those two had no rule at all and so
+   painted the bare Fusion button, visibly smaller and flatter than their neighbours in
+   docs/qa_evidence/2026-09-20-action-rows-left/01-switchboard-idle.png. Colour only; the shape
+   is the `actionRow` rule above. One selector list rather than a rule per button, so a plain
+   button added to a row joins the list and nothing else changes — and a button that brings its
+   own colours (`boardExecute`) is simply not in it. */
+QToolButton#boardChatCheck, QToolButton#boardCleanup,
+QToolButton#boardTests, QToolButton#boardProfile { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
+QToolButton#boardChatCheck:hover, QToolButton#boardCleanup:hover,
+QToolButton#boardTests:hover, QToolButton#boardProfile:hover { color: @text; border-color: @accent; }
+QToolButton#boardChatCheck:disabled, QToolButton#boardCleanup:disabled,
+QToolButton#boardTests:disabled, QToolButton#boardProfile:disabled { color: @disabled; border-color: @surface; }
 /* While a cleanup runs the same button is Stop. Colour and border only: a rule that changed the
    font here would paint one width and measure another (tests/buttonfit_test.cpp). */
 /* Violet, not amber: this is the Switchboard's agent working, and amber is reserved for what is
@@ -689,12 +729,11 @@ QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
    list above it is what it is talking about. */
 QWidget#boardChatPanel { background: transparent; border-top: 1px solid @boardMetalDim; }
 QLabel#boardChatHead { color: @muted; font-family: "@mono"; font-size: 9pt; }
-/* The head row's actions — Check, and the Clean up the board reparents in beside it. They wear
-   the card page's Plan/Execute face (`QPushButton#boardReplyButton`), because they are the same
-   kind of thing in the same place: an action above a prompt box that needs no typing (owner,
-   2026-09-20). One look, so every action row in the app reads the same. */
-QToolButton#boardChatCheck { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
-QToolButton#boardChatCheck:hover { color: @text; border-color: @accent; }
+/* The head row's actions — Check, the Clean up the board reparents in beside it, and Tests and
+   Profile. They wear the card page's Plan/Execute face, because they are the same kind of thing
+   in the same place: an action above a prompt box that needs no typing (owner, 2026-09-20).
+   Their shape comes from the `actionRow` rule and their ground from the plain-ground list, both
+   up beside `boardCleanup` — one look, so every action row in the app reads the same. */
 QTextBrowser#boardChatLog { background: transparent; color: @text; border: none; }
 QTextBrowser#boardChatLog QScrollBar:vertical { width: 8px; margin: 0; }
 /* Violet while the agent is turning, as everywhere else on the board: amber is reserved for what

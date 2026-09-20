@@ -860,7 +860,9 @@ if(BUILD_TESTING)
     add_test(NAME hints COMMAND relay-hints-tests)
     set_tests_properties(hints PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-board-tests tests/boardmodel_test.cpp)
-    target_link_libraries(relay-board-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    # relay-highlight carries src/Theme.cpp: the action-row face is a stylesheet rule, so the test
+    # that checks Check and Plan are one height has to apply the real sheet (#PBX1).
+    target_link_libraries(relay-board-tests PRIVATE relay-board relay-highlight ${RELAY_QT}::Test)
     add_test(NAME board COMMAND relay-board-tests)
     set_tests_properties(board PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The section editor behind the gear: SectionPlan is the rule set (add, remove, merge, rename)

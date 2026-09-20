@@ -1851,6 +1851,13 @@ public:
         for (QPushButton *button : {m_plan, m_execute, m_verify}) {
             button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
             button->setProperty("fullLabel", button->text());   // what fitButtons() shortens from
+            // The shape of a button on an action row, from the one rule that gives it to every
+            // such button wherever it is (src/Theme.cpp, `[actionRow="true"]`) rather than from
+            // this row's object names. Colours stay each button's own — Execute keeps the accent
+            // outline that means "this leaves the board" (owner, 2026-09-20: "make the buttons
+            // consistent, can you use the styling from the card agent" — "(not the colors
+            // though)").
+            button->setProperty("actionRow", true);
         }
         buttons->addWidget(m_plan);
         buttons->addWidget(m_execute);
@@ -4259,6 +4266,12 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_cleanup->setCursor(Qt::PointingHandCursor);
     m_cleanup->setFocusPolicy(Qt::NoFocus);
     m_cleanup->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Every action on the Switchboard agent's row has a letter (owner, 2026-09-20: "it should
+    // have the letter hotkeys for each switchboard action as well"). `u` for clean **up**: free
+    // on this page, which already spends n, e, p, x, v, m, c, y, t, a, o and `/`, and `k` is
+    // Check's. The panel writes the suffix into the label when it adopts the button and answers
+    // the key; updateCleanupButton() below keeps it through the Stop state.
+    m_cleanup->setProperty("actionKey", QStringLiteral("u"));
     m_listTools->addWidget(m_cleanup);
     // The Switchboard agent's model (#BRD3): the worker's own model box. It is built into this
     // row so it exists from the first draw, then buildChatPanel moves it into the page agent's
@@ -6557,8 +6570,14 @@ void BoardView::updateDetailLayout()
         "&nbsp; <b>v</b> verify &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     const bool stacked = width() < kStackedWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
-    if (m_keys->text() != keys)
-        m_keys->setText(keys);
+    // Wherever the board's own line is the one on screen, it ends with the Switchboard agent's
+    // action row — read off the row itself (HelperChatPanel::actionKeyLine) rather than written
+    // out above, so a session that puts a keyed button there gets its entry in the line for free
+    // and a keyless one adds nothing.
+    const QString line = keys == boardKeys && m_chat != nullptr ? keys + m_chat->actionKeyLine()
+                                                                : keys;
+    if (m_keys->text() != line)
+        m_keys->setText(line);
     // A signal's page (#AQ6X) has four actions and no thread, so a stacked pane says its own line
     // rather than the card's. Both pages live in the same half of the splitter and only one is
     // ever up (openSignal and the `board_card` handler hide the other), so "a page is open" is
@@ -7286,6 +7305,14 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
                                                  : QStringLiteral("execute"));
         return true;
     }
+    // The Switchboard agent's action row carries its own letters (owner, 2026-09-20: "it should
+    // have the letter hotkeys for each switchboard action as well"): Check is `k`, Clean up is
+    // `u`, and a button another session puts on that row brings whatever letter it set on itself.
+    // The page asks the panel rather than naming the buttons here, so a new button on the row
+    // needs no change in this function — and a letter this page already spends never reaches it,
+    // because every one of them is answered above.
+    if (m_chat != nullptr && !text.isEmpty() && m_chat->triggerActionKey(text))
+        return true;
     // Del deletes the open or the selected card (#CYM9), after the confirm the button asks.
     // Owner-only by construction: an agent has no way to send this message.
     if (mods == Qt::NoModifier && key->key() == Qt::Key_Delete
@@ -7554,7 +7581,15 @@ void BoardView::updateCleanupButton()
     if (!m_cleanup)
         return;
     const bool running = cleanupRunning();
-    m_cleanup->setText(running ? QStringLiteral("Stop") : QStringLiteral("Clean up"));
+    // The word changes; the letter does not. This rewrites the whole label, so it puts the key
+    // back on — and leaves `fullLabel` saying the same thing, which is what a row that runs out
+    // of room shortens from.
+    const QString letter = m_cleanup->property("actionKey").toString();
+    QString label = running ? QStringLiteral("Stop") : QStringLiteral("Clean up");
+    if (!letter.isEmpty())
+        label += QStringLiteral(" (%1)").arg(letter);
+    m_cleanup->setText(label);
+    m_cleanup->setProperty("fullLabel", label);
     m_cleanup->setToolTip(running
         ? (m_cleanupDry
                ? QStringLiteral("Stop the preview. Nothing has been written either way.")

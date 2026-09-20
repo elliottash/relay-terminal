@@ -42,11 +42,13 @@
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QList>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
 #include <functional>
 
+class QAbstractButton;
 class QFrame;
 class QHBoxLayout;
 class QLabel;
@@ -183,6 +185,32 @@ public:
     void addToolWidget(QWidget *widget);
     void addComposerWidget(QWidget *widget);
 
+    // ---- the row's own shape, and its letters -------------------------------------------------
+    // Every button on this row wears the card page's face, whoever made it (owner, 2026-09-20:
+    // "make the buttons consistent, can you use the styling from the card agent" — "(not the
+    // colors though)"). `addToolWidget` stamps the dynamic property `actionRow` on the button and
+    // repolishes it; src/Theme.cpp keys the shape off that property and leaves every colour to the
+    // button's own rule, so an outlined button is not flattened into a plain one. The object name
+    // is never touched: other sessions' tests find their buttons by it.
+    //
+    // And every action on the row has a letter (owner, 2026-09-20: "it should have the letter
+    // hotkeys for each switchboard action as well"), the way the card page's Plan and Execute do.
+    // The maker sets the dynamic property `actionKey` to a single letter before handing the button
+    // over; the panel appends " (k)" to the label, keeps the full text in `fullLabel` for any
+    // label-shortening logic (CardDetail::fitButtons reads that property), and answers the letter.
+    // A button with no `actionKey` is simply keyless — the row does not invent one.
+    //
+    // The letter was pressed on the page this panel is on: click that button and say true, so the
+    // page stops looking. Keyless letters, a hidden or disabled button, and a panel that is not on
+    // screen all say false. A key press never teaches the shortcut hint the mouse path teaches.
+    bool triggerActionKey(const QString &letter);
+    // What the page's key line should add for this row: `" &nbsp; <b>k</b> check"` per keyed
+    // button, in row order. Empty when nothing on the row has a letter, so a row of keyless
+    // buttons adds nothing to the line.
+    QString actionKeyLine() const;
+    // The keyed buttons, in row order, for a test and for the key line.
+    QList<QAbstractButton *> actionButtons() const;
+
     // ---- the model box, and the keys that reach it (#PK5Q) -----------------------------------
     // The first combo box put in the composer strip is the helper's model box, and this panel is
     // where the keyboard finds it: a terminal pane answers Alt+M by dropping its own box open
@@ -258,6 +286,15 @@ private:
 
     // ---- the context-left chip (`context` events, tagged `chat: true`) ----------------------
     void updateContextChip(const QJsonObject &event);
+
+    // ---- the action row (the head row's buttons) ---------------------------------------------
+    // One place where a button becomes a button *on this row*: the face property, the repolish
+    // that makes Qt re-read the stylesheet for it, the " (k)" the `actionKey` earns, and the
+    // connection that teaches that letter the first few times the button is clicked with a mouse.
+    // Called from `addToolWidget` for a reparented button and from the constructor for the Check
+    // the panel builds itself, so neither half has to remember the other.
+    void adoptActionButton(QWidget *widget);
+    bool m_actionKeyPress = false;           // the click below came from the keyboard, not a mouse
 
     QString m_pane;                          // "switchboard" | "options" | "actions" | "sessions"
     bool isBoard() const { return m_pane == helperpane::switchboard(); }
