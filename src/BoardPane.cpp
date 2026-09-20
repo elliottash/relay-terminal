@@ -1921,6 +1921,13 @@ public:
             plan();
         });
         connect(m_execute, &QPushButton::clicked, this, [this] {
+            // Already in a pane's hands (#48S3): the click is the claim chip's — reveal that
+            // pane — not a second hand-off, and no Execute hint either.
+            if (paneExecuting()) {
+                if (onFocusPane)
+                    onFocusPane(m_sessionToken);
+                return;
+            }
             if (onModeHint)
                 onModeHint(QStringLiteral("execute"));
             execute();
@@ -2264,6 +2271,16 @@ public:
     // changes no status — the card stays in its QA lane until the verifier's verdict moves it —
     // and there is nothing to arm: the checklist on the card is the brief, and a card with no
     // recommendation says so rather than opening a pane on nobody.
+    // The card is in a pane's hands right now (#48S3): a session token whose pane is still
+    // open, and a status that still says the pane is building the card. Once the card lands
+    // (Needs verification) or the pane closes, the claim is only a record again.
+    bool paneExecuting() const
+    {
+        return m_sessionLive
+            && (m_statusValue == QStringLiteral("executing")
+                || m_statusValue == QStringLiteral("in-progress"));
+    }
+
     void verify()
     {
         if (m_id.isEmpty() || m_editing || !onVerify)
@@ -2360,6 +2377,10 @@ public:
             m_tab->setCurrentIndex(tab);
         m_tab->setVisible(m_tab->count() > 1);
         const QString sessionToken = front.value(QStringLiteral("session")).toString().trimmed();
+        // Kept for the action row (#48S3): while this token names a pane that is still open and
+        // the status still says the pane is building the card, Execute is not on offer.
+        m_sessionToken = sessionToken;
+        m_sessionLive = !sessionToken.isEmpty() && (!paneExists || paneExists(sessionToken));
         const QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path,
                                       sessionToken.isEmpty() || !paneExists
                                           || paneExists(sessionToken));
@@ -2400,6 +2421,7 @@ public:
         // Said once: the strip has those words now, so the body below is the card's own.
         if (!m_signalSection.isEmpty())
             m_body = board::bodyWithoutSignalSection(m_body);
+        setModeTips();
         render(sameCard ? Scroll::Keep : Scroll::Top);
         m_loading = false;
     }
@@ -2774,9 +2796,24 @@ private:
                                           "changes no code and no other card. Anything typed goes "
                                           "with it (p, or Ctrl+Enter)"));
         m_delete->setEnabled(!m_busy);
-        m_execute->setEnabled(!m_busy);
-        m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
-                                             "its agent builds it, and the card moves to In progress (x)"));
+        if (paneExecuting()) {
+            // A pane already holds the card (#48S3): the button names it — the same eight
+            // characters every other surface shows of the token — and the click reveals the
+            // pane instead of handing the card to a second one.
+            const QString label =
+                QStringLiteral("Executing (%1)").arg(m_sessionToken.left(8));
+            m_execute->setText(label);
+            m_execute->setProperty("fullLabel", label);
+            m_execute->setEnabled(true);
+            m_execute->setToolTip(QStringLiteral("A pane is already executing this card — "
+                                                 "the click reveals it"));
+        } else {
+            m_execute->setText(QStringLiteral("Execute (x)"));
+            m_execute->setProperty("fullLabel", QStringLiteral("Execute (x)"));
+            m_execute->setEnabled(!m_busy);
+            m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
+                                                 "its agent builds it, and the card moves to In progress (x)"));
+        }
         m_verify->setEnabled(!m_busy && hasVerifier());
         const bool planning = m_busyMode == QStringLiteral("plan");
         m_busyLabel->setText(planning ? QStringLiteral("✦ Switchboarding · planning…")
@@ -3593,6 +3630,8 @@ private:
     // `## Issue` text an edit starts from and is compared with.
     QString m_hash, m_issue;
     QJsonObject m_front;
+    QString m_sessionToken;           // the pane that claimed the card, while it is on screen
+    bool m_sessionLive = false;       // and whether that pane is still open (#48S3)
     QJsonObject m_qa;                 // the worker's verifier recommendation for this card (#T71W)
     QString m_statusValue;
     QStringList m_sections;           // the body's `## ` headings, for "has it a plan?"
