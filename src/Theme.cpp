@@ -95,7 +95,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome[hot="true"], QFrame#helpCard, QMenu, QFrame#notificationsPopup {
+QFrame#paneChrome[hot="true"], QFrame#helpPopup, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
@@ -145,7 +145,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
-QFrame#helpCard, QLabel#toast {
+QFrame#helpPopup, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -174,7 +174,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
-QFrame#helpCard, QLabel#toast {
+QFrame#helpPopup, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -478,7 +478,7 @@ QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @muted; }
 /* Pane button row, drop zones, tab bar controls */
-QFrame#helpCard { background: @raised; border: 1px solid @border; border-radius: 8px; }
+QFrame#helpPopup { background: @raised; border: 1px solid @border; border-radius: 8px; }
 QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 9pt; min-width: 14px; }
 QLabel#helpText { color: @muted; font-size: 9.5pt; }
 QLabel#helpFooter { color: @muted; font-size: 9pt; padding-top: 6px; border-top: 1px solid @border; }

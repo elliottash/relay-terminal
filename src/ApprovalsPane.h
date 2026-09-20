@@ -29,7 +29,7 @@ namespace relay {
 namespace approvals {
 
 // `approvals.CAUTIOUS` (backend/relay_core/approvals.py): what asks before the first-launch
-// choice is answered. One list shared by the checklist rows (RelayWindow::approvalRow), a card's
+// choice is answered. One list shared by the checklist rows (RelayWindow::approvalRow), an ask's
 // "Always allow" (Pane::rememberAlwaysAllowed) and this pane's choose button, because the three
 // must never disagree about what an unanswered Relay asks. Written here rather than asked of the
 // worker because the settings page can be drawn with no worker running, and it changes only with
@@ -88,7 +88,7 @@ public:
         auto *buttons = new QHBoxLayout;
         buttons->setSpacing(10);
         m_allow = new QPushButton(QStringLiteral("Allow everything — recommended"));
-        m_allow->setToolTip(QStringLiteral("No approval cards; what Relay has always done"));
+        m_allow->setToolTip(QStringLiteral("Never ask; what Relay has always done"));
         connect(m_allow, &QPushButton::clicked, this, [this] { if (onAllowEverything) onAllowEverything(); });
         buttons->addWidget(m_allow);
         m_choose = new QPushButton(QStringLiteral("Choose what needs approval"));

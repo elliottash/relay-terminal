@@ -86,24 +86,24 @@ QString typeRefusalText(TypeRefusal refusal, const QString &program);
 // "✦ typed: y" — the inline line printed in the pane for every write the agent makes.
 QString typedLine(const QString &text);
 
-// ----- a line from a paired device while a question card is up (sessions protocol 27.4) -------
-// A phone, a tablet or a guest browser has no card of its own: it sees the question as the text
-// the desktop printed, and answers it by typing a line like any other. The card used to take
+// ----- a line from a paired device while an ask is up (sessions protocol 27.4) ----------------
+// A phone, a tablet or a guest browser has no ask of its own: it sees the question as the text
+// the desktop printed, and answers it by typing a line like any other. The ask used to take
 // *every* such line, before anything was routed, which made the shell unreachable from a paired
-// device until somebody answered the question — a card the owner is ignoring locked them out of
+// device until somebody answered the question — an ask the owner is ignoring locked them out of
 // their own terminal. The desktop never did that: an explicit terminal submit goes to the shell
-// and only an agent-bound line reaches the card. This is that rule, for the remote side: the card
+// and only an agent-bound line reaches the ask. This is that rule, for the remote side: the ask
 // takes the line when the line was going to the agent anyway.
 struct RemoteLine {
-    bool cardOpen = false;       // a question card is up in the pane
+    bool askOpen = false;        // an ask is up in the pane
     bool routerAsked = false;    // the device asked the worker's router to decide (`route`)
     bool routedToShell = false;  // ... and the verdict, which is in hand by now, was the shell
 };
 
 // A device that cannot ask the router (a view-or-agent phone, or a worker that is not up) can only
-// reach the agent, so its line is the card's; one whose verdict came back "shell" is running a
+// reach the agent, so its line is the ask's; one whose verdict came back "shell" is running a
 // command, and a question from the agent does not take that away.
-bool cardTakesRemoteLine(const RemoteLine &line);
+bool askTakesRemoteLine(const RemoteLine &line);
 
 // True when a full-screen (or remote) program owns the terminal and the prompt box still has
 // the keyboard: the pane offers "Take control" instead of switching by itself.

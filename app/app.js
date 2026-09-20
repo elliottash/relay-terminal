@@ -1034,9 +1034,9 @@ function transcribe(event) {
       break;
     }
     case 'plan_written': {
-      const card = el('div', 'plan');
-      card.append(el('div', 'plan-title', event.title || 'Plan'));
-      card.append(el('pre', 'plan-body', event.preview || ''));
+      const plan = el('div', 'plan');
+      plan.append(el('div', 'plan-title', event.title || 'Plan'));
+      plan.append(el('pre', 'plan-body', event.preview || ''));
       const run = el('button', 'plan-run', 'Execute');
       run.type = 'button';
       run.addEventListener('click', () => {
@@ -1044,8 +1044,8 @@ function transcribe(event) {
         // By id, never by path: the desktop minted it and resolves it against its own table.
         rrp.send({ t: 'plan_execute', pane: current, plan_id: event.plan_id }).catch(() => {});
       });
-      card.append(run);
-      body.append(card);
+      plan.append(run);
+      body.append(plan);
       answerNode = null;
       break;
     }

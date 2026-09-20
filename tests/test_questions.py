@@ -392,15 +392,15 @@ class PaneCardTests(unittest.TestCase):
     def test_a_line_from_a_paired_device_is_routed_before_the_card_sees_it(self):
         # Owner, 2026-09-19: a phone's line used to be taken as the answer before anything was
         # routed, so an unanswered card left the shell unreachable from that phone. The rule itself
-        # is `relay::input::cardTakesRemoteLine` (tests/inputpolicy_test.cpp); this is the wiring.
+        # is `relay::input::askTakesRemoteLine` (tests/inputpolicy_test.cpp); this is the wiring.
         submit = self.block("void submitRemote(const QString &text, bool route, const QString &origin,",
                             "// The router's verdict for a remote prompt")
-        self.assertIn("relay::input::cardTakesRemoteLine({m_ask.open(), false, false})", submit)
+        self.assertIn("relay::input::askTakesRemoteLine({m_ask.open(), false, false})", submit)
         # ... and only for the two doors that are agent-bound with no router in them.
         self.assertIn("(steering || !route || !m_workerReady)", submit)
         route = self.block("bool takeRemoteRoute(const QString &id, const QJsonObject &event) {",
                            "void submitTerminal(")
-        self.assertIn("relay::input::cardTakesRemoteLine({m_ask.open(), true, toShell})", route)
+        self.assertIn("relay::input::askTakesRemoteLine({m_ask.open(), true, toShell})", route)
         self.assertIn("submitTerminal(prompt.text, false);", route)   # a command still runs
         # Whoever typed it keeps their name on it: on the card's echo and on the queue row.
         self.assertIn("answerQuestion(prompt.text, prompt.author)", route)
@@ -412,11 +412,11 @@ class PaneCardTests(unittest.TestCase):
 
     def test_a_card_that_cannot_be_drawn_is_answered_rather_than_dropped(self):
         # An empty id or no questions used to `return` and leave the worker blocked for good.
-        # The check itself is `unreadableCard()` (its own method since the approval card, #K2FV,
+        # The check itself is `unreadableAsk()` (its own method since the approval ask, #K2FV,
         # needed a different notion of readable); this is the branch that answers such a card.
         show = self.block("void showQuestion(const QJsonObject &event) {",
-                          "// The worker took the card away")
-        malformed = show.split("if (unreadableCard()) {", 1)[1]
+                          "// The worker took the ask away")
+        malformed = show.split("if (unreadableAsk()) {", 1)[1]
         malformed = malformed.split("return;", 1)[0]
         self.assertIn("Ink::Error", malformed)                       # the pane says so
         self.assertIn('{"type", "question_answer"}', malformed)      # and the turn carries on

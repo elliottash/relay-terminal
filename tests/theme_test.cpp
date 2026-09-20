@@ -520,7 +520,7 @@ private Q_SLOTS:
 
     // Owner, 2026-09-19, on amber carrying two meanings at once: "agree, address that". A tool
     // pane's header band was drawn in `warning`, the same token as the "needs you" glyph, the
-    // question card and every other mark that says a person is blocked. It has its own `[ui] tool`
+    // ask and every other mark that says a person is blocked. It has its own `[ui] tool`
     // now — brass, the same family, dulled — and this holds the two apart in every shipped theme:
     // the band's brass is never the flag's amber, and it stays as legible as everything else.
     void theToolBandIsBrassAndNotTheAmberOfAFlag() {

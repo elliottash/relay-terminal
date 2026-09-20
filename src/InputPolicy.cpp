@@ -128,8 +128,8 @@ QString Secret::take() {
 
 void Secret::wipe() { relay::input::wipe(m_text); }
 
-bool cardTakesRemoteLine(const RemoteLine &line) {
-    if (!line.cardOpen) return false;
+bool askTakesRemoteLine(const RemoteLine &line) {
+    if (!line.askOpen) return false;
     return !(line.routerAsked && line.routedToShell);
 }
 

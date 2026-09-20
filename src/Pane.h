@@ -19,7 +19,7 @@
 #include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
-#include "ApprovalsPane.h"  // relay::approvals::cautious(): the card's "Always allow" writes the same list the checklist shows
+#include "ApprovalsPane.h"  // relay::approvals::cautious(): the ask's "Always allow" writes the same list the checklist shows
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
 #include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
 #include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
@@ -209,12 +209,12 @@ public:
     }
 };
 
-// What a line typed into the prompt box means for the question card on screen (#MQ9C,
+// What a line typed into the prompt box means for the ask on screen (#MQ9C,
 // protocol 27.4). Free and pure, so the whole decision sits in one place with nothing of the pane
-// around it: Pane::answerQuestion reads the options off the card and then only acts on this.
+// around it: Pane::answerQuestion reads the options off the ask and then only acts on this.
 // Keys are not lines and are not read here: Esc skips the current question (owner, 2026-09-19 —
 // `Pane::skipQuestion`, which is what `0` and `/skip` below mean) and Ctrl+Shift+Enter sends the
-// box to the shell instead, which is why a card can never take the terminal away.
+// box to the shell instead, which is why an ask can never take the terminal away.
 namespace relay::ask {
 
 struct Reading {
@@ -222,7 +222,7 @@ struct Reading {
         Words,          // their own answer, in their own words (always so for an open question)
         Chosen,         // options, picked by number
         Skip,           // "0" or /skip: this one is left unanswered
-        NoSuchOption,   // a number the card has no option for: nothing is sent, the card stays up
+        NoSuchOption,   // a number the ask has no option for: nothing is sent, the ask stays up
     };
     Kind kind = Words;
     QStringList labels;   // Chosen: the labels picked, in the order typed. Words: the line itself.
@@ -2631,7 +2631,7 @@ public:
 
     // ----- the agent asks the user something (#MQ9C, protocol 27) --------------------------
     // The worker cannot draw, so a question is a round trip: `question` comes in, the pane prints
-    // the card and waits, the prompt box takes the answer, `question_answer` goes back and the
+    // the ask and waits, the prompt box takes the answer, `question_answer` goes back and the
     // agent's turn — which has been blocked on it all this time — carries on.
     //
     // It is printed into the terminal rather than put in a widget over it, in the amber the rest
@@ -2658,26 +2658,26 @@ public:
         int current = -1;
         // Card #K2FV: the same round trip can carry an approval rather than the model's questions.
         // One decision replaces the answers; `questions` holds the single synthesized line so every
-        // path that counts, closes or supersedes a card works unchanged.
+        // path that counts, closes or supersedes an ask works unchanged.
         bool approval = false;
         QString capability;     // the checklist row the decision lands on ("always" unticks it)
-        QString subagent;       // set when a subagent's action drew the card, to name it as its
+        QString subagent;       // set when a subagent's action drew the ask, to name it as its
         bool open() const { return current >= 0 && current < questions.size(); }
     };
 
     bool questionOpen() const { return m_ask.open(); }
 
     void showQuestion(const QJsonObject &event) {
-        // A second card can only mean the first one is stale (a worker restart, a turn that was
+        // A second ask can only mean the first one is stale (a worker restart, a turn that was
         // stopped between the emit and the reply): drop it rather than stack them. Dropping it is
         // not enough on its own, though — whoever asked the first question is still blocked on an
-        // answer to *that* id, and nobody can type one once the card is gone — so the superseded
+        // answer to *that* id, and nobody can type one once the ask is gone — so the superseded
         // id is answered with nothing first and its turn carries on. Protocol §27 has one question
         // open at a time, so this should never fire; it costs a line and it cannot deadlock.
         // A repeat of the same id is a redraw, not a supersession, and is not answered away.
         // A superseded approval is denied rather than left unanswered: an approval nobody answers
         // is a refusal on the worker's side (protocol 27.6), and the refusal should say so rather
-        // than look like a card that never arrived.
+        // than look like an ask that never arrived.
         const QString incoming = event.value(QStringLiteral("id")).toString();
         if (m_ask.open()) {
             const QString superseded = m_ask.id;
@@ -2692,8 +2692,8 @@ public:
         }
         m_ask = Ask{};
         m_ask.id = incoming;
-        // An approval card (card #K2FV, protocol 27.6) carries its own fields rather than a
-        // `questions` array, so it is turned into the one-question card it is drawn as — before the
+        // An approval ask (card #K2FV, protocol 27.6) carries its own fields rather than a
+        // `questions` array, so it is turned into the one-question ask it is drawn as — before the
         // unreadable check, which would otherwise answer it away as empty, and an empty answer to
         // an approval is a silent deny.
         if (event.value(QStringLiteral("kind")).toString() == QStringLiteral("approval")) {
@@ -2705,11 +2705,11 @@ public:
         } else {
             m_ask.questions = event.value(QStringLiteral("questions")).toArray();
         }
-        if (unreadableCard()) {
-            // A card that cannot be drawn would otherwise leave the worker's turn blocked on an
-            // answer nobody can type. Say so where the card would have been, and answer nothing:
+        if (unreadableAsk()) {
+            // An ask that cannot be drawn would otherwise leave the worker's turn blocked on an
+            // answer nobody can type. Say so where the ask would have been, and answer nothing:
             // the tool reports every question unanswered and the turn carries on. An approval is
-            // the one card whose "unanswered" must reach the worker as a deny (27.6) — allowing an
+            // the one ask whose "unanswered" must reach the worker as a deny (27.6) — allowing an
             // action the pane could not read would be the opposite of the point.
             const QString id = m_ask.id;
             const bool approval = m_ask.approval;
@@ -2741,7 +2741,7 @@ public:
         focusInput();
     }
 
-    // The worker took the card away: Stop, or the turn ending under it.
+    // The worker took the ask away: Stop, or the turn ending under it.
     void closeQuestion(const QString &reason) {
         if (!m_ask.open()) { m_ask = Ask{}; return; }
         m_ask = Ask{};
@@ -2762,9 +2762,9 @@ private:
         return question.value(QStringLiteral("options")).toArray();
     }
 
-    // Whether the card on hand can be drawn at all (see showQuestion). A plain card needs at least
+    // Whether the ask on hand can be drawn at all (see showQuestion). A plain ask needs at least
     // one question; an approval needs its header and question, since it draws from those alone.
-    bool unreadableCard() const {
+    bool unreadableAsk() const {
         if (m_ask.id.isEmpty() || m_ask.questions.isEmpty()) return true;
         if (!m_ask.approval) return false;
         const QJsonObject question = questionAt(0);
@@ -2772,7 +2772,7 @@ private:
             || question.value(QStringLiteral("question")).toString().isEmpty();
     }
 
-    // The card for the question being asked now.
+    // The ask for the question being asked now.
     void printQuestion() {
         if (m_ask.approval) { printApproval(); return; }
         const QJsonObject question = questionAt(m_ask.current);
@@ -2803,9 +2803,9 @@ private:
                                ? QStringLiteral("  Numbers (\"1,3\"), or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")
                                : QStringLiteral("  A number, or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")),
                     Ink::Note);
-        // Esc is the card's skip now, not the turn's Stop (owner, 2026-09-19), so the footer says
+        // Esc is the ask's skip now, not the turn's Stop (owner, 2026-09-19), so the footer says
         // where Stop went. It has to: Esc was the only key that stopped a turn unless the user
-        // bound `agent.stop` themselves, and a card that quietly took the one Stop key away would
+        // bound `agent.stop` themselves, and an ask that quietly took the one Stop key away would
         // leave a turn nobody could end.
         printInline(QStringLiteral("  %1.\n").arg(stopTurnHint()), Ink::Note);
         closeInline();
@@ -2820,17 +2820,17 @@ private:
                               : QStringLiteral("%1 stops the turn").arg(stop);
     }
 
-    // The approval card's answers, in the order the pane prints them — `approvals.DECISIONS`
+    // The approval ask's answers, in the order the pane prints them — `approvals.DECISIONS`
     // (protocol 27.6): once / turn / always / deny.
     static QStringList approvalDecisions() {
         return {QStringLiteral("once"), QStringLiteral("turn"), QStringLiteral("always"), QStringLiteral("deny")};
     }
 
-    // The approval card (card #K2FV): not a question the model thought of, an action the policy
+    // The approval ask (card #K2FV): not a question the model thought of, an action the policy
     // stopped. Four answers and no others — no free text, because the four are the whole decision
     // space, and no skip, because "skipped" reaches the worker as a deny and a key that denies
-    // without saying so is the trap this card exists to close. A subagent's action draws the same
-    // card named as the subagent's, so the person at the desk knows who is asking.
+    // without saying so is the trap this ask exists to close. A subagent's action draws the same
+    // ask named as the subagent's, so the person at the desk knows who is asking.
     void printApproval() {
         const QJsonObject question = questionAt(0);
         const QStringList decisions = approvalDecisions();
@@ -2854,15 +2854,15 @@ private:
             printInline(QStringLiteral("     %1\n").arg(descriptions.at(i)), Ink::Note);
         }
         printInline(QStringLiteral("  Answer 1–4 · no skip, no free text.\n"), Ink::Note);
-        // Esc is not this card's key (see skipQuestion), so the footer names where Stop went, as
-        // the question card's footer does.
+        // Esc is not this ask's key (see skipQuestion), so the footer names where Stop went, as
+        // a question's footer does.
         printInline(QStringLiteral("  %1.\n").arg(stopTurnHint()), Ink::Note);
         closeInline();
     }
 
-    // The approval card's answer: a number 1–4 or the word itself, and nothing else. Anything a
+    // The approval ask's answer: a number 1–4 or the word itself, and nothing else. Anything a
     // person types that is not one of the four would reach the worker as a deny without their ever
-    // saying no, so it is refused and the card restated instead.
+    // saying no, so it is refused and the ask restated instead.
     int readDecision(const QString &text) const {
         bool ok = false;
         const int number = text.toInt(&ok);
@@ -2873,7 +2873,7 @@ private:
         return -1;
     }
 
-    // What the prompt box says while a card is up. Longest first, for a narrow pane.
+    // What the prompt box says while an ask is up. Longest first, for a narrow pane.
     QStringList questionPlaceholders() const {
         if (!m_ask.open()) return {};
         const QJsonObject question = questionAt(m_ask.current);
@@ -2908,19 +2908,19 @@ private:
         return relay::ask::read(text, labels, question.value(QStringLiteral("multiple")).toBool());
     }
 
-    // Enter in the prompt box while a card is up. Returns false when there is no card, so the
+    // Enter in the prompt box while an ask is up. Returns false when there is no ask, so the
     // ordinary routing runs. `author` is the person a line from a paired device came from; empty
     // for the desk, whose answers are unsigned because there is only one of them.
     bool answerQuestion(const QString &text, const QString &author = QString()) {
         if (!m_ask.open()) return false;
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return true;                  // an empty box answers nothing
-        // The approval card answers on its own terms — four decisions, no own words (readDecision).
+        // The approval ask answers on its own terms — four decisions, no own words (readDecision).
         if (m_ask.approval) return answerApproval(trimmed, author);
         const QJsonObject question = questionAt(m_ask.current);
         const relay::ask::Reading reading = readAnswer(trimmed);
         if (reading.kind == relay::ask::Reading::NoSuchOption) {
-            // A number the card has no option for: name it and print the card again, rather than
+            // A number the ask has no option for: name it and print the ask again, rather than
             // send the model "4" as the answer they gave. Nothing is recorded; the wait goes on.
             ensureLineStart();
             printInline(QStringLiteral("There is no option %1 · answer with 1–%2, 0 to skip, or your own words\n")
@@ -2932,7 +2932,7 @@ private:
             return true;
         }
         const QStringList answer = reading.kind == relay::ask::Reading::Skip ? QStringList() : reading.labels;
-        // The slow path for this card is typing an option out in full when its number would do
+        // The slow path for this ask is typing an option out in full when its number would do
         // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in
         // the user's own words is the tool working as intended, not something to correct.
         for (int i = 0; i < questionOptions(question).size(); ++i)
@@ -2946,22 +2946,22 @@ private:
         return true;
     }
 
-    // Enter in the prompt box while an approval card is up (see answerQuestion). A number or the
-    // decision's own word decides; anything else restates what the card takes, and the wait goes on.
+    // Enter in the prompt box while an approval ask is up (see answerQuestion). A number or the
+    // decision's own word decides; anything else restates what the ask takes, and the wait goes on.
     bool answerApproval(const QString &text, const QString &author) {
         const int index = readDecision(text);
         if (index < 0) {
-            // Not one of the four: name what the card takes rather than send the words to the
+            // Not one of the four: name what the ask takes rather than send the words to the
             // worker, which would read them as a deny the user never chose.
             ensureLineStart();
-            printInline(QStringLiteral("Answer 1–4 · this card takes a number or the word itself\n"), Ink::Ask);
+            printInline(QStringLiteral("Answer 1–4 · a number or the word itself\n"), Ink::Ask);
             closeInline();
             printApproval();
             focusInput();
             changed();
             return true;
         }
-        // The slow path (WARP.md's standing rule), on the same hint as a question card's: the
+        // The slow path (WARP.md's standing rule), on the same hint as a question's: the
         // decision typed out in full when its number would do.
         if (approvalDecisions().at(index).compare(text, Qt::CaseInsensitive) == 0)
             hint(QStringLiteral("question.number"),
@@ -2970,13 +2970,13 @@ private:
         return true;
     }
 
-    // Esc while a card is up (owner, 2026-09-19): this one question is skipped and the next goes
-    // up, which is exactly what typing `0` or `/skip` does. Returns false when there is no card,
+    // Esc while an ask is up (owner, 2026-09-19): this one question is skipped and the next goes
+    // up, which is exactly what typing `0` or `/skip` does. Returns false when there is no ask,
     // so Esc goes on stopping the turn everywhere else.
     bool skipQuestion() {
         if (!m_ask.open()) return false;
-        // The approval card is the exception: skipping it *is* denying, and Esc is the one key a
-        // person reaches for to make a card go away, so it must not decide anything. The card
+        // The approval ask is the exception: skipping it *is* denying, and Esc is the one key a
+        // person reaches for to make an ask go away, so it must not decide anything. The ask
         // stays up; the line under it says why.
         if (m_ask.approval) {
             ensureLineStart();
@@ -2990,8 +2990,8 @@ private:
         return true;
     }
 
-    // One question answered (or skipped): recorded, echoed under the card, and the next one put
-    // up — or, when that was the last, every answer sent back together. Every door into the card
+    // One question answered (or skipped): recorded, echoed under the ask, and the next one put
+    // up — or, when that was the last, every answer sent back together. Every door into the ask
     // ends here, so Esc, the prompt box and a line from a paired device leave the same trace.
     void recordAnswer(const QJsonObject &question, const QStringList &answer, const QString &author = QString()) {
         m_ask.answers[m_ask.current] = answer;
@@ -3024,7 +3024,7 @@ private:
         changed();
     }
 
-    // One approval decided (card #K2FV): echoed under the card like every answer, then sent as a
+    // One approval decided (card #K2FV): echoed under the ask like every answer, then sent as a
     // `decision` rather than answers. `always` is the one decision that outlives the turn — the
     // saved checklist is rewritten and the new policy pushed to the worker *before* the decision,
     // so the answer lands on an agent that already allows what it asked about.
@@ -3048,11 +3048,11 @@ private:
 
     // "Always allow": the capability comes off the saved ask list (security/approvals_ask, the
     // checklist in Options › Security) and the first-launch choice is marked made, then the whole
-    // policy is pushed exactly as the settings page pushes it — the card, the checklist and the
+    // policy is pushed exactly as the settings page pushes it — the ask, the checklist and the
     // worker all read the same keys, so nothing else needs telling. Before the choice is made the
     // saved key is empty and the cautious set is what is in force, so the list starts there: read
     // raw, an unanswered installation would store "ask about nothing" and flip the whole policy
-    // to allow-all with one card (the same reader the checklist rows use, approvalRow).
+    // to allow-all with one ask (the same reader the checklist rows use, approvalRow).
     void rememberAlwaysAllowed() {
         QSettings settings;
         QStringList ask = settings.value(QStringLiteral("security/approvals_ask")).toStringList();
@@ -7300,7 +7300,7 @@ private:
         static const QList<SlashCommand> commands{
             {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
             {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation and clear the terminal (same as /new)")},
-            // The card `?` shows in an empty prompt box. `/help` is what people type when they do
+            // The popup `?` shows in an empty prompt box. `/help` is what people type when they do
             // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
             {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
             {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
@@ -7849,9 +7849,9 @@ private:
         } else if (name == QStringLiteral("skills")) {
             openSkills();
         } else if (name == QStringLiteral("help")) {
-            // The same card `?` shows, never a second surface for the same list. Typing the
-            // command while the card is up must leave it up, so this shows rather than toggles.
-            if (!(m_helpCard && m_helpCard->isVisible())) toggleHelpCard();
+            // The same popup `?` shows, never a second surface for the same list. Typing the
+            // command while the popup is up must leave it up, so this shows rather than toggles.
+            if (!(m_helpPopup && m_helpPopup->isVisible())) toggleHelpPopup();
             hint(QStringLiteral("help.slash"), QStringLiteral("Next time: press ? in an empty prompt box"));
         }
     }
@@ -8213,7 +8213,7 @@ private:
         // The desktop's "do not blink" (a cursor flash time of 0) is this app's reduce-motion
         // signal — RichEditor::setCaretColor already takes the caret's blink from it.
         const bool animate = QApplication::cursorFlashTime() > 0;
-        // A question card owns the prompt box while it is up: what the box invites you to type is
+        // An ask owns the prompt box while it is up: what the box invites you to type is
         // the answer, not "waiting for 2 subagents" (#MQ9C).
         const QStringList lines = m_ask.open()
             ? questionPlaceholders()
@@ -8527,13 +8527,13 @@ private:
 public:
     bool requestsOpen() const { return m_requestsPanel && m_requestsPanel->isVisible(); }
     // The short list people actually need, in the prompt box. Ctrl+? has the complete one.
-    void toggleHelpCard() {
-        if (m_helpCard && m_helpCard->isVisible()) { m_helpCard->hide(); return; }
-        if (!m_helpCard) {
-            m_helpCard = new QFrame(this);
-            m_helpCard->setObjectName(QStringLiteral("helpCard"));
-            m_helpCard->setAttribute(Qt::WA_StyledBackground);
-            auto *box = new QVBoxLayout(m_helpCard);
+    void toggleHelpPopup() {
+        if (m_helpPopup && m_helpPopup->isVisible()) { m_helpPopup->hide(); return; }
+        if (!m_helpPopup) {
+            m_helpPopup = new QFrame(this);
+            m_helpPopup->setObjectName(QStringLiteral("helpPopup"));
+            m_helpPopup->setAttribute(Qt::WA_StyledBackground);
+            auto *box = new QVBoxLayout(m_helpPopup);
             box->setContentsMargins(14, 10, 14, 10); box->setSpacing(4);
             auto &keys = Keymap::instance();
             auto row = [box](const QString &key, const QString &what) {
@@ -8580,13 +8580,13 @@ public:
             hide->setObjectName(QStringLiteral("helpFooter"));
             box->addWidget(hide);
         }
-        m_helpCard->adjustSize();
+        m_helpPopup->adjustSize();
         const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
-        const int w = std::min(std::max(360, m_helpCard->sizeHint().width()), std::max(360, composer.width() - 24));
-        const int h = m_helpCard->sizeHint().height();
-        m_helpCard->setGeometry(composer.left() + 12, std::max(0, composer.top() - h - 6), w, h);
-        m_helpCard->show();
-        m_helpCard->raise();
+        const int w = std::min(std::max(360, m_helpPopup->sizeHint().width()), std::max(360, composer.width() - 24));
+        const int h = m_helpPopup->sizeHint().height();
+        m_helpPopup->setGeometry(composer.left() + 12, std::max(0, composer.top() - h - 6), w, h);
+        m_helpPopup->show();
+        m_helpPopup->raise();
     }
 
     void toggleRequests() { if (requestsOpen()) closeRequests(); else openRequests(); }
@@ -8812,7 +8812,7 @@ private:
             // submit in this pane is dropped in silence — the worst version of the bug the local
             // dispatch above exists to prevent.
             m_pendingSubmit.clear(); m_previewId.clear(); m_heldDecision = QJsonObject();
-            // Nobody is left to answer to (#MQ9C): take the card down rather than leave the pane
+            // Nobody is left to answer to (#MQ9C): take the ask down rather than leave the pane
             // asking on behalf of a worker that is gone.
             closeQuestion(QStringLiteral("the agent worker stopped"));
             stopTurnClock();
@@ -9040,11 +9040,11 @@ private:
             return;
         }
         if (submit) {
-            // A question card is up: this text is the answer, not a prompt and not a command
+            // An ask is up: this text is the answer, not a prompt and not a command
             // (#MQ9C). Nothing below runs — not `@path`, not `/commands`, not the router. An
             // explicit terminal submit (Ctrl+Shift+Enter, or Enter with the chip on TERMINAL) is
             // the exception: a question from the agent must not take the user's terminal away,
-            // and the card's own footer says so.
+            // and the ask's own footer says so.
             const bool toShell = (overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode)
                                  == QStringLiteral("shell");
             if (m_ask.open() && !toShell && !m_editor->toPlainText().trimmed().isEmpty()) {
@@ -10533,12 +10533,12 @@ private:
         // than "thinking" (cards #V7QD, #KP4M).
         const QString subject = relay::panestatus::waitingSubject(waitingFacts());
         if (!subject.isEmpty()) what = QStringLiteral("waiting for ") + subject;
-        // Blocked on a question card is the plainest case of all (#MQ9C): the turn is not thinking,
+        // Blocked on an ask is the plainest case of all (#MQ9C): the turn is not thinking,
         // it is waiting for the person reading it, and saying "thinking" would be a lie in the one
         // place the user is looking while they decide.
         const bool asked = m_ask.open();
         if (asked) what = QStringLiteral("waiting for your answer");
-        // While a card is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
+        // While an ask is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
         // offers the key that is actually live and the tooltip says where Stop went.
         const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
         const QString label = QStringLiteral("Relaying · %1… · %2 s%3 · %4")
@@ -10861,7 +10861,7 @@ private:
     // when it can actually run that guest's headless harness here. Such a row is a model row like
     // any other: picking it is a `configure`/`set_model` carrying a `guest` object, the worker puts
     // the ordinary Agent on a HarnessProvider, and the transcript, the call lines, the context chip
-    // and the question cards are Relay's own. Nothing is typed into a TUI and the pane's shell
+    // and the asks are Relay's own. Nothing is typed into a TUI and the pane's shell
     // stays the user's. A row the worker cannot run (`harness: false`, or a worker that reports no
     // guest rows at all) keeps the Tier B launch of 26.9, which is also what a `claude` typed by
     // hand gets. `guestHarnessUsable` is the one place that decides between the two.
@@ -11624,10 +11624,10 @@ private:
     static QByteArray inkCode(Ink ink) {
         // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
         // Everything printed into the terminal is frozen at the colour it was written in — the
-        // emulator cannot recolour its scrollback — and a question card is the one piece of inline
+        // emulator cannot recolour its scrollback — and an ask is the one piece of inline
         // output that is still actionable after a theme switch. Indexed bold yellow is what each
         // theme's own palette renders (`[terminal] palette[3]`: #ecc476 on Relay Dark, the ochre
-        // #7a5400 on IBM Beige), so the card follows the theme instead of keeping a dark theme's
+        // #7a5400 on IBM Beige), so the ask follows the theme instead of keeping a dark theme's
         // amber on a light ground. It is the colour MarkdownAnsi's **Need:** bold already uses
         // for the same reason (src/MarkdownAnsi.h, card #4E13).
         if (ink == Ink::Ask) return QByteArray("\x1b[1;33m");
@@ -12182,15 +12182,15 @@ private:
         // next tool call, which is what Enter on an empty prompt box does here (#C4M8). With no
         // turn to steer, the worker queues it, exactly as the desktop's own steer does.
         m_remoteAuthor = originName.trimmed();
-        // A question card is up (#MQ9C, protocol 27.4): the line answers it — but only when it was
+        // An ask is up (#MQ9C, protocol 27.4): the line answers it — but only when it was
         // going to the agent anyway, which is the rule at the desk and now the rule here too
-        // (owner, 2026-09-19). This used to answer the card before anything was routed, so a phone
+        // (owner, 2026-09-19). This used to answer the ask before anything was routed, so a phone
         // could not reach the shell at all until somebody dealt with the question. These two doors
         // are agent-bound by themselves: a steer is aimed at the running turn, and a device that
         // cannot ask the router can only reach the agent. The routed line is decided in
         // takeRemoteRoute, when the verdict is in.
         const bool steering = when == QLatin1String("steer") && m_agentBusy;
-        if (relay::input::cardTakesRemoteLine({m_ask.open(), false, false})
+        if (relay::input::askTakesRemoteLine({m_ask.open(), false, false})
             && (steering || !route || !m_workerReady)
             && answerQuestion(trimmed, m_remoteAuthor)) {
             m_remoteAuthor.clear();
@@ -12229,9 +12229,9 @@ private:
         const RemotePrompt prompt = *pending;
         m_remotePrompts.erase(pending);
         const bool toShell = event.value(QStringLiteral("route")).toString() == QStringLiteral("shell");
-        // The card takes the line only now, and only when the router sent it to the agent (27.4):
+        // The ask takes the line only now, and only when the router sent it to the agent (27.4):
         // the question is what the agent is blocked on, and a command is not an answer to it.
-        if (relay::input::cardTakesRemoteLine({m_ask.open(), true, toShell})) {
+        if (relay::input::askTakesRemoteLine({m_ask.open(), true, toShell})) {
             m_remoteAuthor = prompt.author;
             const bool answered = answerQuestion(prompt.text, prompt.author);
             m_remoteAuthor.clear();
@@ -12601,11 +12601,11 @@ private:
         // Warp-style: "?" in an empty prompt box shows the main keys, "?" or Esc hides them again.
         if ((k == Qt::Key_Question || key->text() == QStringLiteral("?"))
             && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
-            toggleHelpCard();
+            toggleHelpPopup();
             return true;
         }
-        if (m_helpCard && m_helpCard->isVisible() && k == Qt::Key_Escape && mods == Qt::NoModifier) {
-            m_helpCard->hide();
+        if (m_helpPopup && m_helpPopup->isVisible() && k == Qt::Key_Escape && mods == Qt::NoModifier) {
+            m_helpPopup->hide();
             return true;
         }
         if (!m_prefixMode.isEmpty() && k == Qt::Key_Backspace && mods == Qt::NoModifier && m_editor->toPlainText().isEmpty()) {
@@ -12819,11 +12819,11 @@ private:
         }
         // --- end subagents UI ---
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
-            // A question card is up: Esc skips that question rather than stopping the turn (owner,
+            // An ask is up: Esc skips that question rather than stopping the turn (owner,
             // 2026-09-19). The turn is blocked on the person reading it, so the key under their
             // hand should get them past the question, not end the work they are being asked about.
             // There is no second Esc that stops either — on the last question Esc sends the answers
-            // and the turn carries on — and the card's footer says where Stop is instead.
+            // and the turn carries on — and the ask's footer says where Stop is instead.
             if (skipQuestion()) return true;
             stopAgent();
             toast(QStringLiteral("Agent interrupted"));
@@ -15545,7 +15545,7 @@ private:
     // and the file to unlink once the worker has answered.
     QHash<QString, QString> m_remoteVoice, m_remoteVoiceClips;
     bool m_voiceHold = false, m_voiceTranscribing = false;
-    QFrame *m_helpCard = nullptr;
+    QFrame *m_helpPopup = nullptr;
     QComboBox *m_effortBox = nullptr;
     QListWidget *m_slashList = nullptr;
     QListWidget *m_tabList = nullptr;   // Tab completion candidates
@@ -15651,7 +15651,7 @@ private:
         else enqueue(entry);
     }
     QString m_lastPlanPath;      // the plan this pane's agent wrote last
-    Ask m_ask;                   // the question card up in this pane, if any (#MQ9C)
+    Ask m_ask;                   // the ask up in this pane, if any (#MQ9C)
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     bool m_turnCutOff = false;     // a resumed session whose last turn never ended (#SXF1)

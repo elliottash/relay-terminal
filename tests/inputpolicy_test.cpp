@@ -305,21 +305,21 @@ private Q_SLOTS:
         QCOMPARE(handoffRefusalCode(HandoffAction::RefuseBusy), QStringLiteral("busy"));
         QCOMPARE(handoffRefusalCode(HandoffAction::RefuseChain), QStringLiteral("chain"));
     }
-    // A line from a paired phone while a question card is up (sessions protocol 27.4, #MQ9C).
+    // A line from a paired phone while an ask is up (sessions protocol 27.4, #MQ9C).
     void aRemoteLineReachesTheShellEvenWithAQuestionOpen() {
-        auto takes = [](bool cardOpen, bool routerAsked, bool routedToShell) {
-            return cardTakesRemoteLine({cardOpen, routerAsked, routedToShell});
+        auto takes = [](bool askOpen, bool routerAsked, bool routedToShell) {
+            return askTakesRemoteLine({askOpen, routerAsked, routedToShell});
         };
-        // No card: nothing to take the line.
+        // No ask: nothing to take the line.
         QVERIFY(!takes(false, true, false));
         QVERIFY(!takes(false, false, false));
-        // The router sent it to the shell: it is a command, and a card does not take the terminal
+        // The router sent it to the shell: it is a command, and an ask does not take the terminal
         // away from a phone any more than it does from the desk.
         QVERIFY(!takes(true, true, true));
-        // Routed to the agent: the card is what the agent is waiting on, so the card answers.
+        // Routed to the agent: the ask is what the agent is waiting on, so the ask answers.
         QVERIFY(takes(true, true, false));
         // No router in the decision at all — a view-or-agent device, or a worker that is not up:
-        // the line can only reach the agent, so the card takes it.
+        // the line can only reach the agent, so the ask takes it.
         QVERIFY(takes(true, false, false));
     }
     // The agent worker is gone and its banner is up. The shell was never the worker's to lend

@@ -197,7 +197,7 @@ class ApprovingPane:
                              args=({"id": event["id"], **answer},), daemon=True).start()
 
 
-class ApprovalCardTests(unittest.TestCase):
+class ApprovalAskTests(unittest.TestCase):
     """`Questions.ask_approval` (protocol 27.6): the card's shape, the four decisions, and Stop."""
 
     def setUp(self):
@@ -533,7 +533,7 @@ class SourceTestCase(unittest.TestCase):
         return rest.split(end, 1)[0]
 
 
-class PaneApprovalCardTests(SourceTestCase):
+class PaneApprovalAskTests(SourceTestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = (ROOT / "src" / "Pane.h").read_text(encoding="utf-8")
@@ -543,7 +543,7 @@ class PaneApprovalCardTests(SourceTestCase):
         # an approval nobody answers is a refusal on the worker's side, and an empty answer to
         # an approval would read there as a deny the user never chose — so say that instead.
         show = self.block(self.source, "void showQuestion(const QJsonObject &event) {",
-                          "// The worker took the card away")
+                          "// The worker took the ask away")
         superseded = show.split("if (!superseded.isEmpty() && superseded != incoming) {", 1)[1]
         superseded = superseded.split("        }", 1)[0]
         self.assertIn("if (wasApproval)", superseded)
@@ -555,9 +555,9 @@ class PaneApprovalCardTests(SourceTestCase):
         # The approval branch is parsed before the unreadable check, which would otherwise answer
         # the card away as empty — an empty answer to an approval is a silent deny.
         show = self.block(self.source, "void showQuestion(const QJsonObject &event) {",
-                          "// The worker took the card away")
-        self.assertLess(show.index('QStringLiteral("kind")'), show.index("if (unreadableCard())"))
-        unreadable = show.split("if (unreadableCard()) {", 1)[1]
+                          "// The worker took the ask away")
+        self.assertLess(show.index('QStringLiteral("kind")'), show.index("if (unreadableAsk())"))
+        unreadable = show.split("if (unreadableAsk()) {", 1)[1]
         self.assertIn("not allowed", unreadable)              # the pane says denied, not "unanswered"
         self.assertLess(unreadable.index("if (approval)"), unreadable.index('{"decision"'))
         self.assertIn('{"decision", QStringLiteral("deny")}', unreadable)
@@ -575,7 +575,7 @@ class PaneApprovalCardTests(SourceTestCase):
     def test_words_that_are_not_one_of_the_four_do_not_reach_the_worker(self):
         # Anything else would arrive as a deny the user never chose, so the card is restated.
         answer = self.block(self.source, "bool answerApproval(const QString &text, const QString &author) {",
-                            "// Esc while a card is up")
+                            "// Esc while an ask is up")
         refused = answer.split("if (index < 0) {", 1)[1].split("return true;", 1)[0]
         self.assertIn("Answer 1–4", refused)
         self.assertIn("printApproval();", refused)            # the card goes up again

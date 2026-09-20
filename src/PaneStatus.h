@@ -102,7 +102,7 @@ struct Facts {
     quint64 finishSerial = 0;      // bumps on every finished turn
     QString lastOutcome;           // of that turn: "done", "error" or "cancelled"
     bool lastAsked = false;        // the last done turn's reply ended on a question
-    bool questionOpen = false;     // an `ask_user` card is up in the pane, waiting to be answered
+    bool questionOpen = false;     // an ask (`ask_user` or an approval) is up, waiting to be answered
 };
 
 // `seenSerial` is the finishSerial the user has already seen (the window records it whenever the

@@ -1844,8 +1844,8 @@ private:
     }
 
     // `approvals.CAUTIOUS` (backend/relay_core/approvals.py): what asks before the first-launch
-    // choice is answered. One list with the card's "Always allow" and the first-launch pane's
-    // buttons (relay::approvals::cautious, src/ApprovalsPane.h), so the rows, a card and the pane
+    // choice is answered. One list with the ask's "Always allow" and the first-launch pane's
+    // buttons (relay::approvals::cautious, src/ApprovalsPane.h), so the rows, an ask and the pane
     // can never disagree about what an unanswered Relay asks.
     static QStringList approvalsCautious() { return relay::approvals::cautious(); }
 
@@ -2226,7 +2226,7 @@ private:
                 relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
                     QStringLiteral("    when it wants to use a tool"),
                     QStringLiteral("    %1 runs with no per-action approvals, like Relay's own agent. "
-                                   "Ask me puts each one to you as a card: Allow, Allow for session, "
+                                   "Ask me puts each one to you: Allow, Allow for session, "
                                    "Deny, or Deny and stop the turn").arg(rows.first().provider),
                     {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
                     {QStringLiteral("just run it"), QStringLiteral("ask me"), QStringLiteral("refuse it")},
@@ -2857,7 +2857,7 @@ private:
             info.id = QStringLiteral("info:security");
             info.label = QStringLiteral(
                 "Relay allows by default: the agent's commands and file edits run without per-action "
-                "approval — Ask before, below, is the opt-in that stops the actions you tick on a card. "
+                "approval — Ask before, below, is the opt-in that stops the actions you tick and asks first. "
                 "What bounds them is where they may reach, and that is what this "
                 "page sets. File tools are confined to the pane's workspace and refuse .ssh, .gnupg, .git, "
                 ".env and .pem/.key files, on this machine and on an ssh host. Commands run with your own user "
@@ -3027,9 +3027,9 @@ private:
                                    QStringLiteral("Backstop for a runaway turn, not the normal stop"), 2000, 1, 2000);
         security.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
                                    QStringLiteral("A small side call flags asks that may be unaddressed"), false);
-        // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval card's "Always
-        // allow" unticks the matching row by writing the same list. The labels are the card's
-        // headers (approvals.LABELS), so the row a card names is the row that unticks.
+        // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval ask's "Always
+        // allow" unticks the matching row by writing the same list. The labels are the ask's
+        // headers (approvals.LABELS), so the row an ask names is the row that unticks.
         security.rows << headingRow(QStringLiteral("Ask before"));
         security.rows << approvalRow(QStringLiteral("edit"), QStringLiteral("Change a file that already exists"),
                                      QStringLiteral("edit_file and write_file, on a file that is there"));
