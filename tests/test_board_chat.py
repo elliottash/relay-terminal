@@ -557,6 +557,88 @@ class ImportToolTest(ProtocolChatTest):
         self.assertNotIn("error", result)
 
 
+class BoardlessHelperTest(unittest.TestCase):
+    """A tab with no project attached still has a helper (protocol 30.7, card #FEJQ).
+
+    It is the same worker and the same conversation; what it has not got is a board. So the
+    `board_*` tools are absent, the app tools are there, and only the one pane whose whole
+    subject is the cards refuses — in a sentence, not a traceback.
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.events: list[dict] = []
+        self.commands = P.BoardCommands(StubTurns(), self.events.append)
+        self.commands.configure(None, {})          # no workspace: no board anywhere
+        self.assertIsNone(self.commands.tools)
+        self.agent: FakeAgent | None = None
+        self.commands.chat._build = self.build
+        self.addCleanup(self.commands.chat.drop)
+
+    def build(self, emit):
+        self.agent = FakeAgent(emit)
+        return self.agent, None                    # the board-less shape
+
+    def of(self, name):
+        return [e for e in self.events if e.get("event") == name]
+
+    def ask(self, text, **extra):
+        self.commands.dispatch({"type": "board_chat", "id": "r1", "text": text, **extra})
+
+    def test_a_switchboard_ask_with_no_board_is_one_sentence(self):
+        with self.assertRaises(ValueError) as caught:
+            self.ask("what is ready?")
+        self.assertEqual(str(caught.exception), P.NO_BOARD_CHAT_ERROR)
+        self.assertIn("Options", str(caught.exception))
+        self.assertFalse(self.commands.chat.busy())
+        # And the default — no `pane` at all — is the Switchboard, so it refuses the same way.
+        with self.assertRaises(ValueError):
+            self.ask("still the board", pane="switchboard")
+
+    def test_the_other_three_panes_answer_without_a_board(self):
+        for pane, needle in (("options", "app_option_list"),
+                             ("actions", "app_action_list"),
+                             ("sessions", "app_sessions_search")):
+            with self.subTest(pane=pane):
+                self.ask(f"a question about {pane}", pane=pane)
+                started = self.of("board_chat_started")[-1]
+                self.assertEqual(started["pane"], pane)
+                self.agent.gate.set()
+                wait_idle(self.commands.chat)
+                self.assertIn(needle, self.agent.prompts[-1])
+                self.assertIsNone(self.commands.chat.tools)
+
+    def test_a_survey_still_needs_a_board(self):
+        with self.assertRaises(ValueError):
+            self.ask("survey", survey=True)
+
+    def test_the_builder_makes_a_board_less_agent_that_keeps_the_app_tools(self):
+        import tempfile
+        from relay_core import app_tools as A
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+
+        with tempfile.TemporaryDirectory() as root:
+            main = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), root,
+                         lambda event: None)
+            main.app = A.AppTools(A.AppCatalog.from_request(
+                {"tab": "t1", "writes_enabled": True, "options": [], "actions": []}),
+                A.AppBridge(lambda event: None))
+            self.commands.turns.agent = main
+            agent, tools = self.commands._build_page_agent(lambda event: None)
+            self.assertIsNone(tools)
+            self.assertIsNone(agent.board)
+            self.assertIs(agent.app, main.app)
+            names = [spec["function"]["name"] for spec in agent.tools()]
+            self.assertFalse([n for n in names if n.startswith("board_")], names)
+            self.assertIn("app_option_list", names)
+            # No board repository to stand in for it: the workspace is the pane agent's own.
+            self.assertEqual(str(agent.executor.workspace.root),
+                             str(main.executor.workspace.root))
+
+
 class FakeConfig:
     """A provider config, as far as the page agent's rebuild rule is concerned: a model id."""
 

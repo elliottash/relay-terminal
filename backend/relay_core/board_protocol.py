@@ -50,6 +50,13 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
 NO_BOARD_ERROR = ("This project has no Switchboard (no switchboard/board.yaml, and no "
                   "issues/board.yaml).")
 
+#: What a *Switchboard* ask gets when this tab has no board (protocol 30.7).  The helper itself
+#: still runs — Options, Actions and Sessions are about the app, not about a board — so this is
+#: only for the one pane whose whole subject is the cards.
+NO_BOARD_CHAT_ERROR = ("This tab has no Switchboard, so there is nothing for the Switchboard "
+                       "pane to talk about. Attach a project to the tab, or ask from Options, "
+                       "Actions or Sessions.")
+
 #: The owner-side messages that may be the first thing a project's board ever hears.  Only a
 #: create can be: the other three name a card, and an uninitialized board has none.
 INIT_WRITES = ("board_create",)
@@ -459,17 +466,23 @@ class BoardCommands:
 
         The model the page's picker named, when there is one, resolves through the same role
         table, so a page on the Flash agent is a role choice and not a second provider setup.
+
+        Since 30.7 this agent is the whole tab's helper, and a tab with no project attached has
+        no board: it is then built with `board=None` — no `board_*` tool at all — and answers
+        for Options, Actions and Sessions through the app tools alone.
         """
         from .agent import Agent          # late: agent.py pulls in the whole tool executor
         from .tools import Workspace
         main = self._agent()
         if main is None:
             raise ValueError("Configure a provider and workspace first.")
+        # None here is the board-less helper of 30.7 — a tab with no project attached, or one
+        # whose board autonomy is off. It is a shape this agent has, not a failure: it keeps the
+        # app tools (`app=` below) and is offered no `board_*` tool at all. Its workspace is then
+        # the pane agent's own, since there is no board repository to stand in for it.
         tools = self.agent_tools(self.workspace, {"board": self.settings["raw"]})
-        if tools is None:
-            raise ValueError("The Switchboard page agent has no board tools here "
-                             "(this project has no board.yaml, or its autonomy is off).")
-        workspace = str(tools.board.repo)
+        workspace = (str(tools.board.repo) if tools is not None
+                     else self.workspace or str(main.executor.workspace.root))
         config = main.config
         preset_id = main.preset.id if main.preset else None
         effort = getattr(main, "effort", None)
@@ -1349,13 +1362,18 @@ class BoardCommands:
         (#N8VK's rule, the same as a pane's).  Everything else the board can run still refuses
         while it is turning, because it can write any card.
         """
-        self._need()
         text = request.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
             raise ValueError(f"board_chat text must be 1-{MAX_ASK_TEXT} characters.")
         # Which pane asked (protocol 30.7). It picks the brief and tags every event of the turn;
         # absent means the Switchboard, so every client from before 30.7 is unchanged.
         pane = board_chat.validate_pane(request.get("pane"))
+        # A tab with no project attached still has a helper: the app tools and no board tools
+        # (30.7). So the board is required by the *pane*, not by the message — and the one pane
+        # that needs it is refused in a sentence rather than with a protocol error nobody can
+        # act on. The check is after the pane is parsed, which is why it moved down here.
+        if pane == "switchboard" and self.tools is None:
+            raise ValueError(NO_BOARD_CHAT_ERROR)
         context = request.get("context")
         if context is not None and not isinstance(context, str):
             raise ValueError("board_chat context must be text.")
