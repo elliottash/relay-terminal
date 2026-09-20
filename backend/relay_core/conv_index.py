@@ -1895,8 +1895,10 @@ class ConversationIndex:
                         backfilled += bool(stale)
                     # The sidecars are the GUI's, not the autosave's: it is their own stamp that
                     # says to read them, and a row that is behind the schema reads them once too.
-                    wanted = stamps.get(session_id, "")
-                    if stale or wanted != stored.get(session_id, ""):
+                    # Most sessions have none — nothing on disk and nothing recorded — and those
+                    # cost nothing at all, not even on the one pass that backfills the schema.
+                    wanted, was = stamps.get(session_id, ""), stored.get(session_id, "")
+                    if (wanted or was) and (stale or wanted != was):
                         self.update_sidecars(session_id, sidecar_entries(folder, session_id), wanted)
                         sidecars += 1
                 for thread_folder in thread_folders:
