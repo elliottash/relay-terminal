@@ -2151,6 +2151,13 @@ void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()
                                                    true, true, QStringLiteral("backend first"));
     QVERIFY(task.startsWith(QStringLiteral("Execute #XS6Q: Modes\n")));
     QVERIFY(task.contains(QStringLiteral("until the acceptance holds")));
+    // #K3TY: where the plan has one, Execute says to follow its Orchestration block — and a
+    // card with no plan cannot carry one, so the no-plan wordings never mention it.
+    QVERIFY(task.contains(QStringLiteral("Where the plan has an Orchestration block, follow it")));
+    QVERIFY(!relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"), false, false)
+                 .contains(QStringLiteral("Orchestration")));
+    QVERIFY(!relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"), false, true)
+                 .contains(QStringLiteral("Orchestration")));
     QVERIFY(task.contains(QStringLiteral("implemented_by")));
     QVERIFY(task.contains(QStringLiteral("links.commits")));
     QVERIFY(task.contains(QStringLiteral("Put #XS6Q in the message of every commit")));
