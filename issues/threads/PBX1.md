@@ -124,3 +124,39 @@ and a shot that merely contains the word "Plan" would pass either way.
 
 `NOTES.md` says what each shot shows and how the checks are made (the card's violet outlined
 `Execute (x)` is read from a saturation-boosted band, because no whole-page OCR pass reads it).
+
+<!-- relay:entry 20260920T233923Z-qh author=claude-code kind=decision -->
+Owner, 2026-09-20, of the Switchboard agent's action row: **"make the buttons consistent, can you use the styling from the card agent"** — and then, of the colours, **"(not the colors though)"**. And: **"it should have the letter hotkeys for each switchboard action as well"**.
+
+Read together: the row imposes **shape** on every button that joins it — border, radius, padding, weight, height — and imposes **no colour at all**, so Execute's accent outline still means "this leaves the board" and a plain button stays plain. And every action on the row says its letter in its own label, the way `Plan (p)` does.
+
+<!-- relay:entry 20260920T233923Z-qi author=claude-code kind=progress -->
+`3ed92250` — the row's face and its letters.
+
+- `src/Theme.cpp`: one rule, `QPushButton[actionRow="true"], QToolButton[actionRow="true"]`, carrying border-width/style, radius, padding and weight and **no colour**. It is keyed on a dynamic property and not on object names, so a session adding a button gets the shape without renaming its button — its own tests find it by that name — and each button's object-name rule (an id selector, specificity 101 against this rule's 11) keeps the ground and the ink its maker gave it.
+- Tests and Profile (#7BM4) had no rule at all and painted the bare Fusion button: 25 px tall where their neighbours were 33. They joined the plain-ground selector list beside Check and Clean up — colour only, one list rather than a rule per button.
+- Push buttons carry three pixels of extra padding (`QWidget#boardCardActions QPushButton`, specificity 102, which is what beats `#boardReplyButton` and `#boardExecute`). That is Qt's `QSize(3, 3)` fudge for a styled QToolButton — "### broken QToolButton" in `qstylesheetstyle.cpp` — handed back, and it is a constant, so the two rows are one height at any desktop font size.
+- `HelperChatPanel::adoptActionButton` stamps the property (and repolishes) on every button `addToolWidget` adopts and on the Check the panel builds; `CardDetail` sets it on Plan, Execute and Verify.
+- The letters: a maker sets `actionKey`; the panel writes " (k)" into the label, keeps `fullLabel` for `fitButtons()`, answers the key (`BoardView::handleBoardKey` asks the panel rather than naming buttons) and adds its entry to the key line. Check `k`, Clean up `u` — free on a page that already spends n, e, p, x, v, m, c, y, t, a, o and `/`. `updateCleanupButton()` keeps the letter through the Stop state. A mouse click teaches the letter once (`board.action.<objectName>`, WARP.md's standing rule); the key press that just used it says nothing.
+
+Tests: `tests/boardmodel_test.cpp::everyButtonOnAnActionRowWearsTheCardPagesFace` (a reparented button keeps its name, gains the property, and matches Check's height and font; Plan matches too; the shared rule declares no colour) and `::everyActionOnTheSwitchboardsRowHasALetter` (labels, key line, `k` and `u` on the list, a session's own letter, and the hint only on the mouse path). `ctest -R '^board$|^boardpane$'` — both pass; `buttonfit`, `boardexecute`, `cardtests`, `profilepane`, `boardsections`, `boardsignals`, `boardfilter`, `boardwatch`, `helpermodelbox`, `testsuites` pass too.
+
+<!-- relay:entry 20260920T233923Z-qj author=claude-code kind=evidence -->
+Live Xvfb run: `docs/qa_evidence/2026-09-20-action-row-face/`, driving the binary land.py built from the exact tree it committed. The driver is the previous run's (`../2026-09-20-action-rows-left/drive.sh`), unchanged, because its checks are the ones this change must not break: **22 checks, 22 passed**.
+
+`_row-before-after.png` is the measurement (`convert … -threshold 12% -connected-components 8`, same crop in both runs):
+
+| | before `69fee7b2` | after `3ed92250` |
+|---|---|---|
+| Check | 78 × 33 | 97 × 33 |
+| Clean up | 95 × 33 | 116 × 33 |
+| Tests | 48 × **25** | 71 × **33** |
+| Profile | 57 × **25** | 80 × **33** |
+| Plan (card page) | 76 × **30** | 76 × **33** |
+| Execute (card page) | 97 × **30** | 97 × **33** |
+
+Tests and Profile were eight pixels short and sat four pixels low; they are now the same height, border, radius and type as their neighbours. The card page's two grew the three pixels that make the two rows one height, and their widths did not change. The colours did not move: in the after strip `Execute (x)` is still the violet outlined one and `Plan (p)` the plain one.
+
+`01-switchboard-idle.png` reads `782:Check 825:(k) 885:Clean 926:up 946:(u) 1006:Tests 1085:Profile` — one row, one height, and the letters in the labels.
+
+Left open, because they are another session's files: **Tests and Profile carry no letter.** The mechanism is the `actionKey` property on the button, so #7BM4's session adds one line each (`s` and `r` are free on that page) and the label, the key and the key line follow with no change here.
