@@ -603,6 +603,7 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
 // Exact digits rather than "9.8k": this line is read against another one two turns up, and that
 // comparison is the whole point of it.
 void AgentInternalsView::noteUsage(const QJsonObject &usage) {
+    flushHeldThinking();   // a block held while the pane was hidden goes in above this line (#PPR4)
     const qint64 in = usage.value(QStringLiteral("prompt_tokens")).toVariant().toLongLong();
     const qint64 out = usage.value(QStringLiteral("completion_tokens")).toVariant().toLongLong();
     if (in <= 0 && out <= 0) return;   // a provider that reported nothing countable draws nothing
