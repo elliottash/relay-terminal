@@ -1,0 +1,47 @@
+{
+  "label": "before-counts",
+  "url": "http://127.0.0.1:8098/tests/screen_harness.html?count=1",
+  "window_ms": 2083.6,
+  "frames": 200,
+  "history_get": 200,
+  "refused_at_120_per_60s": 80,
+  "getComputedStyle(root)": 401,
+  "clientWidth(root)": 401,
+  "non_idle_js_ms": 745.6,
+  "fit_ms": 8.2,
+  "fit_share_of_non_idle_js": "1.1%",
+  "top_js": [
+    [
+      "(idle) :0",
+      975.5
+    ],
+    [
+      "get clientWidth :0",
+      414.0
+    ],
+    [
+      "(program) :0",
+      362.4
+    ],
+    [
+      "toBottom screen.js:206",
+      118.4
+    ],
+    [
+      "(garbage collector) :0",
+      69.7
+    ],
+    [
+      "replaceChildren :0",
+      65.3
+    ],
+    [
+      "fit screen.js:119",
+      8.2
+    ],
+    [
+      "apply screen.js:154",
+      7.5
+    ]
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "label": "before-profile",
+  "url": "http://127.0.0.1:8098/tests/screen_harness.html",
+  "window_ms": 2066.1,
+  "frames": 200,
+  "history_get": 200,
+  "refused_at_120_per_60s": 80,
+  "getComputedStyle(root)": 0,
+  "clientWidth(root)": 0,
+  "non_idle_js_ms": 754.4,
+  "fit_ms": 416.8,
+  "fit_share_of_non_idle_js": "55.3%",
+  "top_js": [
+    [
+      "(idle) :0",
+      956.1
+    ],
+    [
+      "fit screen.js:119",
+      416.8
+    ],
+    [
+      "(program) :0",
+      355.6
+    ],
+    [
+      "toBottom screen.js:206",
+      129.7
+    ],
+    [
+      "(garbage collector) :0",
+      73.3
+    ],
+    [
+      "replaceChildren :0",
+      60.9
+    ],
+    [
+      "append :0",
+      8.9
+    ],
+    [
+      "apply screen.js:154",
+      8.2
+    ]
+  ]
+}

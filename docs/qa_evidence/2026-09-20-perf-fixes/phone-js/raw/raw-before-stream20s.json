@@ -1,0 +1,50 @@
+{
+  "label": "before-stream20s",
+  "url": "http://127.0.0.1:8098/tests/screen_harness.html",
+  "window_ms": 29634.4,
+  "frames": 2000,
+  "history_get": 1722,
+  "refused_at_120_per_60s": 1602,
+  "getComputedStyle(root)": 0,
+  "clientWidth(root)": 0,
+  "non_idle_js_ms": 21250.9,
+  "fit_ms": 15040.5,
+  "fit_share_of_non_idle_js": "70.8%",
+  "chrome_cpu_s": 60.25,
+  "wall_s": 30.4,
+  "chrome_cpu_share_of_one_core": "198.4%",
+  "top_js": [
+    [
+      "fit screen.js:119",
+      15040.5
+    ],
+    [
+      "(program) :0",
+      6514.4
+    ],
+    [
+      "replaceChildren :0",
+      2739.8
+    ],
+    [
+      "(idle) :0",
+      1869.1
+    ],
+    [
+      "toBottom screen.js:206",
+      1469.3
+    ],
+    [
+      "(garbage collector) :0",
+      832.7
+    ],
+    [
+      "trim screen.js:350",
+      509.8
+    ],
+    [
+      "atBottom screen.js:202",
+      92.7
+    ]
+  ]
+}

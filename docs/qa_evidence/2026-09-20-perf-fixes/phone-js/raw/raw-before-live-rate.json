@@ -1,0 +1,51 @@
+{
+  "label": "before-live-rate",
+  "url": "http://127.0.0.1:8098/tests/screen_harness.html",
+  "window_ms": 29696.5,
+  "frames": 160,
+  "every_ms": 185,
+  "history_get": 160,
+  "refused_at_120_per_60s": 40,
+  "getComputedStyle(root)": 0,
+  "clientWidth(root)": 0,
+  "non_idle_js_ms": 1240.6,
+  "fit_ms": 691.8,
+  "fit_share_of_non_idle_js": "55.8%",
+  "chrome_cpu_s": 11.54,
+  "wall_s": 30.4,
+  "chrome_cpu_share_of_one_core": "38.0%",
+  "top_js": [
+    [
+      "(idle) :0",
+      27560.9
+    ],
+    [
+      "(program) :0",
+      895.0
+    ],
+    [
+      "fit screen.js:119",
+      691.8
+    ],
+    [
+      "toBottom screen.js:206",
+      186.2
+    ],
+    [
+      "replaceChildren :0",
+      119.6
+    ],
+    [
+      "(garbage collector) :0",
+      81.6
+    ],
+    [
+      "apply screen.js:154",
+      18.8
+    ],
+    [
+      "atBottom screen.js:202",
+      14.6
+    ]
+  ]
+}
