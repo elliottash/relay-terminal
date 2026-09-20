@@ -11,3 +11,17 @@ Five decisions from the #PF4K profile, each with my recommendation.
 <!-- relay:entry 20260920T195147Z-c4 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-20 19:51
 The owner decided all five: "1 ok. 220MB seems like a good trade for the isolation" · "2 yes, and you can also deploy a fable subagent to propose further pruning / distillation of the system prompt components. or have a short version for local models / short context windows" · "3 ok" · "4 ok" · "5 yes" · "and if there are other useful findings or fixes or tweaks, go ahead and do them". Card to executing; one implementer per decision, each landing with #GMCF in the message.
+
+<!-- relay:entry 20260920T202036Z-c5 author=claude-code kind=question -->
+### Claude Code · 2026-09-20 20:20
+Decision 2 follow-up: the Fable distillation proposal is landed (79fd67d6, `docs/qa_evidence/2026-09-20-perf-fixes/prompt-distillation/PROPOSAL.md`). Its measurement corrects the profile: a pane sends **9,823 tokens** of prompt + tools per request without a board and **14,544** with one, and tool schemas are 58–70 % of that — `set_keybinding` alone is 2,592 tokens. On `local:bonsai` a cold prefill is 18.5 s today; 1.9 s with the short profile. Nine decisions, smallest risk first, each recommended yes by the proposal:
+1. Slim `set_keybinding` (drop the 91-action listing and enum) — ~2,500 tokens per request. **Being done now** under "other useful fixes or tweaks".
+2. Distil `SYSTEM` to `SYSTEM.distilled.txt` — no rule deleted, ssh/program/run_in_terminal detail moves to the tool descriptions that already carry it; ~480 tokens. Needs the owner's read: it is the agent's voice.
+3. A subagent `SYSTEM` without the terminal, ssh and rendering lines — ~1,200 tokens per subagent request.
+4. Fix the assembly order, move the plan-mode note into the turn's context block, keep the tool list fixed across modes — no bytes saved, but a mode switch stops re-prefilling (13–18 s → 0.2 s on the Local tier) and hosted prompt caches can hit across a session.
+5. Show cached-token counts in Activity and `session_info` — how 4 gets verified per provider.
+6. Tighten the todo rules and the `update_todos` / `ask_user` descriptions — ~350 tokens.
+7. Short profile for the Local tier (`prompt_profile: auto|full|short`, auto = local endpoint or context ≤ 32k) — 14,544 → 1,425 tokens, 18.5 s → ~2 s cold.
+8. Tier the Switchboard policy to `BOARD-POLICY.core.txt` — ~780 tokens per board turn. The owner's voice: read the draft first.
+9. On-demand tool groups (app, own-session, tests) behind one `load_tools(group)` — ~2,150 tokens on hosted providers only.
+Recommendation: 1, 4, 5, 7 first (no wording of yours changes; 7 is what makes the Local tier usable); then 2, 3, 6, 8 after reading the drafts; 9 last.
