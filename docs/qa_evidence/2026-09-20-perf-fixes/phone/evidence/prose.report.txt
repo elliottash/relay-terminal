@@ -1,0 +1,60 @@
+== prose3  prompt: please stream zprose20000x20r200 now   window 30s   load 5.43 6.07 4.89
+-- worker -> GUI for this turn (562567 -> 617603)
+--- /tmp/claude-1000/pf4k/phone/out/qa5.ipc/worker2gui.jsonl [562567:617603] bytes=55036
+message                       n     bytes      avg   share
+delta                      1000     51326       51   93.3%
+requests                      3      1836      612    3.3%
+route                         2       642      321    1.2%
+queue_changed                 3       427      142    0.8%
+turn_summary                  1       164      164    0.3%
+queued                        1       152      152    0.3%
+context                       1       139      139    0.3%
+agent_started                 1       116      116    0.2%
+agent_finished                1        89       89    0.2%
+done                          1        83       83    0.2%
+status                        1        62       62    0.1%
+
+-- phone websocket + JS
+frames in=1497 bytes_in=1526358 out=224 bytes_out=27276
+--- JS self time, total 30040 ms over 30 s wall
+  27541.1 ms   91.7%  (idle) @:0
+   1170.4 ms    3.9%  (program) @:0
+    543.5 ms    1.8%  fit @screen.js:119
+    189.5 ms    0.6%  (garbage collector) @:0
+     90.1 ms    0.3%  replaceChildren @:0
+     61.1 ms    0.2%  decrypt @:0
+     53.5 ms    0.2%  nearSeam @screen.js:262
+     28.8 ms    0.1%  atBottom @screen.js:202
+     24.2 ms    0.1%  socket.onmessage @rrp.js:341
+     23.4 ms    0.1%  JSON.parse @:1
+     22.6 ms    0.1%  fit @screen.js:119
+     18.5 ms    0.1%  decrypt @noise.js:103
+     15.2 ms    0.1%  span @screen.js:434
+     14.3 ms    0.0%  requestIfNeeded @screen.js:270
+     14.0 ms    0.0%  send @:0
+     13.2 ms    0.0%  append @:0
+     12.3 ms    0.0%  nearSeam @screen.js:262
+     12.2 ms    0.0%  WebSocket.send @:1
+     12.1 ms    0.0%  JSON.stringify @:1
+     10.3 ms    0.0%  #frame @rrp.js:356
+     10.1 ms    0.0%  TextDecoder @:0
+      9.2 ms    0.0%  dispatchEvent @:0
+      8.9 ms    0.0%  atBottom @screen.js:202
+      8.8 ms    0.0%  decode @:0
+      7.6 ms    0.0%  encrypt @:0
+
+-- gfxinfo (com.android.chrome) since reset
+Total frames rendered: 0
+Janky frames: 0 (0.00%)
+Janky frames (legacy): 0 (0.00%)
+50th percentile: 4950ms
+90th percentile: 4950ms
+95th percentile: 4950ms
+99th percentile: 4950ms
+Number Missed Vsync: 0
+Number High input latency: 0
+Number Slow UI thread: 0
+Number Slow bitmap uploads: 0
+Number Slow issue draw commands: 0
+Number Frame deadline missed: 0
+Number Frame deadline missed (legacy): 0

@@ -1,0 +1,13 @@
+# The two frames the 200-line tool output made on the air to the phone.
+# wsbytes.py over Chrome DevTools; opcode 2 = binary (one Noise frame = one RRP message).
+# The turn's tool_output was 13837 B and its tool_result 14197 B of plaintext (qa5-ipc.txt);
+# Noise adds 16 bytes of tag plus the one-byte encoding marker.
+
+6796.206329	in	2	14253
+6796.205394	in	2	13927
+6796.212947	in	2	7661
+6796.20862	in	2	7482
+6796.203248	in	2	7432
+6796.195072	in	2	1048
+6796.216844	in	2	929
+6796.192402	in	2	659

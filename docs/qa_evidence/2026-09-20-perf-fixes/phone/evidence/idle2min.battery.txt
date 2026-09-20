@@ -1,0 +1,31 @@
+== idle2min  window 120562 ms
+chrome cpu jiffies: utime 26  stime 21  total 47 (100 Hz)
+chrome cpu: 0.47 s over 120.6 s wall = 0.4% of one core
+-- dumpsys cpuinfo (chrome rows)
+Load: 7.02 / 2.49 / 1.77
+  0.4% 15864/com.android.chrome:sandboxed_process0:org.chromium.content.app.NativeOnlySandboxedProcessService0:9: 0.3% user + 0.1% kernel / faults: 89 minor
+  0.1% 11063/com.android.chrome: 0.1% user + 0% kernel / faults: 477 minor
+  0.1% 15581/com.android.chrome:privileged_process0: 0% user + 0% kernel / faults: 133 minor
+  0% 15779/com.android.chrome:sandboxed_process0:org.chromium.content.app.NativeOnlySandboxedProcessService0:5: 0% user + 0% kernel
+  0% 15819/com.android.chrome:sandboxed_process0:org.chromium.content.app.NativeOnlySandboxedProcessService0:7: 0% user + 0% kernel
+-- batterystats --charged com.android.chrome
+      cpu=28.3 cpu:fg=11.9 cpu:bg=16.4 cpu:cached=0.00229 audio=0.0794 (3s 804ms) audio:fg=0.0303 (1s 456ms) audio:bg=0.0490 (2s 348ms) sensors=0.0217 sensors:fg=0.000324 sensors:bg=0.0214 wifi=0.228 wifi:fg=0.00832 wifi:bg=0.220 wakelock=123 (8m 33s 256ms) wakelock:fg=0.0000200 (1ms) wakelock:bg=123 (8m 33s 253ms) wakelock:cached=0.0000340 (2ms) GPU=0.309 GPU:fg=0.167 GPU:bg=0.143
+      (on battery, screen on) cpu=0.932 cpu:bg=0.932 audio=0.0242 (1s 157ms) audio:bg=0.0242 (1s 157ms) sensors=0.0000210 sensors:bg=0.0000210 wifi=0.000780 wifi:bg=0.000780 wakelock=0.242 (1s 135ms) wakelock:bg=0.242 (1s 135ms) GPU=0.00786 GPU:bg=0.00786
+      (on battery, screen off/doze) cpu=12.9 cpu:fg=0.0292 cpu:bg=12.8 cpu:cached=0.000236 audio=0.00389 (187ms) audio:fg=0.0000200 (1ms) audio:bg=0.00387 (186ms) sensors=0.0214 sensors:bg=0.0214 wifi=0.216 wifi:fg=0.0000850 wifi:bg=0.216 wakelock=123 (8m 32s 121ms) wakelock:fg=0.0000200 (1ms) wakelock:bg=123 (8m 32s 118ms) wakelock:cached=0.0000340 (2ms) GPU=0.0873 GPU:bg=0.0873
+      (not on battery, screen on) cpu=12.3 cpu:fg=9.88 cpu:bg=2.45 cpu:cached=0.00205 audio=0.0490 (2s 352ms) audio:fg=0.0281 (1s 347ms) audio:bg=0.0209 (1s 5ms) sensors=0.000315 sensors:fg=0.000311 sensors:bg=0.00000400 wifi=0.00790 wifi:fg=0.00525 wifi:bg=0.00265 GPU=0.173 GPU:fg=0.126 GPU:bg=0.0474
+      (not on battery, screen off/doze) cpu=2.19 cpu:fg=1.96 cpu:bg=0.229 audio=0.00225 (108ms) audio:fg=0.00225 (108ms) sensors=0.0000130 sensors:fg=0.0000130 wifi=0.00338 wifi:fg=0.00299 wifi:bg=0.000391 GPU=0.0406 GPU:fg=0.0406
+      screen=11.8 cpu=5.23 cpu:fg=0.0413 cpu:bg=0.960 cpu:fgs=4.21 cpu:cached=0.0181 sensors=0.0836 sensors:fg=0.0000100 sensors:bg=0.00775 sensors:fgs=0.0758 wifi=1.73 wifi:fg=0.00120 wifi:bg=0.158 wifi:fgs=1.57 wifi:cached=0.0000180 wakelock=111 (6m 48s 872ms) wakelock:fg=0.0143 (101ms) wakelock:bg=14.0 (30s 324ms) wakelock:fgs=97.2 (6m 18s 440ms) wakelock:cached=0.000120 (7ms) GPU=0.0391 GPU:fg=0.000385 GPU:bg=0.00421 GPU:fgs=0.0345
+      (on battery, screen on) screen=2.94 cpu=0.228 cpu:fg=0.0407 cpu:fgs=0.187 sensors=0.000215 sensors:fg=0.0000100 sensors:fgs=0.000205 wifi=0.0105 wifi:fg=0.00111 wifi:bg=0.000147 wifi:fgs=0.00928 wakelock=0.323 (1s 697ms) wakelock:fg=0.0137 (100ms) wakelock:bg=0.0292 (97ms) wakelock:fgs=0.280 (1s 500ms) GPU=0.00165 GPU:fg=0.000381 GPU:fgs=0.00127
+      (on battery, screen off/doze) cpu=0.00183 cpu:fg=0.000652 cpu:cached=0.00118 sensors=0.0821 sensors:bg=0.00770 sensors:fgs=0.0744 wifi=1.62 wifi:fg=0.0000820 wifi:bg=0.152 wifi:fgs=1.47 wakelock=111 (6m 47s 175ms) wakelock:fg=0.000545 (1ms) wakelock:bg=14.0 (30s 227ms) wakelock:fgs=96.9 (6m 16s 940ms) wakelock:cached=0.000120 (7ms) GPU=0.0367 GPU:fg=0.00000400 GPU:bg=0.00408 GPU:fgs=0.0326
+      (not on battery, screen on) screen=8.83 cpu=4.38 cpu:bg=0.660 cpu:fgs=3.70 cpu:cached=0.0169 sensors=0.00121 sensors:bg=0.0000200 sensors:fgs=0.00119 wifi=0.0882 wifi:bg=0.00303 wifi:fgs=0.0851 wifi:cached=0.0000180 GPU=0.000788 GPU:bg=0.000128 GPU:fgs=0.000660
+      (not on battery, screen off/doze) cpu=0.614 cpu:bg=0.301 cpu:fgs=0.314 sensors=0.0000530 sensors:bg=0.0000260 sensors:fgs=0.0000270 wifi=0.00519 wifi:bg=0.00256 wifi:fgs=0.00263
+      cpu=125 cpu:bg=125 wifi=0.176 wifi:bg=0.176
+      (on battery, screen on) cpu=0.895 cpu:bg=0.895 wifi=0.0000470 wifi:bg=0.0000470
+      (on battery, screen off/doze) cpu=116 cpu:bg=116 wifi=0.164 wifi:bg=0.164
+      (not on battery, screen on) cpu=6.70 cpu:bg=6.70 wifi=0.0113 wifi:bg=0.0113
+      (not on battery, screen off/doze) cpu=0.901 cpu:bg=0.901 wifi=0.000410 wifi:bg=0.000410
+      cpu=1.91 cpu:fg=0.638 cpu:bg=0.00395 cpu:fgs=1.27 cpu:cached=0.000284 audio=3.20 (2m 33s 487ms) audio:fg=0.110 (5s 240ms) audio:bg=0.000104 (5ms) audio:fgs=3.09 (2m 28s 242ms) sensors=0.310 sensors:fg=0.00476 sensors:bg=0.0000260 sensors:fgs=0.305 wakelock=63.2 (2m 26s 714ms) wakelock:fg=0.117 (469ms) wakelock:fgs=63.1 (2m 26s 245ms) GPU=0.519 GPU:fg=0.0460 GPU:bg=0.0000200 GPU:fgs=0.473
+      (on battery, screen on) cpu=0.0958 cpu:fg=0.0919 cpu:bg=0.00387 audio=0.170 (8s 104ms) audio:fg=0.106 (5s 73ms) audio:fgs=0.0634 (3s 31ms) sensors=0.000882 sensors:fg=0.000313 sensors:fgs=0.000569 wakelock=0.239 (857ms) wakelock:fg=0.110 (445ms) wakelock:fgs=0.129 (412ms) GPU=0.0144 GPU:fg=0.00824 GPU:bg=0.0000200 GPU:fgs=0.00611
+      (on battery, screen off/doze) cpu=0.0000730 cpu:bg=0.0000730 audio=3.02 (2m 25s 44ms) audio:bg=0.000104 (5ms) audio:fgs=3.02 (2m 25s 39ms) sensors=0.304 sensors:fg=0.00000900 sensors:bg=0.0000260 sensors:fgs=0.304 wakelock=63.0 (2m 25s 857ms) wakelock:fg=0.00672 (24ms) wakelock:fgs=63.0 (2m 25s 833ms) GPU=0.443 GPU:fg=0.000458 GPU:fgs=0.442
+      (not on battery, screen on) cpu=1.36 cpu:fg=0.493 cpu:fgs=0.866 cpu:cached=0.000284 audio=0.00706 (339ms) audio:fg=0.00348 (167ms) audio:fgs=0.00358 (172ms) sensors=0.00450 sensors:fg=0.00444 sensors:fgs=0.0000640 GPU=0.0376 GPU:fg=0.0373 GPU:fgs=0.000371
+      (not on battery, screen off/doze) cpu=0.454 cpu:fg=0.0528 cpu:fgs=0.401 sensors=0.000200 sensors:fg=0.00000100 sensors:fgs=0.000199 GPU=0.0241 GPU:fgs=0.0241
