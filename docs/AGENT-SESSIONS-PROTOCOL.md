@@ -5888,3 +5888,189 @@ decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "O
   out of step with the tabs and a tab that is gone leaves one small file behind rather than a
   dangling row. A helper file that cannot be read is a helper with no history, never an error the
   person sees.
+
+## 31. Tests: what the project has, what happened to them, and what proves a card (v4.1, 2026-09-20)
+
+Card `#7BM4`, owner 2026-09-20. The Switchboard is the project's tooling hub, not only its
+tracker: a card names the tests that prove it in a `## Tests` section and has a **Check** beside
+them, and a **Test suites** pane lists every test with its history. Both are fed by the five
+`tests_*` requests below, which the **board worker** answers — the same worker as section 19, so
+these go down the `BoardWorker` connection (the tab's helper), never a terminal pane's.
+
+Backend: `backend/relay_core/tests_protocol.py` (`TestsCommands`, the five handlers), over
+`test_probe.py` (discovery), `test_history.py` (the store and the fold), `junit_runner.py` (JUnit
+out of the stdlib suite) and `jobs.py` (the process group a run is); wired in `board_protocol.py`
+(`TESTS_TYPES`, `BoardCommands._tests`). Agent tools: `tests_check` and `tests_run` in
+`board_tools.py`. GUI: `src/TestSuitesModel.{h,cpp}` (headless) and `src/TestSuitesPane.{h,cpp}`.
+Tests: `tests/test_tests_protocol.py`, `tests/test_test_probe.py`, `tests/test_test_history.py`,
+`tests/testsuites_test.cpp`. Machine setup and the commands by hand: `docs/PROFILING.md`.
+
+**Unknown keys are ignored on both sides, and a missing optional key means "unknown", never
+zero.** A p95 of 0.0 and a p95 nobody measured are different facts.
+
+### 31.1 Requests (GUI → worker)
+
+```
+{"type": "tests_list"}                          the whole inventory
+{"type": "tests_run", "ids": [...], "repeat_until_fail": 0}
+{"type": "tests_stop", "run_id": "..."}
+{"type": "tests_history", "id": "ctest:board", "limit": 100}
+{"type": "tests_check", "card": "7BM4"}
+```
+
+`tests_list` and `tests_check` may carry an `id`, which is echoed as the request id. `tests_run`
+and `tests_history` may **not**: on their events `id` is the *test*, and one JSON object cannot
+carry the name twice (the same collision 30.8 records for `app_command`'s row). `tests_run` also
+takes `build_dir` (an absolute path, or one relative to the project) and `all: true`, which raises
+the id ceiling and nothing else — there is no request that means "the whole suite".
+
+### 31.2 Events (worker → GUI)
+
+```
+{"event":"tests_list", "project": <path>, "tests":[TestRecord], "summary": Summary,
+   "cards_without_tests":[{id, title, status}]}
+{"event":"tests_run", "run_id", "state":"started"|"progress"|"finished"|"stopped"|"error",
+   "id"?, "result"?, "duration"?, "done":int, "total":int, "message"?}
+{"event":"tests_history", "id", "executions":[Execution]}          newest first
+{"event":"tests_check", "card", "findings":[{test, verdict, message, severity}], "actions":[str]}
+```
+
+Every one of them also carries `root`, the board folder a GUI routes by (19.2), because one
+window can have several projects open.
+
+`Summary` is `{total, passed, failed, skipped, never_run, slow, flaky, duration, line}`, where
+`line` is the ready-made header text in nextest's words: `68 tests · 64 passed (2 slow, 1 flaky)
+· 3 never run · 12.4 s`. `cards_without_tests` is the board-level report: the work cards in
+`executing`, `in-progress`, `needs-verification` or a `needs-qa-*` lane whose body has no
+`## Tests` section — the verification backlog.
+
+A `tests_run` `progress` event with an `id` and **no** `result` says that test has begun (the row
+goes Running); with a `result` it is that test's verdict. `finished`, `stopped` and `error` each
+end the run, and a fresh `tests_list` follows every run.
+
+### 31.3 TestRecord and Execution
+
+```
+TestRecord
+  id             str   stable key "<runner>:<invocation>", e.g. "ctest:panelayout",
+                       "unittest:tests.test_board.CardTests.test_roundtrip"
+  name           str   short display name
+  runner         str   "ctest" | "unittest" | "manual"
+  file           str   repo-relative source path, "" if unknown
+  line           int   optional
+  invocation     str   what a person types to run just this one
+  labels         [str]
+  first_seen     str   ISO-8601 UTC, optional
+  last_run       str   ISO-8601 UTC, optional (absent = never run)
+  last_result    str   "pass" | "fail" | "skip" | "error" | "timeout" | "" (never run)
+  runs, pass, fail, skip   int   over the retained window, since the last source_hash change
+  duration_p50, duration_p95, duration_last   float seconds, optional
+  reliability    float 0..100 = pass/(pass+fail)*100, optional when pass+fail == 0
+  flake_score    float recency-weighted count of pass<->fail transitions (0 = steady)
+  slow           bool  p95 in the suite's top decile (and >= 1.0 s), or p95 regressed > 50 %
+  flaky          bool  pass and fail at the same commit, or flake_score >= 2
+  stale          [str] any of "gone" | "never-run" | "skipped-forever" | "orphaned" | "edited"
+  source_hash    str   "sha256:<hex>" of the test's source (file granularity in v0)
+  history        [Execution]  newest first, at most 20
+  last_failure   {at, commit, message, excerpt}   optional
+  cards          [str] card ids whose ## Tests section names this test
+
+Execution      one line of the JSONL store, and one history cell
+  {ts, run_id, id, runner, result, duration, commit, host}
+```
+
+`host` is `socket.gethostname()`, so a run from spark and a run from sphinxpad of the same test
+sit side by side in one history. The store is `<board>/.private/tests/history.jsonl`, gitignored:
+a store, not source. The numbers that matter are committed into cards by Check.
+
+### 31.4 Running tests, and the five refusals
+
+A run names its tests. Ids are grouped by runner and each runner gets **one** command:
+`ctest --test-dir <build> -R '^(a|b)$' --output-junit <tmp>` (plus `--repeat until-fail:N`), and
+`python3 -m relay_core.junit_runner --junit <tmp> <dotted names…>` (looped by the shell for
+`repeat_until_fail`). Both go through `jobs.JobTable`, so `tests_stop` ends the process group
+rather than only the wait, and both run in `scripts/test.sh`'s isolation plus the offscreen
+platform: a temporary `XDG_DATA_HOME` — and every other XDG directory, and `TMPDIR`, under one
+short `/tmp` path for the 108-byte socket limit — `RELAY_KEYRING=off`, a throwaway
+`RELAY_LOCAL_MODELS`, `QT_QPA_PLATFORM=offscreen`.
+
+ctest's own output is parsed as it arrives (`Start n: <name>`, `n/m Test #n: <name> … Passed 0.90
+sec`) so the pane moves during the run; the JUnit files are the authority at the end, and every
+verdict they carry that was not already reported is emitted before `finished`. The executions are
+appended to the store with `commit` = `git rev-parse HEAD` and `host` = this machine, and a fresh
+`tests_list` closes the run.
+
+Five refusals, each one sentence in a `{"state": "error", "message"}` event, nothing started:
+
+1. **no ids** — nothing here starts the whole suite implicitly;
+2. **more than 200 ids** without `all: true`;
+3. **a run already in flight** — one at a time, per worker;
+4. **ids that name nothing runnable** — a `manual:` entry is evidence recorded by hand, not a
+   command (a manual entry *beside* a real one is skipped, not refused, and `started`'s message
+   says how many were skipped);
+5. **no configured build directory** for ctest ids.
+
+### 31.5 Check, and a card's `## Tests`
+
+`tests_check {card}` reads the card's `## Tests` lines, the files its commits touched
+(`links.commits`, then `git log --grep '#ID'`, then `git show --name-only`) and the folded
+history, and answers `findings` — **empty when nothing is wrong** — plus at most three `actions`
+(*Run these*, *Add the tests this card's commits touched*, *Open the failing one*). The verdicts
+are `gone`, `never-run`, `skipped-forever`, `edited`, `flaky`, `slow` and the card-level
+`orphaned`; severities are GitHub Checks' `failure` / `warning` / `notice`. A card with **no**
+`## Tests` section at all does not go through that fold: it gets the one finding that says so,
+`no-tests`, because the section being missing is the only thing to fix.
+
+A `## Tests` line is an invocation with an optional ` — path` tail, and a line may name more than
+one test, exactly as the same line would at a terminal:
+
+```markdown
+## Tests
+- `ctest -R panelayout` — tests/panelayout_test.cpp
+- `tests/test_board_chat.py::BoardChatTests::test_steer`
+- manual: docs/qa_evidence/2026-09-20-thing/
+```
+
+`tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without it being
+logged as a rewrite of the owner's text.
+
+### 31.6 The agent's two tools
+
+Registered the way `board_claim` is, so a terminal-pane agent and the Switchboard page agent both
+have them:
+
+- **`tests_check {card}`** — the findings as text plus the actions. Runs nothing, writes nothing.
+  Policy rule 6 asks for it before a card moves to `needs-verification`.
+- **`tests_run {ids, repeat_until_fail?, timeout_seconds?}`** — at most 50 ids, waits (300 s by
+  default, 1800 s ceiling) and answers with a per-test table and the failure message for anything
+  that did not pass. The wire's refusals arrive as tool errors, so the model reads the sentence.
+
+### 31.7 Results from another machine
+
+`scripts/relay-remote-tests` builds and tests a commit on a second runner and fetches the results
+into `<board>/.private/tests/incoming/<host>-<run>/` — `meta.json` (`run_id`, `commit`, `host`,
+`finished`, …), `ctest.xml`, `unittest.xml`, `ninja_log` and the logs. `tests_list` folds any
+folder that has not been ingested into the store **before** it discovers anything, so a pane that
+opens right after a remote run shows it at once.
+
+Exactly once, guarded twice: an `ingested` file is written beside the folder, and the folder's
+`run_id` is checked against the store. Either guard alone would do; both are there because the
+folders fetched before the marker existed must not be counted a second time. A folder with no
+`meta.json` still ingests, under its own directory name as the `run_id`.
+
+### 31.8 Notes and deviations
+
+- **The board worker, not the pane's.** These requests go to the worker that answers `board_*`
+  (`BoardWorker`, 30.7). `TestsCommands` is made on first use and cached against (project, board
+  root), so a `set_board` answers about the project the worker was moved to, and its job table is
+  its own — stopping a test run cannot reach a command the agent left running.
+- **No `configure` field is needed.** The build directory defaults to `<project>/build`, which is
+  what this repository and every CMake project here uses; a GUI that needs another one sends
+  `build_dir` on the request rather than configuring it once, so two build directories can be
+  asked about in one session.
+- **`id` means the test on two events.** `tests_run` and `tests_history` spend the key on the
+  test, which is what `src/TestSuitesModel.cpp` reads; those events carry no request id, and
+  `tests_list`/`tests_check` simply omit `id` when nothing asked for them.
+- **Discovery is offline and bounded.** `ctest --show-only=json-v1` is the only subprocess, and
+  the Python half is parsed with `ast` — nothing is imported, so a test module that would fail at
+  import time is still listed, which is exactly when a card needs to know its tests exist.
