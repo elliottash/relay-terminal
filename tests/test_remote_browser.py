@@ -10,6 +10,7 @@ Skipped when Chrome is not installed.
 """
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -102,6 +103,67 @@ class ScrollbackSource(panes_mod.DemoPaneSource):
         start = end - want
         return {"from_row": start, "total": self.total, "more": start > 0,
                 "lines": [self._row(row, row) for row in range(start, end)]}
+
+
+class SixPanes(panes_mod.DemoPaneSource):
+    """Six panes, one in each status of section 6.3, in an order that is not the inbox's.
+
+    Two of them are guest-agent panes — a Claude Code pane and a Codex pane. They are ordinary
+    panes to every part of this: the desktop publishes them like any other terminal with a screen,
+    and nothing in the phone's inbox asks whether a pane has one of Relay's own agent workers
+    behind it. That is the point of including them: the test fails if anything starts to.
+    """
+
+    def __init__(self):
+        super().__init__()
+        now = time.time()
+        self._panes = [
+            {"id": "p-idle", "window": 1, "tab": "notes", "title": "notes", "cwd": "~/notes",
+             "program": "", "control": "human", "status": "idle", "unread": 0, "queue": 0,
+             "updated": now - 900},
+            # A guest agent, three minutes into a turn: "running · 3m" comes from `updated`.
+            {"id": "p-claude", "window": 1, "tab": "relay", "title": "claude code",
+             "cwd": "~/repos/relay-terminal", "program": "claude", "control": "agent",
+             "status": "running", "unread": 0, "queue": 2, "updated": now - 185},
+            {"id": "p-failed", "window": 1, "tab": "build", "title": "build", "cwd": "~/build",
+             "program": "ninja", "control": "human", "status": "failed", "unread": 0, "queue": 0,
+             "updated": now - 30},
+            {"id": "p-codex", "window": 1, "tab": "codex", "title": "codex", "cwd": "~/repos/x",
+             "program": "codex", "control": "agent", "status": "finished", "unread": 0,
+             "queue": 0, "updated": now - 60},
+            {"id": "p-waiting", "window": 1, "tab": "deploy", "title": "deploy", "cwd": "~/ops",
+             "program": "ansible", "control": "human", "status": "waiting_input", "unread": 0,
+             "queue": 0, "updated": now - 10},
+            {"id": "p-password", "window": 1, "tab": "ssh", "title": "ssh prod-db", "cwd": "~",
+             "program": "ssh", "control": "human", "status": "password", "unread": 0, "queue": 0,
+             "updated": now - 5},
+        ]
+
+    def republish(self) -> None:
+        """Send the list again unchanged, so a test can assert on a render it set up for."""
+        self._changed()
+
+
+class RecordingSource(panes_mod.DemoPaneSource):
+    """The demo desktop with the scripted turn taken out: what was composed, and nothing else.
+
+    The queue-and-replay test is about how many times a prompt reaches the desktop, so a source
+    that answers with six seconds of scripted agent output is noise it would have to wait for.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.composed: list[tuple] = []
+        self.stops: list[str] = []
+
+    async def compose(self, pane, text, *, to_agent, when, origin, origin_name="") -> None:
+        self.composed.append((pane, text, when, origin))
+        # The turn starts, and says so, because that is what puts Stop on the phone's screen.
+        self._emit(pane, {"event": "agent_started"})
+        self.set_status(pane, "running")
+
+    async def agent_stop(self, pane) -> None:
+        self.stops.append(pane)
 
 
 class Harness:
@@ -197,7 +259,7 @@ class BrowserClientTests(unittest.TestCase):
 
                     # Open a pane and send a prompt; the agent's answer streams back.
                     await browser.evaluate(
-                        "document.querySelectorAll('.pane-row')[0].click()")
+                        "document.querySelector('[data-pane-id=\"pane-1\"]').click()")
                     await browser.wait_for(shown('screen-thread'))
                     self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
                     await browser.evaluate("""
@@ -386,7 +448,7 @@ class BrowserClientTests(unittest.TestCase):
                 try:
                     await browser.navigate(url)
                     await browser.wait_for(shown('screen-inbox'), timeout=40)
-                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
                     await browser.wait_for(shown('screen-thread'))
                     await browser.wait_for(shown('terminal-pane'), timeout=20)
                     await browser.wait_for(
@@ -516,7 +578,7 @@ class BrowserClientTests(unittest.TestCase):
                 try:
                     await browser.navigate(url)
                     await browser.wait_for(shown('screen-inbox'), timeout=40)
-                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
                     await browser.wait_for(shown('screen-thread'))
                     await browser.wait_for(shown('terminal-pane'), timeout=20)
                     self.assertEqual(await browser.evaluate(mode), "Watching")
@@ -577,7 +639,7 @@ class BrowserClientTests(unittest.TestCase):
                 try:
                     await browser.navigate(url)
                     await browser.wait_for(shown('screen-inbox'), timeout=40)
-                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
                     await browser.wait_for(shown('screen-thread'))
                     await browser.wait_for(shown('terminal-pane'), timeout=20)
                     self.assertTrue(await browser.evaluate(
@@ -635,6 +697,261 @@ class BrowserClientTests(unittest.TestCase):
                 finally:
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 180))
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+class InboxTests(unittest.TestCase):
+    """The first screen of the day (#PH0N phase 2.5).
+
+    The question the inbox answers is "what wants me?", not "what is there?". So: the rows that
+    need the owner come first whatever else is going on, a running pane says how long it has been
+    running, and the number of rows that want him is on the app icon before he has opened
+    anything at all.
+    """
+
+    ROWS = ("[...document.querySelectorAll('.pane-row')].map(r => ["
+            "r.dataset.paneId,"
+            " r.querySelector('.chip').textContent,"
+            " r.querySelector('.pane-title').textContent])")
+
+    def test_needs_you_comes_first_and_every_row_says_what_it_is_doing(self):
+        async def main():
+            async with Harness(source=SixPanes) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    rows = await browser.wait_for(
+                        f"(() => {{ const r = {self.ROWS}; return r.length === 6 ? r : null; }})()",
+                        timeout=20)
+
+                    # Three bands: what needs you, what is working, the rest. Inside a band the
+                    # desktop's own order stands — these are the panes on a screen the owner
+                    # knows, and re-sorting them by "most recently changed" makes rows swap
+                    # places under a thumb.
+                    self.assertEqual([row[0] for row in rows],
+                                     ["p-failed", "p-waiting", "p-password",
+                                      "p-claude", "p-idle", "p-codex"])
+                    self.assertEqual([row[1] for row in rows[:3]],
+                                     ["failed", "waiting for you", "password"])
+                    # The running pane says how long. `updated` put its turn three minutes back.
+                    self.assertEqual(rows[3][1], "running · 3m")
+                    self.assertEqual([row[1] for row in rows[4:]], ["idle", "finished"])
+                    # A guest-agent pane is an ordinary pane: its own title, in its own band,
+                    # with nothing the others do not have.
+                    self.assertEqual([row[2] for row in rows],
+                                     ["build", "deploy", "ssh prod-db", "claude code", "notes",
+                                      "codex"])
+                    self.assertIn("2 queued", await browser.evaluate(
+                        "document.querySelector('[data-pane-id=\"p-claude\"] .pane-queue')"
+                        ".textContent"))
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_the_app_badge_counts_what_needs_you_and_clears_at_zero(self):
+        async def main():
+            async with Harness(source=SixPanes) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    # The Badging API is an installed PWA's, and headless Chrome has none, so the
+                    # two calls are recorded here instead. The guard around them is the product
+                    # code's (`updateBadge`): a browser without them must not throw on every list.
+                    await browser.evaluate("""
+                        (() => {
+                          window.__badge = null;
+                          navigator.setAppBadge = (n) => { window.__badge = n; return Promise.resolve(); };
+                          navigator.clearAppBadge = () => { window.__badge = 0; return Promise.resolve(); };
+                          return true;
+                        })()
+                    """)
+                    harness.source.republish()
+                    self.assertEqual(await browser.wait_for(
+                        "window.__badge === null ? null : window.__badge", timeout=20), 3)
+
+                    # Answered, all three: the badge goes away rather than sticking at the last
+                    # number, which is the failure people actually notice.
+                    for pane in ("p-failed", "p-waiting", "p-password"):
+                        harness.source.set_status(pane, "idle")
+                    # `wait_for` polls until the expression is truthy, so the zero is reported as
+                    # a word rather than as the number it is waiting to stop seeing.
+                    self.assertEqual(await browser.wait_for(
+                        "window.__badge === 0 ? 'cleared' : null", timeout=20), "cleared")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+class OfflineQueueTests(unittest.TestCase):
+    """Queue and replay across a real drop (#PH0N phase 2.7, protocol section 7).
+
+    iOS closes the socket within seconds of the app leaving the foreground, so a prompt typed on
+    a bus is normally typed with no link. What used to happen is that `rrp.send` rejected, every
+    caller swallowed it, and the prompt simply never happened — after the person had watched
+    themselves send it. The drop here is a real one: the desktop closes the channel, the
+    rendezvous closes the phone's socket, and the client reconnects on its own.
+    """
+
+    async def drop(self, harness) -> None:
+        for channel in list(harness.host.channels.values()):
+            await channel.close("test drop")
+
+    def test_a_prompt_typed_while_the_link_is_down_is_kept_and_sent_once(self):
+        async def main():
+            async with Harness(source=RecordingSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
+                    await browser.wait_for(shown('screen-thread'), timeout=20)
+
+                    await self.drop(harness)
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'offline'"
+                        " ? 'offline' : null", timeout=20)
+
+                    await browser.evaluate("""
+                        (() => {
+                          document.getElementById('composer-text').value = 'run the tests';
+                          document.getElementById('composer-send').click();
+                          return true;
+                        })()
+                    """)
+                    # A line under the box, not a sheet: the person is mid-sentence and a modal
+                    # over the prompt box takes the sentence with it.
+                    note = await browser.wait_for("""
+                        (() => {
+                          const n = document.getElementById('outbox-note');
+                          return n && !n.hidden ? n.textContent : null;
+                        })()
+                    """, timeout=20)
+                    self.assertEqual(note, "Sends when back online · 1 message")
+                    # And the box is empty: it was taken, not refused.
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('composer-text').value"), "")
+                    self.assertEqual(harness.source.composed, [])
+
+                    # The client reconnects by itself, resumes its streams, and only then sends
+                    # what it kept.
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'connected'"
+                        " ? 'connected' : null", timeout=30)
+                    for _ in range(100):
+                        await asyncio.sleep(0.1)
+                        if harness.source.composed:
+                            break
+                    self.assertEqual(len(harness.source.composed), 1, harness.source.composed)
+                    pane, text, when, origin = harness.source.composed[0]
+                    self.assertEqual(text, "run the tests")
+                    self.assertTrue(origin.startswith("remote:"), origin)
+
+                    # The line goes away once it has gone out, and nothing arrives twice — a
+                    # second drop and reconnect must not replay a queue that is already empty.
+                    self.assertEqual(await browser.wait_for(
+                        "document.getElementById('outbox-note').hidden ? 'gone' : null",
+                        timeout=20), "gone")
+
+                    # A Stop waits the same way. It is also still *there* to tap: hiding it when
+                    # the socket dropped meant that seconds after the app left the foreground,
+                    # the one button whose purpose is "stop it now" was the one that had gone.
+                    await browser.wait_for(
+                        "document.getElementById('composer-stop').hidden ? null : 'shown'",
+                        timeout=20)
+                    await self.drop(harness)
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent.startsWith('offline')"
+                        " ? 'offline' : null", timeout=20)
+                    self.assertFalse(await browser.evaluate(
+                        "document.getElementById('composer-stop').hidden"),
+                        "Stop disappeared when the link did")
+                    await browser.evaluate("document.getElementById('composer-stop').click()")
+                    # And the header says so, because the inbox does not show the line.
+                    self.assertEqual(await browser.wait_for(
+                        "document.getElementById('link-status').textContent.includes('waiting')"
+                        " ? document.getElementById('link-status').textContent : null",
+                        timeout=20), "offline · 1 waiting")
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'connected'"
+                        " ? 'connected' : null", timeout=30)
+                    for _ in range(100):
+                        await asyncio.sleep(0.1)
+                        if harness.source.stops:
+                            break
+                    self.assertEqual(harness.source.stops, [pane])
+
+                    await self.drop(harness)
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'connected'"
+                        " ? 'connected' : null", timeout=30)
+                    await asyncio.sleep(1.0)
+                    self.assertEqual(len(harness.source.composed), 1,
+                                     "the prompt was replayed a second time")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_two_prompts_queued_while_down_arrive_in_order(self):
+        async def main():
+            async with Harness(source=RecordingSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
+                    await browser.wait_for(shown('screen-thread'), timeout=20)
+
+                    await self.drop(harness)
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'offline'"
+                        " ? 'offline' : null", timeout=20)
+                    for text in ("first", "second"):
+                        await browser.evaluate(f"""
+                            (() => {{
+                              document.getElementById('composer-text').value = '{text}';
+                              document.getElementById('composer-send').click();
+                              return true;
+                            }})()
+                        """)
+                    self.assertEqual(await browser.wait_for("""
+                        (() => {
+                          const n = document.getElementById('outbox-note');
+                          return n && !n.hidden && n.textContent.includes('2 messages')
+                            ? n.textContent : null;
+                        })()
+                    """, timeout=20), "Sends when back online · 2 messages")
+
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'connected'"
+                        " ? 'connected' : null", timeout=30)
+                    for _ in range(100):
+                        await asyncio.sleep(0.1)
+                        if len(harness.source.composed) == 2:
+                            break
+                    self.assertEqual([row[1] for row in harness.source.composed],
+                                     ["first", "second"])
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
 
 
 if __name__ == "__main__":

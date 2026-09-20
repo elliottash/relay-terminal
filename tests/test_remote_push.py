@@ -220,6 +220,133 @@ class ServiceWorkerTests(unittest.TestCase):
         self.assertEqual(self.opened(bytes(32), blob), [],
                          "a forged push must be discarded, not shown")
 
+    def test_the_notification_carries_relays_own_icon(self):
+        # Without these the lock screen shows the browser's default glyph. Both are paths on this
+        # origin: a notification must never fetch an image from anywhere else, because that URL
+        # would be a request the lock screen makes on the app's behalf and outside its control.
+        key = bytes(range(32))
+        shown = self.opened(key, push.seal(key, {"v": 1, "kind": "plan", "pane": "p1",
+                                                 "title": "A plan is ready", "body": "Pane 1"}))
+        self.assertEqual(shown[0]["options"]["icon"], "./icons/icon-192.png")
+        self.assertEqual(shown[0]["options"]["badge"], "./icons/icon-192.png")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class NotificationTapTests(unittest.TestCase):
+    """Tapping a notification opens that pane (section 9.2, the `pane` in the sealed body).
+
+    The pane id is the only thing in a body that names anything, and it is an opaque desktop id
+    — no title, no cwd, no command (see ``BodyTests``) — so it is also the only thing the worker
+    has to hand the app. This drives the whole path in one go: `remote/notify.py` builds the body,
+    `remote/push.py` seals it, `app/sw.js` opens it, shows it, and is then tapped.
+    """
+
+    def tapped(self, key: bytes, blob: bytes, mode: str) -> dict:
+        done = subprocess.run(
+            [shutil.which("node"), str(HERE / "sw_click_peer.mjs"),
+             base64.b64encode(key).decode(), base64.b64encode(blob).decode(), mode],
+            capture_output=True, text=True, cwd=str(HERE.parent))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def body_for(self, kind: str, pane: str) -> dict:
+        notifier = notify.Notifier(None, None, spawn=lambda coroutine: coroutine.close())
+        return notifier.body(kind, pane, spent=91.0, program="sudo")
+
+    def test_a_tap_on_an_open_app_posts_the_pane_id_to_it(self):
+        key = bytes(range(32))
+        for kind in notify.KINDS:
+            with self.subTest(kind=kind):
+                body = self.body_for(kind, "pane-9ab3")
+                result = self.tapped(key, push.seal(key, body), "focus")
+                self.assertEqual(result["shown"][0]["options"]["data"], {"pane": "pane-9ab3"})
+                self.assertEqual(result["posted"], [{"t": "open_pane", "pane": "pane-9ab3"}])
+                self.assertEqual(result["focused"], 1)
+                self.assertIsNone(result["opened"], "an app already open is focused, not re-opened")
+                self.assertEqual(result["closed"], 1, "the notification is dismissed by the tap")
+
+    def test_a_tap_with_no_window_open_carries_the_pane_in_the_url(self):
+        # A window `openWindow` has only just created has no `message` listener yet, so posting to
+        # it is a race. The id goes in the URL instead and app.js drops the query once it has it.
+        key = bytes(range(32))
+        body = self.body_for("waiting_input", "pane-7cd1")
+        result = self.tapped(key, push.seal(key, body), "open")
+        self.assertEqual(result["opened"], "./?pane=pane-7cd1")
+        self.assertEqual(result["posted"], [])
+
+    def test_a_pane_id_with_url_punctuation_in_it_is_escaped(self):
+        key = bytes(range(32))
+        blob = push.seal(key, {"v": 1, "kind": "failed", "pane": "a b&c=d#e",
+                               "title": "That turn failed", "body": "Pane 1"})
+        result = self.tapped(key, blob, "open")
+        self.assertEqual(result["opened"], "./?pane=a%20b%26c%3Dd%23e")
+
+    def test_a_body_without_a_pane_still_opens_the_app(self):
+        # Nothing the hub builds is shaped this way, but a worker must not fail to open on a body
+        # it did not expect: the app is opened, without a pane.
+        key = bytes(range(32))
+        blob = push.seal(key, {"v": 1, "kind": "plan", "title": "A plan is ready", "body": "Pane 1"})
+        result = self.tapped(key, blob, "open")
+        self.assertEqual(result["opened"], "./")
+        self.assertEqual(self.tapped(key, blob, "focus")["posted"], [])
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class NotifySwitchTests(unittest.TestCase):
+    """Two switches on the phone over the five kinds the protocol keeps (section 9.1).
+
+    The desktop's side is deliberately unchanged — ``remote/notify.py`` still stores and decides
+    per kind — so what is worth pinning is that the phone's two switches cover those five exactly,
+    send lists the desktop will accept, and read an older, partial list back as something rather
+    than as neither on nor off.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        done = subprocess.run([shutil.which("node"), str(HERE / "notify_kinds_peer.mjs")],
+                              capture_output=True, text=True, cwd=str(HERE.parent))
+        assert done.returncode == 0, done.stderr
+        cls.mapping = json.loads(done.stdout)
+
+    def test_there_are_two_switches_with_the_owners_wording(self):
+        self.assertEqual([group["label"] for group in self.mapping["switches"]],
+                         ["When an agent finishes or fails", "When something needs me"])
+
+    def test_the_two_switches_cover_the_protocols_five_kinds_exactly(self):
+        self.assertEqual(sorted(self.mapping["all"]), sorted(notify.KINDS))
+        self.assertEqual(len(self.mapping["all"]), len(set(self.mapping["all"])),
+                         "a kind in both switches could not be turned off")
+
+    def test_each_switch_sends_kinds_the_desktop_accepts(self):
+        # `clean_kinds` is the desktop's gate: an unknown kind is refused and the stored list
+        # stands, so a mapping that drifted from the protocol would silently stop working.
+        self.assertEqual(notify.clean_kinds(self.mapping["sends"]["finished_only"]),
+                         ["agent_finished", "failed", "plan"])
+        self.assertEqual(notify.clean_kinds(self.mapping["sends"]["needs_only"]),
+                         ["waiting_input", "password"])
+        self.assertEqual(notify.clean_kinds(self.mapping["sends"]["both"]), list(notify.KINDS))
+
+    def test_the_finishing_switch_is_the_three_ends_and_needs_me_is_the_two_answers(self):
+        groups = {group["name"]: group["kinds"] for group in self.mapping["switches"]}
+        self.assertEqual(groups["finished"], ["agent_finished", "failed", "plan"])
+        self.assertEqual(groups["needs"], ["waiting_input", "password"])
+
+    def test_both_switches_off_sends_nothing_which_is_unsubscribing(self):
+        # An empty list would mean *all of them* to the desktop (section 9.1), which is the
+        # opposite of what was asked, so the app unsubscribes instead of sending one.
+        self.assertEqual(self.mapping["sends"]["neither"], [])
+        self.assertEqual(notify.clean_kinds([]), list(notify.DEFAULT_KINDS))
+
+    def test_a_stored_list_reads_back_as_switch_positions(self):
+        reads = self.mapping["reads"]
+        self.assertEqual(reads["all"], {"finished": True, "needs": True})
+        self.assertEqual(reads["needs_only"], {"finished": False, "needs": True})
+        # A record from before the switches existed, with one kind of a group left on.
+        self.assertEqual(reads["one_of_a_group"], {"finished": True, "needs": False})
+        # Absent or empty is all of them on the desktop, so both switches read on.
+        self.assertEqual(reads["empty"], {"finished": True, "needs": True})
+        self.assertEqual(reads["absent"], {"finished": True, "needs": True})
+
 
 class VapidTests(unittest.TestCase):
     ENDPOINT = "https://push.example.com/v1/subscription/abc123"
@@ -1001,6 +1128,9 @@ class NotifyRowTests(unittest.TestCase):
                         # Nothing to choose between until there is something to be notified about.
                         self.assertTrue(await browser.evaluate(
                             "document.getElementById('notify-kinds').hidden"))
+                        # And nothing that would ask for permission behind the button.
+                        self.assertEqual(await browser.evaluate(
+                            "document.querySelectorAll('#notify-kinds input').length"), 0)
                     else:
                         self.assertTrue(state["hidden"])
                         self.assertIn("notification", state["note"].lower())
@@ -1008,8 +1138,8 @@ class NotifyRowTests(unittest.TestCase):
                     await browser.stop()
         run(main(), timeout=120)
 
-    def test_the_checkboxes_are_this_phones_choice_and_survive_a_reload(self):
-        """The whole loop in a browser: subscribe, uncheck one, reload, and it is still unchecked.
+    def test_the_two_switches_are_this_phones_choice_and_survive_a_reload(self):
+        """The whole loop in a browser: subscribe, turn one switch off, reload, still off.
 
         Skipped where the machine cannot reach a push service, because `pushManager.subscribe`
         really does talk to one — and takes its time about it, which is why the waits here are
@@ -1039,40 +1169,63 @@ class NotifyRowTests(unittest.TestCase):
                             "document.getElementById('notify-note').textContent")
                         raise unittest.SkipTest(f"no push service reachable here ({note!r})")
 
-                    # Everything on to begin with, and the boxes say so.
+                    # Everything on to begin with, and the two switches say so. Two, not five:
+                    # the five kinds stay the protocol's and the desktop's, and the phone asks
+                    # the two questions a person standing at a bus stop is actually answering.
                     self.assertEqual(device.push["kinds"], list(notify.KINDS))
-                    checked = await browser.wait_for("""
+                    switches = await browser.wait_for("""
                         (() => {
                           const boxes = [...document.querySelectorAll('#notify-kinds input')];
-                          return boxes.length ? boxes.map(b => [b.id, b.checked]) : null;
+                          return boxes.length ? boxes.map(b => [b.id, b.checked, b.dataset.kinds,
+                            b.getAttribute('role'),
+                            document.querySelector(`label[for="${b.id}"]`).textContent]) : null;
                         })()
                     """, timeout=20)
-                    self.assertEqual(len(checked), len(notify.KINDS))
-                    self.assertTrue(all(state for _, state in checked))
+                    self.assertEqual([row[0] for row in switches],
+                                     ["notify-switch-finished", "notify-switch-needs"])
+                    self.assertTrue(all(row[1] for row in switches))
+                    self.assertEqual([row[2] for row in switches],
+                                     ["agent_finished failed plan", "waiting_input password"])
+                    self.assertEqual([row[3] for row in switches], ["switch", "switch"])
+                    self.assertEqual([row[4] for row in switches],
+                                     ["When an agent finishes or fails", "When something needs me"])
 
-                    # Uncheck one: the desktop's record loses exactly that kind.
+                    # Turn the finishing one off: the desktop's record loses exactly its kinds.
                     await browser.evaluate(
-                        "document.getElementById('notify-kind-agent_finished').click()")
+                        "document.getElementById('notify-switch-finished').click()")
                     for _ in range(150):
                         await asyncio.sleep(0.2)
                         if "agent_finished" not in device.push["kinds"]:
                             break
-                    self.assertEqual(device.push["kinds"],
-                                     [kind for kind in notify.KINDS if kind != "agent_finished"])
+                    self.assertEqual(device.push["kinds"], ["waiting_input", "password"])
 
-                    # Reload: the boxes are drawn from what was stored, not from the defaults.
+                    # Reload: the switches are drawn from what was stored, not from the defaults.
                     await browser.navigate(harness.base)
                     await browser.wait_for(shown('screen-inbox'), timeout=40)
                     again = await browser.wait_for("""
                         (() => {
-                          const box = document.getElementById('notify-kind-agent_finished');
+                          const box = document.getElementById('notify-switch-finished');
                           return box ? { off: !box.checked,
-                                         on: document.getElementById('notify-kind-password').checked }
+                                         on: document.getElementById('notify-switch-needs').checked }
                                      : null;
                         })()
                     """, timeout=20)
-                    self.assertTrue(again["off"], "the unchecked box came back checked")
+                    self.assertTrue(again["off"], "the switch that was turned off came back on")
                     self.assertTrue(again["on"])
+
+                    # Turning the last one off is unsubscribing, and says so: an empty `kinds`
+                    # would mean *all of them* to the desktop (section 9.1), which is the
+                    # opposite of what was asked.
+                    await browser.evaluate(
+                        "document.getElementById('notify-switch-needs').click()")
+                    for _ in range(150):
+                        await asyncio.sleep(0.2)
+                        if harness.devices.live()[0].push is None:
+                            break
+                    self.assertIsNone(harness.devices.live()[0].push)
+                    self.assertEqual(await browser.wait_for(
+                        "document.getElementById('notify').textContent", timeout=20),
+                        "Notify me on this phone")
                 finally:
                     await browser.stop()
         run(main(), timeout=240)

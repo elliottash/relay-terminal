@@ -17,6 +17,8 @@ Skipped when Chrome is not installed.
 """
 import asyncio
 import json
+import shutil
+import subprocess
 import threading
 import unittest
 from functools import partial
@@ -432,6 +434,74 @@ class PaneViewTests(unittest.TestCase):
                 await browser.stop()
 
         self.drive(main())
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class OutboxTests(unittest.TestCase):
+    """The transport the view is handed (``app/outbox.js``, protocol section 7).
+
+    The view knows nothing about the link being down: it calls ``send`` and that is the end of its
+    involvement. So the rules about what happens next — what may wait for the link, what may
+    never, and that a replay is one send and not two — belong here rather than in the view, and
+    they are worth checking without a browser because each of them is a single wrong ``if`` away
+    from being silently untrue. ``tests/test_remote_browser.py`` drives the same code over a real
+    drop; this is the part that is cheap to run.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        done = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "outbox_peer.mjs")],
+                              capture_output=True, text=True, cwd=str(ROOT))
+        assert done.returncode == 0, done.stderr
+        cls.out = json.loads(done.stdout)
+
+    def test_a_prompt_sent_while_the_link_is_down_is_kept_and_then_sent_unchanged(self):
+        case = self.out["queued_then_sent"]
+        self.assertEqual(case["first"], "queued")
+        self.assertEqual(case["line"], "Sends when back online · 1 message")
+        self.assertEqual(case["flushed"], 1)
+        self.assertEqual(case["sent"],
+                         [{"t": "compose", "pane": "p1", "text": "hello", "msg_id": "m1"}])
+        self.assertEqual(case["pendingAfter"], 0)
+
+    def test_two_flushes_in_the_same_tick_send_it_once(self):
+        # A phone coming out of a pocket fires `pageshow` and `online` together, and the
+        # reconnect's own flush lands on top of them.
+        case = self.out["a_double_flush_sends_once"]
+        self.assertEqual(case["sent"], ["m1", "m2"])
+        self.assertEqual(case["pendingAfter"], 0)
+
+    def test_re_sending_the_same_message_while_offline_is_not_two_prompts(self):
+        self.assertEqual(self.out["a_repeat_is_not_two"]["pending"], 1)
+
+    def test_a_password_or_a_keystroke_is_never_queued(self):
+        # Section 6.6 and 6.7: a password answered into a prompt that has since ended, or a
+        # control byte replayed into whatever is in the foreground twenty minutes later, are both
+        # worse than a failure the person can see.
+        case = self.out["never_queued"]
+        self.assertEqual(case["queueable"], ["agent_stop", "compose"])
+        self.assertEqual(case["pending"], 0)
+        for kind in ("secret_input", "keys", "line", "pane_focus"):
+            self.assertEqual(case["refused"][kind], "not connected.")
+
+    def test_anything_that_waits_carries_an_id_so_it_lands_at_most_once(self):
+        case = self.out["an_id_is_minted"]
+        self.assertEqual(case["msg_id"], "string")
+        self.assertGreaterEqual(case["length"], 12)
+
+    def test_a_flush_that_cannot_get_the_first_one_out_keeps_the_order(self):
+        case = self.out["order_is_kept"]
+        self.assertEqual(case["flushed"], 0)
+        self.assertEqual(case["later"], 2)
+        self.assertEqual(case["sent"], ["one", "two"])
+
+    def test_the_line_under_the_prompt_box_counts_what_is_waiting(self):
+        self.assertEqual(self.out["lines"], {
+            "none": "",
+            "one": "Sends when back online · 1 message",
+            "many": "Sends when back online · 3 messages",
+            "mixed": "Sends when back online · 2 messages, 1 Stop",
+        })
 
 
 if __name__ == "__main__":

@@ -434,11 +434,15 @@ export class Rrp extends EventTarget {
     return message.t;
   }
 
+  // Answers whether the resume actually went out. A caller with input it kept while the link was
+  // down (app/outbox.js) has to know: replaying a prompt into a session whose streams were never
+  // resumed sends it before the client has caught up on what it missed, and the reply then reads
+  // as belonging to whatever was on screen before the drop.
   resume() {
     const streams = Object.fromEntries(this.streams);
-    if (Object.keys(streams).length) {
-      this.send({ t: 'resume', streams, hub_epoch: this.hubEpoch }).catch(() => {});
-    }
+    if (!Object.keys(streams).length) return Promise.resolve(true);
+    return this.send({ t: 'resume', streams, hub_epoch: this.hubEpoch })
+      .then(() => true).catch(() => false);
   }
 
   close() {

@@ -47,18 +47,37 @@ self.addEventListener('push', (event) => {
       body: body.body || '',
       tag: body.kind || 'relay',      // a second "agent finished" replaces the first
       renotify: false,
+      // Relay's own mark rather than the browser's default glyph. Both files are local to this
+      // origin and are the ones the deploy ships (app/icons/, rendered from app/icon.svg); a
+      // notification must never fetch an image from anywhere else, because the URL would be a
+      // lock-screen-triggered request out of this app's control.
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
       data: { pane: body.pane },
     });
   })());
 });
 
+// Tapping it opens that pane, not the inbox. The pane id is the one thing in the sealed body
+// that names anything (section 9.2), and it is an opaque desktop id — no title, no cwd, no
+// command — so passing it on carries nothing further than the notification already did.
+//
+// Two ways in, because a service worker has two cases. A page that is already open is focused and
+// **posted** the id. A page that is not gets `?pane=<id>`: a window created by `openWindow` has no
+// `message` listener for however long its module takes to load, so posting to it is a race, and
+// app.js drops the query from the URL as soon as it has read it.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const data = event.notification.data || {};
+  const pane = typeof data.pane === 'string' ? data.pane : '';
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of all) {
-      if ('focus' in client) return client.focus();
+      if ('focus' in client) {
+        if (pane) client.postMessage({ t: 'open_pane', pane });
+        return client.focus();
+      }
     }
-    return self.clients.openWindow('./');
+    return self.clients.openWindow(pane ? `./?pane=${encodeURIComponent(pane)}` : './');
   })());
 });

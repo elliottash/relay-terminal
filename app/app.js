@@ -22,6 +22,11 @@ import { mountPane } from './pane.js';
 import { trackViewport } from './viewport.js';
 // Renewing a push subscription made under another rendezvous's VAPID key (section 9).
 import { renewIfKeyMoved } from './pushkey.js';
+// Queue and replay across a drop (section 7). It sits in the transport this file hands to the
+// pane view, so the view itself knows nothing about being offline.
+import { Outbox, pendingLine } from './outbox.js';
+// The two notification switches and what they mean in the protocol's five kinds (section 9.1).
+import { NOTIFY_SWITCHES, ALL_KINDS, switchesFrom, kindsFor } from './notifykinds.js';
 
 trackViewport();
 
@@ -29,6 +34,7 @@ const rrp = new Rrp();
 let panes = [];
 let current = null;
 let reconnectTimer = null;
+let connecting = false;   // a handshake is in flight: a second connect would race it
 let capability = 'view';
 let features = [];
 let screenView = null;
@@ -51,6 +57,11 @@ let answerNode = null;      // the answer being streamed, without a terminal to 
 let recorder = null;        // the MediaRecorder while a voice clip is being recorded
 let voiceRequest = '';      // the id of the clip waiting for the desktop's transcript
 const models = new Map();   // pane -> {model, waiting}: the model indicator (issue 3ES1)
+// When this device first saw a pane in the status it is in now, so a running pane can say how
+// long it has been running even from a desktop that sends no `updated` (see paneSince).
+const statusSince = new Map();
+let inboxTimer = null;      // repaints the elapsed time on running rows
+let pendingOpen = '';       // a pane a notification asked for, before the pane list has arrived
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -66,10 +77,22 @@ function el(tag, className, text) {
   return node;
 }
 
+// The chip in the header, and what is waiting behind it. The link's own word is kept apart from
+// the count so that either can change without the other being recomputed by its caller: the
+// count is the one thing that has to stay readable from the inbox, where the line under the
+// prompt box is not on screen.
+let linkState = { text: 'starting', kind: '' };
+
 function setStatus(text, kind = '') {
+  linkState = { text, kind };
+  paintStatus();
+}
+
+function paintStatus() {
   const chip = $('link-status');
-  chip.textContent = text;
-  chip.className = `chip ${kind}`;
+  const waiting = outbox.pending.length;
+  chip.textContent = waiting && !linkUp() ? `${linkState.text} · ${waiting} waiting` : linkState.text;
+  chip.className = `chip ${linkState.kind}`;
 }
 
 function deviceName() {
@@ -83,6 +106,40 @@ function deviceName() {
     : /Chrome/i.test(agent) ? 'Chrome'
     : /Safari/i.test(agent) ? 'Safari' : 'browser';
   return { name: `${platform} ${browser}`, platform: browser };
+}
+
+// ---- sending, across a drop (section 7) -------------------------------------------------------
+
+// iOS closes the socket within seconds of the app going to the background, so "send" on a phone
+// has to mean "send, or hold it until the link is back". Everything this file and the pane view
+// send goes through here; `app/outbox.js` holds the rule about which types may wait (a prompt and
+// a Stop) and which may never (`keys`, `secret_input`), and `msg_id` is what makes a replay after
+// a drop land at most once on the desktop.
+const linkUp = () => Boolean(rrp.session);
+
+const outbox = new Outbox({
+  send: (message) => rrp.send(message),
+  online: linkUp,
+  onChange: () => renderOutboxNote(),
+});
+
+// A line under the pane, never a sheet: the person is typing on a bus and a modal over the box
+// takes the sentence with it.
+function renderOutboxNote() {
+  const node = $('outbox-note');
+  if (!node) return;
+  const text = pendingLine(outbox.counts());
+  node.textContent = text;
+  node.hidden = !text;
+  paintStatus();        // and in the header, where it is readable from the inbox too
+}
+
+// One place that knows a message may have been kept rather than sent, so every caller — the pane
+// view's transport, the client's own composer, Stop — says the same thing about it.
+function post(message, onError) {
+  return outbox.post(message)
+    .then((what) => { if (what === 'queued') renderOutboxNote(); return what; })
+    .catch((error) => { if (onError) onError(error); });
 }
 
 // ---- pairing ----------------------------------------------------------------------------------
@@ -130,6 +187,7 @@ async function connectStored() {
     return;
   }
   setStatus('connecting…');
+  connecting = true;
   try {
     await rrp.connect(record);
     setStatus('connected', 'ok');
@@ -139,48 +197,158 @@ async function connectStored() {
     show('inbox');
     $('inbox-empty').textContent = error.message || 'Could not reach your desktop.';
     scheduleReconnect();
+  } finally {
+    connecting = false;
   }
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
+function scheduleReconnect(delay = 3000) {
+  if (reconnectTimer) {
+    if (delay >= 3000) return;         // one already pending, and this is not more urgent
+    clearTimeout(reconnectTimer);      // coming back from the background: do not sit out the wait
+  }
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
     const record = await loadDevice();
-    if (!record || rrp.session) return;
+    // `connecting` as well as `session`: a handshake that has begun has no session yet, and a
+    // second `connect` on top of it opens a second channel to the desktop whose frames the first
+    // one's cipherstate cannot read. That is one socket per wake-up event, which is what a phone
+    // coming out of a pocket produces several of at once.
+    if (!record || rrp.session || connecting) return;
+    connecting = true;
     try {
       await rrp.connect(record);
       setStatus('connected', 'ok');
-      rrp.resume();
-      if (current) rrp.send({ t: 'pane_focus', pane: current });
+      // What was typed while the link was down goes out **after** the resume, and only if the
+      // resume itself went out: a `compose` that arrives before the streams are back would be
+      // answered into a stream this client has not caught up on. A failed resume keeps it.
+      const resumed = await rrp.resume();
+      if (current) rrp.send({ t: 'pane_focus', pane: current }).catch(() => {});
+      if (resumed) await outbox.flush();
     } catch {
       scheduleReconnect();
+    } finally {
+      connecting = false;
     }
-  }, 3000);
+  }, delay);
+}
+
+// The link is back, or the page is: try what is waiting. It does nothing before this device has
+// ever connected — during pairing, or on a page that is only being looked at — because there is
+// then nothing to come back to and a reconnect would race the first handshake.
+function wakeUp() {
+  if (!rrp.record) return;
+  if (!rrp.session) scheduleReconnect(0);
+  else outbox.flush();
 }
 
 // ---- inbox ------------------------------------------------------------------------------------
 
+// The five statuses of section 6.3, in the words the inbox uses. Lower case, because the chip is
+// read as part of the row rather than as a heading, and because "Waiting for input" is the
+// desktop's own phrasing of a machine state while the phone's question is only ever whether this
+// one wants you.
 const STATUS_LABEL = {
-  idle: 'Idle', running: 'Running', waiting_input: 'Waiting for input',
-  password: 'Password prompt', finished: 'Finished', failed: 'Failed',
+  idle: 'idle', running: 'running', waiting_input: 'waiting for you',
+  password: 'password', finished: 'finished', failed: 'failed',
 };
 
+// The three that are a reason to take the phone out of your pocket. `waiting_input` is
+// best-effort (section 6.3) and `password` may be a program the agent started, but both are
+// things only the person can answer, and a failed turn is one nobody else will pick up.
+const NEEDS_YOU = ['waiting_input', 'password', 'failed'];
+
 function needsYou(pane) {
-  return ['waiting_input', 'password', 'failed'].includes(pane.status);
+  return NEEDS_YOU.includes(pane.status);
+}
+
+// A pane's place in the list: what needs you, then what is working, then the rest. Within a band
+// the desktop's own order stands — it is the order of the panes on the screen the person knows,
+// and re-sorting it by "most recently changed" makes rows swap places under a thumb.
+function band(pane) {
+  if (needsYou(pane)) return 0;
+  if (pane.status === 'running') return 1;
+  return 2;
+}
+
+// When this pane entered the status it is in, as a millisecond clock, or 0 when nothing knows.
+//
+// `updated` is on the wire for a pane (section 6.3 via remote/panes.py) and is the desktop's own
+// answer, so it is preferred — but the GUI bridge does not fill it in yet (`RemoteShare::sendPane`
+// sends no `updated`, so `remote/gui_host.py` stores 0), and a wrong epoch would print "running ·
+// 20204h". So it is used only when it is a plausible recent wall-clock second, and otherwise the
+// moment this device first saw the status, which is right from the phone's point of view: it has
+// been running at least that long.
+const UPDATED_SANE_MS = 7 * 24 * 3600 * 1000;
+
+function paneSince(pane) {
+  const updated = Number(pane.updated) || 0;
+  const now = Date.now();
+  if (updated > 0) {
+    const millis = updated > 1e12 ? updated : updated * 1000;   // seconds or already millis
+    if (millis <= now + 60000 && now - millis < UPDATED_SANE_MS) return millis;
+  }
+  const seen = statusSince.get(pane.id);
+  return seen && seen.status === pane.status ? seen.at : 0;
+}
+
+// "3m", "1h 4m", "18s" — the same ladder remote/notify.py's `elapsed_text` uses on a lock screen,
+// so a push and the inbox row it belongs to read the same.
+function elapsedText(millis) {
+  const seconds = Math.max(0, Math.floor(millis / 1000));
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
+  return `${seconds}s`;
+}
+
+function statusText(pane) {
+  const label = STATUS_LABEL[pane.status] || pane.status || 'idle';
+  if (pane.status !== 'running') return label;
+  const since = paneSince(pane);
+  return since ? `${label} · ${elapsedText(Date.now() - since)}` : label;
+}
+
+// Remember when each pane entered its current status, and forget the panes that have gone.
+function trackStatuses() {
+  const live = new Set();
+  for (const pane of panes) {
+    live.add(pane.id);
+    const seen = statusSince.get(pane.id);
+    if (!seen || seen.status !== pane.status) {
+      statusSince.set(pane.id, { status: pane.status, at: Date.now() });
+    }
+  }
+  for (const id of [...statusSince.keys()]) if (!live.has(id)) statusSince.delete(id);
+}
+
+// The count on the app icon: how many panes want you. Guarded on every side — the Badging API is
+// Chrome and an installed PWA only, `setAppBadge` rejects rather than throwing in some versions,
+// and a browser that has it may still refuse an unpinned page.
+function updateBadge(count) {
+  try {
+    if (count > 0) navigator.setAppBadge?.(count)?.catch?.(() => {});
+    else navigator.clearAppBadge?.()?.catch?.(() => {});
+  } catch {
+    /* a browser without the Badging API: the chip in the list is the whole story there */
+  }
 }
 
 function renderInbox() {
   const list = $('pane-list');
   list.replaceChildren();
-  const sorted = [...panes].sort((a, b) => (needsYou(b) - needsYou(a))
-    || (b.updated || 0) - (a.updated || 0));
+  trackStatuses();
+  // Decorated, so the tie-break is the desktop's order and not the engine's idea of a stable sort.
+  const sorted = panes.map((pane, at) => ({ pane, at }))
+    .sort((a, b) => (band(a.pane) - band(b.pane)) || (a.at - b.at))
+    .map((entry) => entry.pane);
   for (const pane of sorted) {
     const row = el('button', 'pane-row');
     row.type = 'button';
+    row.dataset.paneId = pane.id;
     const head = el('div', 'pane-head');
     head.append(el('span', 'pane-title', pane.title || pane.id));
-    const chip = el('span', `chip status-${pane.status}`, STATUS_LABEL[pane.status] || pane.status);
+    const chip = el('span', `chip status-${pane.status}`, statusText(pane));
+    chip.dataset.paneChip = pane.id;
     head.append(chip);
     row.append(head);
     row.append(el('div', 'pane-cwd', pane.cwd || ''));
@@ -189,6 +357,21 @@ function renderInbox() {
     list.append(row);
   }
   $('inbox-empty').textContent = panes.length ? '' : 'No panes yet.';
+  updateBadge(panes.filter(needsYou).length);
+  // A running pane's elapsed time is the one thing in the list that changes without a message
+  // from the desktop, so it is ticked here rather than left to say "running · 0s" for an hour.
+  if (inboxTimer) clearInterval(inboxTimer);
+  inboxTimer = panes.some((pane) => pane.status === 'running')
+    ? setInterval(tickElapsed, 15000) : null;
+}
+
+// Only the chips move: repainting the list would take the row out from under a thumb.
+function tickElapsed() {
+  for (const pane of panes) {
+    if (pane.status !== 'running') continue;
+    const chip = document.querySelector(`[data-pane-chip="${CSS.escape(pane.id)}"]`);
+    if (chip) chip.textContent = statusText(pane);
+  }
 }
 
 // ---- notifications ------------------------------------------------------------------------------
@@ -220,13 +403,8 @@ async function currentSubscription() {
 // Which notifications this phone wants. The desktop cannot know — it depends on whose phone this
 // is and what today looks like — so the choice is made here, kept on this device's record on the
 // desktop, and changed by sending `push_subscribe` again, which never re-prompts for permission.
-const NOTIFY_KINDS = [
-  ['waiting_input', 'Waiting for input'],
-  ['password', 'Password prompt'],
-  ['failed', 'A turn failed'],
-  ['plan', 'A plan is ready'],
-  ['agent_finished', 'The agent finished (after 30 seconds)'],
-];
+// Two switches, not five checkboxes: `app/notifykinds.js` holds the mapping onto section 9.1's
+// five kinds and why it is the split it is. This file only draws it.
 let notifyKinds = null;                    // what the desktop last told us it has stored
 
 function renderNotifyKinds(on) {
@@ -234,15 +412,17 @@ function renderNotifyKinds(on) {
   list.replaceChildren();
   list.hidden = !on;
   if (!on) return;
-  const wanted = notifyKinds || NOTIFY_KINDS.map(([kind]) => kind);
-  for (const [kind, label] of NOTIFY_KINDS) {
-    const row = el('div', 'notify-kind');       // a div, so each sits on its own line
+  const state = switchesFrom(notifyKinds);
+  for (const group of NOTIFY_SWITCHES) {
+    const row = el('div', 'notify-switch');     // a div, so each sits on its own line
     const box = document.createElement('input');
     box.type = 'checkbox';
-    box.id = `notify-kind-${kind}`;
-    box.checked = wanted.includes(kind);
+    box.setAttribute('role', 'switch');
+    box.id = `notify-switch-${group.name}`;
+    box.checked = state[group.name];
+    box.dataset.kinds = group.kinds.join(' ');
     box.addEventListener('change', chooseNotifyKinds);
-    const text = el('label', 'muted small', ` ${label}`);
+    const text = el('label', 'notify-switch-label', group.label);
     text.htmlFor = box.id;
     row.append(box, text);
     list.append(row);
@@ -250,8 +430,8 @@ function renderNotifyKinds(on) {
 }
 
 async function chooseNotifyKinds() {
-  const chosen = NOTIFY_KINDS.map(([kind]) => kind)
-    .filter((kind) => $(`notify-kind-${kind}`)?.checked);
+  const chosen = kindsFor(Object.fromEntries(NOTIFY_SWITCHES.map((group) =>
+    [group.name, !!$(`notify-switch-${group.name}`)?.checked])));
   if (!chosen.length) {
     // Wanting none of them is unsubscribing, and says so rather than silently keeping the last set.
     await toggleNotifications();
@@ -288,14 +468,22 @@ async function updateNotifyRow() {
   const button = $('notify');
   const note = $('notify-note');
   if (!button) return;
+  // iOS delivers Web Push only to a PWA on the Home Screen. In Safari it usually has no
+  // PushManager at all — no error, no prompt — but some iPadOS versions expose one that then
+  // refuses, so the check is "not installed on iOS", not "no PushManager": what would follow is a
+  // permission sheet that cannot lead anywhere. One line saying what to do instead, and no button
+  // to tap that will fail.
+  $('notify-kinds').hidden = true;
+  if (IOS && !installedApp()) {
+    button.hidden = true;
+    note.textContent = 'To be notified on iPhone or iPad, add Relay to your Home Screen first: '
+      + 'tap the Share button, choose “Add to Home Screen”, and open it from there. iOS only '
+      + 'delivers notifications to an installed app.';
+    return;
+  }
   if (!pushUsable()) {
     button.hidden = true;
-    // iOS delivers Web Push only to a PWA on the Home Screen, and simply has no PushManager
-    // otherwise — no error, no prompt — so say what to do instead of failing silently.
-    note.textContent = IOS && !installedApp()
-      ? 'To be notified on iPhone or iPad: tap the Share button, choose “Add to Home Screen”, '
-        + 'and open Relay from there. iOS only delivers notifications to an installed app.'
-      : 'This browser cannot show notifications.';
+    note.textContent = 'This browser cannot show notifications.';
     return;
   }
   button.hidden = false;
@@ -337,7 +525,7 @@ async function enableNotifications() {
   // Everything on to begin with: one tap turns off what you did not want, and a notification you
   // never saw is not something you can decide about.
   await sendSubscription(subscription, (await storedValue('push-kinds'))
-    || NOTIFY_KINDS.map(([kind]) => kind));
+    || ALL_KINDS);
 }
 
 async function disableNotifications() {
@@ -386,7 +574,7 @@ async function renewPushIfMoved() {
     report: async (fresh, vapid) => {
       await storeValue('push-vapid', vapid);
       await sendSubscription(fresh, (await storedValue('push-kinds'))
-        || NOTIFY_KINDS.map(([kind]) => kind));
+        || ALL_KINDS);
     },
   });
 }
@@ -411,7 +599,10 @@ let paneView = null;
 function ensurePaneView() {
   if (paneView) return paneView;
   paneView = mountPane($('pane-view'), {
-    send: (message) => { rrp.send(message).catch(() => {}); },
+    // The view's whole transport. It never learns that the link can be down: a prompt it hands
+    // over while the socket is dead is kept here and goes out on the next resume, and the line
+    // under the pane says so (section 7, app/outbox.js).
+    send: (message) => { post(message); },
   });
   $('pane-view').hidden = false;   // mountPane has already appended its root here
   // The terminal belongs inside the view, above the reasoning and the queue, exactly as the
@@ -459,6 +650,20 @@ function openPane(paneId) {
   // Ask for this pane's state, when the desktop says it publishes one. Without the feature the
   // view is never mounted and the terminal stays where it is.
   if (features.includes('pane_state')) rrp.send({ t: 'pane_state_get', pane: paneId }).catch(() => {});
+}
+
+// A notification was tapped, on this pane (section 9.2: the sealed body carries the pane id and
+// nothing else that names it). The pane list may not have arrived yet — the tap is usually what
+// woke the app — so the id is held until it does, and the thread opens then rather than on an
+// empty title.
+function requestOpenPane(paneId) {
+  if (!paneId) return;
+  if (panes.some((pane) => pane.id === paneId)) {
+    pendingOpen = '';
+    openPane(paneId);
+    return;
+  }
+  pendingOpen = paneId;
 }
 
 function closePane() {
@@ -1258,13 +1463,15 @@ function sendPrompt() {
     return;
   }
   const running = panes.find((pane) => pane.id === current)?.status === 'running';
-  rrp.send({
+  // Through the outbox: offline, this is kept with its `msg_id` and goes out once on resume,
+  // rather than being rejected into a `catch` the person never sees.
+  post({
     t: 'compose', pane: current, text, when: running ? 'queue' : 'now',
     // `agent: false` asks the desktop to route it, which only a device trusted with typing may
     // do. Anything else reaches the agent and nothing more.
     ...(capability === 'full' ? { agent: false } : {}),
     msg_id: b64(crypto.getRandomValues(new Uint8Array(9))),
-  }).catch(fail);
+  }, fail);
   clear();
 }
 
@@ -1294,6 +1501,11 @@ rrp.addEventListener('authcode', (event) => {
 rrp.addEventListener('panes', (event) => {
   panes = event.detail.items || [];
   renderInbox();
+  if (pendingOpen && panes.some((pane) => pane.id === pendingOpen)) {
+    const wanted = pendingOpen;
+    pendingOpen = '';
+    if (wanted !== current) openPane(wanted);
+  }
   if (current) {
     const pane = panes.find((item) => item.id === current);
     if (pane) {
@@ -1346,6 +1558,7 @@ rrp.addEventListener('error', (event) => {
 
 rrp.addEventListener('revoked', async () => {
   await forgetDevice();
+  outbox.clear();            // nothing staged for a desktop that will not take it
   setStatus('revoked', 'warn');
   show('welcome');
   $('welcome-note').textContent = 'This device was revoked from the desktop.';
@@ -1353,7 +1566,10 @@ rrp.addEventListener('revoked', async () => {
 
 rrp.addEventListener('closed', (event) => {
   setStatus('offline', 'warn');
-  $('composer-stop').hidden = true;
+  // Stop stays where it is. Hiding it here meant that the moment the socket dropped — which on
+  // iOS is seconds after the app leaves the foreground — the one button whose whole purpose is
+  // "stop it now" was the one button that had gone. The turn it belongs to is still running on
+  // the desktop; tapping it queues the stop, and the desktop applies it once (section 7).
   if (!event.detail.clean) scheduleReconnect();
 });
 
@@ -1364,12 +1580,24 @@ rrp.addEventListener('fault', (event) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    if (!rrp.session) scheduleReconnect();
-    else rrp.send({ t: 'client_state', visible: true }).catch(() => {});
+    if (!rrp.session) scheduleReconnect(0);
+    else {
+      rrp.send({ t: 'client_state', visible: true }).catch(() => {});
+      outbox.flush();
+    }
   } else if (rrp.session) {
     rrp.send({ t: 'client_state', visible: false }).catch(() => {});
   }
 });
+
+// `visibilitychange` is not enough on a phone. Safari restores this page from the back/forward
+// cache — from the app switcher, from a back gesture, from a notification tap onto a page that
+// was never unloaded — and the page comes back with its JavaScript state intact and its
+// WebSocket long dead, without firing `visibilitychange` at all. `pageshow` with `persisted` is
+// the event that says so. And a phone that has just walked back into signal fires `online` while
+// it was visible the whole time.
+window.addEventListener('pageshow', (event) => { if (event.persisted) wakeUp(); });
+window.addEventListener('online', () => wakeUp());
 
 window.addEventListener('DOMContentLoaded', () => {
   // An invite link lands on /join, and that is where a guest's session stays. Handing the page
@@ -1380,6 +1608,15 @@ window.addEventListener('DOMContentLoaded', () => {
     startGuest();
     return;
   }
+  // A notification tapped while the app was not running opens it with `?pane=…`: a window that
+  // has only just been created has no `message` handler yet, so the id comes in the URL instead
+  // and the query is dropped again so a reload does not re-open it.
+  const asked = new URLSearchParams(location.search).get('pane');
+  if (asked) {
+    pendingOpen = asked;
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+  renderOutboxNote();
   $('composer-send').addEventListener('click', sendPrompt);
   $('composer-mic').addEventListener('click', toggleVoice);
   $('composer-text').addEventListener('keydown', (event) => {
@@ -1400,7 +1637,9 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
   $('composer-stop').addEventListener('click', () => {
-    rrp.send({ t: 'agent_stop', pane: current }).catch(() => {});
+    // A Stop waits for the link the same way a prompt does: tapping it on a bus means "stop it",
+    // not "stop it if the socket happens to be up". The `msg_id` keeps a replayed one harmless.
+    post({ t: 'agent_stop', pane: current });
   });
   // Sticky Ctrl/Alt from the extra-keys row apply to the next line typed in the box.
   $('composer-text').addEventListener('keydown', (event) => {
@@ -1457,6 +1696,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('pair-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {
     await forgetDevice();
+    outbox.clear();
     rrp.close();
     location.replace(location.pathname);
   });
@@ -1489,4 +1729,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Tapping a notification opens that pane. The worker focuses this page and posts the pane id
+  // (app/sw.js `notificationclick`); it is only an id, and one this client already has in its
+  // pane list, so nothing about the notification is drawn — the thread it opens is built from
+  // the desktop's own `panes` and `pane_state` as it always is.
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data;
+    if (data && data.t === 'open_pane' && typeof data.pane === 'string') {
+      requestOpenPane(data.pane);
+    }
+  });
 }

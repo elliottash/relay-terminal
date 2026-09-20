@@ -71,8 +71,9 @@
          from a gesture, so it is asked for here and never on load. -->
     <div class="pad" id="notify-row">
       <button type="button" id="notify" class="quiet-button">Notify me on this phone</button>
-      <!-- Which notifications this phone wants. The choice belongs to whoever is holding it, so
-           it is made here and stored on this device's record on the desktop. -->
+      <!-- Which notifications this phone wants: two switches over the five `kinds` of section
+           9.1. The choice belongs to whoever is holding the phone, so it is made here and stored
+           on this device's record on the desktop. -->
       <div id="notify-kinds" hidden></div>
       <p id="notify-note" class="muted small"></p>
     </div>
@@ -129,6 +130,10 @@
              spellcheck="false" placeholder="Password for this pane&hellip;" aria-label="Password">
       <button type="button" id="secret-send">Send</button>
     </div>
+    <!-- What was typed while the link was down (REMOTE-PROTOCOL.md section 7). A line, never a
+         sheet: iOS drops the socket seconds after the app leaves the foreground, so this is the
+         normal case on a phone and a modal over the prompt box would take the sentence with it. -->
+    <div id="outbox-note" class="pad" hidden></div>
     <!-- Speak instead of typing. The clip is recorded here and transcribed on the desktop,
          which holds the key; this device never talks to a transcription provider, and the words
          come back into the box above so they can be read before they are sent. -->
