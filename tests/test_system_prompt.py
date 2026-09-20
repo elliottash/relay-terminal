@@ -249,7 +249,34 @@ class SizeTests(PromptFixture):
         self.assertLess(prompt, 10 * 1024, f'system prompt grew to {prompt} bytes')
         self.assertLess(tools, 18 * 1024, f'tool schemas grew to {tools} bytes')
         board = len(self.agent().system_prompt().encode('utf-8'))
-        self.assertLess(board, 14 * 1024, f'prompt with a Switchboard grew to {board} bytes')
+        # 11.5 KB since the policy was tiered (#GMCF decision 8); it was 13.9 KB before.
+        self.assertLess(board, 12 * 1024 + 512, f'prompt with a Switchboard grew to {board} bytes')
+
+    def test_the_board_policy_block_stays_tiered(self):
+        # #GMCF decision 8: the policy block is what has to be read *before* a board tool is
+        # called, and nothing else — the landing detail and the `## Tests` section are the
+        # `deliver` skill's, the stamps and the QA-close rule are `board_move_card`'s, rewriting
+        # the user's text is `board_update_card`'s, labelling is `board_create_card`'s. v4 was
+        # 5,066 bytes of every board turn; a rule that comes back here has to be one no tool
+        # description can carry, because the model reads it before it has called anything.
+        section = board_tools.prompt_section(self.agent().board)
+        size = len(section.encode('utf-8'))
+        self.assertLess(size, 3 * 1024, f'the Switchboard policy block grew to {size} bytes')
+        for phrase in ('verbatim', 'board_claim', 'board_rate_limited', 'discussing',
+                       "board page's chat", 'deliver'):
+            self.assertIn(phrase, section)
+        # What moved is gone from every turn's prompt, and is where it was sent.
+        specs = {s['function']['name']: json.dumps(s, ensure_ascii=False)
+                 for s in board_tools.TOOL_SPECS}
+        for phrase, tool in (('implemented_by', 'board_move_card'),
+                             ('Rewriting text the user wrote', 'board_update_card'),
+                             ('labelling', 'board_create_card'),
+                             ('`## Tests`', 'tests_check')):
+            self.assertNotIn(phrase, section, f'{phrase!r} is back in the policy')
+            self.assertIn(phrase, specs[tool])
+        deliver = (Path(skills_mod.bundled_dir()) / 'deliver' / 'SKILL.md').read_text('utf-8')
+        for phrase in ('## Tests', 'links.commits', 'verified_by', 'area labels'):
+            self.assertIn(phrase, deliver)
 
     def test_the_skills_catalogue_is_one_trigger_line_per_skill(self):
         agent = self.agent(board=False)
