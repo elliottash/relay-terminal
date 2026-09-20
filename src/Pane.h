@@ -903,20 +903,35 @@ public:
 
     // Everything this pane is holding, oldest first. Relay's own restore rules are dropped: saving
     // them would stack one set per restore inside the history, and each run prints its own.
-    QStringList paneTextLines(int maxLines) const {
+    static void dropRestoreMarks(QStringList *lines) {
+        lines->erase(std::remove_if(lines->begin(), lines->end(), [](const QString &line) {
+                         return line == scrollbackOpenMark() || line == scrollbackLegacyOpenMark()
+                                || line == scrollbackCloseMark() || line == sessionTextOpenMark()
+                                || line == sessionTextCloseMark();
+                     }),
+                     lines->end());
+    }
+    // The history *above* the visible screen, oldest first. This is the part that grows line by
+    // line as output scrolls off, so it is the one a position in the pane's text can be measured
+    // against (the screen cannot: its row count is the grid height whatever is written on it).
+    QStringList paneHistoryLines(int maxLines) const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return {};
         QStringList lines = m_backend->scrollbackText(maxLines);
-        // The visible screen is the newest part of what the user was reading. A full-screen
-        // program (vim, less) owns it instead, and its frame is not output worth keeping.
-        if (terminalCan(relay::TerminalBackend::ScreenText) && !m_backend->altScreen())
-            lines += m_backend->screenText().split(QLatin1Char('\n'));
-        lines.erase(std::remove_if(lines.begin(), lines.end(), [](const QString &line) {
-                        return line == scrollbackOpenMark() || line == scrollbackLegacyOpenMark()
-                               || line == scrollbackCloseMark() || line == sessionTextOpenMark()
-                               || line == sessionTextCloseMark();
-                    }),
-                    lines.end());
+        dropRestoreMarks(&lines);
         return lines;
+    }
+    // The visible screen is the newest part of what the user was reading, and it always belongs to
+    // whatever the pane is doing now. A full-screen program (vim, less) owns it instead, and its
+    // frame is not output worth keeping.
+    QStringList paneScreenLines() const {
+        if (!m_backend || !terminalCan(relay::TerminalBackend::ScreenText) || m_backend->altScreen()) return {};
+        QStringList lines = m_backend->screenText().split(QLatin1Char('\n'));
+        dropRestoreMarks(&lines);
+        return lines;
+    }
+    QStringList paneTextLines(int maxLines) const {
+        if (!terminalCan(relay::TerminalBackend::Scrollback)) return {};
+        return paneHistoryLines(maxLines) + paneScreenLines();
     }
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
@@ -954,9 +969,9 @@ public:
     // is beyond the oldest line still held and nothing in the buffer can tell the two apart: the
     // save then starts at the oldest line there is, which is the approximation the plan allows for.
     QStringList sessionTextLines() const {
-        const QStringList lines = paneTextLines(kSessionTextScan);
-        if (m_sessionTextMark <= 0 || m_sessionTextMark > lines.size()) return lines;
-        return lines.mid(m_sessionTextMark);
+        QStringList history = paneHistoryLines(kSessionTextScan);
+        if (m_sessionTextMark > 0 && m_sessionTextMark <= history.size()) history = history.mid(m_sessionTextMark);
+        return history + paneScreenLines();
     }
 
     // Where this conversation's text goes: a guest's sidecar in Relay's own tree, or the session
@@ -971,8 +986,14 @@ public:
     void saveSessionText() const {
         const QString path = sessionTextPath();
         if (path.isEmpty()) return;   // no conversation yet, or an id Relay will not name a file with
+        const QStringList lines = sessionTextLines();
+        // An empty pane is not evidence that the conversation printed nothing: the screen may have
+        // been cleared, or the terminal may already be gone at shutdown. The per-pane store removes
+        // its file in this case, because a restarted pane must not restore stale output; the
+        // conversation's file is the conversation's record, so it is left as it is.
+        if (lines.isEmpty()) return;
         QString error;
-        if (!relay::sessiontext::write(path, sessionTextLines(), &error) && !error.isEmpty())
+        if (!relay::sessiontext::write(path, lines, &error) && !error.isEmpty())
             fprintf(stderr, "relay: could not save this conversation's terminal text: %s\n", qPrintable(error));
     }
 
@@ -987,12 +1008,24 @@ public:
         if (id == m_sessionTextId && directory == m_sessionTextDir && source == m_sessionTextSource
             && guestId == m_sessionTextGuestId)
             return;
-        saveSessionText();
+        // /new banks the outgoing conversation's text before it wipes the screen, and a bare
+        // "clear the terminal" throws that text away on purpose. Either way the pane no longer
+        // holds it, and saving now would write a blank screen over the record on disk.
+        if (m_sessionTextBanked) m_sessionTextBanked = false;
+        else saveSessionText();
         m_sessionTextId = id;
         m_sessionTextDir = directory;
         m_sessionTextSource = source;
         m_sessionTextGuestId = guestId;
-        m_sessionTextMark = paneTextLines(kSessionTextScan).size();
+        m_sessionTextMark = paneHistoryLines(kSessionTextScan).size();
+        // The clear /new does is a round trip through the pty, so the buffer this was just
+        // measured from can still hold the conversation that is leaving — and a mark that is too
+        // high hides the incoming conversation's first lines for good. Measure again a moment
+        // later and keep the smaller: the count only falls when a clear lands, and only rises
+        // when the new conversation prints, so the smaller reading is always the right boundary.
+        QTimer::singleShot(400, this, [this] {
+            m_sessionTextMark = std::min(m_sessionTextMark, paneHistoryLines(kSessionTextScan).size());
+        });
         // A forked guest names itself only once it is running, and this is where that id lands:
         // the pane it forked from stashed its text, and the fork takes it from here (#0TJ9).
         if (relay::sessiontext::isGuestSource(source) && !guestId.isEmpty()) adoptForkText(source);
@@ -1114,6 +1147,11 @@ public:
     }
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
+        // The conversation that is ending keeps what it printed (#0TJ9). Here rather than at the
+        // `reset` event: the terminal is cleared a few lines down, so by the time the worker
+        // answers there is nothing of this conversation left in the pane to save.
+        saveSessionText();
+        m_sessionTextBanked = true;
         send({{"type", "reset"}}); clearFix();
         closeQuestion(QString());   // the conversation it belonged to is over (#MQ9C)
         // Agent turns print into the terminal, so a new conversation that left the old ones on
@@ -2618,9 +2656,10 @@ public:
     void clearTerminal() {
         if (!m_backend) return;
         // Clearing the screen is the user throwing this text away, so the conversation's saved
-        // text starts again from here rather than keeping what was wiped (#0TJ9). The file on disk
-        // is left as it is until the next save, which has nothing of the old text to write.
+        // text starts again from here rather than keeping what was wiped (#0TJ9). What is already
+        // on disk stays: the pane no longer holds it, so it cannot be written again.
         m_sessionTextMark = 0;
+        m_sessionTextBanked = true;
         closeInline();
         m_lastBlock = relay::gaps::Block::None;   // a cleared screen does not open with a blank line
         if (shellIdleAtPrompt()) {
@@ -15838,6 +15877,9 @@ private:
     // conversation and `m_sessionTextGuestId` its id; otherwise the pair of Relay values is used.
     QString m_sessionTextId, m_sessionTextDir, m_sessionTextSource, m_sessionTextGuestId;
     int m_sessionTextMark = 0;
+    // The outgoing conversation's text is on disk and the screen has been wiped, so the next
+    // change of conversation must not save the blank screen over it (/new, "clear the terminal").
+    bool m_sessionTextBanked = false;
     // True while m_restoredScrollback holds a *conversation's* text rather than this pane's own:
     // the two wear different rules, because only one of them was printed in this pane.
     bool m_restoredIsSessionText = false;
