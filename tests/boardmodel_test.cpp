@@ -31,6 +31,8 @@
 #include <QTimeZone>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
+#include <QTimer>
 #include <QtTest>
 
 using relay::board::Card;
@@ -96,6 +98,39 @@ QStringList sketch(const QList<Row> &rows)
             out << row.cardId;
     }
     return out;
+}
+
+// The delete confirm (#CYM9) is modal, so the answer is armed before the click, the way
+// modelsettings_test.cpp answers the Model… prompt. `accept` clicks the Delete button;
+// otherwise the dialog is rejected (Cancel). The try count is only a backstop: an unanswered
+// dialog would hang the suite.
+void answerDeleteConfirm(bool accept)
+{
+    auto *timer = new QTimer;
+    auto *tries = new int(0);
+    QObject::connect(timer, &QTimer::timeout, timer, [timer, tries, accept] {
+        auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        // A real window of time, not a tick budget: on a busy machine 500 zero-ms ticks can
+        // pass before the dialog's exec loop even starts, and an unanswered dialog then hangs
+        // the suite until QtTest's own timeout.
+        if (!box && ++*tries < 200)
+            return;
+        if (box) {
+            if (accept) {
+                for (QAbstractButton *button : box->buttons())
+                    if (button->text() == QStringLiteral("Delete")) {
+                        button->click();
+                        break;
+                    }
+            } else {
+                box->reject();
+            }
+        }
+        timer->stop();
+        timer->deleteLater();
+        delete tries;
+    });
+    timer->start(50);
 }
 
 QJsonObject opened(const QList<QJsonObject> &cards)
@@ -176,6 +211,7 @@ private slots:
     void aRowCarriesItsPriorityFlag();
     void theFlagHeaderSortsByPriority();
     void aFlagClickWritesBoardPriority();
+    void theDeleteKeyAndButtonDeleteTheCardAndTheUndoToastSurvives();
     void labelChipsKeepOnlyTheCardsThatCarryThem();
     void theColumnsNameTheOrdersAClickGoesThrough();
     void arrowsFoldASectionAndTheFoldIsSaved();
@@ -944,6 +980,73 @@ void BoardModelTests::aFlagClickWritesBoardPriority()
 
 // The label chips beside the section checkboxes (#VKFV): a card is on the page only when it
 // carries every ticked label, composing with the text filter the way `label:` terms do.
+// #CYM9: the owner deletes a card from the detail's button or the Del key on the selection,
+// after one confirm; the write's notice carries Undo and the removal events that follow do not
+// talk over it. Cancel changes nothing.
+void BoardModelTests::theDeleteKeyAndButtonDeleteTheCardAndTheUndoToastSurvives()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+
+    // The Del key on the selected card, confirmed: one board_delete naming that card.
+    answerDeleteConfirm(true);
+    QTest::keyClick(list, Qt::Key_Delete);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_delete"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+    const QString requestId = sent.last().value("id").toString();
+    QVERIFY(!requestId.isEmpty());
+
+    // The write lands, then the removal events follow: the notice names the delete and keeps
+    // its Undo, instead of being replaced by "#K7Q2 was removed from the board.".
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", requestId},
+                                 {"kind", "board_delete"}, {"card_id", "K7Q2"},
+                                 {"write_id", "w-77"}, {"removed", true}});
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", QJsonArray{}},
+                                 {"removed", QJsonArray{"K7Q2"}}});
+    QCOMPARE(view.notice(), QStringLiteral("Deleted #K7Q2"));
+    view.undoLast();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_undo"));
+    QCOMPARE(sent.last().value("write_id").toString(), QStringLiteral("w-77"));
+
+    // Another pane's delete of the card this pane has open is still news, not an echo.
+    view.handleEvent(opened({row("M3XJ", "ready", "features")}));
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "M3XJ"},
+                                    {"title", "M3XJ card"}, {"status", "ready"}, {"tab", "features"},
+                                    {"body", "text"}, {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    sent.clear();
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", QJsonArray{}},
+                                 {"removed", QJsonArray{"M3XJ"}}});
+    QCOMPARE(view.notice(), QStringLiteral("#M3XJ was removed from the board."));
+    QVERIFY(!view.detailOpen());
+
+    // The detail's own button asks the same question; Cancel sends nothing.
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
+                                    {"title", "K7Q2 card"}, {"status", "inbox"}, {"tab", "features"},
+                                    {"body", "text"}, {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    auto *remove = view.findChild<QToolButton *>(QStringLiteral("boardCardDelete"));
+    QVERIFY(remove);
+    QVERIFY(!remove->isHidden());
+    sent.clear();
+    answerDeleteConfirm(false);
+    remove->click();
+    QVERIFY(sent.isEmpty());
+
+    // Confirmed, it deletes the open card.
+    answerDeleteConfirm(true);
+    remove->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_delete"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+}
+
 void BoardModelTests::labelChipsKeepOnlyTheCardsThatCarryThem()
 {
     Model model;

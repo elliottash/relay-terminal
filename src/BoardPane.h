@@ -167,6 +167,9 @@ public:
     void requestCheck(const QString &columnId = QString());
     bool chatRunning() const;
     void moveSelected();            // the `m` popup
+    // Delete (card #CYM9): the open or selected card, after a confirm, through `board_delete`.
+    // The owner's action alone — an agent closes a card by moving it to done or dropped.
+    void deleteSelected();
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
     // A label hashtag was clicked (#3ZAP) — a row badge, the meta's labels, or a `#tag` in the
@@ -240,6 +243,12 @@ private:
     void moveCard(const QString &id, const QString &columnId, const QString &beforeId,
                   const QString &afterId);
     void moveToTab(const QString &id, const QString &tabId);
+    // The delete both paths land in (the Del key, the button, the `m` menu entry): ask, then
+    // send `board_delete`. `deletedHere`/`forgetDeleted` track the cards this pane has asked to
+    // delete, so their own removal events leave the "Deleted #ID · Undo" toast standing.
+    void deleteCard(const QString &id);
+    bool deletedHere(const QString &card) const;
+    void forgetDeleted(const QString &card);
     // One `board_update` for what the card detail's editor changed, against the hash the card
     // was read at. The worker writes the file; a stale hash comes back as `board_conflict`.
     void saveCardEdit(const QJsonObject &patch, const QString &baseHash);
@@ -389,6 +398,9 @@ private:
     int m_requestSeq = 0;
     QString m_lastWrite;            // write_id of this pane's last write, for Undo
     QHash<QString, QString> m_pendingNotes;   // request id -> "Moved #K7Q2 to Ready"
+    // request id -> the card this pane asked to delete (#CYM9), until the write lands, is
+    // refused, or the card comes back.
+    QHash<QString, QString> m_pendingDeletes;
     // A drag runs a nested event loop inside the list's startDrag(); refilling the list there
     // would delete the items under it, so a rebuild waits for the drag to end.
     bool m_dragActive = false, m_rebuildPending = false;

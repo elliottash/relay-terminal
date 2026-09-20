@@ -362,6 +362,62 @@ class PriorityWriteTests(ProtocolTest):
         self.assertNotIn("priority", card.front)
 
 
+class DeleteWriteTests(ProtocolTest):
+    """`board_delete` (card #CYM9): the owner's confirmed delete — no base_hash, no agent tool."""
+
+    def test_a_delete_answers_written_and_changed_with_the_card_in_removed(self):
+        card_id = self.make_card()
+        events = self.send(type="board_delete", id="r1", card=card_id, reason="a scratch card")
+        written = self.of("board_written")
+        self.assertEqual(len(written), 1)
+        self.assertEqual(written[0]["kind"], "board_delete")
+        self.assertEqual(written[0]["card_id"], card_id)
+        self.assertTrue(written[0]["removed"])
+        self.assertTrue(written[0]["write_id"])
+        changed = [e for e in self.of("board_changed") if card_id in e.get("removed", [])]
+        self.assertTrue(changed, events)
+        self.assertIsNone(self.board.card_by_id(card_id))
+        self.assertFalse(self.board.thread_path(card_id).exists())
+
+    def test_board_undo_brings_a_deleted_card_and_its_thread_back(self):
+        card_id = self.make_card()
+        self.send(type="board_comment", id="c1", card=card_id, text="a line")
+        events = self.send(type="board_delete", id="r1", card=card_id)
+        write_id = self.of("board_written")[0]["write_id"]
+        events = self.send(type="board_undo", id="r2", write_id=write_id)
+        self.assertTrue(self.of("board_undone"))
+        self.assertIsNotNone(self.board.card_by_id(card_id))
+        self.assertTrue(self.board.thread_path(card_id).exists())
+        self.assertIn("a line", self.board.thread_path(card_id).read_text(encoding="utf-8"))
+
+    def test_a_delete_is_refused_while_a_turn_runs_on_the_card(self):
+        card_id = self.make_card()
+        self.cards.hold(card_id)
+        self.send(type="board_ask", id="a1", card=card_id, text="hold on")
+        events = self.send(type="board_delete", id="r1", card=card_id)
+        errors = self.of("error")
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["code"], "board_busy")
+        self.assertIsNotNone(self.board.card_by_id(card_id))
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
+    def test_a_delete_of_an_unknown_card_is_a_plain_error(self):
+        events = self.send(type="board_delete", id="r1", card="AAAA")
+        self.assertEqual([e["event"] for e in events], ["error"])
+        self.assertEqual(events[0]["code"], "board_not_found")
+        self.assertIn("no card", events[0]["text"])
+
+    def test_a_delete_without_a_board_is_the_no_board_error_not_an_init_request(self):
+        # A delete names a card, and a project with no board has none: nothing to initialize.
+        events = []
+        commands = P.BoardCommands(StubTurns(), events.append)
+        with self.assertRaises(ValueError) as raised:
+            commands.dispatch({"type": "board_delete", "id": "r1", "card": "AAAA"})
+        self.assertIn("no Switchboard", str(raised.exception))
+        self.assertEqual(events, [])
+
+
 class AskTests(ProtocolTest):
     def test_the_question_is_recorded_before_the_agent_sees_it(self):
         card_id = self.make_card()

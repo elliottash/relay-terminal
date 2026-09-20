@@ -1050,6 +1050,69 @@ class UndoTests(BoardToolsTest):
         with self.assertRaises(T.BoardToolError):
             self.tools.undo("w-nope")
 
+    def test_a_delete_removes_the_card_and_its_thread_and_returns_a_write_id(self):
+        card_id = self.create()
+        self.tools.run("board_comment", {"id": card_id, "kind": "note", "text": "a line"})
+        card = self.board.card_by_id(card_id)
+        path, thread = card.path, self.board.thread_path(card_id)
+        self.assertTrue(path.exists() and thread.exists())
+        result = self.tools.delete_card(card_id, "a scratch card")
+        self.assertEqual(result["id"], card_id)
+        self.assertTrue(result["removed"])
+        self.assertTrue(result["write_id"])
+        self.assertFalse(path.exists())
+        self.assertFalse(thread.exists())
+        self.assertIsNone(self.board.card_by_id(card_id))
+        # The change the panes hear names the card in `removed`, never as an upsert: there is
+        # no card there to read.
+        changed = [e for e in self.events if e["event"] == "board_changed"][-1]
+        self.assertEqual(changed["removed"], [card_id])
+        self.assertEqual(changed["upserts"], [])
+
+    def test_a_delete_is_undoable_and_both_files_come_back_byte_for_byte(self):
+        card_id = self.create()
+        self.tools.run("board_comment", {"id": card_id, "kind": "note", "text": "keep me"})
+        card = self.board.card_by_id(card_id)
+        card_bytes, thread_bytes = card.path.read_bytes(), self.board.thread_path(card_id).read_bytes()
+        result = self.tools.delete_card(card_id)
+        undone = self.tools.undo(result["write_id"])
+        self.assertEqual(undone["action"], "delete")
+        self.assertFalse(undone["removed"])
+        self.assertEqual(card.path.read_bytes(), card_bytes)
+        self.assertEqual(self.board.thread_path(card_id).read_bytes(), thread_bytes)
+        # No "undid" line either: the card is exactly as it was, not annotated (the delete
+        # had no thread to append to, so undo appends nothing).
+        self.assertNotIn("undid", thread_bytes.decode("utf-8"))
+
+    def test_a_delete_takes_the_other_privacy_variants_thread_too_and_undo_brings_it_back(self):
+        card_id = self.create()
+        private = self.board.thread_path(card_id, private=True)
+        private.parent.mkdir(parents=True, exist_ok=True)
+        private.write_bytes(b"private thread bytes")
+        result = self.tools.delete_card(card_id)
+        self.assertFalse(private.exists())
+        self.tools.undo(result["write_id"])
+        self.assertEqual(private.read_bytes(), b"private thread bytes")
+
+    def test_an_undo_recreates_a_folder_that_went_with_the_last_card_in_it(self):
+        card_id = self.create()
+        folder = self.board.card_by_id(card_id).path.parent
+        result = self.tools.delete_card(card_id)
+        # Nothing of the card is left; the empty folder may have gone the way of a checkout
+        # that prunes empty directories — undo still has to put the card back.
+        self.assertFalse(any(folder.iterdir()))
+        folder.rmdir()
+        self.tools.undo(result["write_id"])
+        self.assertEqual(self.board.card_by_id(card_id).id, card_id)
+
+    def test_a_delete_of_an_unknown_card_is_refused(self):
+        with self.assertRaises(T.BoardToolError):
+            self.tools.delete_card("AAAA")
+
+    def test_the_agent_still_has_no_delete_tool(self):
+        # The owner's delete is a method, not a tool (#CYM9): the offered names are unchanged.
+        self.assertNotIn("board_delete_card", T.TOOL_NAMES + T.CLEANUP_TOOL_NAMES + T.WRITE_TOOLS)
+
     def test_a_committed_card_is_never_removed_by_undo(self):
         try:
             subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True, timeout=30)

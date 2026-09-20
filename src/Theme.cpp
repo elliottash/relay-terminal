@@ -760,10 +760,11 @@ QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
 /* The pencil that edits the card sits on the title it edits, outlined in the accent (#VZ69). On a
    card whose other tools are muted text buttons, exactly one control is obviously pressable, and
-   it is the one the owner reaches for most. */
-QToolButton#boardEditPencil { color: @accent; background: transparent; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; }
-QToolButton#boardEditPencil:hover { color: @accentText; background: @accent; border-color: @accent; }
-QToolButton#boardEditPencil:disabled { color: @disabled; background: transparent; border-color: @surface; }
+   it is the one the owner reaches for most. The delete beside it (#CYM9) wears the same outline:
+   destructive, but a first-class action of the card, and undoable for 30 s like every write. */
+QToolButton#boardEditPencil, QToolButton#boardCardDelete { color: @accent; background: transparent; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; }
+QToolButton#boardEditPencil:hover, QToolButton#boardCardDelete:hover { color: @accentText; background: @accent; border-color: @accent; }
+QToolButton#boardEditPencil:disabled, QToolButton#boardCardDelete:disabled { color: @disabled; background: transparent; border-color: @surface; }
 /* Editing the card's own words: the title in place, and `## Issue` where the document was. */
 QLineEdit#boardCardTitleEdit { color: @text; font-size: 12pt; font-weight: 600; background: @surface; border: 1px solid @accentBorder; border-radius: 6px; padding: 2px 6px; }
 QFrame#boardEdit { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }

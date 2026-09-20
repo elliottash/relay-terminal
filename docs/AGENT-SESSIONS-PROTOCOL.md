@@ -2160,6 +2160,8 @@ autonomy is not `off`, together with `board_policy.md` in the system prompt. Pla
 read tools and drops the four writes.
 
 - **No delete tool.** Closing a card is `board_move_card` to `done` or `dropped` with a reason.
+  The owner alone may delete, through the GUI's `board_delete` (19.3, #CYM9) — confirmed, undoable
+  for 30 s, and out of the agent's reach.
 - **Immutable through `board_update_card`:** `id`, `type`, `created`, `source`, `rank`, `status`,
   `private`. `status` and `rank` are `board_move_card`'s job; the rest are the record.
 - **Owner text may be rewritten** (decision 12.3, superseding the refusal in design 6.3): a replaced

@@ -1,0 +1,22 @@
+01 board open:        Alpha Bravo 
+03 confirm dialog:    yes
+   (confirm: committed. at 659 427 -> clicking 719,477)
+03 notice:            Ask ab Deleted #NY1V
+03 alpha file:        gone
+03 rows left:         Bravo 
+04 notice:            Ask ab Undone: #NY1V is back as it was.
+04 alpha file:        back
+04 alpha identical:   yes
+04 rows:              Alpha Bravo 
+05 detail open:       yes (body with an Issue heading)
+05 delete button:     at 1330 184 40 11
+   (confirm: committed. at 662 427 -> clicking 722,477)
+07 notice:            Ask ab Deleted #FY2V
+07 bravo file:        gone
+07 bravo thread:      gone
+07 rows:              Alpha 
+08b confirm was up:   1
+09 alpha file:        intact
+09 card still open:   yes
+10 notice:            Ask abl #NY1V was removed from the board.
+10 card still open:   yes

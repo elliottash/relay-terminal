@@ -177,7 +177,9 @@ thread. Its model chip defaults to the anchor pane's preset.
 (popup, digits pick a column, Tab lists tabs); Alt+Shift+Left/Right move a column, Alt+Shift+Up/Down reorder; `/`
 or Esc filter (`label:`, `status:`, `@agent`, `waiting:me`, text) — on the main page Esc lands in the filter bar,
 taking an active filter off first (#K9X6); `l` labels; `a` assign; `c` reply; `t` insert `#ID` into the
-anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pane; Ctrl+PgUp/PgDn switch tabs; `?` keys.
+anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pane; `Del` delete the open or
+selected card (#CYM9: the owner's confirmed delete — the card file and its thread go, Undo for 30 s);
+Ctrl+PgUp/PgDn switch tabs; `?` keys.
 **Hints** (WARP.md rule, live Keymap text): palette/button → Ctrl+Shift+S; mouse drag → `m`; clicking `+` → `n`;
 "Send to terminal" button → `t`; typed `/board` → the open shortcut; clicking into the filter → `Esc`.
 
@@ -670,11 +672,13 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
 
 - No delete tool: closing is `done`/`dropped` with a reason. Owner text (`## Issue`, owner thread entries) is
   hash-recorded and edits to it are refused. Every agent write appends a thread event (actor, model, pane, turn id).
+  The owner alone may delete — the GUI's confirmed `board_delete` (#CYM9), never an agent tool.
 - Limits: 5 creates and 20 other writes per turn, 30 creates per hour per workspace; beyond them `board_rate_limited`
   and the agent summarizes in chat. Writes are atomic and hash-checked like `write_file`.
 - Autonomy in `board.yaml` (`off`; `suggest` = writes become proposals accepted in the Board; `auto`) with a per-user
   local override. This repo: `auto` (owner decision); new boards: `suggest`.
-- Undo (toast, 30 s) restores the pre-write snapshot; undoing a creation removes the file only if never committed.
+- Undo (toast, 30 s) restores the pre-write snapshot; undoing a creation removes the file only if never committed,
+  and undoing the owner's delete puts the card file and its thread back exactly as they were (#CYM9).
 
 ### 6.4 QA and iteration
 
@@ -759,7 +763,7 @@ deletes converted paragraphs and logs a thread event per card. `TODO:` comments 
 | `board_open {workspace}` | `board {rev, config, cards: [{id, path, title, tab, status, labels, assignee, waiting_on, rank, thread_count, last_entry}], problems}` |
 | `board_refresh {paths}` (from `QFileSystemWatcher`) | `board_changed {rev, upserts, removed, problems}` |
 | `board_card_get {id}` | `board_card {id, hash, front, body, thread: [{entry_id, author, kind, time, text, turn?}]}` |
-| `board_create {tab, status, text, author}`, `board_update {id, base_hash, patch}`, `board_move {id, status?, tab?, before?, after?}`, `board_comment {id, text, author}`, `board_undo {write_id}` | `board_changed`; stale hash → `error {code: "board_conflict", id, current_hash}` |
+| `board_create {tab, status, text, author}`, `board_update {id, base_hash, patch}`, `board_move {id, status?, tab?, before?, after?}`, `board_delete {id, reason?, author}` (#CYM9, owner-only: card file and thread off disk, Undo 30 s), `board_comment {id, text, author}`, `board_undo {write_id}` | `board_changed`; stale hash → `error {code: "board_conflict", id, current_hash}` |
 | `board_ask {id, text}` (board worker) | normal turn events with `turn_id` and `card_id`, then `board_changed` |
 | `board_scan {sources?}`, `board_convert {finding_ids, edits}`, `board_cleanup_sources {finding_ids}`, `board_check` | `board_scan_result {findings: [{fid, kind, path, range, excerpt, proposal}]}`, `board_converted {cards}`, `board_changed`, `board_problems {items: [{path, code, message, fix?}]}` |
 

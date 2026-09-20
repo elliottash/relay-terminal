@@ -34,7 +34,7 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           normalize_id)
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
-         "board_move", "board_priority", "board_comment", "board_undo", "board_ask",
+         "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
          "board_cancel", "board_check",
          "board_cleanup", "board_init", "board_init_answer", "board_folder", "board_sections",
          # Initializing a project and importing what is already in it (19.13,
@@ -1072,7 +1072,7 @@ class BoardCommands:
                 raise ValueError(result["error"])
             self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid})
         elif kind in ("board_create", "board_update", "board_move", "board_priority",
-                      "board_comment"):
+                      "board_delete", "board_comment"):
             self._write(kind, request, rid)
         elif kind == "board_undo":
             tools = self._need()

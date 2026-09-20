@@ -28,6 +28,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -1254,6 +1255,22 @@ static QString sanitizeTrace(const QString &text)
     return clean;
 }
 
+// The one question every delete path asks (card #CYM9): name the card, say exactly what goes,
+// and say where recovery stands — Undo for 30 s, git after that only if it ever saw the card.
+// Cancel is the default: a delete is never something the keyboard slipped into.
+static bool confirmDeleteCard(const QString &id, const QString &title, QWidget *parent)
+{
+    QMessageBox confirm(QMessageBox::Warning, QStringLiteral("Delete card"),
+                        QStringLiteral("Delete #%1 “%2”?").arg(id, title),
+                        QMessageBox::Cancel, parent);
+    confirm.setInformativeText(QStringLiteral(
+        "The card file and its thread are removed from disk. Undo works for 30 seconds; "
+        "git still has it if it was committed."));
+    auto *remove = confirm.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    confirm.exec();
+    return confirm.clickedButton() == remove;
+}
+
 // The right half of the Switchboard: the card as one document (body, then its thread, the way an
 // issue page reads), a reply box under it, and the pickers and links in a header above it.
 class CardDetail final : public QWidget {
@@ -1316,6 +1333,15 @@ public:
         m_edit->setCursor(Qt::PointingHandCursor);
         m_edit->setFocusPolicy(Qt::NoFocus);
         titleRow->addWidget(m_edit, 0, Qt::AlignTop);
+        // The owner's delete (#CYM9): the one action that takes a card off the board rather
+        // than closing it, so it asks first and its Undo window is the only soft landing.
+        m_delete = new QToolButton(this);
+        m_delete->setObjectName(QStringLiteral("boardCardDelete"));
+        m_delete->setText(QStringLiteral("⌫ Delete (Del)"));
+        m_delete->setToolTip(QStringLiteral("Delete this card and its thread, after a confirm (Del)"));
+        m_delete->setCursor(Qt::PointingHandCursor);
+        m_delete->setFocusPolicy(Qt::NoFocus);
+        titleRow->addWidget(m_delete, 0, Qt::AlignTop);
         layout->addLayout(titleRow);
 
         auto *pickers = new QHBoxLayout;
@@ -1496,6 +1522,11 @@ public:
                 onEditHint();
             beginEdit(false);
         });
+        connect(m_delete, &QToolButton::clicked, this, [this] {
+            if (onDeleteHint)
+                onDeleteHint();
+            remove();
+        });
         connect(m_saveEdit, &QPushButton::clicked, this, [this] { saveEdit(); });
         connect(m_cancelEdit, &QPushButton::clicked, this, [this] { cancelEdit(); });
         connect(m_close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
@@ -1587,6 +1618,9 @@ public:
     // write over a file that changed meanwhile. The GUI never writes the file itself.
     std::function<void(const QJsonObject &patch, const QString &baseHash)> onEdit;
     std::function<void()> onEditHint;        // the Edit button was clicked, not the key
+    // Delete (#CYM9): the trash button or the Del key was confirmed; the view sends board_delete.
+    std::function<void()> onDelete;
+    std::function<void()> onDeleteHint;      // the Delete button was clicked, not the key
 
     QString cardId() const { return m_id; }
     QString path() const { return m_path; }
@@ -1612,6 +1646,23 @@ public:
     // Whether there is something to open: the worker found a verifier that is not the implementer
     // and is actually on this machine.
     bool hasVerifier() const { return !board::verifyRunner(m_qa).isEmpty(); }
+
+    // Delete (#CYM9): hand the card to the view, which asks the one confirm every path asks
+    // (asking here too would double-confirm: button -> onDelete -> deleteCard -> a second
+    // dialog nobody answered). Not while a turn runs on the card — the worker would only
+    // refuse it — and not mid-edit: what is on screen would be deleted underneath the person
+    // typing into it.
+    void remove()
+    {
+        if (m_id.isEmpty() || m_editing || !onDelete)
+            return;
+        if (m_busy) {
+            showError(QStringLiteral("The agent is still answering on #%1. Stop it, or wait for "
+                                     "it, before deleting the card.").arg(m_id));
+            return;
+        }
+        onDelete();
+    }
 
     // Plan: a turn that writes the card's `## Plan` (protocol 19.10). Words in the reply box go
     // with it as the owner's note; an empty box is fine — the card is the brief.
@@ -2055,6 +2106,10 @@ protected:
                     m_reply->setFocus();
                     return true;
                 }
+                if (key->key() == Qt::Key_Delete) {   // #CYM9
+                    remove();
+                    return true;
+                }
             }
             if (m_editing && (object == m_titleEdit || object == m_issueEdit)) {
                 if (key->key() == Qt::Key_Escape) {
@@ -2114,6 +2169,7 @@ private:
         m_plan->setToolTip(QStringLiteral("The agent reads the code and writes the card's plan; it "
                                           "changes no code and no other card. Anything typed goes "
                                           "with it (p, or Ctrl+Enter)"));
+        m_delete->setEnabled(!m_busy);
         m_execute->setEnabled(!m_busy);
         m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
                                              "its agent builds it, and the card moves to In progress (x)"));
@@ -2635,6 +2691,7 @@ private:
     QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
+    QToolButton *m_delete = nullptr;
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_plan = nullptr, *m_execute = nullptr, *m_verify = nullptr;
@@ -3049,6 +3106,11 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     };
     m_detail->onEdit = [this](const QJsonObject &patch, const QString &baseHash) {
         saveCardEdit(patch, baseHash);
+    };
+    m_detail->onDelete = [this] { deleteCard(m_detail->cardId()); };
+    m_detail->onDeleteHint = [this] {
+        if (onHint)
+            onHint(QStringLiteral("board.delete"), QStringLiteral("Del"));
     };
     m_detail->onEditHint = [this] {
         if (onHint)
@@ -3843,6 +3905,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_config = event.value(QStringLiteral("config")).toObject();
         m_model.setConfig(m_config);
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
+        m_pendingDeletes.clear();
         const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
         rebuild();
         if (hadFocus)
@@ -3882,18 +3945,28 @@ void BoardView::handleEvent(const QJsonObject &event)
             onTitleChanged(title());
         // A card that is open stays in step with its file; other cards' changes leave it alone.
         const QString open = m_detail->cardId();
-        if (!open.isEmpty() && detailOpen()) {
-            if (removed.contains(open)) {
-                closeDetail();
+        if (!open.isEmpty() && detailOpen() && removed.contains(open)) {
+            closeDetail();
+            // This pane's own delete already put up its "Deleted #ID · Undo" toast (#CYM9); the
+            // removal events that follow it must not talk over that. Someone else's delete —
+            // another pane, an agent, a collaborator's pull — still says what happened.
+            if (!deletedHere(open))
                 showNotice(QStringLiteral("#%1 was removed from the board.").arg(open), true);
-            } else {
-                for (const QJsonValue &value : upserts)
-                    if (value.toObject().value(QStringLiteral("id")).toString() == open) {
-                        send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
-                              {QStringLiteral("card"), open}});
-                        break;
-                    }
-            }
+        }
+        if (!open.isEmpty() && detailOpen()) {
+            for (const QJsonValue &value : upserts)
+                if (value.toObject().value(QStringLiteral("id")).toString() == open) {
+                    send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                          {QStringLiteral("card"), open}});
+                    break;
+                }
+        }
+        // A card this pane deleted coming back (Undo, or a re-create) ends its marker: the next
+        // removal of that id is news again, not the echo of our own write.
+        for (const QJsonValue &value : upserts) {
+            const QString back = value.toObject().value(QStringLiteral("id")).toString();
+            if (!back.isEmpty())
+                forgetDeleted(back);
         }
         return;
     }
@@ -3983,6 +4056,9 @@ void BoardView::handleEvent(const QJsonObject &event)
         const QString kind = event.value(QStringLiteral("kind")).toString();
         const QString card = event.value(QStringLiteral("card_id")).toString();
         QString note = m_pendingNotes.take(requestId);
+        // The delete has landed (#CYM9): from here the "Deleted #ID · Undo" toast owns the
+        // card's removal events, until the card itself comes back or the pane reloads.
+        m_pendingDeletes.remove(requestId);
         if (kind == QStringLiteral("board_create")) {
             note = QStringLiteral("Created #%1").arg(card);
             // The quick-add field took the title; the card itself takes the issue (owner, #VZ69:
@@ -4136,6 +4212,7 @@ void BoardView::handleEvent(const QJsonObject &event)
     // a stale hash): say so where the card was dropped instead of in a status bar.
     if (type == QStringLiteral("error") && mine) {
         m_pendingNotes.remove(requestId);
+        m_pendingDeletes.remove(requestId);
         const QString text = event.value(QStringLiteral("text")).toString();
         // The card was written by someone else between the read and the save. Nothing was
         // overwritten and nothing typed is lost: read the card again (which brings the new hash
@@ -5036,11 +5113,59 @@ void BoardView::moveSelected()
         const QString id = tab.id;
         connect(action, &QAction::triggered, this, [this, id] { moveToTab(m_selected, id); });
     }
+    menu.addSeparator();
+    // The `m` menu is where the owner looked for a way to close a card and found none (#CYM9):
+    // delete sits at its foot, destructive and labelled so, below every move.
+    QAction *remove = menu.addAction(QStringLiteral("Delete card…"));
+    connect(remove, &QAction::triggered, this, [this] {
+        if (onHint)
+            onHint(QStringLiteral("board.delete"), QStringLiteral("Del"));
+        deleteSelected();
+    });
     // Under the selected row rather than wherever the mouse happens to be.
     QPoint at = QCursor::pos();
     if (QListWidgetItem *current = m_list->currentItem())
         at = m_list->viewport()->mapToGlobal(m_list->visualItemRect(current).bottomLeft());
     menu.exec(at);
+}
+
+void BoardView::deleteSelected()
+{
+    deleteCard(m_selected);
+}
+
+// The owner's delete (card #CYM9): confirm, then one `board_delete` message; the worker takes
+// the file and its thread off disk and the write's Undo puts them back. The card is remembered
+// as ours until the write lands, so the removal events that follow do not talk over the toast.
+void BoardView::deleteCard(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    const board::Card *card = m_model.card(id);
+    if (!confirmDeleteCard(id, card ? card->title : QString(), this))
+        return;
+    const QString requestId = nextRequestId();
+    m_pendingNotes.insert(requestId, QStringLiteral("Deleted #%1").arg(id));
+    m_pendingDeletes.insert(requestId, id);
+    send({{QStringLiteral("type"), QStringLiteral("board_delete")},
+          {QStringLiteral("id"), requestId},
+          {QStringLiteral("card"), id},
+          {QStringLiteral("reason"), QStringLiteral("deleted in the Switchboard")}});
+}
+
+bool BoardView::deletedHere(const QString &card) const
+{
+    return m_pendingDeletes.values().contains(card);
+}
+
+void BoardView::forgetDeleted(const QString &card)
+{
+    for (auto it = m_pendingDeletes.begin(); it != m_pendingDeletes.end();) {
+        if (it.value() == card)
+            it = m_pendingDeletes.erase(it);
+        else
+            ++it;
+    }
 }
 
 void BoardView::focusInput()
@@ -5181,6 +5306,13 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         cardAction(text == QStringLiteral("p") ? QStringLiteral("plan")
                    : text == QStringLiteral("v") ? QStringLiteral("verify")
                                                  : QStringLiteral("execute"));
+        return true;
+    }
+    // Del deletes the open or the selected card (#CYM9), after the confirm the button asks.
+    // Owner-only by construction: an agent has no way to send this message.
+    if (mods == Qt::NoModifier && key->key() == Qt::Key_Delete
+        && (detailOpen() || !m_selected.isEmpty())) {
+        deleteCard(detailOpen() ? m_detail->cardId() : m_selected);
         return true;
     }
     if (key->key() == Qt::Key_Escape && detailOpen()) {

@@ -1527,6 +1527,12 @@ file needs no schema bump (`relay::windowstate::tabNode`/`tabProject`).
 Inside the pane: arrows select, Enter opens a card, Esc closes it, `n` adds one, `m` moves it,
 `/` filters, `c` replies, `y` copies `#ID`, `t` sends `#ID` to the composer, `o` opens the card
 file, Ctrl+PgUp/PgDn switch tabs, and Alt+Shift+arrows move a card between columns or within one.
+`Del` — or the trash button beside the Edit pencil on an open card, or "Delete card…" at the foot
+of the `m` popup — deletes the open or selected card (card #CYM9): one confirm naming the card,
+then a `board_delete` the worker refuses while a turn runs on it. The card file and its thread
+leave the disk; the write's Undo restores both for 30 s and git is the recovery after that. It is
+the owner's action only — an agent closes a card by moving it to `done` or `dropped`, and no
+`board_delete` tool is ever offered to one.
 The gear after the section checkboxes opens the section editor (`src/BoardSections.*`), which also
 names the board's folder and offers the one action that renames it — "Hide this board's folder" /
 "Show this board's folder" (`board_folder`, protocol 19.17; never on an `issues/` board) — and the

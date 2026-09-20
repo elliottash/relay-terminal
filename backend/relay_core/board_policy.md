@@ -32,7 +32,8 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    it is plainly wrong, and the old and the new text are recorded in the card's thread automatically,
    so the change is visible and reversible. Say in your reply that you did it.
 9. **Nothing is deleted.** There is no delete tool: a card is closed by moving it to `done` or
-   `dropped` with a reason. The thread is append-only.
+   `dropped` with a reason. The thread is append-only. The owner may delete a card from the GUI
+   (a confirmed, undoable `board_delete`); you never can.
 10. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
     writing and summarize the rest of the requests in your reply.
 11. **Labels.** You label the card; the user never has to. Every work card carries exactly one of

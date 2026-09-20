@@ -357,7 +357,8 @@ append-only, one entry per write.
 
 - **Ctrl+Shift+S** opens it beside the pane you were in (again to close it); `n` adds a card, `/` filters
   (`label:voice`, `status:ready`, `@agent`, `waiting:me`), Enter opens one, `m` moves it,
-  `t` sends `#ID` to the composer.
+  `t` sends `#ID` to the composer, `Del` (or the card's Delete button) deletes one after a
+  confirm — undoable for 30 seconds, and agents have no delete at all.
 - **In the terminal**: `#` and a few characters picks a card, `/card <text>` captures one without
   leaving the prompt, `/switchboard` opens the pane. A `#K7Q2` in a prompt hands the agent the
   card, its open tasks and its recent thread.

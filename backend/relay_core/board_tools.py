@@ -11,7 +11,10 @@ the last write.  It never calls a model and never uses the network.
 
 Guardrails, in one place so they can be reviewed:
 
-* **No delete tool.**  Closing a card is a move to `done` or `dropped` with a reason.
+* **No delete tool.**  Closing a card is a move to `done` or `dropped` with a reason.  The one
+  real delete is the owner's: the GUI's confirmed `board_delete` message (card #CYM9), which
+  lands in `BoardTools.delete_card` below — never a tool an agent is offered — and is undoable
+  for 30 s like every other write.
 * **Every write appends a thread entry** naming the actor, model, pane and turn.  A change
   to owner-authored text additionally appends a `rewrite` entry carrying the old and the
   new text verbatim (decision 12.3).
@@ -1666,17 +1669,22 @@ class BoardTools:
     def _record(self, action: str, card: B.Card, summary: str, before: bytes | None,
                 thread_size: int, moved_from: Path | None = None,
                 others: Sequence[tuple[Path, bytes | None, Path | None]] = (),
-                cards: Sequence[str] = ()) -> str:
+                cards: Sequence[str] = (), removed: bool = False) -> str:
         return self._record_path(action, card.path, card.id or "", summary, before,
                                  self.board.thread_path(card.id or "", card.private),
-                                 thread_size, moved_from, others, cards)
+                                 thread_size, moved_from, others, cards, removed)
 
     def _record_path(self, action: str, path: Path, card_id: str, summary: str,
                      before: bytes | None, thread_path: Path | None, thread_size: int,
                      moved_from: Path | None = None,
                      others: Sequence[tuple[Path, bytes | None, Path | None]] = (),
-                     cards: Sequence[str] = ()) -> str:
-        """Record one undoable write, announce it, and (in a cleanup) log it for the changelog."""
+                     cards: Sequence[str] = (), removed: bool = False) -> str:
+        """Record one undoable write, announce it, and (in a cleanup) log it for the changelog.
+
+        `removed` is the one write that takes a card off the board rather than changing it
+        (the owner's delete): the change event names the card in `removed`, not `upserts`,
+        so the panes drop the row instead of asking for a card that is no longer there.
+        """
         write_id = f"w-{int(self.clock() * 1000):x}-{secrets.token_hex(2)}"
         record = WriteRecord(write_id=write_id, action=action, card_id=card_id,
                              path=path, summary=summary, at=self.clock(), before=before,
@@ -1697,8 +1705,9 @@ class BoardTools:
             self.cleanup.record(CleanupChange(action=action, card_id=card_id, summary=summary,
                                               path=rel, write_id=write_id, cards=list(cards)))
         self._emit_board(activity)
-        self._emit_board({"event": "board_changed", "upserts": [card_id] if card_id else [],
-                          "removed": [], "write_id": write_id})
+        self._emit_board({"event": "board_changed",
+                          "upserts": [] if removed else ([card_id] if card_id else []),
+                          "removed": [card_id] if removed else [], "write_id": write_id})
         return write_id
 
     def _thread_size(self, card: B.Card) -> int:
@@ -2064,6 +2073,40 @@ class BoardTools:
         summary = f"priority {old_priority} → {priority}"
         write_id = self._record("priority", card, summary, before, size)
         return {"id": card.id, "priority": priority, "hash": B.file_hash(card.path),
+                "write_id": write_id, "summary": summary}
+
+    def delete_card(self, card_id: str, reason: str = "") -> dict:
+        """The owner's confirmed delete (protocol 19.3 ``board_delete``, card #CYM9).
+
+        Not a `run()` tool, like `set_priority` above it: an agent closes a card by moving it to
+        `done` or `dropped` (`board_policy.md` rule 9), and this is the owner at the keyboard
+        asking for the file to go — the same standing as editing the card file by hand.  The
+        card file and its thread are unlinked from disk, and the bytes ride the write record
+        like any other write, so the GUI's Undo puts both back for `UNDO_SECONDS`; after that
+        git is the only recovery, and only for a card it has seen.
+
+        Nothing is appended to the thread — there is no card to append to.  Undo therefore
+        restores the thread byte-for-byte as it was, without even the usual "undid" line.
+        """
+        card = self._card(normalize_id(card_id))
+        reason = " ".join(str(reason or "").split())[:MAX_REASON]
+        before_bytes = card.path.read_bytes()
+        # Both privacy variants of the thread: a card flipped private and back can leave the
+        # older file behind, and a delete that left half a card on disk would not be a delete.
+        threads = [(path, path.read_bytes())
+                   for path in (self.board.thread_path(card.id, card.private),
+                                self.board.thread_path(card.id, not card.private))
+                   if path.exists()]
+        rel = str(card.path.relative_to(self.board.repo))
+        card.path.unlink()
+        for path, _ in threads:
+            path.unlink()
+        self.writes_this_turn += 1
+        summary = f"deleted · {reason}" if reason else "deleted"
+        write_id = self._record("delete", card, summary, before_bytes, 0,
+                                others=[(path, content, None) for path, content in threads],
+                                removed=True)
+        return {"id": card.id, "removed": True, "path": rel,
                 "write_id": write_id, "summary": summary}
 
     def stage_advance(self, card_id: str, event: str) -> dict | None:
