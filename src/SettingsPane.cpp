@@ -8,6 +8,9 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QToolButton>
+#include <QUrl>
 #include <QDir>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -604,12 +607,20 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         line->enableDrag();
     }
     auto *box = new QHBoxLayout(line);
-    box->setContentsMargins(10, 6, 10, 6);
+    box->setContentsMargins(10 + 28 * qMax(0, row.indent), 6, 10, 6);
     box->setSpacing(12);
+    if (!row.dragGroup.isEmpty()) {
+        // A grip, so a row that can be dragged looks like one (owner, 2026-09-20: the priority
+        // list "should also be draggable, not just arrows" — it was, and nothing said so).
+        auto *grip = mutedLabel(QStringLiteral("⠿"), "settingsGrip");
+        grip->setToolTip(QStringLiteral("Drag to reorder"));
+        grip->setCursor(Qt::OpenHandCursor);
+        box->addWidget(grip);
+    }
     auto *text = new QVBoxLayout;
     text->setSpacing(1);
     auto *label = new QLabel(row.label);
-    label->setObjectName(QStringLiteral("settingsRowLabel"));
+    label->setObjectName(row.strong ? QStringLiteral("settingsRowLabelStrong") : QStringLiteral("settingsRowLabel"));
     label->setWordWrap(true);
     label->setTextFormat(Qt::PlainText);
     text->addWidget(label);
@@ -630,6 +641,19 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     label->setMinimumWidth(std::min(words + 2, metrics.averageCharWidth() * 18));
     box->addLayout(text, 1);
 
+    if (!row.tooltip.isEmpty()) { line->setToolTip(row.tooltip); label->setToolTip(row.tooltip); }
+    if (!row.infoUrl.isEmpty()) {
+        auto *info = new QToolButton;
+        info->setObjectName(QStringLiteral("settingsInfoLink"));
+        info->setText(QStringLiteral("ⓘ"));
+        info->setAutoRaise(true);
+        info->setCursor(Qt::PointingHandCursor);
+        info->setFocusPolicy(Qt::NoFocus);
+        info->setToolTip(QStringLiteral("About this: %1").arg(row.infoUrl));
+        info->setAccessibleName(QStringLiteral("About %1").arg(row.label));
+        connect(info, &QToolButton::clicked, this, [url = row.infoUrl] { QDesktopServices::openUrl(QUrl(url)); });
+        box->addWidget(info);
+    }
     // Every control writes through the row's callback and then says so, which redraws this pane —
     // so rows that describe other rows ("Flash · glm-5.3-flash") never go stale — and every other
     // Options pane with it. Focus and scroll survive the rebuild, and the rebuild happens on the

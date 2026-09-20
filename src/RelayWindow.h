@@ -2059,6 +2059,9 @@ private:
             row.label = label;
             row.detail = status;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
+            row.infoUrl = guest ? (id == QStringLiteral("guest:claude") ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
+                                                                         : QStringLiteral("https://developers.openai.com/codex"))
+                                : str(preset, "key_url");
             row.dragGroup = QStringLiteral("providers");
             row.onDropBefore = [id, curated](const QString &draggedRowId) {
                 relay::models::curation::moveProviderBefore(draggedRowId.section(QLatin1Char(':'), 1), id);
@@ -2119,6 +2122,8 @@ private:
 
         // ----- 2. which models the picker shows -------------------------------------------------
         // One checkbox per provider (owner, 2026-09-20): off hides every model and folds the group.
+        // No per-model "openrouter fallback" here any more (owner, later that day): an OpenRouter
+        // model is a model like any other — add it to the picker and rank it above the line.
         // A provider whose catalog is open-ended (more than six models — OpenRouter's live list)
         // shows only the models you checked plus an id box that completes from the whole list;
         // one whose list is complete (Claude Code, Codex, a plan's three tiers) shows them all and
@@ -2131,11 +2136,6 @@ private:
             info.label = QStringLiteral("A checked model is a row in every pane's model box and in the picker. "
                                         "The reasoning levels are what the model accepts; the level itself is picked per pane.");
             models.rows << info;
-        }
-        bool openrouterKey = false;
-        for (const auto &value : presets) {
-            const QJsonObject preset = value.toObject();
-            if (str(preset, "id") == QStringLiteral("openrouter")) openrouterKey = preset.value(QStringLiteral("has_stored_key")).toBool();
         }
         constexpr int kOpenEnded = 6;   // more catalog models than this: an id box, only the checked shown
         for (const QString &presetId : catalog.presets()) {
@@ -2151,6 +2151,7 @@ private:
             head.detail = collapsed ? QStringLiteral("hidden from the picker · check to show its models")
                                     : QStringLiteral("%1 of %2 models in the picker").arg(shownCount).arg(rows.size());
             head.aliases = QStringLiteral("provider models picker show hide ") + rows.first().provider;
+            head.strong = true;
             head.checked = !collapsed && shownCount > 0;
             head.onToggle = [catalog, presetId, rows, curated](bool on) {
                 relay::models::curation::setCollapsed(presetId, !on);
@@ -2166,45 +2167,34 @@ private:
                 relay::SettingRow row;
                 row.kind = relay::SettingRow::Toggle;
                 row.id = QStringLiteral("option:models/shown/") + entry.key;
-                row.label = QStringLiteral("    ") + entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
+                row.indent = 1;
+                row.label = entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
                 QStringList notes;
                 if (!entry.tier.isEmpty()) notes << QStringLiteral("%1 model").arg(entry.tier);
                 notes << (entry.efforts.isEmpty() ? QStringLiteral("no reasoning setting")
                                                   : QStringLiteral("reasoning ") + entry.efforts.join(QStringLiteral(" · ")));
                 if (entry.intelligence >= 0) notes << QStringLiteral("intelligence %1").arg(entry.intelligence);
                 if (entry.label != entry.model.toLower()) notes << entry.model;
-                row.detail = QStringLiteral("    ") + notes.join(QStringLiteral(" · "));
-                row.aliases = QStringLiteral("model picker show hide ") + entry.model + QLatin1Char(' ') + entry.provider;
+                // One line per model (owner, 2026-09-20): the levels, the score and the id are the
+                // hover, and ⓘ opens the model's OpenRouter page — one page shape for every model,
+                // with context, pricing and the providers behind it — when OpenRouter serves it.
+                row.tooltip = notes.join(QStringLiteral(" · "));
+                if (entry.preset == QStringLiteral("openrouter")) row.infoUrl = QStringLiteral("https://openrouter.ai/") + entry.model;
+                else if (!entry.openrouter.isEmpty()) row.infoUrl = QStringLiteral("https://openrouter.ai/") + entry.openrouter;
+                row.aliases = QStringLiteral("model picker show hide ") + entry.model + QLatin1Char(' ') + entry.provider + QLatin1Char(' ') + row.tooltip;
                 row.checked = relay::models::curation::isShown(entry);
                 row.onToggle = [catalog, key = entry.key, curated](bool on) {
                     relay::models::curation::setShown(key, on, catalog);
                     curated();
                 };
                 models.rows << row;
-                if (openrouterKey && !entry.openrouter.isEmpty() && !entry.guest && !entry.hosted && entry.preset != QStringLiteral("openrouter")) {
-                    // The same model on OpenRouter when this provider fails (owner, 2026-09-20):
-                    // off unless asked for, per model, and only offered once an OpenRouter key is
-                    // stored. Two words; the tooltip-sized detail is the row's aliases.
-                    relay::SettingRow twin;
-                    twin.kind = relay::SettingRow::Toggle;
-                    twin.id = QStringLiteral("option:models/openrouter_fallback/") + entry.key;
-                    twin.label = QStringLiteral("        openrouter fallback");
-                    twin.aliases = QStringLiteral("openrouter fallback failover twin ") + entry.model + QLatin1Char(' ') + entry.openrouter;
-                    twin.checked = relay::models::curation::openrouterFallback(entry.key);
-                    twin.reset = [key = entry.key, this] { relay::models::curation::setOpenrouterFallback(key, false); if (m_active) m_active->agentOptionsChanged(QStringLiteral("models/openrouter_fallback")); };
-                    twin.changed = twin.checked;
-                    twin.onToggle = [this, key = entry.key](bool on) {
-                        relay::models::curation::setOpenrouterFallback(key, on);
-                        if (m_active) m_active->agentOptionsChanged(QStringLiteral("models/openrouter_fallback"));
-                    };
-                    models.rows << twin;
-                }
                 if (entry.custom) {
                     relay::SettingRow remove;
                     remove.kind = relay::SettingRow::Buttons;
                     remove.id = QStringLiteral("models/custom/") + entry.key;
-                    remove.label = QStringLiteral("    remove %1").arg(entry.label);
-                    remove.detail = QStringLiteral("    Forget this id; the provider's own list is unaffected");
+                    remove.indent = 1;
+                    remove.label = QStringLiteral("remove %1").arg(entry.label);
+                    remove.detail = QStringLiteral("Forget this id; the provider's own list is unaffected");
                     remove.buttonTexts = QStringList{QStringLiteral("remove")};
                     remove.onButton = [key = entry.key, curated](int) { relay::models::curation::removeCustom(key); curated(); };
                     models.rows << remove;
@@ -2213,8 +2203,8 @@ private:
             if (openEnded) {
                 // opencode's box: type part of an id and pick from what the provider serves; an id
                 // it does not list is added as typed.
-                relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("    add a model"),
-                    QStringLiteral("    %1 more on %2 · type to search their ids; an unlisted id is added as typed")
+                relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("add a model"),
+                    QStringLiteral("%1 more on %2 · type to search their ids; an unlisted id is added as typed")
                         .arg(unlisted.size()).arg(rows.first().provider),
                     QStringLiteral("model id"), [catalog, presetId, curated](const QString &value) {
                         const QString id = value.trimmed();
@@ -2226,6 +2216,7 @@ private:
                         curated();
                     });
                 add.completions = unlisted;
+                add.indent = 1;
                 add.text.clear(); add.changed = false;
                 models.rows << add;
             }
@@ -2237,8 +2228,8 @@ private:
                 const QString key = guestSettingKey(guest, QStringLiteral("permissions"));
                 const QString current = QSettings().value(key).toString().trimmed();
                 relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
-                    QStringLiteral("    when it wants to use a tool"),
-                    QStringLiteral("    %1 runs with no per-action approvals, like Relay's own agent. "
+                    QStringLiteral("when it wants to use a tool"),
+                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
                                    "Ask me puts each one to you: Allow, Allow for session, "
                                    "Deny, or Deny and stop the turn").arg(rows.first().provider),
                     {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
@@ -2251,6 +2242,7 @@ private:
                         refreshSettingsPanes();
                     });
                 ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
+                ask.indent = 1;
                 models.rows << ask;
             }
         }

@@ -67,9 +67,8 @@ that conflict.
    add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
    Codex**; **test** checks the key reaches the provider) — then **models in the picker**, a
    checklist of each provider's models, then **priority**: rank 1 is Main, what new panes start
-   on; rank 2 is the fallback `/swap` and failover go to. Under a model that OpenRouter also
-   serves, one more switch: continue on the same model through your OpenRouter key when its own
-   provider fails — off unless you turn it on for that model. Claude Code and Codex, when
+   on; the models above the line after it are the fallbacks, in order — an OpenRouter model
+   ranked there is how "the same model on OpenRouter" is done. Claude Code and Codex, when
    installed, are providers there like any other.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.

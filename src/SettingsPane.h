@@ -76,6 +76,15 @@ struct SettingRow {
     // meaning "put that one before me"; the caller persists the order and the pane redraws.
     QString dragGroup;
     std::function<void(const QString &draggedRowId)> onDropBefore;
+    // Hierarchy inside a section: a group's own row is `strong` (bold label) and the rows under
+    // it are indented one level (Options › Models: a provider and its models).
+    int indent = 0;
+    bool strong = false;
+    // Hover text for the whole row, and a page to read more (an ⓘ button before the control):
+    // Options › Models keeps a model's reasoning levels, score and id in the hover so the list
+    // stays one line per model (owner, 2026-09-20).
+    QString tooltip;
+    QString infoUrl;
     int number = 0, minimum = 0, maximum = 0;               // Number
     QString suffix;
     std::function<void(int)> onNumber;

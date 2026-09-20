@@ -1866,8 +1866,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the turn's terminal event, puts all of it back, so the pane keeps the model the user chose; if the
   chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
   Models can turn it off (`agent/failover`). **The chain is the priority list** (owner, 2026-09-20):
-  the models above the "fallbacks end here" line, in order, as the `fallbacks` option, then the
-  same model on OpenRouter for the models opted in (`failover_openrouter`), and nothing else. Relay
+  the models above the "fallbacks end here" line, in order, as the `fallbacks` option, and nothing
+  else (the worker's `failover_openrouter` twin step is still there but the GUI sends no ids). Relay
   Free is a fallback only when it sits above the line, which replaced the `failover_hosted` switch
   of 2026-09-19 (still accepted from older GUIs and ignored).
   **Subagents fail over on the pane's chain**: `subagents.py` hands each one the pane's role
