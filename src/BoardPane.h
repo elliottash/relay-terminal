@@ -118,6 +118,19 @@ public:
     // folded; saved panes restore their exact set with the rest of the window's state.
     QJsonArray collapsedSections() const;
     void setCollapsedSections(const QJsonArray &state);
+
+    // The sections whose "N closed by the agent" row is open (#93WR): the cards the agent
+    // finished and closed itself stand behind one row at the end of their section, folded by
+    // default. Same shape and the same home in the layout node as the folded set above
+    // (`{"board": {"self_closed": [...]}}`), so a pane comes back with the same rows showing.
+    QJsonArray openSelfClosed() const;
+    void setOpenSelfClosed(const QJsonArray &state);
+    // By value, for the reason toggleSection is: every caller names a section out of `m_rows`.
+    void toggleSelfClosed(QString columnId);
+    // Which section's fold row the selection is standing on, or empty. A fold row is not a card,
+    // so `selectedCard()` is empty while it is selected and every card action is inert — and a
+    // card selected by any other path wins, which is what keeps the two from both being set.
+    QString selectedFold() const { return m_selected.isEmpty() ? m_selectedFold : QString(); }
     // By value, not by reference: every caller names a section out of `m_rows`, which the
     // rebuild below replaces.
     void toggleSection(QString columnId);
@@ -298,6 +311,10 @@ private:
     QString m_root;
     board::Model m_model;
     QString m_selected;
+    // The section whose fold row the selection is on (#93WR), or empty. Exactly one of this and
+    // m_selected is ever set: the fold row is a selectable row that is not a card.
+    QString m_selectedFold;
+    QSet<QString> m_selfClosedOpen;   // sections whose self-closed cards are showing (#93WR)
     // The card turns running right now, by card id (protocol 19.16). Several cards can be
     // planning or discussing at once, and only one of them is on screen, so what each turn has
     // said so far and what it is doing this second are held here rather than in the card view.

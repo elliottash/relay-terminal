@@ -256,6 +256,8 @@ private slots:
     // The cards the agent closed itself, folded into one row of the done list (#93WR)
     void aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt();
     void theSelfClosedCardsOfASectionFoldIntoOneRow();
+    void theFoldRowTogglesOnClickEnterAndTheArrowsAndRidesTheLayout();
+    void aSelfClosedCardReachedByIdUnfoldsItsGroup();
     void theBriefsAskForTheExactModelAndTheGuestHarness();
     void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
     // The Switchboard page agent's panel (#8YQ9, protocol 19.18)
@@ -4007,6 +4009,141 @@ void BoardModelTests::theSelfClosedCardsOfASectionFoldIntoOneRow()
 
     // A folded section says nothing about its fold row: its cards are all put away.
     QCOMPARE(sketch(model.rows({QStringLiteral("done")})).last(), QStringLiteral("# done 5 folded"));
+}
+
+// The row in the pane: it toggles on a click, on Enter and on the arrows, it is not a card, and
+// which groups are open rides the layout node beside the folded sections (#93WR).
+void BoardModelTests::theFoldRowTogglesOnClickEnterAndTheArrowsAndRidesTheLayout()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.setCollapsedSections(QJsonArray{});   // as a restored pane with everything open
+    const auto own = [](const char *id, const char *rank) {
+        QJsonObject json = row(QString::fromUtf8(id), "done", "features", QString::fromUtf8(rank));
+        json.insert("implemented_by", "anthropic/claude-opus-5");
+        json.insert("verified_by", "anthropic/claude-opus-5");
+        return json;
+    };
+    view.handleEvent(opened({row("AAA1", "done", "features", "a"), own("CCC3", "c"),
+                             own("DDD4", "d"), row("OPEN1", "ready", "features", "e")}));
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+
+    // Folded by default: one ordinary row and one fold row, whose words are the row's own.
+    const int fold = relay::board::rowOfFold(view.rows(), QStringLiteral("done"));
+    QVERIFY(fold > 0);
+    QCOMPARE(view.rows().at(fold).title, QStringLiteral("2 closed by the agent"));
+    QVERIFY(view.rows().at(fold).collapsed);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")), -1);
+    // The section header still counts them: three cards are in Done, two of them behind the row.
+    QCOMPARE(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).count, 3);
+    // It is a row in the list, it carries no card, and it says what it is.
+    QCOMPARE(list->count(), view.rows().size());
+    QVERIFY(list->item(fold)->flags().testFlag(Qt::ItemIsSelectable));
+    QVERIFY(!list->item(fold)->flags().testFlag(Qt::ItemIsDragEnabled));
+    QVERIFY(list->item(fold)->toolTip().startsWith(
+        QStringLiteral("Cards the agent finished and closed itself, without a verifier.")));
+    QVERIFY(list->item(fold)->toolTip().contains(QStringLiteral("Enter or → to show them.")));
+
+    // A click on it shows its cards, and leaves the selection standing on the row itself.
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      list->visualItemRect(list->item(fold)).center());
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")) >= 0);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("DDD4")) >= 0);
+    QCOMPARE(view.selectedFold(), QStringLiteral("done"));
+    QVERIFY(view.selectedCard().isEmpty());       // a fold row is not a card
+    QCOMPARE(view.rows().at(relay::board::rowOfFold(view.rows(), QStringLiteral("done"))).title,
+             QStringLiteral("2 closed by the agent"));
+    QVERIFY(!view.rows().at(relay::board::rowOfFold(view.rows(), QStringLiteral("done"))).collapsed);
+
+    // Enter on it puts them away again, and a second click shows them.
+    QTest::keyClick(list, Qt::Key_Return);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")), -1);
+    QCOMPARE(view.selectedFold(), QStringLiteral("done"));
+    QTest::keyClick(list, Qt::Key_Return);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")) >= 0);
+
+    // → from the row steps into its first card; ← from that card comes back to the row and puts
+    // the cards away, and ← again folds the whole section.
+    QTest::keyClick(list, Qt::Key_Right);
+    QCOMPARE(view.selectedCard(), QStringLiteral("CCC3"));
+    QTest::keyClick(list, Qt::Key_Left);
+    QCOMPARE(view.selectedFold(), QStringLiteral("done"));
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")), -1);
+    QTest::keyClick(list, Qt::Key_Left);
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
+    // ← on a card of an ordinary section still folds that section, as it always did.
+    view.setCollapsedSections(QJsonArray{});
+    view.selectCard(QStringLiteral("OPEN1"));
+    QTest::keyClick(list, Qt::Key_Left);
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
+
+    // → on the folded row shows its cards and stands on the first of them.
+    view.setCollapsedSections(QJsonArray{});
+    view.setOpenSelfClosed(QJsonArray{});
+    view.selectCard(QStringLiteral("AAA1"));
+    QTest::keyClick(list, Qt::Key_Down);
+    QCOMPARE(view.selectedFold(), QStringLiteral("done"));
+    QTest::keyClick(list, Qt::Key_Right);
+    QCOMPARE(view.selectedCard(), QStringLiteral("CCC3"));
+
+    // Which groups are open goes into the layout node and comes back from it, beside the folded
+    // sections and in the same shape.
+    QStringList open;
+    for (const QJsonValue &value : view.openSelfClosed())
+        open << value.toString();
+    QCOMPARE(open, (QStringList{"done"}));
+    view.setOpenSelfClosed(QJsonArray{});
+    QVERIFY(view.openSelfClosed().isEmpty());
+    QVERIFY(view.rows().at(relay::board::rowOfFold(view.rows(), QStringLiteral("done"))).collapsed);
+    view.setOpenSelfClosed(QJsonArray{QStringLiteral("done")});
+    QVERIFY(!view.rows().at(relay::board::rowOfFold(view.rows(), QStringLiteral("done"))).collapsed);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("DDD4")) >= 0);
+    // A new pane starts folded: the layout node is empty until a group is opened.
+    relay::BoardView fresh(QStringLiteral("/tmp/workspace"));
+    QVERIFY(fresh.openSelfClosed().isEmpty());
+
+    // A filter shows a matching self-closed card as an ordinary row, with no fold row over it.
+    view.setOpenSelfClosed(QJsonArray{});
+    QLineEdit *filter = view.findChild<QLineEdit *>(QStringLiteral("boardFilter"));
+    QVERIFY(filter);
+    filter->setText(QStringLiteral("DDD4"));
+    QCOMPARE(relay::board::rowOfFold(view.rows(), QStringLiteral("done")), -1);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("DDD4")) >= 0);
+    filter->clear();
+    QVERIFY(relay::board::rowOfFold(view.rows(), QStringLiteral("done")) >= 0);
+}
+
+// A card reached by id — a `#ID` in a card's text, a link from a thread, the cleanup panel's
+// anchors — opens whatever is holding it, so "reveal" really reveals it (#93WR).
+void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QJsonObject own = row("CCC3", "done", "features", "c");
+    own.insert("implemented_by", "anthropic/claude-opus-5");
+    own.insert("verified_by", "anthropic/claude-opus-5");
+    // A brand-new pane: every section folded, and the group inside Done folded too.
+    view.handleEvent(opened({own, row("AAA1", "done", "features", "a")}));
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")), -1);
+
+    view.selectCard(QStringLiteral("CCC3"));
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")) >= 0);
+    QCOMPARE(view.selectedCard(), QStringLiteral("CCC3"));
+    QVERIFY(view.selectedFold().isEmpty());
+    QVERIFY(!view.rows().at(relay::board::rowOfFold(view.rows(), QStringLiteral("done"))).collapsed);
+    QStringList open;
+    for (const QJsonValue &value : view.openSelfClosed())
+        open << value.toString();
+    QCOMPARE(open, (QStringList{"done"}));
+
+    // An ordinary card asked for by id leaves the folds exactly as they were: only a card the
+    // group is holding needs the group opened.
+    relay::BoardView other(QStringLiteral("/tmp/workspace"));
+    other.handleEvent(opened({own, row("AAA1", "done", "features", "a")}));
+    other.selectCard(QStringLiteral("AAA1"));
+    QVERIFY(other.openSelfClosed().isEmpty());
+    QVERIFY(other.rows().at(relay::board::rowOfSection(other.rows(),
+                                                       QStringLiteral("done"))).collapsed);
 }
 
 // An answer that names a thing the app can show is one click from showing it (#FEJQ). `card:`

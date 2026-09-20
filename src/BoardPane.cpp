@@ -397,6 +397,27 @@ SectionShape sectionShape(const QFont &font, int width, bool first, bool canAdd)
     return shape;
 }
 
+// The fold row that stands for a section's self-closed cards (#93WR): a chevron and one muted
+// line, "3 closed by the agent". It is a row inside the section's cards rather than a header of
+// its own, so the chevron sits where the card rows' `#ID` column starts and there is no rule
+// above it — the eye reads it as the last of the cards, which is what it stands for.
+struct FoldShape {
+    QRect chevronRect, titleRect;
+    int height = 0;
+};
+
+FoldShape foldShape(const QFont &font, int width)
+{
+    FoldShape shape;
+    const QFontMetrics metrics(smaller(font, 0.85));
+    shape.height = qMax(22, metrics.height() + 8);
+    int x = kRowPadX + kGlyphWidth + 4;
+    shape.chevronRect = QRect(x, 0, 12, shape.height);
+    x += 14;
+    shape.titleRect = QRect(x, 0, qMax(20, width - kRowPadX - x), shape.height);
+    return shape;
+}
+
 // Paints the single list: a section header or one card per row. It reads the card from the model
 // by id, so a row holds nothing but the id and a refill never copies card data into the view.
 class RowDelegate final : public QStyledItemDelegate {
@@ -432,6 +453,8 @@ public:
             return QSize(width, 0);
         if (row->kind == board::Row::Section)
             return QSize(width, sectionShape(option.font, width, index.row() == 0, false).height);
+        if (row->kind == board::Row::Fold)
+            return QSize(width, foldShape(option.font, width).height);
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
@@ -452,6 +475,8 @@ public:
         painter->setRenderHint(QPainter::Antialiasing);
         if (row->kind == board::Row::Section)
             paintSection(painter, option, rect, *row, index.row() == 0);
+        else if (row->kind == board::Row::Fold)
+            paintFold(painter, option, rect, *row);
         else
             paintCard(painter, option, rect, *row);
         painter->restore();
@@ -570,6 +595,38 @@ private:
             painter->drawText(shape.triageRect.translated(origin), Qt::AlignCenter,
                               QStringLiteral("\u26A0"));
         }
+    }
+
+    // The self-closed fold row (#93WR): the same chevrons and the same muted text as a folded
+    // section header, and the selection band of a card row, because unlike a header this row can
+    // be stood on.
+    void paintFold(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
+                   const board::Row &row) const
+    {
+        const FoldShape shape = foldShape(option.font, rect.width());
+        const QPoint origin = rect.topLeft();
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hover = option.state & QStyle::State_MouseOver;
+        const bool focused = m_list->hasFocus();
+        if (selected || hover) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+                                       : mix(theme::BoardFace, theme::Text, 0.05));
+            painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+        }
+        if (selected) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
+                                            rect.height() - 6), 1, 1);
+        }
+        painter->setFont(smaller(option.font, 0.85));
+        painter->setPen(selected || hover ? theme::Text : theme::TextMuted);
+        painter->drawText(shape.chevronRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          row.collapsed ? QStringLiteral("▸") : QStringLiteral("▾"));
+        const QFontMetrics metrics(smaller(option.font, 0.85));
+        painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          metrics.elidedText(row.title, Qt::ElideRight, shape.titleRect.width()));
     }
 
     void paintCard(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
@@ -923,6 +980,9 @@ public:
     std::function<void(const QString &, const QString &, const QString &, const QString &)> onDropped;
     std::function<void(bool)> onDragging;   // a drag from this list started (true) or ended
     std::function<void(const QString &columnId)> onToggleSection, onAddInSection;
+    // The self-closed fold row (#93WR): a click shows its cards or puts them away. The row is not
+    // a card — it never starts a drag and nothing can be dropped on it.
+    std::function<void(const QString &columnId)> onToggleFold;
     // The ⚠ on a section header (#8YQ9): check that section's cards and show what it found.
     std::function<void(const QString &columnId)> onTriageSection;
     // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
@@ -998,6 +1058,14 @@ protected:
         if (const QString label = labelBadgeUnder(event); !label.isEmpty()) {
             if (onCopyLabel)
                 onCopyLabel(label);
+            event->accept();
+            return;
+        }
+        // The fold row (#93WR) toggles on a click, like a section header, and the pane stands the
+        // selection on it afterwards so Enter and ←/→ carry on from there.
+        if (row && row->kind == board::Row::Fold && event->button() == Qt::LeftButton) {
+            if (onToggleFold)
+                onToggleFold(row->columnId);
             event->accept();
             return;
         }
@@ -3050,6 +3118,13 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->onCopyLabel = [this](const QString &label) { copyTag(label); };
     m_list->onPriority = [this](const QString &card, int step) { setCardPriority(card, step); };
     m_list->onToggleSection = [this](const QString &columnId) { toggleSection(columnId); };
+    // A click on the self-closed fold row (#93WR) does what Enter on it does, and says so once:
+    // the row is a keyboard row like any other.
+    m_list->onToggleFold = [this](const QString &columnId) {
+        if (onHint)
+            onHint(QStringLiteral("board.selfClosedFold"), QStringLiteral("Enter"));
+        toggleSelfClosed(columnId);
+    };
     m_list->onAddInSection = [this](const QString &columnId) {
         if (onHint)
             onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
@@ -4521,6 +4596,10 @@ void BoardView::selectRow(int index)
     if (index < 0 || index >= m_rows.size() || index >= m_list->count())
         return;
     QListWidgetItem *item = m_list->item(index);
+    // Exactly one of the two is ever set (#93WR): a fold row is selectable but is not a card, so
+    // standing on it empties the card selection and every card action is inert.
+    m_selectedFold = m_rows.at(index).kind == board::Row::Fold ? m_rows.at(index).columnId
+                                                              : QString();
     m_selected = item->data(kCardRole).toString();
     m_list->setCurrentItem(item);
     item->setSelected(true);
@@ -4541,7 +4620,7 @@ void BoardView::refill()
         for (const board::Column &section : m_model.sections())
             m_collapsed.insert(section.id);
     }
-    m_rows = m_model.rows(m_collapsed, m_hidden);
+    m_rows = m_model.rows(m_collapsed, m_hidden, m_selfClosedOpen);
 
     if (!m_model.filter().trimmed().isEmpty())
         m_list->placeholder = QStringLiteral("No card matches this filter.\nEsc clears it.");
@@ -4566,6 +4645,23 @@ void BoardView::refill()
                                              : QStringLiteral("%1 · %2 cards — click to fold")
                                                    .arg(row.title).arg(row.count),
                                          row.columnId));
+            continue;
+        }
+        // The self-closed fold row (#93WR): selectable, because Enter and ←/→ work on it, and
+        // nothing else — it carries no card id, so it cannot be dragged, opened, moved or deleted,
+        // and the handlers that read that id all step over it.
+        if (row.kind == board::Row::Fold) {
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            item->setToolTip(row.collapsed
+                                 ? QStringLiteral("Cards the agent finished and closed itself, "
+                                                  "without a verifier. Enter or → to show them.")
+                                 : QStringLiteral("Cards the agent finished and closed itself, "
+                                                  "without a verifier. Enter or ← to put them "
+                                                  "away."));
+            if (row.columnId == selectedFold()) {
+                m_list->setCurrentItem(item);
+                item->setSelected(true);
+            }
             continue;
         }
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
@@ -4749,6 +4845,49 @@ void BoardView::toggleSection(QString columnId)
             m_selected.clear();
         }
     }
+}
+
+// The self-closed fold row (#93WR): show this section's self-closed cards, or put them away.
+// Folding while the selection is inside moves the selection to the fold row, which is where ←
+// left off and where → carries on from.
+void BoardView::toggleSelfClosed(QString columnId)
+{
+    if (columnId.isEmpty())
+        return;
+    const bool hadFocus = m_list->hasFocus();
+    if (m_selfClosedOpen.contains(columnId))
+        m_selfClosedOpen.remove(columnId);
+    else
+        m_selfClosedOpen.insert(columnId);
+    rebuild();
+    const int fold = board::rowOfFold(m_rows, columnId);
+    if (board::rowOfCard(m_rows, m_selected) >= 0)
+        return;               // the selected card is still on screen: nothing to move
+    m_selected.clear();
+    if (fold < 0) {
+        m_selectedFold.clear();
+        return;               // the row itself has gone (its section folded, or a filter)
+    }
+    m_selectedFold = columnId;
+    if (hadFocus)
+        selectRow(fold);
+}
+
+QJsonArray BoardView::openSelfClosed() const
+{
+    QStringList ids(m_selfClosedOpen.begin(), m_selfClosedOpen.end());
+    ids.sort();
+    return QJsonArray::fromStringList(ids);
+}
+
+void BoardView::setOpenSelfClosed(const QJsonArray &state)
+{
+    m_selfClosedOpen.clear();
+    for (const QJsonValue &value : state)
+        if (!value.toString().isEmpty())
+            m_selfClosedOpen.insert(value.toString());
+    if (m_open)
+        rebuild();
 }
 
 QJsonArray BoardView::collapsedSections() const
@@ -5223,6 +5362,29 @@ void BoardView::focusFilter()
 void BoardView::selectCard(const QString &id)
 {
     m_selected = id;
+    m_selectedFold.clear();
+    // A card the fold row is holding cannot be stood on until the row is open (#93WR), so a card
+    // reached by id — a `#ID` in a card's or a thread's text, a link from the helper, the cleanup
+    // panel's anchors — opens what holds it: its self-closed group, and the section around it.
+    // Only for a self-closed card: every other card is where it always was.
+    if (board::rowOfCard(m_rows, id) < 0) {
+        const board::Card *card = m_model.card(id);
+        const QString section = card ? m_model.sectionOf(*card) : QString();
+        if (card && board::selfClosed(*card) && !section.isEmpty()) {
+            bool opened = false;
+            if (!m_selfClosedOpen.contains(section)) {
+                m_selfClosedOpen.insert(section);
+                opened = true;
+            }
+            if (m_collapsed.contains(section)) {
+                m_collapsedSeeded = true;
+                m_collapsed.remove(section);
+                opened = true;
+            }
+            if (opened)
+                rebuild();
+        }
+    }
     const int at = board::rowOfCard(m_rows, id);
     if (at >= 0)
         selectRow(at);
@@ -5404,13 +5566,29 @@ void BoardView::shiftSection(int delta)
     moveCard(m_selected, ids.at(next), {}, {});
 }
 
-// Left folds the section the selection is in.
+// Left folds the section the selection is in — or, on the self-closed fold row or on one of its
+// cards, puts those cards away first (#93WR). One key, innermost first: ← on a self-closed card
+// lands on the fold row, ← again folds the whole section.
 void BoardView::foldSelected()
 {
+    if (!selectedFold().isEmpty()) {
+        const QString columnId = selectedFold();
+        if (m_selfClosedOpen.contains(columnId))
+            toggleSelfClosed(columnId);
+        else
+            toggleSection(columnId);
+        return;
+    }
     const int at = board::rowOfCard(m_rows, m_selected);
     if (at < 0)
         return;
-    toggleSection(m_rows.at(at).columnId);
+    const QString columnId = m_rows.at(at).columnId;
+    const board::Card *card = m_model.card(m_selected);
+    if (card && board::selfClosed(*card) && m_selfClosedOpen.contains(columnId)) {
+        toggleSelfClosed(columnId);
+        return;
+    }
+    toggleSection(columnId);
 }
 
 // Right unfolds the folded section nearest the selection, above or below, and stands on its
@@ -5419,6 +5597,17 @@ void BoardView::foldSelected()
 // rather than jumping back to whatever was folded at the top.
 void BoardView::unfoldNearest()
 {
+    // On the self-closed fold row (#93WR), → is that row's own key: it shows its cards, and on an
+    // open row it steps into the first of them, the way ← steps back out.
+    if (!selectedFold().isEmpty()) {
+        const QString columnId = selectedFold();
+        if (!m_selfClosedOpen.contains(columnId))
+            toggleSelfClosed(columnId);
+        const int first = board::stepRow(m_rows, board::rowOfFold(m_rows, columnId), 1);
+        if (first >= 0 && m_rows.at(first).kind == board::Row::Card)
+            selectRow(first);
+        return;
+    }
     int from = board::rowOfCard(m_rows, m_selected);
     if (from < 0)
         from = 0;
@@ -5637,7 +5826,12 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
             return true;
         case Qt::Key_Return:
         case Qt::Key_Enter:
-            openSelected();
+            // Enter on the self-closed fold row (#93WR) toggles it; a fold row is not a card and
+            // has nothing to open.
+            if (!selectedFold().isEmpty())
+                toggleSelfClosed(selectedFold());
+            else
+                openSelected();
             return true;
         default:
             break;
