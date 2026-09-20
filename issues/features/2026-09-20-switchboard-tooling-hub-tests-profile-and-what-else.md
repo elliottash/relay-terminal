@@ -1,14 +1,14 @@
 ---
 id: 7BM4
 type: work
-status: discussing
+status: executing
 labels: [feature, switchboard, tests, profiling]
 component: [gui, worker]
-waiting_on: owner
+assignee: claude-code
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [R9G7, SDXE], github: null}
+links: {plans: [], commits: [], evidence: [], related: [R9G7, SDXE, PF4K], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -20,6 +20,16 @@ do you also think there should be a test suites pane, potentially as an auxiliar
 why not have a profiling button as well? so you click a Profiling button from the swtichboard, and it profiles the project.
 
 do you understand what i am doing? are there other project / SWE tooling that we can smoothly add to the swtichboard? do research on what other tools do
+
+## Decisions
+- 2026-09-20, owner, on the four questions below: "i agree with those recommendations." So: the
+  Profile button asks for its target and ships the build first; Check is a gate on leaving
+  `needs-verification`, with a recorded override; the pane lists the attached project's tests
+  only; after the three surfaces, flaky-tests-become-cards comes first, then the dependencies
+  file, release notes, hotspots and TODO mining.
+- 2026-09-20, owner: "can you help me set up my machine and sphinxpad for the test suites /
+  profiling system." Both machines are runners: spark (aarch64, Ubuntu 24.04, g++ 13, Qt5) and
+  sphinxpad (x86_64, Ubuntu 26.04, clang, Qt5 and Qt6). Setup is `scripts/relay-tooling-setup`.
 
 ## Plan
 **Goal** — The Switchboard becomes the project's control panel, not only its tracker: every
@@ -69,11 +79,14 @@ Copilot) do, and what this repo already has. The findings below are the ones tha
    the **same commit** (Datadog), flake score = recency-weighted pass↔fail transitions (TestGrid).
    asv's per-benchmark source hash applies to tests: when the test's source changes, its history
    resets rather than producing a flake score built from two different tests.
-7. "Profile the project" is three different buttons in this repo, and only one works today:
-   GUI runtime needs `perf`, which `perf_event_paranoid=4` blocks (copy CLion: detect, explain,
-   offer the sysctl); the build has no `-ftime-trace` on g++ 13.3, so it is per-target times from
-   `.ninja_log` or a compiler-launcher timer; the Python tests profile with `py-spy` (no root) or
-   stdlib `cProfile`. Every profiling product shows a **table before the flame graph**, and with
+7. "Profile the project" is three different buttons in this repo. **Corrected 2026-09-20 after
+   reading #PF4K:** `perf_event_paranoid=4` on both machines blocks plain `perf`, but passwordless
+   `sudo -n perf` works on both, so the app target is not blocked — the tool runs `sudo -n perf`,
+   hands the output file back to the user, and explains itself only where sudo asks for a
+   password. The build has no `-ftime-trace` on spark's g++ 13.3 and `build/` is Unix Makefiles
+   (no `.ninja_log`), so on spark it is per-target times from a compiler-launcher timer; sphinxpad
+   has clang, so the per-header and per-template report (ClangBuildAnalyzer) runs there. The
+   Python tests profile with `py-spy` (no root) or stdlib `cProfile`. Every profiling product shows a **table before the flame graph**, and with
    no QtWebEngine the table is a `QTreeView` while the flame graph opens speedscope in the browser.
 8. None of the seven agent products parses test output into a per-test panel: they show raw logs
    or a recording. Parsed per-test results on a card are a differentiator. Two atoms to copy:
