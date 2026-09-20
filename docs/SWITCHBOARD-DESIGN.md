@@ -647,9 +647,17 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   no themeable rule of its own, and a row of box characters would wrap and be copied with the
   text). Bolder ink alone was what the owner could not see.
 - **Discuss and Comment have no buttons.** They are what the box does: **Enter** discusses,
-  **Ctrl+Shift+Enter** leaves a comment with no model call, and the placeholder says both. The row
-  keeps only what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
-  **Verify (v)**. The empty-thread line teaches the same three keys instead of naming buttons.
+  **Ctrl+Shift+Enter** leaves a comment with no model call, and the placeholder says both. What is
+  left is what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
+  **Verify (v)** — and since 2026-09-20 those three are a row of their own **above** the reply
+  frame (`boardCardActions`), not inside it: "move those buttons out of there (plan / execute /
+  etc), because they actually dont do anything in the chat box. can we instead put buttons like
+  that in a row above the chat box. they are actions the agent can take that dont require typing.
+  we put the 'clean up' button there for the main switchboard agent, for example" (owner). Their
+  keys, tooltips and behaviour are unchanged, and both still take whatever is typed in the box as
+  their note. The empty-thread line teaches the same three keys instead of naming buttons.
+- **The reply box is the pane's prompt box** (4.13a): one frame, the busy strip, a borderless
+  editor in the prompt font, and one chip strip under it carrying the model box alone.
 - **Stopping a turn is a strip, not a mode-swapped button.** While a turn runs, a line over the
   reply box reads `✦ Switchboarding · planning…` or `✦ Switchboarding · discussing…` with `✕ Stop planning` /
   `✕ Stop discussing` at its right (`boardBusyStrip`, `boardBusyLabel`, `boardStop`); the buttons
@@ -684,6 +692,34 @@ row, a query or a card — with every change announced as `Agent changed <label>
 · Undo` and undoable without an agent (protocol 30.6). The `switchboard` model role keeps its name
 and its model box, and is labelled **"Helper agent"**; each panel's header says where it is
 ("Switchboard agent", "Options helper", "Sessions helper").
+
+### 4.13a Every prompt box is the main pane's prompt box (#PBX1, owner 2026-09-20)
+
+The owner, comparing the main pane's prompt box with the helper panels: "i dont like the helper
+agent prompt UI … there is the useless help sentence, and then a bunch of wasted space, and then
+the tiny text box. and the buttons dont look as good", and "[remove] the send button on all, make
+it like the pane agent". So a pane's prompt box (`QFrame#composer`, `src/Pane.h`) is the reference
+and every other box in the app is that control:
+
+- **One rounded frame** on `@surface` with a 1 px border, a 10 px radius and the accent border
+  while the cursor is in it — `QFrame#boardChatBox` on the helper panel, `QFrame#boardReply` on
+  the card page, both written from `QFrame#composer`'s own values.
+- Inside it, top to bottom: **the busy strip** (what the turn is doing and the `✕ Stop` that ends
+  it), shown only while a turn runs, where a pane's "Relaying · …" line is; **the editor**,
+  borderless and in the prompt font, growing with what is typed; then **the chip strip**,
+  right-aligned: context left, the model box, the microphone, all one height and one style.
+- **No Send button anywhere.** Enter sends, as it always has in a pane, and the placeholder says
+  so. A turn is stopped by the busy strip's `✕ Stop` or by **Esc** in the box.
+- **Nothing else in the box.** An action that needs no typing goes in the row **above** it: Check
+  and Clean up on the Switchboard's head row, Plan / Execute / Verify above the card's box, all
+  wearing one face so every action row in the app reads the same.
+- **No help sentence and no reserved space.** The paragraph that used to stand over an empty
+  conversation is gone; the placeholder names the agent instead ("Ask the Switchboard agent —
+  Enter sends, a second prompt queues", "Ask the Options helper — …"), and the log is hidden
+  outright until there is a conversation, then grows with its content up to its cap (320 px on the
+  board, ~40 % of the pane elsewhere).
+
+Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`.
 
 ## 5. Referencing cards from the terminal
 
