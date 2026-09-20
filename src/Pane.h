@@ -1099,7 +1099,8 @@ public:
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
                 QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("planning"),
                 QStringLiteral("summaries"), QStringLiteral("suggestions"), QStringLiteral("chores"),
-                QStringLiteral("audit"), QStringLiteral("vision"), QStringLiteral("route_assist")};
+                QStringLiteral("audit"), QStringLiteral("loop_check"), QStringLiteral("vision"),
+                QStringLiteral("route_assist")};
     }
     // The pane-agent role was called "fast" until 2026-09-18 (see backend/relay_core/roles.py:
     // DEPRECATED_ROLES). Saved layouts and settings written before then still say "fast"; every
@@ -1120,6 +1121,7 @@ public:
             {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
             {QStringLiteral("chores"), QStringLiteral("Chores")},
             {QStringLiteral("audit"), QStringLiteral("Request audit")},
+            {QStringLiteral("loop_check"), QStringLiteral("Loop check")},
             {QStringLiteral("vision"), QStringLiteral("Vision")},
             {QStringLiteral("route_assist"), QStringLiteral("Route assist")}};
         return labels.value(role, role);
@@ -4106,8 +4108,11 @@ private:
     // Turn limits and request audit from Agent options (protocol 12.1).
     static QJsonObject requestOptions() {
         QSettings settings;
-        return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 256).toInt(), 1, 500)},
-                {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
+        // Uncapped by default (card #2CZP): both defaults are the clamp maxima, so an overnight run
+        // is not stopped by a count. The loop detector in the worker is what ends a turn that has
+        // stopped making progress; these are the fuse behind it.
+        return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 500).toInt(), 1, 500)},
+                {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 2000).toInt(), 1, 2000)},
                 // Idle deadline for a streamed model call (protocol 15), and the longer budget
                 // the first chunk alone may take (0: the same deadline, as it was before 15.1's
                 // second row — prefill on a large prompt is not a stalled stream).
@@ -8671,6 +8676,19 @@ private:
         if (type == QStringLiteral("completion_check")) {
             ensureLineStart();
             printInline(relay::RequestLedgerModel::completionCheckLine(event) + '\n', Ink::Note);
+            return true;
+        }
+        // Card #2CZP: with the turn limits raised to a backstop, what ends a turn going nowhere is
+        // the worker's loop detector. Its nudge is worth a line — it is the one thing that says why
+        // the agent is being told to change approach — and the cadence reminder is a status only.
+        if (type == QStringLiteral("loop_detected")) {
+            ensureLineStart();
+            printInline(relay::RequestLedgerModel::loopLine(event) + '\n', Ink::Note);
+            return true;
+        }
+        if (type == QStringLiteral("recitation")) {
+            status(QStringLiteral("Still working · %1 tool calls in this turn · recapping what is open")
+                       .arg(event.value(QStringLiteral("tool_calls")).toInt()));
             return true;
         }
         return false;

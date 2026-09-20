@@ -358,8 +358,8 @@ existing events keep their fields and meaning. Deviations from the research sket
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `max_steps` | int 1–500 | 50 | model calls per turn |
-| `max_tool_calls` | int 1–2000 | 150 | tool calls per turn |
+| `max_steps` | int 1–500 | 500 | model calls per turn; a backstop, not the working stop (12.10) |
+| `max_tool_calls` | int 1–2000 | 2000 | tool calls per turn; likewise |
 | `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
@@ -368,6 +368,13 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `fallback` | `{preset, model}` \| null | null | the model ranked second in Options › Models, tried first when a turn fails over (15.2.2); null or an unusable shape means no ranked fallback |
 | `approvals_ask` | string[] | `[]` | capabilities that draw an approval card before the call runs (27.6) |
 | `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
+
+**The turn limits are a fuse, not the stop (owner, 2026-09-20, card `#2CZP`).** Both defaults now
+sit at their own clamp maxima — the clamps are unchanged, 1–500 and 1–2000 — because people leave an
+agent working overnight and a turn that is still getting somewhere should not be ended for counting.
+What they still catch is a runaway turn; what ends a turn that has *stopped* getting somewhere is the
+loop detection in 12.10, which nudges first. The GUI's own defaults match (`src/Pane.h`, and the two
+Options › Security rows in `src/RelayWindow.h`, which now read "Backstop for a runaway turn").
 
 **Approvals (27.6, card #K2FV).** `approvals_ask` names capabilities from `edit`, `create`,
 `delete_or_move`, `read_outside`, `terminal`, `program`, `network`; an empty list means "ask about
@@ -396,6 +403,13 @@ This is a `done`, not an `error`: `agent_finished {outcome: "done", stop_reason:
 **not** paused. `turn_summary` also carries `stop_reason: "limit"`. The request stays `open` in the ledger and the
 model gets a note that the turn stopped at the limit. The GUI can offer "Continue" (send an ordinary `ask`).
 There is no "Stopped at the model-step limit" `error` any more.
+
+The loop detector (12.10) ends a turn through this same path, so **`stop_reason` stays `"limit"`**
+and nothing on the Continue path changes. It is told apart by `limit.which == "loop"`, and the
+`limit` object then carries four more keys — `pattern` (`repeat`, `error`, `cycle` or `monologue`),
+`tool` (empty for `monologue`), `count`, `detail` — plus `nudges`, how many nudges were ignored
+before the stop. The step and tool-call counts are still there but are nowhere near their maxima,
+which is why the GUI reads `which` before printing them (`RequestLedgerModel::limitLine`).
 
 ### 12.3 Request ledger
 
@@ -544,7 +558,12 @@ requests (or new unlinked todos touched this turn) are still `pending`/`in_progr
 
 appends a user note ("Relay completion check 1/2: before finishing, these are still open: … Do them now, or call
 update_todos to mark each one cancelled, deferred or blocked with a reason.") and calls the model again, at most
-twice per turn (and never past `max_steps`). The turn then ends normally.
+twice per turn (and never past `max_steps`). The turn then ends normally. This note, like the todo
+reminders, is `relay_kind: "note"`; the cadence recitation of 12.10 is `relay_kind: "recitation"`, so
+the two are told apart in a saved session. A model that answers the same thing again instead of
+acting is the `monologue` pattern (12.10), and it is judged here — the completion check is the only
+thing that keeps a turn without tool calls going, so a nudge is only ever added to a turn that was
+going to continue anyway.
 
 **Open item:** `{kind: "request"|"todo", id, status, preview (≤120 chars), request_ids? (todos only)}`.
 `done` gains `open_items: [open item…]` on every turn (empty when nothing is open): unfinished requests of the turn
@@ -609,7 +628,9 @@ without the JSON object gives `unaddressed: []` plus `error`.
 ### 12.9 Deviations from the research sketches
 
 - The limit outcome is `done {stop_reason: "limit"}` rather than a new outcome `limit`, so the current GUI keeps the
-  queue running without changes. Owner default is 50 steps / 150 tool calls (research suggested 60/150).
+  queue running without changes. The owner default was 50 steps / 150 tool calls (research suggested
+  60/150); since 2026-09-20 (card `#2CZP`) both defaults are the clamp maxima, 500 and 2000, and the
+  loop detection of 12.10 is what ends a turn going nowhere.
 - `queued` carries `ledger_id` (the sketch's `request_id` already means the GUI's ask id). Commands take
   `ledger_id`, because `id` is the correlation id everywhere else in this protocol; `request_set` also accepts
   `reason`, and `request_reask` was added.
@@ -620,6 +641,72 @@ without the JSON object gives `unaddressed: []` plus `error`.
 - On cancel/failure the interrupted tool group is completed with error results instead of being removed, so the
   model still sees which tools ran.
 - Requests have one extra status, `cancelled` (model-cancelled via todos), distinct from `cancelled_by_user`.
+
+### 12.10 Loop detection, nudges and cadence recitation (v4.0, 2026-09-20)
+
+Uncapping the turn limits (12.1) took away the only thing that used to end a turn which had stopped
+making progress, so three layers replace it (owner, 2026-09-20, card `#2CZP`). Backend:
+`backend/relay_core/loopdetect.py`, with `_observe_call`, `_handle_loop`, `_loop_verdict` and
+`_recitation` in `agent.py`; tests: `tests/test_agent.py`. All three are silent when nothing is
+wrong: no event, no message, no model call.
+
+**1. A deterministic detector**, asked about every tool result and every model message that makes no
+tool call. It costs nothing and sends nothing anywhere: it keeps a short window of
+`(tool, arguments-hash, result-hash, error?)` triples, never the payloads, with volatile result
+fields (pids, timings, timestamps) scrubbed and trailing whitespace stripped before hashing, so
+output that differs only in how long it took is the same output. Every pattern it knows is defined
+over **consecutive** observations, which is what makes it safe to run on every call — the reasoning
+is in [ARCHITECTURE.md](ARCHITECTURE.md), under the agent loop.
+
+| `pattern` | Constant (`loopdetect.py`) | Fires when |
+|---|---|---|
+| `repeat` | `SAME_RESULT_REPEATS` = 4 | the same tool, the same arguments and the same result, 4 times in a row |
+| `error` | `SAME_ERROR_REPEATS` = 3 | the same tool with the same arguments fails 3 times in a row (the results may differ) |
+| `cycle` | `CYCLE_CALLS` = 6 | the last 6 calls repeat a 2- or 3-call cycle |
+| `monologue` | `MONOLOGUE_REPEATS` = 3 | the same model message, with no tool call, 3 times in a row |
+
+`repeat` is checked first (six identical calls are a repeat, not a 2-cycle), and a fired pattern
+clears the run, so the next one needs a fresh full run rather than firing again on every later call.
+A pattern found inside a tool batch is **parked and acted on at the next step boundary**: a
+user-role note must never come between an assistant's tool calls and their results.
+
+**2. Cadence recitation**, every `RECITE_STEPS` = 25 model steps or `RECITE_TOOL_CALLS` = 50 tool
+calls, whichever comes first. On a long run the ask itself scrolls out of recent attention, so the
+worker says it again — the prompt that opened the turn, the open ledger items and todos (12.6's open
+items), and the last few tool names. It is rendered from state Relay already holds, so it costs no
+model call. The message is a user message with `relay_kind: "recitation"`, and the worker emits
+
+`recitation {turn_id, steps, tool_calls}`
+
+Nothing is emitted or added when nothing is open, and a subagent never gets one (it has no ledger:
+`track_requests` is off).
+
+**3. An LLM double-check**, on a detector trigger only — never on a timer, so it costs at most one
+short completion per nudge. The `loop_check` role (Lite tier, 13.1) is given the pattern and the
+last `LOOP_CHECK_RECENT` = 12 rendered actions (arguments through `tool_labels.safe_args`, since
+they leave this model for another one) and answers `loop` or `productive` on one line, against a
+whitelist of productive repetition in its prompt. The call runs on a daemon thread joined for at
+most `LOOP_CHECK_TIMEOUT_S` = 20 s: a timeout, an error or an unreadable answer leaves the
+deterministic verdict standing, and a worker with no roles configured (a subagent, a test) skips the
+check entirely. `productive` clears the detector's run and nothing else happens. Event:
+
+`loop_check {turn_id, model, pattern, verdict: "loop"|"productive"|"unknown", error?}`
+
+**Escalation.** A pattern the double-check did not clear adds a user note (`relay_kind: "note"`)
+naming what repeated and asking for a different approach — a different tool, different arguments, a
+different angle — or a plain statement of being blocked, and the worker emits
+
+`loop_detected {turn_id, pattern, tool, count, detail, nudge, max_nudges, stopping}`
+
+`nudge` counts from 1, `max_nudges` is `loopdetect.MAX_NUDGES` = 2, and `detail` is one short line
+for a human: the failing error's first line, the cycle's tools, or the repeated message. The second
+nudge says in its text that the turn will be stopped if it continues. When two nudges have been
+ignored, the next trigger carries `stopping: true` and ends the turn through the same
+`_stop_at_limit` a count uses — `stop_reason: "limit"`, `limit.which == "loop"` (12.2) — and the
+model gets a note saying the request is unfinished and to continue it differently when asked.
+
+The GUI prints both events in the pane (`RequestLedgerModel::loopLine`, and `limitLine` for the
+stop); `tests/requests_test.cpp` covers those lines.
 
 ## 13. Model roles (v1.3, 2026-09-17; `planning` added v3.4, 2026-09-19)
 
@@ -646,13 +733,21 @@ The newest role is `planning`, which serves plan-mode turns: by default the pane
 | `suggestions` | next-command and next-prompt suggestions | Flash tier |
 | `chores` | duplicate checks, labels, titles, note scans | Lite tier |
 | `audit` | the request audit (12.6) | Lite tier |
+| `loop_check` | the loop double-check (12.10): asked only when a turn repeats itself, before it is stopped | Lite tier |
 | `vision` | image turns on presets without image support | GLM main → `glm-5.3-flash`, otherwise main |
 | `route_assist` | the routing assist call (section 11) | `google/gemini-3.5-flash-lite` on OpenRouter when a key is stored, else main |
 | `planning` | plan-mode turns (section 6) | the pane's own model at max reasoning; no swap when the effort is already max or the provider has no effort knob (13.11) |
 
 Side calls by role: compaction summaries and recaps use `summaries`; next-command/next-prompt suggestions
-use `suggestions`; the request audit uses `audit`; routing assist uses `route_assist`; instruction
-synthesis stays on `main`.
+use `suggestions`; the request audit uses `audit`; the loop double-check uses `loop_check`, and only
+after the deterministic detector has already fired (12.10), never on a timer; routing assist uses
+`route_assist`; instruction synthesis stays on `main`.
+
+`switchboard` is **labelled "Helper agent"** in the UI since 2026-09-20 (card `#FEJQ`, owner): the
+role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and
+Sessions alike (section 30), so naming it after one of its panes had stopped being true. The
+protocol name, the stored settings, the model box and its Main default are unchanged — the label is
+the only thing that moved.
 
 `switchboard` is **labelled "Helper agent"** in the UI since 2026-09-20 (card `#FEJQ`, owner): the
 role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and

@@ -1,0 +1,238 @@
+configure with no max_steps / max_tool_calls in the request:
+
+{
+  "max_steps": 500,
+  "max_tool_calls": 2000
+}
+
+full configured event:
+{
+  "event": "configured",
+  "model": "stub",
+  "skills": 1,
+  "agent_role": "main",
+  "roles": {
+    "main": {
+      "role": "main",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Main agent",
+      "tier": null
+    },
+    "terminal_use": {
+      "role": "terminal_use",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Terminal-use agent",
+      "tier": "main"
+    },
+    "subagent": {
+      "role": "subagent",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Subagent",
+      "tier": "main"
+    },
+    "switchboard": {
+      "role": "switchboard",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Helper agent",
+      "tier": "main"
+    },
+    "flash": {
+      "role": "flash",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Flash agent",
+      "tier": "main"
+    },
+    "local": {
+      "role": "local",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Local agent",
+      "tier": "main",
+      "note": "No local model is set up; using Main."
+    },
+    "planning": {
+      "role": "planning",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": "max",
+      "source": "default",
+      "label": "Plan mode",
+      "tier": "high"
+    },
+    "summaries": {
+      "role": "summaries",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Summaries",
+      "tier": "main"
+    },
+    "suggestions": {
+      "role": "suggestions",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Suggestions",
+      "tier": "main"
+    },
+    "chores": {
+      "role": "chores",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Chores",
+      "tier": "main"
+    },
+    "audit": {
+      "role": "audit",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Request audit",
+      "tier": "main"
+    },
+    "loop_check": {
+      "role": "loop_check",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Loop check",
+      "tier": "main"
+    },
+    "vision": {
+      "role": "vision",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Vision",
+      "tier": null
+    },
+    "route_assist": {
+      "role": "route_assist",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main",
+      "label": "Route assist",
+      "tier": null
+    }
+  },
+  "tiers": {
+    "high": {
+      "tier": "high",
+      "label": "High",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": "max",
+      "source": "default",
+      "using": "high"
+    },
+    "main": {
+      "tier": "main",
+      "label": "Main",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "main"
+    },
+    "flash": {
+      "tier": "flash",
+      "label": "Flash",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "default",
+      "using": "main"
+    },
+    "lite": {
+      "tier": "lite",
+      "label": "Lite",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "default",
+      "using": "main"
+    },
+    "local": {
+      "tier": "local",
+      "label": "Local",
+      "model": "stub",
+      "preset": null,
+      "base_url": "http://127.0.0.1:39789/v1",
+      "effort": null,
+      "source": "default",
+      "using": "main",
+      "note": "No local model is set up; using Main."
+    }
+  },
+  "context_window": 128000,
+  "compact_threshold": 0.8,
+  "limit_tokens": 71232,
+  "effort": null,
+  "mode": "build",
+  "instructions": [],
+  "session_id": "1f1f7b41c8c84af4ae67ff17deb28030",
+  "plans_dir": "/tmp/relay-2czp-dx25fa02/.relay/plans",
+  "session_dir": "/tmp/relay-2czp-dx25fa02/home/.local/share/relay/sessions/f2683f7840692941",
+  "max_steps": 500,
+  "max_tool_calls": 2000,
+  "completion_check": true,
+  "audit_requests": false,
+  "todo_tool": true,
+  "stall_timeout_s": 60.0,
+  "first_token_timeout_s": 0.0,
+  "max_program_writes": 20,
+  "failover": true,
+  "failover_hosted": false,
+  "fallback": null,
+  "instructions_max_bytes": 32768,
+  "instructions_bytes": 0,
+  "agents": 2,
+  "skill_commands": [
+    {
+      "name": "local-model-setup",
+      "description": "Set up a local model server (llama.cpp, Ollama, vLLM) on this machine and register it with Relay: survey, choose, serve, smoke-test, register."
+    }
+  ]
+}

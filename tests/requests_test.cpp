@@ -347,6 +347,11 @@ private slots:
         QCOMPARE(RequestLedgerModel::limitLine(json("{'stop_reason':'limit','limit':{'which':'steps','steps':50,'max_steps':50,'tool_calls':12,'max_tool_calls':150}}")),
                  QStringLiteral("‖ Stopped at the step limit (50 model steps, limit 50) · unfinished tasks stay open"));
         QVERIFY(RequestLedgerModel::limitLine(json("{'limit':{'which':'tool_calls','tool_calls':151,'max_tool_calls':150}}")).contains(QStringLiteral("tool-call limit (151 tool calls")));
+        // Card #2CZP: the loop detector stops a turn through the same stop reason, so the line has
+        // to say what repeated rather than print counts that are nowhere near their limits.
+        QCOMPARE(RequestLedgerModel::limitLine(json("{'stop_reason':'limit','limit':{'which':'loop','pattern':'repeat','tool':'run_command','count':4,'steps':31,'max_steps':500,'tool_calls':62,'max_tool_calls':2000}}")),
+                 QStringLiteral("‖ Stopped: repeating itself (run_command 4 times with the same result) · unfinished tasks stay open"));
+        QVERIFY(RequestLedgerModel::limitLine(json("{'limit':{'which':'loop','pattern':'monologue','tool':'','count':3}}")).contains(QStringLiteral("the same answer 3 times")));
         QCOMPARE(RequestLedgerModel::completionCheckLine(json("{'reminder':1,'max_reminders':2}")), QStringLiteral("✦ checking open items (1/2)"));
         QCOMPARE(RequestLedgerModel::auditLine(json("{'unaddressed':[{'request_id':'R2','quote':'update the docs'}]}")),
                  QStringLiteral("may be unaddressed: “update the docs”"));   // the user's words, not the ledger id

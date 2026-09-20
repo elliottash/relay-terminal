@@ -1,0 +1,46 @@
+test_cancel_while_command_runs (tests.test_agent.AgentTests.test_cancel_while_command_runs) ... ok
+test_command_runs_without_approval (tests.test_agent.AgentTests.test_command_runs_without_approval) ... ok
+test_file_tools_still_confined_to_workspace (tests.test_agent.AgentTests.test_file_tools_still_confined_to_workspace) ... ok
+test_reset_conversation_emits_the_fresh_context (tests.test_agent.AgentTests.test_reset_conversation_emits_the_fresh_context) ... ok
+test_unknown_tool_is_not_executed (tests.test_agent.AgentTests.test_unknown_tool_is_not_executed) ... ok
+test_write_runs_without_approval_and_shows_diff (tests.test_agent.AgentTests.test_write_runs_without_approval_and_shows_diff) ... ok
+test_context_note_is_labelled_and_prepended (tests.test_agent.ContextTests.test_context_note_is_labelled_and_prepended) ... ok
+test_control_characters_stripped_from_program (tests.test_agent.ContextTests.test_control_characters_stripped_from_program) ... ok
+test_invalid_context_rejected (tests.test_agent.ContextTests.test_invalid_context_rejected) ... ok
+test_no_context_leaves_prompt_unchanged (tests.test_agent.ContextTests.test_no_context_leaves_prompt_unchanged) ... ok
+test_terminal_directory_alone_is_still_context (tests.test_agent.ContextTests.test_terminal_directory_alone_is_still_context) ... ok
+test_worker_passes_context_to_queue (tests.test_agent.ContextTests.test_worker_passes_context_to_queue) ... ok
+test_a_long_turn_runs_past_the_old_step_and_tool_call_limits (tests.test_agent.LoopAndRecitationTests.test_a_long_turn_runs_past_the_old_step_and_tool_call_limits) ... ok
+test_a_loop_verdict_confirms_the_pattern_and_a_failing_check_does_not_block_the_turn (tests.test_agent.LoopAndRecitationTests.test_a_loop_verdict_confirms_the_pattern_and_a_failing_check_does_not_block_the_turn) ... ok
+test_a_productive_verdict_from_the_double_check_clears_the_detector (tests.test_agent.LoopAndRecitationTests.test_a_productive_verdict_from_the_double_check_clears_the_detector) ... ok
+test_a_repeated_failing_call_is_nudged_twice_and_then_stops_the_turn (tests.test_agent.LoopAndRecitationTests.test_a_repeated_failing_call_is_nudged_twice_and_then_stops_the_turn) ... ok
+test_a_short_turn_and_a_subagent_are_never_recited_to (tests.test_agent.LoopAndRecitationTests.test_a_short_turn_and_a_subagent_are_never_recited_to) ... ok
+test_a_step_that_calls_many_tools_reaches_the_tool_call_mark_first (tests.test_agent.LoopAndRecitationTests.test_a_step_that_calls_many_tools_reaches_the_tool_call_mark_first) ... ok
+test_the_cadence_reminder_arrives_on_the_step_mark_and_not_before (tests.test_agent.LoopAndRecitationTests.test_the_cadence_reminder_arrives_on_the_step_mark_and_not_before) ... ok
+test_the_defaults_are_the_clamp_maxima_not_a_working_limit (tests.test_agent.LoopAndRecitationTests.test_the_defaults_are_the_clamp_maxima_not_a_working_limit) ... ok
+test_a_second_stall_fails_the_turn_and_keeps_the_request_open (tests.test_agent.StallRetryTests.test_a_second_stall_fails_the_turn_and_keeps_the_request_open) ... ok
+test_a_started_answer_is_not_retried (tests.test_agent.StallRetryTests.test_a_started_answer_is_not_retried) ... ok
+test_retried_once_and_the_second_try_sends_the_same_conversation (tests.test_agent.StallRetryTests.test_retried_once_and_the_second_try_sends_the_same_conversation) ... ok
+test_stall_timeout_is_an_agent_option (tests.test_agent.StallRetryTests.test_stall_timeout_is_an_agent_option) ... ok
+test_the_first_token_may_be_given_longer_than_the_gaps_between_chunks (tests.test_agent.StallRetryTests.test_the_first_token_may_be_given_longer_than_the_gaps_between_chunks)
+Options › "Wait longer for the first token": prefill on a big prompt is not a stall. ... ok
+test_replies_are_asked_for_in_markdown (tests.test_agent.SystemPromptTests.test_replies_are_asked_for_in_markdown) ... ok
+test_a_failed_call_says_why (tests.test_agent.ToolLabelEventTests.test_a_failed_call_says_why) ... ok
+test_a_write_carries_its_diff_and_the_summary_carries_the_label (tests.test_agent.ToolLabelEventTests.test_a_write_carries_its_diff_and_the_summary_carries_the_label) ... ok
+test_an_edit_says_what_changed (tests.test_agent.ToolLabelEventTests.test_an_edit_says_what_changed) ... ok
+test_run_command_events_carry_the_label (tests.test_agent.ToolLabelEventTests.test_run_command_events_carry_the_label) ... ok
+test_the_stored_detail_of_a_write_is_its_diff (tests.test_agent.ToolLabelEventTests.test_the_stored_detail_of_a_write_is_its_diff) ... ok
+test_the_stored_output_gains_a_detail_and_keeps_everything_else (tests.test_agent.ToolLabelEventTests.test_the_stored_output_gains_a_detail_and_keeps_everything_else) ... ok
+test_a_filtered_response_is_not_retried (tests.test_agent.TruncationRetryTests.test_a_filtered_response_is_not_retried) ... ok
+test_a_second_cut_off_fails_the_turn_and_keeps_the_request_open (tests.test_agent.TruncationRetryTests.test_a_second_cut_off_fails_the_turn_and_keeps_the_request_open) ... ok
+test_an_answer_that_started_is_not_retried_but_is_kept (tests.test_agent.TruncationRetryTests.test_an_answer_that_started_is_not_retried_but_is_kept) ... ok
+test_retried_once_with_a_note_that_says_why (tests.test_agent.TruncationRetryTests.test_retried_once_with_a_note_that_says_why) ... ok
+test_agent_requires_config (tests.test_agent.WorkerTests.test_agent_requires_config) ... ok
+test_configuration_does_not_contact_provider_or_echo_key (tests.test_agent.WorkerTests.test_configuration_does_not_contact_provider_or_echo_key) ... ok
+test_malformed_request_does_not_crash (tests.test_agent.WorkerTests.test_malformed_request_does_not_crash) ... ok
+test_route_without_any_provider (tests.test_agent.WorkerTests.test_route_without_any_provider) ... ok
+
+----------------------------------------------------------------------
+Ran 40 tests in 1.300s
+
+OK

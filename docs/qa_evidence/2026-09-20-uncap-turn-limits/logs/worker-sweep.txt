@@ -1,0 +1,9 @@
+sweep: 30 distinct reads in one turn
+====================================
+
+tool_result events: 30
+model steps: 31  (last status: Requesting model · step 31/500)
+
+events:
+  {"event": "recitation", "turn_id": "f5321e810eb24d99b48753338519c601", "steps": 25, "tool_calls": 25}
+  {"event": "done", "turn_id": "f5321e810eb24d99b48753338519c601"}

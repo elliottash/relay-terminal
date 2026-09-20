@@ -16,6 +16,7 @@ from typing import Callable
 from . import context as compaction
 from . import conv_index
 from . import logs
+from . import loopdetect
 from . import route_assist
 from . import titles as session_titles
 from . import approvals
@@ -53,16 +54,30 @@ MAX_TURN_LOG = 50           # turns whose tool results and transcript stay avail
 MID_TURN_SAVE_S = 10.0      # how often a turn still running writes its session (_autosave_soon)
 TRANSCRIPT_CONTENT_CAP = 8000
 SUMMARY_PREVIEW_CAP = 160
-# Turn limits (owner decision 2026-09-17: 50 model steps, 150 tool calls, configurable). Hitting one ends the
-# turn with `done {stop_reason: "limit"}`, which does not pause the queue.
-DEFAULT_MAX_STEPS = 256
-DEFAULT_MAX_TOOL_CALLS = 150
+# Turn limits. Uncapped by default since 2026-09-20 (owner, card #2CZP: "people want to have long
+# agent runs over night"): the defaults sit at `validate_turn_options`' clamp maxima, so they are a
+# backstop fuse for a runaway turn rather than the working stop. What ends a turn that has stopped
+# making progress is the loop detector below (loopdetect.py), which nudges first and only stops a
+# turn that ignored two nudges. Both remain configurable (Options > Security, protocol 12.1);
+# hitting either still ends the turn with `done {stop_reason: "limit"}`, which does not pause the queue.
+DEFAULT_MAX_STEPS = 500
+DEFAULT_MAX_TOOL_CALLS = 2000
 MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
 STALE_TODO_STEPS = 8
 # Tool calls into a turn before nudging a model that wrote no todo list (card D8VN). Counted in tool
 # calls, not steps: glm-5.3 issues every write of a five-part job in one parallel batch, so by step 4
 # the work is done and a step threshold fires too late to help. A single simple ask stays under this.
 NO_LIST_TOOL_CALLS = 4
+# Cadence recitation (card #2CZP, the Manus todo.md pattern): with no turn limit doing the work,
+# the ask itself scrolls out of recent attention on a long run. Every 25 model steps or 50 tool
+# calls, whichever comes first, the original request, the open ledger items and the open todos are
+# said again. Silent when nothing is open, and never sent to a subagent (it has no ledger).
+RECITE_STEPS = 25
+RECITE_TOOL_CALLS = 50
+# How long the trigger-only loop double-check (a Lite-role side call) may hold the turn before its
+# deterministic verdict stands. A check never blocks a turn: the thread is a daemon and abandoned.
+LOOP_CHECK_TIMEOUT_S = 20.0
+LOOP_CHECK_RECENT = 12         # observations described to the double-check
 OPEN_ITEM_PREVIEW = 120
 # A stalled model call is retried once per turn, and only when nothing of the answer arrived
 # (issue SQAM). See _model_call for why that is the whole safety argument.
@@ -1371,7 +1386,14 @@ class Agent:
         record = self._begin_record(turn_id if isinstance(turn_id, str) and turn_id else f"t{_TURN_PREFIX}-{next(_TURN_COUNTER)}", prompt)
         turn_id = record["turn_id"]
         ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0,
-               "no_list_note": False, "takeover": False}
+               "no_list_note": False, "takeover": False,
+               # Card #2CZP. `loop` watches the tool calls and the model's own messages for the four
+               # deterministic patterns; `loop_pattern` carries one it found from inside a tool batch
+               # out to the next step boundary, because a note must never be added between an
+               # assistant's tool calls and their results. `nudges` counts the ones already sent:
+               # past loopdetect.MAX_NUDGES the turn is stopped. `recited_*` are the cadence marks.
+               "loop": loopdetect.Detector(), "loop_pattern": None, "nudges": 0, "recent": [],
+               "recited_step": 0, "recited_calls": 0, "prompt": prompt}
         self._turn_ctx = ctx
         if self.board is not None:
             # Switchboard write budgets are per turn (design 6.3).
@@ -1443,6 +1465,14 @@ class Agent:
                     steered = self.steer_source()
                     if steered:
                         add(self._steer_message(steered, ctx, turn))
+                # A loop the detector found inside the last tool batch is answered here, at the step
+                # boundary: this is the only place a user-role note may join the conversation without
+                # separating an assistant's tool calls from their results (card #2CZP).
+                pattern = ctx["loop_pattern"]
+                ctx["loop_pattern"] = None
+                if pattern is not None and self._handle_loop(record, ctx, pattern, add):
+                    self._stop_at_limit(record, ctx, steps, calls_used, pattern=pattern)
+                    return
                 if (self._todos_enabled() and ctx["since_todos"] >= STALE_TODO_STEPS
                         and self.todos.open_items(include_delegated=False)):
                     add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(include_delegated=False),
@@ -1456,6 +1486,16 @@ class Agent:
                         and calls_used >= NO_LIST_TOOL_CALLS):
                     add({"role": "user", "content": todo_tool.no_list_reminder_text(calls_used), "relay_kind": "note"})
                     ctx["no_list_note"] = True
+                # Cadence recitation (card #2CZP): with the turn limits raised to a backstop, a long
+                # run's original ask would otherwise sit further and further back in the context.
+                if (steps - ctx["recited_step"] >= RECITE_STEPS
+                        or calls_used - ctx["recited_calls"] >= RECITE_TOOL_CALLS):
+                    ctx["recited_step"], ctx["recited_calls"] = steps, calls_used
+                    recital = self._recitation(ctx)
+                    if recital:
+                        add({"role": "user", "content": recital, "relay_kind": "recitation"})
+                        self.emit({"event": "recitation", "turn_id": turn_id, "steps": steps,
+                                   "tool_calls": calls_used})
                 # A model switched mid-turn takes over here, before the next request and before the
                 # compaction check, so a smaller window is checked against the conversation (3ES1).
                 applied = self.apply_pending_model(turn_id, steps + 1, "step")
@@ -1492,6 +1532,11 @@ class Agent:
                 self.emit(self.context_event())
                 calls = message.get("tool_calls", [])
                 if not calls:
+                    # Monologue (card #2CZP): the same answer again, with no action taken. It can only
+                    # reach the threshold through the completion checks below — they are the one thing
+                    # that keeps a turn without tool calls going — so the nudge is sent inside that
+                    # branch, where the turn continues anyway, and never to extend one about to end.
+                    monologue = ctx["loop"].observe_message(message.get("content") or "", False)
                     open_items = self._open_items(ctx) if self.completion_check else []
                     if open_items and reminders < MAX_COMPLETION_REMINDERS and steps < self.max_steps:
                         reminders += 1
@@ -1499,6 +1544,9 @@ class Agent:
                                    "reminder": reminders, "max_reminders": MAX_COMPLETION_REMINDERS})
                         add({"role": "user", "content": self._completion_reminder(open_items, reminders),
                              "relay_kind": "note"})
+                        if monologue is not None and self._handle_loop(record, ctx, monologue, add):
+                            self._stop_at_limit(record, ctx, steps, calls_used, pattern=monologue)
+                            return
                         continue
                     if self.track_requests:
                         self.requests.finish_turn(turn_id, True, self.todos.items)
@@ -1542,6 +1590,7 @@ class Agent:
                                 self.emit({"event": "tool_result", "tool": func["name"], "result": result,
                                            "label": label, "ms": ms,
                                            "turn_id": turn_id, "call_id": call["id"]})
+                                self._observe_call(ctx, func["name"], label_args or func.get("arguments"), result)
                                 continue
                             prepared = self._prepare(func["name"], args)
                             preview = prepared.preview
@@ -1566,6 +1615,11 @@ class Agent:
                     if label_diff:
                         event["diff"] = label_diff
                     self.emit(event)
+                    # The tool budget's own refusal is not the model repeating itself: it is the same
+                    # synthetic error for every remaining call of the batch, and the limit check at
+                    # the top of the loop ends the turn before any nudge could be read.
+                    if calls_used <= self.max_tool_calls:
+                        self._observe_call(ctx, func["name"], label_args or func.get("arguments"), result)
                 batch = None
         except Cancelled:
             # subagents: stop this turn's foreground subagents. Delivered notes stay in the conversation now.
@@ -2166,23 +2220,138 @@ class Agent:
             pass
         return True
 
+    # ----- loop detection (card #2CZP) --------------------------------------------------
+    def _observe_call(self, ctx: dict, name: str, args, result) -> None:
+        """Show one finished tool call to the turn's loop detector, and keep a line about it.
+
+        The line is what the double-check is shown if a pattern fires; it goes through
+        ``tool_labels.safe_args`` because it leaves this model for another one. A pattern found here
+        is parked in ``ctx["loop_pattern"]`` rather than acted on: this runs inside a tool batch, and
+        a user-role note may not come between an assistant's tool calls and their results.
+        """
+        call = loopdetect.make_call(name, args, result)
+        preview = json.dumps(tool_labels.safe_args(name, args), ensure_ascii=False)[:200]
+        ctx["recent"].append(f"{name} {preview} -> {'error' if call.error else 'ok'}")
+        del ctx["recent"][:-LOOP_CHECK_RECENT]
+        found = ctx["loop"].observe_call(call)
+        if found is not None and ctx["loop_pattern"] is None:
+            ctx["loop_pattern"] = found
+
+    def _handle_loop(self, record: dict, ctx: dict, pattern, add) -> bool:
+        """Answer a detected pattern. Returns True when the turn must stop.
+
+        The deterministic verdict is nudged unless the double-check says the repetition is
+        productive; each nudge names the pattern and asks for a different approach or a plain
+        "blocked". Past ``loopdetect.MAX_NUDGES`` ignored nudges the turn ends cleanly, through
+        ``_stop_at_limit`` — the same ``stop_reason: "limit"`` the GUI's Continue already handles.
+        """
+        if self._loop_verdict(ctx, pattern) is False:
+            ctx["loop"].clear()
+            return False
+        ctx["nudges"] += 1
+        stopping = ctx["nudges"] > loopdetect.MAX_NUDGES
+        logs.event(_log, "loop_detected", session=self.session_id, turn=ctx["turn_id"],
+                   pattern=pattern.kind, tool=pattern.tool or None, count=pattern.count,
+                   nudge=ctx["nudges"], stopping=stopping)
+        self.emit({"event": "loop_detected", "turn_id": ctx["turn_id"], "pattern": pattern.kind,
+                   "tool": pattern.tool, "count": pattern.count, "detail": pattern.detail,
+                   "nudge": ctx["nudges"], "max_nudges": loopdetect.MAX_NUDGES, "stopping": stopping})
+        if stopping:
+            return True
+        add({"role": "user", "relay_kind": "note",
+             "content": loopdetect.nudge_text(pattern, ctx["nudges"])})
+        return False
+
+    def _loop_verdict(self, ctx: dict, pattern) -> bool | None:
+        """The trigger-only double-check: a Lite-role model says loop or productive.
+
+        Never on a timer, and never blocking: the call runs on a daemon thread and is abandoned
+        after ``LOOP_CHECK_TIMEOUT_S``, an error or an unreadable answer, all of which leave the
+        deterministic verdict standing. With no roles configured (a subagent, a unit test) there is
+        no cheap model to ask and the detector's own verdict is the whole answer.
+        """
+        if self.roles is None:
+            return None
+        out: dict = {}
+
+        def work():
+            try:
+                provider = self.side_provider(cheap=True, role="loop_check",
+                                              max_tokens=loopdetect.CHECK_MAX_TOKENS)
+                out["model"] = self.role_model("loop_check")
+                out["verdict"] = loopdetect.run_check(provider, pattern, list(ctx["recent"]),
+                                                      self.cancel_event)
+            except Exception as exc:
+                out["error"] = (str(exc)[:300] if isinstance(exc, (ValueError, OSError, ProviderError))
+                                else type(exc).__name__)
+
+        thread = threading.Thread(target=work, name="relay-loop-check", daemon=True)
+        thread.start()
+        thread.join(LOOP_CHECK_TIMEOUT_S)
+        verdict = None if thread.is_alive() else out.get("verdict")
+        event = {"event": "loop_check", "turn_id": ctx["turn_id"], "model": out.get("model"),
+                 "pattern": pattern.kind,
+                 "verdict": "loop" if verdict is True else "productive" if verdict is False else "unknown"}
+        if thread.is_alive():
+            event["error"] = f"no answer in {LOOP_CHECK_TIMEOUT_S:g} s"
+        elif out.get("error"):
+            event["error"] = out["error"]
+        self.emit(event)
+        return verdict
+
+    def _recitation(self, ctx: dict) -> str:
+        """The cadence reminder's text, or "" when there is nothing open to recite.
+
+        Built from state Relay already keeps — the request that opened the turn, the open ledger
+        items and todos, and the last few tool calls — so it costs no model call. A subagent has no
+        ledger of its own (``track_requests`` off) and never gets one.
+        """
+        if not self.track_requests:
+            return ""
+        open_items = self._open_items(ctx, final=True)
+        if not open_items:
+            return ""
+        asked = " ".join((ctx.get("prompt") or "").split())[:300]
+        listed = "; ".join(f'{i["id"]} "{i["preview"]}" ({i["status"]})' for i in open_items[:8])
+        progress = ", ".join(line.split(" ", 1)[0] for line in ctx["recent"][-5:])
+        tail = f" Most recently: {progress}." if progress else ""
+        return (f'[Relay reminder: this turn is still running. What was asked: "{asked}". Still open: '
+                f"{listed}.{tail} Keep working through the open items above; if one cannot be done, "
+                "mark it blocked with a reason rather than carrying on around it.]")
+
     # ----- drop-path handling (research G1-G3) ----------------------------------------
-    def _stop_at_limit(self, record: dict, ctx: dict, steps: int, calls_used: int) -> None:
-        """G1: a turn limit is not an error; the queue keeps going and the request stays open."""
-        which = "tool_calls" if calls_used > self.max_tool_calls else "steps"
-        text = (f"Stopped at the turn limit ({steps} of {self.max_steps} model steps, "
-                f"{min(calls_used, self.max_tool_calls)} of {self.max_tool_calls} tool calls). "
-                "The request is not finished; ask the agent to continue.")
-        self.messages.append({"role": "user", "relay_kind": "note", "content": (
-            "[Relay note: the turn above stopped at Relay's turn limit before it finished. Its request is not "
-            "finished; continue it when the user asks.]")})
+    def _stop_at_limit(self, record: dict, ctx: dict, steps: int, calls_used: int, pattern=None) -> None:
+        """G1: a turn limit is not an error; the queue keeps going and the request stays open.
+
+        ``pattern``: the turn is being ended by the loop detector (card #2CZP) rather than by a
+        count. It reports as ``stop_reason: "limit"`` with ``limit.which == "loop"`` so the pane's
+        Continue and the ledger line keep working unchanged — only the wording differs.
+        """
+        which = "loop" if pattern is not None else "tool_calls" if calls_used > self.max_tool_calls else "steps"
+        if pattern is not None:
+            text = loopdetect.stop_text(pattern)
+            note = ("[Relay note: the turn above was stopped because it repeated itself — "
+                    f"{loopdetect.describe(pattern)}. The reminders to change approach did not change it. Its "
+                    "request is not finished; when the user asks, continue it with a different approach — and "
+                    "if there is no other way forward, say plainly what is blocking it.]")
+        else:
+            text = (f"Stopped at the turn limit ({steps} of {self.max_steps} model steps, "
+                    f"{min(calls_used, self.max_tool_calls)} of {self.max_tool_calls} tool calls). "
+                    "The request is not finished; ask the agent to continue.")
+            note = ("[Relay note: the turn above stopped at Relay's turn limit before it finished. Its request is not "
+                    "finished; continue it when the user asks.]")
+        self.messages.append({"role": "user", "relay_kind": "note", "content": note})
         if self.track_requests:
             self.requests.finish_turn(ctx["turn_id"], False, self.todos.items)
         record["stop_reason"] = "limit"
         self.emit({"event": "status", "text": text})
+        limit = {"which": which, "steps": steps, "max_steps": self.max_steps,
+                 "tool_calls": calls_used, "max_tool_calls": self.max_tool_calls}
+        if pattern is not None:
+            limit.update({"pattern": pattern.kind, "tool": pattern.tool, "count": pattern.count,
+                          "detail": pattern.detail, "nudges": ctx["nudges"] - 1})
         self._end_turn(record, {"event": "done", "turn_id": ctx["turn_id"], "stop_reason": "limit", "text": text,
-                                "limit": {"which": which, "steps": steps, "max_steps": self.max_steps,
-                                          "tool_calls": calls_used, "max_tool_calls": self.max_tool_calls},
+                                "limit": limit,
                                 "open_items": self._open_items(ctx, final=True)})
 
     def _keep_unfinished_turn(self, how: str) -> None:

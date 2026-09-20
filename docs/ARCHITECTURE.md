@@ -1897,10 +1897,14 @@ conversation.
 
 `backend/relay_core/agent.py`. One conversation per worker. The system prompt tells the model
 that tools run without confirmation, that tool output is untrusted, and that `run_command` is a
-separate non-interactive shell. Per turn: at most 256 model requests and 150 tool calls by default
+separate non-interactive shell. Per turn: at most 500 model requests and 2000 tool calls by default
 (`max_steps`/`max_tool_calls`, configurable); hitting a limit ends the turn with
-`done {stop_reason: "limit"}`, which does not pause the queue. On cancel or error the user's prompt
-and delivered steers stay in history; only a half-finished tool-call group is completed with
+`done {stop_reason: "limit"}`, which does not pause the queue. Those two defaults are the largest
+values the protocol accepts — uncapped, in effect (owner, 2026-09-20, card `#2CZP`: people leave an
+agent working overnight, and a turn that is still getting somewhere should not be stopped for
+counting). They are now a fuse for a runaway turn; what ends a turn that has *stopped* getting
+somewhere is the loop detection below. On cancel or error the user's prompt and delivered steers
+stay in history; only a half-finished tool-call group is completed with
 "not completed" results, and a note says the request is unfinished and state must be reinspected.
 Context accounting and compaction: `context.py` (protocol section 4 and 12.7).
 
@@ -1918,6 +1922,37 @@ verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens)
 `relay_kind: "prompt"` messages count as turn starts. An optional audit side call
 (`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
 this (no ledger or todos).
+
+**Loop detection, nudges and recitation** (`backend/relay_core/loopdetect.py`, with `_observe_call`,
+`_handle_loop`, `_loop_verdict` and `_recitation` in `agent.py`; protocol 12.10 has the thresholds,
+the events and their payloads). With the turn limits raised to a fuse, something else has to notice
+a turn that is going nowhere, and three layers do, in rising cost. A **deterministic detector** sees
+every tool result and every model message that makes no tool call: it keeps hashes of
+`(tool, arguments, result)` — never payloads, with pids and timings scrubbed out first — and fires
+on four shapes: the same call with the same result four times over, the same call failing three
+times, a 2- or 3-call cycle filling the last six calls, or the same answer three times with no tool
+call.
+A **cadence recitation** every 25 steps or 50 tool calls says the original ask, the open ledger items
+and the last few tool names back to the model, rendered from state Relay already holds. Only when
+the detector has fired does a model get involved at all: a **Lite-tier `loop_check` side call** on a
+daemon thread, joined for 20 s, is asked whether the repetition is productive after all, and a
+timeout or an unreadable answer simply leaves the detector's verdict standing. A confirmed pattern
+nudges — name what repeated, ask for a different approach or a plain "blocked" — and only a third
+trigger, after two ignored nudges, ends the turn, through the same `stop_reason: "limit"` path a
+count uses so the pane's Continue is unchanged.
+
+**Consecutiveness is the whitelist.** Every pattern is defined over an unbroken run of identical
+observations, and that one rule is why the detector is safe to run on every call rather than needing
+a list of exemptions. A batch operation across many files names a different path each time, so no
+two calls hash alike. Incremental edits to one file carry different arguments every time, same
+story. A retry with variation varies — and a retry that does not vary is not a variation, it is the
+loop this exists for. Re-running a build or a test suite after an edit puts the edit calls *between*
+the runs, so the runs are not consecutive and the count resets at each edit. What is left is an
+agent running the identical command with the identical arguments for the identical result, with
+nothing in between, which is not progress under any of those readings — and because that is a claim
+about the shape of the history and not about intent, it nudges before it stops, and the `loop_check`
+call exists to forgive the one honest case (polling a job whose output happens not to change).
+Every layer is silent when nothing is wrong: no event, no message, no model call.
 
 **Tasks UI** (`src/RequestLedger.*`, `src/RequestsPanel.*`, library `relay-requests`, tests
 `tests/requests_test.cpp`). `RequestLedgerModel` holds the latest `requests`/`todos` lists and

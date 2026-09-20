@@ -5,9 +5,12 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from relay_core import agent as agent_module
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig, ProviderStalled, ProviderTruncated
 
@@ -454,3 +457,184 @@ class ToolLabelEventTests(unittest.TestCase):
         self.assertEqual(stored['detail'][0]['style'], 'diff')
         self.assertIn('+x', stored['detail'][0]['text'])
         self.assertIn('+x', stored['diff'])
+
+
+# ----- uncapped turns, loop detection, recitation (card #2CZP) ------------------------------------
+
+def call_of(name, arguments, cid):
+    return {'id': cid, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments)}}
+
+
+class ScriptedProvider:
+    """Answers with whatever `plan(n)` returns for the n-th call: a message, or None to finish."""
+    def __init__(self, plan): self.plan=plan; self.calls=0
+    def complete(self, messages, tools, emit, cancel):
+        self.calls += 1
+        message = self.plan(self.calls)
+        if message is not None:
+            return message
+        emit({'event':'delta','text':'Finished.'})
+        return {'role':'assistant','content':'Finished.'}
+    def cancel(self): pass
+
+
+class StubRoles:
+    """Enough of a RoleResolver for role_model(); side_provider short-circuits to the fake provider."""
+    def resolve(self, role):
+        return types.SimpleNamespace(is_main=True, config=types.SimpleNamespace(model='lite-model'))
+
+
+class LoopAndRecitationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root=Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    def of(self, events, name):
+        return [e for e in events if e['event'] == name]
+
+    def repeating(self, path='missing.txt'):
+        """The same failing read, for ever: the `error` pattern at three calls in a row."""
+        return ScriptedProvider(lambda n: {'role':'assistant','content':'',
+                                           'tool_calls':[call_of('read_file', {'path': path}, f'c{n}')]})
+
+    def walking(self, steps, finish_at=None):
+        """A different file each step, which is a batch operation and must never look like a loop."""
+        def plan(n):
+            if finish_at is not None and n > finish_at:
+                return None
+            return {'role':'assistant','content':'',
+                    'tool_calls':[call_of('read_file', {'path': f'f{n}.txt'}, f'c{n}')]}
+        for i in range(steps + 2):
+            (self.root / f'f{i + 1}.txt').write_text('x\n')
+        return ScriptedProvider(plan)
+
+    def test_the_defaults_are_the_clamp_maxima_not_a_working_limit(self):
+        # Owner, 2026-09-20: uncapped by default. Both sit at validate_turn_options' maxima, so the
+        # settings are a backstop fuse for a runaway turn rather than the normal stop.
+        from relay_core.agent import DEFAULT_MAX_STEPS, DEFAULT_MAX_TOOL_CALLS
+        self.assertEqual((DEFAULT_MAX_STEPS, DEFAULT_MAX_TOOL_CALLS), (500, 2000))
+        agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=self.repeating())
+        self.assertEqual((agent.options()['max_steps'], agent.options()['max_tool_calls']), (500, 2000))
+
+    def test_a_long_turn_runs_past_the_old_step_and_tool_call_limits(self):
+        # The old caps were 256 steps and 150 tool calls; on the defaults neither ends this turn.
+        events=[]
+        fake=self.walking(300, finish_at=300)
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=fake, context_window=2_000_000)
+        agent.ask('read all of them')
+        self.assertGreater(fake.calls, 256)
+        self.assertGreater(len(self.of(events, 'tool_result')), 150)
+        self.assertEqual(events[-1]['event'], 'done')
+        self.assertNotIn('stop_reason', events[-1])
+        self.assertEqual(self.of(events, 'loop_detected'), [])   # a batch of distinct reads is not a loop
+
+    def test_a_repeated_failing_call_is_nudged_twice_and_then_stops_the_turn(self):
+        events=[]
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=self.repeating())
+        agent.ask('read it')
+        nudges=self.of(events, 'loop_detected')
+        self.assertEqual([e['nudge'] for e in nudges], [1, 2, 3])
+        self.assertEqual([e['stopping'] for e in nudges], [False, False, True])
+        self.assertEqual(nudges[0]['pattern'], 'error')
+        self.assertEqual(nudges[0]['tool'], 'read_file')
+        # The nudges are user-role notes naming what repeated, injected at a step boundary — never
+        # between an assistant's tool calls and their results, which no provider would accept.
+        notes=[m for m in agent.messages if m.get('relay_kind') == 'note' and 'not making progress' in m['content']]
+        self.assertEqual(len(notes), 2)
+        for index, message in enumerate(agent.messages):
+            if message.get('relay_kind') == 'note' and index:
+                self.assertFalse(agent.messages[index - 1].get('tool_calls'))
+        done=events[-1]
+        self.assertEqual((done['event'], done['stop_reason']), ('done', 'limit'))
+        self.assertEqual(done['limit']['which'], 'loop')
+        self.assertEqual((done['limit']['pattern'], done['limit']['tool'], done['limit']['nudges']),
+                         ('error', 'read_file', 2))
+        # Nowhere near the count limits: this stop is the detector's, and it says so.
+        self.assertLess(done['limit']['steps'], done['limit']['max_steps'])
+        self.assertIn('read_file', done['text'])
+
+    def test_a_productive_verdict_from_the_double_check_clears_the_detector(self):
+        # Gemini-style second opinion: the deterministic pattern stands unless a Lite model says the
+        # repetition is productive, and then the turn simply carries on.
+        events=[]
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=self.repeating(), roles=StubRoles(),
+                    max_steps=12)
+        with mock.patch.object(agent_module.loopdetect, 'run_check', return_value=False) as checked:
+            agent.ask('read it')
+        self.assertTrue(checked.called)
+        self.assertEqual(self.of(events, 'loop_detected'), [])
+        self.assertEqual([e['verdict'] for e in self.of(events, 'loop_check')][:1], ['productive'])
+        self.assertEqual(self.of(events, 'loop_check')[0]['model'], 'lite-model')
+        # It ran to the configured backstop instead, which is what the fuse is for.
+        self.assertEqual(events[-1]['limit']['which'], 'steps')
+
+    def test_a_loop_verdict_confirms_the_pattern_and_a_failing_check_does_not_block_the_turn(self):
+        for name, check in (('confirmed', mock.Mock(return_value=True)),
+                            ('failed', mock.Mock(side_effect=ValueError('no key'))),
+                            ('unreadable', mock.Mock(return_value=None))):
+            with self.subTest(name):
+                events=[]
+                agent=Agent(CONFIG, self.temp.name, events.append, provider=self.repeating(),
+                            roles=StubRoles())
+                with mock.patch.object(agent_module.loopdetect, 'run_check', check):
+                    agent.ask('read it')
+                self.assertEqual(len(self.of(events, 'loop_detected')), 3)
+                self.assertEqual(events[-1]['limit']['which'], 'loop')
+                checks=self.of(events, 'loop_check')
+                self.assertEqual(checks[0]['verdict'], 'loop' if name == 'confirmed' else 'unknown')
+                if name == 'failed':
+                    self.assertEqual(checks[0]['error'], 'no key')
+
+    def test_the_cadence_reminder_arrives_on_the_step_mark_and_not_before(self):
+        # 25 model steps or 50 tool calls, whichever comes first. One call per step reaches the step
+        # mark first, so that is the one this run proves; the tool-call mark is the test below.
+        events=[]
+        fake=self.walking(60, finish_at=60)
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=fake, context_window=2_000_000)
+        agent.ask('read all of them and tell me what changed')
+        recited=self.of(events, 'recitation')
+        self.assertEqual([e['steps'] for e in recited], [25, 50])
+        notes=[m for m in agent.messages if m.get('relay_kind') == 'recitation']
+        self.assertEqual(len(notes), len(recited))
+        # It is built from what Relay already holds: the ask, the open items, the recent calls.
+        self.assertIn('read all of them and tell me what changed', notes[0]['content'])
+        self.assertIn('Still open', notes[0]['content'])
+        self.assertIn('read_file', notes[0]['content'])
+        # Its relay_kind is its own, so compaction and the transcript can tell it from a reminder.
+        self.assertNotIn('recitation', [m.get('relay_kind') for m in agent.messages
+                                        if 'not making progress' in (m.get('content') or '')])
+
+    def test_a_step_that_calls_many_tools_reaches_the_tool_call_mark_first(self):
+        # The other half of "whichever comes first": ten calls a step reaches 50 tool calls at step
+        # five, long before the step mark, which is the shape a parallel batch of writes has.
+        events=[]
+        for i in range(120):
+            (self.root / f'f{i}.txt').write_text('x\n')
+        def plan(n):
+            if n > 8:
+                return None
+            return {'role':'assistant','content':'',
+                    'tool_calls':[call_of('read_file', {'path': f'f{n * 10 + i}.txt'}, f'c{n}-{i}')
+                                  for i in range(10)]}
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=ScriptedProvider(plan),
+                    context_window=2_000_000)
+        agent.ask('read them all in batches and report')
+        recited=self.of(events, 'recitation')
+        self.assertTrue(recited, 'a turn past 50 tool calls recites what is still open')
+        self.assertLess(recited[0]['steps'], 25)
+        self.assertGreaterEqual(recited[0]['tool_calls'], 50)
+
+    def test_a_short_turn_and_a_subagent_are_never_recited_to(self):
+        events=[]
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=self.walking(3, finish_at=3),
+                    context_window=2_000_000)
+        agent.ask('read three files')
+        self.assertEqual(self.of(events, 'recitation'), [])
+        # A subagent keeps no request ledger of its own (track_requests off), so there is nothing to
+        # recite and the cadence stays silent however long it runs.
+        events=[]
+        sub=Agent(CONFIG, self.temp.name, events.append, provider=self.walking(60, finish_at=60),
+                  track_requests=False, context_window=2_000_000)
+        sub.ask('read all of them')
+        self.assertEqual(self.of(events, 'recitation'), [])
+        self.assertEqual([m for m in sub.messages if m.get('relay_kind') == 'recitation'], [])

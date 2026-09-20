@@ -2757,10 +2757,13 @@ private:
         security.rows << numberRow(QStringLiteral("agent/max_auto_turns"),
                                    QStringLiteral("Automatic turns from background agents"),
                                    QStringLiteral("In a row without your input (0 = unlimited)"), 50, 0, 10000);
+        // Card #2CZP: both sit at their maxima by default, so a long overnight run is not stopped by
+        // a count. A turn that has stopped making progress is ended by the loop detector instead;
+        // these two are the fuse behind it, for a runaway turn nothing else catches.
         security.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
-                                   QStringLiteral("Model calls, then the turn stops with Continue"), 256, 1, 500);
+                                   QStringLiteral("Backstop for a runaway turn; then it stops with Continue"), 500, 1, 500);
         security.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
-                                   QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
+                                   QStringLiteral("Backstop for a runaway turn, not the normal stop"), 2000, 1, 2000);
         security.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
                                    QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval card's "Always
@@ -3611,7 +3614,7 @@ private:
             {QStringLiteral("recap"), QStringLiteral("summary away return catch up")},
             {QStringLiteral("tasks"), QStringLiteral("todos todo requests ledger asks open items checklist unaddressed progress")},
             {QStringLiteral("continue agent"), QStringLiteral("continue keep going limit steps more turn")},
-            {QStringLiteral("limit"), QStringLiteral("max steps tool calls budget turn length continue")},
+            {QStringLiteral("limit"), QStringLiteral("max steps tool calls budget turn length continue uncapped overnight backstop fuse loop stuck")},
             {QStringLiteral("audit"), QStringLiteral("unaddressed missed requests check todos")},
             {QStringLiteral("shortcut hint"), QStringLiteral("tips tutorial learn keys hints help")},
             {QStringLiteral("thinking"), QStringLiteral("reasoning chain of thought visibility show")},

@@ -57,7 +57,7 @@ def _preset(preset_id):
 # default is the main model pushed to max reasoning, so a plan is investigated harder without
 # switching the pane's own model.
 ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "planning",
-         "summaries", "suggestions", "chores", "audit", "vision", "route_assist")
+         "summaries", "suggestions", "chores", "audit", "loop_check", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
           # "switchboard" keeps its protocol name — settings, the model box (#BRD3), its Options ›
@@ -67,8 +67,8 @@ LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent"
           # rather than the one pane it started in (protocol 30.7).
           "switchboard": "Helper agent", "flash": "Flash agent", "local": "Local agent",
           "planning": "Plan mode", "summaries": "Summaries", "suggestions": "Suggestions",
-          "chores": "Chores", "audit": "Request audit", "vision": "Vision",
-          "route_assist": "Route assist"}
+          "chores": "Chores", "audit": "Request audit", "loop_check": "Loop check",
+          "vision": "Vision", "route_assist": "Route assist"}
 
 # The pane-agent role was called "fast" until 2026-09-18. It is renamed to "flash" so the one word
 # names the tier, the role and the /flash command, and so nothing in Relay says "fast" — in Codex and
@@ -98,6 +98,7 @@ ACTIONS: tuple[tuple[str, str, str], ...] = (
      "Actions and Sessions"),
     ("chores", "Chores: duplicate checks, labels, titles, note scans", "small structured judgements"),
     ("audit", "Request audit", "flags asks that may be unaddressed after a turn"),
+    ("loop_check", "Loop check", "asked only when a turn repeats itself, before it is stopped"),
     ("vision", "Images and vision turns", "used when the main model cannot read images"),
     ("route_assist", "Command routing", "decides shell or agent for one line of input"),
 )
@@ -113,7 +114,7 @@ ROLE_TIERS: dict[str, str | None] = {
     "planning": "high",
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
-    "chores": "lite", "audit": "lite", "local": "local",
+    "chores": "lite", "audit": "lite", "loop_check": "lite", "local": "local",
     # Vision and route assist are not tiered: they have their own fixed defaults below.
     "vision": None, "route_assist": None,
 }

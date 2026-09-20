@@ -1,0 +1,50 @@
+test_audit_falls_back_to_side_provider (test_requests.AgentRequestTests.test_audit_falls_back_to_side_provider) ... ok
+test_audit_is_off_by_default (test_requests.AgentRequestTests.test_audit_is_off_by_default) ... ok
+test_audit_uses_router_model_and_only_flags (test_requests.AgentRequestTests.test_audit_uses_router_model_and_only_flags) ... ok
+test_completion_check_can_be_disabled (test_requests.AgentRequestTests.test_completion_check_can_be_disabled) ... ok
+test_completion_check_reprompts_at_most_twice (test_requests.AgentRequestTests.test_completion_check_reprompts_at_most_twice) ... ok
+test_completion_check_resolved_by_update (test_requests.AgentRequestTests.test_completion_check_resolved_by_update) ... ok
+test_default_limits (test_requests.AgentRequestTests.test_default_limits) ... ok
+test_fork_carries_ledger_up_to_turn (test_requests.AgentRequestTests.test_fork_carries_ledger_up_to_turn) ... ok
+test_g1_step_limit_is_not_an_error (test_requests.AgentRequestTests.test_g1_step_limit_is_not_an_error) ... ok
+test_g1_tool_call_cap (test_requests.AgentRequestTests.test_g1_tool_call_cap) ... ok
+test_g5_compaction_after_three_steers_keeps_original_prompt (test_requests.AgentRequestTests.test_g5_compaction_after_three_steers_keeps_original_prompt) ... ok
+test_invalid_todo_update_returns_error_to_model (test_requests.AgentRequestTests.test_invalid_todo_update_returns_error_to_model) ... ok
+test_legacy_session_backfills_ledger (test_requests.AgentRequestTests.test_legacy_session_backfills_ledger) ... ok
+test_no_list_reminder_is_silent_for_a_short_turn_or_once_a_list_exists (test_requests.AgentRequestTests.test_no_list_reminder_is_silent_for_a_short_turn_or_once_a_list_exists) ... ok
+test_no_list_reminder_when_the_model_never_writes_one (test_requests.AgentRequestTests.test_no_list_reminder_when_the_model_never_writes_one)
+A turn doing real work with no todo list gets exactly one nudge (card D8VN). ... ok
+test_resume_restores_ledger_and_todos (test_requests.AgentRequestTests.test_resume_restores_ledger_and_todos) ... ok
+test_rewind_restores_todos_and_truncates_ledger (test_requests.AgentRequestTests.test_rewind_restores_todos_and_truncates_ledger) ... ok
+test_single_ask_is_recorded_and_done (test_requests.AgentRequestTests.test_single_ask_is_recorded_and_done) ... ok
+test_stale_todo_reminder (test_requests.AgentRequestTests.test_stale_todo_reminder) ... ok
+test_thirty_messages_compacted_twice_keep_every_request (test_requests.AgentRequestTests.test_thirty_messages_compacted_twice_keep_every_request) ... ok
+test_todo_tool_can_be_turned_off (test_requests.AgentRequestTests.test_todo_tool_can_be_turned_off) ... ok
+test_parse (test_requests.AuditParseTests.test_parse) ... ok
+test_wire_messages_strip_relay_keys (test_requests.AuditParseTests.test_wire_messages_strip_relay_keys) ... ok
+test_block_contents (test_requests.CarriedBlockTests.test_block_contents) ... ok
+test_recent_user_messages_budget_and_skips (test_requests.CarriedBlockTests.test_recent_user_messages_budget_and_skips) ... ok
+test_finish_turn_marks_unlinked_done_and_keeps_open_linked (test_requests.LedgerUnitTests.test_finish_turn_marks_unlinked_done_and_keeps_open_linked) ... ok
+test_lifecycle_and_todo_derivation (test_requests.LedgerUnitTests.test_lifecycle_and_todo_derivation) ... ok
+test_prune_keeps_open_entries (test_requests.LedgerUnitTests.test_prune_keeps_open_entries) ... ok
+test_round_trip_backfill_and_export (test_requests.LedgerUnitTests.test_round_trip_backfill_and_export) ... ok
+test_user_status_sticks_and_validation (test_requests.LedgerUnitTests.test_user_status_sticks_and_validation) ... ok
+test_list_get_set_reask_todos (test_requests.ProtocolCommandTests.test_list_get_set_reask_todos) ... ok
+test_set_options (test_requests.ProtocolCommandTests.test_set_options) ... ok
+test_g1_limit_does_not_pause_queue (test_requests.QueueDropPathTests.test_g1_limit_does_not_pause_queue) ... ok
+test_g2_cancel_then_resume_keeps_queued_items (test_requests.QueueDropPathTests.test_g2_cancel_then_resume_keeps_queued_items) ... ok
+test_g2_interrupt_keeps_interrupted_request (test_requests.QueueDropPathTests.test_g2_interrupt_keeps_interrupted_request) ... ok
+test_g3_steer_keeps_attachments_and_context (test_requests.QueueDropPathTests.test_g3_steer_keeps_attachments_and_context) ... ok
+test_remove_and_clear_mark_cancelled_by_user (test_requests.QueueDropPathTests.test_remove_and_clear_mark_cancelled_by_user) ... ok
+test_steer_returned_requeues_exactly_once (test_requests.QueueDropPathTests.test_steer_returned_requeues_exactly_once) ... ok
+test_a_refining_message_joins_the_existing_todo (test_requests.TodoUnitTests.test_a_refining_message_joins_the_existing_todo)
+The prompt tells the model to add the new request id to a todo it already has rather ... ok
+test_ids_are_kept_and_links_default (test_requests.TodoUnitTests.test_ids_are_kept_and_links_default) ... ok
+test_several_todos_may_be_in_progress (test_requests.TodoUnitTests.test_several_todos_may_be_in_progress) ... ok
+test_validation (test_requests.TodoUnitTests.test_validation) ... ok
+test_g7_user_messages_are_not_trimmed_for_the_summarizer (test_requests.TranscriptTests.test_g7_user_messages_are_not_trimmed_for_the_summarizer) ... ok
+
+----------------------------------------------------------------------
+Ran 43 tests in 0.928s
+
+OK

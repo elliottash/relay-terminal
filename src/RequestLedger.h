@@ -128,6 +128,8 @@ public:
     static QString limitLine(const QJsonObject &done);
     // "✦ checking open items (1/2)"
     static QString completionCheckLine(const QJsonObject &event);
+    // "↻ run_command 4 times with the same result · reminder 1/2" for loop_detected (card #2CZP).
+    static QString loopLine(const QJsonObject &event);
     // "may be unaddressed: R3 “…”" for request_audit (empty when nothing was flagged).
     static QString auditLine(const QJsonObject &event);
 

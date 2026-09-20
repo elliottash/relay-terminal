@@ -506,7 +506,19 @@ QString RequestLedgerModel::openItemsLine(const QList<LedgerOpenItem> &items, in
 
 QString RequestLedgerModel::limitLine(const QJsonObject &done) {
     const QJsonObject limit = done.value(QStringLiteral("limit")).toObject();
-    const bool tools = limit.value(QStringLiteral("which")).toString() == QStringLiteral("tool_calls");
+    const QString which = limit.value(QStringLiteral("which")).toString();
+    // The loop detector ends a turn through the same stop reason as a count does (card #2CZP), so
+    // Continue and the rest of this path are unchanged — but the line has to say why, because the
+    // counts it would otherwise print are nowhere near their limits.
+    if (which == QStringLiteral("loop")) {
+        const QString tool = limit.value(QStringLiteral("tool")).toString();
+        const int count = limit.value(QStringLiteral("count")).toInt();
+        const QString what = tool.isEmpty()
+            ? QStringLiteral("the same answer %1 times").arg(count)
+            : QStringLiteral("%1 %2 times with the same result").arg(tool).arg(count);
+        return QStringLiteral("‖ Stopped: repeating itself (%1) · unfinished tasks stay open").arg(what);
+    }
+    const bool tools = which == QStringLiteral("tool_calls");
     const QString counts = tools
         ? QStringLiteral("%1 tool calls, limit %2").arg(limit.value(QStringLiteral("tool_calls")).toInt()).arg(limit.value(QStringLiteral("max_tool_calls")).toInt())
         : QStringLiteral("%1 model steps, limit %2").arg(limit.value(QStringLiteral("steps")).toInt()).arg(limit.value(QStringLiteral("max_steps")).toInt());
@@ -517,6 +529,21 @@ QString RequestLedgerModel::limitLine(const QJsonObject &done) {
 QString RequestLedgerModel::completionCheckLine(const QJsonObject &event) {
     return QStringLiteral("✦ checking open items (%1/%2)")
         .arg(event.value(QStringLiteral("reminder")).toInt(1)).arg(event.value(QStringLiteral("max_reminders")).toInt(2));
+}
+
+QString RequestLedgerModel::loopLine(const QJsonObject &event) {
+    // What the pane shows when the worker's loop detector nudges (card #2CZP). The last nudge and
+    // the stop say so, because a turn about to end should not look like one more reminder.
+    const QString tool = event.value(QStringLiteral("tool")).toString();
+    const int count = event.value(QStringLiteral("count")).toInt();
+    const QString what = tool.isEmpty()
+        ? QStringLiteral("the same answer %1 times, with no tool call").arg(count)
+        : QStringLiteral("%1 %2 times with the same result").arg(tool).arg(count);
+    if (event.value(QStringLiteral("stopping")).toBool())
+        return QStringLiteral("↻ %1 · stopping this turn").arg(what);
+    const int nudge = event.value(QStringLiteral("nudge")).toInt(1);
+    const int max = event.value(QStringLiteral("max_nudges")).toInt(2);
+    return QStringLiteral("↻ %1 · asked to change approach (%2/%3)").arg(what).arg(nudge).arg(max);
 }
 
 QString RequestLedgerModel::auditLine(const QJsonObject &event) {

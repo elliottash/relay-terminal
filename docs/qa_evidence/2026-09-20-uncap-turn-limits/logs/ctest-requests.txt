@@ -1,0 +1,8 @@
+    Start 14: requests
+1/2 Test #14: requests .........................   Passed    0.06 sec
+    Start 30: panestate
+2/2 Test #30: panestate ........................   Passed    0.30 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.36 sec

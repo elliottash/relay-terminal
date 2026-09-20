@@ -335,8 +335,10 @@ class AgentRequestTests(Base):
         self.assertLessEqual(done['limit']['steps'], 3)
 
     def test_default_limits(self):
+        # Uncapped by default since 2026-09-20 (card #2CZP): both defaults are validate_turn_options'
+        # clamp maxima, so the settings are a backstop fuse rather than the working stop.
         agent = self.agent(Script())
-        self.assertEqual((agent.max_steps, agent.max_tool_calls), (256, 150))
+        self.assertEqual((agent.max_steps, agent.max_tool_calls), (500, 2000))
 
     def test_completion_check_reprompts_at_most_twice(self):
         provider = Script([todos_call({'text': 'fix X', 'status': 'in_progress'}, {'text': 'rename Y', 'status': 'pending'})],

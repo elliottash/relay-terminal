@@ -541,6 +541,18 @@ class TierTests(unittest.TestCase):
         self.assertEqual(made.resolve("suggestions").model, made.resolve("flash").model)
         self.assertEqual(made.resolve("audit").model, made.resolve("chores").model)
 
+    def test_loop_check_is_a_lite_role_and_falls_back_to_main_without_a_key(self):
+        # Card #2CZP: the trigger-only loop double-check is a small structured judgement, so it rides
+        # the Lite tier beside chores and the request audit rather than the pane's own model.
+        made = self.tiered("kimi", ("kimi", "openrouter"))
+        self.assertEqual(made.resolve("loop_check").model, made.resolve("chores").model)
+        self.assertEqual(made.resolve("loop_check").tier, "lite")
+        # With no Lite key it steps down like any other Lite role, and with no key at all it is the
+        # main agent — which is what lets the check be skipped rather than fail a turn.
+        self.assertEqual(made.resolve("loop_check").source, "default")
+        stepped = self.tiered("kimi", ("kimi",)).resolve("loop_check")
+        self.assertEqual(stepped.tier, "flash")
+
     def test_lite_without_its_key_steps_down_to_flash_with_an_inline_note(self):
         made = self.tiered("kimi", ("kimi",))          # no OpenRouter key
         chores = made.resolve("chores")
