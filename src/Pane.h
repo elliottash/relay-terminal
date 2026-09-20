@@ -7607,7 +7607,7 @@ private:
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests")); !keys.isEmpty() && requestsOpen())
                 hint(QStringLiteral("tasks.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("task list")));
         }
-        else if (name == QStringLiteral("continue")) continueTurn();
+        else if (name == QStringLiteral("continue")) continueTurn(true);   // the slow path: it teaches the empty-box key (#SXF1)
         else if (name == QStringLiteral("instructions")) openInstructions();
         else if (name == QStringLiteral("export")) exportConversation();
         else if (name == QStringLiteral("agents")) {
