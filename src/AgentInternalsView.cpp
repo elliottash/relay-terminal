@@ -10,10 +10,12 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLocale>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QStringList>
 #include <QTextCharFormat>
 #include <QVBoxLayout>
 
@@ -591,6 +593,37 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
     }
     touchTurn();
     setHeader();
+}
+
+// ----- what one provider call spent (§ 4, #GMCF decision 5) --------------------------------------
+//
+// The cached count is drawn only when the provider reported one: `cached_tokens` absent means the
+// provider says nothing about its prefix cache at all, and "(0 cached)" would claim the cache
+// missed — which llama.cpp, OpenAI and both guest harnesses report as a real 0 when it did.
+// Exact digits rather than "9.8k": this line is read against another one two turns up, and that
+// comparison is the whole point of it.
+void AgentInternalsView::noteUsage(const QJsonObject &usage) {
+    const qint64 in = usage.value(QStringLiteral("prompt_tokens")).toVariant().toLongLong();
+    const qint64 out = usage.value(QStringLiteral("completion_tokens")).toVariant().toLongLong();
+    if (in <= 0 && out <= 0) return;   // a provider that reported nothing countable draws nothing
+    const QLocale locale;
+    QStringList cache;
+    if (usage.contains(QStringLiteral("cached_tokens")))
+        cache << locale.toString(usage.value(QStringLiteral("cached_tokens")).toVariant().toLongLong())
+                     + QStringLiteral(" cached");
+    if (usage.contains(QStringLiteral("cache_write_tokens")))
+        cache << locale.toString(usage.value(QStringLiteral("cache_write_tokens")).toVariant().toLongLong())
+                     + QStringLiteral(" written");
+    const QString line = QStringLiteral("· %1 in%2 · %3 out")
+                             .arg(locale.toString(in),
+                                  cache.isEmpty() ? QString()
+                                                  : QStringLiteral(" (") + cache.join(QStringLiteral(", "))
+                                                        + QStringLiteral(")"),
+                                  locale.toString(out));
+    endThinking();
+    ensureLineStart();
+    append(line + QLatin1Char('\n'), Ink::Muted);
+    touchTurn();
 }
 
 // ----- folding a row open ----------------------------------------------------------------------

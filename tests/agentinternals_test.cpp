@@ -6,6 +6,7 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QPlainTextEdit>
 #include <QTest>
 #include <QTextCursor>
@@ -306,6 +307,40 @@ private slots:
         view.note("Reasoning display is off");
         view.note("Reasoning display is off");
         QCOMPARE(view.plainText().count(QStringLiteral("Reasoning display is off")), 1);
+    }
+
+    // #GMCF decision 5: the prefix cache, per provider call, as a number rather than a belief.
+    void aProviderCallSaysWhatItSpentAndWhatWasCached() {
+        AgentInternalsView view;
+        const QLocale locale;
+        const QString in = locale.toString(qint64(9823)), cached = locale.toString(qint64(8900));
+        view.beginTurn("t1", "fix the build");
+        view.noteUsage(json("{'prompt_tokens': 9823, 'completion_tokens': 412, 'cached_tokens': 8900}"));
+        QVERIFY(view.plainText().contains(QStringLiteral("· %1 in (%2 cached) · %3 out")
+                                              .arg(in, cached, locale.toString(qint64(412)))));
+        // A provider that counts cache writes separately (Anthropic, codex) says both.
+        view.noteUsage(json("{'prompt_tokens': 100, 'completion_tokens': 5,"
+                            " 'cached_tokens': 60, 'cache_write_tokens': 40}"));
+        QVERIFY(view.plainText().contains(QStringLiteral("· 100 in (60 cached, 40 written) · 5 out")));
+        // One line per call, not per turn: the two above are both still there, under one rule.
+        QCOMPARE(view.turnCount(), 1);
+        QCOMPARE(view.plainText().count(QStringLiteral(" in")), 2);
+    }
+
+    void aProviderThatSaysNothingAboutCachingClaimsNothing() {
+        AgentInternalsView view;
+        view.beginTurn("t1", "fix the build");
+        // No `cached_tokens` at all: the line is drawn, without a cache claim of either kind.
+        view.noteUsage(json("{'prompt_tokens': 500, 'completion_tokens': 20}"));
+        QCOMPARE(view.plainText().count(QStringLiteral("· 500 in · 20 out")), 1);
+        QVERIFY(!view.plainText().contains(QStringLiteral("cached")));
+        // A reported miss is 0 and is said, because it means the cache was there and missed.
+        view.noteUsage(json("{'prompt_tokens': 500, 'completion_tokens': 20, 'cached_tokens': 0}"));
+        QVERIFY(view.plainText().contains(QStringLiteral("(0 cached)")));
+        // Nothing countable draws nothing at all.
+        const QString before = view.plainText();
+        view.noteUsage(json("{'requests': 1}"));
+        QCOMPARE(view.plainText(), before);
     }
 };
 

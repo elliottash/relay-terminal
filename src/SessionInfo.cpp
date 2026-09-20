@@ -79,8 +79,15 @@ QString usageHtml(const QJsonObject &usage) {
     const qint64 total = usage.value(QStringLiteral("total_tokens")).toVariant().toLongLong();
     const qint64 requests = usage.value(QStringLiteral("requests")).toVariant().toLongLong();
     if (requests == 0 && total == 0) return QStringLiteral("<span class=m>none reported yet</span>");
-    return QStringLiteral("%1 in · %2 out · %3 total <span class=m>· %4 request%5</span>")
-        .arg(compactNumber(in), compactNumber(out), compactNumber(total))
+    // What the provider's prefix cache served, beside the input it is part of (#GMCF decision 5).
+    // The key is absent when the provider says nothing about caching, and nothing is drawn then:
+    // "(0 cached)" would claim the cache missed, which is a different thing (protocol § 4).
+    QString cached;
+    if (usage.contains(QStringLiteral("cached_tokens")))
+        cached = QStringLiteral(" <span class=m>(%1 cached)</span>")
+                     .arg(compactNumber(usage.value(QStringLiteral("cached_tokens")).toVariant().toLongLong()));
+    return QStringLiteral("%1 in%2 · %3 out · %4 total <span class=m>· %5 request%6</span>")
+        .arg(compactNumber(in), cached, compactNumber(out), compactNumber(total))
         .arg(requests).arg(requests == 1 ? QString() : QStringLiteral("s"));
 }
 

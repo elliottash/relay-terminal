@@ -365,7 +365,8 @@ private slots:
                          {QStringLiteral("context"), QJsonObject{{QStringLiteral("used_tokens"), 41200}, {QStringLiteral("window"), 200000},
                                                                  {QStringLiteral("percent"), 20.6}}},
                          {QStringLiteral("usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 120000}, {QStringLiteral("completion_tokens"), 8000},
-                                                               {QStringLiteral("total_tokens"), 128000}, {QStringLiteral("requests"), 34}}},
+                                                               {QStringLiteral("total_tokens"), 128000}, {QStringLiteral("requests"), 34},
+                                                               {QStringLiteral("cached_tokens"), 96000}}},
                          {QStringLiteral("turns"), 2}, {QStringLiteral("thread_count"), 2},
                          {QStringLiteral("instructions"), QJsonArray{QStringLiteral("/w/CLAUDE.md")}},
                          {QStringLiteral("history"), QJsonArray{
@@ -374,9 +375,19 @@ private slots:
                               QJsonObject{{QStringLiteral("turn"), 2}, {QStringLiteral("prompt"), QStringLiteral("second")}}}}};
         const QString html = renderInfo(info, now);
         for (const char *needle : {"glm-5", "GLM Coding Plan", "41.2k / 200.0k", "20.6%", "128.0k total", "34 requests",
+                                   // What the provider's prefix cache served, beside the input it is
+                                   // part of (#GMCF decision 5).
+                                   "120.0k in", "(96.0k cached)",
                                    "not reported by this provider", "/data/s.json", "CLAUDE.md", "first &lt;b&gt;",
                                    "a1 general", "Find &amp; fix", "a2"})
             QVERIFY2(html.contains(QString::fromUtf8(needle)), needle);
+        // A provider that says nothing about caching claims nothing: no "(0 cached)".
+        QJsonObject quiet = info;
+        quiet[QStringLiteral("usage")] = QJsonObject{{QStringLiteral("prompt_tokens"), 120000},
+                                                     {QStringLiteral("completion_tokens"), 8000},
+                                                     {QStringLiteral("total_tokens"), 128000},
+                                                     {QStringLiteral("requests"), 34}};
+        QVERIFY(!renderInfo(quiet, now).contains(QStringLiteral("cached")));
         QVERIFY(html.indexOf(QStringLiteral("Find &amp; fix")) < html.indexOf(QStringLiteral("second")));   // at its turn
         // A link survives a session directory with '&' in it.
         const int at = html.indexOf(QStringLiteral("relay-info:thread?"));

@@ -6945,6 +6945,14 @@ private:
             noteLimits(event.value(QStringLiteral("preset")).toString(), windows, event.value(QStringLiteral("status")).toString());
             return true;
         }
+        if (type == QStringLiteral("usage")) {
+            // One provider call's token report (protocol § 4). The context chip is drawn from the
+            // `context` event that follows; this is the per-call line the Activity pane shows, and
+            // with it what the provider's prefix cache served (#GMCF decision 5). Nothing is drawn
+            // in the terminal: the pane is where the per-request numbers live.
+            if (m_internals) m_internals->noteUsage(event.value(QStringLiteral("usage")).toObject());
+            return true;
+        }
         if (type == QStringLiteral("context")) {
             m_ctxUsed = event.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
             m_ctxWindow = event.value(QStringLiteral("window")).toVariant().toLongLong();

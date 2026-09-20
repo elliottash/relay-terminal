@@ -78,6 +78,11 @@ public:
     // `tool_output_get` round trip setToolOutput() answers.
     void toolOutput(int lines);
     void toolResult(const QJsonObject &event);
+    // One provider call's `usage` (§ 4), as the muted line that closes that call: what it put in,
+    // how much of it the provider's prefix cache served, and what came back. One line per call and
+    // not per turn — a turn makes several calls, and "which request paid for the prefix again" is
+    // the question a cached prompt is judged by (#GMCF decision 5).
+    void noteUsage(const QJsonObject &usage);
     // The reply to the `tool_output_get` a click asked for: its rows go under the row that asked.
     void setToolOutput(const QJsonObject &reply);
     // The worker could not answer (the turn has left its log of fifty).
