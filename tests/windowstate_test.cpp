@@ -407,6 +407,18 @@ private slots:
     }
 
     // The file cannot grow without limit: the newest lines win, on both caps.
+    // When the backend produces ANSI-formatted scrollback, the escape sequences survive the file.
+    void formattedScrollbackSurvivesSaveAndRestore() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("2f9a7d41-0000-4000-8000-abcdefabcdef");
+        const QStringList lines{QLatin1String("\x1b[1;31mred bold\x1b[0m"),
+                                QLatin1String("\x1b[38;2;1;2;3mrgb\x1b[0m"),
+                                QStringLiteral("plain")};
+        QVERIFY(writeScrollback(id, lines));
+        QCOMPARE(readScrollback(id), lines);
+    }
+
     void scrollbackIsBoundedByLinesAndBytes() {
         QStringList many;
         for (int i = 0; i < kScrollbackMaxLines + 500; ++i) many << QStringLiteral("line %1").arg(i);

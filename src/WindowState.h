@@ -132,15 +132,19 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // after the `scrollback` id the pane node carries, written the same atomic way windows.json is.
 // The same id also names the pane's prompt history (src/PromptHistory.h).
 //
-// **Text, not cells.** What is saved is what `TerminalBackend::scrollbackText()` reports — the
-// lines, in order, without colour. Two reasons. The engine hands the host text: cells and their
-// SGR would need a new `VtCore` call implemented in both cores, which is a far larger change than
-// the loss is worth. And absolute colour does not survive: a replayed `38;2;R;G;B` is burnt into
-// the new pane's history, and a terminal cannot recolour its scrollback (src/MarkdownAnsi.h), so
-// text saved under one theme would come back in the old theme's colours for good. Plain lines
-// take the live theme's foreground instead, and the block is marked as restored where it is
-// replayed. If styling is ever worth keeping, save the *indexed* SGR only (the palette entries
-// the engine resolves at paint time), never RGB.
+// **Text, with SGR where the engine can give it.** What is saved is what
+// `TerminalBackend::formattedScrollbackText()` / `formattedScreenText()` report: the lines, in
+// order, with their attributes and colours as ANSI SGR (card #VJDD). Engines that cannot
+// reconstruct escape sequences fall back to the plain `scrollbackText()` / `screenText()` and the
+// block is still readable. Only SGR is serialized — no OSC, no cursor movement — and replay
+// filters the file down to CSI SGR, so a hand-edited or truncated file cannot drive the terminal.
+//
+// The tradeoff is colour and theme: an indexed colour (0-255) is resolved by the palette in force
+// when it is painted, so it follows a palette-based theme change, but an RGB colour
+// (`38;2;R;G;B`) is burnt into the new pane's history and cannot be recoloured by a theme switch
+// (src/MarkdownAnsi.h). Restored output therefore keeps the colours it was printed in rather than
+// taking the live theme's foreground; a program that wants theme-following colour should use the
+// indexed palette.
 //
 // The file is bounded twice over — at most kScrollbackMaxLines lines and kScrollbackMaxBytes of
 // text, newest kept — so no pane can grow the state directory without limit, and files whose pane

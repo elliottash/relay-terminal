@@ -904,11 +904,18 @@ public:
     // them would stack one set per restore inside the history, and each run prints its own.
     static void dropRestoreMarks(QStringList *lines) {
         lines->erase(std::remove_if(lines->begin(), lines->end(), [](const QString &line) {
-                         return line == scrollbackOpenMark() || line == scrollbackLegacyOpenMark()
-                                || line == scrollbackCloseMark() || line == sessionTextOpenMark()
-                                || line == sessionTextCloseMark();
+                         const QString plain = stripSgr(line);
+                         return plain == scrollbackOpenMark() || plain == scrollbackLegacyOpenMark()
+                                || plain == scrollbackCloseMark() || plain == sessionTextOpenMark()
+                                || plain == sessionTextCloseMark();
                      }),
                      lines->end());
+    }
+    // Strip CSI SGR sequences (ESC [ ... m) from text. Used when comparing replayed lines that
+    // may have picked up Relay's own ink against the plain restore-mark strings.
+    static QString stripSgr(const QString &text) {
+        static const QRegularExpression sgr(QStringLiteral("\\x1b\\[[0-9;:]*m"));
+        return QString(text).remove(sgr);
     }
     // The history *above* the visible screen, oldest first. This is the part that grows line by
     // line as output scrolls off, so it is the one a position in the pane's text can be measured
@@ -932,10 +939,32 @@ public:
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return {};
         return paneHistoryLines(maxLines) + paneScreenLines();
     }
+
+    // Formatted versions preserve SGR attributes and colours. They are used when a pane is saved
+    // for reopening so that bold, italics, underline and both indexed and RGB colours survive the
+    // restart. Engines that do not report FormattedText fall back to the plain variants above.
+    QStringList paneFormattedHistoryLines(int maxLines) const {
+        if (!terminalCan(relay::TerminalBackend::FormattedText | relay::TerminalBackend::Scrollback)) return paneHistoryLines(maxLines);
+        QStringList lines = m_backend->formattedScrollbackText(maxLines);
+        dropRestoreMarks(&lines);
+        return lines;
+    }
+    QStringList paneFormattedScreenLines() const {
+        if (!m_backend || !terminalCan(relay::TerminalBackend::FormattedText | relay::TerminalBackend::ScreenText)
+            || m_backend->altScreen())
+            return paneScreenLines();
+        QStringList lines = m_backend->formattedScreenText().split(QLatin1Char('\n'));
+        dropRestoreMarks(&lines);
+        return lines;
+    }
+    QStringList paneFormattedTextLines(int maxLines) const {
+        if (!terminalCan(relay::TerminalBackend::FormattedText | relay::TerminalBackend::Scrollback)) return paneTextLines(maxLines);
+        return paneFormattedHistoryLines(maxLines) + paneFormattedScreenLines();
+    }
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
         QString error;
-        if (!relay::windowstate::writeScrollback(m_scrollbackId, paneTextLines(relay::windowstate::kScrollbackMaxLines), &error)
+        if (!relay::windowstate::writeScrollback(m_scrollbackId, paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines), &error)
             && !error.isEmpty())
             fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
         saveSessionText();
@@ -968,9 +997,9 @@ public:
     // is beyond the oldest line still held and nothing in the buffer can tell the two apart: the
     // save then starts at the oldest line there is, which is the approximation the plan allows for.
     QStringList sessionTextLines() const {
-        QStringList history = paneHistoryLines(kSessionTextScan);
+        QStringList history = paneFormattedHistoryLines(kSessionTextScan);
         if (m_sessionTextMark > 0 && m_sessionTextMark <= history.size()) history = history.mid(m_sessionTextMark);
-        return history + paneScreenLines();
+        return history + paneFormattedScreenLines();
     }
 
     // Where this conversation's text goes: a guest's sidecar in Relay's own tree, or the session
@@ -12389,6 +12418,38 @@ private:
         }
         return clean;
     }
+    // Like sanitize(), but keeps CSI SGR sequences (ESC [ ... m). Used for restored scrollback
+    // that Relay itself serialized to ANSI, so formatting and colours survive replay while a
+    // hand-edited file still cannot drive the terminal with OSC, cursor movement, or other CSI.
+    static QString sanitizeSgrOnly(const QString &text) {
+        QString clean;
+        clean.reserve(text.size());
+        for (int i = 0; i < text.size(); ++i) {
+            const QChar c = text.at(i);
+            const ushort u = c.unicode();
+            // Start of a CSI sequence?
+            if (u == 0x1b && i + 1 < text.size() && text.at(i + 1).unicode() == '[') {
+                int j = i + 2;
+                while (j < text.size()) {
+                    const ushort p = text.at(j).unicode();
+                    // parameter bytes (0x30-0x3f) plus the separators SGR uses
+                    if ((p >= 0x30 && p <= 0x3f) || p == ';' || p == ':') { ++j; continue; }
+                    // final byte: 0x40-0x7e
+                    if (p >= 0x40 && p <= 0x7e) {
+                        if (p == 'm') {
+                            clean.append(text.mid(i, j - i + 1));
+                            i = j;
+                        }
+                        break;
+                    }
+                    break;
+                }
+                continue;
+            }
+            if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
+        }
+        return clean;
+    }
 
     void buildTranscript() {
         m_transcript = new QFrame;
@@ -12723,8 +12784,12 @@ private:
         QByteArray out = "\r\x1b[2K";
         out += inkCode(Ink::Note) + (conversation ? sessionTextOpenMark() : scrollbackOpenMark()).toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
-        // a hand-edited (or truncated) file cannot drive the terminal.
-        for (const QString &line : lines) out += sanitize(line).toUtf8() + "\r\n";
+        // a hand-edited (or truncated) file cannot drive the terminal. When the backend produced
+        // ANSI-formatted scrollback we keep the SGR sequences and strip everything else.
+        for (const QString &line : lines) {
+            const QString safe = line.contains(QLatin1Char('\x1b')) ? sanitizeSgrOnly(line) : sanitize(line);
+            out += safe.toUtf8() + "\r\n";
+        }
         out += inkCode(Ink::Note) + (conversation ? sessionTextCloseMark() : scrollbackCloseMark()).toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
         // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the

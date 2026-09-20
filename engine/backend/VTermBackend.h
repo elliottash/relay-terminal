@@ -40,8 +40,10 @@ public:
 
     int capabilities() const override;
     QString screenText() const override;
+    QString formattedScreenText() const override;
     QPoint cursorPosition() const override;
     QStringList scrollbackText(int maxLines) const override;
+    QStringList formattedScrollbackText(int maxLines) const override;
     bool altScreen() const override;
     int rows() const override;
     int columns() const override;

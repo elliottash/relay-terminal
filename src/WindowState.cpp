@@ -2,6 +2,7 @@
 #include "WindowState.h"
 
 #include <QDateTime>
+#include <QRegularExpression>
 #include <algorithm>
 #include <QDir>
 #include <QFile>
@@ -386,6 +387,13 @@ void removeAllScrollback() {
 namespace sessiontext {
 namespace {
 
+// Remove CSI SGR sequences so a line that was saved with formatting can still be matched by the
+// plain-text rules that locate turn markers and restore marks.
+QString stripSgr(const QString &text) {
+    static const QRegularExpression sgr(QStringLiteral("\\x1b\\[[0-9;:]*m"));
+    return QString(text).remove(sgr);
+}
+
 bool isHex(const QString &text, int from, int count, bool anyCase) {
     if (from + count > text.size()) return false;
     for (int i = from; i < from + count; ++i) {
@@ -472,11 +480,12 @@ int turnStart(const QStringList &lines, const QString &prompt) {
     const QString first = prompt.section(QLatin1Char('\n'), 0, 0).trimmed();
     if (first.isEmpty()) return -1;
     for (int i = lines.size() - 1; i >= 0; --i) {
-        if (!lines.at(i).startsWith(marker)) continue;
+        const QString plain = stripSgr(lines.at(i));
+        if (!plain.startsWith(marker)) continue;
         // The printed line is the prompt cut at the pane's width, so it is a prefix of it — and
         // the pane's other ✦ lines ("✦ the command finished …") are not, which is what keeps them
         // from being mistaken for a turn.
-        const QString shown = lines.at(i).mid(marker.size()).trimmed();
+        const QString shown = plain.mid(marker.size()).trimmed();
         if (!shown.isEmpty() && first.startsWith(shown)) return i;
     }
     return -1;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Screen-model tests: feed byte sequences into every available VtCore and
 // assert cells, text, modes and events.
+#include "core/AnsiSerializer.h"
 #include "core/LibVtermCore.h"
 #include "core/VtCore.h"
 
@@ -85,6 +86,32 @@ private slots:
         QCOMPARE(CellColor::kind(l.cells[2].fg), CellColor::Default);
         QCOMPARE(CellColor::kind(l.cells[2].bg), CellColor::Default);
         QVERIFY(l.cells[3].attrs & AttrReverse);
+    }
+
+    void ansiSerializerPreservesAttributesAndColours()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        h.vt->setColors(0xd8d8d8, 0x1c1e24, nullptr);
+        h.feed("\x1b[1;4;31mA\x1b[0m\x1b[38;2;1;2;3;48;2;4;5;6mB\x1b[0mC\x1b[7mD");
+        const QString ansi = lineToAnsi(h.frame().lines[0]);
+        // A was printed bold, underlined and red. A core may keep the colour indexed (31) or
+        // resolve it to RGB, so only the attributes and the presence of an SGR are asserted here.
+        QVERIFY(ansi.contains(QLatin1String("\x1b[1;4;")));
+        QVERIFY(ansi.contains(QLatin1String("mA")));
+        // B is truecolour and must survive exactly, both foreground and background.
+        QVERIFY(ansi.contains(QLatin1String("\x1b[38;2;1;2;3;48;2;4;5;6mB")));
+        QVERIFY(ansi.contains(QLatin1String("\x1b[7mD")));
+        QVERIFY(ansi.endsWith(QLatin1String("\x1b[0m")));
+    }
+
+    void ansiSerializerHandlesWideCharactersAndClusters()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        h.feed(QStringLiteral("a漢b éx").toUtf8());
+        const QString ansi = lineToAnsi(h.frame().lines[0]);
+        QCOMPARE(ansi, QStringLiteral("a漢b éx"));
     }
 
     void wideAndCombiningCharacters()

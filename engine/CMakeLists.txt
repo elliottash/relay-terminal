@@ -61,6 +61,7 @@ endif()
 # ---- engine library
 set(RELAY_ENGINE_SOURCES
     TerminalBackend.h
+    core/AnsiSerializer.h core/AnsiSerializer.cpp
     core/CellTypes.h core/CellTypes.cpp
     core/VtCore.h core/VtCoreFactory.cpp
     core/LibVtermCore.h core/LibVtermCore.cpp

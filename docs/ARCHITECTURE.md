@@ -572,12 +572,16 @@ nothing is re-run.
   temp-file-and-rename as `windows.json`. The pure part is `relay::windowstate`
   (`scrollbackPath`, `clampScrollback`, `writeScrollback`, `readScrollback`, `scrollbackIds`,
   `pruneScrollback`); the pane side is `Pane::saveScrollback()` / `replayRestoredScrollback()`.
-  - **Text, not cells.** What is saved is `scrollbackText()` plus the visible screen (skipped while
-    a full-screen program owns it), without colour. The engine hands the host text, and an
-    absolute colour replayed into a new pane is burnt into its history — a terminal cannot
-    recolour its scrollback (`src/MarkdownAnsi.h`), so text saved under one theme would come back
-    in that theme's colours for good. Anything worth keeping later must be *indexed* SGR, which
-    the engine resolves at paint time from the live theme.
+  - **Text, with SGR where the engine can give it** (card #VJDD). What is saved is
+    `formattedScrollbackText()` plus the formatted visible screen (skipped while a full-screen
+    program owns it), serialized by `engine/core/AnsiSerializer.*`; an engine that cannot
+    reconstruct escape sequences falls back to the plain `scrollbackText()` / `screenText()`. Only
+    SGR is emitted, and replay filters the file down to CSI SGR, so a hand-edited file still
+    cannot drive the terminal. The tradeoff is colour and theme: an indexed colour (0-255) is
+    resolved by the palette in force when it is painted, so it follows a palette-based theme
+    change, but an RGB colour is burnt into the new pane's history and cannot be recoloured by a
+    theme switch (`src/MarkdownAnsi.h`). Restored output therefore keeps the colours it was
+    printed in rather than taking the live theme's foreground.
   - **Bounded.** At most 5,000 lines and 512 KiB per pane, newest kept, trailing blank rows
     dropped (`kScrollbackMaxLines` / `kScrollbackMaxBytes`, both well inside the engine's 20,000
     line scrollback). A pane whose text is empty leaves no file, every layout write prunes the
@@ -591,8 +595,9 @@ nothing is re-run.
     shell —” / “— end of restored scrollback; this shell is new —”) and sends an empty line so the
     shell prints a fresh prompt underneath — `redrawPrompt()` is a no-op here, because Readline's
     idea of where its prompt sits has just scrolled away. The rules are Relay's own chrome and are
-    filtered out of the next save, so they do not stack up over restarts, and restored lines go
-    through `sanitize()`, so a hand-edited file cannot drive the terminal.
+    filtered out of the next save (their SGR is stripped before the comparison), so they do not
+    stack up over restarts, and restored lines go through `sanitizeSgrOnly()`, which keeps CSI SGR
+    and drops every other control sequence, so a hand-edited file cannot drive the terminal.
 - **The conversation's own copy** (`relay::sessiontext`, card #0TJ9; owner report: "when i accessed
   a convo in the session manager, i couldnt scroll back"). The store above is keyed by *pane*, and
   the layout prune deletes a pane's file the moment it leaves the layout — so a conversation opened

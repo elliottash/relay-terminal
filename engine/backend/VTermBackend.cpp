@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "VTermBackend.h"
 
+#include "core/AnsiSerializer.h"
+#include "core/CellTypes.h"
 #include "session/TerminalSession.h"
 #include "view/TerminalView.h"
 
@@ -138,7 +140,7 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline | Folds | ClipboardWrite;
+        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline | Folds | ClipboardWrite | FormattedText;
 }
 
 void VTermBackend::setClipboardWriteAllowed(bool allowed)
@@ -253,8 +255,31 @@ void VTermBackend::linkProbeAnswered()
 }
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }
+
+QString VTermBackend::formattedScreenText() const
+{
+    return m_session->withCore([](VtCore &core) {
+        ViewportFrame frame;
+        core.updateFrame(&frame, true);
+        const QStringList lines = linesToAnsi(frame.lines);
+        return lines.join(QLatin1Char('\n'));
+    });
+}
+
 QPoint VTermBackend::cursorPosition() const { return m_session->cursorPosition(); }
 QStringList VTermBackend::scrollbackText(int maxLines) const { return m_session->scrollbackText(maxLines); }
+
+QStringList VTermBackend::formattedScrollbackText(int maxLines) const
+{
+    return m_session->withCore([maxLines](VtCore &core) {
+        const int total = core.historyRows();
+        const int want = std::max(0, std::min(maxLines, total));
+        std::vector<Line> lines;
+        if (want > 0)
+            core.historyLines(total - want, want, &lines);
+        return linesToAnsi(lines);
+    });
+}
 bool VTermBackend::altScreen() const { return m_session->altScreen(); }
 int VTermBackend::rows() const { return m_session->rows(); }
 int VTermBackend::columns() const { return m_session->columns(); }

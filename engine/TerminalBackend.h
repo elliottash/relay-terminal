@@ -219,6 +219,7 @@ public:
         LineDiscipline = 1 << 12,  // termiosFlags(): ICANON/ECHO of the terminal, cheaply
         Folds = 1 << 13,           // setFoldContent(): tool-call detail unfolded inside the grid
         ClipboardWrite = 1 << 14,  // setClipboardWriteAllowed(): OSC 52 writes, off unless the host says
+        FormattedText = 1 << 15,   // formattedScreenText() / formattedScrollbackText() preserve SGR
     };
 
     // ---- clipboard (OSC 52); needs the ClipboardWrite capability
@@ -285,6 +286,10 @@ public:
     virtual int capabilities() const = 0;
     virtual QString screenText() const = 0;                     // visible screen lines, '\n'-joined
     virtual QStringList scrollbackText(int maxLines) const = 0; // oldest first, newest last
+    // Visible screen and scrollback with SGR formatting and colours preserved. Engines that
+    // cannot reconstruct escape sequences fall back to the plain-text variants above.
+    virtual QString formattedScreenText() const { return screenText(); }
+    virtual QStringList formattedScrollbackText(int maxLines) const { return scrollbackText(maxLines); }
     virtual bool altScreen() const = 0;
     virtual int rows() const = 0;
     virtual int columns() const = 0;
