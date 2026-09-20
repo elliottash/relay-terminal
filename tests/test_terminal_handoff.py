@@ -251,7 +251,12 @@ class ContextTests(unittest.TestCase):
         # Owner, 2026-09-18: the agent reasoned "I'm not supposed to enter commands for the user
         # without being asked". Consent here is structural — the ceiling, the pane's echo, the
         # chain breaker — so no prompt line may add an "only if they asked" gate on top of it.
-        self.assertIn("use it on your own initiative", agent_module.SYSTEM)
+        # Stated in both places since #GMCF decision 2 moved the tool's own detail into its
+        # description: SYSTEM carries the decision on every turn, the description repeats it on
+        # every turn the tool exists. Neither may go.
+        self.assertIn("you are expected to act", agent_module.SYSTEM)
+        self.assertIn("including commands in the user's terminal", agent_module.SYSTEM)
+        self.assertIn("You do not need to be asked", module.SPEC["function"]["description"])
         for gate in ("only when it is needed for the request",
                      "the user asked for the outcome",
                      "never send a keystroke the user's request does not call for"):
