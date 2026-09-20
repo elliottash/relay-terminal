@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PaneLayout.h"
 
+#include <QLayout>
+#include <QMargins>
 #include <QSplitter>
 #include <QWidget>
 
@@ -379,6 +381,53 @@ void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList
         if (!splitter || splitter->count() != sizes.at(i).size()) continue;
         splitter->setSizes(sizes.at(i));
     }
+}
+
+// ----- what a pane's minimum width is made of (card #SDXE) ------------------------------------
+
+int layoutMinimumWidth(const QWidget *widget) {
+    if (!widget) return 0;
+    const QSizePolicy::Policy policy = widget->sizePolicy().horizontalPolicy();
+    int minimum = 0;
+    // Qt's own rule (qSmartMinSize): a widget that may shrink is held up by its minimum size hint,
+    // and one that may not — QSizePolicy::Fixed — by the larger of the two hints, which is to say
+    // by the size hint it is asking for. Ignored means the layout owes it nothing.
+    if (policy != QSizePolicy::Ignored)
+        minimum = (policy & QSizePolicy::ShrinkFlag)
+                      ? widget->minimumSizeHint().width()
+                      : std::max(widget->sizeHint().width(), widget->minimumSizeHint().width());
+    minimum = std::min(minimum, widget->maximumWidth());
+    // An explicit minimumWidth() REPLACES the computed floor rather than raising it, which is why
+    // setMinimumWidth(1) on a QLabel takes its whole text out of the pane's minimum.
+    if (widget->minimumWidth() > 0) minimum = widget->minimumWidth();
+    return std::max(0, minimum);
+}
+
+QString headerMinimumsLine(const QString &pane, int paneWidth, int paneMinimum, const QLayout *row) {
+    QStringList parts;
+    int total = 0;
+    if (row) {
+        const QMargins margins = row->contentsMargins();
+        total = margins.left() + margins.right();
+        int shown = 0;
+        for (int i = 0; i < row->count(); ++i) {
+            QWidget *widget = row->itemAt(i)->widget();
+            if (!widget || widget->isHidden()) continue;
+            const int minimum = layoutMinimumWidth(widget);
+            total += minimum + (shown++ ? row->spacing() : 0);
+            parts << QStringLiteral("%1=%2").arg(widget->objectName().isEmpty()
+                                                     ? QString::fromLatin1(widget->metaObject()->className())
+                                                     : widget->objectName())
+                                            .arg(minimum);
+        }
+    }
+    return QStringLiteral("pane \"%1\" w=%2 min=%3 header=%4 | %5")
+        .arg(pane).arg(paneWidth).arg(paneMinimum).arg(total).arg(parts.join(QLatin1Char(' ')));
+}
+
+bool layoutLogEnabled() {
+    static const bool on = qEnvironmentVariableIsSet("RELAY_LAYOUT_LOG");
+    return on;
 }
 
 }  // namespace relay::panes

@@ -3565,6 +3565,13 @@ private:
         // the header's open hand. Double click still renames it, as the tooltip says.
         // The text is elided in updateHeader(), so the label asks for exactly what it shows.
         m_titleLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        // ...and a QLabel's own minimum is that whole text, which made the pane's minimum width
+        // follow the title the model keeps rewriting as the work moves on: a splitter must satisfy
+        // every child's minimum, so a longer title widened the pane and took the pixels off its
+        // neighbours (card #SDXE). An explicit minimum REPLACES the computed one, so this is the
+        // ladder's own title floor and nothing to do with the text — the label still asks for what
+        // it shows through its size hint, and still gets it whenever the header has the room.
+        m_titleLabel->setMinimumWidth(relay::panes::kTitleFloorPx);
         m_titleLabel->installEventFilter(this);
         m_titleEdit = new QLineEdit;
         m_titleEdit->setObjectName(QStringLiteral("paneTitleEdit"));

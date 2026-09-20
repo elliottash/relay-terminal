@@ -20,6 +20,7 @@
 
 #include <optional>
 
+class QLayout;
 class QSplitter;
 class QWidget;
 
@@ -273,5 +274,40 @@ std::optional<Direction> moveToward(const QRect &pane, const QRect &anchor);
 // shell keys and not "the first half of a shortcut", so a stale chord can never turn a much
 // later Move-down into a dock.
 bool chordKeyKeepsWindow(int key, const QString &actionId);
+
+
+// ----- what a pane's minimum width is made of (card #SDXE) ------------------------------------
+//
+// A pane grows when its MINIMUM grows. The splitters are built with setChildrenCollapsible(false),
+// so a splitter must satisfy every child's minimum size: the moment one child's minimum passes the
+// width it has, the splitter widens that child and takes the pixels from its neighbours. A widget
+// whose minimum follows the text it is showing therefore drags the dividers about while an agent
+// works — the header's usage meter re-measures "cpu 7%" against "cpu 100%" two and a half times a
+// second — and nothing on screen says why. That is the jiggle card #SDXE reports.
+//
+// The rule below is the one a QHBoxLayout applies to each of its children (Qt's qSmartMinSize):
+// the size POLICY decides whether the size hint or the minimum size hint is the floor, and an
+// explicit minimumWidth() replaces whatever that came to. It is worth having written down because
+// the answer surprises: a QSizePolicy::Fixed widget cannot shrink, so its sizeHint() *is* its
+// minimum and overriding minimumSizeHint() on it changes nothing at all. Every header widget whose
+// hint follows its text must therefore either shrink (Maximum, Preferred, Ignored) with a
+// content-free minimumSizeHint(), or carry an explicit minimumWidth().
+//
+// A hidden widget is not asked this question by its layout at all; that is the caller's test to
+// make, so that this one is about the policy and nothing else.
+int layoutMinimumWidth(const QWidget *widget);
+
+// The minimum width every visible child of `row` contributes, as one line:
+//   pane "agent" w=612 min=498 | paneStateGlyph=16 paneUsageChip=94 paneTitle=286 …
+// Printed for every pane about once a second while RELAY_LAYOUT_LOG is set in the environment,
+// which is how the numbers in docs/qa_evidence/2026-09-20-pane-width-jiggle were taken: run it
+// before and after a change and a minimum that follows content shows up as a column that moves.
+// `paneWidth` and `paneMinimum` are the pane's own, so the line says whether the header is what is
+// holding the pane open.
+QString headerMinimumsLine(const QString &pane, int paneWidth, int paneMinimum, const QLayout *row);
+
+// True while RELAY_LAYOUT_LOG is set. Read once: a diagnostic that costs a getenv per pane per
+// frame is one nobody leaves in.
+bool layoutLogEnabled();
 
 }  // namespace relay::panes

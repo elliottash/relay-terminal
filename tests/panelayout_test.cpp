@@ -10,6 +10,8 @@
 // Ctrl+Alt+Down do nothing at all.
 #include "PaneLayout.h"
 
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 #include <QLabel>
 #include <QMap>
 #include <QSplitter>
@@ -23,6 +25,69 @@
 using namespace relay::panes;
 
 namespace {
+
+// ----- what a pane's minimum width is made of (card #SDXE) --------------------------------------
+
+// A header chip as a pane's chrome builds one: a painted widget whose size hint is the width of
+// the text it is showing at this moment. Its size POLICY is the whole question — a widget that
+// cannot shrink is held up by its size hint, so a hint that follows content is a MINIMUM that
+// follows content, and a splitter that must satisfy it widens the pane the chip is in.
+class Chip : public QWidget {
+public:
+    explicit Chip(QSizePolicy::Policy policy) { setSizePolicy(policy, QSizePolicy::Fixed); }
+    void setText(const QString &text) { m_text = text; updateGeometry(); }
+    void setFloor(int px) { m_floor = px; updateGeometry(); }
+    QSize sizeHint() const override { return {10 * int(m_text.size()) + 14, 18}; }
+    QSize minimumSizeHint() const override { return {m_floor, 18}; }
+
+private:
+    QString m_text;
+    int m_floor = 0;
+};
+
+// A pane: one chip in a row, and the stretch a real pane header has after its title.
+QWidget *paneWithChip(Chip *chip) {
+    auto *pane = new QWidget;
+    auto *row = new QHBoxLayout(pane);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(0);
+    row->addWidget(chip);
+    row->addStretch(1);
+    return pane;
+}
+
+// Two of them side by side in a splitter built the way RelayWindow::newSplitter builds one, inside
+// a window of a fixed 600 px — a tab, in the app — so the splitter cannot answer a minimum it
+// cannot meet by growing the window, which is what a top-level splitter would do. Returns that
+// window; the caller owns it, and splitterIn() finds the splitter again.
+QWidget *tabOf(Chip *left, Chip *right) {
+    auto *tab = new QWidget;
+    auto *column = new QVBoxLayout(tab);
+    column->setContentsMargins(0, 0, 0, 0);
+    auto *splitter = new QSplitter(Qt::Horizontal);
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(0);
+    splitter->addWidget(paneWithChip(left));
+    splitter->addWidget(paneWithChip(right));
+    column->addWidget(splitter);
+    tab->setFixedSize(600, 60);
+    // Shown (offscreen), because a widget that has never been shown is hidden and a layout owes a
+    // hidden widget nothing — the minimums under test would all read as zero.
+    tab->show();
+    QCoreApplication::sendPostedEvents();
+    splitter->setSizes({300, 300});
+    QCoreApplication::sendPostedEvents();
+    return tab;
+}
+
+QSplitter *splitterIn(QWidget *tab) { return tab->findChild<QSplitter *>(); }
+
+// What the splitter settles on once the chips have been re-measured.
+QList<int> settled(QWidget *tab) {
+    QCoreApplication::sendPostedEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+    return splitterIn(tab)->sizes();
+}
 
 // A splitter of named panes, so a test can state the order as a string.
 QSplitter *splitterOf(Qt::Orientation orientation, const QStringList &names) {
@@ -770,6 +835,91 @@ private Q_SLOTS:
         HeaderWants noBadge = everythingOn();
         noBadge.badge = 0;
         QVERIFY(headerFit(800, noBadge).directory > headerFit(800, everythingOn()).directory);
+    }
+
+    // ----- pane widths must not follow content (card #SDXE) --------------------------------------
+
+    // Qt's rule, which is why the chips' minimums had to change and not only their hints: a widget
+    // that may not shrink is held up by the larger of its two hints — its size hint — so
+    // overriding minimumSizeHint() on a QSizePolicy::Fixed chip changes nothing at all.
+    void aFixedWidgetIsHeldUpByWhatItShows() {
+        Chip chip(QSizePolicy::Fixed);
+        chip.setFloor(0);
+        chip.setText(QStringLiteral("cpu 7%"));
+        const int narrow = layoutMinimumWidth(&chip);
+        QCOMPARE(narrow, chip.sizeHint().width());
+        chip.setText(QStringLiteral("cpu 100% · mem 42%"));
+        QCOMPARE(layoutMinimumWidth(&chip), chip.sizeHint().width());
+        QVERIFY(layoutMinimumWidth(&chip) > narrow);   // the reading widened the minimum
+    }
+
+    // The same chip that may shrink is held up by its floor, and the floor is a constant: this is
+    // the shape every widget in a pane header now has.
+    void aShrinkableWidgetIsHeldUpByItsFloor() {
+        Chip chip(QSizePolicy::Maximum);
+        chip.setFloor(0);
+        chip.setText(QStringLiteral("cpu 7%"));
+        QCOMPARE(layoutMinimumWidth(&chip), 0);
+        chip.setText(QStringLiteral("cpu 100% · mem 42%"));
+        QCOMPARE(layoutMinimumWidth(&chip), 0);        // still nothing, whatever it is showing
+        chip.setFloor(24);
+        QCOMPARE(layoutMinimumWidth(&chip), 24);
+    }
+
+    // An explicit minimumWidth REPLACES the computed floor rather than raising it — which is how
+    // the title label keeps the ladder's 80 px floor and not its whole text.
+    void anExplicitMinimumWidthReplacesTheHints() {
+        QLabel label(QStringLiteral("a title long enough to want far more than eighty pixels"));
+        label.setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        QVERIFY(layoutMinimumWidth(&label) > kTitleFloorPx);   // a QLabel's minimum is its text
+        label.setMinimumWidth(kTitleFloorPx);
+        QCOMPARE(layoutMinimumWidth(&label), kTitleFloorPx);
+        label.setText(QStringLiteral("a much longer title still, written by the model mid-turn"));
+        QCOMPARE(layoutMinimumWidth(&label), kTitleFloorPx);
+    }
+
+    // A widget the layout owes nothing takes nothing, whatever it shows: the queue strip and the
+    // composer are Ignored for exactly this reason.
+    void anIgnoredWidgetOwesNothing() {
+        Chip chip(QSizePolicy::Ignored);
+        chip.setText(QStringLiteral("a very wide line of streamed output"));
+        QCOMPARE(layoutMinimumWidth(&chip), 0);
+    }
+
+    // The incident itself, in two throwaway panes: a splitter that may not collapse its children
+    // must satisfy every child's minimum, so a chip whose minimum follows its text drags the
+    // divider as the text grows. This is the jiggle — a pane that widens because its agent is
+    // working — and the fix is the chip's policy and floor, nothing about the splitter.
+    void aFixedChipDragsTheDivider() {
+        auto *left = new Chip(QSizePolicy::Fixed);
+        auto *right = new Chip(QSizePolicy::Fixed);
+        left->setText(QStringLiteral("idle"));
+        right->setText(QStringLiteral("idle"));
+        std::unique_ptr<QWidget> tab(tabOf(left, right));
+        const QList<int> before = settled(tab.get());
+        QCOMPARE(before, QList<int>({300, 300}));
+        left->setText(QStringLiteral("a pane with a great deal to say about what it is doing"));
+        const QList<int> after = settled(tab.get());
+        QVERIFY2(after.at(0) > before.at(0), "the splitter did not widen the pane: no incident to fix");
+        QVERIFY2(after.at(1) < before.at(1), "the pane grew without taking the room off its neighbour");
+        QCOMPARE(after.at(0) + after.at(1), before.at(0) + before.at(1));
+    }
+
+    // The same two panes with the chips the header has now: content changes the chip's size hint,
+    // so the header re-lays itself out, and the panes keep the widths they were given.
+    void aShrinkableChipLeavesTheDividerAlone() {
+        auto *left = new Chip(QSizePolicy::Maximum);
+        auto *right = new Chip(QSizePolicy::Maximum);
+        left->setText(QStringLiteral("idle"));
+        right->setText(QStringLiteral("idle"));
+        std::unique_ptr<QWidget> tab(tabOf(left, right));
+        const QList<int> before = settled(tab.get());
+        QCOMPARE(before, QList<int>({300, 300}));
+        left->setText(QStringLiteral("a pane with a great deal to say about what it is doing"));
+        QCOMPARE(settled(tab.get()), before);
+        // Even a chip wider than the pane it is in only loses what it cannot paint.
+        left->setText(QString(400, QLatin1Char('x')));
+        QCOMPARE(settled(tab.get()), before);
     }
 
     // A title shorter than its floor asks for what it is: the floor is a limit on eliding, not a

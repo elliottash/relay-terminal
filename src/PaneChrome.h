@@ -37,6 +37,7 @@
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QJsonObject>
+#include <QDebug>
 #include <QResizeEvent>
 #include <QShowEvent>
 #include <QToolButton>
@@ -623,6 +624,36 @@ public:
             tool->onBandChanged = [guard] { if (guard) guard->place(); };
         }
         if (auto *pane = dynamic_cast<Pane *>(leaf)) buildStatus(pane);
+        if (relay::panes::layoutLogEnabled()) startLayoutLog();
+    }
+
+    // RELAY_LAYOUT_LOG (card #SDXE): one line a second per pane, saying how wide the pane is, what
+    // its minimum is and which widget in its header row is holding that minimum up. A pane that
+    // grows while an agent works grew because one of those numbers grew, and this is the only
+    // place that says which. Off unless the variable is set, so it costs a dead branch otherwise.
+    void startLayoutLog() {
+        static int serials = 0;
+        m_layoutLogSerial = ++serials;
+        auto *timer = new QTimer(this);
+        timer->setInterval(1000);
+        connect(timer, &QTimer::timeout, this, [this] {
+            QWidget *leaf = parentWidget();
+            if (!leaf) return;
+            auto *pane = dynamic_cast<Pane *>(leaf);
+            // The title changes while the pane works, so the serial is what identifies a pane
+            // across a run: "#2" is the same pane in every line it prints.
+            const QString name = QStringLiteral("#%1 %2").arg(m_layoutLogSerial)
+                                     .arg(pane && !pane->paneTitle().isEmpty() ? pane->paneTitle() : leaf->objectName());
+            qInfo().noquote() << relay::panes::headerMinimumsLine(name + QStringLiteral(" header"),
+                                                                 leaf->width(), leaf->minimumSizeHint().width(),
+                                                                 pane ? pane->headerLayout() : nullptr);
+            // And the pane's own column, so a minimum that is not the header's says which row it
+            // is: the header, the terminal, the transcript or the prompt box.
+            qInfo().noquote() << relay::panes::headerMinimumsLine(name + QStringLiteral(" column"),
+                                                                 leaf->width(), leaf->minimumSizeHint().width(),
+                                                                 leaf->layout());
+        });
+        timer->start();
     }
 
     void place() {
@@ -1044,11 +1075,14 @@ private:
             const int natural = m_form == relay::panes::SshForm::HostOnly ? hostWidth() : fullWidth();
             return {m_allowed > 0 ? std::min(natural, m_allowed) : natural, 18};
         }
-        // Only a chip the ladder is driving may be squeezed at all, and never under the glyph and
-        // one ellipsis. The phone chip is not on the ladder, so its minimum is what it shows.
-        QSize minimumSizeHint() const override {
-            return {m_allowed > 0 ? std::min(sizeHint().width(), ellipsisWidth()) : sizeHint().width(), 18};
-        }
+        // The glyph and one ellipsis: the chip's floor, and a width that does not depend on what
+        // the chip is showing (card #SDXE). It used to be the chip's whole text until the ladder
+        // had granted it a width — and for the phone chip, which the ladder never drives, for
+        // good — so a chip that appeared, or whose host or sharing line grew, raised the pane's
+        // minimum width and the splitter widened the pane to meet it. The chip still asks for its
+        // whole text through sizeHint() and still gets it whenever the row has the room; what it
+        // may no longer do is make the room.
+        QSize minimumSizeHint() const override { return {ellipsisWidth(), 18}; }
     protected:
         void paintEvent(QPaintEvent *) override {
             const relay::panestatus::Tokens t = relay::chrome::tokens();
@@ -1104,7 +1138,13 @@ private:
         // without it the title never learns that the chip appeared and never re-elides.
         explicit PaneUsageChip(Pane *owner) : m_owner(owner) {
             setObjectName(QStringLiteral("paneUsageChip"));
-            setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            // Maximum, not Fixed: a Fixed widget cannot shrink, so Qt takes its sizeHint() as its
+            // minimum and minimumSizeHint() below would count for nothing. This chip's hint is the
+            // width of the reading it is painting — "cpu 7%" one second and "cpu 100% · mem 12%"
+            // the next — and as a minimum that was the pane growing in response to content, which
+            // is card #SDXE. Maximum keeps the hint as the width it is given when the row has the
+            // room and lets the layout take it back when it does not.
+            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
             setAccessibleName(QStringLiteral("Pane CPU and memory"));
             // Nothing is known until the first sample lands, and a chip that is merely empty
             // still holds its ~58 px of header open. Start hidden, like the other chips.
@@ -1168,7 +1208,10 @@ private:
         int fullWidth() const { return widthFor(false); }
         int cpuWidth() const { return widthFor(true); }
         QSize sizeHint() const override { return {widthFor(m_cpuOnly), 18}; }
-        QSize minimumSizeHint() const override { return sizeHint(); }
+        // The meter never holds a pane open: it is a read-out of what the pane is doing, and a
+        // pane that has to be wider because it is busy is the bug. With no room it paints nothing
+        // (the guard in paintEvent), which is the same answer the ladder's last rung gives.
+        QSize minimumSizeHint() const override { return {0, 18}; }
     protected:
         void paintEvent(QPaintEvent *) override {
             if (m_text.isEmpty()) return;
@@ -1235,7 +1278,11 @@ private:
         // nothing — the title was never told to re-elide when the badge appeared or widened.
         PaneSubagentBadge(PaneChrome *chrome, Pane *owner) : m_chrome(chrome), m_owner(owner) {
             setObjectName(QStringLiteral("paneSubagentBadge"));
-            setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            // Maximum for the usage chip's reason (card #SDXE): a Fixed widget's sizeHint is its
+            // minimum, and this one's follows the count it is painting, so starting a subagent
+            // widened the pane. It is still whole or absent — paintEvent leaves it out rather
+            // than clipping it — but the room it takes is room the header already had.
+            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
             setAccessibleName(QStringLiteral("Subagents running"));
             hide();
         }
@@ -1258,10 +1305,13 @@ private:
             QFont bold = font(); bold.setWeight(QFont::DemiBold);
             return {7 + 12 + 4 + QFontMetrics(bold).horizontalAdvance(m_text) + 7, 18};
         }
-        QSize minimumSizeHint() const override { return sizeHint(); }
+        QSize minimumSizeHint() const override { return {0, 18}; }
     protected:
         void paintEvent(QPaintEvent *) override {
-            if (m_text.isEmpty()) return;
+            // Rung 5 of the ladder: the badge is whole or it is not there. Half a badge in a
+            // header that could not spare its width would be worse than none, and growing the
+            // pane to fit it is what card #SDXE forbids.
+            if (m_text.isEmpty() || width() < sizeHint().width()) return;
             const relay::panestatus::Tokens t = relay::chrome::tokens();
             const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
             QFont bold = font(); bold.setWeight(QFont::DemiBold);
@@ -1313,6 +1363,7 @@ private:
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;
     QString m_remoteHost;
+    int m_layoutLogSerial = 0;        // RELAY_LAYOUT_LOG only: which pane a line is about
     int m_cutY = 0, m_footLeft = 0;   // the L's cut: below m_cutY only columns from m_footLeft remain
 };
 

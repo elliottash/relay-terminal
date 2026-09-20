@@ -1,0 +1,22 @@
+[measure] three panes; settling
+[measure] panes seen: #1 QWidget Reading the request ledger and the roles file to find the stale tier, #1 QWidget pane, #1 QWidget shell, #2 QWidget pane, #3 QWidget pane
+pane #1: 68 samples, widths [296, 335, 339], minimums [266, 292, 335, 339]
+    paneTitle moved: [33, 76, 80]
+    width during idle: [296]
+    width during busy: [296, 335]
+    width during busy+rename: [335, 339]
+    width during busy+short-title: [296]
+    width during quiet-again: [296]
+pane #2: 68 samples, widths [563, 566, 592], minimums [525]
+    width during idle: [592]
+    width during busy: [566, 592]
+    width during busy+rename: [563, 566]
+    width during busy+short-title: [592]
+    width during quiet-again: [592]
+pane #3: 68 samples, widths [282, 283, 296], minimums [266]
+    width during idle: [296]
+    width during busy: [283, 296]
+    width during busy+rename: [282, 283]
+    width during busy+short-title: [282, 296]
+    width during quiet-again: [296]
+FAIL pane widths: moved in #1, #2, #3

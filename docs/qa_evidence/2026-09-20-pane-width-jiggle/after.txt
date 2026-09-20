@@ -1,0 +1,10 @@
+[measure] three panes; settling
+[measure] panes seen: #1 Reading the request ledger and the roles file to find the stale tier column, #1 Reading the request ledger and the roles file to find the stale tier header, #1 pane column, #1 pane header, #1 shell column, #1 shell header, #2 pane column, #2 pane header, #3 pane column, #3 pane header
+pane #1 column: 68 samples, widths [296], minimums [270, 278]
+    paneHeader moved: [254, 262]
+pane #1 header: 68 samples, widths [296], minimums [270, 278]
+pane #2 column: 68 samples, widths [592], minimums [525]
+pane #2 header: 68 samples, widths [592], minimums [525]
+pane #3 column: 68 samples, widths [296], minimums [270]
+pane #3 header: 68 samples, widths [296], minimums [270]
+PASS pane widths: every pane kept one width

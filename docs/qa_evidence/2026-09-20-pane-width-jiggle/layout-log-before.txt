@@ -1,0 +1,234 @@
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=593 min=525 header=0 | 
+pane "#1 QWidget pane" w=594 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=283 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=566 min=525 header=0 | 
+pane "#1 QWidget pane" w=335 min=335 header=319 | paneStateGlyph=16 paneUsageChip=61 paneTitle=76
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=563 min=525 header=0 | 
+pane "#1 QWidget Reading the request ledger and the roles file to find the stale tier" w=339 min=339 header=323 | paneStateGlyph=16 paneUsageChip=61 paneTitle=80
+pane "#3 QWidget pane" w=282 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76
+pane "#2 QWidget pane" w=592 min=525 header=0 | 
+pane "#1 QWidget shell" w=296 min=292 header=276 | paneStateGlyph=16 paneUsageChip=61 paneTitle=33
+pane "#3 QWidget pane" w=296 min=266 header=250 | paneStateGlyph=16 paneTitle=76

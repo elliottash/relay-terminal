@@ -1,0 +1,465 @@
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sdxe-jiggle/run, 0775 instead of 0700
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=593 min=525 header=0 | 
+pane "#2 pane column" w=593 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=594 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=594 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#1 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 pane header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 pane column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 Reading the request ledger and the roles file to find the stale tier header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 Reading the request ledger and the roles file to find the stale tier column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
+pane "#2 pane header" w=592 min=525 header=0 | 
+pane "#2 pane column" w=592 min=525 header=531 | paneTypeBand=0 QWidget=523
+pane "#1 shell header" w=296 min=278 header=262 | paneStateGlyph=16 paneUsageChip=0 paneTitle=80
+pane "#1 shell column" w=296 min=278 header=300 | paneHeader=262 QWidget=10 composer=0
+pane "#3 pane header" w=296 min=270 header=254 | paneStateGlyph=16 paneTitle=80
+pane "#3 pane column" w=296 min=270 header=292 | paneHeader=254 QWidget=10 composer=0
