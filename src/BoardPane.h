@@ -11,6 +11,7 @@
 // `handleEvent`, so it can be driven by a per-window Switchboard worker or, in tests, by hand.
 #include <QElapsedTimer>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QPointer>
 #include <QSet>
@@ -21,6 +22,7 @@
 #include "BoardModel.h"
 #include "BoardSections.h"
 
+class QComboBox;
 class QFrame;
 class QHBoxLayout;
 class QLabel;
@@ -32,6 +34,7 @@ class QTextBrowser;
 class QToolButton;
 class QVBoxLayout;
 class RichEditor;
+class CurrentTextComboBox;   // global, as Pane.h defines it (#BRD3)
 
 namespace relay {
 
@@ -45,7 +48,11 @@ public:
     explicit BoardView(const QString &workspace, QWidget *parent = nullptr);
 
     // ---- wiring
-    std::function<void(const QJsonObject &)> onSend;         // a board_* protocol message
+    std::function<void(const QJsonObject &)> onSend;         // a worker protocol message (board_*, presets, …)
+    // The model box's pick (#BRD3): "tier:" (follow Main), "tier:flash", "tier:lite",
+    // "preset:<id>" or "gear" (the Model roles dialog). The view holds no QSettings: the window
+    // writes the `switchboard` role and reconfigures the board workers.
+    std::function<void(const QString &data)> onModelPick;
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
     // Execute (`x`, #XS6Q): open a terminal pane beside the board whose agent is handed `task`
@@ -269,6 +276,17 @@ private:
     QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
     QHBoxLayout *m_toolsWrap = nullptr;
     QToolButton *m_add = nullptr, *m_cleanup = nullptr;
+    // The Switchboard agent's model box (#BRD3), at the end of the same row: it names the model
+    // the board's worker is running and picks a different one. Filled from the worker's
+    // `configured` (roles/tiers) and `presets` (the provider rows) events; a pick goes out
+    // through onModelPick. Disabled while a card turn or a cleanup runs, because the worker
+    // refuses a configure mid-turn.
+    CurrentTextComboBox *m_modelBox = nullptr;
+    QJsonArray m_presets;               // the last `presets` event's rows
+    QJsonObject m_roles, m_tiers;       // the last `configured` / `model_roles` summaries
+    QString m_modelTip;                 // the box's tooltip without the busy line
+    void rebuildModelBox();
+    void syncModelBoxEnabled();
     // The list's own column header (board::Sort): the Card, Created and Updated cells a click
     // sorts by, over the rows and under the tools.
     ColumnHeader *m_columnHeader = nullptr;

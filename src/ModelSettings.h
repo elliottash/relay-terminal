@@ -84,6 +84,13 @@ public:
     static QStringList tierIds();
     static QString tierSetting(const QString &tier, const QString &field);
     static QString roleSetting(const QString &role, const QString &field);
+    // The two writes behind every "which model does this job run on" pick, shared with the
+    // Switchboard pane's model box (#BRD3) so the two writers cannot drift. A tier pick (empty =
+    // the job's built-in default tier) clears any pinned endpoint; a provider pick (empty = back
+    // to the tier) clears the tier, and both drop a stored model id — protocol 13.7 makes a tier
+    // and an endpoint exclusive.
+    static void writeRoleTier(const QString &role, const QString &tier);
+    static void writeRolePreset(const QString &role, const QString &presetId);
 
 private:
     void rebuild();

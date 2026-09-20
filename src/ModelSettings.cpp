@@ -430,6 +430,26 @@ QString RolesDialog::roleSetting(const QString &role, const QString &field) {
     return QStringLiteral("roles/") + role + '/' + field;
 }
 
+void RolesDialog::writeRoleTier(const QString &role, const QString &tier) {
+    QSettings settings;
+    if (tier.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("tier")));
+    else settings.setValue(roleSetting(role, QStringLiteral("tier")), tier);
+    // A tier choice replaces any hand-picked endpoint for this role (13.7: the pair is refused).
+    settings.remove(roleSetting(role, QStringLiteral("preset")));
+    settings.remove(roleSetting(role, QStringLiteral("model")));
+}
+
+void RolesDialog::writeRolePreset(const QString &role, const QString &presetId) {
+    QSettings settings;
+    settings.remove(roleSetting(role, QStringLiteral("model")));   // that provider's own default
+    if (presetId.isEmpty()) {
+        settings.remove(roleSetting(role, QStringLiteral("preset")));
+    } else {
+        settings.setValue(roleSetting(role, QStringLiteral("preset")), presetId);
+        settings.remove(roleSetting(role, QStringLiteral("tier")));   // an endpoint and a tier are exclusive
+    }
+}
+
 RolesDialog::RolesDialog(QWidget *parent) : QDialog(parent) {
     setObjectName(QStringLiteral("rolesDialog"));
     setWindowTitle(QStringLiteral("Relay · Model roles"));
@@ -918,12 +938,7 @@ void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject 
     connect(choice, QOverload<int>::of(&QComboBox::activated), this, [this, choice, role](int i) {
         const QString chosen = choice->itemData(i).toString();
         if (chosen == QStringLiteral("custom")) return;   // the provider box is in charge; nothing to do
-        QSettings settings;
-        if (chosen.isEmpty()) settings.remove(roleSetting(role, QStringLiteral("tier")));
-        else settings.setValue(roleSetting(role, QStringLiteral("tier")), chosen);
-        // A tier choice replaces any hand-picked endpoint for this role.
-        settings.remove(roleSetting(role, QStringLiteral("preset")));
-        settings.remove(roleSetting(role, QStringLiteral("model")));
+        writeRoleTier(role, chosen);
         if (onRolesChanged) onRolesChanged();
         rebuild();
     });
@@ -959,15 +974,7 @@ void RolesDialog::buildActionRow(QGridLayout *grid, int line, const QJsonObject 
                                         "provider's default model; it stops following any tier."));
     fillProviders(provider, QStringLiteral("Same as tier"), storedPreset);
     connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider, role](int i) {
-        const QString chosen = provider->itemData(i).toString();
-        QSettings settings;
-        settings.remove(roleSetting(role, QStringLiteral("model")));   // that provider's own default
-        if (chosen.isEmpty()) {
-            settings.remove(roleSetting(role, QStringLiteral("preset")));
-        } else {
-            settings.setValue(roleSetting(role, QStringLiteral("preset")), chosen);
-            settings.remove(roleSetting(role, QStringLiteral("tier")));   // an endpoint and a tier are exclusive
-        }
+        writeRolePreset(role, provider->itemData(i).toString());
         if (onRolesChanged) onRolesChanged();
         rebuild();
     });

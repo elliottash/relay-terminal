@@ -2081,6 +2081,16 @@ The Switchboard agent is **a worker per window**, started by the GUI exactly lik
 but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
 13 — which defaults to the main agent. Card chats therefore never enter a pane's conversation.
 
+The Switchboard pane shows that model and can change it (#BRD3, 2026-09-20). It sends `presets`
+to list the providers and reads `configured`'s `model`/`roles`/`tiers` — plus the `model_roles`
+event that follows a configure in which a role fell back — to build the box's rows and its
+current row, with the role's `warning`/`note` in the tooltip. No new messages or events: a pick
+is written by the GUI into the persisted `switchboard` role (13.7's
+`roles/switchboard/{tier,preset}` — the same keys the roles dialog edits) and applied by
+re-sending `configure` to every live board worker. The worker refuses a configure mid-turn, so
+the pane disables the box while any `board_ask` turn or cleanup runs rather than letting a pick
+error.
+
 The question is appended to the card's thread **before** the model is called, so a crash or a
 provider failure never loses what the user typed. The agent is stateless per card: the first
 question about a card resets the conversation and seeds it with the card's front matter, its body

@@ -52,6 +52,7 @@ target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
+    src/CurrentTextComboBox.h   # the model box, shared with the terminal pane (#BRD3)
     src/BoardSections.cpp src/BoardSections.h
     src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h
     src/BoardChat.cpp src/BoardChat.h)   # the Switchboard page agent's panel (#8YQ9, 19.18)

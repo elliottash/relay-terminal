@@ -4653,6 +4653,24 @@ public:
         view->onSend = [this, workspace](const QJsonObject &message) {
             if (relay::BoardWorker *worker = boardWorker(workspace)) worker->send(message);
         };
+        // The Switchboard agent's model box (#BRD3): a pick writes the persisted `switchboard`
+        // role — the same keys the roles dialog's Advanced row writes, through the same helpers
+        // — and reconfigures the board workers, because only a configure moves the running
+        // agent. The gear row is the roles dialog itself.
+        view->onModelPick = [guard](const QString &data) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            if (data == QStringLiteral("gear")) {
+                w->runAction(QStringLiteral("agent.modelRoles"));
+                return;
+            }
+            if (data.startsWith(QStringLiteral("tier:")))
+                relay::RolesDialog::writeRoleTier(QStringLiteral("switchboard"), data.mid(5));
+            else if (data.startsWith(QStringLiteral("preset:")))
+                relay::RolesDialog::writeRolePreset(QStringLiteral("switchboard"), data.mid(7));
+            else return;
+            w->reconfigureBoardWorkers();
+        };
         // The last Switchboard of this root to close takes its worker with it. The connection is
         // kept so stopBoardWorkers() can drop it before the window tears its own panes down.
         m_boardWorkerHooks << connect(tool, &QObject::destroyed, this, [this, workspace](QObject *gone) {
