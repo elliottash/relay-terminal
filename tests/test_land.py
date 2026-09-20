@@ -230,11 +230,11 @@ class LandingHunks(LandCase):
         # path landed on main as the commit's subject line.
         self.land("begin", "mine", "new/thing.py")
         write(self.repo / "new/thing.py", "print('hi')\n")
-        tip = git(self.repo, "rev-parse", "main")
+        tip = git(self.repo, "rev-parse", "main").stdout
         proc = self.land("commit", "mine", "-m", str(self.repo / "no-such-msg.txt"), expect=None)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("looks like a message file", proc.stderr)
-        self.assertEqual(git(self.repo, "rev-parse", "main"), tip)
+        self.assertEqual(git(self.repo, "rev-parse", "main").stdout, tip)
         # The same text with a space in it is a message, as before.
         self.land("commit", "mine", "-m", "a message with a / in it")
 
