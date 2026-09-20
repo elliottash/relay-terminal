@@ -97,12 +97,10 @@ MAX_LIST_LIMIT = 50
 MAX_THREAD_ENTRIES = 50
 UNDO_SECONDS = 30
 
-#: Fields no agent write may touch.  `status`, `rank` and `section` belong to `board_move_card`
-#: (the last is where a card is parked, #3XZV); `source` is the provenance of the owner's own
-#: words; `private` would move the file between the git tree and the private root, which is the
-#: owner's decision.
-IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
-                              "section"})
+#: Fields no agent write may touch.  `status` and `rank` belong to `board_move_card`;
+#: `source` is the provenance of the owner's own words; `private` would move the file
+#: between the git tree and the private root, which is the owner's decision.
+IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private"})
 
 #: Sections an agent writes freely.  Anything else in a card body is owner text: it may
 #: still be rewritten (decision 12.3) but the old and new text go into the thread.
@@ -1493,7 +1491,7 @@ class BoardTools:
         return {"id": card.id, "title": card.title, "type": card.type, "status": card.status,
                 "tab": self._tab_of(card), "labels": list(card.front.get("labels") or []),
                 "assignee": card.front.get("assignee"), "waiting_on": card.front.get("waiting_on"),
-                "rank": card.rank, "private": card.private, "priority": card.priority,
+                "rank": card.rank, "private": card.private,
                 "path": str(card.path.relative_to(self.board.repo)) if card.path else None,
                 "thread_entries": thread_counts.get(card.id or "", 0),
                 "created": str(card.front.get("created") or ""),
@@ -1789,20 +1787,11 @@ class BoardTools:
                 if key in IMMUTABLE_FIELDS:
                     raise BoardToolError(
                         f"{key} is not writable: id, type and created are the record, source is the "
-                        "user's own provenance, private moves the file, and status, rank and "
-                        "section are board_move_card's job.", code="board_refused", field=key)
+                        "user's own provenance, private moves the file, and status and rank are "
+                        "board_move_card's job.", code="board_refused", field=key)
                 if key not in writable:
                     raise BoardToolError(f"{key} is not a field of a {card.type} card; allowed: "
                                          f"{', '.join(sorted(writable))}.", code="board_refused", field=key)
-                if key == "priority" and value is not None:
-                    # One clamped int (#VKFV): a bad value is refused rather than guessed at,
-                    # and 0 means "no flag", which is the key's absence in the file.
-                    try:
-                        value = B.clamp_priority(value)
-                    except B.BoardError as exc:
-                        raise BoardToolError(str(exc), code="board_refused", field=key) from exc
-                    if value == 0:
-                        value = None
                 old = card.front.get(key)
                 if value is None:
                     card.drop(key)
@@ -1867,8 +1856,7 @@ class BoardTools:
                 "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites]}
 
     def _move(self, args: dict) -> dict:
-        allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",
-                   "implemented_by"}
+        allowed = {"id", "status", "tab", "before", "after", "reason", "evidence", "implemented_by"}
         if set(args) - allowed:
             raise BoardToolError(f"board_move_card takes {', '.join(sorted(allowed))}.")
         card_id = normalize_id(args.get("id"))
@@ -1877,24 +1865,10 @@ class BoardTools:
         before_bytes = card.path.read_bytes()
         base_hash = B.file_hash(card.path)
         old_status, old_tab = card.status, self._tab_of(card)
-        old_section = str(card.front.get("section") or "")
         status = str(args.get("status")).strip().lower() if args.get("status") else old_status
         if status not in B.STATUS_FOLDER[card.type]:
             raise BoardToolError(f"unknown {card.type} status {args.get('status')!r}; use one of "
                                  f"{', '.join(B.STATUS_FOLDER[card.type])}.")
-        # `section` parks the card in a manual section — a column that collects nothing — and an
-        # empty string takes it out (#3XZV). Its status is left alone either way.
-        section_arg = args.get("section")
-        if section_arg is not None:
-            if not isinstance(section_arg, str):
-                raise BoardToolError("section must be a section id, or an empty string to take "
-                                     "the card out of one.")
-            if section_arg.strip():
-                self._require_manual_section(section_arg.strip().lower())
-                section_arg = section_arg.strip().lower()
-            else:
-                section_arg = ""
-        new_section = old_section if section_arg is None else section_arg
         tab = str(args.get("tab")).strip().lower() if args.get("tab") else old_tab
         category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
                     else self._category_for_tab(tab))
@@ -1905,7 +1879,7 @@ class BoardTools:
         # the worker cannot know — a guest CLI writing through the bridge.
         mine = self.context.signature()
         stamped = ""
-        if mine and (status in ("in-progress", "executing", "needs-verification")
+        if mine and (status == "in-progress"
                      or (status in QA_STATUSES and old_status not in QA_STATUSES)):
             stamped = mine
             card.set("implemented_by", mine)
@@ -1951,10 +1925,6 @@ class BoardTools:
             card.set("links", links)
         if args.get("implemented_by") and not stamped:
             card.set("implemented_by", args["implemented_by"])
-        if section_arg == "":
-            card.drop("section")
-        elif section_arg is not None:
-            card.set("section", section_arg)
 
         card.set("status", status)
         rank = self._rank_for(card, status, args.get("before"), args.get("after"))
@@ -1974,9 +1944,6 @@ class BoardTools:
         parts = []
         if status != old_status:
             parts.append(f"{_column_label(old_status)} → {_column_label(status)}")
-        if new_section != old_section:
-            parts.append(f"parked in {_column_label(new_section)}" if new_section
-                         else f"out of {_column_label(old_section)}")
         if tab != old_tab:
             parts.append(f"tab {old_tab} → {tab}")
         if rank is not None and not parts:
@@ -1991,41 +1958,9 @@ class BoardTools:
             line += f" · verified_by {verified}"
         self._append(card, line, kind="event")
         write_id = self._record("move", card, summary, before_bytes, size, moved_from)
-        return {"id": card.id, "status": status, "section": new_section or None, "tab": tab,
-                "rank": card.rank,
+        return {"id": card.id, "status": status, "tab": tab, "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
-                "write_id": write_id, "summary": summary}
-
-    def set_priority(self, card_id: str, priority) -> dict:
-        """The pane's flag click (protocol 19.3 ``board_priority``, card #VKFV).
-
-        Not a `run()` tool: it is the owner at the keyboard, not an agent turn, so it takes no
-        `base_hash` — the whole patch is one clamped integer, like a drag's rank — and it is not
-        offered to the agent, which sets the same field through `board_update_card`. Undo, the
-        write record and the thread entry are the ordinary ones, so a misclick is Ctrl+Z like
-        any other move.
-        """
-        card_id = normalize_id(card_id)
-        priority = B.clamp_priority(priority)   # raises BoardError -> BoardToolError below
-        card = self._card(card_id)
-        before = card.path.read_bytes()
-        base_hash = B.file_hash(card.path)
-        old_priority = card.priority
-        if priority:
-            card.set("priority", priority)
-        else:
-            card.drop("priority")
-        size = self._thread_size(card)
-        self.board.save(card, base_hash=base_hash)
-        self.writes_this_turn += 1
-        flag = ("-" if priority < 0 else "+" if priority else "") + str(abs(priority))
-        line = (f"- ✦ {self.context.actor} flagged this card · priority {flag}"
-                if priority else f"- ✦ {self.context.actor} cleared this card's priority flag")
-        self._append(card, line, kind="event")
-        summary = f"priority {old_priority} → {priority}"
-        write_id = self._record("priority", card, summary, before, size)
-        return {"id": card.id, "priority": priority, "hash": B.file_hash(card.path),
                 "write_id": write_id, "summary": summary}
 
     def _rank_for(self, card: B.Card, status: str, before, after) -> str | None:
@@ -2210,10 +2145,8 @@ class BoardTools:
             if not columns:
                 raise BoardToolError("columns must name at least one section.")
             # An id outside the known list is allowed only when this board says what it collects:
-            # that is what makes an invented section possible without making a typo silent. An
-            # explicit empty entry is a manual section — one that collects nothing on purpose
-            # (#3XZV) — and counts as said just the same.
-            unknown = [c for c in columns if c not in B.COLUMN_IDS and c not in statuses]
+            # that is what makes an invented section possible without making a typo silent.
+            unknown = [c for c in columns if c not in B.COLUMN_IDS and not statuses.get(c)]
             if unknown:
                 raise BoardToolError(
                     f"unknown section(s) {', '.join(unknown)}: either name one of "
@@ -2421,12 +2354,10 @@ MAX_SECTION_TITLE = 40
 
 
 def _column_statuses(value) -> dict[str, list[str]]:
-    """`{section: [status, ...]}`, checked: known statuses, nothing invented.
+    """`{section: [status, ...]}`, checked: known statuses, no empty section, nothing invented.
 
     Merging two sections is writing one of them with both sets of statuses and dropping the
     other from `columns`, so this is the one place that decides what a section may collect.
-    An explicit empty list is a section that collects nothing — one a person fills by hand,
-    parking cards in it with `board_move_card {section}` (#3XZV) — and it is kept as written.
     """
     if not isinstance(value, dict):
         raise BoardToolError("column_statuses must be an object of section -> statuses.")
@@ -2437,12 +2368,10 @@ def _column_statuses(value) -> dict[str, list[str]]:
         column = _one_line(key, "a column_statuses key", 40).lower()
         if not _SECTION_ID_RE.fullmatch(column):
             raise BoardToolError(f"section id {column!r} must be lower-case letters, digits, - and _.")
-        if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
-            raise BoardToolError(f"column_statuses[{column}] must be an array of statuses.")
-        statuses = [s.strip() for s in listed if s.strip()]
-        if not listed:
-            out[column] = []          # a manual section: it collects nothing on purpose
-            continue
+        statuses = _string_list(listed, f"column_statuses[{column}]")
+        if not statuses:
+            raise BoardToolError(f"section {column!r} must collect at least one status; to take a "
+                                 "section away, leave it out of columns instead.")
         unknown = [s for s in statuses if s not in B.ALL_STATUSES]
         if unknown:
             raise BoardToolError(f"unknown status(es) {', '.join(unknown)} in section {column!r}; "
