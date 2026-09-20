@@ -735,6 +735,11 @@ class BoardCommands:
                       # Protocol 30.4/30.7: the helper agent is the one that most needs the app
                       # tools — a question asked in Options is answered by this agent.
                       app=getattr(main, "app", None),
+                      # #GMCF decision 9: and because it is that agent, it never holds those
+                      # schemas back. A tab with no project attached has no board to hang a
+                      # `ChatScope` on, so without this flag the helper took the pane branch and
+                      # deferred the very tools it exists for.
+                      helper=True,
                       # #GMCF (owner, 2026-09-20): the Actions pane is the palette with its
                       # shortcuts beside it, so the helper may rebind one. The catalogue is the
                       # worker's own — the same object the `configure` built and a `keybindings`

@@ -144,6 +144,54 @@ class LoadTests(Base):
                          [t['function']['name'] for t in before])
 
 
+class HelperTests(Base):
+    """A tab's helper (30.7) never defers: it is the agent the app tools exist for.
+
+    Deferral is a pane's bargain. The helper is asked from Options, Actions and Sessions, so its
+    first action is an app call every time and holding the schemas back buys it nothing but a round
+    trip. The board is not what tells the two apart — a tab with no project attached has no board —
+    so the flag `_build_page_agent` sets is, and these pin both sides of it.
+    """
+
+    def helper(self, **kwargs) -> Agent:
+        agent = self.agent(helper=True, **kwargs)
+        agent.refresh_system_prompt()
+        return agent
+
+    def test_a_helper_is_eager_with_a_board_and_without_one(self):
+        for board in (True, False):
+            with self.subTest(board=board):
+                agent = self.helper(board=board)
+                self.assertEqual(agent._deferred_groups(), ())
+                names = self.names(agent)
+                for eager in ('app_option_list', 'app_action_run', 'session_info', 'activity'):
+                    self.assertIn(eager, names)
+                # Nothing is held back, so there is nothing to fetch and no rule line to say so.
+                self.assertNotIn('load_tools', names)
+                self.assertNotIn('load_tools', agent.system_prompt())
+                # The app group's own rules stay in the prompt, where they were before decision 9.
+                self.assertIn(app_tools.prompt_section(agent.app), agent.system_prompt())
+
+    def test_a_board_attached_helper_is_eager_in_its_chat_scope_too(self):
+        # The scope branch of `Agent.tools` hands over the app tools whatever the flag says, so
+        # what this pins is the prompt it was built with: it used to carry the one-line rule for a
+        # `load_tools` tool that branch never offers.
+        agent = self.helper()
+        agent.board.begin_chat_turn()
+        self.addCleanup(agent.board.end_chat_turn)
+        self.assertEqual(agent._deferred_groups(), ())
+        self.assertNotIn('load_tools', agent.messages[0]['content'])
+        self.assertIn('app_option_set', agent.messages[0]['content'])
+
+    def test_an_ordinary_pane_still_defers(self):
+        agent = self.agent()
+        self.assertEqual(agent._deferred_groups(), ('app', 'own_session', 'tests'))
+        names = self.names(agent)
+        self.assertIn('load_tools', names)
+        for held in ('app_option_list', 'session_info', 'tests_run'):
+            self.assertNotIn(held, names)
+
+
 class ConversationTests(Base):
     """One scripted turn: the model reaches for a deferred tool, is told how to get it, loads it,
     and calls it — which is the round trip the prompt line promises."""

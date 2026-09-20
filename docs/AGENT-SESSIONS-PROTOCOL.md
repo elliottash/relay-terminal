@@ -840,7 +840,10 @@ only their schemas were held back. This is Claude Code's own deferred-tool shape
 
 Deferral is **off** on the Local tier and under the short profile (12.12), where a load would cost
 the whole prefix, and off for a group nothing is wired up for (no `app` block, no board): there is
-then no `load_tools` tool and no rule line. A new conversation starts from the names again. The
+then no `load_tools` tool and no rule line. It is off for a **tab's helper** (30.7) in every scope,
+board or no board — it is the agent asked from Options, Actions and Sessions, so its first action is
+an app call and holding the schemas back only buys it a round trip. A new conversation starts from
+the names again. The
 group's prompt rules travel with its schemas: a deferred `app` group takes `app_tools.prompt_section`
 out of the prompt and leaves the one line. Backend: `backend/relay_core/tool_groups.py`; tests:
 `tests/test_tool_groups.py`.

@@ -536,7 +536,8 @@ class Agent:
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
                  fallbacks=None, failover_openrouter=None,
-                 roles=None, board=None, app=None, security_options: dict | None = None,
+                 roles=None, board=None, app=None, helper: bool = False,
+                 security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
         self.cancel_event = threading.Event()
@@ -583,6 +584,10 @@ class Agent:
         # options, actions, the sessions index and navigation, attached exactly as `board` is
         # (protocol 30.4, card #FEJQ). The helper worker's agents get the same instance.
         self.app = app
+        # Whether this agent is a tab's helper (protocol 30.7) rather than a pane's own agent.
+        # `board_protocol._build_page_agent` is the only caller that sets it, and `_deferred_groups`
+        # is the only reader: a helper never holds the app or own_session schemas back (#GMCF).
+        self.helper = helper
         # The pane agent's read tools over its own session (relay_core.activity_tools), set by
         # `ActivityTools.attach` after construction because they need the finished agent. Only a
         # pane agent has them: the helper worker has no pane of its own to report on (30.5).
@@ -843,7 +848,18 @@ class Agent:
         appending a schema re-prefills the whole request (proposal 4.1), and the short profile does
         not offer these tools at all. A group nothing is wired up for — no `app` block, no activity
         tools, no board — is not deferred either: there is nothing to load.
+
+        A **helper** defers nothing, in every scope (#GMCF, 2026-09-20). Deferral is a pane's
+        bargain — the app tools are on every request and a minority of turns use them — and the
+        helper is the other side of it: it is the agent Options, Actions and Sessions ask, so its
+        first action is an app call and the hold-back only buys it a round trip. Keying that on
+        `card_scope` was not enough, because a tab with no project attached has no board to carry
+        one (30.7): its helper took the pane branch and lost the tools it exists for, and the helper
+        *with* a board got the one-line rule in the prompt it was built with while `ChatScope`
+        handed it the schemas anyway — a `load_tools` it had no tool to call.
         """
+        if getattr(self, "helper", False):
+            return ()
         if getattr(self, "preset", None) is not None and getattr(self.preset, "local", False):
             return ()
         if self.profile() != "full" or getattr(getattr(self, "board", None), "card_scope", None) is not None:
