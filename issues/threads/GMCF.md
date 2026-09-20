@@ -37,3 +37,7 @@ The owner on the nine distillation decisions: "1-9 all seem good to me". Impleme
 <!-- relay:entry 20260920T212011Z-c8 author=claude-code kind=evidence -->
 ### Claude Code · 2026-09-20 21:20
 everything landed: the five decisions and the nine distillation decisions; commits in links.commits, results and the QA checklist in the body, three questions left open for the owner. Moved to needs-verification.
+
+<!-- relay:entry 20260920T213550Z-c9 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 21:35
+The owner on the three open questions in the body: "1 yes, 2 yes, 3 yes" — the Lite tier defaults to the short profile; the Local tier gets the five-tool board set; the Actions-pane helper's configure carries the keybindings, so it may rebind keys. Two implementers.
