@@ -72,7 +72,9 @@ that conflict.
    on: main for new panes, high for plan mode, flash for terminal driving and quick side calls,
    lite for chores, local for `/local`. The rest are that tier's fallbacks, in order, and a model
    in no list is only used when you pick it by hand. "fill the lists" applies Relay's defaults,
-   or the recommended ones with the cheaper OpenRouter twins after your own models. Claude Code
+   or the recommended ones with the cheaper OpenRouter twins after your own models. A **profile**
+   names the five lists as a set — "AI work", "admin work" — and switching one in, there or with
+   `/profile`, swaps every list at once for every pane. Claude Code
    and Codex, when installed, are providers there like any other.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.
@@ -200,7 +202,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 - **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
   (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
   limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the picker, also
-  Ctrl+Alt+M), `/models` (Options › Models, also Ctrl+Shift+M), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
+  Ctrl+Alt+M), `/models` (Options › Models, also Ctrl+Shift+M), `/profile [name]` (switch the model profile), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),

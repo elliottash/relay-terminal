@@ -2182,7 +2182,9 @@ private:
                                       "(GLM, Kimi, MiniMax), or your Claude Code and Codex logins. Keys live in the "
                                       "desktop keyring and requests go straight to the provider, never through Relay's "
                                       "server; Relay Free, the included allowance, is the one exception and goes through "
-                                      "Relay's hosted service. Ctrl+Shift+M or /models opens this page; Alt+M drops the "
+                                      "Relay's hosted service. A profile names the five lists as a set, so \"AI work\" "
+                                      "and \"admin work\" can rank models differently and swap in one switch (/profile). "
+                                      "Ctrl+Shift+M or /models opens this page; Alt+M drops the "
                                       "model box open; Ctrl+Alt+M or /model opens the picker.");
         Pane *pane = m_active;
         QSettings settings;
@@ -2203,13 +2205,7 @@ private:
         // since the last presets answer (the "5h 62% left" status line, an exhausted row).
         const relay::models::Catalog catalog = !viaHelper ? pane->modelCatalog() : relay::models::catalogFrom(presets);
         const qint64 now = QDateTime::currentSecsSinceEpoch();
-        auto curated = [this] {
-            refreshSettingsPanes();
-            for (Pane *each : allPanes()) {
-                each->modelsCurationChanged();
-                each->agentOptionsChanged(QStringLiteral("models/fallback"));   // rank 2 reaches the worker now
-            }
-        };
+        auto curated = [this] { modelsCurated(); };
         auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
 
         // ----- 1. providers ---------------------------------------------------------------------
@@ -2554,7 +2550,100 @@ private:
             }
         }
 
-        // ----- 3. the five lists ----------------------------------------------------------------
+        // ----- 3. profiles ----------------------------------------------------------------------
+        // Owner (2026-09-20 evening): "we need model user profiles like warp for the priority lists
+        // … so I can have an 'AI work' profile and an 'admin work' profile that sets different model
+        // priorities." Warp's Agent Profile is a whole posture — base model, planning model,
+        // autonomy, command allow/deny lists, MCP access — switched from an icon in its input area.
+        // Here a profile is the five lists below and nothing else, which is what was asked for, and
+        // the lists and the profile are one thing: an edit to a list while a profile is current is
+        // an edit *of* it, so there is no "unsaved changes" state to explain or lose.
+        {
+            relay::SettingRow head = headingRow(QStringLiteral("profiles"));
+            head.collapsible = true;
+            models.rows << head;
+        }
+        {
+            const QStringList names = relay::models::curation::profiles();
+            const QString currentProfile = relay::models::curation::currentProfile();
+            // Saving the lists as they are under a name, which is also how the first one is made.
+            auto saveAs = [this, curated](const QString &initial, const QString &title) {
+                bool ok = false;
+                const QString name = QInputDialog::getText(this, title,
+                    QStringLiteral("A name for the five lists as they are now — “AI work”, “admin work”.\n"
+                                   "Editing a list while this profile is chosen edits the profile: there is nothing to save."),
+                    QLineEdit::Normal, initial, &ok).trimmed();
+                if (!ok || name == initial) return QString();
+                if (!relay::models::curation::validProfileName(name)) {
+                    if (!name.isEmpty())
+                        QMessageBox::warning(this, title, QStringLiteral("A profile name cannot contain “/” or “\\”."));
+                    return QString();
+                }
+                if (relay::models::curation::profiles().contains(name)) {
+                    QMessageBox::warning(this, title, QStringLiteral("There is already a profile called “%1”.").arg(name));
+                    return QString();
+                }
+                return name;
+            };
+            const QString kNew = QStringLiteral("\x01new");   // never a profile name: validProfileName trims
+            relay::SettingRow row;
+            row.kind = relay::SettingRow::Choice;
+            row.id = QStringLiteral("models/profile");
+            row.label = QStringLiteral("profile");
+            row.detail = QStringLiteral("A named set of the five lists below. Switching one in swaps every list at once "
+                                        "(also /profile)");
+            row.aliases = QStringLiteral("profile profiles preset workspace ai work admin work priorities switch");
+            // "no profile" is offered only while that is where you are: once a profile is chosen the
+            // lists belong to it, and the way out is to delete it, as in Warp.
+            if (currentProfile.isEmpty()) { row.options << QString(); row.optionLabels << QStringLiteral("no profile"); }
+            for (const QString &name : names) { row.options << name; row.optionLabels << name; }
+            row.options << kNew;
+            row.optionLabels << QStringLiteral("new profile…");
+            row.current = currentProfile;
+            row.onChoose = [this, catalog, curated, saveAs, kNew](const QString &value) {
+                if (value == kNew) {
+                    const QString name = saveAs(QString(), QStringLiteral("new profile"));
+                    if (name.isEmpty()) { refreshSettingsPanes(); return; }   // put the box back on what is current
+                    relay::models::curation::saveProfile(name);
+                    curated();
+                    return;
+                }
+                if (value.isEmpty()) return;
+                relay::models::curation::applyProfile(value);
+                applyMainDefault(catalog);   // rank 1 of the new main list is what new panes start on
+                curated();
+            };
+            models.rows << row;
+            if (!currentProfile.isEmpty()) {
+                relay::SettingRow actions;
+                actions.kind = relay::SettingRow::Buttons;
+                actions.id = QStringLiteral("models.profile.actions");
+                actions.label = currentProfile;
+                actions.indent = 1;
+                actions.tooltip = QStringLiteral("The profile the five lists below belong to right now");
+                actions.aliases = QStringLiteral("rename delete profile ") + currentProfile;
+                actions.buttonTexts = QStringList{QStringLiteral("rename…"), QStringLiteral("delete")};
+                actions.onButton = [this, currentProfile, curated, saveAs](int index) {
+                    if (index == 0) {
+                        const QString name = saveAs(currentProfile, QStringLiteral("rename profile"));
+                        if (name.isEmpty()) return;
+                        relay::models::curation::renameProfile(currentProfile, name);
+                        curated();
+                        return;
+                    }
+                    if (QMessageBox::question(this, QStringLiteral("delete profile"),
+                                              QStringLiteral("Delete the profile “%1”?\nThe five lists stay exactly as they are; "
+                                                             "they simply stop belonging to a profile.").arg(currentProfile))
+                        != QMessageBox::Yes)
+                        return;
+                    relay::models::curation::deleteProfile(currentProfile);
+                    curated();
+                };
+                models.rows << actions;
+            }
+        }
+
+        // ----- 4. the five lists ----------------------------------------------------------------
         // Main, high, flash, lite, local (owner, 2026-09-20), in place of one priority list and its
         // line. Each is ordered: rank 1 is what the tier runs on, the rest are its fallbacks, and a
         // model in no list is only ever used when you pick it by hand. A row is a model and the
@@ -2700,6 +2789,16 @@ private:
                                                 "summaries, chores — runs on"),
                                  QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
         return models;
+    }
+    // The lists changed — an edit on Options › Models, a profile switched there or by `/profile`:
+    // the page redraws and every pane re-reads them, its box and picker first, then the worker's
+    // failover chain (rank 2 reaches it now). One exit for every way the curation moves.
+    void modelsCurated() {
+        refreshSettingsPanes();
+        for (Pane *each : allPanes()) {
+            each->modelsCurationChanged();
+            each->agentOptionsChanged(QStringLiteral("models/fallback"));
+        }
     }
     // Rank 1 of the priority list is what a new pane starts on: the same two keys a switch writes.
     // A guest at rank 1 is left alone — a fresh pane starting a harness unasked is a surprise.
@@ -6907,6 +7006,10 @@ private:
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
         pane->onOpenOptions = [guard](const QString &tab) {
             if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
+        };
+        // `/profile` swapped the five lists: the same two steps a switch on Options › Models takes.
+        pane->onProfileApplied = [guard] {
+            if (auto *w = windowOf(guard)) { applyMainDefault(guard->modelCatalog()); w->modelsCurated(); }
         };
         pane->onShareTab = [guard](int *panes) {
             auto *w = windowOf(guard);

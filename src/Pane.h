@@ -652,6 +652,10 @@ public:
     std::function<void()> onOpenSharing;
     // Options, opened at one of its tabs: `/models` lands on Options › Models.
     std::function<void(const QString &tab)> onOpenOptions;
+    // `/profile` switched the five tier lists: the window redraws Options › Models, moves the
+    // new-pane default to the new rank 1 of main and tells every pane, exactly as a switch made on
+    // the page does. Unset, this pane alone re-reads the lists.
+    std::function<void()> onProfileApplied;
     // The window's id for the tab this pane is in, and how many terminals it holds, so the share
     // dialog can offer "Share the whole tab". Unset (or "") offers only this pane.
     std::function<QString(int *panes)> onShareTab;
@@ -7866,6 +7870,7 @@ private:
             {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
             {QStringLiteral("reasoning"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort (same as /effort)")},
             {QStringLiteral("models"), QString(), QStringLiteral("Options › Models: providers, which models the picker shows, their order")},
+            {QStringLiteral("profile"), QStringLiteral("[name]"), QStringLiteral("Model profile: switch the five tier lists to a named set (Options › Models › profile); alone, a picker")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
@@ -8271,6 +8276,51 @@ private:
             // there, so this is the one door for all three.
             if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
             else status(QStringLiteral("Options › Models is not available from this pane."));
+        } else if (name == QStringLiteral("profile")) {
+            // Owner (2026-09-20 evening): "an 'AI work' profile and an 'admin work' profile that
+            // sets different model priorities". A profile is a named set of the five tier lists
+            // (Options › Models › profile); switching swaps every list at once, for every pane.
+            // The conversation and this pane's model stay: the status line says what main now
+            // runs on and that /main puts this pane on it.
+            namespace curation = relay::models::curation;
+            const QStringList names = curation::profiles();
+            if (names.isEmpty()) {
+                status(QStringLiteral("No profiles yet. Options › Models › profile › new profile… saves the five lists under a name."));
+                return;
+            }
+            const QString current = curation::currentProfile();
+            QString chosen = args.trimmed();
+            if (chosen.isEmpty()) {
+                QList<relay::agentui::PickerRow> rows;
+                for (const QString &each : names)
+                    rows << relay::agentui::PickerRow{{each, each == current ? QStringLiteral("current") : QString()},
+                                                      QStringLiteral("The five tier lists saved as “%1”").arg(each), each};
+                const auto result = relay::agentui::pick(this, QStringLiteral("profile"),
+                    QStringLiteral("A named set of the five tier lists. Switching swaps every list at once, in every pane."),
+                    {QStringLiteral("profile"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
+                if (result.row < 0 || result.row >= names.size()) return;
+                chosen = names.at(result.row);
+            } else if (!names.contains(chosen)) {
+                // Typed: the exact name, else the one name it is a case-insensitive prefix of.
+                QStringList matches;
+                for (const QString &each : names)
+                    if (each.compare(chosen, Qt::CaseInsensitive) == 0) matches = QStringList{each};
+                if (matches.isEmpty())
+                    for (const QString &each : names)
+                        if (each.startsWith(chosen, Qt::CaseInsensitive)) matches << each;
+                if (matches.size() != 1) {
+                    status(QStringLiteral("No profile called “%1”. Profiles: %2.").arg(chosen, names.join(QStringLiteral(", "))));
+                    return;
+                }
+                chosen = matches.first();
+            }
+            curation::applyProfile(chosen);
+            if (onProfileApplied) onProfileApplied();
+            else { modelsCurationChanged(); agentOptionsChanged(QStringLiteral("models/fallback")); }
+            const relay::models::Entry main = relay::models::mainDefault(modelCatalog());
+            status(main.key.isEmpty()
+                       ? QStringLiteral("Profile: %1.").arg(chosen)
+                       : QStringLiteral("Profile: %1 · main runs on %2 (/main puts this pane on it).").arg(chosen, main.label));
         } else if (name == QStringLiteral("effort") || name == QStringLiteral("reasoning")) {
             const QStringList levels = offeredEfforts();
             const QString wanted = args.toLower();
@@ -11835,6 +11885,10 @@ private:
                               .arg(effortText, Keymap::instance().shortcutText(QStringLiteral("agent.effortUp")),
                                    Keymap::instance().shortcutText(QStringLiteral("agent.effortDown")))};
         if (!extra.isEmpty()) lines << extra;
+        // Which named set of the five tier lists the box's rows come from, when there is one
+        // (Options › Models › profile, /profile). Unnamed lists say nothing: there is no line to read.
+        if (const QString profile = relay::models::curation::currentProfile(); !profile.isEmpty())
+            lines << QStringLiteral("Profile: %1  (/profile switches)").arg(profile);
         if (!m_roleSummary.isEmpty()) {
             lines << QString();
             for (const QString &role : QStringList{QStringLiteral("main")} + roleIds()) {

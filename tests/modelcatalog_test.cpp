@@ -315,6 +315,82 @@ private Q_SLOTS:
         QVERIFY(curation::tierList(QStringLiteral("main")).isEmpty());   // defaults replace every list
     }
 
+    // Owner, 2026-09-20 evening: "we need model user profiles like warp for the priority lists …
+    // an 'AI work' profile and an 'admin work' profile that sets different model priorities."
+    void profilesAreNamedSnapshotsOfTheFiveLists() {
+        const QString ai = QStringLiteral("AI work"), admin = QStringLiteral("admin work");
+        QVERIFY(curation::profiles().isEmpty());
+        QCOMPARE(curation::currentProfile(), QString());
+
+        // "AI work": the big models first.
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("high"));
+        curation::addToTier(QStringLiteral("flash"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("low"));
+        curation::saveProfile(ai);
+        QCOMPARE(curation::profiles(), QStringList{ai});
+        QCOMPARE(curation::currentProfile(), ai);
+
+        // "admin work": the cheap ones, saved from the lists as they are, then rewritten.
+        curation::saveProfile(admin);
+        QCOMPARE(curation::profiles(), (QStringList{ai, admin}));
+        QCOMPARE(curation::currentProfile(), admin);
+        curation::setTierList(QStringLiteral("main"), {{QStringLiteral("kimi-code|kimi-for-coding-highspeed"), QString()}});
+        curation::setTierList(QStringLiteral("flash"), {});
+
+        // Editing a list while a profile is current *is* editing that profile: nothing to save.
+        curation::applyProfile(ai);
+        QCOMPARE(curation::currentProfile(), ai);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(curation::tierList(QStringLiteral("flash")).first().key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        curation::applyProfile(admin);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 1);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        QVERIFY(curation::tierList(QStringLiteral("flash")).isEmpty());   // a whole snapshot: an empty list stays empty
+
+        // Rank 1 of main follows the profile, which is what a switch is for.
+        const Catalog catalog = catalogFrom(presets());
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        curation::applyProfile(ai);
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("glm-coding|glm-5.3"));
+
+        // Storage: one group per profile, and the current name.
+        QSettings settings;
+        QVERIFY(settings.contains(QStringLiteral("models/profiles/AI work/tier/main")));
+        QCOMPARE(settings.value(QStringLiteral("models/profile")).toString(), ai);
+
+        // Rename keeps its place, its lists and (being current) the current name.
+        curation::renameProfile(ai, QStringLiteral("deep work"));
+        QCOMPARE(curation::profiles(), (QStringList{QStringLiteral("deep work"), admin}));
+        QCOMPARE(curation::currentProfile(), QStringLiteral("deep work"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().key, QStringLiteral("glm-coding|glm-5.3"));
+        curation::applyProfile(QStringLiteral("deep work"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+
+        // A name already taken, an empty one and one with a "/" in it are all refused.
+        curation::renameProfile(QStringLiteral("deep work"), admin);
+        QCOMPARE(curation::profiles(), (QStringList{QStringLiteral("deep work"), admin}));
+        curation::renameProfile(QStringLiteral("deep work"), QStringLiteral(" "));
+        curation::renameProfile(QStringLiteral("deep work"), QStringLiteral("a/b"));
+        QCOMPARE(curation::profiles(), (QStringList{QStringLiteral("deep work"), admin}));
+        QVERIFY(!curation::validProfileName(QStringLiteral("a/b")));
+        QVERIFY(curation::validProfileName(QStringLiteral("admin work")));
+
+        // Deleting the current profile leaves the lists alone and nothing current.
+        curation::deleteProfile(QStringLiteral("deep work"));
+        QCOMPARE(curation::profiles(), QStringList{admin});
+        QCOMPARE(curation::currentProfile(), QString());
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+        // With no profile current, an edit reaches no profile.
+        curation::setTierList(QStringLiteral("main"), {});
+        curation::applyProfile(admin);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        // A profile that does not exist is not applied, and is never current.
+        curation::applyProfile(QStringLiteral("nobody"));
+        QCOMPARE(curation::currentProfile(), admin);
+    }
+
     void effortLabelsAreTheProvidersWords() {
         QJsonArray rows = presets();
         QJsonObject openai = rows.at(2).toObject();

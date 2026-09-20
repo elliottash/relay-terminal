@@ -22,6 +22,8 @@ const QString kSort = QStringLiteral("models/sort");
 const QString kOpenrouter = QStringLiteral("models/openrouter_fallback");
 const QString kCollapsed = QStringLiteral("models/collapsed");
 const QString kProviderOrder = QStringLiteral("models/provider_order");
+const QString kProfileOrder = QStringLiteral("models/profile_order");
+const QString kProfile = QStringLiteral("models/profile");
 const QString kThreshold = QStringLiteral("models/fallback_threshold");
 constexpr int kDefaultThreshold = 2;
 constexpr int kRecentCap = 10;
@@ -428,6 +430,11 @@ QStringList tierIds() {
 }
 QString tierLabel(const QString &tier) { return tier + QStringLiteral(" models"); }
 static QString tierKey(const QString &tier) { return QStringLiteral("models/tier/") + tier; }
+// One profile's copy of one list. The name goes in the key, which is why `validProfileName` keeps
+// "/" and "\" out of it: either would split the name across QSettings groups.
+static QString profileTierKey(const QString &name, const QString &tier) {
+    return QStringLiteral("models/profiles/") + name + QStringLiteral("/tier/") + tier;
+}
 bool tierListsSet() {
     QSettings settings;
     for (const QString &tier : tierIds()) if (settings.contains(tierKey(tier))) return true;
@@ -450,6 +457,11 @@ void setTierList(const QString &tier, const QList<TierEntry> &entries) {
     // An emptied list is stored as empty, not forgotten: "no fallbacks here" is a choice, and a
     // forgotten key would bring the defaults back.
     QSettings().setValue(tierKey(tier), items);
+    // The live lists and the current profile are one thing (owner, 2026-09-20 evening): an edit
+    // made while a profile is current is an edit *of* that profile. Nothing to save, nothing to
+    // lose by switching away. This is the single writer every other tier function goes through.
+    if (const QString name = currentProfile(); !name.isEmpty())
+        QSettings().setValue(profileTierKey(name, tier), items);
 }
 void addToTier(const QString &tier, const QString &key, const QString &effort) {
     QList<TierEntry> entries = tierList(tier);
@@ -502,7 +514,83 @@ void applyTierDefaults(const QJsonObject &lists) {
 }
 void clearTierLists() {
     QSettings settings;
-    for (const QString &tier : tierIds()) settings.remove(tierKey(tier));
+    const QString name = currentProfile();
+    for (const QString &tier : tierIds()) {
+        settings.remove(tierKey(tier));
+        // Same invariant as setTierList: what the current profile holds is what the lists hold.
+        if (!name.isEmpty()) settings.remove(profileTierKey(name, tier));
+    }
+}
+
+// ----- profiles ---------------------------------------------------------------------------------
+
+bool validProfileName(const QString &name) {
+    const QString trimmed = name.trimmed();
+    return !trimmed.isEmpty() && !trimmed.contains(QLatin1Char('/')) && !trimmed.contains(QLatin1Char('\\'));
+}
+
+QStringList profiles() { return list(kProfileOrder); }
+
+QString currentProfile() {
+    const QString name = QSettings().value(kProfile).toString();
+    // A name left behind by a profile someone deleted (or an older Relay) is no profile at all:
+    // answering it would make setTierList write through to a profile the page does not list.
+    return profiles().contains(name) ? name : QString();
+}
+
+void saveProfile(const QString &name) {
+    const QString clean = name.trimmed();
+    if (!validProfileName(clean)) return;
+    QSettings settings;
+    for (const QString &tier : tierIds())
+        settings.setValue(profileTierKey(clean, tier), settings.value(tierKey(tier)).toStringList());
+    QStringList names = profiles();
+    if (!names.contains(clean)) { names << clean; store(kProfileOrder, names); }
+    settings.setValue(kProfile, clean);
+}
+
+void applyProfile(const QString &name) {
+    if (!profiles().contains(name)) return;
+    // Current first, so setTierList's write-through lands back in the profile it came from rather
+    // than in whichever one was current a moment ago.
+    QSettings().setValue(kProfile, name);
+    QSettings settings;
+    for (const QString &tier : tierIds()) {
+        QList<TierEntry> entries;
+        for (const QString &item : settings.value(profileTierKey(name, tier)).toStringList()) {
+            const int last = item.lastIndexOf(QLatin1Char('|'));
+            if (last <= 0) continue;
+            entries << TierEntry{item.left(last), item.mid(last + 1)};
+        }
+        // Every tier is written, absent ones included: a profile is a whole snapshot, so a list it
+        // holds nothing for is empty here too and not whatever the profile before it left behind.
+        setTierList(tier, entries);
+    }
+}
+
+void renameProfile(const QString &from, const QString &to) {
+    const QString clean = to.trimmed();
+    QStringList names = profiles();
+    if (!names.contains(from) || !validProfileName(clean) || (clean != from && names.contains(clean))) return;
+    QSettings settings;
+    for (const QString &tier : tierIds()) {
+        settings.setValue(profileTierKey(clean, tier), settings.value(profileTierKey(from, tier)).toStringList());
+        if (clean != from) settings.remove(profileTierKey(from, tier));
+    }
+    names[names.indexOf(from)] = clean;     // renaming keeps its place in the list
+    store(kProfileOrder, names);
+    if (settings.value(kProfile).toString() == from) settings.setValue(kProfile, clean);
+}
+
+void deleteProfile(const QString &name) {
+    QStringList names = profiles();
+    if (!names.contains(name)) return;
+    QSettings settings;
+    for (const QString &tier : tierIds()) settings.remove(profileTierKey(name, tier));
+    names.removeAll(name);
+    store(kProfileOrder, names);
+    // The lists themselves stay: this machine goes on running on what it was running on, unnamed.
+    if (settings.value(kProfile).toString() == name) settings.remove(kProfile);
 }
 
 QStringList collapsedProviders() { return list(kCollapsed); }

@@ -1861,7 +1861,14 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   and `agent/effort` for new panes, every entry after it is a fallback, and a model in no list is
   only used when picked by hand; the lists go to the worker as `tiers: {tier: [entries]}` and the
   two defaults it computes, `tier_list_defaults`, fill them — a fresh install takes the OpenRouter
-  one when that key is stored); `models/collapsed` folds a provider's group (the priority list, its
+  one when that key is stored); a profile (owner, 2026-09-20 evening: "an 'AI work' profile and an
+  'admin work' profile that sets different model priorities") is a named snapshot of the five lists
+  under `models/profiles/<name>/tier/<tier>`, with `models/profile` the current name and
+  `models/profile_order` the page's order — `curation::saveProfile` / `applyProfile` / `renameProfile`
+  / `deleteProfile`, and `setTierList` writes through to the current profile so the live lists and
+  the profile are one thing with no unsaved state. The page's **profile** choice row and `/profile
+  [name]` (alone, a picker) both end in `RelayWindow::modelsCurated`, which redraws the page and
+  re-sends the lists to every pane; `models/collapsed` folds a provider's group (the priority list, its
   "fallbacks end here" line and the per-model "openrouter fallback" switch of earlier that day are
   gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`

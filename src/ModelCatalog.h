@@ -172,6 +172,32 @@ QString listEffortFor(const QString &key);
 void applyTierDefaults(const QJsonObject &lists);
 void clearTierLists();
 
+// ----- profiles (owner, 2026-09-20 evening) -----------------------------------------------------
+// "we need model user profiles like warp for the priority lists … so I can have an 'AI work'
+// profile and an 'admin work' profile that sets different model priorities." A profile is a named
+// snapshot of the five tier lists and nothing else: no permissions, no MCP, no per-project binding
+// (Warp's profiles carry all three; Relay's five lists are the thing the owner asked to name).
+//
+//   models/profiles/<name>/tier/<tier>   that profile's copy of one list, same format as the live one
+//   models/profile_order                 the names, in creation order (the page's order)
+//   models/profile                       the name that is current; absent = none, the lists are unnamed
+//
+// The live lists and the current profile are *one thing*: editing a list while a profile is current
+// writes through to it, so there is no "unsaved changes" state to explain or lose. Switching is
+// therefore lossless in both directions, which is what makes it safe to do from `/profile`.
+QStringList profiles();                  // names, in creation order
+QString currentProfile();                // "" when the lists belong to no profile
+void saveProfile(const QString &name);   // the live lists → that profile; it becomes current
+void applyProfile(const QString &name);  // that profile's lists → the live lists; it becomes current
+// No-ops when `from` is not a profile, `to` is empty or invalid, or `to` is already taken — the
+// page checks first and says so, and a silent overwrite of the other profile is never what was meant.
+void renameProfile(const QString &from, const QString &to);
+// The live lists are left exactly as they are: a profile is a name for them, and deleting the name
+// is not a reason to change what this machine runs on. Current becomes "".
+void deleteProfile(const QString &name);
+// Whether this is a usable profile name: non-empty, no "/" or "\" (they would make QSettings groups).
+bool validProfileName(const QString &name);
+
 // A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
 QStringList collapsedProviders();
 bool isCollapsed(const QString &preset);
