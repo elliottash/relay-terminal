@@ -766,7 +766,20 @@ public:
     void testKey(const QString &preset) { send({{"type", "test_key"}, {"preset", preset}}); }
     void removeKey(const QString &preset) { send({{"type", "remove_key"}, {"preset", preset}}); }
     // Options › Models changed what the picker shows or in what order: every box re-reads it.
-    void modelsCurationChanged() { refreshPickers(); }
+    void modelsCurationChanged() { rememberFallback(modelCatalog()); refreshPickers(); }
+    // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
+    // worker) can name it as the failover's first candidate. A guest cannot be a failover target.
+    static void rememberFallback(const relay::models::Catalog &catalog) {
+        const relay::models::Entry fallback = relay::models::fallback(catalog);
+        QSettings settings;
+        if (fallback.key.isEmpty() || fallback.guest) {
+            settings.remove(QStringLiteral("models/fallback/preset"));
+            settings.remove(QStringLiteral("models/fallback/model"));
+            return;
+        }
+        settings.setValue(QStringLiteral("models/fallback/preset"), fallback.preset);
+        settings.setValue(QStringLiteral("models/fallback/model"), fallback.model);
+    }
     // Options changed `guests/<guest>/model` or `…/effort`. A pane that is on that guest right now
     // asks its harness to move (`set_model` with the `guest` block, as `/model claude opus` does);
     // every other pane picks the new default up the next time it starts the guest.
@@ -4091,6 +4104,13 @@ private:
                 // because a pane on the user's own key never chose Relay's hosted service).
                 {"failover", settings.value(QStringLiteral("agent/failover"), true).toBool()},
                 {"failover_hosted", settings.value(QStringLiteral("agent/failover_hosted"), false).toBool()},
+                // Rank 2 of Options › Models' priority list (owner, 2026-09-20): the model a failing
+                // turn is moved to first. Written by rememberFallback whenever the list or the
+                // catalog changes; null until there is a second ranked model.
+                {"fallback", settings.value(QStringLiteral("models/fallback/preset")).toString().isEmpty()
+                                 ? QJsonValue()
+                                 : QJsonValue(QJsonObject{{"preset", settings.value(QStringLiteral("models/fallback/preset")).toString()},
+                                                          {"model", settings.value(QStringLiteral("models/fallback/model")).toString()}})},
                 // Options › Security (card #3KB7). Always sent, including empty, so clearing a list
                 // in Options reaches the worker as "no rules" rather than as "unchanged".
                 {"command_denylist", QJsonArray::fromStringList(settings.value(QStringLiteral("security/command_denylist")).toStringList())},
@@ -9264,6 +9284,7 @@ private:
                 // The allowance the worker last saw, so the chip has a figure before the first call.
                 if (hosted && preset.value(QStringLiteral("quota")).isObject()) setHostedQuota(preset.value(QStringLiteral("quota")).toObject());
             }
+            rememberFallback(modelCatalog());   // the failover's first candidate follows the catalog
             if (m_keysDialog) m_keysDialog->setPresets(providerPresets());
             if (m_rolesDialog) m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
             // A presets event that arrives after the first one can change what a settings pane

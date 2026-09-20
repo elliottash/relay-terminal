@@ -419,7 +419,7 @@ class GuiMirrorTests(unittest.TestCase):
         self.assertIn('QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), serving.model)', picker)
         self.assertIn('QStringLiteral("serving:") + serving.model', picker)
         self.assertIn("servingTooltip()", picker)
-        guard = source.split("void selectModel(const QString &id) {", 1)[1].split("\n    }", 1)[0]
+        guard = source.split("void selectModel(const QString &id, const QString &model = QString()) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn('id.startsWith(QStringLiteral("serving:"))', guard)
         # The tooltip says which model the turn goes back to, and that a pick still lands at its end.
         tooltip = source.split("QString servingTooltip() const {", 1)[1].split("\n    }", 1)[0]

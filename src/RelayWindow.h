@@ -1959,6 +1959,7 @@ private:
     // A guest at rank 1 is left alone — a fresh pane starting a harness unasked is a surprise.
     static void applyMainDefault(const relay::models::Catalog &catalog) {
         const relay::models::Entry main = relay::models::mainDefault(catalog);
+        Pane::rememberFallback(catalog);
         if (main.key.isEmpty() || main.guest) return;
         QSettings settings;
         settings.setValue(QStringLiteral("provider/preset"), main.preset);

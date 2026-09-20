@@ -385,6 +385,18 @@ MODEL_CATALOG: dict[str, list[dict]] = {
 INTELLIGENCE: dict[str, int | None] = {
     row["id"]: None for rows in MODEL_CATALOG.values() for row in rows
 }
+# The owner's ruling, seeded 2026-09-20 from the Artificial Analysis Intelligence Index v4.3.2
+# (https://artificialanalysis.ai/leaderboards/models), each model at its highest reasoning level,
+# as the picker's "intelligence" sort. Edit by hand; a model not listed here sorts last, blank.
+INTELLIGENCE.update({
+    "claude-fable-5-1": 53,
+    "gpt-6-astra": 53,
+    "claude-opus-5": 51,
+    "gpt-5.6-sol": 47,
+    "glm-5.3": 45,
+    "k3": 44,
+    "kimi-k3": 44,
+})
 
 
 def catalog_rows(preset_id) -> list[dict]:
