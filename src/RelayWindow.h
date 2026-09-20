@@ -1845,7 +1845,7 @@ private:
             general.rows << hints;
         }
         general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
-                                  QStringLiteral("After 3+ minutes away while the agent worked"), true);
+                                  QStringLiteral("Written into a pane a few minutes after work ends there unwatched"), true);
         {
             // Dolphin-style opening in the explorer pane and the preview file picker (issue #0C7V).
             relay::SettingRow single = toggleRow(QStringLiteral("files/single_click"),

@@ -476,6 +476,10 @@ public:
         m_idleTip.setSingleShot(true);
         m_idleTip.setInterval(4000);
         connect(&m_idleTip, &QTimer::timeout, this, [this] { showIdleTip(); });
+        // The idle-pane away recap (card #D54R): one shot, due `awayRecapThresholdMs()` after the
+        // turn's end, and it only writes when the pane is still unwatched then.
+        m_idleRecap.setSingleShot(true);
+        connect(&m_idleRecap, &QTimer::timeout, this, [this] { idleRecapDue(); });
         m_assistDebounce.setSingleShot(true); m_assistDebounce.setInterval(300);
         connect(&m_assistDebounce, &QTimer::timeout, this, [this] {
             // Only the current text is checked; stale previews are dropped.
@@ -3178,6 +3182,21 @@ protected:
     void showEvent(QShowEvent *event) override {
         QWidget::showEvent(event);
         if (m_poll.isActive()) pollShell();
+        updateIdleRecap();   // shown again: stop the timer if watched, re-arm if still unwatched
+    }
+
+    // Off screen (its tab stopped being the current one): the pane is unwatched from here, so an
+    // idle recap whose time already passed while it was shown is written now (card #D54R).
+    void hideEvent(QHideEvent *event) override {
+        QWidget::hideEvent(event);
+        updateIdleRecap();
+    }
+
+    // Focus moving to a sibling pane changes no window and hides nothing: RelayWindow flips this
+    // pane's "relayActive" dynamic property instead, which arrives here.
+    bool event(QEvent *happening) override {
+        if (happening->type() == QEvent::DynamicPropertyChange) updateIdleRecap();
+        return QWidget::event(happening);
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
@@ -6588,9 +6607,11 @@ private:
                            ? QStringLiteral("Recap failed: ") + event.value(QStringLiteral("error")).toString()
                            : QStringLiteral("Not enough conversation for a recap yet."));
                 m_recapManual = false;
+                m_recapInFlight = false;   // answered, skipped or failed: the pane may ask again
                 return true;
             }
             m_recapManual = false;
+            m_recapInFlight = false;
             m_lastRecapTurns = event.value(QStringLiteral("turns_covered")).toInt();
             ensureLineStart();
             // The block opens by marking where the agent's last message ended and when it
@@ -7834,20 +7855,66 @@ private:
         return true;
     }
 
+    // How long a pane must sit unwatched with finished work before an away recap is written.
+    // The env var is the test handle the #MVGR evidence already used; the default matches Claude
+    // Code's session-recap delay (180 s).
+    static qint64 awayRecapThresholdMs() {
+        const qint64 seconds = qEnvironmentVariableIsSet("RELAY_RECAP_AWAY_SECONDS")
+            ? qEnvironmentVariableIntValue("RELAY_RECAP_AWAY_SECONDS") : 180;
+        return qMax<qint64>(seconds, 1) * 1000;
+    }
+
+    // The guards both away-recap paths share: the setting is on, an agent is configured, nothing
+    // is running or queued, nothing is being drafted, and turns finished that the last recap this
+    // pane printed did not already cover (Claude Code asks for two user turns between recaps; a
+    // turn here is the same unit). An ask already answered by the worker clears the in-flight
+    // flag on its event.
+    bool awayRecapAllowed() const {
+        if (!QSettings().value(QStringLiteral("recap/away"), true).toBool() || !m_configured || m_agentBusy) return false;
+        if (moreTurnsPending() || m_recapInFlight) return false;
+        if (!m_editor->toPlainText().isEmpty() || m_turnsCompleted == m_lastRecapTurns || m_turnsCompleted < 3) return false;
+        return true;
+    }
+
+    // Arm, re-anchor or stop the idle-pane recap (card #D54R). Claude Code's timer waits from the
+    // turn's end and only writes while its terminal is unfocused; `watched()` is Relay's focus —
+    // the window is active, the pane is on the shown tab and it is the tab's active leaf — so a
+    // background tab or an unwatched split counts as unfocused and gets its recap written while
+    // the user is elsewhere, exactly the idle-pane case. Watched again, or busy, the timer stops:
+    // nothing is written over the shoulder of someone reading the pane.
+    void updateIdleRecap() {
+        if (watched() || m_agentBusy || !m_idleSince.isValid()) { m_idleRecap.stop(); return; }
+        const qint64 remaining = awayRecapThresholdMs() - m_idleSince.elapsed();
+        if (remaining <= 0) {
+            m_idleRecap.stop();
+            idleRecapDue();
+            return;
+        }
+        // An armed timer due sooner than this keeps its date: the anchor never moves.
+        if (m_idleRecap.isActive() && m_idleRecap.remainingTime() <= remaining) return;
+        m_idleRecap.start(int(qMin<qint64>(remaining, 2147483647)));
+    }
+
+    void idleRecapDue() {
+        if (!awayRecapAllowed()) return;
+        m_recapInFlight = true;
+        send({{"type", "recap_request"}, {"reason", "away"}});
+    }
+
     void noteWindowActivation(bool active) {
         if (!active) {
             if (!m_awaySince.isValid()) m_awaySince.start();
+            updateIdleRecap();
             return;
         }
         const bool wasAway = m_awaySince.isValid();
         const qint64 awayMs = wasAway ? m_awaySince.elapsed() : 0;
         m_awaySince.invalidate();
-        const qint64 threshold = qEnvironmentVariableIsSet("RELAY_RECAP_AWAY_SECONDS")
-            ? qEnvironmentVariableIntValue("RELAY_RECAP_AWAY_SECONDS") * 1000LL : 180000LL;
-        if (!wasAway || awayMs < threshold || !m_finishedWhileAway) return;
+        updateIdleRecap();   // a watched pane stops its timer; an unwatched one keeps or gets one
+        if (!wasAway || awayMs < awayRecapThresholdMs() || !m_finishedWhileAway) return;
         m_finishedWhileAway = false;
-        if (!QSettings().value(QStringLiteral("recap/away"), true).toBool() || !m_configured || m_agentBusy) return;
-        if (!m_editor->toPlainText().isEmpty() || m_turnsCompleted == m_lastRecapTurns || m_turnsCompleted < 3) return;
+        if (!awayRecapAllowed()) return;
+        m_recapInFlight = true;
         send({{"type", "recap_request"}, {"reason", "away"}});
     }
 
@@ -9208,6 +9275,7 @@ private:
         } else if (type == QStringLiteral("agent_started")) {
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
+            m_idleRecap.stop(); m_idleSince.invalidate();   // a running turn is not idle work to recap
             m_shareFailed = false;      // the pane is in use again; the last failure is history
             startTurnClock();
             m_currentItem = event.value(QStringLiteral("id")).toString();
@@ -9274,6 +9342,12 @@ private:
                 notify(QStringLiteral("Agent turn failed"), turnSummary(), relay::NotificationCenter::kindError);
             }
             if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
+            // The idle-pane recap's anchor (card #D54R): the wait starts when the work ended, not
+            // when the pane stopped being watched, so looking away late still fires on time.
+            if (outcome == QStringLiteral("done") && !m_agentBusy && !moreTurnsPending()) {
+                m_idleSince.start();
+                updateIdleRecap();
+            }
             if (outcome == QStringLiteral("done") && !m_agentBusy && !moreTurnsPending()
                 && QSettings().value(QStringLiteral("suggestions/next_prompt"), false).toBool())
                 QTimer::singleShot(300, this, [this] { requestSuggestion(QStringLiteral("next_prompt")); });
@@ -15099,6 +15173,9 @@ private:
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
     QString m_prefixMode, m_prefixPrevMode;
     QTimer m_idleTip;
+    QTimer m_idleRecap;              // the idle-pane away recap (card #D54R)
+    QElapsedTimer m_idleSince;       // when the agent last went idle: the recap wait's anchor
+    bool m_recapInFlight = false;    // an away recap asked for and not yet answered
     QFrame *m_banner = nullptr;
     QLabel *m_bannerText = nullptr;
     QPushButton *m_bannerAction = nullptr;
