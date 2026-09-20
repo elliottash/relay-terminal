@@ -836,14 +836,29 @@ class RoleResolver:
         except KeyError:
             return False
 
+    def naming_tier(self, preset_id, model, tiers=TIERS) -> str | None:
+        """The first of ``tiers`` whose list names (preset, model), or None when none does.
+
+        Read-only, and asked by anything that wants to know which row of Options › Models a turn is
+        running on rather than where it may fail over to: the prompt profile is short on the Lite
+        tier (`prompt_profiles.SHORT_TIERS`, #GMCF, owner 2026-09-20), which `turn_tier` cannot
+        answer because it deliberately does not look at the Lite list.
+        """
+        for tier in tiers:
+            if any(self._is_entry(entry, preset_id, model, tier) for entry in self.tiers.get(tier) or []):
+                return tier
+        return None
+
     def turn_tier(self, preset_id, model, default: str = "main") -> str:
         """Which list a pane running (preset, model) is on, for its failover: Main when the Main
         list names it, else the Flash or Local list that does, else ``default`` — the agent's own
-        reading of the provider's tier table, which is all there was before the lists."""
-        for tier in ("main", "flash", "local"):
-            if any(self._is_entry(entry, preset_id, model, tier) for entry in self.tiers.get(tier) or []):
-                return tier
-        return default
+        reading of the provider's tier table, which is all there was before the lists.
+
+        Lite and High are not among them on purpose: a failing Lite turn steps *up* to Main rather
+        than down (`Agent._failover_tier`), and High is the plan turn's list, walked by
+        `_next_plan_model` before an ordinary failover starts.
+        """
+        return self.naming_tier(preset_id, model, ("main", "flash", "local")) or default
 
     def openrouter_twin_candidate(self, model, tier: str, exclude, hosts=()) -> Resolved | None:
         """The same model on OpenRouter (owner, 2026-09-20), as the failover target after every

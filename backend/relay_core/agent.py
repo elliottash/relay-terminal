@@ -858,12 +858,30 @@ class Agent:
 
         Read fresh rather than stored, because `auto` follows the model: a pane that switches from
         the Local tier to a hosted one, or a turn a vision or planning swap took over, sends the
-        profile of the model actually serving it. `set_model` refreshes the prompt, so the switch
-        reaches the next request on its own.
+        profile of the model actually serving it. `_adopt_model` refreshes the prompt when the
+        profile changed, so the switch reaches the next request on its own.
         """
         return prompt_profiles.resolve(getattr(self, "prompt_profile", prompt_profiles.DEFAULT_PROFILE),
-                                       preset=self.preset,
+                                       preset=self.preset, tier=self._model_tier(),
                                        context_window=getattr(getattr(self, "context", None), "window", None))
+
+    def _model_tier(self) -> str | None:
+        """Which Options › Models list names the model serving this turn, or None (owner, 2026-09-20).
+
+        The tier lists are the user's own ranking, so they are the only thing that can say a model
+        is a *Lite* model — a provider's table cannot, and the window cannot (Bonsai runs with 131k
+        and gemini flash-lite with a million). `RoleResolver.naming_tier` is read-only and answers
+        from the lists the resolver was configured with; a pane with no resolver, or a model no list
+        names, gets None and falls back to the endpoint and window tests.
+        """
+        preset, roles = getattr(self, "preset", None), getattr(self, "roles", None)
+        naming = getattr(roles, "naming_tier", None)
+        if preset is None or not callable(naming):
+            return None
+        try:
+            return naming(preset.id, self.config.model)
+        except Exception:                       # a stale list must never cost a turn its prompt
+            return None
 
     def context_invalidate(self) -> None:
         if hasattr(self, "context"):
@@ -893,11 +911,16 @@ class Agent:
         """
         if self.profile() == "short":
             # A model that pays for the prompt in seconds gets the rules and the tools it can use,
-            # and none of the Switchboard, todo, app, own-session or keybinding text: 1.4k tokens
-            # against 14.5k, and about two seconds of prefill against eighteen.
+            # and none of the todo, app, own-session or keybinding text: 1.5k tokens against 14.5k,
+            # and about two seconds of prefill against eighteen. The Switchboard is the one
+            # exception since the owner's decision of 2026-09-20 — a pane with a board attached
+            # carries decision 8's policy block and the five board tools, because a capture pane
+            # that cannot file what it was told is not worth the tokens it saves.
             return prompt_profiles.system_prompt(
                 workspace=str(self.executor.workspace.root), skills=self.executor.skills,
-                instructions=self.instructions.section if self.instructions is not None else "")
+                instructions=self.instructions.section if self.instructions is not None else "",
+                board=board_tools.prompt_section(getattr(self, "board", None)),
+                board_note=board_tools.session_note(getattr(self, "board", None)))
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
         # #GMCF decision 9: a group whose schemas are loaded on demand takes its rules with it, and
         # leaves the one line that says the names exist. The line is the same whether or not the
@@ -1052,6 +1075,7 @@ class Agent:
         assign `self.config` alone: the conversation then went to the new provider in the old one's
         reasoning dialect, and the context bar kept measuring it against the old window.
         """
+        was = self.profile() if hasattr(self, "messages") else None
         self.config = config
         self.preset = preset
         self._apply_stall_timeout()
@@ -1064,6 +1088,15 @@ class Agent:
         # A different tokenizer counts differently; estimate until the new model reports usage.
         self.context.invalidate()
         self.messages = adapt_history(self.messages, self._effort_style())
+        # `auto` follows the model, and `tools()` is rebuilt per request while `messages[0]` is
+        # not: a swap onto the Local or Lite tier used to send the short tool list under the full
+        # prompt, which promises tools the request no longer carries (#GMCF, owner 2026-09-20).
+        # Rewritten only when the profile actually changed, because the rewrite is what costs the
+        # prefix: a model swap inside one tier keeps every cached token, and a swap across tiers
+        # re-prefills once — as it must, since the prompt genuinely differs. The restore at the
+        # end of a failed-over turn comes back through here and puts the full profile back.
+        if was is not None and was != self.profile():
+            self.refresh_system_prompt()
 
     # ----- a model switch while a turn runs (issue 3ES1) --------------------------------
     def _hook_preempt(self, provider):

@@ -214,6 +214,34 @@ class StabilityTests(PromptFixture):
                   for a in (without, attached)]
         self.assertEqual(stable[1][:len(stable[0])], stable[0])
 
+    def test_a_failover_across_tiers_re_prefills_once_and_comes_back_byte_for_byte(self):
+        # `auto` follows the model, and since the owner's decision of 2026-09-20 the Lite tier is
+        # short: a turn that fails over from the Main list onto a Lite model genuinely sends a
+        # different prompt and a different tool list, so it re-prefills — once. What must not
+        # happen is the swap leaving anything behind: `_end_failover` comes back through the same
+        # `_adopt_model`, and everything the provider had cached before the swap has to match it
+        # byte for byte again, or the rest of the conversation re-prefills a second time (#GMCF).
+        from relay_core.roles import RoleResolver
+        base = 'https://generativelanguage.googleapis.com/v1beta/openai'
+        tiers = {'main': [{'preset': 'gemini', 'model': 'gemini-3.1-pro-preview'}],
+                 'lite': [{'preset': 'gemini', 'model': 'gemini-3.5-flash-lite'}]}
+        config = ProviderConfig(base, 'gemini-3.1-pro-preview', 'k')
+        agent = build_agent(self.workspace, self.repo, self.library)
+        agent.config, agent.preset = config, agent_module.resolve_preset('gemini', base, config.model)
+        agent.roles = RoleResolver(config, 'gemini', tiers=tiers, key_lookup=lambda *a, **k: 'k')
+        agent.refresh_system_prompt()
+        before = (agent.messages[0]['content'], json.dumps(agent.tools(), ensure_ascii=False))
+        agent._adopt_model(ProviderConfig(base, 'gemini-3.5-flash-lite', 'k'), agent.preset)
+        self.assertEqual(agent.profile(), 'short')
+        during = (agent.messages[0]['content'], json.dumps(agent.tools(), ensure_ascii=False))
+        self.assertNotEqual(during, before)
+        # The prompt the model is actually sent is the one the tool list belongs to, at every step.
+        self.assertEqual(agent.messages[0]['content'], agent.system_prompt())
+        agent._adopt_model(config, agent.preset)
+        self.assertEqual(agent.profile(), 'full')
+        self.assertEqual((agent.messages[0]['content'],
+                          json.dumps(agent.tools(), ensure_ascii=False)), before)
+
     def test_the_prompt_carries_no_clock_and_no_identifier(self):
         # The two that would be easiest to add without noticing. A session id or a timestamp
         # anywhere but the tail costs the whole cached prefix below it, every turn.

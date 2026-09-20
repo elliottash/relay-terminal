@@ -1,0 +1,173 @@
+{
+ "full-board": {
+  "prompt_bytes": 12552,
+  "tools_bytes": 23199,
+  "tools": 23,
+  "tool_names": [
+   "run_command",
+   "read_file",
+   "list_directory",
+   "write_file",
+   "edit_file",
+   "command_output",
+   "stop_command",
+   "load_skill",
+   "read_skill_file",
+   "ask_user",
+   "update_todos",
+   "write_plan",
+   "load_tools",
+   "board_list",
+   "board_read",
+   "board_create_card",
+   "board_update_card",
+   "board_move_card",
+   "board_import_items",
+   "board_comment",
+   "board_claim",
+   "board_signals",
+   "set_keybinding"
+  ],
+  "prompt_tokens": 2926,
+  "tools_tokens": 5913,
+  "total_tokens": 8839,
+  "cold": [
+   {
+    "wall_s": 10.86,
+    "prompt_n": 9102,
+    "prompt_ms": 10719.7
+   },
+   {
+    "wall_s": 10.63,
+    "prompt_n": 9102,
+    "prompt_ms": 10592.6
+   },
+   {
+    "wall_s": 10.23,
+    "prompt_n": 9102,
+    "prompt_ms": 10209.9
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.23,
+    "prompt_n": 24,
+    "prompt_ms": 204.3
+   },
+   {
+    "wall_s": 0.22,
+    "prompt_n": 24,
+    "prompt_ms": 194.9
+   },
+   {
+    "wall_s": 0.24,
+    "prompt_n": 24,
+    "prompt_ms": 200.1
+   }
+  ]
+ },
+ "short-board": {
+  "prompt_bytes": 3034,
+  "tools_bytes": 3140,
+  "tools": 8,
+  "tool_names": [
+   "run_command",
+   "read_file",
+   "list_directory",
+   "write_file",
+   "edit_file",
+   "command_output",
+   "stop_command",
+   "load_skill"
+  ],
+  "prompt_tokens": 715,
+  "tools_tokens": 802,
+  "total_tokens": 1517,
+  "cold": [
+   {
+    "wall_s": 2.21,
+    "prompt_n": 1780,
+    "prompt_ms": 2088.3
+   },
+   {
+    "wall_s": 2.03,
+    "prompt_n": 1780,
+    "prompt_ms": 2019.9
+   },
+   {
+    "wall_s": 2.05,
+    "prompt_n": 1780,
+    "prompt_ms": 2041.5
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.21,
+    "prompt_n": 24,
+    "prompt_ms": 197.9
+   },
+   {
+    "wall_s": 0.21,
+    "prompt_n": 24,
+    "prompt_ms": 199.2
+   },
+   {
+    "wall_s": 0.21,
+    "prompt_n": 24,
+    "prompt_ms": 197.6
+   }
+  ]
+ },
+ "short-noboard": {
+  "prompt_bytes": 3034,
+  "tools_bytes": 3140,
+  "tools": 8,
+  "tool_names": [
+   "run_command",
+   "read_file",
+   "list_directory",
+   "write_file",
+   "edit_file",
+   "command_output",
+   "stop_command",
+   "load_skill"
+  ],
+  "prompt_tokens": 715,
+  "tools_tokens": 802,
+  "total_tokens": 1517,
+  "cold": [
+   {
+    "wall_s": 2.25,
+    "prompt_n": 1782,
+    "prompt_ms": 2089.2
+   },
+   {
+    "wall_s": 2.12,
+    "prompt_n": 1782,
+    "prompt_ms": 2111.3
+   },
+   {
+    "wall_s": 2.09,
+    "prompt_n": 1782,
+    "prompt_ms": 2079.3
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.2,
+    "prompt_n": 26,
+    "prompt_ms": 191.7
+   },
+   {
+    "wall_s": 0.21,
+    "prompt_n": 26,
+    "prompt_ms": 194.5
+   },
+   {
+    "wall_s": 0.22,
+    "prompt_n": 26,
+    "prompt_ms": 205.7
+   }
+  ]
+ }
+}

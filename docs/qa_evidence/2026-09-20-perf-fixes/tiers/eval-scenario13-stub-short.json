@@ -1,0 +1,48 @@
+{
+  "preset": "openrouter",
+  "model": "stub",
+  "todo_tool": false,
+  "profile": "short",
+  "system_file": null,
+  "todo_rules_file": null,
+  "scenarios": {
+    "13": {
+      "asks": 1,
+      "completed": 3,
+      "checks": {
+        "filed_a_card": true,
+        "kept_the_users_words": true,
+        "claimed_it": true
+      },
+      "cards": 1,
+      "card": {
+        "id": "4HF7",
+        "status": "executing",
+        "assignee": "agent",
+        "title": "# Pane header flickers on a tab rename"
+      },
+      "board_calls": [
+        "board_create_card",
+        "board_claim"
+      ],
+      "board_errors": [],
+      "elapsed_s": 1.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Don't fix this now — put it on the Switchboard so it is not lost, and claim the card so I can see it is yours: the pane "
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "no_list_nudges": 0,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

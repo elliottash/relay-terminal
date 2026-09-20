@@ -3071,13 +3071,15 @@ private:
             // #GMCF decision 7: what a pane sends before the first user word. The full profile is
             // ~14,500 tokens of prompt and tool schemas, which a hosted provider caches and a model
             // served on this machine prefills at about 800 tokens a second — eighteen seconds of
-            // silence on every cold turn. "Auto" sends the short profile (16 rules, 8 tools) to a
-            // local endpoint or a model with a window of 32k or less, and the full one to everything
-            // else; the other two pin it for panes whose owner disagrees.
+            // silence on every cold turn. "Auto" sends the short profile (18 rules, 8 tools, plus
+            // the five Switchboard tools when a project is attached) to a local endpoint, a model
+            // on the Lite list of Options › Models (owner, 2026-09-20) or a model with a window of
+            // 32k or less, and the full one to everything else; the other two pin it for panes
+            // whose owner disagrees.
             relay::SettingRow profile =
                 choiceRow(QStringLiteral("agent/prompt_profile"), QStringLiteral("Prompt profile"),
-                          QStringLiteral("Auto: the short prompt and 8 tools on a local or small-window "
-                                         "model, the full one elsewhere"),
+                          QStringLiteral("Auto: the short prompt on a local, Lite-tier or "
+                                         "small-window model, the full one elsewhere"),
                           {QStringLiteral("auto"), QStringLiteral("full"), QStringLiteral("short")},
                           {QStringLiteral("Auto"), QStringLiteral("Full"), QStringLiteral("Short")},
                           QSettings().value(QStringLiteral("agent/prompt_profile"),
@@ -3085,7 +3087,7 @@ private:
                           QStringLiteral("auto"), [](const QString &value) {
                 QSettings().setValue(QStringLiteral("agent/prompt_profile"), value);
             });
-            profile.aliases = QStringLiteral("prompt profile short full local context window tokens prefill speed");
+            profile.aliases = QStringLiteral("prompt profile short full local lite tier context window tokens prefill speed");
             agent.rows << profile;
         }
         agent.rows << headingRow(QStringLiteral("Switchboard"));

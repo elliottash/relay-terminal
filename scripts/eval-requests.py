@@ -24,7 +24,10 @@ To compare two versions of the prompt, one flag apart:
 
 `--system-file` / `--todo-rules-file` replace `agent.SYSTEM` and `todos.RULES` before the Agent is
 built; `--profile short` is the landed short profile (#GMCF decision 7: its SYSTEM, no todo tool, its
-eight tools), passed as the `prompt_profile` agent option, so A and B differ by that flag alone. `--context '{"terminal_handoff": "agent"}'` puts a
+eight tools, plus the five board tools and the tiered policy when a scenario attaches a Switchboard),
+passed as the `prompt_profile` agent option, so A and B differ by that flag alone. Scenario 13 is the
+board one — file a card and claim it, the owner's condition for giving the short profile any board
+tools at all. `--context '{"terminal_handoff": "agent"}'` puts a
 Relay context block on the first message, which is how the rules that moved out of SYSTEM and into the
 per-turn notes (ssh, program driving, run_in_terminal) can be exercised at all.
 
@@ -187,7 +190,32 @@ class Stub:
             if "finish the installer" in text:                      # scenario 12 (the password prompt)
                 add("program", "type_into_program",
                     {"text": "y", "submit": True, "intent": "answer the installer's Continue? prompt"})
+            if "put it on the Switchboard" in text:                 # scenario 13 (the board five)
+                # The policy's rule 2: `request` is the user's own words, verbatim. The stub does
+                # what the rule says so that a run can tell a broken tool list from a model that
+                # paraphrased; the title is the stub's own, as the rule allows.
+                add("board-create", "board_create_card",
+                    {"tab": "bugs", "status": "inbox", "title": "Pane header flickers on a tab rename",
+                     "request": text.split(": ", 1)[-1].rstrip(".")})
+                filed = self._filed_card(messages)
+                if filed:
+                    add("board-claim", "board_claim",
+                        {"id": filed, "note": "Looking at the header repaint on rename."})
         return actions
+
+    @staticmethod
+    def _filed_card(messages: list[dict]) -> str | None:
+        """The id `board_create_card` answered with, read back out of its tool result."""
+        for message in reversed(messages):
+            if message.get("role") != "tool":
+                continue
+            try:
+                body = json.loads(str(message.get("content") or ""))
+            except ValueError:
+                continue
+            if isinstance(body, dict) and body.get("id") and body.get("path"):
+                return str(body["id"])
+        return None
 
     # ----- the provider interface ---------------------------------------------------------------
     def complete(self, messages, tools, emit, cancel):
@@ -535,8 +563,87 @@ def scenario12(run: Run, ws: Path, timeout: float) -> dict:
             "password_attempts": len(refused)}
 
 
+def attach_board(run: Run, ws: Path):
+    """A Switchboard on this scenario's workspace, wired up as `configure` wires a pane's.
+
+    The owner's condition for giving the short profile any board tools at all (#GMCF, 2026-09-20):
+    "can this model file a card and claim it". Nothing keyless can answer that, so this is a real
+    board in a temporary directory with a real tab table, and the checks read the card off disk.
+    """
+    from relay_core import board as board_mod, board_tools
+    root = ws / "issues"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / board_mod.BOARD_CONFIG).write_text(
+        "version: 1\n"
+        "tabs: [{id: features, folder: features}, {id: bugs, folder: changes}]\n"
+        "columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]\n"
+        "agent: {autonomy: auto, max_creates_per_turn: 5}\n", encoding="utf-8")
+    tools = board_tools.BoardTools(
+        board_mod.Board(root, ws), emit=run.emit, autonomy="auto",
+        state_path=ws / ".relay" / "board-rate.json", pane_token=BOARD_TOKEN,
+        context=board_tools.ToolContext(actor="agent", model="eval", pane="1"))
+    run.agent.board = tools
+    run.agent.refresh_system_prompt()
+    return tools
+
+
+def card_issue(card) -> str:
+    """The card's `## Issue` section — where the policy says the user's own words go."""
+    body = card.body if card is not None else ""
+    section = body.split("## Issue", 1)[-1] if "## Issue" in body else body
+    return "\n".join(section.split("\n## ", 1)[0].splitlines()).strip()[:400]
+
+
+#: The pane token scenario 13's board is given, so `session` on the claimed card is checkable.
+BOARD_TOKEN = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+#: The report scenario 13 asks to be filed. Deliberately one thing, plainly not finishable in the
+#: turn, and worded as a user would word it: the policy says `request` is their words verbatim.
+CARD_REPORT = ("the pane header flickers for about a second every time I rename a tab, "
+               "on both themes")
+
+
+def scenario13(run: Run, ws: Path, timeout: float) -> dict:
+    """File a card on a Switchboard and claim it — the owner's condition for the board five.
+
+    Decision 8's sub-question was "none until an A/B shows a 27B model can file a card"; the owner
+    answered it "yes, give the Local tier the five-tool board set" (2026-09-20) and asked for the
+    A/B anyway. This is it: the short profile carries `board_list`, `board_read`,
+    `board_create_card`, `board_claim` and `board_comment` and the tiered policy, and the checks
+    are the three things the policy asks for — a card exists, its `request` is the user's own
+    words, and this pane holds it.
+    """
+    board = attach_board(run, ws)
+    run.sup.submit(
+        f"Don't fix this now — put it on the Switchboard so it is not lost, and claim the card so "
+        f"I can see it is yours: {CARD_REPORT}.", "now")
+    run.idle(timeout)
+    cards = board.board.cards()
+    card = cards[0] if len(cards) == 1 else next((c for c in cards if "flicker" in c.to_text().lower()), None)
+    verbatim = card is not None and CARD_REPORT.rstrip(".") in card.to_text()
+    held = card is not None and str(card.front.get("session") or "") == BOARD_TOKEN
+    checks = {"filed_a_card": card is not None,
+              "kept_the_users_words": verbatim,
+              "claimed_it": held}
+    calls = [e.get("tool") for e in run.events if e.get("event") == "tool_started"]
+    return {"asks": 1, "completed": sum(checks.values()), "checks": checks,
+            "cards": len(cards),
+            "card": None if card is None else {"id": card.front.get("id"),
+                                               "status": card.front.get("status"),
+                                               "assignee": card.front.get("assignee"),
+                                               "title": card.body.splitlines()[0][:80] if card.body else "",
+                                               # What it filed as the user's words: the whole point
+                                               # of `kept_the_users_words`, so the run says it.
+                                               "issue": card_issue(card)},
+            # Which of the five it reached for, and whether it tried one of the six that are not
+            # offered under this profile (a refusal here is the tool list doing its job).
+            "board_calls": [c for c in calls if str(c).startswith(("board_", "tests_"))],
+            "board_errors": [str(e.get("error"))[:200] for e in run.events
+                             if e.get("event") == "tool_result" and e.get("error")][:5]}
+
+
 SCENARIOS = {1: scenario1, 2: scenario2, 3: scenario3, 4: scenario4, 6: scenario6,
-             8: scenario8, 9: scenario9, 10: scenario10, 11: scenario11, 12: scenario12}
+             8: scenario8, 9: scenario9, 10: scenario10, 11: scenario11, 12: scenario12,
+             13: scenario13}
 # Scenario 12's screen: what the installer shows once the "Continue?" prompt has been answered.
 # One entry, so it stays on screen for the rest of the turn — Relay refuses every write while it is
 # up (`program_input._refusal`), which is what makes a model that keeps trying visible as

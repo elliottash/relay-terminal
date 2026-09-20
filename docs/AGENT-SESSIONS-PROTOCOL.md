@@ -382,7 +382,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
-| `prompt_profile` | `auto` \| `full` \| `short` | `auto` | which system prompt and tool list this pane sends (12.12). `auto` is `short` when the model is served from this machine (a `local:` endpoint) or its catalogue window is at most 32,768, and `full` otherwise |
+| `prompt_profile` | `auto` \| `full` \| `short` | `auto` | which system prompt and tool list this pane sends (12.12). `auto` is `short` when the model is served from this machine (a `local:` endpoint), when the model serving the turn is on the Lite list of Options › Models, or when its catalogue window is at most 32,768; `full` otherwise |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 | `fallbacks` | `[{preset, model}, …]` | `[]` | the Options › Models priority list below the pane's own model, in order: where a failing turn goes, first entry first (15.2.2). Relay Free is a target only when it is in the list. Null or a non-list means an empty list; an entry that is not `{preset, model}` is dropped. Superseded by the `tiers.main` list (13.7, v3.10): still accepted, and it **is** the Main chain whenever no `tiers.main` was sent. `fallback` (singular, one `{preset, model}` or null, 2026-09-20 morning) is still read as a one-element list; `fallbacks` wins when both are sent |
 | `failover_openrouter` | string[] | `[]` | model ids that may continue on the same model through OpenRouter when they fail (15.2.2), tried after the whole list; per model and off by default, since it spends the OpenRouter key at pay-as-you-go rates. Null or an unusable shape means none |
@@ -777,27 +777,46 @@ roughly 800 tokens a second, so it is **eighteen seconds of silence on every col
 | Profile | Prompt | Tools |
 |---|---|---|
 | `full` | `SYSTEM`, the todo rules, the app and own-session rules, the skill catalogue, the project's instruction files, the workspace line, the Switchboard policy and session note | everything the pane has: files and commands, jobs, skills, `ask_user`, `update_todos`, `write_plan`, subagents, app, own session, the Switchboard, `set_keybinding`, and the terminal pair when offered |
-| `short` | `relay_core.prompt_profiles.SYSTEM_SHORT` (18 rules), the project's instruction files, the workspace line, and one line naming the user's skills | eight: `run_command`, `read_file`, `list_directory`, `write_file`, `edit_file`, `command_output`, `stop_command`, `load_skill`, plus `run_in_terminal` / `type_into_program` when the turn offers them |
+| `short` | `relay_core.prompt_profiles.SYSTEM_SHORT` (18 rules), the project's instruction files, the workspace line, one line naming the user's skills, and — when a project is attached — the tiered Switchboard policy (19.4) and the session note | eight: `run_command`, `read_file`, `list_directory`, `write_file`, `edit_file`, `command_output`, `stop_command`, `load_skill`; plus the **board five** `board_list`, `board_read`, `board_create_card`, `board_claim`, `board_comment` when a project is attached; plus `run_in_terminal` / `type_into_program` when the turn offers them |
 
-`auto`, the default, is `short` when the model is served from this machine (a `local:` endpoint) or
-its catalogue `context_window` is at most 32,768, and `full` otherwise — a window alone does not say
-it (Bonsai runs with 131k), which is why the endpoint is tested first. It is resolved per request,
-so a per-turn model swap (vision, planning, failover) sends the profile of the model actually
-serving, and `set_model` refreshes the prompt as it already does.
+`auto`, the default, is `short` when the model is served from this machine (a `local:` endpoint),
+when the model serving the turn is named on the **Lite** list of Options › Models (13.7), or when its
+catalogue `context_window` is at most 32,768; `full` otherwise. A window alone does not say it —
+Bonsai runs with 131k and `gemini-3.5-flash-lite` with a million — which is why the endpoint is
+tested first and the tier second. The tier is read from the user's own lists
+(`RoleResolver.naming_tier`, read-only; `Agent._model_tier`), never from a provider's tier table: the
+lists are the ranking, and a model no list names falls through to the window test.
+
+`auto` is resolved per request, against the model **actually serving**, so a per-turn swap — a vision
+or planning model, or a failover down the list — sends that model's profile. Crossing between the
+Lite/Local tiers and the rest therefore genuinely changes the prompt and the tool list, and so
+**re-prefills once**: `_adopt_model` rewrites `messages[0]` when, and only when, the profile changed,
+which is also what keeps the prompt and the tool list describing the same agent (`tools()` is rebuilt
+per request; the prompt is not). A swap that stays inside one tier touches neither. When the turn
+ends, `_end_failover` comes back through the same path and the pane's own profile is restored
+byte for byte, so the rest of the conversation hits the prefix it had before the swap
+(`tests/test_system_prompt.py::StabilityTests::test_a_failover_across_tiers_re_prefills_once_and_comes_back_byte_for_byte`).
 
 The short profile drops no *rule* the full one keeps: every line of `SYSTEM_SHORT` is one of
-`SYSTEM`'s, tightened, and what is absent is about features the profile does not offer. It carries
-**no Switchboard tools and no board policy**, which is the answer to decision 8's sub-question until
-an A/B shows a 27B model can file a card; `prompt_profile: "full"` is the override for a pane that
-wants them back. `session_info` (25.3) reports `prompt_profile` (what is in force now) and
+`SYSTEM`'s, tightened, and what is absent is about features the profile does not offer. Since the
+owner's decision of 2026-09-20 it carries the **five board tools a card round trip needs** and
+decision 8's tiered policy whenever the pane has a Switchboard — the answer to decision 8's
+sub-question, which the draft had left as "none". The five keep their full descriptions, because
+decision 8 moved rules *out* of `board_policy.md` and *into* those schemas. The three writes that are
+not among them (`board_update_card`, `board_move_card`, `board_import_items`), `board_signals` and
+the two `tests_*` tools stay out; `prompt_profile: "full"` is the override for a pane that wants them
+back. `session_info` (25.3) reports `prompt_profile` (what is in force now) and
 `prompt_profile_setting` (what the option says) on a live session, and the `configure` reply carries
 both as `prompt_profile` and `prompt_profile_in_effect`. GUI: Options › Agent "Prompt profile"
 (`src/RelayWindow.h`), sent by `Pane::requestOptions` and applied at once by `set_agent_options`; the
 ⓘ pane says "short prompt" beside the mode. Backend: `backend/relay_core/prompt_profiles.py`; tests:
 `tests/test_prompt_profiles.py`.
 
-Measured on `local:bonsai` (2026-09-20): full 14,544 tokens and 18.5 s of cold prefill, short 1,480
-tokens and 2.2 s; warm, both 0.2 s.
+Measured on `local:bonsai` with its own tokenizer, at the tip of the day's work
+(`docs/qa_evidence/2026-09-20-perf-fixes/tiers/`): with a Switchboard attached, full is 8,837 tokens
+and 10.0 s of cold prefill, short 3,846 tokens and 4.6 s; with no project attached, short is 1,515
+tokens and 2.26 s. Warm, all of them 0.20 s. The board five and the policy are what separates the
+two short rows — 2,331 tokens — and are paid only where there is a board.
 
 ### 12.13 `load_tools` — tool groups fetched on demand (v4.3, 2026-09-20, #GMCF decision 9)
 
@@ -972,7 +991,7 @@ presets … then advanced options, which would then reveal the specific actions"
 | `high` | plan mode (`planning`), and any role pinned to it | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
 | `flash` | terminal use, fast panes, summaries, suggestions | the first usable entry of `tiers.flash`, else `TIER_DEFAULTS[<main preset>]["flash"]` |
-| `lite` | chores and the request audit | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
+| `lite` | chores and the request audit; a pane whose model is on this list also sends the **short prompt profile** by default (12.12) | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
 | `local` | panes on the Local agent (`/local`), and any role pinned to it | the first usable entry of `tiers.local`, else the first saved local endpoint |
 
 **Options: each tier is an ordered list** (v3.10, owner, 2026-09-20: Options › Models replaces its

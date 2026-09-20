@@ -1,0 +1,51 @@
+{
+  "preset": "local:bonsai",
+  "model": "bonsai-2-27b",
+  "todo_tool": true,
+  "profile": "full",
+  "system_file": null,
+  "todo_rules_file": null,
+  "scenarios": {
+    "13": {
+      "asks": 1,
+      "completed": 3,
+      "checks": {
+        "filed_a_card": true,
+        "kept_the_users_words": true,
+        "claimed_it": true
+      },
+      "cards": 1,
+      "card": {
+        "id": "YTXV",
+        "status": "executing",
+        "assignee": "agent",
+        "title": "# Pane header flickers when a tab is renamed",
+        "issue": "the pane header flickers for about a second every time I rename a tab, on both themes."
+      },
+      "board_calls": [
+        "board_list",
+        "board_list",
+        "board_create_card",
+        "board_claim"
+      ],
+      "board_errors": [],
+      "elapsed_s": 166.1,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Don't fix this now — put it on the Switchboard so it is not lost, and claim the card so I can see it is yours: the pane "
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "no_list_nudges": 1,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}
