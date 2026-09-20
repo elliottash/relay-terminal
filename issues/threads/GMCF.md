@@ -25,3 +25,7 @@ Decision 2 follow-up: the Fable distillation proposal is landed (79fd67d6, `docs
 8. Tier the Switchboard policy to `BOARD-POLICY.core.txt` — ~780 tokens per board turn. The owner's voice: read the draft first.
 9. On-demand tool groups (app, own-session, tests) behind one `load_tools(group)` — ~2,150 tokens on hosted providers only.
 Recommendation: 1, 4, 5, 7 first (no wording of yours changes; 7 is what makes the Local tier usable); then 2, 3, 6, 8 after reading the drafts; 9 last.
+
+<!-- relay:entry 20260920T202117Z-c6 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 20:21
+Decision 1 closed: the owner, shown the lazy-worker mapping (`docs/qa_evidence/2026-09-20-perf-fixes/spawn/LAZY-WORKER-MAPPING.md`), said "yes, i want workers per pane". Workers stay one per pane, started at pane creation as today; nothing changes. The mapping stays as the record of why a lazy start is not a memory fix here.
