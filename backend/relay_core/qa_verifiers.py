@@ -10,7 +10,7 @@ Three jobs, all pure except the two probes at the bottom:
   is whose model wrote the code, not whose invoice it lands on.
 * **`family(text)`** — the vendor family of any signature *or* of the free text that
   `implemented_by` held before this card ("Claude Opus 5 (pane 2)").  Both spellings must land on
-  the same family, or the independence rule would let Claude close what Claude wrote.
+  the same family, or the `qa` recommendation would rank Claude as a verifier of Claude's own card.
 * **`recommend(...)`** — the ranked verifier for a card, from `VERIFIER_RANK`: the implementer's
   own family is skipped, the rest of its lineage is moved behind every other lineage but still
   offered, a local endpoint comes last, and anything this machine cannot run is reported as
@@ -240,9 +240,9 @@ def signature(preset_id: str | None, model: str | None = "") -> str:
 #: same-model review was not the loser and the authors attribute their asymmetry to the capability
 #: gap and to rewrite-versus-repair style rather than to family.  Nobody has published a cell with
 #: Kimi, GLM, MiniMax or DeepSeek reviewing Claude-authored code, so the ordering below is
-#: unmeasured for exactly the pairs Relay uses most.  What does NOT rest on this is the rule that a
-#: different family closes a QA card: that is a process-independence guarantee for the audit trail
-#: and holds whatever the error correlations turn out to be.  Card #T71W carries the pilot that
+#: unmeasured for exactly the pairs Relay uses most.  Since card #76DJ (owner, 2026-09-20) the
+#: close gate is the verdict on the card, not the closer's family, so a different family is
+#: advice about error correlations, never a requirement for permission.  Card #T71W carries the pilot that
 #: would settle the order, and what it would cost.
 #: Relay Free has no row: it is a route, not a lab (see `RELAY_FREE_UPSTREAMS`).
 LINEAGE: dict[str, str] = {
