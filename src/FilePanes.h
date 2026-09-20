@@ -215,6 +215,21 @@ public:
 
     static constexpr qint64 kMaxTextBytes = 2 * 1024 * 1024;
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
+    // Past this, a text file is shown plain: colouring it would cost more than it is worth, and
+    // no reader waits that long for it (#MDSG). It only turns anything away for a file on a
+    // host, which is the one text path kMaxTextBytes does not already cap.
+    static constexpr qint64 kMaxHighlightBytes = 2 * 1024 * 1024;
+
+    // ----- syntax highlighting (#MDSG) ------------------------------------------------------
+    // Highlighting is optional at build time, and when it is built in it runs a slice at a time
+    // after the text is on screen rather than all at once before it. These three say what state
+    // that is in, mainly so a test can wait for the end of it.
+    static bool syntaxHighlightingBuiltIn();
+    // Blocks coloured so far; 0 when this file has no highlighter (no definition, too big, or
+    // not a text file).
+    int highlightedBlocks() const;
+    // True while there is more of the open file to colour.
+    bool highlighting() const;
 
     std::function<void(const QString &)> onTitleChanged;
     // A link to a local file or folder was clicked in the rendered Markdown. The preview never

@@ -22,6 +22,7 @@
 class QAction;
 class QCheckBox;
 class QComboBox;
+class QFont;
 class QFrame;
 class QLabel;
 class QLineEdit;
@@ -29,6 +30,7 @@ class QMenu;
 class QPushButton;
 class QTabWidget;
 class QTextBrowser;
+class QTextDocument;
 class QTimer;
 class QToolButton;
 class QTreeWidget;
@@ -93,6 +95,46 @@ QStringList badges(const QJsonObject &item, bool openNow, const QString &closedT
                    const QString &usageTag = QString());
 // A path elided in the middle ("src/…/Conversations.cpp"); other text is elided at the end.
 QString elideMiddleText(const QString &text, int maxChars);
+
+// ----- the list's rich-text rows (#MDSG) ----------------------------------------------------
+
+// The rows that draw rich text — a match line, a summary paragraph — lay a QTextDocument out
+// twice, once to answer sizeHint and once to paint, and the list is thrown away and rebuilt on
+// every keystroke. On the owner's store that was 100–190 ms of GUI time per key, all of it in
+// Qt's text engine. So the laid-out documents are kept here between rebuilds.
+//
+// The key is the html, the width it is laid out at and the font: the only three things the
+// layout depends on. The ink is not part of it — the delegate passes the row's colour in the
+// paint context, so a selected row and a theme's colours reuse the same document. What does
+// invalidate an entry is a change of font or of the html itself, and both change the key;
+// `clear()` is called anyway when the tree's font, palette or style changes, because a style
+// sheet can reach the text through neither.
+class RichTextCache {
+public:
+    explicit RichTextCache(int capacity = 512);
+    ~RichTextCache();
+    RichTextCache(const RichTextCache &) = delete;
+    RichTextCache &operator=(const RichTextCache &) = delete;
+
+    // The document for `html`, laid out at `width` in `font`. Never null; owned by the cache and
+    // valid until the cache is cleared or enough other documents have pushed it out.
+    QTextDocument *document(const QString &html, int width, const QFont &font);
+    void clear();
+    int size() const;
+    int capacity() const { return m_capacity; }
+    // Laid out again, or handed back: what the fix is measured by, and what the test reads.
+    int hits() const { return m_hits; }
+    int misses() const { return m_misses; }
+
+private:
+    struct Entry {
+        QTextDocument *document = nullptr;
+        quint64 used = 0;          // the stamp the least-recently-used eviction compares
+    };
+    QHash<QString, Entry> m_entries;
+    quint64 m_clock = 0;
+    int m_capacity, m_hits = 0, m_misses = 0;
+};
 
 // ----- guest sessions (protocol 26.7) ------------------------------------------------------
 //
@@ -257,6 +299,9 @@ private:
     QJsonObject queryRequest() const;
     void rebuildTree(const QString &keep);
     QTreeWidgetItem *addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item);
+    // A group row or a quick-look placeholder spans the whole width. While the list is being
+    // filled the request is held back and every span is set at the end (#MDSG, see the .cpp).
+    void spanFirstColumn(QTreeWidgetItem *row);
     void decorate(QTreeWidgetItem *row, const QJsonObject &item);
     void selectionChanged();
     void requestPreview(const QString &sessionId);
@@ -318,6 +363,7 @@ private:
     QJsonArray m_items;
     // A conversation can have two rows (the "Continue" group and its own group), so both are kept.
     QMultiHash<QString, QTreeWidgetItem *> m_rows;
+    QList<QTreeWidgetItem *> m_spanRows;       // rows waiting for their span (#MDSG)
     QHash<QString, QJsonObject> m_overviews;   // what an unfolded row shows, once fetched
     QSet<QString> m_summarising;
     QStringList m_openSessions;

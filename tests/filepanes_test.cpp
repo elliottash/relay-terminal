@@ -12,9 +12,11 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBlock>
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QTreeView>
+#include <ctime>
 
 using relay::FileExplorer;
 using relay::FilePreview;
@@ -30,6 +32,32 @@ QStringList names(const QStringList &paths) {
     QStringList out;
     for (const auto &path : paths) out << QFileInfo(path).fileName();
     return out;
+}
+
+// A C++ file of `lines` lines, with the comments, strings and keywords a highlighter has to carry
+// state across. Nothing here reads the repository: the file panes are timed on a file of a known
+// size, not on whatever happens to be on this disk (#MDSG).
+QByteArray sourceLines(int lines) {
+    QByteArray out;
+    out.reserve(lines * 64);
+    for (int i = 0; i < lines; ++i) {
+        switch (i % 6) {
+        case 0: out += "// the " + QByteArray::number(i) + "th line of this file\n"; break;
+        case 1: out += "static const char *name" + QByteArray::number(i) + " = \"a string\";\n"; break;
+        case 2: out += "/* a comment that\n"; break;
+        case 3: out += "   runs over two lines */\n"; break;
+        case 4: out += "int value" + QByteArray::number(i) + "(int x) { return x * 2; }\n"; break;
+        default: out += "\n"; break;
+        }
+    }
+    return out;
+}
+
+// CPU this process has burnt, in milliseconds: the number the profile reports as "GUI CPU".
+double cpuMs() {
+    struct timespec ts {};
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1.0e6;
 }
 
 // The non-separator ids of a right-click menu, in order.
@@ -243,6 +271,62 @@ private slots:
         QVERIFY(preview.notice().startsWith(QStringLiteral("Showing the first")));
     }
 
+    // ----- syntax highlighting a big file (#MDSG) ----------------------------------------------
+
+    // The whole file is on screen straight away and the colours fill in afterwards, in slices.
+    void aBigFileIsShownFirstAndColouredAfterwards() {
+        if (!FilePreview::syntaxHighlightingBuiltIn())
+            QSKIP("built without KSyntaxHighlighting: nothing colours a file here");
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("big.cpp"));
+        writeFile(path, sourceLines(8000));
+        FilePreview preview;
+        preview.resize(700, 500);
+        preview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&preview));
+        QVERIFY(preview.open(path));
+        // Every line is there to read, and only the first screenfuls are coloured so far.
+        QCOMPARE(preview.text().count(QLatin1Char('\n')), 8000);
+        QVERIFY(preview.highlighting());
+        const int eager = preview.highlightedBlocks();
+        QVERIFY(eager > 0);
+        QVERIFY(eager < 8000);
+        // Jumping to the end before the colouring gets there is allowed to show plain text, never
+        // the wrong colours; the frontier catches up and the last line ends up coloured like the
+        // first. (Line 7994 is one of the `static const char *n = "…";` lines.)
+        auto *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(editor);
+        preview.goToLine(7994);
+        // And it finishes by itself, from the top down, without anything being asked of it.
+        QTRY_VERIFY_WITH_TIMEOUT(!preview.highlighting(), 20000);
+        QCOMPARE(preview.highlightedBlocks(), preview.text().count(QLatin1Char('\n')) + 1);
+        const QTextBlock last = editor->document()->findBlockByNumber(7993);
+        QVERIFY(last.text().startsWith(QStringLiteral("static const char *")));
+        QVERIFY(last.layout() && !last.layout()->formats().isEmpty());
+    }
+
+    // Opening another file stops the first one's colouring rather than letting two run at once.
+    void openingAnotherFileStopsTheColouringOfTheFirst() {
+        if (!FilePreview::syntaxHighlightingBuiltIn())
+            QSKIP("built without KSyntaxHighlighting: nothing colours a file here");
+        QTemporaryDir temp;
+        const QString big = temp.filePath(QStringLiteral("big.cpp"));
+        const QString small = temp.filePath(QStringLiteral("small.cpp"));
+        writeFile(big, sourceLines(8000));
+        writeFile(small, sourceLines(20));
+        FilePreview preview;
+        QVERIFY(preview.open(big));
+        QVERIFY(preview.highlighting());
+        QVERIFY(preview.open(small));
+        // The small file is done in the first, synchronous slice: nothing is left running, and
+        // what is coloured belongs to the file that is open now.
+        QVERIFY(!preview.highlighting());
+        QCOMPARE(preview.highlightedBlocks(), 21);
+        // No slice of the first file's may fire afterwards and colour this one's blocks.
+        QTest::qWait(60);
+        QCOMPARE(preview.highlightedBlocks(), 21);
+    }
+
     void missingPathReturnsFalse() {
         FilePreview preview;
         QVERIFY(!preview.open(QStringLiteral("/nonexistent/relay/file.txt")));
@@ -414,6 +498,19 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!preview.isDirty(), 10000);
         QCOMPARE(QString::fromUtf8(readFile(m_fake.filePath(QStringLiteral("stdin")))), QStringLiteral("listen 9090;\n"));
         QVERIFY(preview.notice().contains(QStringLiteral("Saved to")));
+    }
+
+    // A host's file is the one text path with no size cap, so it is where the highlighting limit
+    // bites: past it the file is shown plain rather than colouring for minutes (#MDSG).
+    void aRemoteFileTooBigToColourIsShownPlain() {
+        QByteArray body(int(FilePreview::kMaxHighlightBytes) + 1, 'a');
+        body[100] = '\n';
+        fakeHost("14:1758153600:640\n" + body);
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/huge.cpp"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Text, 20000);
+        QCOMPARE(preview.highlightedBlocks(), 0);
+        QVERIFY(!preview.highlighting());
     }
 
     // WARP.md's standing rule: the slow path teaches the fast one. Clicking Save says "Next time:
@@ -607,6 +704,62 @@ private slots:
     void cleanup() {
         if (!m_savedPath.isNull()) { qputenv("PATH", m_savedPath); m_savedPath = QByteArray(); }
         relay::remote::forgetLogin(m_host);
+    }
+
+    // The one visible difference the fix makes, as two PNGs: a big file the moment it is on
+    // screen, and the same file once the colouring has worked its way down it (#MDSG).
+    void bigFileScreenshots() {
+        const QString directory = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (directory.isEmpty()) QSKIP("set RELAY_SHOT_DIR=<dir> to write the file pane as a PNG");
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("big.cpp"));
+        writeFile(path, sourceLines(8000));
+        FilePreview preview;
+        preview.resize(900, 700);
+        preview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&preview));
+        QVERIFY(preview.open(path));
+        QVERIFY(preview.grab().save(directory + QStringLiteral("/file-pane-open.png")));
+        QTRY_VERIFY_WITH_TIMEOUT(!preview.highlighting(), 30000);
+        QVERIFY(preview.grab().save(directory + QStringLiteral("/file-pane-coloured.png")));
+        qInfo("wrote %s/file-pane-open.png and file-pane-coloured.png", qPrintable(directory));
+    }
+
+    // What opening a file costs: the freeze before the text is on screen, and the GUI time the
+    // whole thing takes including the colouring that now happens afterwards (#MDSG). It prints
+    // rather than asserts — the numbers are the machine's — so it only runs when asked for.
+    void openCost() {
+        if (qEnvironmentVariableIsEmpty("RELAY_PERF_BENCH"))
+            QSKIP("set RELAY_PERF_BENCH=1 to time opening a file");
+        QTemporaryDir temp;
+        FilePreview preview;
+        preview.resize(900, 700);
+        preview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&preview));
+        // RELAY_PERF_FILE names a real file to open as well, which is how the 15,830-line
+        // src/Pane.h of the profile is timed without the bench depending on it being there.
+        QStringList paths;
+        for (const int lines : {300, 15830}) {
+            const QString path = temp.filePath(QStringLiteral("bench-%1.cpp").arg(lines));
+            writeFile(path, sourceLines(lines));
+            paths << path;
+        }
+        if (!qEnvironmentVariable("RELAY_PERF_FILE").isEmpty()) paths << qEnvironmentVariable("RELAY_PERF_FILE");
+        for (const QString &path : paths) {
+            const QByteArray body = readFile(path);
+            const int lines = body.count('\n');
+            for (const bool warm : {false, true}) {
+                const double start = cpuMs();
+                QVERIFY(preview.open(path));
+                preview.repaint();
+                const double firstPaint = cpuMs() - start;
+                QTRY_VERIFY_WITH_TIMEOUT(!preview.highlighting(), 60000);
+                preview.repaint();
+                qInfo("%d lines (%lld B), %s: %.0f ms GUI CPU to first paint, %.0f ms in all",
+                      lines, qint64(body.size()), warm ? "warm" : "cold", firstPaint, cpuMs() - start);
+                preview.open(temp.path());   // nothing: the next open is not the same path
+            }
+        }
     }
 
 private:

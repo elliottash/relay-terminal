@@ -11,11 +11,14 @@
 
 #include <QSaveFile>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QSyntaxHighlighter>
 #include <QRegularExpression>
 #include <QTextDocument>
 #include <QTextCharFormat>
+#include <QTimer>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QResizeEvent>
 #include <algorithm>
 #include <QApplication>
@@ -748,12 +751,124 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
     return QWidget::eventFilter(object, event);
 }
 
+// ----- highlighting a big file without freezing the pane (#MDSG) --------------------------------
+
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+namespace {
+// KSyntaxHighlighting colours the whole document the moment it is handed a definition, on the GUI
+// thread: opening src/Pane.h (15,830 lines) froze the pane for 1,965 ms cold, 688 ms warm, and
+// about 520 ms of the warm figure was the colouring alone. The text is what the reader is waiting
+// for, so this shows it first and colours it afterwards, a few milliseconds at a time.
+//
+// Colouring has to run strictly top down — a line's state is the line before it, which is how a
+// multi-line comment knows it is still inside one. So a block past the frontier is left alone:
+// highlightBlock() returns without setting a format or a state, which also stops Qt's own
+// "carry on while the state changes" from running past the frontier. Jumping to the end of a big
+// file therefore shows it plain for a moment and then coloured, never coloured wrongly.
+//
+// What stops it: deleting the highlighter (what the panes do when they load another file) takes
+// its timer with it. An edit is handled by QSyntaxHighlighter as usual for the blocks already
+// coloured; lines added or removed above the frontier move it, because it counts blocks.
+class LazyHighlighter final : public KSyntaxHighlighting::SyntaxHighlighter {
+public:
+    explicit LazyHighlighter(QTextDocument *document)
+        : KSyntaxHighlighting::SyntaxHighlighter(document), m_blocks(document->blockCount()) {
+        m_timer.setSingleShot(true);
+        m_timer.setInterval(1);
+        QObject::connect(&m_timer, &QTimer::timeout, this, [this] { slice(kSliceMs); });
+        m_edits = QObject::connect(document, &QTextDocument::contentsChange, this,
+                                   [this](int from, int, int) { edited(from); });
+    }
+
+    // ~QSyntaxHighlighter clears the formats off every block, which is an edit of the document,
+    // which would call back into a half-destroyed object (the timer is gone by then). So the
+    // document is let go of first.
+    ~LazyHighlighter() override {
+        QObject::disconnect(m_edits);
+        m_timer.stop();
+    }
+
+    // Colour what is on screen now and queue the rest. Called once the document holds the text:
+    // a file of a few hundred lines is finished here, before the pane is painted at all, so
+    // nothing small flickers from plain to coloured.
+    void start() {
+        m_frontier = 0;
+        m_blocks = document() ? document()->blockCount() : 0;
+        slice(kEagerMs, kEagerBlocks);
+    }
+
+    // How much of the document is coloured, and whether more is still to come. The panes offer
+    // both so a test can wait for the end of it.
+    int highlightedBlocks() const { return m_frontier; }
+    bool busy() const { return document() && m_frontier < document()->blockCount(); }
+
+protected:
+    void highlightBlock(const QString &text) override {
+        if (currentBlock().blockNumber() >= m_frontier) return;   // not reached yet: leave it plain
+        KSyntaxHighlighting::SyntaxHighlighter::highlightBlock(text);
+    }
+
+private:
+    static constexpr int kSliceMs = 4;        // one slice of idle time, small enough not to be felt
+    static constexpr int kEagerMs = 15;       // and what the first, synchronous one may cost
+    static constexpr int kEagerBlocks = 400;  // comfortably more than a screenful at any font size
+
+    void slice(int budgetMs, int maxBlocks = -1) {
+        QTextDocument *document = this->document();
+        if (!document) return;
+        QElapsedTimer spent;
+        spent.start();
+        int done = 0;
+        // One edit block around the whole slice. Without it the view is told the document has
+        // changed once per block and re-lays it out each time, which cost more than the
+        // colouring itself: 204 ms of work for src/Pane.h became 556 ms.
+        QTextCursor cursor(document);
+        cursor.beginEditBlock();
+        while (m_frontier < document->blockCount() && spent.elapsed() < budgetMs
+               && (maxBlocks < 0 || done < maxBlocks)) {
+            const QTextBlock block = document->findBlockByNumber(m_frontier);
+            if (!block.isValid()) { m_frontier = document->blockCount(); break; }
+            ++m_frontier;                       // inside the frontier before it is coloured
+            ++done;
+            rehighlightBlock(block);
+        }
+        // Nothing was inserted or taken out — only the colours on those blocks changed — so the
+        // "the document changed" signals the end of the edit block would send are held back:
+        // QSyntaxHighlighter would answer them by reformatting the whole slice a second time, and
+        // no other reader of them has anything to do. The layout is told directly, not by signal,
+        // so the view still repaints.
+        { const QSignalBlocker quiet(document); cursor.endEditBlock(); }
+        m_blocks = document->blockCount();
+        if (busy()) m_timer.start();
+    }
+
+    // The frontier is a block number, so lines put in or taken out above it move it; the blocks
+    // below it are Qt's own business (it reformats what changed). Typing in the tail of a file
+    // that is not coloured yet simply waits for the frontier, like the rest of the tail.
+    void edited(int from) {
+        QTextDocument *document = this->document();
+        if (!document) return;
+        const int now = document->blockCount();
+        if (document->findBlock(from).blockNumber() < m_frontier)
+            m_frontier = qBound(0, m_frontier + (now - m_blocks), now);
+        m_blocks = now;
+        if (busy() && !m_timer.isActive()) m_timer.start();
+    }
+
+    QMetaObject::Connection m_edits;
+    QTimer m_timer;
+    int m_frontier = 0;   // blocks 0 … m_frontier-1 are coloured; the rest are plain
+    int m_blocks = 0;     // the block count as of the last slice, to move the frontier by an edit
+};
+}  // namespace
+#endif
+
 // ----- FilePreview -------------------------------------------------------------------------------
 
 struct FilePreview::Private {
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     KSyntaxHighlighting::Repository repository;
-    KSyntaxHighlighting::SyntaxHighlighter *highlighter = nullptr;
+    LazyHighlighter *highlighter = nullptr;
 #endif
 #ifdef RELAY_HAVE_QTPDF
     QPdfDocument *pdf = nullptr;
@@ -955,6 +1070,30 @@ QString FilePreview::text() const {
     return m_textView->toPlainText();
 }
 
+bool FilePreview::syntaxHighlightingBuiltIn() {
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    return true;
+#else
+    return false;
+#endif
+}
+
+int FilePreview::highlightedBlocks() const {
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    return d->highlighter ? d->highlighter->highlightedBlocks() : 0;
+#else
+    return 0;
+#endif
+}
+
+bool FilePreview::highlighting() const {
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    return d->highlighter && d->highlighter->busy();
+#else
+    return false;
+#endif
+}
+
 bool FilePreview::open(const QString &path) {
     if (relay::remote::isFileUrl(path)) return openRemote(path);
     const QFileInfo info(path);
@@ -1126,12 +1265,15 @@ void FilePreview::showRemoteText(const QByteArray &content, bool markdown) {
     delete d->highlighter;
     d->highlighter = nullptr;
     const KSyntaxHighlighting::Definition definition = d->repository.definitionForFileName(m_remotePath);
-    if (definition.isValid()) {
-        d->highlighter = new KSyntaxHighlighting::SyntaxHighlighter(m_textView->document());
+    // A host's file is not capped the way a local one is (readCapped), so this is where the limit
+    // bites: past it the file is shown plain rather than colouring for minutes (#MDSG).
+    if (definition.isValid() && content.size() <= kMaxHighlightBytes) {
+        d->highlighter = new LazyHighlighter(m_textView->document());
         KSyntaxHighlighting::Theme theme = d->repository.theme(QStringLiteral("Breeze Dark"));
         if (!theme.isValid()) theme = d->repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
         d->highlighter->setTheme(theme);
         d->highlighter->setDefinition(definition);
+        d->highlighter->start();
     }
 #endif
     // Markdown opens rendered, as a local .md does, and "Source (MD)" is where it is edited —
@@ -1312,12 +1454,17 @@ void FilePreview::showText(const QString &path, qint64 size) {
     m_textView->setPlainText(content);
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     const KSyntaxHighlighting::Definition definition = d->repository.definitionForFileName(path);
-    if (definition.isValid()) {
-        d->highlighter = new KSyntaxHighlighting::SyntaxHighlighter(m_textView->document());
+    // The text first, its colours after: the highlighter is installed on the document that is
+    // already filled and works through it a slice at a time (#MDSG). readCapped() has already
+    // held the text to kMaxTextBytes, so the limit below only turns a file away when the two
+    // figures are the same.
+    if (definition.isValid() && content.size() <= kMaxHighlightBytes) {
+        d->highlighter = new LazyHighlighter(m_textView->document());
         KSyntaxHighlighting::Theme theme = d->repository.theme(QStringLiteral("Breeze Dark"));
         if (!theme.isValid()) theme = d->repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
         d->highlighter->setTheme(theme);
         d->highlighter->setDefinition(definition);
+        d->highlighter->start();
     }
 #endif
     m_kind = Kind::Text;
@@ -1598,7 +1745,7 @@ protected:
 struct PlanEditor::Private {
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     KSyntaxHighlighting::Repository repository;
-    KSyntaxHighlighting::SyntaxHighlighter *highlighter = nullptr;
+    LazyHighlighter *highlighter = nullptr;
 #endif
     QSyntaxHighlighter *fallback = nullptr;
 };
@@ -1643,7 +1790,7 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     const KSyntaxHighlighting::Definition definition = d->repository.definitionForName(QStringLiteral("Markdown"));
     if (definition.isValid()) {
-        d->highlighter = new KSyntaxHighlighting::SyntaxHighlighter(m_editor->document());
+        d->highlighter = new LazyHighlighter(m_editor->document());
         KSyntaxHighlighting::Theme theme = d->repository.theme(QStringLiteral("Breeze Dark"));
         if (!theme.isValid()) theme = d->repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
         d->highlighter->setTheme(theme);
@@ -1664,6 +1811,10 @@ bool PlanEditor::open(const QString &path) {
     m_path = QFileInfo(path).absoluteFilePath();
     m_editor->setPlainText(QString::fromUtf8(file.readAll()));
     m_editor->document()->setModified(false);
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    // A new document, so the colouring starts again at the top (#MDSG).
+    if (d->highlighter) d->highlighter->start();
+#endif
     m_notice->hide();
     updateTitle();
     return true;

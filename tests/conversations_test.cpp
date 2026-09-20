@@ -20,10 +20,13 @@
 #include <QTabBar>
 #include <QTest>
 #include <QTextBrowser>
+#include <QTextDocument>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QElapsedTimer>
 #include <QTreeWidgetItemIterator>
 #include <QUrl>
+#include <ctime>
 
 using namespace relay::conversations;
 
@@ -82,6 +85,42 @@ static QJsonArray ranges(std::initializer_list<std::pair<int, int>> items) {
     QJsonArray out;
     for (const auto &item : items) out.append(QJsonArray{item.first, item.second});
     return out;
+}
+
+// ----- the search-as-you-type bench (#MDSG) ---------------------------------------------------
+//
+// A synthetic result page shaped like the worker's: a hundred rows, each with the match lines a
+// text search returns. Nothing here reads the owner's store — setResults() takes the worker's
+// JSON, so a made-up page exercises exactly the code a real one does.
+static QJsonArray benchItems(int count, const QString &word) {
+    QJsonArray items;
+    for (int i = 0; i < count; ++i) {
+        QJsonObject item = sessionItem(QStringLiteral("s%1").arg(i),
+                                       QStringLiteral("Conversation %1 about the %2 index").arg(i).arg(word),
+                                       QStringLiteral("project-%1").arg(i % 7));
+        item.insert(QStringLiteral("summary"),
+                    QStringLiteral("A long-running conversation in which the %1 index was rebuilt, the "
+                                   "FTS table re-created and the pane re-measured several times.").arg(word));
+        item.insert(QStringLiteral("updated"), 1.0e9 + i);
+        QJsonArray matches;
+        for (int m = 0; m < 3; ++m)
+            matches.append(QJsonObject{{QStringLiteral("turn"), m + 1},
+                                       {QStringLiteral("kind"), QStringLiteral("reply")},
+                                       {QStringLiteral("line"), QStringLiteral("the %1 index is rebuilt from the "
+                                                                               "session files on every start").arg(word)},
+                                       {QStringLiteral("ranges"), ranges({{4, 4 + word.size()}})}});
+        item.insert(QStringLiteral("matches"), matches);
+        item.insert(QStringLiteral("match_count"), matches.size());
+        items.append(item);
+    }
+    return items;
+}
+
+// CPU this process has burnt, in milliseconds: the number the profile reports as "GUI CPU".
+static double cpuMs() {
+    struct timespec ts {};
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1.0e6;
 }
 
 class ConversationsTest : public QObject {
@@ -1355,6 +1394,147 @@ private slots:
         unwired.show();
         QVERIFY(QTest::qWaitForWindowExposed(&unwired));
         QVERIFY(!unwired.findChild<QWidget *>(QStringLiteral("boardChatPanel"))->isVisible());
+    }
+
+    // The delegate's laid-out documents are kept between rebuilds, keyed by html, width and font
+    // (#MDSG): the same row asked for twice is laid out once.
+    void richTextCacheKeys() {
+        RichTextCache cache(3);
+        const QString html = QStringLiteral("<b>turn 3</b> the index is rebuilt on every start");
+        const QFont font(QStringLiteral("Sans"), 10);
+        QTextDocument *first = cache.document(html, 300, font);
+        QVERIFY(first);
+        QCOMPARE(cache.document(html, 300, font), first);      // the same document, not a copy
+        QCOMPARE(cache.misses(), 1);
+        QCOMPARE(cache.hits(), 1);
+
+        // The width it was laid out at is part of what it is: a narrower column wraps differently.
+        QTextDocument *narrow = cache.document(html, 180, font);
+        QVERIFY(narrow != first);
+        QCOMPARE(cache.misses(), 2);
+
+        // So is the font — a theme that changes it must not hand back the old layout.
+        QFont bigger = font;
+        bigger.setPointSize(14);
+        QVERIFY(cache.document(html, 300, bigger) != first);
+        QCOMPARE(cache.misses(), 3);
+        QCOMPARE(cache.size(), 3);
+
+        // Bounded: a fourth entry pushes the least recently used one out, and no more are kept.
+        cache.document(html, 300, font);                        // first is now the most recent
+        cache.document(QStringLiteral("<b>turn 4</b> another line"), 300, font);
+        QCOMPARE(cache.size(), 3);
+        QCOMPARE(cache.document(html, 300, font), first);        // kept: it was asked for last
+        QCOMPARE(cache.document(html, 180, font) == narrow, false);   // dropped: the oldest
+
+        cache.clear();
+        QCOMPARE(cache.size(), 0);
+    }
+
+    // The rows that span the whole width are still spanned after a rebuild, although the spans are
+    // now set in one go at the end of it (#MDSG).
+    void groupRowsSpanTheWidth() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("First")),
+                                        sessionItem(QStringLiteral("b"), QStringLiteral("Second"),
+                                                    QStringLiteral("other"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree && tree->topLevelItemCount() >= 2);
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *group = tree->topLevelItem(i);
+            QCOMPARE(group->data(0, Qt::UserRole + 7).toString(), QStringLiteral("group"));
+            QVERIFY(group->isFirstColumnSpanned());
+            // Its sessions each carry the quick-look placeholder, spanned too.
+            QVERIFY(group->childCount() > 0);
+            QTreeWidgetItem *row = group->child(0);
+            QCOMPARE(row->childCount(), 1);
+            QVERIFY(row->child(0)->isFirstColumnSpanned());
+        }
+        // The narrow columns are back to sizing themselves once the list is filled.
+        for (int column = 1; column < tree->columnCount(); ++column)
+            QCOMPARE(tree->header()->sectionResizeMode(column), QHeaderView::ResizeToContents);
+    }
+
+    // The list as it is drawn, written out as a PNG so the same page can be compared pixel for
+    // pixel against another build (#MDSG: the row cache and the deferred spans must change what a
+    // keystroke costs and nothing else). Off unless a directory is named for it.
+    void listScreenshot() {
+        const QString directory = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (directory.isEmpty()) QSKIP("set RELAY_SHOT_DIR=<dir> to write the list as a PNG");
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.onPreview = [](const QString &, const QString &) {};
+        manager.resize(900, 760);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree);
+        manager.setQuery(QStringLiteral("index"));
+        manager.setResults({{QStringLiteral("items"), benchItems(24, QStringLiteral("index"))}});
+        // Two rows unfolded, so the rich-text rows the delegate lays out are on screen too.
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *group = tree->topLevelItem(i);
+            for (int j = 0; j < qMin(2, group->childCount()); ++j) {
+                QTreeWidgetItem *row = group->child(j);
+                manager.setPreview({{QStringLiteral("session_id"), row->data(0, Qt::UserRole + 1).toString()},
+                                    {QStringLiteral("overview"), QJsonObject{{QStringLiteral("summary"),
+                                        QStringLiteral("Rebuilt the index and re-measured the pane.")}}}});
+                row->setExpanded(true);
+            }
+        }
+        // Rebuilt once more: what a keystroke leaves on screen, not what the first fill did.
+        manager.setResults({{QStringLiteral("items"), benchItems(24, QStringLiteral("index"))}});
+        QVERIFY(tree->viewport()->grab().save(directory + QStringLiteral("/sessions-list.png")));
+        qInfo("wrote %s/sessions-list.png", qPrintable(directory));
+    }
+
+    // What a keystroke costs: a hundred-row page arrives and the list is rebuilt and repainted,
+    // ten times over, as search-as-you-type does it (#MDSG). It prints rather than asserts — the
+    // number is the machine's — so it only runs when asked for.
+    void searchKeystrokeCost() {
+        if (qEnvironmentVariableIsEmpty("RELAY_PERF_BENCH"))
+            QSKIP("set RELAY_PERF_BENCH=1 to time a keystroke");
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.onPreview = [](const QString &, const QString &) {};
+        manager.resize(900, 760);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree);
+        manager.setQuery(QStringLiteral("index"));
+
+        for (const bool unfolded : {false, true}) {
+            manager.setResults({{QStringLiteral("items"), benchItems(100, QStringLiteral("index"))}});
+            if (unfolded)
+                for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+                    QTreeWidgetItem *group = tree->topLevelItem(i);
+                    group->setExpanded(true);
+                    for (int j = 0; j < group->childCount(); ++j) {
+                        QTreeWidgetItem *row = group->child(j);
+                        manager.setPreview({{QStringLiteral("session_id"), row->data(0, Qt::UserRole + 1).toString()},
+                                            {QStringLiteral("overview"), QJsonObject{{QStringLiteral("summary"),
+                                                QStringLiteral("Rebuilt the index and re-measured the pane.")}}}});
+                        row->setExpanded(true);
+                    }
+                }
+            tree->viewport()->grab();
+            const double cpuBefore = cpuMs();
+            QElapsedTimer wall;
+            wall.start();
+            const int keys = 10;
+            for (int k = 0; k < keys; ++k) {
+                manager.setResults({{QStringLiteral("items"), benchItems(100, QStringLiteral("index"))}});
+                tree->viewport()->grab();
+            }
+            qInfo("%s rows: %.1f ms GUI CPU per key, %.1f ms wall per key",
+                  unfolded ? "unfolded" : "collapsed", (cpuMs() - cpuBefore) / keys,
+                  double(wall.elapsed()) / keys);
+        }
     }
 };
 

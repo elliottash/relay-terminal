@@ -426,6 +426,49 @@ QString estimateText(const QJsonObject &event) {
              compactTokens(event.value(QStringLiteral("approx_output_tokens")).toDouble()), model);
 }
 
+// ----- the list's rich-text rows (#MDSG) ----------------------------------------------------
+
+RichTextCache::RichTextCache(int capacity) : m_capacity(std::max(1, capacity)) {}
+RichTextCache::~RichTextCache() { clear(); }
+
+int RichTextCache::size() const { return m_entries.size(); }
+
+void RichTextCache::clear() {
+    for (const Entry &entry : std::as_const(m_entries)) delete entry.document;
+    m_entries.clear();
+}
+
+QTextDocument *RichTextCache::document(const QString &html, int width, const QFont &font) {
+    // The font goes in the key as its own description rather than by identity: two QFonts that
+    // describe the same face lay text out the same way and must share an entry.
+    const QString key = QString::number(width) + QLatin1Char('\x1f') + font.toString()
+                        + QLatin1Char('\x1f') + html;
+    const auto it = m_entries.find(key);
+    if (it != m_entries.end()) {
+        ++m_hits;
+        it->used = ++m_clock;
+        return it->document;
+    }
+    ++m_misses;
+    if (m_entries.size() >= m_capacity) {
+        // Full: the one that has gone longest unasked for goes. Only a miss can get here, so the
+        // scan costs nothing once the visible rows are all in.
+        auto oldest = m_entries.begin();
+        for (auto scan = m_entries.begin(); scan != m_entries.end(); ++scan)
+            if (scan->used < oldest->used) oldest = scan;
+        delete oldest->document;
+        m_entries.erase(oldest);
+    }
+    auto *document = new QTextDocument;
+    // The same three calls in the same order the delegate used to make inline: the layout, and so
+    // the pixels, must not change because the document is kept.
+    document->setDefaultFont(font);
+    document->setHtml(html);
+    document->setTextWidth(width);
+    m_entries.insert(key, Entry{document, ++m_clock});
+    return document;
+}
+
 // ----- the session manager pane -------------------------------------------------------------
 
 namespace {
@@ -439,17 +482,19 @@ QString escaped(const QString &text) { return text.simplified().toHtmlEscaped();
 // highlighted match line read as prose rather than as one elided line.
 class RowDelegate : public QStyledItemDelegate {
 public:
-    explicit RowDelegate(QTreeWidget *tree) : QStyledItemDelegate(tree), m_tree(tree) {}
+    explicit RowDelegate(QTreeWidget *tree) : QStyledItemDelegate(tree), m_tree(tree) {
+        // A style sheet, a theme or a font change can move the text without changing the html or
+        // the column width, and the cache keys on those three alone (#MDSG). Watching the tree is
+        // how it hears about it; the pane's own event filter on the tree is untouched.
+        m_tree->installEventFilter(this);
+    }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         if (index.column() == 0) {
             const QString html = index.data(kHtmlRole).toString();
             if (!html.isEmpty()) {
-                QTextDocument document;
-                document.setDefaultFont(option.font);
-                document.setHtml(html);
-                document.setTextWidth(textWidth(index));
-                return QSize(int(document.idealWidth()), int(document.size().height()) + 4);
+                QTextDocument *document = m_cache.document(html, textWidth(index), option.font);
+                return QSize(int(document->idealWidth()), int(document->size().height()) + 4);
             }
             if (!index.data(kTitleRole).toString().isEmpty()) {
                 const QFontMetrics metrics(option.font);
@@ -483,15 +528,12 @@ public:
         painter->save();
         painter->setFont(opt.font);
         if (!html.isEmpty()) {
-            QTextDocument document;
-            document.setDefaultFont(opt.font);
-            document.setHtml(html);
-            document.setTextWidth(rect.width());
+            QTextDocument *document = m_cache.document(html, rect.width(), opt.font);
             painter->translate(rect.topLeft());
             QAbstractTextDocumentLayout::PaintContext context;
             context.palette.setColor(QPalette::Text, ink);
             context.clip = QRectF(0, 0, rect.width(), rect.height());
-            document.documentLayout()->draw(painter, context);
+            document->documentLayout()->draw(painter, context);
             painter->restore();
             return;
         }
@@ -522,6 +564,23 @@ public:
         painter->restore();
     }
 
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (object == m_tree)
+            switch (event->type()) {
+            case QEvent::FontChange:
+            case QEvent::PaletteChange:
+            case QEvent::StyleChange:
+            case QEvent::ApplicationFontChange:
+            case QEvent::ApplicationPaletteChange:
+                m_cache.clear();
+                break;
+            default:
+                break;
+            }
+        return QStyledItemDelegate::eventFilter(object, event);
+    }
+
 private:
     // How wide column 0 is for this row: the column less the indentation its depth costs.
     int textWidth(const QModelIndex &index) const {
@@ -530,6 +589,9 @@ private:
         return std::max(80, m_tree->columnWidth(0) - depth * m_tree->indentation() - 10);
     }
     QTreeWidget *m_tree = nullptr;
+    // sizeHint() and paint() are const and both want the document; the cache is the delegate's
+    // own scratch, not part of what it says about a row.
+    mutable RichTextCache m_cache;
 };
 }  // namespace
 
@@ -1227,9 +1289,19 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     auto *placeholder = new QTreeWidgetItem(row);
     placeholder->setData(0, kKindRole, QStringLiteral("preview"));
     placeholder->setData(0, kHtmlRole, QStringLiteral("Loading the quick look…"));
-    placeholder->setFirstColumnSpanned(true);
+    spanFirstColumn(placeholder);
     placeholder->setFlags(Qt::ItemIsEnabled);
     return row;
+}
+
+// setFirstColumnSpanned() on a row that is already in the tree makes the view lay itself out then
+// and there, and Qt re-measures the three "resize to contents" columns over every row while it is
+// at it. Filling a hundred-row page row by row therefore cost about a hundred of those walks —
+// most of the 100–190 ms a keystroke took (#MDSG). While the list is being filled the spans are
+// collected instead and set in one go at the end, which lays the finished tree out once.
+void SessionManager::spanFirstColumn(QTreeWidgetItem *row) {
+    if (m_filling) m_spanRows.append(row);
+    else row->setFirstColumnSpanned(true);
 }
 
 void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
@@ -1286,6 +1358,13 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
 
 void SessionManager::rebuildTree(const QString &keep) {
     m_filling = true;
+    // Qt measures a "resize to contents" column by walking every row of the tree, and unfolding a
+    // row makes the view do it again — so restoring a hundred unfolded rows walked the list a
+    // hundred times (#MDSG). The three narrow columns keep the width they have while the list is
+    // filled and are measured once, at the end: the same measurement, over the finished tree.
+    QHeaderView *header = m_tree->header();
+    for (int column = 1; column < m_tree->columnCount(); ++column)
+        header->setSectionResizeMode(column, QHeaderView::Interactive);
     // A refresh must leave the reader where they were: the same row selected, the same rows
     // unfolded and the list scrolled to the same place.
     QSet<QString> unfolded;
@@ -1316,7 +1395,7 @@ void SessionManager::rebuildTree(const QString &keep) {
         QTreeWidgetItem *group = groups.value(name);
         if (!group) {
             group = new QTreeWidgetItem(m_tree, {name.isEmpty() ? QStringLiteral("(no project)") : name});
-            group->setFirstColumnSpanned(true);
+            spanFirstColumn(group);
             group->setFlags(Qt::ItemIsEnabled);
             group->setExpanded(true);
             group->setData(0, kKindRole, QStringLiteral("group"));
@@ -1436,6 +1515,10 @@ void SessionManager::rebuildTree(const QString &keep) {
         pending = later;
     }
 
+    // Every group row and every quick-look placeholder at once, now the tree is whole.
+    for (QTreeWidgetItem *row : std::as_const(m_spanRows)) row->setFirstColumnSpanned(true);
+    m_spanRows.clear();
+
     // Back where the reader was: the same rows unfolded (from what was already fetched), the same
     // row current, the same scroll offset.
     for (const QString &id : std::as_const(unfolded))
@@ -1445,6 +1528,8 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_sessions = sessions;
     m_threadCount = threads;
     m_filling = false;
+    for (int column = 1; column < m_tree->columnCount(); ++column)
+        header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
     m_tree->verticalScrollBar()->setValue(std::min(scroll, m_tree->verticalScrollBar()->maximum()));
     updateStatus();
