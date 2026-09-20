@@ -34,6 +34,7 @@
 #include <QPlainTextEdit>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -403,6 +404,25 @@ public:
             return QRect();
         return cardShape(board::Card{}, false, m_list->font(), rowWidth())
             .priorityRect.translated(itemRect.topLeft());
+    }
+
+    // The label a click at `at` (viewport coordinates) lands on in the card row at `rowIndex`
+    // (#3ZAP): labels are the one badge that copies rather than decorates. A null string when
+    // the click is anywhere else in the row.
+    QString labelBadgeAt(int rowIndex, const QRect &itemRect, const QPoint &at) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Card)
+            return QString();
+        const board::Card *card = m_model->card(row->cardId);
+        if (!card)
+            return QString();
+        const CardShape shape = cardShape(*card, row->showStatus, m_list->font(), rowWidth());
+        for (const auto &placed : shape.badges)
+            if (placed.first.kind == board::Badge::Label
+                && placed.second.translated(itemRect.topLeft()).contains(at))
+                return placed.first.text;
+        return QString();
     }
 
     // Nothing is created straight into Done: a card gets there by being closed.
@@ -823,8 +843,12 @@ public:
     // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
     // one (#VKFV). The pane clamps at −1…+3 and writes it through `board_priority`.
     std::function<void(const QString &cardId, int step)> onPriority;
+    // A click on a row's label badge copies its hashtag (#3ZAP) instead of selecting the row.
+    std::function<void(const QString &label)> onCopyLabel;
     std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf,
         triageRectOf;
+    // The label badge a point lands on, as text, or a null string (#3ZAP).
+    std::function<QString(int rowIndex, const QRect &itemRect, const QPoint &at)> labelBadgeAt;
     static QString dragging;
 
 protected:
@@ -839,6 +863,25 @@ protected:
     {
         QListWidget::showEvent(event);
         scheduleDelayedItemsLayout();       // measured while hidden, at whatever width it had
+    }
+
+    // The label badge under a left-button event, or a null string (#3ZAP): shared by the
+    // press, release and double-click guards, so a badge click is one gesture that copies and
+    // never becomes a selection or an activation.
+    QString labelBadgeUnder(const QMouseEvent *event) const
+    {
+        if (!labelBadgeAt || event->button() != Qt::LeftButton)
+            return QString();
+#if QT_VERSION_MAJOR >= 6
+        const QPoint at = event->position().toPoint();
+#else
+        const QPoint at = event->pos();
+#endif
+        const QModelIndex index = indexAt(at);
+        const board::Row *row = rowAt(index.row());
+        if (!row || row->kind != board::Row::Card)
+            return QString();
+        return labelBadgeAt(index.row(), visualRect(index), at);
     }
 
     // A click on a section header toggles it, or adds into it; it never becomes a selection.
@@ -865,6 +908,14 @@ protected:
                 return;
             }
         }
+        // A label badge copies its hashtag (#3ZAP) rather than selecting the row; the row's
+        // other badges still decorate, and a click between them selects as before.
+        if (const QString label = labelBadgeUnder(event); !label.isEmpty()) {
+            if (onCopyLabel)
+                onCopyLabel(label);
+            event->accept();
+            return;
+        }
         if (row && row->kind == board::Row::Section && event->button() == Qt::LeftButton) {
             const QRect add = addRectOf ? addRectOf(index.row(), visualRect(index)) : QRect();
             const QRect triage = triageRectOf ? triageRectOf(index.row(), visualRect(index))
@@ -882,6 +933,31 @@ protected:
             return;
         }
         QListWidget::mousePressEvent(event);
+    }
+
+    // The release of a badge click must not reach the list either (#3ZAP): the press state Qt
+    // keeps is stale from an earlier real press on that row, and it would hand the badge's
+    // release to the row as a click — a badge is a control, not a selection.
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        if (!labelBadgeUnder(event).isEmpty()) {
+            event->accept();
+            return;
+        }
+        QListWidget::mouseReleaseEvent(event);
+    }
+
+    // A second click on a badge is another copy, not an activation of the row (#3ZAP).
+    void mouseDoubleClickEvent(QMouseEvent *event) override
+    {
+        const QString label = labelBadgeUnder(event);
+        if (!label.isEmpty()) {
+            if (onCopyLabel)
+                onCopyLabel(label);
+            event->accept();
+            return;
+        }
+        QListWidget::mouseDoubleClickEvent(event);
     }
 
     // Our own drag, not QListWidget's: the default image is the row painted on a transparent
@@ -1438,6 +1514,12 @@ public:
         };
         m_reply->installEventFilter(this);
         connect(m_meta, &QLabel::linkActivated, this, [this](const QString &link) {
+            const QUrl url(link);
+            if (url.scheme() == QStringLiteral("tag")) {   // the labels row copies (#3ZAP)
+                if (onCopyTag)
+                    onCopyTag(url.path().isEmpty() ? url.host() : url.path());
+                return;
+            }
             if (onOpenPath)
                 onOpenPath(link);
         });
@@ -1448,6 +1530,17 @@ public:
             if (url.scheme() == QStringLiteral("relay-pane")) {
                 if (onFocusPane)
                     onFocusPane(url.path());
+                return;
+            }
+            // A label hashtag copies; a `#ID` that names a card zooms to it (#3ZAP).
+            if (url.scheme() == QStringLiteral("tag")) {
+                if (onCopyTag)
+                    onCopyTag(url.path().isEmpty() ? url.host() : url.path());
+                return;
+            }
+            if (url.scheme() == QStringLiteral("card")) {
+                if (onOpenCard)
+                    onOpenCard((url.path().isEmpty() ? url.host() : url.path()).toUpper());
                 return;
             }
             if (!url.scheme().isEmpty() && url.scheme() != QStringLiteral("file")) {
@@ -1476,6 +1569,15 @@ public:
     std::function<void(const QString &note)> onVerify;
     // A `relay-pane:` anchor in the thread names a pane by session token (#HKAP).
     std::function<void(const QString &token)> onFocusPane;
+    // A label hashtag was clicked — a badge in the list, the meta's labels, or a `#tag` in the
+    // card's own words or the thread (#3ZAP): copy `#tag` and say so.
+    std::function<void(const QString &tag)> onCopyTag;
+    // A `#ID` in the card's own words or the thread names another card on this board: zoom to
+    // it, the way the cleanup panel's `card:` anchors do (#3ZAP).
+    std::function<void(const QString &id)> onOpenCard;
+    // Whether a word after a `#` names a card on this board (#3ZAP): the board decides whether
+    // `#K7Q2` is a card reference or a four-character label — shape alone cannot.
+    std::function<bool(const QString &id)> hasCard;
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void(const QString &what, const QString &value)> onMove;
@@ -2128,7 +2230,25 @@ private:
                 parts << item(label, items.join(QStringLiteral(", ")));
             }
         };
-        add("labels", QStringLiteral("labels"));
+        // Labels read as the hashtags they are and copy on a click (#3ZAP): the muted key
+        // stays the meta's, the words take the pane's link colour.
+        QStringList labelWords;
+        const QJsonValue labelsValue = front.value(QLatin1String("labels"));
+        if (labelsValue.isArray())
+            for (const QJsonValue &entry : labelsValue.toArray())
+                labelWords << entry.toString();
+        else if (labelsValue.isString())
+            labelWords << labelsValue.toString();
+        labelWords.removeAll(QString());
+        if (!labelWords.isEmpty()) {
+            QStringList shown;
+            for (const QString &label : std::as_const(labelWords))
+                shown << QStringLiteral("<a href=\"tag:%1\" style=\"color:%2\">#%3</a>")
+                                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(label)),
+                                      theme::Link.name(), label.toHtmlEscaped());
+            parts << QStringLiteral("<span style=\"color:%1\">labels</span>&nbsp;%2")
+                         .arg(theme::TextMuted.name(), shown.join(QStringLiteral(", ")));
+        }
         add("assignee", QStringLiteral("assignee"));
         add("waiting_on", QStringLiteral("waiting on"));
         add("milestone", QStringLiteral("milestone"));
@@ -2193,7 +2313,90 @@ private:
         part.setDefaultFont(m_doc->document()->defaultFont());
         part.setMarkdown(markdown);
         tuneHeadings(&part, base);
+        const int from = cursor.position();
         cursor.insertFragment(QTextDocumentFragment(&part));
+        linkifyTags(cursor.document(), from, cursor.position());
+    }
+
+    // A `#tag` (#3ZAP): a label hashtag copies when clicked; a `#ID` that names a card on this
+    // board zooms to it instead. Card ids are the four base32 characters the board coins, so
+    // shape alone cannot tell a reference from a four-letter label — `hasCard` decides, and a
+    // word that names no card is a label. A `#` inside a word (`well#known`) is not a tag.
+    static const QRegularExpression &tagPattern()
+    {
+        static const QRegularExpression pattern(
+            QStringLiteral("(?<![A-Za-z0-9_-])#[A-Za-z0-9][A-Za-z0-9_-]*"));
+        return pattern;
+    }
+
+    // The anchor a tag wears, over whatever format the words around it carry.
+    QTextCharFormat tagFormat(const QTextCharFormat &base, const QString &word) const
+    {
+        const bool ref = hasCard && hasCard(word);
+        QTextCharFormat link = base;
+        link.setAnchor(true);
+        link.setAnchorHref(ref ? QStringLiteral("card:") + word.toUpper()
+                               : QStringLiteral("tag:") + word);
+        link.setFontUnderline(true);
+        link.setForeground(theme::Link);
+        return link;
+    }
+
+    // `text` inserted with every `#tag` in it an anchor (#3ZAP), so a plain thread line — an
+    // event, a note, a hand-off — carries the same affordance the Markdown bodies get.
+    void insertTagged(QTextCursor &cursor, const QString &text, const QTextCharFormat &format)
+    {
+        int at = 0;
+        QRegularExpressionMatchIterator it = tagPattern().globalMatch(text);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch match = it.next();
+            const QString found = match.captured(0);
+            if (match.capturedStart() > at)
+                cursor.insertText(text.mid(at, match.capturedStart() - at), format);
+            cursor.insertText(found, tagFormat(format, found.mid(1)));
+            at = match.capturedEnd();
+        }
+        if (at < text.size())
+            cursor.insertText(text.mid(at), format);
+    }
+
+    // Overlay `#tag` anchors on a stretch of already-rendered Markdown (#3ZAP): the body after
+    // setMarkdown(), or the range a thread comment's fragment landed in. What is already an
+    // anchor — a Markdown link's label, a pane link — and what is code, fenced or inline, keeps
+    // its meaning: `[#bug](http://x)` stays an http link and `#include` stays source.
+    void linkifyTags(QTextDocument *doc, int from, int to)
+    {
+        for (QTextBlock block = doc->findBlock(from);
+             block.isValid() && block.position() <= to; block = block.next()) {
+            const QTextBlockFormat blockFormat = block.blockFormat();
+            if (blockFormat.property(QTextFormat::BlockCodeLanguage).isValid()
+                || blockFormat.property(QTextFormat::BlockCodeFence).isValid())
+                continue;
+            for (QTextBlock::iterator piece = block.begin(); !piece.atEnd(); ++piece) {
+                const QTextFragment fragment = piece.fragment();
+                if (!fragment.isValid())
+                    continue;
+                const QTextCharFormat base = fragment.charFormat();
+                if (!base.anchorHref().isEmpty())
+                    continue;
+                if (base.fontFamilies().toStringList().contains(QStringLiteral("monospace"),
+                                                               Qt::CaseInsensitive))
+                    continue;   // a code span, not prose
+                const QString text = fragment.text();
+                QRegularExpressionMatchIterator it = tagPattern().globalMatch(text);
+                while (it.hasNext()) {
+                    const QRegularExpressionMatch match = it.next();
+                    const int start = fragment.position() + match.capturedStart();
+                    const int end = fragment.position() + match.capturedEnd();
+                    if (start < from || end > to)
+                        continue;
+                    QTextCursor apply(doc);
+                    apply.setPosition(start);
+                    apply.setPosition(end, QTextCursor::KeepAnchor);
+                    apply.setCharFormat(tagFormat(base, match.captured(0).mid(1)));
+                }
+            }
+        }
     }
 
     // A hairline the width of the document: an empty block two pixels tall, painted in the border
@@ -2218,7 +2421,7 @@ private:
         block.setTopMargin(topMargin);
         block.setBottomMargin(2);
         cursor.insertBlock(block, format);
-        cursor.insertText(text, format);
+        insertTagged(cursor, text, format);
     }
 
     // One reasoning block: the text, whether it ended, how long it ran, and — for a sealed
@@ -2279,6 +2482,7 @@ private:
         const qreal base = m_doc->font().pointSizeF() > 0 ? m_doc->font().pointSizeF() : 10.0;
         doc->setMarkdown(m_body.trimmed().isEmpty() ? QStringLiteral("*No description.*") : m_body);
         tuneHeadings(doc, base);
+        linkifyTags(doc, 0, doc->characterCount());   // the card's own words first (#3ZAP)
 
         QTextCursor cursor(doc);
         cursor.movePosition(QTextCursor::End);
@@ -2603,6 +2807,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->priorityRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->priorityRectOf(rowIndex, itemRect);
     };
+    m_list->labelBadgeAt = [delegate](int rowIndex, const QRect &itemRect, const QPoint &at) {
+        return delegate->labelBadgeAt(rowIndex, itemRect, at);
+    };
+    m_list->onCopyLabel = [this](const QString &label) { copyTag(label); };
     m_list->onPriority = [this](const QString &card, int step) { setCardPriority(card, step); };
     m_list->onToggleSection = [this](const QString &columnId) { toggleSection(columnId); };
     m_list->onAddInSection = [this](const QString &columnId) {
@@ -2747,6 +2955,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (onFocusPane && !token.isEmpty())
             onFocusPane(token);
     };
+    m_detail->hasCard = [this](const QString &id) { return m_model.card(id) != nullptr; };
+    m_detail->onCopyTag = [this](const QString &tag) { copyTag(tag); };
+    m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
     m_detail->onOpenPath = [this](const QString &path) {
         if (!onOpenFile || path.isEmpty())
             return;
@@ -3040,10 +3251,7 @@ void BoardView::buildCleanupPanel(QVBoxLayout *layout)
     connect(m_cleanupBody, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) {
         // `card:K7Q2` goes through the same path a row click does; anything else is a file.
         if (url.scheme() == QStringLiteral("card")) {
-            const QString id = (url.path().isEmpty() ? url.host() : url.path()).toUpper();
-            selectCard(id);
-            m_selected = id;
-            openSelected();
+            openCard((url.path().isEmpty() ? url.host() : url.path()).toUpper());
             return;
         }
         if (onOpenFile && !url.path().isEmpty())
@@ -4767,10 +4975,28 @@ void BoardView::selectCard(const QString &id)
 
 void BoardView::copyReference()
 {
-    if (m_selected.isEmpty())
+    copyTag(m_selected);
+}
+
+// A label hashtag was clicked (#3ZAP) — a row badge, the meta's labels, or a `#tag` in the
+// card's own words or the thread: the copy-and-notice `copyReference` gives a card id.
+void BoardView::copyTag(const QString &tag)
+{
+    if (tag.isEmpty())
         return;
-    QApplication::clipboard()->setText(QStringLiteral("#") + m_selected);
-    showNotice(QStringLiteral("Copied #%1").arg(m_selected), false);
+    QApplication::clipboard()->setText(QStringLiteral("#") + tag);
+    showNotice(QStringLiteral("Copied #%1").arg(tag), false);
+}
+
+// Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text takes the same path the
+// cleanup panel's `card:` anchors do.
+void BoardView::openCard(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    selectCard(id);
+    m_selected = id;
+    openSelected();
 }
 
 void BoardView::sendSelectionToTerminal()

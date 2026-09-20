@@ -169,6 +169,12 @@ public:
     void moveSelected();            // the `m` popup
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
+    // A label hashtag was clicked (#3ZAP) — a row badge, the meta's labels, or a `#tag` in the
+    // card's own words or the thread: the copy-and-notice `copyReference` gives a card id.
+    void copyTag(const QString &tag);
+    // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text, and the cleanup panel's
+    // `card:` anchors, land here.
+    void openCard(const QString &id);
     void sendSelectionToTerminal();
     void openSelectedFile();
     void selectCard(const QString &id);

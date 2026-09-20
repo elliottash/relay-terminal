@@ -10,6 +10,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QFocusEvent>
 #include <QFrame>
@@ -186,6 +187,7 @@ private slots:
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
     void theThinkingTraceRunsInTheCardsThread();
+    void hashtagClicksCopyAndCardRefsZoom();
     void quickAddNamesTheSectionItAddsTo();
     void aCleanupPreviewsFirstAndItsEventsNeverReachACardThread();
     void applyingAPreviewRunsTheCleanupForReal();
@@ -1430,6 +1432,113 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
     QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
     QVERIFY(text().indexOf(QStringLiteral("\u2726 thought for 4 s"))
             < text().lastIndexOf(QStringLiteral("The plan: render it in the thread.")));
+}
+
+// #3ZAP: a label hashtag copies — a row's badge, the meta's labels, or a `#tag` in the card's
+// own words or the thread — while a `#ID` that names a card on the board zooms to it instead.
+// What is already a link or code keeps its meaning.
+void BoardModelTests::hashtagClicksCopyAndCardRefsZoom()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QJsonObject withLabel = row("M3XJ", "inbox", "features");
+    withLabel.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("bug")});
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), withLabel}));
+    view.setCollapsedSections(QJsonArray{});
+
+    const QString body = QStringLiteral(
+        "# M3XJ card\n\n## Issue\nA bug #bug and a ref #K7Q2; a missing #ZZZZ reads as a "
+        "label.\n\nSee [#bug](http://example.com/x) and:\n\n```cpp\n#include <vector>\n```\n");
+    const QJsonArray thread{QJsonObject{{"entry_id", "20260920T120000Z-aa"},
+                                       {"author", "owner"}, {"kind", "comment"},
+                                       {"text", QStringLiteral("Also #bug here, ref #K7Q2.")}}};
+    openCard(view, sent, QJsonObject{{"event", "board_card"},
+                                     {"card_id", "M3XJ"},
+                                     {"title", "M3XJ card"},
+                                     {"status", "inbox"},
+                                     {"tab", "features"},
+                                     {"path", "issues/features/M3XJ.md"},
+                                     {"front", QJsonObject{{"labels",
+                                                           QJsonArray{QStringLiteral("bug")}}}},
+                                     {"body", body},
+                                     {"thread", thread},
+                                     {"thread_total", 1}});
+
+    // What the document carries: every label a tag: anchor (body and thread alike), the
+    // reference a card: one, the Markdown link's own href untouched, the fenced code bare.
+    auto *doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(doc);
+    QStringList hrefs;
+    QString linked;
+    for (QTextBlock block = doc->document()->begin(); block.isValid(); block = block.next())
+        for (QTextBlock::iterator piece = block.begin(); !piece.atEnd(); ++piece) {
+            const QTextFragment fragment = piece.fragment();
+            if (!fragment.isValid() || !fragment.charFormat().isAnchor())
+                continue;
+            const QString href = fragment.charFormat().anchorHref();
+            hrefs << href;
+            if (href == QStringLiteral("http://example.com/x"))
+                linked += fragment.text();
+        }
+    QVERIFY(hrefs.count(QStringLiteral("tag:bug")) >= 2);    // once in the body, once in the thread
+    QVERIFY(hrefs.contains(QStringLiteral("tag:ZZZZ")));     // no such card: a label
+    QVERIFY(hrefs.contains(QStringLiteral("card:K7Q2")));   // a card on the board
+    QVERIFY(!hrefs.contains(QStringLiteral("tag:include")));   // the fence keeps its meaning
+    QCOMPARE(linked, QStringLiteral("#bug"));   // the Markdown link kept its own href
+
+    // A tag copies with a notice; a card reference zooms without touching the clipboard.
+    QApplication::clipboard()->setText(QString());
+    Q_EMIT doc->anchorClicked(QUrl(QStringLiteral("tag:bug")));
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#bug"));
+    QCOMPARE(view.notice(), QStringLiteral("Copied #bug"));
+    QApplication::clipboard()->setText(QStringLiteral("untouched"));
+    Q_EMIT doc->anchorClicked(QUrl(QStringLiteral("card:K7Q2")));
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("untouched"));
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+
+    // The meta's labels carry the same copy.
+    auto *meta = view.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(meta->text().contains(QStringLiteral("href=\"tag:bug\"")));
+    Q_EMIT meta->linkActivated(QStringLiteral("tag:bug"));
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#bug"));
+    QCOMPARE(view.notice(), QStringLiteral("Copied #bug"));
+
+    // A row's label badge copies without moving the selection; the rest of the row selects.
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+    view.resize(1100, 700);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.selectCard(QStringLiteral("M3XJ"));
+    const QRect rowRect = list->visualItemRect(list->currentItem());
+    QVERIFY(rowRect.isValid());
+    const int y = rowRect.center().y();
+    QApplication::clipboard()->setText(QString());
+    int hit = -1;
+    // The badges sit at the row's right end, left of the date columns; a sweep finds the one
+    // label badge wherever this platform's metrics put it, and no other badge intercepts.
+    for (int x = rowRect.right() - 6; x > rowRect.right() - 320 && x > rowRect.left() + 90;
+         x -= 6) {
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(x, y));
+        if (QApplication::clipboard()->text() == QStringLiteral("#bug")) {
+            hit = x;
+            break;
+        }
+    }
+    QVERIFY(hit > 0);
+    QCOMPARE(view.notice(), QStringLiteral("Copied #bug"));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QApplication::clipboard()->setText(QString());
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(hit, y));
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#bug"));
+    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));   // the badge never selects
+    QApplication::clipboard()->setText(QStringLiteral("keep"));
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(rowRect.left() + 90, y));
+    QCOMPARE(view.selectedCard(), QStringLiteral("M3XJ"));   // the row still does
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("keep"));
 }
 
 // ---- the whole-board cleanup (protocol 19.9) -----------------------------------------------
