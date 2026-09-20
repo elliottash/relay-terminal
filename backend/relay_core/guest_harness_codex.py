@@ -46,6 +46,28 @@ fallback for an `item/completed` with no `aggregatedOutput`. `item/fileChange/ou
 same shape and 0.155.1's schema marks it deprecated ("the server no longer emits this
 notification"); it is handled the same way for the servers that still do.
 
+**Usage limits** (the subscription's rolling windows, not the context). 0.155.1's schema has
+`account/rateLimits/read` (params `{}`; response `{rateLimits: RateLimitSnapshot, …}`) and the
+notification `account/rateLimits/updated {rateLimits: RateLimitSnapshot}`, described as a
+"sparse rolling rate-limit update" that clients "merge into the most recent read". A
+`RateLimitSnapshot` is `{primary?, secondary?: {usedPercent: int, windowDurationMins?: int,
+resetsAt?: int}, planType?, rateLimitReachedType?, limitId?, …}`. Recorded live on 2026-09-20
+against this codex, on a Pro plan:
+
+    -> account/rateLimits/read {}
+    <- {"ordinaryUsageAllowed": true, "rateLimits": {"limitId": "codex", "limitName": null,
+        "normalModelSlug": null, "primary": {"usedPercent": 53, "windowDurationMins": 10080,
+        "resetsAt": 1790065926}, "secondary": null, "credits": {...}, "individualLimit": null,
+        "spendControlReached": false, "planType": "pro", "rateLimitReachedType": null},
+        "rateLimitsByLimitId": {"codex": {...the same...}},
+        "rateLimitResetCredits": {"availableCount": 0, "credits": []}, "accountId": "…",
+        "rateLimitUpsell": null}
+
+So *primary* is not always the five-hour window: here it is the 7-day one (10080 minutes) and
+there is no secondary. `windowDurationMins` decides the kind (`window_kind_for_minutes`), and the
+adapter reads once at `start()` and then merges every `account/rateLimits/updated`, emitting a
+`limits` event on the next turn (or at once, inside one).
+
 **Approval scopes.** `answer()`'s `decision["scope"]` reaches the words codex has and
 allow/deny does not: `acceptForSession` (v2) / `approved_for_session` (v1) for `session`,
 `cancel` (v2) / `abort` (v1) for a deny that also ends the turn. See `_answer_record`.
@@ -65,7 +87,8 @@ from collections import deque
 
 from .guest_harness import (Emit, HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, chunk_tool_output, map_tool_name,
-                            validate_effort, validate_permissions)
+                            validate_effort, validate_permissions,
+                            window_kind_for_minutes)
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +145,7 @@ _NOTIFICATIONS = {
     "item/started": "_on_item_started",
     "item/completed": "_on_item_completed",
     "thread/tokenUsage/updated": "_on_thread_tokenUsage_updated",
+    "account/rateLimits/updated": "_on_account_rateLimits_updated",
     "thread/compacted": "_on_thread_compacted",
     "warning": "_on_warning",
     "guardianWarning": "_on_guardianWarning",
@@ -176,6 +200,10 @@ class CodexHarness:
         self._server_requests: dict[str, dict] = {}
         self._turn: _TurnState | None = None
         self._usage: dict = {}
+        # The subscription's rolling windows as codex last reported them (a merged
+        # RateLimitSnapshot: primary / secondary), and whether a turn has yet told the pane.
+        self._limits: dict = {}
+        self._limits_fresh = False
         self._session_id = ""
         self._model = ""
         self._effort = ""
@@ -240,7 +268,71 @@ class CodexHarness:
             self.close()
             raise HarnessNotAvailable("Codex's app-server started no thread (no id came back).")
         self._announce_started = True
+        self._read_limits()
         return HarnessStart(session_id=self._session_id, model=self._model)
+
+    def _read_limits(self) -> None:
+        """Ask for the subscription's rolling windows once, without waiting: the answer lands on
+        the reader thread (`_dispatch`) and is emitted as `limits` at the next turn. A server
+        without the method (or an account without limits) answers with an error, which is
+        ignored: the figures are a courtesy, never a condition of starting."""
+        try:
+            self._request_async("account/rateLimits/read", {},
+                                on_result=lambda result: self._merge_limits(
+                                    (result or {}).get("rateLimits")))
+        except HarnessError as exc:
+            log.debug("codex harness: could not ask for rate limits: %s", exc)
+
+    def _merge_limits(self, snapshot) -> None:
+        """Fold a RateLimitSnapshot into the held one. The schema calls an update *sparse*
+        ("merge available values… does not clear a previously observed value"), so a window that
+        is absent or null leaves what was known; a window that is present replaces it."""
+        if not isinstance(snapshot, dict):
+            return
+        with self._lock:
+            for key in ("primary", "secondary"):
+                window = snapshot.get(key)
+                if isinstance(window, dict) and not isinstance(window.get("usedPercent"), bool) \
+                        and isinstance(window.get("usedPercent"), (int, float)):
+                    self._limits[key] = dict(window)
+            for key in ("planType", "rateLimitReachedType", "limitId"):
+                if key in snapshot and snapshot[key] is not None:
+                    self._limits[key] = snapshot[key]
+            self._limits_fresh = bool(self._limits.get("primary") or self._limits.get("secondary"))
+
+    def _limits_event(self) -> dict:
+        """The held snapshot as a `limits` event, or {} when no window is known."""
+        with self._lock:
+            held = dict(self._limits)
+        windows = []
+        for position, key in enumerate(("primary", "secondary")):
+            window = held.get(key)
+            if not isinstance(window, dict):
+                continue
+            used = window.get("usedPercent")
+            if isinstance(used, bool) or not isinstance(used, (int, float)):
+                continue
+            resets = window.get("resetsAt")
+            windows.append({"kind": window_kind_for_minutes(window.get("windowDurationMins"),
+                                                            position),
+                            "used_percent": round(min(100.0, max(0.0, float(used))), 1),
+                            "resets_at": int(resets)
+                            if isinstance(resets, (int, float)) and not isinstance(resets, bool)
+                            and resets > 0 else None})
+        if not windows:
+            return {}
+        data = {"windows": windows}
+        if held.get("rateLimitReachedType"):
+            data["status"] = "rejected"
+        return data
+
+    def _emit_limits_if_fresh(self, turn: _TurnState) -> None:
+        with self._lock:
+            fresh, self._limits_fresh = self._limits_fresh, False
+        if fresh:
+            data = self._limits_event()
+            if data:
+                self._emit(turn, "limits", data)
 
     def send(self, prompt: str, *, attachments: list[dict] | None = None, emit: Emit,
              cancel: threading.Event) -> TurnResult:
@@ -255,6 +347,7 @@ class CodexHarness:
             if self._announce_started:
                 self._announce_started = False
                 self._emit(turn, "started", {"session_id": self._session_id, "model": self._model})
+            self._emit_limits_if_fresh(turn)
             params = {"threadId": self._session_id,
                       "input": self._build_input(prompt, attachments)}
             with self._lock:
@@ -570,6 +663,12 @@ class CodexHarness:
     def _on_thread_tokenUsage_updated(self, turn, params):
         return None                        # the state is kept on the reader thread; nothing to emit
 
+    def _on_account_rateLimits_updated(self, turn, params):
+        # Merged on the reader thread already (`_dispatch`); here the turn is running, so say so.
+        # Two updates that both landed before this ran are one event: the merged, newest state.
+        self._emit_limits_if_fresh(turn)
+        return None
+
     def _on_thread_compacted(self, turn, params):
         self._emit(turn, "notice", {"text": "Codex compacted its context."})
 
@@ -831,6 +930,9 @@ class CodexHarness:
                 usage = (message.get("params") or {}).get("tokenUsage") or {}
                 with self._lock:
                     self._usage = dict(usage)
+            elif method == "account/rateLimits/updated":
+                # Kept whether or not a turn runs: outside one, the next `send()` reports it.
+                self._merge_limits((message.get("params") or {}).get("rateLimits"))
             with self._lock:
                 turn = self._turn
             if turn is None:
@@ -849,6 +951,11 @@ class CodexHarness:
             pending.fail(HarnessError(str(error.get("message") or "codex refused the request.")))
         else:
             pending.done(message.get("result") if isinstance(message.get("result"), dict) else {})
+            if pending.on_result is not None:
+                try:
+                    pending.on_result(pending.result)
+                except Exception:                                          # pragma: no cover
+                    log.debug("codex harness: a response callback failed.", exc_info=True)
 
     def _read_stderr(self) -> None:
         stream = self._proc.stderr
@@ -921,9 +1028,12 @@ class CodexHarness:
         except HarnessError as exc:                                        # pragma: no cover
             log.debug("codex harness: a refusal could not be sent: %s", exc)
 
-    def _request_async(self, method: str, params: dict) -> None:
+    def _request_async(self, method: str, params: dict, on_result=None) -> None:
+        """Send and do not wait. `on_result`, when given, runs on the reader thread with the
+        result dict when the answer arrives; an error answer is dropped either way."""
         pending, message = self._prepare(method, params)
         pending.ignore = True
+        pending.on_result = on_result
         self._write(message)
 
     def _request(self, method: str, params: dict, timeout: float | None = None) -> dict:
@@ -974,7 +1084,7 @@ class CodexHarness:
 
 
 class _Pending:
-    __slots__ = ("key", "event", "result", "error", "ignore")
+    __slots__ = ("key", "event", "result", "error", "ignore", "on_result")
 
     def __init__(self, key: str):
         self.key = key
@@ -982,6 +1092,7 @@ class _Pending:
         self.result: dict | None = None
         self.error: HarnessError | None = None
         self.ignore = False
+        self.on_result = None
 
     def done(self, result: dict) -> None:
         self.result = result

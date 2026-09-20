@@ -445,6 +445,55 @@ class TurnTests(unittest.TestCase):
         self.assertEqual(len(provider.harness.sent), turns_before)
 
 
+class LimitsTests(unittest.TestCase):
+    """A harness `limits` event is the worker's `usage_limits` (29.3), and the last figures stay
+    on the provider and on the guest's `presets` row for a picker opened later."""
+
+    def setUp(self):
+        ghp._LAST_LIMITS.clear()
+        self.addCleanup(ghp._LAST_LIMITS.clear)
+
+    def test_limits_become_usage_limits_and_are_remembered(self):
+        windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600},
+                   {"kind": "weekly", "used_percent": 40.04, "resets_at": 1790499600}]
+        script = [{"events": [ev("limits", windows=list(reversed(windows)), status="allowed"),
+                              ev("delta", text="ok")],
+                   "result": ("ok", "end", {})}]
+        events, agent, provider = run_turn(self, script)
+        limits = [e for e in events if e["event"] == "usage_limits"]
+        self.assertEqual(len(limits), 1)
+        self.assertEqual(limits[0]["preset"], "guest:claude")
+        self.assertEqual(limits[0]["guest"], "claude")
+        self.assertEqual(limits[0]["status"], "allowed")
+        self.assertEqual(limits[0]["windows"],                     # normalised, 5h then weekly
+                         [{"kind": "5h", "used_percent": 62.0, "resets_at": 1789926600},
+                          {"kind": "weekly", "used_percent": 40.0, "resets_at": 1790499600}])
+        self.assertEqual(provider.usage_limits["windows"], limits[0]["windows"])
+        self.assertEqual(provider.usage_limits["status"], "allowed")
+        self.assertIsInstance(provider.usage_limits["updated_at"], int)
+        with mock.patch.object(ghp, "installations", return_value={
+                "claude": {"installed": True, "binary": "/usr/bin/claude", "version": ""},
+                "codex": {"installed": True, "binary": "/usr/bin/codex", "version": ""}}), \
+             mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True):
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+        self.assertEqual(rows["guest:claude"]["limits"]["windows"], limits[0]["windows"])
+        self.assertNotIn("limits", rows["guest:codex"])           # codex has said nothing yet
+        # The row is a copy: nobody's edit of it reaches the held figures.
+        rows["guest:claude"]["limits"]["windows"].clear()
+        self.assertEqual(len(ghp.last_limits("claude")["windows"]), 2)
+
+    def test_a_report_with_no_usable_window_is_dropped(self):
+        script = [{"events": [ev("limits", windows=[{"kind": "monthly", "used_percent": 1},
+                                                    {"kind": "5h", "used_percent": "lots"}]),
+                              ev("limits"),
+                              ev("delta", text="ok")],
+                   "result": ("ok", "end", {})}]
+        events, agent, provider = run_turn(self, script)
+        self.assertEqual([e for e in events if e["event"] == "usage_limits"], [])
+        self.assertEqual(provider.usage_limits, {})
+        self.assertEqual(ghp.last_limits("claude"), {})
+
+
 class QuestionTests(unittest.TestCase):
     """Protocol 27 cards for a guest's approvals and questions, answered back through the harness."""
 

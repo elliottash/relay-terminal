@@ -527,6 +527,7 @@ class ClaudeHarness:
         return {"type": "user", "message": {"role": "user", "content": content}}
 
     def _run_turn(self, prompt: str, attachments: list[dict], emit, cancel) -> TurnResult:
+        held: list[dict] = []
         while True:                                    # a turn starts on an empty inbox
             try:
                 stale = self._inbox.get_nowait()
@@ -534,9 +535,13 @@ class ClaudeHarness:
                 break
             if stale is _EOF:
                 raise HarnessError("the guest stopped." + self._stderr_tail())
+            if isinstance(stale, dict) and stale.get("type") == "rate_limit_event":
+                held.append(stale)         # a usage figure is worth keeping; the rest is stale
         self._write(self._user_message(prompt, attachments))
 
         state = {"text": [], "saw_delta": False, "asked_stop": False}
+        for message in held[-1:]:                      # only the newest figure is a figure
+            self._dispatch(message, state, emit)
         while True:
             if cancel.is_set() and not state["asked_stop"]:
                 state["asked_stop"] = True
@@ -569,7 +574,11 @@ class ClaudeHarness:
             self._on_user(message, emit)
         elif kind == "control_request":
             self._on_control_request(message, emit)
-        elif kind in ("rate_limit_event", "prompt_suggestion", "result", "tool_progress"):
+        elif kind == "rate_limit_event":
+            data = _limits_event(message)
+            if data:
+                emit(HarnessEvent("limits", data))
+        elif kind in ("prompt_suggestion", "result", "tool_progress"):
             # `tool_progress` is a running call's elapsed seconds (and `heartbeat` for the tools
             # that have no stream of their own). It carries no output — the CLI drops
             # `bash_progress.output` on its way to stream-json — so there is nothing here to make
@@ -1081,6 +1090,57 @@ def _usage_event(message: dict) -> dict:
         if prompt > 0:
             data["context_tokens"] = prompt
             data["context_pct"] = round(min(100.0, 100.0 * prompt / window), 1)
+    return data
+
+
+# Claude Code's `rate_limit_event`, as 2.1.278 writes it to a stream-json host (recorded live on
+# 2026-09-20 from `claude -p … --output-format stream-json --verbose`; one per turn, after the
+# model's `message_stop` and before the `result`):
+#
+#   {"type": "rate_limit_event",
+#    "rate_limit_info": {"status": "allowed", "resetsAt": 1789926600,
+#                        "rateLimitType": "five_hour", "overageStatus": "rejected",
+#                        "overageDisabledReason": "org_level_disabled", "isUsingOverage": false,
+#                        "unifiedWindows": {"five_hour": {"utilization": 0.05,
+#                                                         "resetsAt": 1789926600},
+#                                           "seven_day": {"utilization": 0.01,
+#                                                         "resetsAt": 1790499600}}},
+#    "uuid": "…", "session_id": "…"}
+#
+# `utilization` is a 0–1 fraction (0.05 is 5% used) and `resetsAt` is unix seconds. The top-level
+# `rateLimitType` / `resetsAt` / `status` describe the window that currently *governs* — which
+# one would reject next — and carry no figure of their own, so `unifiedWindows` is what the
+# event is made of. `status` is allowed | allowed_warning | rejected.
+_CLAUDE_WINDOWS = (("five_hour", "5h"), ("seven_day", "weekly"))
+
+
+def _limits_event(message: dict) -> dict:
+    """The `limits` event a `rate_limit_event` becomes, or {} when it names no window."""
+    info = message.get("rate_limit_info")
+    if not isinstance(info, dict):
+        return {}
+    unified = info.get("unifiedWindows")
+    windows = []
+    if isinstance(unified, dict):
+        for wire, kind in _CLAUDE_WINDOWS:
+            entry = unified.get(wire)
+            if not isinstance(entry, dict):
+                continue
+            used = entry.get("utilization")
+            if isinstance(used, bool) or not isinstance(used, (int, float)):
+                continue
+            resets = entry.get("resetsAt")
+            windows.append({"kind": kind,
+                            "used_percent": round(min(100.0, max(0.0, float(used) * 100.0)), 1),
+                            "resets_at": int(resets)
+                            if isinstance(resets, (int, float)) and not isinstance(resets, bool)
+                            and resets > 0 else None})
+    if not windows:
+        return {}
+    data = {"windows": windows}
+    status = info.get("status")
+    if isinstance(status, str) and status.strip():
+        data["status"] = status.strip()
     return data
 
 

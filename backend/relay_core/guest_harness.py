@@ -53,6 +53,8 @@ PERMISSIONS = ("bypass", "ask", "deny")
 #                    context_tokens?, context_window?,
 #                    cost_usd?, model?}
 #   notice          {text}                                           status
+#   limits          {windows: [{kind: 5h|weekly, used_percent,       usage_limits
+#                    resets_at?}], status?}
 #   done            {text, stop_reason: end|interrupted|error}        (the turn's answer)
 #   error           {text, code?}                                    error
 #
@@ -79,7 +81,20 @@ PERMISSIONS = ("bypass", "ask", "deny")
 # edits (protocol 23).
 
 EVENT_KINDS = ("started", "delta", "thinking", "tool_started", "tool_output", "tool_result",
-               "approval", "question", "usage", "notice", "done", "error")
+               "approval", "question", "usage", "notice", "limits", "done", "error")
+
+# `limits` is the guest's **subscription usage**, not its context: how much of each rolling
+# window the person's plan has spent and when it rolls over, so the model picker can say
+# "5h: 62% left, resets 14:30 · weekly: 40% left, resets Tue" per guest. Both guests report two
+# windows and name them differently — Claude Code's `rate_limit_event` carries
+# `unifiedWindows.five_hour` / `.seven_day` with a 0–1 `utilization`; codex's
+# `account/rateLimits/updated` (and `account/rateLimits/read`) carry `primary` / `secondary`
+# with an integer `usedPercent` and a `windowDurationMins` that says which is which (on a plan
+# with only a weekly allowance, *primary* is the 7-day window and `secondary` is null). The
+# adapters put both into the same two words, `used_percent` is 0–100, and `resets_at` is unix
+# seconds or None. `status` is the guest's own word when it says one (claude: `allowed`,
+# `allowed_warning`, `rejected`). The adapter emits it whenever the guest reports fresh figures.
+LIMIT_WINDOW_KINDS = ("5h", "weekly")
 
 # `tool_output` is what a call prints *while it runs* — a five-minute build or test run would
 # otherwise show a frozen call line until its `tool_result` lands (GT7X task t:a3). It is
@@ -279,6 +294,40 @@ def chunk_tool_output(text: str, limit: int = MAX_TOOL_OUTPUT_CHUNK):
         return
     for start in range(0, len(text), max(1, limit)):
         yield text[start:start + max(1, limit)]
+
+
+def window_kind_for_minutes(minutes, position: int = 0) -> str:
+    """Which of the two window kinds a rolling window of `minutes` is. Anything under a day is
+    the short window (`5h`; codex says 300, Claude Code says five_hour); a day or more is the
+    long one (`weekly`; both say 7 days). With no duration at all, the guest's own order decides:
+    the first window is the short one, the second the long one."""
+    if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and minutes > 0:
+        return LIMIT_WINDOW_KINDS[0] if minutes < 24 * 60 else LIMIT_WINDOW_KINDS[1]
+    return LIMIT_WINDOW_KINDS[1] if position else LIMIT_WINDOW_KINDS[0]
+
+
+def limit_windows(raw) -> list[dict]:
+    """A `limits` event's windows, normalised: one row per kind in LIMIT_WINDOW_KINDS order,
+    `used_percent` a float clamped to 0–100, `resets_at` an int of unix seconds or None. A row
+    without a known kind or a numeric `used_percent` is dropped; the last row per kind wins."""
+    if not isinstance(raw, list):
+        return []
+    by_kind: dict[str, dict] = {}
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        kind = row.get("kind")
+        pct = row.get("used_percent")
+        if kind not in LIMIT_WINDOW_KINDS or isinstance(pct, bool) \
+                or not isinstance(pct, (int, float)):
+            continue
+        resets = row.get("resets_at")
+        if isinstance(resets, bool) or not isinstance(resets, (int, float)) or resets <= 0:
+            resets = None
+        by_kind[kind] = {"kind": kind,
+                         "used_percent": round(min(100.0, max(0.0, float(pct))), 1),
+                         "resets_at": int(resets) if resets is not None else None}
+    return [by_kind[kind] for kind in LIMIT_WINDOW_KINDS if kind in by_kind]
 
 
 def validate_permissions(value) -> str:

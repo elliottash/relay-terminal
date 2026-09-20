@@ -1132,6 +1132,90 @@ class UsageTest(unittest.TestCase):
         self.assertNotIn("context_pct", data)
 
 
+# One `rate_limit_event` exactly as 2.1.278 wrote it on 2026-09-20 (`claude -p "Reply with the
+# single word ok." --output-format stream-json --verbose --include-partial-messages`), ids
+# redacted. `utilization` is a 0-1 fraction; `resetsAt` is unix seconds; the top-level
+# `rateLimitType`/`resetsAt` name the window that governs and carry no figure of their own.
+RATE_LIMIT_EVENT = {
+    "type": "rate_limit_event",
+    "rate_limit_info": {"status": "allowed", "resetsAt": 1789926600, "rateLimitType": "five_hour",
+                        "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled",
+                        "isUsingOverage": False,
+                        "unifiedWindows": {"five_hour": {"utilization": 0.05,
+                                                         "resetsAt": 1789926600},
+                                           "seven_day": {"utilization": 0.01,
+                                                         "resetsAt": 1790499600}}},
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "session_id": "00000000-0000-0000-0000-000000000001",
+}
+
+
+class LimitsTest(unittest.TestCase):
+    """`rate_limit_event` is the subscription's rolling windows and becomes `limits` (29.1)."""
+
+    def test_the_real_event_becomes_two_windows_in_percent(self):
+        data = gh._limits_event(RATE_LIMIT_EVENT)
+        self.assertEqual(data, {"status": "allowed",
+                                "windows": [{"kind": "5h", "used_percent": 5.0,
+                                             "resets_at": 1789926600},
+                                            {"kind": "weekly", "used_percent": 1.0,
+                                             "resets_at": 1790499600}]})
+
+    def test_an_event_naming_no_window_is_nothing(self):
+        self.assertEqual(gh._limits_event({"type": "rate_limit_event",
+                                           "rate_limit_info": {"status": "allowed",
+                                                               "rateLimitType": "five_hour"}}),
+                         {})
+        self.assertEqual(gh._limits_event({"type": "rate_limit_event"}), {})
+        # A window with no figure is skipped; the other still counts. Utilization is clamped.
+        data = gh._limits_event({"rate_limit_info": {"unifiedWindows": {
+            "five_hour": {"resetsAt": 5}, "seven_day": {"utilization": 1.7, "resetsAt": 0}}}})
+        self.assertEqual(data["windows"], [{"kind": "weekly", "used_percent": 100.0,
+                                            "resets_at": None}])
+
+    def test_dispatch_emits_it_as_a_limits_event(self):
+        harness = gh.ClaudeHarness(spawn=Spawner(), binary=_on_path())
+        events = Collector()
+        harness._dispatch(dict(RATE_LIMIT_EVENT), {"text": [], "saw_delta": False,
+                                                   "asked_stop": False}, events)
+        self.assertEqual(events.kinds, ["limits"])
+        self.assertEqual(events.of("limits")[0].data["windows"][0]["kind"], "5h")
+        self.assertEqual(events.of("limits")[0].data["windows"][0]["used_percent"], 5.0)
+
+    def test_every_recorded_turn_reports_its_limits(self):
+        """The CLI sends one per turn, after the model's `message_stop`; each recorded turn has
+        it, and it lands before `done`."""
+        proc = FakeClaude(load("hello"))
+        harness, events, _, _, _ = run_turn(self, proc, "Reply with the single word ok.")
+        self.addCleanup(harness.close)
+        self.assertEqual(events.kinds.count("limits"), 1)
+        self.assertLess(events.kinds.index("limits"), events.kinds.index("done"))
+        windows = events.of("limits")[0].data["windows"]
+        self.assertEqual([w["kind"] for w in windows], ["5h", "weekly"])
+
+    def test_a_figure_that_arrived_between_turns_is_reported_with_the_next(self):
+        """Only the newest one: an older figure is not a figure any more."""
+        proc = FakeClaude(load("hello"))
+        spawner, harness = harness_on(proc)
+        self.addCleanup(harness.close)
+        harness.start(cwd=os.getcwd())
+        older = json.loads(json.dumps(RATE_LIMIT_EVENT))
+        older["rate_limit_info"]["unifiedWindows"]["five_hour"]["utilization"] = 0.4
+        newer = json.loads(json.dumps(RATE_LIMIT_EVENT))
+        newer["rate_limit_info"]["unifiedWindows"]["five_hour"]["utilization"] = 0.62
+        harness._inbox.put(older)
+        harness._inbox.put({"type": "prompt_suggestion", "text": "stale, dropped"})
+        harness._inbox.put(newer)
+        events = Collector()
+        harness.send("Reply with the single word ok.", emit=events, cancel=threading.Event())
+        limits = events.of("limits")
+        self.assertEqual(limits[0].data["windows"][0]["used_percent"], 62.0)
+        self.assertLess(events.kinds.index("limits"), events.kinds.index("delta"))
+        # The held one, then the recorded turn's own; never the older one.
+        self.assertEqual(len(limits), 2)
+        self.assertNotIn(40.0, [w["used_percent"] for e in limits for w in e.data["windows"]])
+
+
 class AttachmentTest(unittest.TestCase):
 
     def test_an_image_travels_as_a_base64_block(self):

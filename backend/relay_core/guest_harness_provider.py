@@ -34,6 +34,7 @@ import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
+                            limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
                             validate_permissions)
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ProviderConfig, ProviderError,
@@ -362,7 +363,47 @@ def preset_rows() -> list[dict]:
                      # list is its own and leaves nothing out, so there is nothing to say.
                      "efforts": guest_efforts(guest_id, models) if state["installed"] else [],
                      "effort_note": "", "models": models})
+        # The subscription's rolling windows as the guest last reported them to any pane in this
+        # worker (`usage_limits`), so a picker opened later still has a figure to show. Absent
+        # until a guest has reported one; a limit belongs to the account, not to a pane.
+        held = last_limits(guest_id)
+        if held:
+            rows[-1]["limits"] = held
     return rows
+
+
+# `usage_limits` as each guest last reported them, keyed by guest id:
+# {"windows": [{kind, used_percent, resets_at}], "status"?: str, "updated_at": unix seconds}.
+# One worker, one account per guest, so one figure per guest is the whole truth here.
+_LAST_LIMITS: dict[str, dict] = {}
+
+
+def last_limits(guest_id: str) -> dict:
+    """A copy of the last `usage_limits` figures for a guest, or {} before it reported any."""
+    held = _LAST_LIMITS.get(guest_id)
+    if not held:
+        return {}
+    out = dict(held)
+    out["windows"] = [dict(w) for w in held.get("windows", [])]
+    return out
+
+
+def usage_limits_event(guest_id: str, data: dict) -> dict:
+    """The worker's `usage_limits` event a harness `limits` event becomes (29.3), or {} when it
+    names no window. Also the moment the figures are remembered for `preset_rows()`."""
+    windows = limit_windows(data.get("windows") if isinstance(data, dict) else None)
+    if not windows:
+        return {}
+    event = {"event": "usage_limits", "preset": PRESET_PREFIX + guest_id, "guest": guest_id,
+             "windows": windows}
+    status = data.get("status")
+    if isinstance(status, str) and status.strip():
+        event["status"] = status.strip()[:40]
+    held = {"windows": [dict(w) for w in windows], "updated_at": int(time.time())}
+    if "status" in event:
+        held["status"] = event["status"]
+    _LAST_LIMITS[guest_id] = held
+    return event
 
 
 # ----- starting one ------------------------------------------------------------------------------
@@ -468,6 +509,9 @@ class HarnessProvider:
         # on every `context` event as `guest_context`, so the pane's chip can say how full the
         # *guest's* window is — which is the only window a guest turn actually runs against.
         self.guest_context: dict = {}
+        # The subscription's rolling windows after the guest's last `limits` event, in the
+        # `usage_limits` event's words (`windows`, `status`?, `updated_at`); {} until it says.
+        self.usage_limits: dict = {}
         self._stall_timeout = float(stall_timeout)
         self._agent = None
         self._asker = _Asker()
@@ -661,6 +705,13 @@ class _Turn:
         self.usage_seen = True
         self.provider.guest_context = guest_context(usage) or self.provider.guest_context
         self.emit({"event": "usage", "usage": usage})
+
+    def _on_limits(self, data: dict) -> None:
+        event = usage_limits_event(self.provider.guest_id, data)
+        if not event:
+            return
+        self.provider.usage_limits = last_limits(self.provider.guest_id)
+        self.emit(event)
 
     def finish(self, usage: dict) -> None:
         """The turn ended well. The usage the harness returned goes out only when it never sent a

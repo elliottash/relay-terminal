@@ -17,6 +17,7 @@ import stat
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from collections import deque
 
@@ -57,6 +58,30 @@ def server(method: str, params: dict) -> dict:
     return {"dir": "<-", "line": {"method": method, "params": params}}
 
 
+# `account/rateLimits/read`'s real answer, recorded on 2026-09-20 from codex-cli 0.155.1 on a Pro
+# plan (account id redacted): the *primary* window is the weekly one (10080 minutes), there is no
+# secondary, so the kind has to come from `windowDurationMins`. The transcripts under `FIXTURES`
+# predate the adapter asking for it; `ReplayProcess` answers the request from here instead of
+# consuming a recorded line, so every recorded turn still replays byte for byte.
+RATE_LIMITS_READ = {
+    "ordinaryUsageAllowed": True,
+    "rateLimits": {"limitId": "codex", "limitName": None, "normalModelSlug": None,
+                   "primary": {"usedPercent": 53, "windowDurationMins": 10080,
+                               "resetsAt": 1790065926},
+                   "secondary": None,
+                   "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+                   "individualLimit": None, "spendControlReached": False, "planType": "pro",
+                   "rateLimitReachedType": None},
+    "rateLimitsByLimitId": {"codex": {"limitId": "codex", "primary": {
+        "usedPercent": 53, "windowDurationMins": 10080, "resetsAt": 1790065926},
+        "secondary": None, "planType": "pro", "rateLimitReachedType": None}},
+    "rateLimitResetCredits": {"availableCount": 0, "credits": []},
+    "accountId": "00000000-0000-0000-0000-000000000000", "rateLimitUpsell": None,
+}
+# What an older server, or one with nothing to report, says instead.
+RATE_LIMITS_UNAVAILABLE = {"code": -32601, "message": "Method not found"}
+
+
 class _Stdin:
     def __init__(self, proc):
         self._proc = proc
@@ -95,8 +120,13 @@ class ReplayProcess:
     are rewritten onto the ids the adapter used, so the adapter's own numbering is free.
     """
 
-    def __init__(self, entries, *, stderr: str = "", die_when_exhausted: bool = False):
+    def __init__(self, entries, *, stderr: str = "", die_when_exhausted: bool = False,
+                 rate_limits=None):
         self.entries = list(entries)
+        # The answer to `account/rateLimits/read` when the transcript has none recorded: a result
+        # dict, or an error dict (the default, RATE_LIMITS_UNAVAILABLE, is what a server without
+        # the method says, so every recorded turn also proves the adapter shrugs it off).
+        self.rate_limits = rate_limits
         self.position = 0
         self.writes: list[dict] = []
         self.methods: list[tuple[str, str]] = []
@@ -151,6 +181,15 @@ class ReplayProcess:
         while self.position < len(self.entries) and self.entries[self.position]["dir"] != "->":
             self._emit(self.entries[self.position])
             self.position += 1
+        if message.get("method") == "account/rateLimits/read" and (
+                self.position >= len(self.entries)
+                or self.entries[self.position]["line"].get("method") != message["method"]):
+            answer = self.rate_limits if self.rate_limits is not None else RATE_LIMITS_UNAVAILABLE
+            key = "error" if "code" in answer and "message" in answer else "result"
+            with self._cond:
+                self._out.append(json.dumps({"id": message.get("id"), key: answer}) + "\n")
+                self._cond.notify_all()
+            return
         if self.position >= len(self.entries):
             if self.die_when_exhausted:
                 self.die()
@@ -296,7 +335,10 @@ class PlainTurnTest(HarnessCase):
         harness, proc, _ = self.started("ok-turn.jsonl")
         result = harness.send("Reply with the single word ok.", emit=self.emit,
                               cancel=threading.Event())
-        self.assertEqual(self.kinds(), ["started", "delta", "usage"])
+        # `limits` is the recorded `account/rateLimits/updated` codex sends after each response
+        # (redacted to zeros in the fixture). It is not at the front: the replay answered the
+        # adapter's own `account/rateLimits/read` with "method not found", which is ignored.
+        self.assertEqual(self.kinds(), ["started", "delta", "limits", "usage"])
         self.assertEqual(self.only("started")[0],
                          {"session_id": "01a0ba5c-89bb-7fb2-9e5b-e96f7f6f07e4",
                           "model": "gpt-5.6-sol"})
@@ -497,8 +539,8 @@ class ToolTurnTest(HarnessCase):
                      cancel=threading.Event())
         order = [k for i, k in enumerate(self.kinds())
                  if k != "delta" or self.kinds()[i - 1] != "delta"]
-        self.assertEqual(order, ["started", "delta", "tool_started", "tool_result", "delta",
-                                 "usage"])
+        self.assertEqual(order, ["started", "delta", "tool_started", "tool_result", "limits",
+                                 "delta", "usage"])
 
     def test_output_deltas_stream_as_tool_output_while_the_command_runs(self):
         """GT7X t:a3. `CommandExecutionOutputDeltaNotification` is `{threadId, turnId, itemId,
@@ -844,6 +886,104 @@ class ApprovalTest(HarnessCase):
         self.assertEqual(refusals[0]["error"]["code"], -32601)
 
 
+# ----- usage limits ---------------------------------------------------------------------------------
+
+
+def _window(used, minutes, resets):
+    return {"usedPercent": used, "windowDurationMins": minutes, "resetsAt": resets}
+
+
+class LimitsTest(HarnessCase):
+    """The subscription's rolling windows (29.1 `limits`): read once at start, merged from every
+    `account/rateLimits/updated`, and the kind decided by `windowDurationMins`."""
+
+    def wait_for_limits(self, harness):
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            with harness._lock:
+                if harness._limits_fresh:
+                    return
+            time.sleep(0.01)
+        self.fail("the rate-limit read was never answered")
+
+    def test_start_asks_once_and_the_first_turn_reports_the_answer(self):
+        harness, proc, _ = self.started("ok-turn.jsonl", rate_limits=RATE_LIMITS_READ)
+        reads = proc.sent("account/rateLimits/read")
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0]["params"], {})
+        self.wait_for_limits(harness)
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        self.assertEqual(self.kinds()[:2], ["started", "limits"])
+        # A Pro plan with only a weekly allowance: primary is the 7-day window, no secondary.
+        self.assertEqual(self.only("limits")[0],
+                         {"windows": [{"kind": "weekly", "used_percent": 53.0,
+                                       "resets_at": 1790065926}]})
+        self.assertEqual(len(proc.sent("account/rateLimits/read")), 1)   # once, not per turn
+
+    def test_a_read_the_server_does_not_have_is_shrugged_off(self):
+        harness, proc, _ = self.started("ok-turn.jsonl")      # answered "method not found"
+        time.sleep(0.05)
+        self.assertEqual(harness._limits, {})
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        self.assertNotEqual(self.kinds()[1], "limits")          # nothing invented at the start
+
+    def test_an_update_outside_a_turn_is_reported_on_the_next(self):
+        entries = load("ok-turn.jsonl")
+        at = index_of(entries, "->", "turn/start")
+        entries.insert(at, server("account/rateLimits/updated", {"rateLimits": {
+            "primary": _window(62, 300, 1789926600), "secondary": _window(40, 10080, 1790499600),
+            "planType": "plus", "rateLimitReachedType": None}}))
+        harness, proc, _ = self.started(entries=entries)
+        self.wait_for_limits(harness)
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        self.assertEqual(self.kinds()[:2], ["started", "limits"])
+        self.assertEqual(self.only("limits")[0]["windows"],
+                         [{"kind": "5h", "used_percent": 62.0, "resets_at": 1789926600},
+                          {"kind": "weekly", "used_percent": 40.0, "resets_at": 1790499600}])
+
+    def test_updates_inside_a_turn_are_merged_sparsely_and_reported_at_once(self):
+        entries = load("ok-turn.jsonl")
+        del entries[index_of(entries, "<-", "account/rateLimits/updated")]   # the recorded one
+        at = index_of(entries, "<-", "item/agentMessage/delta")
+        entries.insert(at, server("account/rateLimits/updated", {"rateLimits": {
+            "primary": _window(62, 300, 1789926600), "secondary": None}}))
+        entries.insert(at + 1, server("account/rateLimits/updated", {"rateLimits": {
+            "primary": None, "secondary": _window(40, 10080, 1790499600)}}))
+        harness, _, _ = self.started(entries=entries)
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        limits = self.only("limits")
+        # Merged on the reader thread, reported on the turn thread: two updates that land before
+        # the turn thread gets to the first are one event with the newest state, never a stale
+        # one — so this is one or two events, and the last always shows the merge. The second
+        # update named no primary: the one already known is kept, not cleared.
+        self.assertIn(len(limits), (1, 2))
+        self.assertEqual(limits[-1]["windows"],
+                         [{"kind": "5h", "used_percent": 62.0, "resets_at": 1789926600},
+                          {"kind": "weekly", "used_percent": 40.0, "resets_at": 1790499600}])
+        self.assertLess(self.kinds().index("limits"), self.kinds().index("delta"))
+        self.assertEqual(self.kinds()[-1], "usage")
+
+    def test_the_kind_comes_from_the_duration_and_a_reached_limit_is_rejected(self):
+        harness = gh.CodexHarness(codex_path=self.fake_codex, spawn=lambda argv, cwd: None)
+        harness._merge_limits({"primary": _window(53, 10080, 1790065926), "secondary": None})
+        self.assertEqual([w["kind"] for w in harness._limits_event()["windows"]], ["weekly"])
+        harness._merge_limits({"primary": _window(7, 300, 9), "secondary": _window(53, 10080, 9)})
+        event = harness._limits_event()
+        self.assertEqual([w["kind"] for w in event["windows"]], ["5h", "weekly"])
+        self.assertNotIn("status", event)
+        harness._merge_limits({"rateLimitReachedType": "rate_limit_reached"})
+        self.assertEqual(harness._limits_event()["status"], "rejected")
+        # No duration at all: the guest's order decides. A zero reset is no reset.
+        harness._limits = {}
+        harness._merge_limits({"primary": {"usedPercent": 0, "windowDurationMins": 0,
+                                           "resetsAt": 0}})
+        self.assertEqual(harness._limits_event()["windows"],
+                         [{"kind": "5h", "used_percent": 0.0, "resets_at": None}])
+        # Nothing known, nothing said.
+        harness._limits = {}
+        self.assertEqual(harness._limits_event(), {})
+
+
 # ----- when things go wrong -----------------------------------------------------------------------
 
 
@@ -855,7 +995,7 @@ class RobustnessTest(HarnessCase):
         harness, _, _ = self.started(entries=entries)
         result = harness.send("Reply with the single word ok.", emit=self.emit,
                               cancel=threading.Event())
-        self.assertEqual(self.kinds(), ["started", "delta", "usage"])
+        self.assertEqual(self.kinds(), ["started", "delta", "limits", "usage"])
         self.assertEqual(result.text, "ok")
 
     def test_a_non_json_line_on_stdout_is_skipped(self):
@@ -867,7 +1007,7 @@ class RobustnessTest(HarnessCase):
         result = harness.send("Reply with the single word ok.", emit=self.emit,
                               cancel=threading.Event())
         self.assertEqual(result.text, "ok")
-        self.assertEqual(self.kinds(), ["started", "delta", "usage"])
+        self.assertEqual(self.kinds(), ["started", "delta", "limits", "usage"])
 
     def test_the_process_dying_mid_turn_raises_with_the_last_stderr_lines(self):
         entries = load("ok-turn.jsonl")
