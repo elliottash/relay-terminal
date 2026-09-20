@@ -1,10 +1,13 @@
 ---
 id: 5PY9
 type: work
-status: inbox
+status: needs-verification
+assignee: agent
+implemented_by: glm/glm-5.3
+priority: 2
 rank: zzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [ca3c8d61], evidence: [docs/qa_evidence/2026-09-20-new-convo-context-chip/], related: [], github: null}
 ---
 # new convo had incorrect context remaining
 
@@ -89,3 +92,9 @@ workspace measures ~3.6k of 128k tokens, so the chip should read **97% left**, n
   `/new`, and check the chip goes straight to "97% left" with a tooltip reading
   "3,5xx of 128,000 tokens (estimated)". Screenshot before and after into
   `docs/qa_evidence/` for the card.
+
+## QA checklist
+- [ ] By hand (the plan's live check): run a conversation until the context chip is visibly down, press `/new` — the chip goes straight to ~97% left (system prompt + workspace instructions + tool schemas are real context), never the old conversation's figure, and does not flash "100% left" on the way. Tooltip: "3,5xx of 128,000 tokens (estimated)".
+- [ ] `/new` while a model switch is still pending, or mid-compaction: the chip loses the old conversation's ↻ / "compacting…" state with it.
+- [ ] Unit tests green: `tests/test_agent.py::AgentTests::test_reset_conversation_emits_the_fresh_context`, `tests/test_session_protocol.py::WorkerSubprocessTests::test_reset_is_preceded_by_the_new_conversations_context` (both in `docs/qa_evidence/2026-09-20-new-convo-context-chip/tests.txt`, 101 tests OK).
+- [ ] Fresh-conversation reading is ~97% left, not 99–100% (owner call noted in the plan's Risks; assumed as wanted).
