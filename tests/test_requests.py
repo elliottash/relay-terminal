@@ -174,7 +174,9 @@ class TodoUnitTests(unittest.TestCase):
         self.assertEqual([t['status'] for t in items], ['in_progress'] * 3)
         self.assertNotIn('Exactly one', todo_mod.SPEC['function']['description'])
         self.assertNotIn('exactly one todo', todo_mod.RULES)
-        self.assertIn('several may be in progress at once', todo_mod.RULES)
+        # In the tool's description since #GMCF decision 6 split "when to call it" (the prompt)
+        # from "what the fields do" (the schema); it is sent on every request either way.
+        self.assertIn('several may be in progress at once', todo_mod.SPEC['function']['description'])
 
     def test_validation(self):
         known = {'R1', 'R2'}

@@ -68,15 +68,15 @@ SPEC = {
     "type": "function",
     "function": {
         "name": "ask_user",
+        # What plan mode wants of this tool — ask before you write the plan, never ask whether the
+        # plan is good, give options only for a real branch — is `planning.PLAN_MODE_NOTE`, in the
+        # same words, and it is sent on exactly the turns it applies to (#GMCF decision 6). What is
+        # left here is what holds in build mode too, where no note is sent.
         "description": (
             "Ask the user a question and wait for the answer. For what the code cannot tell you: "
             "which direction they want, how far a change goes, a trade-off worth their opinion, "
-            "wording only they can choose. Give `options` when the decision really has a few known "
-            "branches — then a number is the whole answer — and leave them out for an open "
-            "question rather than inventing choices to fill the field. In plan mode ask before you "
-            "write the plan. Do not ask permission to use a tool, and do not ask whether your plan "
-            "is good — write it and let them edit it. The turn stops until they answer: ask "
-            "everything in one call."),
+            "wording only they can choose. Do not ask permission to use a tool. The turn stops "
+            "until they answer: ask everything in one call."),
         "parameters": {
             "type": "object",
             "properties": {

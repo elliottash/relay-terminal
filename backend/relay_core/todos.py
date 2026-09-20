@@ -34,12 +34,15 @@ MAX_LINKS = 20
 TODO_ID = re.compile(r"^T[1-9][0-9]{0,5}$")
 SUBAGENT_ID = re.compile(r"^a[1-9][0-9]{0,5}$")
 
+# The description says how the tool behaves; `RULES` says when to call it (#GMCF decision 6). The
+# two used to say both, and the half that was duplicated was paid for twice on every request: once
+# in the prompt, once in the schema. When to call it has to be read before the model decides, so it
+# stays in the prompt; what a field means is only needed once the call is being written.
 SPEC = {"type": "function", "function": {
     "name": "update_todos",
-    "description": ("Replace your todo list for this conversation (send the complete list every time). Use it when a "
-                    "message contains more than one ask or a message arrives while you work. Link each todo to the "
-                    "request ids (R<n>) it serves. Mark every todo you are working on in_progress: several may be in "
-                    "progress at once, yours and those you hand to subagents. A todo a subagent is working on (it shows a "
+    "description": ("Replace your todo list for this conversation (send the complete list every time). Mark every "
+                    "todo you are working on in_progress: several may be in progress at once, yours and those you "
+                    "hand to subagents. A todo a subagent is working on (it shows a "
                     "subagent id) keeps the status Relay gives it until that subagent ends. Mark completed only after the "
                     "work is actually done; cancelled, deferred and blocked need a note with the reason."),
     "parameters": {"type": "object", "properties": {
@@ -47,15 +50,28 @@ SPEC = {"type": "function", "function": {
             "id": {"type": "string", "description": "Existing todo id (T<n>) to keep; omit for a new todo."},
             "text": {"type": "string", "description": "The ask, quoted or closely paraphrased."},
             "status": {"type": "string", "enum": list(STATUSES)},
-            "request_ids": {"type": "array", "items": {"type": "string"}, "description": "Linked requests, e.g. [\"R3\"]. Omit to link a new todo to the current turn's message. Listing several means one piece of work serves them all: add a new id here when a later message refines an ask this todo already covers."},
+            "request_ids": {"type": "array", "items": {"type": "string"}, "description": "Linked requests, e.g. [\"R3\"]. Omit to link a new todo to the current turn's message. Listing several means one piece of work serves them all."},
             "note": {"type": "string", "description": "Reason; required for cancelled, deferred and blocked."},
-            "subagent": {"type": ["string", "null"], "description": "Read-only: the subagent working on this todo, as shown in the list. Set it by starting the subagent with agent(todo_id=...)."}},
+            "subagent": {"type": ["string", "null"], "description": "Read-only: the subagent working on this todo, as shown in the list."}},
             "required": ["text", "status"], "additionalProperties": False}}},
         "required": ["items"], "additionalProperties": False}}}
 
+# One sentence per line, as `agent.SYSTEM` is and for the same reason (2026-09-18): as one
+# nine-sentence paragraph the rules that decide whether to call the tool at all sat mid-sentence
+# beside the field mechanics. #GMCF decision 6 (2026-09-20) split them: what is left here is when
+# to call update_todos, which has to be read *before* the model decides to; how the fields behave
+# is `SPEC`'s description and the parameters' own, which travel with the tool. The sentences that
+# went are the ones the schema already stated word for word — what `request_ids` defaults to,
+# several in progress at once, completed only when done, the note a cancelled or blocked todo needs.
 RULES = """
 
-Requests and todos: Relay records every message the user sends as a request with an id (R<n>). Messages that arrive while you work are labelled with their id. When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted, linked with request_ids (todos you add without request_ids are linked to the message that started the current turn; the tool result shows the links). When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo; add a todo only for work that is genuinely new. Mark the todos you are working on in_progress (several may be in progress at once), mark each completed as soon as it is actually done, and keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason. Do not end your turn with pending todos for those requests. Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own. You can hand todos to subagents, several at once, each with agent(todo_id="T<n>"): Relay then keeps that todo's status in step with its subagent (in_progress while it runs, completed or blocked when it ends), and you do not need to finish it yourself before ending your turn. Skip the list for a single simple ask."""
+Requests and todos: Relay records every message the user sends as a request with an id (R<n>), and labels a message that arrives while you work with its id.
+When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted.
+When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo.
+Keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason, and do not end your turn with pending todos for those requests.
+Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own.
+A todo you hand to a subagent with agent(todo_id="T<n>") follows that subagent, and you do not need to finish it yourself before ending your turn.
+Skip the list for a single simple ask."""
 
 
 def validate(raw, known_request_ids, existing: list[dict], next_id: int,
