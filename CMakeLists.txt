@@ -485,6 +485,7 @@ if(RELAY_BUILD_APP)
     # IDEs see them.
     add_executable(relay src/main.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
+        src/TranscriptReplay.h
         src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/RelayMark.h
@@ -695,6 +696,11 @@ if(BUILD_TESTING)
     target_include_directories(relay-continueturn-tests PRIVATE src)   # header-only rule (#SXF1)
     target_link_libraries(relay-continueturn-tests PRIVATE ${RELAY_QT}::Test)
     add_test(NAME continueturn COMMAND relay-continueturn-tests)
+    # The transcript fallback's renderer (#0TJ9): header-only beside the pane, like the rule above.
+    add_executable(relay-transcriptreplay-tests tests/transcriptreplay_test.cpp)
+    target_include_directories(relay-transcriptreplay-tests PRIVATE src)
+    target_link_libraries(relay-transcriptreplay-tests PRIVATE ${RELAY_QT}::Test)
+    add_test(NAME transcriptreplay COMMAND relay-transcriptreplay-tests)
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
     add_test(NAME panestate COMMAND relay-panestate-tests)

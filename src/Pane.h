@@ -35,6 +35,7 @@
 #include "QueueNav.h"
 #include "QueueSubmit.h"   // when a submitted agent prompt starts its turn at once (#N8VK)
 #include "ContinueTurn.h"  // when Ctrl+Enter on an empty box continues a stopped turn (#SXF1)
+#include "TranscriptReplay.h"  // a resumed conversation with no saved text, drawn from its entries (#0TJ9)
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
@@ -988,6 +989,53 @@ public:
         m_sessionTextMark = paneTextLines(kSessionTextScan).size();
     }
     void syncSessionText() { adoptSessionText(m_sessionId, m_sessionDir, sessionTextSource(), m_guestSession); }
+
+    // ----- opening a conversation brings its terminal text back (#0TJ9) ------------------------
+    //
+    // Queue the saved text for the replay that prints it. The replay is the one the restart uses,
+    // so it goes in at the shell's next prompt and no sooner — "Resume here" replays into a pane
+    // whose shell is live, and a busy shell has to finish first. The once-only latch is released
+    // here rather than at start-up: a pane that opens one conversation after another replays each.
+    // False when there is nothing saved, which is what sends the caller to the transcript.
+    bool queueSessionTextReplay(const QString &path) {
+        const QStringList lines = relay::sessiontext::read(path);
+        if (lines.isEmpty()) return false;
+        m_restoredScrollback = lines;
+        m_restoredIsSessionText = true;
+        m_scrollbackReplayed = false;
+        QTimer::singleShot(0, this, [this] { replayRestoredScrollback(); });
+        return true;
+    }
+
+    // No saved text: every conversation from before this store existed, one whose Relay was killed
+    // before it could write, and one made on the phone, which has no terminal at all. The worker
+    // still has the transcript, so the pane asks for it and draws it as turns (14.4). Its own
+    // request id, so the sessions manager's preview handler leaves the answer alone.
+    void requestSavedTranscript(const QString &sessionId) {
+        if (sessionId.isEmpty() || !m_workerReady) return;
+        m_transcriptRequest = QStringLiteral("resume-text-") + QString::number(++m_requestId);
+        send({{"type", "conversation_get"}, {"id", m_transcriptRequest},
+              {"session_id", sessionId}, {"limit", relay::windowstate::kScrollbackMaxLines}});
+    }
+
+    // The transcript, between the same rules the saved text is replayed between, through the same
+    // inline printer a live turn writes with — so the two fallbacks look like one feature. The
+    // ink mapping lives in this body rather than in a function of its own: `Ink` is declared
+    // further down the class, and only a body is read in the complete-class context.
+    void printSavedTranscript(const QJsonArray &items) {
+        const auto rows = relay::transcriptreplay::render(items, relay::windowstate::kScrollbackMaxLines);
+        if (rows.isEmpty()) return;
+        using L = relay::transcriptreplay::Line;
+        ensureLineStart();
+        printInline(sessionTextOpenMark() + '\n', Ink::Note);
+        for (const auto &row : rows)
+            printInline(row.text + '\n',
+                        row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
+        printInline(sessionTextCloseMark() + '\n', Ink::Note);
+        closeInline();
+        status(QStringLiteral("No saved terminal text for this conversation · replayed %1 line(s) of its transcript.")
+                   .arg(rows.size()));
+    }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }
         if (m_secretMode) { m_secretEdit->setFocus(Qt::OtherFocusReason); return; }
@@ -2751,6 +2799,14 @@ public:
     // list's Shift+Enter), so the pane reports "Session loaded", not "Forked from".
     void setInitialState(const QJsonObject &state, const QString &title, bool fork = true) {
         m_initialState = state; m_forkTitle = title; m_initialIsFork = fork;
+        // "Open in new pane": the reference names the conversation, so its saved terminal text
+        // comes with it (#0TJ9). A fork's state is the messages themselves and names no session,
+        // so there is nothing to look up here — the fork's text is written when its new id lands.
+        const QString id = state.value(QStringLiteral("session_id")).toString();
+        if (id.isEmpty()) return;
+        if (!queueSessionTextReplay(relay::sessiontext::sessionPath(
+                state.value(QStringLiteral("session_dir")).toString(), id)))
+            m_transcriptPending = id;   // the worker is not up yet; asked at `session_configured`
     }
 
     void setEffort(const QString &value) {
@@ -4486,6 +4542,13 @@ private:
         m_sessionDir = event.value(QStringLiteral("session_dir")).toString();
         m_turnsCompleted = 0;
         syncSessionText();   // a reconfigure can hand the pane a different conversation (#0TJ9)
+        // A conversation opened in a new pane with no saved terminal text: the worker is up now,
+        // so its transcript can be asked for (#0TJ9).
+        if (!m_transcriptPending.isEmpty()) {
+            const QString pending = m_transcriptPending;
+            m_transcriptPending.clear();
+            requestSavedTranscript(pending);
+        }
         refreshSessionControls();
         if (!m_initialState.isEmpty()) {
             const QJsonObject state = m_initialState;
@@ -6980,6 +7043,14 @@ private:
             return true;
         }
         if (type == QStringLiteral("conversation")) {
+            // A conversation resumed with no saved terminal text, drawn from its entries (#0TJ9).
+            // Its own request id, so the sessions manager's preview never sees this answer.
+            if (!m_transcriptRequest.isEmpty()
+                && event.value(QStringLiteral("id")).toString() == m_transcriptRequest) {
+                m_transcriptRequest.clear();
+                printSavedTranscript(event.value(QStringLiteral("items")).toArray());
+                return true;
+            }
             if (event.value(QStringLiteral("id")).toString() == QStringLiteral("find-count")) {
                 if (m_findBar) m_findBar->setConversationMatches(event.value(QStringLiteral("match_count")).toInt());
                 return true;
@@ -7341,6 +7412,13 @@ public:
         }
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before opening another conversation.")); return; }
+        // The conversation's terminal text comes back with it (#0TJ9). Both happen before the
+        // resume goes out: the outgoing conversation's own text is closed off under its own id,
+        // and what is queued for the replay belongs to the one being opened.
+        const QString home = directory.isEmpty() ? m_sessionDir : directory;
+        adoptSessionText(sessionId, home, QString(), QString());
+        if (!queueSessionTextReplay(relay::sessiontext::sessionPath(home, sessionId)))
+            requestSavedTranscript(sessionId);
         if (directory.isEmpty() || directory == m_sessionDir) send({{"type", "resume"}, {"id", sessionId}});
         else send({{"type", "load_state"}, {"state", reference}});
     }
@@ -7367,11 +7445,20 @@ public:
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
         }
+        const GuestResume resume = guestResumeFrom(extra);
+        // A guest's terminal text comes back the same way a Relay conversation's does (#0TJ9).
+        // Not for a fork: it is a new conversation with an id of its own, and the parent's text
+        // belongs to the parent. The guest's transcript is the worker's fallback when nothing was
+        // saved, and it reads out of the same index (`source: claude|codex`, protocol 26.7).
+        if (!fork) {
+            adoptSessionText(QString(), QString(), source, resume.sessionId);
+            if (!queueSessionTextReplay(relay::sessiontext::guestPath(source, resume.sessionId)))
+                requestSavedTranscript(resume.sessionId);
+        }
         // Tier A (29.4): when the worker can run this guest headless, the row is resumed *on the
         // pane's own agent* — `configure` with `guest.resume`, in the session's directory — so the
         // conversation, the call lines and the chips are Relay's from the first turn.
         if (guestHarnessUsable(source)) {
-            const GuestResume resume = guestResumeFrom(extra);
             resumeGuestPreset(source, resume.sessionId, resume.fork, cwd, extra);
             return;
         }
@@ -12364,21 +12451,28 @@ private:
         if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
         if (m_inlineOpen || !shellIdleAtPrompt()) return;   // busy: the next prompt tries again
         m_scrollbackReplayed = true;
+        // Two blocks can be replayed into one pane, and they are not the same thing: the pane's
+        // own text from before the restart, and a conversation's text, which followed the
+        // conversation here and was printed in some other pane (#0TJ9). Each wears its own rule.
+        const bool conversation = m_restoredIsSessionText;
+        m_restoredIsSessionText = false;
         const QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
         QByteArray out = "\r\x1b[2K";
-        out += inkCode(Ink::Note) + scrollbackOpenMark().toUtf8() + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + (conversation ? sessionTextOpenMark() : scrollbackOpenMark()).toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
         // a hand-edited (or truncated) file cannot drive the terminal.
         for (const QString &line : lines) out += sanitize(line).toUtf8() + "\r\n";
-        out += inkCode(Ink::Note) + scrollbackCloseMark().toUtf8() + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + (conversation ? sessionTextCloseMark() : scrollbackCloseMark()).toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
         // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the
         // restored block has just scrolled the screen out from under it, so the repaint is a no-op
         // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
         // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
         sendShellInput(QStringLiteral("\n"));
-        status(QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
+        status(conversation
+                   ? QStringLiteral("Restored %1 line(s) of this conversation's saved terminal text.").arg(lines.size())
+                   : QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
     }
 
     // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).
@@ -15659,6 +15753,12 @@ private:
     // conversation and `m_sessionTextGuestId` its id; otherwise the pair of Relay values is used.
     QString m_sessionTextId, m_sessionTextDir, m_sessionTextSource, m_sessionTextGuestId;
     int m_sessionTextMark = 0;
+    // True while m_restoredScrollback holds a *conversation's* text rather than this pane's own:
+    // the two wear different rules, because only one of them was printed in this pane.
+    bool m_restoredIsSessionText = false;
+    // The `conversation_get` asked for to stand in for text that was never saved, and — for a
+    // conversation opened in a new pane — the id to ask about once the worker is up.
+    QString m_transcriptRequest, m_transcriptPending;
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     // The guest-events spool directory as pollGuestEvents() last listed it, for the same reason
