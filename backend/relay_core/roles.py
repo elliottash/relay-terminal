@@ -20,7 +20,7 @@ from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, m
                       openrouter_twin, provider_tier_model, tier_default, tier_fallbacks,
                       validate_effort, validate_tier)
 from .provider import ProviderConfig
-from . import hosted, localmodels
+from . import customproviders, hosted, localmodels
 
 
 def _hostname(base_url: str) -> str:
@@ -42,13 +42,17 @@ def _hosted(preset_id) -> bool:
 
 
 def _preset(preset_id):
-    """A built-in preset, or a saved model server on this machine (localmodels.py) in the same shape."""
+    """A built-in preset, a saved model server on this machine (localmodels.py) or a saved custom
+    provider (customproviders.py), all in the same shape."""
     if not preset_id:
         return None
     found = PRESETS.get(preset_id)
     if found is None and localmodels.is_local_id(preset_id):
         endpoint = localmodels.find(preset_id)
         found = endpoint.as_preset() if endpoint is not None else None
+    if found is None and customproviders.is_custom_id(preset_id):
+        entry = customproviders.find(preset_id)
+        found = entry.as_preset() if entry is not None else None
     return found
 
 # Protocol names. "switchboard" is stored and resolved even though the Switchboard itself is not

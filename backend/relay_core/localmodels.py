@@ -9,7 +9,8 @@ in ``$XDG_CONFIG_HOME/relay/local-models.json``, and the rest of the backend see
 and a worker with no GUI read the same registry.
 
 Ids are ``local:<slug>``. The colon is what keeps them apart: no preset id contains one, and
-``keystore._check_id`` refuses one, so a local id can never reach the keyring.
+``keystore._check_id`` refuses a ``local:`` id (``custom:`` is the one prefix it takes, for a
+custom provider's own key), so a local id can never reach the keyring.
 
 Nothing here starts a server. A probe that finds nothing answers with the command that would.
 """

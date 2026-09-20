@@ -10,7 +10,7 @@ import threading
 import urllib.parse
 from pathlib import Path
 
-from relay_core import (__version__, board_protocol, hosted, keystore, keytest, localmodels, logs,
+from relay_core import (__version__, board_protocol, customproviders, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider, openrouter_catalog
@@ -125,6 +125,9 @@ def main():
               # has_stored_key stays false and `local` is what makes the row usable.
               + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
                  for e in localmodels.catalog().values()]
+              # Custom providers (protocol 28.6): a key under the entry's own id, so
+              # has_stored_key and key_source are read like a built-in row's.
+              + customproviders.rows()
               # Guest agents on this machine (protocol 29.3): no key either, and `harness`
               # is what makes the row this pane's agent rather than a Tier B launch.
               + guest_harness_provider.preset_rows()})
@@ -137,6 +140,9 @@ def main():
     # held, and the fetch that lands after it pushes a fresh one, so the id box completes against
     # the live list without a re-ask.
     openrouter_catalog.set_listener(lambda: emit_presets())
+    # And for a custom provider's /models listing (28.6): the save answers at once, the probe
+    # lands later and pushes the row with the served models added.
+    customproviders.set_listener(lambda: emit_presets())
 
     emit({"event": "ready", "version": __version__})
     while True:
@@ -302,6 +308,11 @@ def main():
                 emit_presets(request.get("id"))
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
+            elif kind in customproviders.TYPES:
+                # A save or delete changes the preset list, so a fresh `presets` follows the answer.
+                customproviders.handle(request, emit)
+                if kind != "custom_providers":
+                    emit_presets()
             elif kind == "hosted_quota":
                 # Protocol 13.9: GET /v1/quota on a thread, so the loop never waits on the network;
                 # exactly one event follows, hosted_quota or error.

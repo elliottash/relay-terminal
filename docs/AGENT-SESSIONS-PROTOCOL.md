@@ -5029,13 +5029,51 @@ stopped — Relay never starts or stops one.
 - A local endpoint is used through the messages that already exist: `configure`, `set_model`, a
   `tiers` entry, a `roles` entry and `test_key` all accept `preset: "local:<id>"` (13.7 for the
   tiers; Local is the fourth tier). `use_stored_key` is ignored for one — there is no key, and
-  `keystore` refuses an id containing a colon, so a local id can never reach the keyring.
+  `keystore` refuses a `local:` id (`custom:` is the one prefix it takes, 28.6), so a local id can
+  never reach the keyring.
 - `test_key` on a local endpoint makes the same two-word call it makes for any provider and means
   "reachable and answering". Unlike a probe it waits out a model load.
 - The `presets` event lists saved endpoints after the built-in rows, with `local: true`, `server`,
   `group: "local"`, `has_stored_key: false`, `key_source: "local"` and `efforts: []` (an
   OpenAI-compatible server has no effort knob Relay can rely on). Built-in rows carry
   `local: false`.
+
+### 28.6 Custom providers (owner, 2026-09-20)
+
+A custom provider is Warp's shape — a name, an OpenAI-compatible base URL, an API key and one or
+more model ids — and it is then a provider like any other: a `presets` row with `custom: true`,
+`id: "custom:<slug>"` (the slug from `id`, else the name), `label` and `provider` the name
+lower-cased, `plan: "custom endpoint"`, `group: "custom"`, `base_url`, `model` the first id,
+`models` in the catalog row shape (`{id, label, tier: null, efforts, intelligence: null,
+openrouter}`, the given ids in order and then whatever the endpoint's `/models` listed the last
+time a save probed it), `model_ids` (the ids as given, for an edit form), `effort_style`, and
+`has_stored_key`/`key_source` read from the keyring like a built-in row's. `configure`,
+`set_model`, a `tiers` or `roles` entry and `test_key` take `preset: "custom:<slug>"` and resolve
+URL, model and key through the same path as a built-in id; a loopback `http://` URL is allowed
+and then no key is sent, whatever is stored. The entries live in
+`$XDG_CONFIG_HOME/relay/custom-providers.json` (`RELAY_CUSTOM_PROVIDERS` overrides), the key in
+the keyring under the entry id (`RELAY_CUSTOM_<SLUG>_API_KEY` overrides), never in the file or an
+event. Backend: `backend/relay_core/customproviders.py`; tests: `tests/test_customproviders.py`.
+
+```
+GUI    → custom_provider_save   {id, provider: {id?, name, base_url, api_key?, models: [ids], effort_style?}}
+worker → custom_provider_saved  {id, provider: <the presets row>}     then a fresh `presets`
+GUI    → custom_provider_delete {id, provider_id}
+worker → custom_provider_deleted {id, provider_id, removed, key_removed, error?}   then a fresh `presets`
+GUI    → custom_providers       {id}
+worker → custom_providers       {id, items: [<presets rows>]}
+```
+
+`api_key` is sent once, like `store_key`, and stored before the entry is written (a key the keyring
+would not take is an `error` and nothing is saved); leaving it out keeps the key already stored, so
+an edit need not re-enter it. The same slug replaces. `effort_style` is `none` (nothing sent, no
+picker — the default, since a custom endpoint has no effort knob Relay can vouch for),
+`openrouter` (`reasoning.effort`, the default for an openrouter.ai URL) or `kimi` (top-level
+`reasoning_effort`, the OpenAI shape). After `custom_provider_saved` the worker asks the endpoint
+for `/models` on its own thread and, when that listing changes the row, pushes another `presets`;
+nothing waits on it, and a remote endpoint is only asked when there is a key to ask with. An
+invalid entry — no name, no model id, an `http://` URL off loopback, a URL carrying credentials,
+an unknown `effort_style` — is an `error` with a sentence the user can act on.
 
 ## 29. Tier A: the guest as the pane's agent, through its headless harness (v3.7, 2026-09-19)
 

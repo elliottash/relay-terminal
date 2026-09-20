@@ -88,9 +88,9 @@ def model_supports_vision(model) -> bool:
 
 # Keys-modal grouping (GUI only; the backend never treats groups differently). "included" is first
 # because Relay Free is what a fresh install runs on before any key is stored.
-GROUPS = ("included", "subscription", "aggregator", "payg", "local")
+GROUPS = ("included", "subscription", "aggregator", "payg", "local", "custom")
 GROUP_LABELS = {"included": "Included", "subscription": "Subscriptions", "aggregator": "Aggregator",
-                "payg": "Pay-as-you-go", "local": "On this machine"}
+                "payg": "Pay-as-you-go", "local": "On this machine", "custom": "Custom"}
 
 
 @dataclass(frozen=True)
@@ -122,6 +122,10 @@ class Preset:
     # `local`. The worker proves an installation identity and gets a short-lived bearer token, so
     # the row is usable with nothing stored and its requests leave the machine through Relay.
     hosted: bool = False
+    # A custom provider (customproviders.py): a named OpenAI-compatible endpoint the user added,
+    # with a key under its own `custom:<slug>` id and the model ids they gave. Never set on an
+    # entry of PRESETS; CustomProvider.as_preset() is the only producer.
+    custom: bool = False
 
     @property
     def vision(self) -> bool:
@@ -137,6 +141,7 @@ class Preset:
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
                 "local": self.local, "server": self.server, "hosted": self.hosted,
+                "custom": self.custom,
                 # The per-model catalog (MODEL_CATALOG below): [] for a local endpoint, whose one
                 # served model is `model` and whose own list comes from the probe (protocol 28).
                 "models": catalog_rows(self.id)}
@@ -553,12 +558,21 @@ def _local(preset_id, base_url: str = "", model: str = "") -> Preset | None:
     return endpoint.as_preset() if endpoint is not None else None
 
 
+def _custom(preset_id, base_url: str = "") -> Preset | None:
+    """A saved custom provider (customproviders.py), by id or by its base URL. Imported late for
+    the same reason as _local."""
+    from . import customproviders
+    entry = customproviders.find(preset_id) or customproviders.match(base_url)
+    return entry.as_preset() if entry is not None else None
+
+
 def resolve_preset(preset_id, base_url: str = "", model: str = "") -> Preset | None:
     if isinstance(preset_id, str) and preset_id in PRESETS:
         return PRESETS[preset_id]
     # Built-in endpoints first; match_preset itself stays cloud-only, because the key import and the
     # keyring use the id it returns and a `local:` id is not a keyring name.
-    return match_preset(base_url or "", model or "") or _local(preset_id, base_url or "", model or "")
+    return match_preset(base_url or "", model or "") or _local(preset_id, base_url or "", model or "") \
+        or _custom(preset_id, base_url or "")
 
 
 def effort_levels(style: str) -> list[str]:

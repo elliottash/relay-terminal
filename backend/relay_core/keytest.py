@@ -14,7 +14,7 @@ import tempfile
 import threading
 import time
 
-from . import guest_harness_provider, localmodels
+from . import customproviders, guest_harness_provider, localmodels
 from .guest_harness import HarnessError, HarnessNotAvailable
 from .presets import PRESETS, apply_effort
 from .provider import ChatProvider, ProviderConfig, ProviderError, ProviderTruncated, make_provider
@@ -43,16 +43,25 @@ GUEST_PROMPT = "Reply with the single word ok."
 
 
 def _preset(preset_id: str):
-    """A built-in preset, or a saved model server on this machine in the same shape (protocol 28)."""
+    """A built-in preset, a saved model server on this machine (protocol 28) or a saved custom
+    provider (28.6), in the same shape."""
     if preset_id in PRESETS:
         return PRESETS[preset_id]
     endpoint = localmodels.find(preset_id)
-    return endpoint.as_preset() if endpoint is not None else None
+    if endpoint is not None:
+        return endpoint.as_preset()
+    entry = customproviders.find(preset_id)
+    return entry.as_preset() if entry is not None else None
+
+
+def _keyless(preset) -> bool:
+    """No key to look up: a local server, Relay Free, or a custom provider on a loopback URL."""
+    return preset.local or preset.hosted or localmodels.loopback_http(preset.base_url)
 
 
 def _provider(preset_id: str, key: str) -> ChatProvider:
     preset = _preset(preset_id)
-    if preset.local:
+    if preset.local or localmodels.loopback_http(preset.base_url):
         # No key and no effort knob. The test still means what it says on the button: this server
         # is reachable and answers. It waits out a cold model load, which a probe does not.
         fields = localmodels.provider_fields(preset_id, preset.base_url, preset.model)
@@ -233,11 +242,11 @@ def run(preset_id: str, emit, request_id=None, lookup=None, factory=_provider, *
     preset = _preset(preset_id) if isinstance(preset_id, str) else None
     if preset is None:
         raise ValueError("Unknown provider preset.")
-    keyless = preset.local or preset.hosted
+    keyless = _keyless(preset)
     key = "" if keyless else (lookup or keystore.lookup)(preset_id)
     if not key and not keyless:
         emit({"event": "key_tested", "id": request_id, "preset": preset_id, "ok": False,
-              "model": PRESETS[preset_id].model, "elapsed_ms": 0,
+              "model": preset.model, "elapsed_ms": 0,
               "error": "No key is stored for this provider."})
         return None
 

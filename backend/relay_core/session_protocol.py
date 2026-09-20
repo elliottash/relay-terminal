@@ -17,9 +17,9 @@ import uuid
 import weakref
 from urllib.parse import urlsplit
 
-from . import (alias_import, aliases, attachments, conv_index, guest_harness_provider,
-               guest_sessions, instructions, keystore, localmodels, logs, planning, suggestions,
-               titles)
+from . import (alias_import, aliases, attachments, conv_index, customproviders,
+               guest_harness_provider, guest_sessions, instructions, keystore, localmodels, logs,
+               planning, suggestions, titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -72,6 +72,8 @@ def provider_name(preset_id: str, base_url: str = "") -> str:
         return f"{PRESETS[preset_id].label} ({preset_id})"
     if localmodels.find(preset_id) is not None:
         return f"{localmodels.find(preset_id).label} ({preset_id})"
+    if customproviders.find(preset_id) is not None:
+        return f"{customproviders.find(preset_id).label} ({preset_id})"
     host = urlsplit(base_url).hostname if base_url else ""
     return host or "this provider"
 
@@ -103,6 +105,14 @@ def provider_config(request: dict) -> ProviderConfig:
             raise ValueError(f"No local endpoint {named!r} is saved. Add it with scripts/relay-local.py add, "
                              "or pick another model.")
         preset = endpoint.as_preset()
+    if preset is None and customproviders.is_custom_id(named):
+        # A custom provider (protocol 28.6): the registry supplies URL and model, the keyring the
+        # key, under the same `custom:<slug>` id.
+        entry = customproviders.find(named)
+        if entry is None:
+            raise ValueError(f"No custom provider {named!r} is saved. Add it in Options > Models, "
+                             "or pick another model.")
+        preset = entry.as_preset()
     base_url = str(request.get("base_url") or "") or (preset.base_url if preset else "")
     model = str(request.get("model") or "") or (preset.model if preset else "")
     extra = request.get("extra")
