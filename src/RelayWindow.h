@@ -6034,7 +6034,16 @@ public:
     relay::BoardWorker *helperWorker(QWidget *page, bool start) {
         if (!page) return nullptr;
         if (!start) return m_boardWorkers.value(tabIdOf(page)).data();
+        // Starting a helper builds the tab's app catalog, and the catalog's Models section asks
+        // for this same helper when no pane agent has presets yet — which at startup is always.
+        // Without this the two call each other until the stack is gone (SIGSEGV in malloc,
+        // relay-gdb.20260920-170825.log). While a tab's helper is being started, the section gets
+        // the worker as it stands (none yet) and asks again when the page is next shown.
+        const QString tab = tabIdOf(page);
+        if (m_helperStarting.contains(tab)) return m_boardWorkers.value(tab).data();
+        m_helperStarting.insert(tab);
         startBoardWorker(page);
+        m_helperStarting.remove(tab);
         return boardWorker(page);
     }
 
@@ -8869,6 +8878,7 @@ private:
     // conversation; the owner's rule is that Switchboards are per tab, so each tab gets its own
     // agent over the one shared set of board files. It ends when the tab does (forgetTab).
     QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
+    QSet<QString> m_helperStarting;   // tabs whose helper startBoardWorker() is building right now
     // /update: the one running updater (scripts/relay-update.py), its unread output and whether
     // its final line was the UPDATED marker the restart waits for. One at a time.
     QProcess *m_updateProcess = nullptr;
