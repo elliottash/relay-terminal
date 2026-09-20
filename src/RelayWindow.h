@@ -33,6 +33,7 @@
 #include "TurnTranscript.h"
 #include "AgentInternalsView.h"   // the Activity pane beside a terminal (#QT8C)
 #include "SettingsPane.h"
+#include "AppCommands.h"   // the agent drives the app: the catalog, the executor, the change log (#FEJQ, §30)
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
 #include "LocalModelsSettings.h"
@@ -378,6 +379,10 @@ public:
         auto *row = new QHBoxLayout(central); row->setContentsMargins(0, 0, 0, 0); row->setSpacing(0);
         row->addWidget(m_tabs, 1);
         setCentralWidget(central);
+        // A setting was written anywhere — this window's Options pane, another window's, a dialog,
+        // a page reset, an agent — so every worker is sent the catalog again (#FEJQ, §30.2: the
+        // block carries current values, and nothing is cached across a refresh).
+        relay::SettingsWatch::instance().listen(this, [this] { sendAppCatalog(); });
         Keymap::instance().listen(this, [this] {
             for (Pane *pane : allPanes()) pane->sendKeybindings();
             const auto conflicts = Keymap::instance().conflicts();
@@ -423,6 +428,10 @@ public:
         const QJsonObject node = relay::windowstate::tabNode(tab);
         const QString project = relay::windowstate::tabProject(tab);
         auto *page = new QWidget;
+        // The id this tab was saved with, so its helper worker finds its own conversation again
+        // (#FEJQ, §30.7). A tab saved without one gets a fresh id the first time something asks.
+        if (const QString id = relay::windowstate::tabId(tab); !id.isEmpty())
+            page->setProperty("relayTabId", id);
         auto *layout = new QVBoxLayout(page); layout->setContentsMargins(0, 0, 0, 0);
         QWidget *root = nullptr;
         try {
@@ -1286,6 +1295,108 @@ private:
         updateTitles();
     }
 
+    // ----- the agent drives the app (card #FEJQ, protocol §30) ---------------------------------
+    //
+    // One executor per window, two sources: a pane's own worker and the tab's helper worker both
+    // send `app_command` down their own pipe, and both are answered here (§30.3). The rules — the
+    // catalog's shape, what is settable, what is agent-safe, the change log and Undo — are in
+    // relay::AppCommands, which knows nothing about windows and is tested without one.
+    relay::AppCommands &appCommands() {
+        if (!m_appCommands.sections) {
+            m_appCommands.sections = [this] { return settingsSections(); };
+            m_appCommands.actions = [this] { return searchableActions(); };
+            m_appCommands.writesEnabled = [] { return agentWritesEnabled(); };
+            m_appCommands.openTarget = [this](const QJsonObject &command, QString *error) {
+                return openAppTarget(command, error);
+            };
+        }
+        return m_appCommands;
+    }
+
+    // Options › Agent, "Agents may change options and run actions" (owner decision 3, 2026-09-20):
+    // one toggle gating the helper and the pane agent together. On when Relay ships.
+    static bool agentWritesEnabled() {
+        return QSettings().value(QStringLiteral("agent/app_writes"), true).toBool();
+    }
+
+    // The tab's persistent id (§30.2 `tab`, §30.7). A tab had no identity that survived a restart
+    // — the saved layout is a list, and its position is not an identity, because a tab moved or
+    // closed renumbers its neighbours. The helper worker is keyed by this and so is its persisted
+    // conversation, so it is minted once, lazily, and saved with the tab (serializeTab / addTab).
+    //
+    // It is not shareTabId(): that one is deliberately not saved, because a share does not outlive
+    // the process. This one is written into the layout, so the prefix differs ("t…" against
+    // "tab-…") and neither can be passed where the other is meant.
+    static QString tabIdOf(QWidget *page) {
+        if (!page) return {};
+        QString id = page->property("relayTabId").toString();
+        if (id.isEmpty()) {
+            id = QLatin1Char('t') + QUuid::createUuid().toString(QUuid::Id128).left(12);
+            page->setProperty("relayTabId", id);
+        }
+        return id;
+    }
+    QString tabIdOfPane(QWidget *leaf) { return tabIdOf(pageOf(leaf)); }
+
+    // The `app` block for a worker in this tab. Rebuilt every time: it carries current values, so
+    // a setting the person changed by hand has to reach the agent about to describe it (§30.2).
+    QJsonObject appCatalogFor(QWidget *page) { return appCommands().catalog(tabIdOf(page)); }
+
+    // The catalog changed — a setting written anywhere, a key added, the Agent toggle flipped — so
+    // every worker of this window is sent the whole block again. Nothing is cached across a
+    // refresh on either side (§30.2), which is why this sends the block and not a delta.
+    void sendAppCatalog() {
+        for (Pane *pane : allPanes()) if (pane) pane->sendAppCatalog();
+        sendHelperCatalogs();   // the tab's helper worker runs the same tools (§30.7)
+    }
+
+    // The helper workers of this window, each sent its own tab's block: the helper is an agent
+    // like a pane's and has the same app tools (§30.7), so it is configured with the same catalog.
+    void sendHelperCatalogs() {
+        for (auto it = m_boardWorkers.cbegin(); it != m_boardWorkers.cend(); ++it)
+            if (relay::BoardWorker *worker = it.value().data())
+                worker->send(QJsonObject{{QStringLiteral("type"), QStringLiteral("app_catalog")},
+                                         {QStringLiteral("app"), appCommands().catalog(helperTab(worker))}});
+    }
+
+    // One `app_command`, answered on the connection it arrived on. `who` is for the change log and
+    // the notification only: the policy is `writes_enabled`, `settable` and `agent_safe`, and it is
+    // the same policy whichever agent asked (§30.8).
+    QJsonObject executeAppCommand(const QJsonObject &command, const QString &who) {
+        return appCommands().execute(command, who);
+    }
+
+    // `open {target, section?, row?, query?, card?}` (§30.3). It opens in *this* window, the one
+    // that owns the worker the command came out of — there is no routing field on the wire.
+    bool openAppTarget(const QJsonObject &command, QString *error) {
+        const auto fail = [error](const QString &word) { if (error) *error = word; return false; };
+        const QString target = command.value(QStringLiteral("target")).toString();
+        const QString section = command.value(QStringLiteral("section")).toString();
+        const QString row = command.value(QStringLiteral("row")).toString();
+        const QString query = command.value(QStringLiteral("query")).toString();
+        const QString card = command.value(QStringLiteral("card")).toString();
+        if (target == QStringLiteral("options") || target == QStringLiteral("actions")) {
+            const bool actions = target == QStringLiteral("actions");
+            const auto mode = actions ? relay::SettingsPane::Mode::Actions : relay::SettingsPane::Mode::Options;
+            openSettingsPane(mode, actions ? QString() : section, query);
+            // Zooming to a row is revealOption()'s job, and it switches to Options mode itself, so
+            // "open Actions at this option" lands on the control rather than on a search result.
+            if (!row.isEmpty()) {
+                ToolPane *tool = settingsPaneIn(m_tabs->currentWidget(), mode);
+                if (!tool || !tool->settings()) return fail(QStringLiteral("failed"));
+                tool->settings()->revealOption(section, row);
+            }
+            return true;
+        }
+        if (target == QStringLiteral("sessions")) { openSessions(QString(), query); return true; }
+        if (target == QStringLiteral("switchboard")) {
+            if (!card.isEmpty()) { openBoardCard(card); return true; }
+            runAction(QStringLiteral("board.open"));
+            return true;
+        }
+        return fail(QStringLiteral("unknown_target"));
+    }
+
     // Two keys, a pane each: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear
     // are Options (what persists). Each opens its own pane, or focuses it if this tab already has
     // one; pressed while that pane has the focus, it closes it. Neither key touches the other's
@@ -1392,6 +1503,11 @@ private:
         return m_localModels;
     }
     relay::LocalModelsSettings m_localModels;
+    // The agent's side of Options and Actions (#FEJQ, §30): the catalog, the executor for one
+    // `app_command`, and the change log that makes every write visible and undoable. One per
+    // window, wired lazily by appCommands(); a pane's worker and the tab's helper both go
+    // through it, so Undo works whichever of them made the change.
+    relay::AppCommands m_appCommands;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -1746,6 +1862,7 @@ private:
                 if (hosted && preset.value(QStringLiteral("available")).toBool()) {
                     row.kind = relay::SettingRow::Buttons;
                     row.buttonTexts = QStringList{QStringLiteral("test")};
+                    row.agentSafeButtons = QList<int>{0};   // testing a key is reversible (#FEJQ, decision 2)
                     row.onButton = [this, id](int) { if (m_active) m_active->testKey(id); };
                 } else {
                     row.kind = relay::SettingRow::Info;
@@ -1753,7 +1870,12 @@ private:
                 }
             } else {
                 row.kind = relay::SettingRow::Buttons;
+                // The row stands for a key the keyring holds, so it is marked as such (#FEJQ,
+                // §30.2): the agent may say where it is and test it, and may neither read it nor
+                // press the buttons that add, replace or remove it (owner decisions 1 and 2).
+                row.secret = true;
                 row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
+                row.agentSafeButtons = QList<int>{1};
                 if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
                 row.onButton = [this, id, label](int index) {
                     if (!m_active) return;
@@ -1888,6 +2010,7 @@ private:
                                 : QString();
             row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
             row.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
+            row.agentSafeButtons = QList<int>{0, 1};   // reordering models, and the other arrow undoes it (#FEJQ)
             row.onButton = [this, catalog, key = entry.key, curated](int index) {
                 relay::models::curation::move(key, index == 0 ? -1 : 1, catalog);
                 applyMainDefault(catalog);
@@ -2312,6 +2435,21 @@ private:
                                               QStringLiteral("<project>/.relay/plans"));
             plans.browse = true;
             agent.rows << plans;
+        }
+        {
+            // Owner decision 3 (card #FEJQ, 2026-09-20): one toggle gates the helper agent and
+            // every pane agent together, and it is on when Relay ships — "the main pane agent gets
+            // the write tools on by default". It is not an approval prompt (§30.8): the safety net
+            // is that every change announces itself and is undoable in one click.
+            relay::SettingRow writes = toggleRow(QStringLiteral("agent/app_writes"),
+                                                 QStringLiteral("Agents may change options and run actions"),
+                                                 QStringLiteral("An agent can set an option on this page, run a "
+                                                                "reversible action and open a pane at a row. "
+                                                                "Every change says so and can be undone; API keys "
+                                                                "are never settable."),
+                                                 true, [this](bool) { sendAppCatalog(); });
+            writes.aliases = QStringLiteral("agent control app tools options actions writes permission");
+            agent.rows << writes;
         }
         agent.rows << headingRow(QStringLiteral("Switchboard"));
         {
@@ -4776,24 +4914,36 @@ public:
         for (Pane *pane : panesIn(page)) pane->setBoard(attached ? board : QJsonObject());
     }
 
-    // One worker per board root per window: a window showing two projects' boards runs two, each
-    // configured for its own tree, and each event reaches only the views of that tree. A single
-    // shared worker was re-pointed at whichever board was opened last and broadcast its cards to
-    // every Switchboard in the window, so the first project's view silently became the second's.
-    relay::BoardWorker *boardWorker(const QString &workspace) {
-        if (workspace.isEmpty()) return nullptr;
-        if (relay::BoardWorker *existing = m_boardWorkers.value(workspace).data()) return existing;
+    // ----- the helper worker: one per tab (card #FEJQ, protocol §30.7) --------------------------
+    //
+    // It was one worker per board root per window until 2026-09-20. That was already right about
+    // the thing it was fixing — a single shared worker was re-pointed at whichever board was
+    // opened last and broadcast its cards to every Switchboard in the window — but the owner's
+    // rule is stronger: **Switchboards are per tab**, so the same project open in two tabs gets
+    // two helpers with two conversations over one set of board files. Keyed by workspace, those
+    // two tabs shared one worker and one conversation, and an answer meant for one redrew both.
+    //
+    // It is also no longer only the board's. The helper in Options, Actions and Sessions is this
+    // same worker (§30.7), so it is the *tab's* agent: it lives as long as the tab and is started
+    // by the first thing that asks it something, whether that is a Switchboard opening or a
+    // question typed into the Options panel.
+    relay::BoardWorker *boardWorker(QWidget *page) {
+        if (!page) return nullptr;
+        const QString tab = tabIdOf(page);
+        if (relay::BoardWorker *existing = m_boardWorkers.value(tab).data()) return existing;
         auto *worker = new relay::BoardWorker(
             QStandardPaths::findExecutable(QStringLiteral("python3")), dataRoot(), this);
-        m_boardWorkers.insert(workspace, worker);
+        m_boardWorkers.insert(tab, worker);
         QPointer<RelayWindow> guard(this);
-        worker->onEvent = [guard, workspace](const QJsonObject &event) {
+        // Its events reach the views of its own tab and no others. A second tab on the same
+        // project has its own worker and its own conversation, and neither redraws the other.
+        worker->onEvent = [guard, tab](const QJsonObject &event) {
             if (!guard) return;
-            for (int i = 0; i < guard->m_tabs->count(); ++i)
-                for (QWidget *leaf : leavesIn(guard->m_tabs->widget(i)))
-                    if (auto *tool = dynamic_cast<ToolPane *>(leaf);
-                        tool && tool->board() && tool->board()->workspace() == workspace)
-                        tool->board()->handleEvent(event);
+            QWidget *page = guard->pageOfTabId(tab);
+            if (!page) return;
+            for (QWidget *leaf : leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
+                    tool->board()->handleEvent(event);
         };
         worker->onStatus = [guard](const QString &text) {
             if (guard) guard->statusBar()->showMessage(text, 9000);
@@ -4801,17 +4951,42 @@ public:
         return worker;
     }
 
-    // The last Switchboard of a board root has gone: its worker has nobody left to talk to, so it
-    // is shut down rather than left running for the life of the window.
-    void releaseBoardWorker(const QString &workspace, QObject *closing = nullptr) {
+    // The helper for this tab, started if it is not running yet. This is what a panel calls at the
+    // **first ask** (owner decision 5: not when the tab opens), so a tab nobody asks anything
+    // never pays for a worker; `start` false asks only whether there is one already.
+    relay::BoardWorker *helperWorker(QWidget *page, bool start) {
+        if (!page) return nullptr;
+        if (!start) return m_boardWorkers.value(tabIdOf(page)).data();
+        startBoardWorker(page);
+        return boardWorker(page);
+    }
+
+    // The tab a page is, by its persistent id. The map is keyed by that, so this is how an event
+    // or a catalog finds its way back to the tab it belongs to.
+    QWidget *pageOfTabId(const QString &tab) const {
+        if (tab.isEmpty()) return nullptr;
         for (int i = 0; i < m_tabs->count(); ++i)
-            for (QWidget *leaf : leavesIn(m_tabs->widget(i))) {
-                if (static_cast<QObject *>(leaf) == closing) continue;
-                if (auto *tool = dynamic_cast<ToolPane *>(leaf);
-                    tool && tool->board() && tool->board()->workspace() == workspace)
-                    return;
-            }
-        if (relay::BoardWorker *worker = m_boardWorkers.take(workspace).data()) {
+            if (QWidget *page = m_tabs->widget(i); page && page->property("relayTabId").toString() == tab)
+                return page;
+        return nullptr;
+    }
+
+    // The tab a helper worker belongs to: the map's own key.
+    QString helperTab(relay::BoardWorker *worker) const {
+        for (auto it = m_boardWorkers.cbegin(); it != m_boardWorkers.cend(); ++it)
+            if (it.value().data() == worker) return it.key();
+        return {};
+    }
+
+    // The tab has gone, so its helper has nobody left to talk to (§30.7: "closing the tab stops
+    // its worker"). It is no longer the last Switchboard closing that ends it: the helper serves
+    // the tab's Options, Actions and Sessions panes too, and a Switchboard put away is not a
+    // conversation abandoned.
+    void releaseBoardWorker(QWidget *page) {
+        if (!page) return;
+        const QString tab = page->property("relayTabId").toString();
+        if (tab.isEmpty()) return;                       // nothing ever asked: no worker to stop
+        if (relay::BoardWorker *worker = m_boardWorkers.take(tab).data()) {
             worker->onEvent = nullptr;
             worker->onStatus = nullptr;
             worker->stop();
@@ -4819,16 +4994,10 @@ public:
         }
     }
 
-    // Every Switchboard worker, told to shut down the way one is when its last view closes. The
-    // single per-window worker was never stopped at all: it was a child of the window, so its
+    // Every helper worker of this window, told to shut down the way one is when its tab closes.
+    // The single per-window worker was never stopped at all: it was a child of the window, so its
     // QProcess was killed by the destructor instead of being asked to exit (closeEvent).
-    //
-    // The per-pane hooks go first: a board pane destroyed with the window would otherwise call
-    // releaseBoardWorker() from QWidget's destructor, by which time this window's own members are
-    // gone. After this the window has no Switchboard state left to release.
     void stopBoardWorkers() {
-        for (const QMetaObject::Connection &hook : std::as_const(m_boardWorkerHooks)) disconnect(hook);
-        m_boardWorkerHooks.clear();
         const QList<QPointer<relay::BoardWorker>> workers = m_boardWorkers.values();
         m_boardWorkers.clear();
         for (const QPointer<relay::BoardWorker> &worker : workers)
@@ -4853,7 +5022,13 @@ public:
     // 2026-09-18, "ask the agent didnt work. it said provider HTTP 401"). A named preset therefore
     // travels alone and the worker fills in that preset's own base URL, model and extra
     // (protocol 1). Only a custom endpoint, which has no preset to resolve, still carries them.
-    void startBoardWorker(const QString &workspace) {
+    void startBoardWorker(QWidget *page) {
+        if (!page) return;
+        // The tab's own project, so two tabs on one project run two helpers over one set of board
+        // files, and a tab attached to nothing gets a helper with no board at all — the app tools
+        // and nothing else (§30.7). `workspace` empty is exactly that: the worker is configured
+        // with no board root, and the backend attaches no `board_*` tools to it.
+        const QString workspace = boardWorkspaceOfTab(page);
         QSettings settings;
         const QString preset = settings.value(QStringLiteral("provider/preset")).toString();
         const bool named = !preset.isEmpty() && preset != QStringLiteral("custom");
@@ -4879,15 +5054,36 @@ public:
         // a turn like any other, and its agent is built from this one's provider and deadlines.
         const QJsonObject limits = Pane::turnOptions();
         for (auto it = limits.begin(); it != limits.end(); ++it) configure.insert(it.key(), it.value());
-        // Only this board root's worker: another project's board in the same window keeps its own.
-        if (relay::BoardWorker *worker = boardWorker(workspace)) worker->start(configure);
+        // Which tab's helper this is (§30.2 `tab`, §30.7). It rides twice on purpose: `app.tab` is
+        // the canonical field and reaches every agent, pane and helper alike, while the top-level
+        // `tab` is what the board side keys its persisted conversation by without reaching into
+        // the app block — the conversation is per (project, tab), and the project is `workspace`.
+        configure.insert(QStringLiteral("tab"), tabIdOf(page));
+        configure.insert(QStringLiteral("app"), appCatalogFor(page));
+        // Only this tab's helper: another tab, even on the same project, keeps its own.
+        if (relay::BoardWorker *worker = boardWorker(page)) worker->start(configure);
     }
 
-    // A setting the Switchboard workers carry changed: re-send `configure` to every live one.
+    // The board a tab's helper works on: the tab's attached project. Empty for an unattached tab,
+    // and that is what gives it a board-less helper — the app tools and no `board_*` at all
+    // (§30.7). A project with no board yet is still its project; the worker is told the state in
+    // the `board` block and offers `board_create_card` alone (19.12), and nothing here creates a
+    // folder.
+    QString boardWorkspaceOfTab(QWidget *page) const {
+        if (const QString project = tabProject(page); !project.isEmpty()) return project;
+        // A Switchboard opened into a tab that was never attached — a `#card` link followed into a
+        // window that had no board — still works on the root its view was built for.
+        if (page) for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
+                return tool->board()->workspace();
+        return {};
+    }
+
+    // A setting the helper workers carry changed: re-send `configure` to every live one.
     // `BoardWorker::start` on a running process is exactly that (and a no-op when nothing moved).
     void reconfigureBoardWorkers() {
-        for (const QString &workspace : m_boardWorkers.keys())
-            if (m_boardWorkers.value(workspace)) startBoardWorker(workspace);
+        for (const QString &tab : m_boardWorkers.keys())
+            if (m_boardWorkers.value(tab)) startBoardWorker(pageOfTabId(tab));
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
@@ -4905,8 +5101,10 @@ public:
         QPointer<ToolPane> guard(tool);
         // This view's own board root, so a second project's Switchboard in the same window writes
         // through its own worker and into its own board folder.
-        view->onSend = [this, workspace](const QJsonObject &message) {
-            if (relay::BoardWorker *worker = boardWorker(workspace)) worker->send(message);
+        view->onSend = [guard](const QJsonObject &message) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            if (relay::BoardWorker *worker = w->helperWorker(w->pageOf(guard), true)) worker->send(message);
         };
         // The Switchboard agent's model box (#BRD3): a pick writes the persisted `switchboard`
         // role — the same keys the roles dialog's Advanced row writes, through the same helpers
@@ -4926,11 +5124,9 @@ public:
             else return;
             w->reconfigureBoardWorkers();
         };
-        // The last Switchboard of this root to close takes its worker with it. The connection is
-        // kept so stopBoardWorkers() can drop it before the window tears its own panes down.
-        m_boardWorkerHooks << connect(tool, &QObject::destroyed, this, [this, workspace](QObject *gone) {
-            releaseBoardWorker(workspace, gone);
-        });
+        // A Switchboard put away no longer stops the worker: it is the tab's helper, and the tab's
+        // Options, Actions and Sessions panes go on asking it (§30.7). Closing the tab is what
+        // ends it — requestCloseTab() → forgetTab() → releaseBoardWorker(page).
         view->onStatus = [guard](const QString &text) {
             if (auto *w = windowOf(guard); w && !text.isEmpty()) w->statusBar()->showMessage(text, 9000);
         };
@@ -5021,8 +5217,13 @@ public:
             if (!w || keys.isEmpty()) return;
             w->hint(QStringLiteral("board.") + id, relay::ShortcutHints::nextTime(keys));
         };
-        startBoardWorker(workspace);
-        if (relay::BoardWorker *worker = boardWorker(workspace)) worker->open();
+        // The board is asked for as soon as the pane is in a tab: the worker is the tab's, and the
+        // pane is not in one yet while this runs.
+        QTimer::singleShot(0, this, [this, guard] {
+            QWidget *page = guard ? pageOf(guard) : nullptr;
+            if (!page) return;
+            if (relay::BoardWorker *worker = helperWorker(page, true)) worker->open();
+        });
         return tool;
     }
 
@@ -5237,6 +5438,18 @@ private:
         pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
         pane->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
+        // The agent drives the app (#FEJQ, §30): the catalog this pane's worker is configured with,
+        // and one `app_command` out of it, executed in the window the pane is in.
+        pane->onAppCatalog = [guard]() -> QJsonObject {
+            auto *w = windowOf(guard);
+            return w ? w->appCatalogFor(w->pageOf(guard)) : QJsonObject{};
+        };
+        pane->onAppCommand = [guard](const QJsonObject &command) -> QJsonObject {
+            auto *w = windowOf(guard);
+            // `who` is the pane's session token: the change log says which agent did it, and the
+            // notification reads the same either way.
+            return w ? w->executeAppCommand(command, guard->sessionToken()) : QJsonObject{};
+        };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
             auto *w = windowOf(guard);
@@ -5501,10 +5714,17 @@ private:
         // layout nobody themed is what it always was.
         const QString theme = perTabThemes() ? tabThemeOf(page) : QString();
         const bool ownTheme = !theme.isEmpty() && theme != relay::theme::startupThemeId();
-        if (node.isEmpty() || (project.isEmpty() && !ownTheme)) return node;
+        // The tab's persistent id (#FEJQ, §30.7) rides in the same wrapper, and only when the tab
+        // has one: it is minted at the first thing that needs it — a helper worker, or an `app`
+        // block going to a pane agent — so a layout of tabs nobody has asked anything is exactly
+        // the shape it always was. Without it a restart would hand the tab's helper somebody
+        // else's conversation, or start it a new one every time.
+        const QString id = page ? page->property("relayTabId").toString() : QString();
+        if (node.isEmpty() || (project.isEmpty() && !ownTheme && id.isEmpty())) return node;
         QJsonObject tab{{QStringLiteral("node"), node}};
         if (!project.isEmpty()) tab.insert(QStringLiteral("project"), project);
         if (ownTheme) tab.insert(QStringLiteral("theme"), theme);
+        if (!id.isEmpty()) tab.insert(QStringLiteral("tab_id"), id);
         return tab;
     }
 
@@ -5645,6 +5865,7 @@ private:
     void forgetTab(QWidget *page) {
         m_tabNames.remove(page);
         m_tabProject.remove(page);   // the tab is going: its project goes with it (#JN7X)
+        releaseBoardWorker(page);    // and its helper agent with it (#FEJQ, §30.7)
     }
 
     // ---- "Share whole tab" (owner, 2026-09-18) ----------------------------------------------------
@@ -6267,6 +6488,13 @@ private:
                 hint(QStringLiteral("notifications.jump.mouse"),
                      relay::ShortcutHints::nextTime(
                          Keymap::instance().shortcutText(QStringLiteral("notifications.jump"))));
+            };
+            // "Agent changed X: before → after · Undo" (#FEJQ, §30.6). The window owns the change
+            // log, so the way back works with no agent in the loop; a change another window made
+            // is not this window's to revert, and undoFromNotification() says so by doing nothing.
+            m_notifications->onAction = [this](const QString &, const QString &actionId) {
+                if (appCommands().undoFromNotification(actionId)) return;
+                notice(QStringLiteral("That change is no longer one this window can undo."), 6000);
             };
         }
         if (m_notifications->isVisible()) { m_notifications->hide(); return; }
@@ -7435,13 +7663,13 @@ private:
     }
 
     WindowManager *m_manager;
-    // Switchboard: one worker per board root in this window, keyed by that root and started with
-    // the first Switchboard opened on it (protocol 17). The Switchboard is per project, so a
-    // window holding two projects' boards runs a worker for each; one shared worker was
-    // re-configured by whichever board opened last and fed its cards to both views.
+    // The helper agents of this window: one per tab, keyed by the tab's persistent id and started
+    // by the first thing that asks it something — a Switchboard opening, or a question typed into
+    // Options, Actions or Sessions (card #FEJQ, protocol §30.7, owner 2026-09-20). It was keyed by
+    // board root until then, which gave the same project open in two tabs one worker and one
+    // conversation; the owner's rule is that Switchboards are per tab, so each tab gets its own
+    // agent over the one shared set of board files. It ends when the tab does (forgetTab).
     QMap<QString, QPointer<relay::BoardWorker>> m_boardWorkers;
-    // One per Switchboard pane: "this pane has gone, release its worker if it was the last".
-    QList<QMetaObject::Connection> m_boardWorkerHooks;
     // /update: the one running updater (scripts/relay-update.py), its unread output and whether
     // its final line was the UPDATED marker the restart waits for. One at a time.
     QProcess *m_updateProcess = nullptr;

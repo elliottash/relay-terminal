@@ -171,7 +171,6 @@ private Q_SLOTS:
         app.sections = [this] { return catalog(&state); };
         app.actions = [this] { return actions(&state); };
         app.writesEnabled = [this] { return writes; };
-        app.tabId = [] { return QStringLiteral("tab-7"); };
         app.openTarget = [this](const QJsonObject &command, QString *error) {
             const QString target = command.value(QStringLiteral("target")).toString();
             if (target != QStringLiteral("options") && target != QStringLiteral("sessions")) {
@@ -188,7 +187,7 @@ private Q_SLOTS:
     // ----- the catalog (§30.2) ------------------------------------------------------------------
 
     void theCatalogCarriesTheTabTheToggleAndEveryRow() {
-        const QJsonObject block = app.catalog();
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
         QCOMPARE(block.value(QStringLiteral("tab")).toString(), QStringLiteral("tab-7"));
         QVERIFY(block.value(QStringLiteral("writes_enabled")).toBool());
 
@@ -210,16 +209,16 @@ private Q_SLOTS:
     }
 
     void aSecretRowIsListedWithoutItsValueAndIsNotSettable() {
-        const QJsonObject key = rowOf(app.catalog(), QStringLiteral("options"), QStringLiteral("provider:acme/key"));
+        const QJsonObject key = rowOf(app.catalog(QStringLiteral("tab-7")), QStringLiteral("options"), QStringLiteral("provider:acme/key"));
         QVERIFY(!key.isEmpty());                                    // it is listed: the agent can say where it is
         QVERIFY(key.value(QStringLiteral("secret")).toBool());
         QVERIFY(!key.value(QStringLiteral("settable")).toBool());
         QVERIFY(!key.contains(QStringLiteral("value")));            // and the key itself never crosses
-        QVERIFY(!QJsonDocument(app.catalog()).toJson().contains("sk-do-not-leak"));
+        QVERIFY(!QJsonDocument(app.catalog(QStringLiteral("tab-7"))).toJson().contains("sk-do-not-leak"));
     }
 
     void buttonRowsAreListedAsActionsOneMarkedSafeAndOneNot() {
-        const QJsonObject block = app.catalog();
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
         const QJsonObject buttons = rowOf(block, QStringLiteral("options"), QStringLiteral("provider:acme"));
         QCOMPARE(buttons.value(QStringLiteral("kind")).toString(), QStringLiteral("buttons"));
         QVERIFY(!buttons.value(QStringLiteral("settable")).toBool());
@@ -231,14 +230,14 @@ private Q_SLOTS:
     }
 
     void agentSafeIsOptInPerAction() {
-        const QJsonObject block = app.catalog();
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("app.settings")).value(QStringLiteral("agent_safe")).toBool());
         QVERIFY(!rowOf(block, QStringLiteral("actions"), QStringLiteral("windows.fresh")).value(QStringLiteral("agent_safe")).toBool());
     }
 
     void theToggleRidesOnTheCatalog() {
         writes = false;
-        QVERIFY(!app.catalog().value(QStringLiteral("writes_enabled")).toBool());
+        QVERIFY(!app.catalog(QStringLiteral("tab-7")).value(QStringLiteral("writes_enabled")).toBool());
     }
 
     // ----- set_option (§30.3) -------------------------------------------------------------------

@@ -109,10 +109,10 @@ QString target(const QJsonObject &command, const char *first, const char *second
 
 // ----- the catalog (§30.2) ------------------------------------------------------------------------
 
-QJsonObject AppCommands::catalog() const {
+QJsonObject AppCommands::catalog(const QString &tab) const {
     using namespace appcommands;
     QJsonObject app;
-    app.insert(QStringLiteral("tab"), tabId ? tabId() : QString());
+    app.insert(QStringLiteral("tab"), tab);
     app.insert(QStringLiteral("writes_enabled"), !writesEnabled || writesEnabled());
 
     QJsonArray options, actionRows;
@@ -178,7 +178,11 @@ QJsonObject AppCommands::catalog() const {
                                       {QStringLiteral("section"), item.section},
                                       {QStringLiteral("label"), item.label},
                                       {QStringLiteral("detail"), item.detail},
-                                      {QStringLiteral("agent_safe"), item.agentSafe}});
+                                      // The table is the policy and the field is the override, so a
+                                      // submenu's children — built fresh each time the menu is read
+                                      // — need no marking of their own.
+                                      {QStringLiteral("agent_safe"),
+                                       item.agentSafe || actionIsAgentSafe(item.key)}});
     };
     for (const ActionItem &item : actions ? actions() : QList<ActionItem>()) {
         appendAction(item);
@@ -239,7 +243,7 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
     const auto match = [&](const ActionItem &candidate) {
         if (candidate.key != key || !candidate.run) return false;
         if (item) *item = candidate;
-        if (agentSafe) *agentSafe = candidate.agentSafe;
+        if (agentSafe) *agentSafe = candidate.agentSafe || appcommands::actionIsAgentSafe(candidate.key);
         return true;
     };
     for (const ActionItem &candidate : actions()) {

@@ -146,6 +146,10 @@ QString tabTheme(const QJsonObject &tab) {
     return tab.value(kNode).isObject() ? tab.value(QStringLiteral("theme")).toString() : QString();
 }
 
+QString tabId(const QJsonObject &tab) {
+    return tab.value(kNode).isObject() ? tab.value(QStringLiteral("tab_id")).toString() : QString();
+}
+
 bool isUsableNode(const QJsonObject &node, int depth) {
     if (depth > kMaxDepth || node.isEmpty()) return false;
     // A saved *tab* may be the {"project", "node"} wrapper (#JN7X): judge what is inside it. Only

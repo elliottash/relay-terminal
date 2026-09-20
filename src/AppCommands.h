@@ -88,15 +88,15 @@ public:
     // the §30.3 error words in *error when it cannot. Not gated by `writes_enabled`: opening a
     // pane changes nothing.
     std::function<bool(const QJsonObject &command, QString *error)> openTarget;
-    // The tab whose id rides on the catalog (§30.2 `tab`), so a pane agent and the tab's helper
-    // agree about which Options pane "open Options" means.
-    std::function<QString()> tabId;
-
     // ----- the catalog (§30.2) ------------------------------------------------------------------
     // The whole `app` block, for `configure` and for an `app_catalog` refresh. It is rebuilt from
     // the live catalogs every time: the block carries current values, so a setting the person
     // changed by hand has to reach the agent that is about to describe it.
-    QJsonObject catalog() const;
+    //
+    // `tab` is the persistent id of the tab this block is going to (§30.2). It is an argument
+    // rather than a member because one window's workers sit in different tabs and one AppCommands
+    // serves them all: the executor is the window's, the tab is the connection's.
+    QJsonObject catalog(const QString &tab) const;
 
     // ----- executing a command (§30.3) ----------------------------------------------------------
     // Takes an `app_command` and answers the `app_command_result` to send back down the same pipe.

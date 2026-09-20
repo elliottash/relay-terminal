@@ -89,6 +89,12 @@ QString tabProject(const QJsonObject &tab);
 // It rides in the same wrapper — {"node", "theme"[, "project"]} — and only when it differs from the
 // default, so a layout with no tab themes is byte-for-byte what it was. Empty for the bare shape.
 QString tabTheme(const QJsonObject &tab);
+// The tab's persistent id (card #FEJQ, protocol §30.7): what its helper worker and that worker's
+// persisted conversation are keyed by, so a restart brings each tab's helper back with its own
+// history rather than its neighbour's. It rides in the same wrapper as `project` and `theme`, and
+// only from the first thing that needs one — a tab nobody has asked anything still saves bare.
+// Empty for the bare shape, and for a layout written before #FEJQ; RelayWindow mints a new one.
+QString tabId(const QJsonObject &tab);
 
 // A pane tree that can be rebuilt: known node kinds only, non-empty splits, bounded depth. A tab
 // in the wrapper shape above is judged by the node inside it.

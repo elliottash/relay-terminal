@@ -629,6 +629,14 @@ public:
     std::function<void(const QString &code)> onJoinShared;   // /join CODE, /connect CODE
     std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
+    // The agent drives the app (card #FEJQ, protocol §30). Two hooks, both the window's:
+    //  * the `app` block that rides on every `configure` and on an `app_catalog` refresh — the
+    //    options and actions catalogs, this tab's id and the Options › Agent toggle (§30.2);
+    //  * one `app_command` out of this pane's worker, executed by the window that owns the pane
+    //    and answered with the `app_command_result` this pane sends straight back down the same
+    //    pipe (§30.3: the command travels the worker's own pipe, so there is no routing field).
+    std::function<QJsonObject()> onAppCatalog;
+    std::function<QJsonObject(const QJsonObject &command)> onAppCommand;
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     std::function<void()> onOpenInternals;   // the Activity pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
@@ -2312,6 +2320,13 @@ public:
     // (#S5SH) start their fresh pane with it.
     void queueCommand(const QString &command) { submitTerminal(command, false); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
+    // The options or actions catalog changed — a setting written anywhere, a key added, the
+    // Options › Agent toggle flipped — so the whole block goes again (#FEJQ, §30.2). It mirrors
+    // sendKeybindings() exactly: the same reason (the catalog carries current values), the same
+    // shape, and nothing is cached across a refresh on either side.
+    void sendAppCatalog() {
+        if (m_configured && onAppCatalog) send(QJsonObject{{"type", "app_catalog"}, {"app", onAppCatalog()}});
+    }
 
     // "Navigate here" in the explorer's right-click menu: change this pane's shell into `path`.
     // A quoted cd is run like any other Relay command, so the shell (and its prompt) follow.
@@ -4154,6 +4169,10 @@ private:
         // with *no* board block makes the worker walk up from the workspace instead, and the
         // workspace is the launch directory, which is how one project's board reached every pane.
         if (onBoardSettings) request.insert(QStringLiteral("board"), onBoardSettings());
+        // What this agent may do to Relay itself (#FEJQ, §30.2). It goes through the same funnel
+        // as the board block and for the same reason: a `configure` that leaves without it makes
+        // an agent with no app tools at all, which is a silent loss of half the feature.
+        if (onAppCatalog) request.insert(QStringLiteral("app"), onAppCatalog());
         return request;
     }
 
@@ -9363,6 +9382,16 @@ private:
             send({{"type", "presets"}});
         } else if (type == QStringLiteral("transcribed")) {
             onTranscribed(event);
+        } else if (type == QStringLiteral("app_command")) {
+            // The window does it and answers; the answer goes back down this pane's own pipe
+            // (#FEJQ, §30.3). A pane whose window has gone still answers, so the worker's tool
+            // call ends in an error rather than in the 20-second `no_reply` deadline.
+            QJsonObject result = onAppCommand ? onAppCommand(event) : QJsonObject{};
+            if (result.isEmpty())
+                result = QJsonObject{{"type", "app_command_result"}, {"id", event.value(QStringLiteral("id")).toString()},
+                                     {"ok", false}, {"error", QStringLiteral("failed")},
+                                     {"message", QStringLiteral("This pane has no window to act in.")}};
+            send(result);
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
