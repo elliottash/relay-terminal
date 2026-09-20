@@ -44,11 +44,13 @@ QString NotificationCenter::postWithAction(const QString &title, const QString &
 }
 
 void NotificationCenter::amend(const QString &id, const QString &title, const QString &body,
-                               const QString &actionLabel, const QString &actionId) {
+                               const QString &actionLabel, const QString &actionId,
+                               const QString &kind) {
     for (Notification &note : m_entries) {
         if (note.id != id) continue;
         if (!title.trimmed().isEmpty()) note.title = title.trimmed();
         if (!body.trimmed().isEmpty()) note.body = body.trimmed();
+        if (!kind.trimmed().isEmpty()) note.kind = kind.trimmed();
         note.actionLabel = actionLabel;
         note.actionId = actionId;
         Q_EMIT changed();

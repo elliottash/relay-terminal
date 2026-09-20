@@ -5507,6 +5507,21 @@ public:
         updateTitles();
     }
 
+    // A signal thread's own history (#AQ6X phase 3), from its notification's button or from the
+    // chip on the signal it claimed. It is a subagent thread of the board worker, so it opens in
+    // the ⓘ view exactly as one of the pane agent's own threads does — `openInfoPane` with the
+    // thread id and its owner session, which is what `SessionManager::onOpenThread` passes too.
+    // The active pane hosts it: a thread is not a pane, so there is no pane of its own to put it
+    // beside, and the one the user is looking at is the one they came from.
+    void openSignalThread(const QString &threadId, const QString &ownerSession) {
+        if (threadId.isEmpty()) return;
+        if (!m_active) {
+            notice(QStringLiteral("No pane to show the thread in."), 4000);
+            return;
+        }
+        openInfoPane(m_active, QString(), QString(), threadId, ownerSession);
+    }
+
     // ----- the first-launch approvals pane (card #K2FV, src/ApprovalsPane.h) --------------------
     // One screen beside a pane, whenever a configure lands in an installation whose choice is
     // unanswered: allow everything — the recommendation — or the cautious checklist. A pane,
@@ -6493,6 +6508,15 @@ public:
         view->paneExists = [guard](const QString &token) {
             auto *w = windowOf(guard);
             return w && !token.isEmpty() && w->findPaneByToken(token) != nullptr;
+        };
+        // A signal thread's chip (#AQ6X phase 3): the claim's token is the *thread's* id, and no
+        // pane has one, so the chip opens that thread's history — the same ⓘ view the Sessions
+        // manager's Enter opens and the pickup's notification goes to. The thread file lives in
+        // the ordinary sessions directory, so the pane's own worker can read it and no
+        // `session_dir` has to be carried across.
+        view->onOpenThread = [guard](const QString &threadId, const QString &owner) {
+            auto *w = windowOf(guard);
+            if (w) w->openSignalThread(threadId, owner);
         };
         // Verify (#T71W): the same pane beside the board, but on the verifier the worker picked —
         // a different provider family from the one that implemented the card. A `preset:` runner
@@ -7892,6 +7916,13 @@ private:
             // is not this window's to revert, and undoFromNotification() says so by doing nothing.
             m_notifications->onAction = [this](const QString &, const QString &actionId) {
                 if (appCommands().undoFromNotification(actionId)) return;
+                // "Working on ctest:panelayout · Open thread" (#AQ6X phase 3, decision 9): the
+                // agent thread Relay started on a failing check nobody was on.
+                const auto thread = relay::board::signalThreadOfAction(actionId);
+                if (!thread.first.isEmpty()) {
+                    openSignalThread(thread.first, thread.second);
+                    return;
+                }
                 notice(QStringLiteral("That change is no longer one this window can undo."), 6000);
             };
         }

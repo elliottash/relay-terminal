@@ -105,6 +105,11 @@ public:
     // card wears its pane's token as a chip; a closed pane's chip says so and stops linking.
     // Unset — a test, or a window that cannot look — means every token reads as live.
     std::function<bool(const QString &token)> paneExists;
+    // A signal thread's history (#AQ6X phase 3): `threadId` and the owner session it is saved
+    // beside, the same two the Sessions manager's `onOpenThread` hands over. A signal a thread
+    // claimed wears the *thread's* id as its chip, so the chip opens a thread rather than
+    // revealing a pane — no pane has that token. Unset means the chip does nothing.
+    std::function<void(const QString &threadId, const QString &ownerSession)> onOpenThread;
     // Verify (`v`, #T71W): open a terminal pane beside the board on `runner` — "guest:codex",
     // "guest:claude" or "preset:<id>", the verifier the worker recommends for this card — and hand
     // it `task`, the QA brief. The card keeps its QA status: only the verifier's verdict moves it.
@@ -158,6 +163,14 @@ public:
     // The page one signal opens, in the card detail's place. Public so a test drives the four
     // actions through the same path the owner's click takes.
     board::SignalDetail *signalDetail() const { return m_signalDetail; }
+    // The signal threads this pane has heard of (#AQ6X phase 3). Public for the same reason the
+    // state above is: a test drives it with fake `signal_thread` events.
+    const board::SignalThreadsState &signalThreads() const { return m_signalThreads; }
+    // Whether a claim's session token names something that is still there: a pane in this window,
+    // or a signal thread that is still working. The one answer the chip, its tooltip and its
+    // click all go by — a signal thread's token belongs to no pane, so `paneExists` alone would
+    // read every working thread as closed.
+    bool tokenLive(const QString &token) const;
     // Which of the two rows are open, for the layout node: `["signals"]`, `["signals",
     // "dismissed"]`. Same shape and the same home as the folded set and `self_closed`
     // (`{"board": {"signals": [...]}}`); default folded, so an empty array is the default and an
@@ -413,11 +426,21 @@ private:
     // request id -> the signal it was sent about, so a refusal lands on the page that asked
     // rather than as a notice over a list nobody is looking at.
     QHash<QString, QString> m_signalRequests;
+    // The signal threads (#AQ6X phase 3) and the notification entry each one posted, so the
+    // `finished` event amends the entry the `started` event put up instead of posting a second.
+    board::SignalThreadsState m_signalThreads;
+    QHash<QString, QString> m_signalThreadNotices;   // thread id -> notification entry id
     // What this pane claims signals under. The Switchboard pane runs no agent of its own, so it
     // claims under its own view token: two board panes never chase one test, and a signal thread
     // (#AQ6X phase 3) will claim under its thread id instead. An unknown token reads `closed` on
     // the chip, which is honest — there is no pane to reveal.
     QString paneClaimToken() const;
+    // A claim chip was activated: reveal the pane it names, or open the signal thread's history
+    // when the token is a thread's (#AQ6X phase 3).
+    void revealClaim(const QString &token);
+    // One `signal_thread` event as a notification: posted on `started`, amended in place on
+    // `finished`, so the bell never shows two lines about one fault.
+    void announceSignalThread(const board::SignalThreadRun &run);
     // Ask the worker for the signal state once, when the board has loaded and the pane is on
     // screen (§32.2). The worker pushes after every change from then on.
     void askSignalsOnce();

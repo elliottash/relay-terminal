@@ -57,8 +57,14 @@ public:
     // what happened instead of offering it again ("Undone: Thinking display"). An empty title or
     // body leaves that field as it was; the action is always replaced, so empty strings take the
     // button away. Unknown ids are ignored.
+    //
+    // `kind` is amendable too, and empty leaves it alone (#AQ6X phase 3): a signal thread posts
+    // "Working on ctest:panelayout" as information and amends it to "Gave up on … — promoted to
+    // #ID", which is a warning. An entry that cannot change its kind cannot say that what it
+    // announced has since gone wrong.
     void amend(const QString &id, const QString &title, const QString &body,
-               const QString &actionLabel, const QString &actionId);
+               const QString &actionLabel, const QString &actionId,
+               const QString &kind = QString());
 
     // Newest first.
     QList<Notification> entries() const;

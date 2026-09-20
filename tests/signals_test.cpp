@@ -13,6 +13,7 @@
 // the backend half lands.
 #include "BoardPane.h"
 #include "BoardSignals.h"
+#include "Notifications.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -151,6 +152,7 @@ private slots:
     void aPromotionIsAnnouncedOnceAndOnlyWhenItIsNew();
     void whichSignalFoldsAreOpenRidesTheLayoutNode();
     void aPromotedCardsPageWearsTheSignalStrip();
+    void aPickupPostsOneNoticeAmendsItAndTheChipReadsLiveWhileItRuns();
 };
 
 // The order is the research's R11: a group (one cause, one item) before the keys it stands for,
@@ -889,6 +891,67 @@ void SignalsTests::aPromotedCardsPageWearsTheSignalStrip()
     view.handleEvent(arrived(QStringLiteral("## Issue\nthe test fails\n"), QJsonArray{"Issue"}));
     QCOMPARE(view.cardSignalStrip(), QString());
     QVERIFY(block->isHidden());
+}
+
+
+// A pickup is decision 9's "visible": one notification with a button that opens the thread, the
+// chip on the signal reading live while it works, and the click on that chip going to the thread's
+// history rather than to a pane that does not exist.
+void SignalsTests::aPickupPostsOneNoticeAmendsItAndTheChipReadsLiveWhileItRuns()
+{
+    relay::NotificationCenter::instance().clear();
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    // No pane in this test has any token, so `paneExists` is the honest "no": without the signal
+    // thread's own answer the chip below would read `closed`.
+    view.paneExists = [](const QString &) { return false; };
+    QList<QPair<QString, QString>> opened;
+    view.onOpenThread = [&opened](const QString &threadId, const QString &owner) {
+        opened << qMakePair(threadId, owner);
+    };
+    view.handleEvent(::opened({card(QStringLiteral("AAA1"), QStringLiteral("inbox"))}));
+
+    QJsonObject held = signalJson(QStringLiteral("ctest:panelayout"), QStringLiteral("broken"),
+                                  QStringLiteral("open"), 4);
+    held.insert(QStringLiteral("session"), QStringLiteral("th1abcdef"));
+    view.handleEvent(changed({held}));
+    view.handleEvent(QJsonObject{{"event", "signal_thread"}, {"state", "started"},
+                                 {"key", "ctest:panelayout"}, {"thread_id", "th1abcdef"},
+                                 {"session_id", "owner-1"}});
+
+    // One entry, with the button that opens the thread.
+    QList<relay::Notification> notes = relay::NotificationCenter::instance().entries();
+    QCOMPARE(notes.size(), 1);
+    QCOMPARE(notes.at(0).title, QStringLiteral("Working on ctest:panelayout"));
+    QCOMPARE(notes.at(0).kind, relay::NotificationCenter::kindInfo);
+    QCOMPARE(notes.at(0).actionLabel, QStringLiteral("Open thread"));
+    QCOMPARE(relay::board::signalThreadOfAction(notes.at(0).actionId).first,
+             QStringLiteral("th1abcdef"));
+
+    // The chip on the signal it claimed reads live, and its click opens the thread's history.
+    QVERIFY(view.tokenLive(QStringLiteral("th1abcdef")));
+    QVERIFY(!view.tokenLive(QStringLiteral("some-pane")));
+    view.setOpenSignals(QJsonArray{QStringLiteral("signals")});
+    view.selectSignal(QStringLiteral("ctest:panelayout"));
+    view.openSignal(QStringLiteral("ctest:panelayout"));
+    relay::board::SignalDetail *page = view.signalDetail();
+    QVERIFY(page);
+    page->onFocusPane(QStringLiteral("th1abcdef"));
+    QCOMPARE(opened.size(), 1);
+    QCOMPARE(opened.at(0).first, QStringLiteral("th1abcdef"));
+    QCOMPARE(opened.at(0).second, QStringLiteral("owner-1"));
+
+    // The finish amends that same entry rather than posting a second: one fault, one line.
+    view.handleEvent(QJsonObject{{"event", "signal_thread"}, {"state", "finished"},
+                                 {"key", "ctest:panelayout"}, {"thread_id", "th1abcdef"},
+                                 {"session_id", "owner-1"}, {"outcome", "gave-up"},
+                                 {"card", "K7Q2"}});
+    notes = relay::NotificationCenter::instance().entries();
+    QCOMPARE(notes.size(), 1);
+    QCOMPARE(notes.at(0).title,
+             QStringLiteral("Gave up on ctest:panelayout — promoted to #K7Q2"));
+    QCOMPARE(notes.at(0).kind, relay::NotificationCenter::kindWarning);
+    QVERIFY(!view.tokenLive(QStringLiteral("th1abcdef")));   // and the chip says closed again
+    relay::NotificationCenter::instance().clear();
 }
 
 QTEST_MAIN(SignalsTests)

@@ -77,7 +77,10 @@ target_include_directories(relay-board PUBLIC src)
 # relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
 # so the GUI's walk and the registry's can never disagree (#JN7X). The dependency only goes this
 # way; relay-projects stays QtCore-only and knows nothing about panes.
-target_link_libraries(relay-board PUBLIC relay-helperchat relay-projects ${RELAY_QT}::Widgets)
+# relay-notifications: a signal thread's pickup posts to the notification centre from the board
+# pane itself (#AQ6X phase 3), so the wording and the amend are read in tests/signals_test.cpp
+# rather than by starting an agent. The centre is QtCore-only, as relay-appcommands' use of it is.
+target_link_libraries(relay-board PUBLIC relay-helperchat relay-projects relay-notifications ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the

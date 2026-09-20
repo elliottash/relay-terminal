@@ -57,6 +57,7 @@
 #include <QVBoxLayout>
 
 #include "CopyOnSelect.h"
+#include "Notifications.h"   // a signal thread's pickup says so in the bell (#AQ6X phase 3)
 #include "RichEditor.h"
 #include "Theme.h"
 
@@ -3789,9 +3790,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // Is the pane that claimed this card still open (#R9G7)? Asked as each row is drawn, so a
     // pane closed while the board is up reads as closed at the list's next repaint; the window
     // answers, and a view with no window behind it (a test) calls every claim live.
-    delegate->paneExists = [this](const QString &token) {
-        return !paneExists || paneExists(token);
-    };
+    delegate->paneExists = [this](const QString &token) { return tokenLive(token); };
     m_list->setItemDelegate(delegate);
     m_list->addRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->addRectOf(rowIndex, itemRect);
@@ -3890,9 +3889,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // side by side would leave no list.
     m_signalDetail = new board::SignalDetail(m_splitter);
     m_signalDetail->hide();
-    m_signalDetail->paneExists = [this](const QString &token) {
-        return !paneExists || paneExists(token);
-    };
+    m_signalDetail->paneExists = [this](const QString &token) { return tokenLive(token); };
     m_signalDetail->onClose = [this] { closeSignal(); };
     m_signalDetail->onEscape = [this] {
         const QString key = m_signalDetail->key();
@@ -3901,10 +3898,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             selectSignal(key);
     };
     m_signalDetail->onOpenCard = [this](const QString &id) { openCard(id); };
-    m_signalDetail->onFocusPane = [this](const QString &token) {
-        if (onFocusPane && !token.isEmpty())
-            onFocusPane(token);
-    };
+    m_signalDetail->onFocusPane = [this](const QString &token) { revealClaim(token); };
     m_signalDetail->onClaim = [this] {
         sendSignal(QStringLiteral("signals_claim"),
                    {{QStringLiteral("pane_token"), paneClaimToken()}});
@@ -4026,13 +4020,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (onSendToTerminal && !m_detail->cardId().isEmpty())
             onSendToTerminal(QStringLiteral("#") + m_detail->cardId() + QLatin1Char(' '));
     };
-    m_detail->onFocusPane = [this](const QString &token) {
-        if (onFocusPane && !token.isEmpty())
-            onFocusPane(token);
-    };
-    m_detail->paneExists = [this](const QString &token) {
-        return !paneExists || paneExists(token);
-    };
+    m_detail->onFocusPane = [this](const QString &token) { revealClaim(token); };
+    m_detail->paneExists = [this](const QString &token) { return tokenLive(token); };
     m_detail->hasCard = [this](const QString &id) { return m_model.card(id) != nullptr; };
     m_detail->onCopyTag = [this](const QString &tag) { copyTag(tag); };
     m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
@@ -5089,6 +5078,15 @@ void BoardView::handleEvent(const QJsonObject &event)
         rebuildModelBox();
         return;
     }
+    // A signal thread started or ended (#AQ6X phase 3, §32.4): Relay picked up a failing check
+    // nobody was on. It is taken *before* the state event below, because the same
+    // `signals_changed` carries the worker's list of running threads and the chip drawn in the
+    // rebuild that follows is asked whether that thread is live.
+    if (m_signalThreads.take(type, event) && type == QStringLiteral("signal_thread")) {
+        announceSignalThread(m_signalThreads.lastEvent());
+        rebuild();                        // the chip on its claim is live now, or stopped being
+        return;
+    }
     // Signals (#AQ6X, protocol §32.1): the worker folds its record and pushes the whole state
     // after every change, and answers `signals_list` with the same shape. It carries no card id
     // and belongs to no thread, so it is taken here, before all of the card traffic.
@@ -5880,8 +5878,11 @@ void BoardView::refill()
                 QString tip = board::signalRowLine(*signal, QDateTime::currentDateTimeUtc());
                 if (!signal->session.isEmpty()) {
                     const QString chip = board::sessionChip(signal->session, true);
-                    tip += (paneExists && !paneExists(signal->session))
+                    tip += !tokenLive(signal->session)
                                    ? QStringLiteral("\nClaimed by %1, which has closed").arg(chip)
+                           : m_signalThreads.isRunning(signal->session)
+                                   ? QStringLiteral("\nWorked by %1, a signal thread Relay "
+                                                    "started. Enter on the chip opens it.").arg(chip)
                                    : QStringLiteral("\nClaimed by %1").arg(chip);
                 }
                 if (!signal->card.isEmpty())
@@ -5911,8 +5912,13 @@ void BoardView::refill()
             // pane closed while the board is up reads as closed at the next refill.
             if (!card->session.isEmpty()) {
                 const QString chip = board::sessionChip(card->session, true);
-                tip += (paneExists && !paneExists(card->session))
+                // A card a signal thread promoted and claimed wears the thread's token, and no
+                // pane has one (#AQ6X phase 3), so the same answer the chip is drawn from.
+                tip += !tokenLive(card->session)
                            ? QStringLiteral("\nClaimed by the pane %1, which has closed").arg(chip)
+                   : m_signalThreads.isRunning(card->session)
+                           ? QStringLiteral("\nWorked by %1, a signal thread Relay started")
+                                     .arg(chip)
                            : QStringLiteral("\nClaimed by the pane %1").arg(chip);
             }
             item->setToolTip(tip);
@@ -6265,6 +6271,65 @@ void BoardView::askSignalsOnce()
 QString BoardView::cardSignalStrip() const
 {
     return m_detail->signalStrip();
+}
+
+bool BoardView::tokenLive(const QString &token) const
+{
+    if (token.isEmpty())
+        return true;                   // nothing claims it, so nothing to be closed
+    // A signal thread's token belongs to no pane (#AQ6X phase 3): it is the thread's own id, and
+    // the thread runs in the board worker. So this is asked first — `paneExists` would answer no
+    // for a thread that is working, and the chip would say `closed` while a fix was under way.
+    if (m_signalThreads.isRunning(token))
+        return true;
+    return !paneExists || paneExists(token);
+}
+
+void BoardView::revealClaim(const QString &token)
+{
+    if (token.isEmpty())
+        return;
+    // A claim under a signal thread's id opens that thread's history, which is the same place the
+    // Sessions manager's Enter opens and the notification's button goes (decision 9). A pane's
+    // token reveals the pane, as it always did.
+    if (const board::SignalThreadRun *run = m_signalThreads.forToken(token)) {
+        if (onOpenThread) {
+            onOpenThread(run->threadId, run->sessionId);
+            return;
+        }
+    }
+    if (onFocusPane)
+        onFocusPane(token);
+}
+
+void BoardView::announceSignalThread(const board::SignalThreadRun &run)
+{
+    // Decision 9: "you get a notification that you can click on to open the agent thread". One
+    // entry per thread — the `started` event posts it, the `finished` one amends it in place, so
+    // the bell never shows two lines about one fault.
+    if (run.threadId.isEmpty())
+        return;
+    QString reason;
+    if (run.outcome == QStringLiteral("dismissed")) {
+        if (const board::Signal *signal = m_signalsState.signalFor(run.key))
+            reason = board::dismissReasonTitle(signal->dismissedReason);
+    }
+    const QString title = board::signalThreadTitle(run, reason);
+    const QString body = board::signalThreadBody(run);
+    const QString action = board::signalThreadActionId(run);
+    const QString label = action.isEmpty() ? QString() : board::signalThreadActionLabel();
+    const QString existing = m_signalThreadNotices.value(run.threadId);
+    if (!existing.isEmpty()) {
+        relay::NotificationCenter::instance().amend(existing, title, body, label, action,
+                                                    board::signalThreadKind(run));
+        if (!run.running)
+            m_signalThreadNotices.remove(run.threadId);
+        return;
+    }
+    const QString id = relay::NotificationCenter::instance().postWithAction(
+            title, body, board::signalThreadKind(run), m_root, label, action);
+    if (run.running && !id.isEmpty())
+        m_signalThreadNotices.insert(run.threadId, id);
 }
 
 QString BoardView::paneClaimToken() const
