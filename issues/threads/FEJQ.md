@@ -47,3 +47,9 @@ What it needs from you, when you have a moment (listed in the plan's Risks): the
 
 <!-- relay:entry 20260920T041534Z-we author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Inbox → Discussing · moved in the Switchboard
+
+<!-- relay:entry 20260920T140508Z-kj author=agent kind=event pane=switchboard -->
+- ✦ agent updated this card · replaced `## Issue` and `## Plan`, retitled
+
+<!-- relay:entry 20260920T140508Z-w5 author=agent kind=decision pane=switchboard -->
+Owner, 2026-09-20, three decisions folded into the card: (1) **one joint system** — the Switchboard agent, the helper agents and "agents can control Relay" are one thing on one card (a split into two was tried and undone the same morning: a helper that can only describe an option is half a feature); (2) **Info and Activity get no helper** — those panes are about the pane's own agent, so that agent gets windowed `session_info` / `activity` read tools and an "Ask" row on each pane prefills its composer; (3) **the Switchboard is inside the system, not its precedent** — one per-window helper worker (the generalised `BoardWorker`, keeping the `switchboard` role so nothing migrates), one chat surface lifted from `BoardChatPanel`, one tool set (`board_*` + `app_*`) shared with every pane agent. Implementation goes to Opus subagents, one per plan step. Still the owner's: settable options, `agent_safe` actions, main-agent tools on by default, and whether the role's label becomes "Helper agent".
