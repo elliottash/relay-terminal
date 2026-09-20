@@ -6259,9 +6259,16 @@ zero.** A p95 of 0.0 and a p95 nobody measured are different facts.
 {"type": "tests_stop", "run_id": "..."}
 {"type": "tests_history", "id": "ctest:board", "limit": 100}
 {"type": "tests_check", "card": "7BM4"}
+{"type": "tests_suggest", "card": "7BM4", "apply": true}
 ```
 
-`tests_list` and `tests_check` may carry an `id`, which is echoed as the request id. `tests_run`
+`tests_suggest` (#7BM4 phase 4) maps the files this card's commits touched to discovered tests by
+the same naming convention Check's `orphaned` verdict uses, and — unless `apply` is `false` —
+appends the lines it chose to the card's `## Tests` with a thread entry. It is what the card's
+*Add the tests this card's commits touched* button asks for; the GUI never writes the section
+itself.
+
+`tests_list`, `tests_check` and `tests_suggest` may carry an `id`, which is echoed as the request id. `tests_run`
 and `tests_history` may **not**: on their events `id` is the *test*, and one JSON object cannot
 carry the name twice (the same collision 30.8 records for `app_command`'s row). `tests_run` also
 takes `build_dir` (an absolute path, or one relative to the project) and `all: true`, which raises
@@ -6275,8 +6282,18 @@ the id ceiling and nothing else — there is no request that means "the whole su
 {"event":"tests_run", "run_id", "state":"started"|"progress"|"finished"|"stopped"|"error",
    "id"?, "result"?, "duration"?, "done":int, "total":int, "message"?}
 {"event":"tests_history", "id", "executions":[Execution]}          newest first
-{"event":"tests_check", "card", "findings":[{test, verdict, message, severity}], "actions":[str]}
+{"event":"tests_check", "card", "findings":[{test, verdict, message, severity}], "actions":[str],
+   "ids":[str], "files":{test id: path}, "failing":[str], "block"?}
+{"event":"tests_suggest", "card", "changed":[path], "lines":[str], "ids":[str], "added":bool,
+   "message"}
 ```
+
+`tests_check`'s last three keys are the same resolution its findings were folded from, so the
+card's action buttons act on what was found rather than re-deriving it: `ids` are the runnable
+test ids the section's lines resolve to (what *Run these* sends), `files` maps a test id to its
+source (so a finding row opens it), and `failing` are the ids whose last stored result was not a
+pass. `block` is the `YYYY-MM-DD HH:MM` stamp of the dated block this check wrote, absent when it
+wrote none.
 
 Every one of them also carries `root`, the board folder a GUI routes by (19.2), because one
 window can have several projects open.
@@ -6359,8 +6376,9 @@ Five refusals, each one sentence in a `{"state": "error", "message"}` event, not
 (`links.commits`, then `git log --grep '#ID'`, then `git show --name-only`) and the folded
 history, and answers `findings` — **empty when nothing is wrong** — plus at most three `actions`
 (*Run these*, *Add the tests this card's commits touched*, *Open the failing one*). The verdicts
-are `gone`, `never-run`, `skipped-forever`, `edited`, `flaky`, `slow` and the card-level
-`orphaned`; severities are GitHub Checks' `failure` / `warning` / `notice`. A card with **no**
+are `gone`, `never-run`, `failing` (the last stored result was not a pass — the same fact the
+landing gate refuses on, so Check never calls such a card clean), `skipped-forever`, `edited`,
+`flaky`, `slow` and the card-level `orphaned`; severities are GitHub Checks' `failure` / `warning` / `notice`. A card with **no**
 `## Tests` section at all does not go through that fold: it gets the one finding that says so,
 `no-tests`, because the section being missing is the only thing to fix.
 
@@ -6376,6 +6394,27 @@ one test, exactly as the same line would at a terminal:
 
 `tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without it being
 logged as a rewrite of the owner's text.
+
+**The dated block.** `tests_check` on the wire also *writes*: the **worker** appends a
+`### Check <YYYY-MM-DD HH:MM>` block under `## Tests`, one line per finding
+(`- <severity> · <test> — <message>`) or `- no findings`, through the board's own save with an
+`evidence` thread entry. At most one block per card per hour, and a block from the same day is
+replaced rather than stacked on, so a day of checking leaves one current answer instead of twelve
+historical ones. A card with **no** `## Tests` section gets no block: there is nowhere to put it,
+and the `no-tests` finding already says the section is missing. The block's own lines are never
+read back as tests. The agent-facing `tests_check` tool (31.6) still writes nothing.
+
+**The gate** (owner, 2026-09-20: Check "is a gate on leaving `needs-verification`, with a
+recorded override"). `board_protocol` refuses a `board_move` **out of** `needs-verification`
+towards `needs-qa*`, `needs-review`, `done` or `verified` while a test the card *names* is gone,
+has never run, or last failed — one sentence, nothing written, and an `error` event with
+`code: "tests_gate"` carrying `card`, `status` and the offending `tests`. A card with **no**
+`## Tests` section is not gated: the missing section is advisory, and gating on it would strand
+every card filed before the section existed. A move carrying `override: "<reason>"` goes through,
+and the reason is quoted into a `decision` thread entry. Any failure of the check itself (no
+discovery, no build directory) lets the move through: a gate that fires when its own evidence is
+missing stops work for reasons nobody can act on. In the GUI the refusal is a notice with an
+**Override…** beside it, which asks for the reason in one line and re-sends the same move.
 
 ### 31.6 The agent's two tools
 

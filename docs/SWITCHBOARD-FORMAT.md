@@ -261,6 +261,41 @@ conflict on. There is always room before, after and between two ranks.
 - Writing tasks rewrites only the task lines: every other byte of the body, and of the file, is
   preserved.
 
+### 2.6 Tests (`## Tests`)
+
+What proves this card, and what Check found when it last looked (card #7BM4, protocol section
+31.5). One test per Markdown list line: an **invocation** — what a person types to run just that
+one — with an optional ` — path` tail naming its source.
+
+```markdown
+## Tests
+- `ctest -R panelayout` — tests/panelayout_test.cpp
+- `tests/test_board_chat.py::BoardChatTests::test_steer`
+- manual: docs/qa_evidence/2026-09-20-thing/
+
+### Check 2026-09-20 21:04
+- failure · ctest:panelayout — `ctest -R panelayout` is not in the project any more
+- notice · unittest:tests.test_board_chat.BoardChatTests.test_steer — was edited; its history was reset
+```
+
+- Three spellings, and the parser is deliberately forgiving about the bullet, the backticks and
+  the dash (`—`, `–`, `--`, `-`): `ctest -R <name>` (a **regex**, as ctest reads it, so one line
+  may name several tests), a Python path with optional `::Class::test_method` (the file or the
+  class alone is every case under it), and `manual: <path>` for evidence a person recorded by
+  hand. A prose line naming no invocation is ignored rather than reported as a broken test.
+- **`### Check <YYYY-MM-DD HH:MM>`** is written by the worker, never by hand: one line per
+  finding as `- <severity> · <test> — <message>`, or `- no findings`. Severities are GitHub
+  Checks' `failure` / `warning` / `notice`. At most one block per card per hour, and a block
+  from the same day is replaced rather than stacked on, so a day of checking leaves one current
+  answer. The block's own lines are prose about tests and are never read back as tests.
+- The section **gates the landing**: a card does not leave `needs-verification` for a QA lane or
+  `done` while a test it lists is gone, has never run, or last failed. A card with no `## Tests`
+  section at all is not gated — the missing section is a warning on the card, not a reason it can
+  never close. A move may carry `override: "<reason>"`, and the reason is quoted into a
+  `decision` thread entry.
+- `tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without the write
+  being recorded as a rewrite of the owner's own words.
+
 ## 3. Threads
 
 One append-only file per card, `issues/threads/<ID>.md` (private cards:

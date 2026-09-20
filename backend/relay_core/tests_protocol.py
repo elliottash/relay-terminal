@@ -483,7 +483,15 @@ class TestsCommands:
         index, _ = self.card_index()
         records = H.records(discovered, executions, index)
         result = H.check_card(lines, self.card_files(ident, card), records)
-        return {"card": ident, **result, **resolved_tests(lines, records),
+        extra = resolved_tests(lines, records)
+        # A test whose last stored result was not a pass is a finding here, not only an action.
+        # `test_history.check_card` answers "is this list stale?", and a failing test is not
+        # stale — but the landing gate refuses on exactly that, so a Check that stayed silent
+        # about it would call a card clean and then be contradicted by the refusal. One finding
+        # per failing test, added where the two halves meet, so neither side has to guess.
+        result["findings"] = list(result.get("findings") or []) + _failing_findings(
+                extra["failing"], {f.get("test") for f in result.get("findings") or []}, records)
+        return {"card": ident, **result, **extra,
                 **self.signal_block(ident, card, discovered=discovered, executions=executions)}
 
     def signal_block(self, card_id: str, card, *, discovered=None, executions=None) -> dict:
@@ -1426,6 +1434,22 @@ def _suggest_sentence(result: dict) -> str:
     verb = "Added" if result.get("added") else "Found"
     return (f"{verb} {len(lines)} test(s) named after what #{result.get('card', '')}'s commits "
             f"touched.")
+
+
+def _failing_findings(failing: Sequence[str], already: set, records_list: Sequence[dict]) -> list:
+    """One `failing` finding per test whose last stored result was not a pass."""
+    by_id = {str(r.get("id") or ""): r for r in records_list}
+    out = []
+    for test_id in failing or []:
+        if test_id in already:
+            continue
+        record = by_id.get(test_id) or {}
+        shown = record.get("invocation") or record.get("name") or test_id
+        when = str(record.get("last_run") or "")
+        out.append({"test": test_id, "verdict": "failing", "severity": "failure",
+                    "message": f"{shown} failed the last time it ran"
+                               + (f", {when}" if when else "")})
+    return out
 
 
 def resolved_tests(lines: Sequence[str], records_list: Sequence[dict]) -> dict:

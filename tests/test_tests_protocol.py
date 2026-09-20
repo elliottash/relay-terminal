@@ -572,6 +572,26 @@ class CheckPayloadTest(TestsProtocolTest):
         self.assertEqual(event["files"].get("ctest:beta"), "tests/beta_test.cpp")
         self.assertIn("Open the failing one", event["actions"])
 
+    def test_a_test_that_last_failed_is_a_finding_and_not_only_an_action(self):
+        """What the landing gate refuses on has to be what Check says, or the two disagree."""
+        self.card("BBB5", "Its test failed", "needs-verification",
+                  body="\n## Tests\n- `ctest -R beta`\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:beta", result="fail",
+                              duration=0.5, runner="ctest", run_id="r1", host="spark")],
+                 self.tests.store_path())
+        self.send(type="tests_check", card="BBB5")
+        findings = self.of("tests_check")[0]["findings"]
+        failing = [f for f in findings if f["verdict"] == "failing"]
+        self.assertEqual(len(failing), 1, findings)
+        self.assertEqual(failing[0]["test"], "ctest:beta")
+        self.assertEqual(failing[0]["severity"], "failure")
+        self.assertIn("failed the last time it ran", failing[0]["message"])
+        # And it is not said twice: a test that is *gone* keeps its own single finding.
+        self.card("BBB6", "Gone and never run", "needs-verification",
+                  body="\n## Tests\n- `ctest -R vanished`\n")
+        self.send(type="tests_check", card="BBB6")
+        self.assertEqual([f["verdict"] for f in self.of("tests_check")[1]["findings"]], ["gone"])
+
     def test_a_card_without_a_tests_section_still_carries_the_three_keys(self):
         self.card("BBB4", "No tests named", "needs-verification")
         self.send(type="tests_check", card="BBB4")
