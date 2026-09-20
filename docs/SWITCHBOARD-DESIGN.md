@@ -655,6 +655,48 @@ So it is not a card type. It gets no id, no rank, no thread and no survey until 
 Decisions 1–12 on card `#AQ6X` are the spec, the research's R1–R13 the reasoning, and
 `AGENT-SESSIONS-PROTOCOL.md` §32 the wire.
 
+#### 4.11.2a What the pane draws (#AQ6X phase 2, 2026-09-20)
+
+Two rows and a page, and nothing else on any human surface. `src/BoardSignals.*` holds the fold over
+`signals_changed` and every word; `src/BoardPane.cpp` draws it; `tests/signals_test.cpp` drives all of
+it with fake events.
+
+- **`▸ N signals`** — "1 signal" in the singular — in #93WR's fold-row shape, with its chevrons, its
+  painting and its selection band, folded by default, toggled by a click, Enter and →/← exactly as
+  that row is. Its tooltip is where the word is defined, because the word alone does not define
+  itself: *"Failures a machine opened and will close: failing tests, broken builds. Enter or → to
+  show them."* No open signals, no row: nothing is the absence of a row, not a row saying none.
+- **Above the first section header, not inside the inbox.** The block belongs to the board, not to a
+  status: every section of a new pane starts folded, so a row inside one would be invisible exactly
+  when a test has just gone red, and a signal has no status the owner can move it to. A filter is
+  about cards, so the block gets out of its way — the rule that already stops a section folding while
+  a search is on. Which of the two toggles are open rides the layout node as `signals`, beside
+  `self_closed`.
+- **A signal's row**: the kind as a *word* (a glyph cannot say "flaky"), the key in the mono the
+  `#ID` column uses, then `×4`, when it was last seen, `regressed` and `stale` as small muted words,
+  and the `⧉ session` chip a claimed card wears — the same `board::sessionChip` and the same "is that
+  pane still open?" question, so who holds a signal and who holds a card look the same. A group comes
+  before the keys it stands for and those are indented under it. Dismissed signals are behind a
+  second toggle, `▸ N dismissed`, at the end of the block, each with its expiry, because a dismissal
+  about to run out is the one thing there about to become work again.
+- **The row is not a card**: it carries no card id, no flag and no dates, it cannot be dragged, and
+  every card action steps over it. That is the whole reason the rows can live in the card list at all.
+- **The page** opens on Enter or a click, in the card page's place — one splitter half, and only ever
+  one of the two up. Key, kind, state, source, count, first and last seen, the claim as a link to
+  that pane, the promoted card as a `#ID` link, a group's members, the excerpt in a monospace block,
+  and four actions: **Claim**, **Release**, **Dismiss**, **Promote**. Dismiss opens a small form *in
+  the page* — the owner's four reasons, a comment, an expiry defaulting to seven days — and refuses an
+  empty comment before the worker has to, because a dismissal nobody wrote a reason for is a failing
+  test nobody can account for in a month. A refusal lands on the page's error line where the action
+  was pressed, and `board_claimed_elsewhere` names the holder rather than saying only no. Escape
+  closes the form first and the page second.
+- **A promoted card's page** wears its machine-owned `## Signal` section as a bordered strip under
+  the pickers, labelled as the machine's own and rewritten on every state change, so the card says
+  what the fault is doing without the owner going back to the signal.
+
+The pane asks once, with `signals_list`, when its `board` event arrives: the worker pushes after
+every change, and every change so far happened before the pane existed.
+
 ### 4.12 The card reads as one page: a pencil, a seam, and a box that does the talking (#VZ69, owner 2026-09-19)
 
 Owner, on the card detail as 4.9 left it: *"there should be a promponent pencil edit button, rather
