@@ -334,13 +334,24 @@ private:
     // through onModelPick. Disabled while a card turn or a cleanup runs, because the worker
     // refuses a configure mid-turn.
     CurrentTextComboBox *m_modelBox = nullptr;
+    // The same box again, on the card page's reply strip (owner, 2026-09-20: "did we lose the
+    // model picker in the switchboard agent … it's the one in the cards"). A card's Discuss and
+    // Plan run on the same `switchboard` role the list page's box names, so the card page cannot
+    // be the one page that neither shows it nor changes it. One state, two widgets: both are
+    // filled by rebuildModelBox, both are disabled by syncModelBoxEnabled, and a pick in either
+    // goes out through pickModel and so through the one onModelPick.
+    CurrentTextComboBox *m_cardModelBox = nullptr;
     // What the model box is built from: the `presets`, `configured` and `model_roles` events, in
     // the holder the three helper panels use as well (src/HelperModelBox.h, #FEJQ) — four boxes
     // over one role and one worker have to agree about which model that is.
     relay::helpermodel::State m_modelBoxState;
     QString m_modelTip;                 // the box's tooltip without the busy line
+    void buildCardModelBox();
     void rebuildModelBox();
     void syncModelBoxEnabled();
+    // What a pick in either box means: the gear snaps back to the live row, everything else goes
+    // to the window, which writes the role and reconfigures the workers.
+    void pickModel(const QString &data);
     // The list's own column header (board::Sort): the Card, Created and Updated cells a click
     // sorts by, over the rows and under the tools.
     ColumnHeader *m_columnHeader = nullptr;

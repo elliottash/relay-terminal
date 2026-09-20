@@ -1556,6 +1556,7 @@ public:
         m_reply->setAutoHeight(2, 8);
         replyLayout->addWidget(m_reply);
         auto *buttons = new QHBoxLayout;
+        m_buttonRow = buttons;
         buttons->setSpacing(6);
         buttons->addStretch(1);
         // Discuss and Comment have no buttons (owner, #VZ69: "remove comment / discuss buttons. i
@@ -1689,6 +1690,29 @@ public:
                 onMove(QStringLiteral("tab"), m_tab->itemData(index).toString());
         });
     }
+
+    // The Switchboard agent's model box on this page (#BRD3). The owner, 2026-09-20: "did we lose
+    // the model picker in the switchboard agent … it's the one in the cards, it's different and
+    // doesn't have the model picker." It was not lost — the list page's box was reparented into
+    // the page agent's composer, where a card cannot see it — but a card's Discuss and Plan run on
+    // the very same `switchboard` role, so the page that runs them is the last place the model
+    // should be invisible. The view owns the box and fills it from the one state both boxes read
+    // (BoardView::rebuildModelBox); the page only gives it its place on the strip and its share of
+    // the row's width. Right-aligned under the reply box, left of the three buttons, which is the
+    // shape of every other composer strip in Relay.
+    void setModelBox(QComboBox *box)
+    {
+        if (box == nullptr || m_buttonRow == nullptr)
+            return;
+        m_modelBox = box;
+        box->setParent(m_replyFrame);
+        m_buttonRow->insertWidget(1, box);   // 0 is the stretch that right-aligns the row
+        fitButtons();
+    }
+
+    // The box was refilled and its current row is a different length, so the row's arithmetic has
+    // to be done again: a long model name is what takes the keys out of the buttons' labels.
+    void refitButtons() { fitButtons(); }
 
     // `mode` is "discuss" or "plan" for an agent turn (protocol 19.10), empty for a plain comment.
     std::function<void(const QString &text, const QString &mode)> onReply;
@@ -2318,6 +2342,14 @@ private:
     // drop out of the labels first, the way a card row drops its decorative badges before its
     // meaning (board::fitBadges). Only while the card is actually on screen: a width nothing has
     // laid out yet says nothing about what fits.
+    //
+    // The model box shares the row (#BRD3), and it is the one thing on it that can give width
+    // back: it is QSizePolicy::Maximum, so the layout shrinks it towards its "MM" minimum before
+    // it touches anything else, while a QPushButton can only be clipped. So the box's *natural*
+    // width is what the keys are measured against — the keys go first, and only then does the box
+    // start to squeeze — and what has to fit at the far end is three short labels beside a box at
+    // its minimum, which is still true at the ~350 px pane where the list is hidden and the card
+    // has the whole width.
     void fitButtons()
     {
         if (!isVisible() || !m_replyFrame || m_replyFrame->isHidden())
@@ -2333,6 +2365,10 @@ private:
             button->setText(label);
             wide += button->sizeHint().width();
             button->setText(was);
+            ++shown;
+        }
+        if (m_modelBox != nullptr && !m_modelBox->isHidden()) {
+            wide += m_modelBox->sizeHint().width();
             ++shown;
         }
         const bool keys = wide + qMax(0, shown - 1) * spacing <= m_replyFrame->width() - margins;
@@ -2828,6 +2864,11 @@ private:
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_plan = nullptr, *m_execute = nullptr, *m_verify = nullptr;
+    // The strip under the reply box: the stretch that right-aligns it, the model box, then the
+    // three buttons (#BRD3). The box is the view's — this page holds it only to place it and to
+    // count its width in fitButtons().
+    QHBoxLayout *m_buttonRow = nullptr;
+    QComboBox *m_modelBox = nullptr;
     // The strip over the reply box while a turn runs: "✦ Switchboarding · planning…" and the ✕ that
     // stops it (#VZ69). Hidden the rest of the time.
     QWidget *m_busyStrip = nullptr;
@@ -3116,6 +3157,13 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // survey could never be seen on the only board that gets one.
     buildChatPanel(layout);
 
+    // The card page's model box (#BRD3), built once both pages exist: the list page's box has
+    // just been reparented into the composer above, and the card page it goes on was made with
+    // the splitter. Both are filled from the one state here, so either page can name the model
+    // before the worker has said a word.
+    buildCardModelBox();
+    rebuildModelBox();
+
     m_keys = new QLabel(this);
     m_keys->setObjectName(QStringLiteral("boardKeys"));
     m_keys->setTextFormat(Qt::RichText);
@@ -3325,16 +3373,11 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_modelBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     m_modelBox->setFocusPolicy(Qt::TabFocus);
     m_listTools->addWidget(m_modelBox);
-    rebuildModelBox();   // the rows the view can show before the worker's first `configured`
     connect(m_modelBox, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
-        const QString data = m_modelBox->itemData(index).toString();
-        // The gear is not a choice: put the box back on the live row at once. A real pick stays
-        // showing until the reconfigure's `configured` event redraws the box on the new role.
-        if (data == QStringLiteral("gear"))
-            rebuildModelBox();
-        if (onModelPick)
-            onModelPick(data);
+        pickModel(m_modelBox->itemData(index).toString());
     });
+    // Not filled here: the card page's twin is built once the card page exists, and the two are
+    // filled together (buildCardModelBox, called from the constructor below).
     toolsLayout->addLayout(m_listTools);
 
     // Where those two go when the pane is too narrow to hold them beside the filter: the pane's
@@ -3638,25 +3681,71 @@ void BoardView::layoutListTools()
 // the same role and the same worker (#FEJQ §30.7). What is left here is this box — built with the
 // filter row so it exists before the panel it ends up in does — and what a pick means to the view.
 
+// The card page's own box (owner, 2026-09-20: "did we lose the model picker in the switchboard
+// agent … it's the one in the cards, it's different and doesn't have the model picker"). An open
+// card hides the whole list page — tools, composer and the box in it — so from a card there was no
+// way to read or change the model, although Discuss and Plan are turns of that very agent.
+//
+// It is the same widget kind under the same object name as its twin, because it is the same
+// control: the theme styles `QComboBox#statusPicker` and nothing else, and a box that looked
+// different would read as a different setting. What tells them apart is the page they are on.
+void BoardView::buildCardModelBox()
+{
+    if (!m_detail || m_cardModelBox)
+        return;
+    m_cardModelBox = new CurrentTextComboBox(m_detail);
+    m_cardModelBox->setObjectName(QStringLiteral("statusPicker"));
+    m_cardModelBox->setAccessibleName(QStringLiteral("Switchboard agent model"));
+    // Maximum, so the reply strip takes its width back from the box rather than from the three
+    // buttons when the card is narrow (CardDetail::fitButtons); TabFocus, so Tab reaches it from
+    // the reply box and the buttons stay off the tab ring.
+    m_cardModelBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    m_cardModelBox->setFocusPolicy(Qt::TabFocus);
+    connect(m_cardModelBox, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        pickModel(m_cardModelBox->itemData(index).toString());
+    });
+    m_detail->setModelBox(m_cardModelBox);
+}
+
+// One pick, whichever box it came from. The gear is not a choice: put both boxes back on the live
+// row at once. A real pick stays showing until the reconfigure's `configured` event redraws them
+// on the new role.
+void BoardView::pickModel(const QString &data)
+{
+    if (data == QStringLiteral("gear"))
+        rebuildModelBox();
+    if (onModelPick)
+        onModelPick(data);
+}
+
 void BoardView::rebuildModelBox()
 {
-    if (!m_modelBox)
-        return;
-    const QSignalBlocker block(m_modelBox);
-    m_modelTip = helpermodel::fill(m_modelBox, m_modelBoxState);
-    m_modelBox->updateGeometry();   // the collapsed box's width follows the new current row
+    // One state, filled into every box over it: the list page's and the card page's must agree
+    // about which model the helper is on, the way the four panels' boxes do (#FEJQ).
+    for (CurrentTextComboBox *box : {m_modelBox, m_cardModelBox}) {
+        if (!box)
+            continue;
+        const QSignalBlocker block(box);
+        m_modelTip = helpermodel::fill(box, m_modelBoxState);
+        box->updateGeometry();   // the collapsed box's width follows the new current row
+    }
+    if (m_detail)
+        m_detail->refitButtons();   // a longer model name takes the keys out of the card's labels
     syncModelBoxEnabled();
 }
 
 // A pick reconfigures the worker, and the worker refuses a configure mid-turn — so while any
-// card's Discuss or Plan, or a cleanup, is running, the box waits rather than errors.
+// card's Discuss or Plan, or a cleanup, is running, the box waits rather than errors. Both boxes:
+// the turn that blocks the configure is as likely to have been started from the card page.
 void BoardView::syncModelBoxEnabled()
 {
-    if (!m_modelBox)
-        return;
     const bool busy = !m_cardTurns.isEmpty() || cleanupRunning();
-    m_modelBox->setEnabled(!busy);
-    m_modelBox->setToolTip(m_modelTip + (busy ? helpermodel::busyNote() : QString()));
+    for (CurrentTextComboBox *box : {m_modelBox, m_cardModelBox}) {
+        if (!box)
+            continue;
+        box->setEnabled(!busy);
+        box->setToolTip(m_modelTip + (busy ? helpermodel::busyNote() : QString()));
+    }
 }
 
 // The boxes follow the sections the model has right now — board.yaml's columns, whatever extra

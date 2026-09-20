@@ -265,6 +265,8 @@ private slots:
     void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
     void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
     void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
+    void theCardPageCarriesTheSameModelBoxAsTheListPage();
+    void theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped();
     // The panel outside the Switchboard (#FEJQ): one worker, four panels.
     void aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents();
     void aHelperOpensAsOneRowThatExpandsIntoTheWholePanel();
@@ -3049,6 +3051,22 @@ QTextBrowser *chatLog(relay::BoardView &view)
     return view.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
 }
 
+// The two model boxes (#BRD3): the list page's, in the page agent's composer, and the card page's,
+// on the reply strip. Both are `statusPicker` — one control, one stylesheet rule — so each is
+// found through the page it is on rather than by name from the view, which would give whichever
+// happens to come first in the child list.
+QComboBox *listModelBox(relay::BoardView &view)
+{
+    QWidget *panel = chatPanel(view);
+    return panel ? panel->findChild<QComboBox *>(QStringLiteral("statusPicker")) : nullptr;
+}
+
+QComboBox *cardModelBox(relay::BoardView &view)
+{
+    auto *detail = view.findChild<QWidget *>(QStringLiteral("boardDetail"));
+    return detail ? detail->findChild<QComboBox *>(QStringLiteral("statusPicker")) : nullptr;
+}
+
 QList<QWidget *> queueRows(relay::BoardView &view)
 {
     return view.findChildren<QWidget *>(QStringLiteral("boardChatQueueRow"));
@@ -3493,7 +3511,7 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
 
     QWidget *panel = chatPanel(view);
-    auto *box = view.findChild<QComboBox *>(QStringLiteral("statusPicker"));
+    QComboBox *box = listModelBox(view);
     QPlainTextEdit *composer = composerOf(view);
     auto *mic = view.findChild<QToolButton *>(QStringLiteral("boardChatMic"));
     auto *context = view.findChild<QLabel *>(QStringLiteral("boardChatContext"));
@@ -3543,6 +3561,212 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     box->setCurrentIndex(0);
     emit box->activated(0);
     QVERIFY(!picked.isEmpty());
+}
+
+namespace {
+
+// The two worker events the box is built from (protocol 13): the provider rows, and the role and
+// tier table a `configured` reports. `helpermodel::State` takes them both, so what is asserted
+// below is that the two boxes read the one state, not that either builds rows of its own.
+QJsonObject presetsEvent()
+{
+    return QJsonObject{
+        {"event", "presets"},
+        {"presets", QJsonArray{
+             QJsonObject{{"id", "glm-coding"}, {"label", "GLM Coding"},
+                         {"model", "zai/glm-5.3"}, {"has_stored_key", true}},
+             QJsonObject{{"id", "kimi"}, {"label", "Kimi"},
+                         {"model", "moonshot/kimi-k3"}, {"has_stored_key", true}},
+             // A harness, not an endpoint, and a provider with no key: neither is offered, on
+             // either page — one state, one set of rows.
+             QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"group", "guest"},
+                         {"has_stored_key", true}},
+             QJsonObject{{"id", "openai"}, {"label", "OpenAI"}, {"model", "openai/gpt-6"},
+                         {"has_stored_key", false}}}}};
+}
+
+QJsonObject configuredEvent(const QString &tier)
+{
+    QJsonObject role{{"source", "configured"}, {"preset", "glm-coding"}};
+    if (!tier.isEmpty())
+        role.insert(QStringLiteral("tier"), tier);
+    return QJsonObject{
+        {"event", "configured"},
+        {"roles", QJsonObject{{"switchboard", role}}},
+        {"tiers", QJsonObject{
+             {"main", QJsonObject{{"model", "zai/glm-5.3"}, {"using", "main"}}},
+             {"flash", QJsonObject{{"model", "moonshot/kimi-k3"}, {"using", "flash"}}},
+             {"lite", QJsonObject{{"model", "zai/glm-5.3-air"}, {"using", "lite"}}}}}};
+}
+
+}  // namespace
+
+// Owner, 2026-09-20: "did we lose the model picker in the switchboard agent … it's the one in the
+// cards, it's different and doesn't have the model picker." The list page's box went into the page
+// agent's composer, and an open card hides the whole list page — so the page whose Discuss and
+// Plan are turns of that very agent was the one page that could neither name the model nor change
+// it. It has the box now, and it is the same box: one `helpermodel::State` fills both, so they
+// cannot disagree about which model the helper is on.
+void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.resize(900, 700);
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
+
+    QComboBox *list = listModelBox(view);
+    QComboBox *page = cardModelBox(view);
+    QVERIFY(list && page);
+    QVERIFY(list != page);
+    // The same control, not one that looks like it: the same class (the collapsed box hugs its
+    // current row), the same accessible name, and on the tab ring where its twin is.
+    QCOMPARE(QString::fromLatin1(page->metaObject()->className()),
+             QString::fromLatin1(list->metaObject()->className()));
+    QCOMPARE(page->objectName(), QStringLiteral("statusPicker"));
+    QCOMPARE(page->accessibleName(), QStringLiteral("Switchboard agent model"));
+    QCOMPARE(page->focusPolicy(), Qt::TabFocus);
+    QCOMPARE(page->sizePolicy().horizontalPolicy(), QSizePolicy::Maximum);
+
+    // On the reply strip and nowhere else, right-aligned: a stretch, the box, then Plan, Execute
+    // and Verify, in that order. The buttons stay off the tab ring.
+    auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
+    QVERIFY(reply && reply->isAncestorOf(page));
+    QLayout *strip = nullptr;
+    for (QLayout *candidate : reply->findChildren<QLayout *>())
+        if (candidate->indexOf(page) >= 0)
+            strip = candidate;
+    QVERIFY(strip);
+    QVERIFY(strip->itemAt(0)->spacerItem() != nullptr);
+    QCOMPARE(strip->indexOf(page), 1);
+    QPushButton *plan = button(view, QStringLiteral("Plan"));
+    QPushButton *execute = button(view, QStringLiteral("Execute"));
+    QPushButton *verify = button(view, QStringLiteral("Verify"));
+    QVERIFY(plan && execute && verify);
+    QVERIFY(strip->indexOf(page) < strip->indexOf(plan));
+    QVERIFY(strip->indexOf(plan) < strip->indexOf(execute));
+    QVERIFY(strip->indexOf(execute) < strip->indexOf(verify));
+    QCOMPARE(plan->focusPolicy(), Qt::NoFocus);
+    QCOMPARE(execute->focusPolicy(), Qt::NoFocus);
+    QCOMPARE(verify->focusPolicy(), Qt::NoFocus);
+
+    // The worker's two events, taken once by the one state and drawn into both boxes: the same
+    // rows, in the same order, on the same current one. The guest harness and the keyless
+    // provider are in neither.
+    view.handleEvent(presetsEvent());
+    view.handleEvent(configuredEvent(QStringLiteral("flash")));
+    QCOMPARE(page->count(), list->count());
+    QStringList listRows, pageRows;
+    for (int i = 0; i < list->count(); ++i) {
+        listRows << list->itemText(i) + QLatin1Char('=') + list->itemData(i).toString();
+        pageRows << page->itemText(i) + QLatin1Char('=') + page->itemData(i).toString();
+    }
+    QCOMPARE(pageRows, listRows);
+    QVERIFY(!pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("guest:codex")));
+    QVERIFY(!pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("preset:openai")));
+    QCOMPARE(page->currentData().toString(), QStringLiteral("tier:flash"));
+    QCOMPARE(page->currentText(), list->currentText());
+    QCOMPARE(page->toolTip(), list->toolTip());
+
+    // A pick on the card page is the pick the list page would have sent — the same row's data,
+    // through the one onModelPick. The view writes no settings itself, here either.
+    QStringList picks;
+    view.onModelPick = [&picks](const QString &data) { picks << data; };
+    const int provider = page->findData(QStringLiteral("preset:kimi"));
+    QVERIFY(provider >= 0);
+    QCOMPARE(list->itemData(provider).toString(), QStringLiteral("preset:kimi"));
+    page->setCurrentIndex(provider);
+    emit page->activated(provider);
+    QCOMPARE(picks, QStringList{QStringLiteral("preset:kimi")});
+
+    // The worker answering the reconfigure redraws *both* boxes on the new role, so the list page
+    // is never left naming the model the card page moved off.
+    view.handleEvent(configuredEvent(QString()));
+    QCOMPARE(page->currentData().toString(), QStringLiteral("preset:glm-coding"));
+    QCOMPARE(list->currentData().toString(), QStringLiteral("preset:glm-coding"));
+
+    // The gear is not a choice: it goes out like any other pick, and the box is put straight back
+    // on the live row rather than left showing "Model roles…".
+    picks.clear();
+    const int gear = page->findData(QStringLiteral("gear"));
+    QVERIFY(gear >= 0);
+    page->setCurrentIndex(gear);
+    emit page->activated(gear);
+    QCOMPARE(picks, QStringList{QStringLiteral("gear")});
+    QCOMPARE(page->currentData().toString(), QStringLiteral("preset:glm-coding"));
+
+    // A turn reconfigures nothing mid-flight, so while the card is working the box waits and says
+    // why — on both pages, because the turn that blocks the configure is as likely to have been
+    // started from this one.
+    view.cardAction(QStringLiteral("plan"));
+    QVERIFY(!page->isEnabled());
+    QVERIFY(!list->isEnabled());
+    QVERIFY2(page->toolTip().contains(QStringLiteral("Disabled while the agent is working")),
+             qPrintable(page->toolTip()));
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "plan"}});
+    QVERIFY(page->isEnabled());
+    QVERIFY(list->isEnabled());
+    QVERIFY(!page->toolTip().contains(QStringLiteral("Disabled while the agent is working")));
+}
+
+// The box shares the reply strip with Plan, Execute and Verify, and it is the only thing on it
+// that can give width back — QSizePolicy::Maximum against three buttons a layout can only clip.
+// At the ~350 px pane where the list is hidden and the card has the whole width, all three
+// buttons are still whole; what gives is the box.
+void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.resize(900, 700);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(presetsEvent());
+    view.handleEvent(configuredEvent(QStringLiteral("flash")));   // "Flash — moonshot/kimi-k3"
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
+
+    QComboBox *page = cardModelBox(view);
+    auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
+    QVERIFY(page && reply);
+    view.resize(350, 700);
+    QTRY_VERIFY(view.width() == 350);
+    QCoreApplication::processEvents();
+
+    // Every button whole — its own size hint, and both edges inside the strip.
+    const QList<QPushButton *> row{button(view, QStringLiteral("Plan")),
+                                   button(view, QStringLiteral("Execute"))};
+    for (QPushButton *item : row) {
+        QVERIFY(item);
+        QVERIFY(!item->isHidden());
+        QVERIFY2(item->width() >= item->sizeHint().width(),
+                 qPrintable(QStringLiteral("%1 is %2 px wide, hint %3")
+                                .arg(item->text()).arg(item->width()).arg(item->sizeHint().width())));
+        const QPoint left = item->mapTo(reply, QPoint(0, 0));
+        QVERIFY2(left.x() >= 0 && left.x() + item->width() <= reply->width(),
+                 qPrintable(QStringLiteral("%1 spans %2..%3 in a %4 px strip")
+                                .arg(item->text()).arg(left.x())
+                                .arg(left.x() + item->width()).arg(reply->width())));
+    }
+    // And the keys came out of the labels first, the way a narrow row has always shed them.
+    QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan"));
+    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute"));
+
+    // The box is what gave the room: squeezed under its own hint, still on the row, still usable.
+    QVERIFY(!page->isHidden());
+    QVERIFY2(page->width() < page->sizeHint().width(),
+             qPrintable(QStringLiteral("box %1 px, hint %2")
+                            .arg(page->width()).arg(page->sizeHint().width())));
+    QVERIFY2(page->width() >= page->minimumSizeHint().width(),
+             qPrintable(QStringLiteral("box %1 px, minimum %2")
+                            .arg(page->width()).arg(page->minimumSizeHint().width())));
+    const QPoint boxAt = page->mapTo(reply, QPoint(0, 0));
+    QVERIFY(boxAt.x() >= 0 && boxAt.x() + page->width() <= reply->width());
+
+    // Wide again, and the keys come back.
+    view.resize(1100, 700);
+    QTRY_COMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
 }
 
 // ---------------------------------------------------------------------------- the helper panel
