@@ -58,7 +58,7 @@ private slots:
                               " 'label':{'kind':'run','running':'running pytest','title':'ran pytest'}}"));
         QCOMPARE(view.toolRowCount(), 1);
         QCOMPARE(view.toolLines().first(), QStringLiteral("▸ running pytest…"));
-        view.toolOutput("line one\nline two\n");
+        view.toolOutput(2);   // two lines, however the worker said so (§ 23.10, #PPR4)
         QVERIFY(view.toolLines().first().contains(QStringLiteral("2 lines")));
         view.toolResult(json("{'call_id':'c1','turn_id':'t1','tool':'run_command','ok':true,"
                              " 'label':{'kind':'run','running':'running pytest','title':'ran pytest',"

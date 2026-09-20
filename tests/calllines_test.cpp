@@ -207,6 +207,41 @@ private slots:
         QCOMPARE(row.rest, QStringLiteral(" · 4,100 lines"));
     }
 
+    // The two shapes a live tool_output takes (protocol 23.10, card #PPR4): the text, or the
+    // counts the worker made from that same text when the GUI asked it to keep the text off the
+    // wire. The row's counter must not be able to tell them apart — which is the whole claim the
+    // option rests on — so every chunk here is fed in both shapes and the two are compared.
+    void countingAChunkIsTheSameWithOrWithoutItsText() {
+        const QStringList chunks{QStringLiteral(""),
+                                 QStringLiteral("no newline"),
+                                 QStringLiteral("one\n"),
+                                 QStringLiteral("one\ntwo\nthree\n"),
+                                 QStringLiteral("one\ntwo\nhalf"),
+                                 QStringLiteral("\n\n\n"),
+                                 QStringLiteral("héllo ☃\nmore\n")};
+        int streamed = 0, counted = 0;
+        for (const QString &chunk : chunks) {
+            const QJsonObject text{{"event", "tool_output"}, {"text", chunk}};
+            // Exactly what backend/relay_core/tool_stream.py sends in place of it.
+            const QJsonObject numbers{{"event", "tool_output"}, {"counted", true},
+                                      {"lines", int(chunk.count(QLatin1Char('\n')))},
+                                      {"bytes", int(chunk.toUtf8().size())},
+                                      {"partial", !chunk.isEmpty() && !chunk.endsWith(QLatin1Char('\n'))}};
+            const OutputCount a = toolOutputCount(text);
+            const OutputCount b = toolOutputCount(numbers);
+            QCOMPARE(b.lines, a.lines);
+            QCOMPARE(b.partial, a.partial);
+            QVERIFY(!a.counted);
+            QVERIFY(b.counted);
+            streamed += a.lines; counted += b.lines;
+            // And the row drawn from the running total is the same row.
+            QCOMPARE(runningRow(pytest(), 0, streamed + (a.partial ? 1 : 0)).rest,
+                     runningRow(pytest(), 0, counted + (b.partial ? 1 : 0)).rest);
+        }
+        QCOMPARE(counted, streamed);
+        QCOMPARE(streamed, 11);
+    }
+
     // ---- what a click does -----------------------------------------------------------------------
 
     void clickFollowsOpenType() {

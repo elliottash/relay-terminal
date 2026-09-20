@@ -101,6 +101,21 @@ Click clickFor(const toollabel::Label &label);
 // every row anchors open-call so a click still reaches the detail.
 bool anchorsFold(Click click, bool merged, bool backendFolds);
 
+// ----- what a live tool_output adds to the row's counter ------------------------------------------
+
+// How much a `tool_output` event adds to the running row's line count (#TK9C), in either of the
+// two shapes protocol § 23.10 allows: the text itself, or — when the GUI has asked the worker for
+// `stream_tool_output: false`, because nothing here is reading the text — the counts the worker
+// made from exactly that text. The two must agree to the line, which is what this one function is
+// for: the pane never counts newlines itself, and tests/calllines_test.cpp holds both shapes of
+// the same chunk against each other (card #PPR4).
+struct OutputCount {
+    int lines = 0;         // newlines in this chunk
+    bool partial = false;  // it does not end on one, so a line is still open and the row counts it
+    bool counted = false;  // the counts arrived without the text: there is nothing to print
+};
+OutputCount toolOutputCount(const QJsonObject &event);
+
 // ----- the state machine ------------------------------------------------------------------------
 //
 // Which row the cursor is on, whether it may still be rewritten, and how far a run of mergeable

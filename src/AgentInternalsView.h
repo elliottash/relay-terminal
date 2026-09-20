@@ -71,7 +71,11 @@ public:
                      qint64 elapsedMs);
     // tool_started / tool_output / tool_result, exactly as the worker sends them (§ 23).
     void toolStarted(const QJsonObject &event);
-    void toolOutput(const QString &text);
+    // A live `tool_output`, as its line count alone: this view never showed the text, only the
+    // counter on the running row, and since #PPR4 the worker may send the count and keep the
+    // text off the wire (§ 23.10). The full output is a click away either way, through the
+    // `tool_output_get` round trip setToolOutput() answers.
+    void toolOutput(int lines);
     void toolResult(const QJsonObject &event);
     // The reply to the `tool_output_get` a click asked for: its rows go under the row that asked.
     void setToolOutput(const QJsonObject &reply);

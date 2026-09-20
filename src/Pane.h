@@ -492,6 +492,12 @@ public:
         });
         m_assistHold.setSingleShot(true); m_assistHold.setInterval(400);
         connect(&m_assistHold, &QTimer::timeout, this, [this] { releaseHeldDecision(); });
+        // A phone watching this pane prints a running call's output from the event itself, so a
+        // share starting or ending changes whether the worker may keep that text off the wire
+        // (protocol 23.10, #PPR4). The window shares panes under a tab without asking this pane,
+        // which is why this is the signal and not the share button.
+        connect(&relay::RemoteShare::instance(), &relay::RemoteShare::sharingChanged, this,
+                [this] { sendToolStreamOption(); });
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
         connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); });
         connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateGhost(); });
@@ -3166,6 +3172,11 @@ public:
         if (key == QStringLiteral("agent/panes_flash")) return;   // only affects panes opened later
         // The reasoning fold reads it live: nothing to reconfigure, nothing to send.
         if (key == QStringLiteral("agent/thinking_display")) return;
+        // Show tool output is read live here too; the only thing the worker needs from it is
+        // whether to put the text on the wire at all (protocol 23.10, #PPR4). It used to fall
+        // through to applyConfigureChange(), which on a pane that has already run a turn does
+        // nothing until the next New chat — so the stream did not come back when it was asked for.
+        if (key == QStringLiteral("agent/show_tool_output")) { sendToolStreamOption(); return; }
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
             || key == QStringLiteral("agent/stall_timeout_s")
@@ -4246,6 +4257,23 @@ private:
                 {"approvals_chosen", settings.value(QStringLiteral("security/approvals_chosen"), false).toBool()}};
     }
 
+    // Whether anything on this side still reads the *text* of a tool's output, which is what the
+    // worker is told with `stream_tool_output` (protocol 23.10, card #PPR4). Two surfaces do: the
+    // stream under the row that Agent options › Show tool output turns on, and a phone —
+    // `app/app.js` prints a running call's output straight from the event and has no fold to fetch
+    // it with. Everything else here wants the count and nothing else: the call's own line (#TK9C),
+    // the Activity pane's running row, and both folds, which fetch the real text with
+    // `tool_output_get` when they are opened. Off, the worker sends the counts instead of ~66 KB
+    // of UTF-8 per call.
+    bool needsToolOutputText() const { return showToolOutput() || sharedWithPhone(); }
+
+    // Tell the worker which of the two shapes to send, whenever the answer above can change: at
+    // configure (withSessionFields below), when Options toggles Show tool output, and when this
+    // pane starts or stops being shared.
+    void sendToolStreamOption() {
+        if (m_configured) send({{"type", "set_agent_options"}, {"stream_tool_output", needsToolOutputText()}});
+    }
+
     // Session-related configure fields from settings (protocol sections 1 and 8).
     QJsonObject withSessionFields(QJsonObject request) const {
         QSettings settings;
@@ -4260,6 +4288,10 @@ private:
         // and the Switchboard draws it as the chip that reveals this pane — so the token has to
         // travel with the configure rather than be asked for later.
         if (!m_token.isEmpty()) request.insert(QStringLiteral("pane_token"), m_token);
+        // Protocol 23.10 (#PPR4): stated on every configure, not only when it changes, because a
+        // fresh worker starts on the default — sending the text — and a pane that needs none of it
+        // would otherwise pay for a turn's worth of output before the first toggle.
+        request.insert(QStringLiteral("stream_tool_output"), needsToolOutputText());
         request.insert(QStringLiteral("instructions"), QJsonObject{
             {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
             {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
@@ -4907,8 +4939,8 @@ private:
         if (m_internals) m_internals->toolStarted(event);
     }
 
-    void internalsToolOutput(const QString &text) {
-        if (m_internals) m_internals->toolOutput(text);
+    void internalsToolOutput(int lines) {
+        if (m_internals) m_internals->toolOutput(lines);
     }
 
     // The pane's settled row, and the ledger's: the same row the terminal would have drawn, with
@@ -9695,11 +9727,19 @@ private:
             // call's own line carries it live, and its fold holds the text. Agent options › Show
             // tool output brings the stream back — and then the line is final where it stands,
             // because the output below it is where the cursor now is.
-            const QString text = event.value(QStringLiteral("text")).toString();
-            m_toolLines += text.count('\n');
-            m_toolPartialLine = !text.isEmpty() && !text.endsWith('\n');
-            if (m_internals) internalsToolOutput(text);   // the row lives in the Activity pane (#QT8C)
-            else if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
+            // Two shapes on the wire since #PPR4 (§ 23.10): the text, or — while nothing here is
+            // reading it, which needsToolOutputText() decides and the worker is told — the counts
+            // the worker made from exactly that text. toolOutputCount() reads either, so the row's
+            // live count is the same number in both and no surface has to know which arrived.
+            const relay::calllines::OutputCount count = relay::calllines::toolOutputCount(event);
+            m_toolLines += count.lines;
+            m_toolPartialLine = count.partial;
+            if (m_internals) internalsToolOutput(count.lines);   // the row lives in the Activity pane (#QT8C)
+            // `!count.counted` is the moment the switch is thrown mid-call: the worker has not read
+            // the new option yet, so this chunk has no text to print and the row below counts it.
+            else if (showToolOutput() && !count.counted) {
+                turnHeader(); printInline(event.value(QStringLiteral("text")).toString(), Ink::ToolOutput);
+            }
             else if (!m_liveCall.isEmpty() && shellIdleAtPrompt()) {
                 // The running row counts what the command has printed. Throttled to about ten
                 // rewrites a second: a build that prints a thousand lines must not repaint a row a

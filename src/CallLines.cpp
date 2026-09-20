@@ -182,6 +182,25 @@ bool anchorsFold(Click click, bool merged, bool backendFolds) {
     return merged || click == Click::Fold || click == Click::Todos;
 }
 
+// ----- what a live tool_output adds to the row's counter ------------------------------------------
+
+OutputCount toolOutputCount(const QJsonObject &event) {
+    OutputCount out;
+    // `counted` is the worker saying it made these numbers from the chunk it did not send
+    // (§ 23.10). Branching on the flag and not on "is there a text?" keeps an empty chunk — which
+    // the streaming shape does send — meaning "nothing new, the line is closed" in both shapes.
+    if (event.value(QStringLiteral("counted")).toBool()) {
+        out.counted = true;
+        out.lines = event.value(QStringLiteral("lines")).toInt();
+        out.partial = event.value(QStringLiteral("partial")).toBool();
+        return out;
+    }
+    const QString text = event.value(QStringLiteral("text")).toString();
+    out.lines = int(text.count(QLatin1Char('\n')));
+    out.partial = !text.isEmpty() && !text.endsWith(QLatin1Char('\n'));
+    return out;
+}
+
 // ----- the state machine ------------------------------------------------------------------------
 
 void LineCursor::dropRun() {

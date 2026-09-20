@@ -442,10 +442,10 @@ void AgentInternalsView::toolStarted(const QJsonObject &event) {
 // The live counter on a running command's row ("running pytest… · 120 lines"). Every chunk is
 // counted; the row is redrawn at most ten times a second, as the terminal's own row is — a build
 // that prints a thousand lines must not repaint a row a thousand times.
-void AgentInternalsView::toolOutput(const QString &text) {
+void AgentInternalsView::toolOutput(int lines) {
     if (m_calls.isEmpty() || m_calls.last().done) return;
     ToolCall &call = m_calls.last();
-    call.liveLines += text.count(QLatin1Char('\n'));
+    call.liveLines += lines;
     if (m_liveTick.isValid() && m_liveTick.elapsed() < 100) return;
     m_liveTick.restart();
     drawRow(call);

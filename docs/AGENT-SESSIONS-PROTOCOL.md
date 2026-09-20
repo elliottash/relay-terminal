@@ -188,11 +188,12 @@ after 2 s. Two tools go with run_command (subagents that have it get them too):
 `command_output {job_id, wait_seconds?}` returns the output not yet read (the newest 32 KiB when
 there is more, `omitted_bytes` counting the rest) and waits up to `wait_seconds` (0–1800) for the
 job to end; `stop_command {job_id}` stops the job's process group and returns `stopped: true`.
-`tool_output {text}` streams only while a call is waiting on the job. Stop ends the job being
-waited on; jobs handed back earlier keep running. At most 8 run at once. Every job of a
-conversation is stopped on a new conversation, when a subagent's run ends, and when the worker
-exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for these results. Only
-the 16 most recent finished jobs are remembered; `command_output` on an older one is an error.
+`tool_output {text}` — or its counts alone, 23.10 — streams only while a call is waiting on the
+job. Stop ends the job being waited on; jobs handed back earlier keep running. At most 8 run at
+once. Every job of a conversation is stopped on a new conversation, when a subagent's run ends,
+and when the worker exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for
+these results. Only the 16 most recent finished jobs are remembered; `command_output` on an older
+one is an error.
 
 **Too wide to crawl (card #2Y96, 2026-09-19).** `run_command` refuses, at prepare time, a recursive
 search or listing whose root is the user's home directory, `/`, or a directory the home sits under:
@@ -284,7 +285,9 @@ tests in `tests/test_routing_thinking_skills.py`; live evidence in
   Without a configured agent the reply is `route_assisted {route: null, error: "not_configured"}`.
 - **`tool_output` name collision.** Streaming command output already uses `tool_output {text}`. The stored reply to
   `tool_output_get` is `tool_output {stored: true, turn_id, call_id, name, preview, result, ok, exit_code?}` with no
-  `text`; the GUI must branch on `stored`.
+  `text`; the GUI must branch on `stored`. Since 23.10 the *streaming* one has a second shape of its own — `{lines,
+  bytes, partial, counted: true}`, when the GUI has asked for the counts and not the text — and the stored reply is
+  never trimmed.
 - **Turn ids.** `turn_id` is the queue item id (same as `agent_started.id`); turns started outside the queue
   (subagents) get a generated id. `turn_id` is also on `error` and `cancelled`, and `call_id` on `tool_started` and
   `tool_result`.
@@ -369,6 +372,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `failover_hosted` | bool | — | **retired 2026-09-20**: the pane-wide "Relay Free may be a fallback" switch. Accepted from an older GUI and ignored; put Relay Free in `fallbacks` instead |
 | `approvals_ask` | string[] | `[]` | capabilities that draw an approval ask before the call runs (27.6) |
 | `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
+| `stream_tool_output` | bool | true | put the *text* of a tool's output on the wire. False sends the counts instead — 81 % fewer bytes in a tool-heavy turn — and the fold still fetches the whole of it (23.10). Not an agent option: it applies with no agent configured, and a `configure` that omits it restores the default |
 
 **The turn limits are a fuse, not the stop (owner, 2026-09-20, card `#2CZP`).** Both defaults now
 sit at their own clamp maxima — the clamps are unchanged, 1–500 and 1–2000 — because people leave an
@@ -3818,6 +3822,67 @@ as a job keeps "ran …" and gains "still running as job-2".
   outcome and duration.
 - **`tool_labels.py` has no I/O**, so it can say "wrote" or "edited" only from what the caller
   knows: the prepared call before execution, the result's `created` after it.
+
+### 23.10 `stream_tool_output` — the counts instead of the text (v2.10, 2026-09-20)
+
+Card #PPR4. Measured on 2026-09-20
+(`docs/qa_evidence/2026-09-20-perf-profile/transcript/FINDINGS.md`, finding 2): a turn of twenty
+`run_command` calls with 2 000 lines of output each put **1.34 MB of 1.64 MB** — 81 % of everything
+the worker said — into `tool_output` and `tool_result`, about 66 KB per call, and in Relay's
+default configuration the GUI reads none of it. The row's own line wants the *number* of lines
+(§ 23, card #TK9C) and its fold fetches the real text with `tool_output_get` when it is opened, so
+the text was parsed out of JSON, materialised as UTF-16 and dropped. `QJsonDocument::fromJson` was
+7.1 % of the GUI thread's cycles because of it.
+
+**Option.** `configure` and `set_agent_options` accept `stream_tool_output` (bool, default
+**true**), listed with the other options in 12.1. True is exactly the behaviour of every version
+before this one, so a GUI that never sends it — or one whose pane needs the text after all — is
+unaffected, byte for byte. `configured` and `agent_options` echo the value in force. It is a
+property of the *worker*, not of its agent: it applies with no agent configured, it applies to the
+very next event, and a `configure` that does not mention it puts the default back.
+
+**What changes while it is false.** Only the two streaming events, and only the fields that carry
+the output itself:
+
+| Message | Without the option | With `stream_tool_output: false` |
+|---|---|---|
+| `tool_output` (the live stream, § "Commands as jobs") | `{text}` | `{lines, bytes, partial, counted: true}` and **no `text`** |
+| `tool_result` | `result` as the tool returned it | each of `result.output`, `result.content`, `result.screen` that is a string becomes `<field>_lines` and `<field>_bytes`; the event gains `counted: true` |
+
+`lines` is the number of newlines in the chunk the worker did not send, `bytes` its length in
+UTF-8, and `partial` says the chunk does not end on a newline — so a line is still open and the
+running row counts it. Everything else is untouched: the `label` (§ 23.2) is built from the full
+result before the event is trimmed and is byte for byte the same, and so are `ms`, `diff`,
+`turn_id`, `call_id`, `tool`, and `exit_code`, `error`, `job_id`, `still_running`, `truncated`,
+`omitted_bytes` and the write counts inside `result`. A result with nothing of the kind in it — an
+`edit_file`, a failure that is only an `error` — is sent unchanged and carries no `counted`.
+
+**Nothing is lost.** The worker keeps every result for the last 50 turns, and `tool_output_get`
+answers with the whole of it, `detail` sections and all, whatever the option says: that is the one
+surface the option must not touch, and it is where every surface that *shows* output already reads
+it from. The stored reply is also called `tool_output` (the name collision in section 5); it
+carries `stored: true` and no `text`, and is never trimmed.
+
+**Subagents are not trimmed.** `subagent_event {id, payload}` wraps a subagent's own events and is
+forwarded only while a view is subscribed (`agent_subscribe`) — that is, only while something is
+reading them — so its payload keeps its text.
+
+**When the GUI asks for it** (`src/Pane.h`, `needsToolOutputText()`). Two surfaces read the text:
+the stream under the row that Options › Agent › **Show tool output** turns on, and a **phone**,
+which prints a running call's output straight from the event (`app/app.js`) and has no fold to
+fetch it with. Everything else wants the count — the call's own line, the Activity pane's running
+row, and both folds. So the pane sends `stream_tool_output: !(showToolOutput() ||
+sharedWithPhone())` on every `configure`, when Options toggles Show tool output, and when a share
+starts or ends. A GUI that has not been updated sends nothing and gets the text, and so does the
+phone behind one that has.
+
+**Reading either shape.** A surface that wants the line count takes it from `lines` when `counted`
+is set and from `text` otherwise — `relay::calllines::toolOutputCount()` in `src/CallLines.cpp` is
+that function, and `tests/calllines_test.cpp` holds the two shapes of the same chunk against each
+other. Backend: `backend/relay_core/tool_stream.py`, applied in `backend/worker.py`'s `emit()` —
+the last thing before the bytes leave the process, so every observer inside the worker (the board,
+the subagent manager, the session titler) still sees the whole event. Tests:
+`tests/test_tool_stream.py`.
 
 ## 24. SSH and mosh sessions: the router and the agent on the host (v2.6, 2026-09-18)
 
