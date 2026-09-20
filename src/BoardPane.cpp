@@ -5503,6 +5503,14 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (event.value(QStringLiteral("code")).toString() == QStringLiteral("tests_gate")) {
             m_gatedMove = m_pendingMoves.value(requestId);
             showNotice(text, true, QString(), !m_gatedMove.isEmpty());
+            // Nothing was written, so no `board_changed` follows and the status picker is still
+            // showing the lane the card did not go to. Read the card again so it snaps back to
+            // where the card actually is: a picker that lies about a refused move is worse than
+            // the refusal.
+            if (const QString card = event.value(QStringLiteral("card")).toString();
+                !card.isEmpty() && card == m_detail->cardId())
+                send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                      {QStringLiteral("card"), card}});
             return;
         }
         // The card was written by someone else between the read and the save. Nothing was
