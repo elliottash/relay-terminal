@@ -30,12 +30,15 @@ from . import project_probe as PP
 from . import roles as model_roles
 from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
-                          card_brief, cleanup_brief, find_board_root, named_board_root,
-                          normalize_id)
+                          card_brief, check_pane_token, cleanup_brief, find_board_root,
+                          named_board_root, normalize_id)
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
          "board_cancel", "board_check",
+         # Execute's hand-off in one message (19.19, #R9G7): the three writes it used to send
+         # by hand, plus the pane session token the card records as `session`.
+         "board_claim",
          "board_cleanup", "board_init", "board_init_answer", "board_folder", "board_sections",
          # Initializing a project and importing what is already in it (19.13,
          # docs/PROJECT-INIT-AND-IMPORT.md section 8).
@@ -195,6 +198,11 @@ class BoardCommands:
         self.tools: BoardTools | None = None
         #: The `board` block this worker was last pointed with, normalized (`parse_board`).
         self.settings: dict = parse_board(None)
+        #: This pane's session token, from `configure {pane_token}` (protocol 19.19). The board
+        #: tools carry it so `board_claim` can write it onto a card as `session` and onto the
+        #: claim's thread entry as `pane_token`. None for the Switchboard worker, which has no
+        #: terminal pane of its own, and for a GUI too old to send one.
+        self.pane_token: str | None = None
         #: "Initialize a project and create a Switchboard here?" (protocol 19.12), shared by the
         #: owner's tools and the agent's so one yes or no is the pane's.
         self.init = BoardInit(emit)
@@ -263,6 +271,7 @@ class BoardCommands:
         agent's half with `agent_tools` and hands it to the `Agent` it then builds.
         """
         self.workspace = str(workspace) if workspace else None
+        self.pane_token = check_pane_token((request or {}).get("pane_token"))
         return self._point(workspace, parse_board((request or {}).get("board")), agent=False)
 
     def _point(self, workspace: str | None, settings: dict, *, agent: bool = True) -> dict | None:
@@ -311,7 +320,8 @@ class BoardCommands:
                            context=ToolContext(actor=actor,
                                                pane=os.environ.get("RELAY_PANE_ID") or None),
                            enforce_limits=actor != "owner", duplicate_check=actor != "owner",
-                           state=state, project=settings["project"], init=self.init)
+                           state=state, project=settings["project"], init=self.init,
+                           pane_token=self.pane_token)
         tools.on_created = self._board_became_ready
         return tools
 
@@ -616,6 +626,10 @@ class BoardCommands:
         """
         if "board" not in request:
             raise ValueError("set_board needs a board object, or null to detach.")
+        # A pane that re-points itself may also (re)state its token; without one the pane keeps
+        # the token its `configure` gave it, since the pane itself has not changed.
+        if "pane_token" in request:
+            self.pane_token = check_pane_token(request.get("pane_token"))
         block = request["board"]
         # `board: null` detaches. It is not the same as a `configure` with no board block at all,
         # which still walks up from the workspace; an explicit null says "this pane has none".
@@ -1126,7 +1140,7 @@ class BoardCommands:
                 raise ValueError(result["error"])
             self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid})
         elif kind in ("board_create", "board_update", "board_move", "board_priority",
-                      "board_delete", "board_comment"):
+                      "board_delete", "board_comment", "board_claim"):
             self._write(kind, request, rid)
         elif kind == "board_undo":
             tools = self._need()
@@ -1267,6 +1281,26 @@ class BoardCommands:
                     result = tools.delete_card(card_id, request.get("reason") or "")
                 except (BoardToolError, B.BoardError) as exc:
                     result = {"error": str(exc), "code": getattr(exc, "code", "board_refused")}
+            elif kind == "board_claim":
+                # Execute (19.10, 19.19): the card goes to the terminal pane whose token this
+                # message carries, and the claim is the three writes Execute used to send by
+                # hand. That token is the pane's, not this worker's — the Switchboard worker has
+                # no pane of its own — so it overrides the one `configure` gave the tools for as
+                # long as this one call runs.
+                note = request.get("text")
+                held, tools.pane_token = tools.pane_token, (
+                    check_pane_token(request.get("pane_token")) or tools.pane_token)
+                try:
+                    result = tools.run("board_claim", {
+                        "id": request.get("card"),
+                        **({"note": note} if isinstance(note, str) and note.strip() else {}),
+                        **({"force": True} if request.get("force") else {})})
+                finally:
+                    tools.pane_token = held
+                # The whole card comes back for the *model's* benefit (it is the block a turn
+                # would otherwise read); the GUI re-reads the card from `board_changed`, so the
+                # block is not sent down the pipe with the reply.
+                result.pop("card", None)
             else:
                 # `pane_token` (#HKAP): the pane Execute handed the card to, so the thread entry
                 # can link back to it. Absent (or empty) on every other comment.

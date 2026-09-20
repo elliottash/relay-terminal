@@ -11,6 +11,7 @@ import unittest.mock
 from pathlib import Path
 
 from relay_core import board as B
+from relay_core import board_protocol as P
 from relay_core import board_tools as T
 from relay_core import qa_verifiers as QA
 
@@ -29,6 +30,10 @@ class BoardToolsTest(unittest.TestCase):
 
     autonomy = None
     config = CONFIG
+    #: This pane's session token (protocol 19.19): what `board_claim` writes onto a card as
+    #: `session` and onto its progress entry as `pane_token`. A subclass sets it to None to be
+    #: a worker that has none — the Switchboard's own, or a GUI too old to send one.
+    pane_token = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -41,7 +46,7 @@ class BoardToolsTest(unittest.TestCase):
         self.tools = T.BoardTools(
             self.board, emit=self.events.append, autonomy=self.autonomy,
             context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5", pane="2"),
-            state_path=self.repo / ".relay" / "board-rate.json")
+            state_path=self.repo / ".relay" / "board-rate.json", pane_token=self.pane_token)
         self.tools.begin_turn("t-1")
 
     def tearDown(self):
@@ -66,10 +71,10 @@ class BoardToolsTest(unittest.TestCase):
 # --------------------------------------------------------------------------- specs
 
 class SpecTests(unittest.TestCase):
-    def test_the_seven_designed_tools_are_offered_and_nothing_else(self):
+    def test_the_designed_tools_are_offered_and_nothing_else(self):
         self.assertEqual(T.TOOL_NAMES, ("board_list", "board_read", "board_create_card",
                                         "board_update_card", "board_move_card",
-                                        "board_import_items", "board_comment"))
+                                        "board_import_items", "board_comment", "board_claim"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
@@ -96,7 +101,10 @@ class SpecTests(unittest.TestCase):
     def test_the_policy_ships_next_to_the_module_and_names_the_rules(self):
         text = T.policy_text()
         self.assertNotIn("<!--", text)
-        for phrase in ("verbatim", "board_rate_limited", "needs-qa-llm", "discussing"):
+        # `needs-qa-llm` left rule 5 with the owner's decision of 2026-09-20 (any pane may close
+        # a card once the verdict is on it): the policy now names the lane the implementer lands
+        # in and calls the rest "a QA lane".
+        for phrase in ("verbatim", "board_rate_limited", "needs-verification", "discussing"):
             self.assertIn(phrase, text)
 
     def test_model_family_tells_providers_apart(self):
@@ -169,7 +177,9 @@ class ListAndReadTests(BoardToolsTest):
             self.tools.run("board_comment", {"id": card_id, "kind": "note", "text": f"note {n}"})
         result = self.tools.run("board_read", {"id": card_id, "thread_entries": 2})
         self.assertEqual(len(result["thread"]), 2)
-        self.assertEqual(result["thread_total"], 5)
+        # Six, not five: the first note moves the inbox card to Discussing (#3XZV) and that
+        # move is an event entry of its own.
+        self.assertEqual(result["thread_total"], 6)
         self.assertEqual([e["text"] for e in result["thread"]], ["note 2", "note 3"])
 
 
@@ -880,6 +890,275 @@ class CommentTests(BoardToolsTest):
         self.assertEqual([str(p) for p in self.board.check()], [])
 
 
+# ------------------------------------------------------------------------- claim
+
+class ClaimTests(BoardToolsTest):
+    """`board_claim` (#R9G7): one call does what the Switchboard's Execute button does."""
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+
+    def progress_entries(self, card_id=None):
+        return [e for e in self.board.thread(card_id or self.card_id) if e.kind == "progress"]
+
+    def test_a_claim_sets_assignee_status_and_session_and_links_the_pane(self):
+        result = self.tools.run("board_claim", {"id": self.card_id,
+                                                "note": "starting on the parser"})
+        self.assertNotIn("error", result, result)
+        self.assertTrue(result["claimed"])
+        self.assertEqual(result["status"], "executing")
+        self.assertEqual(result["session"], self.pane_token)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.front["assignee"], "agent")
+        self.assertEqual(card.status, "executing")
+        self.assertEqual(card.front["session"], self.pane_token)
+        # The progress entry is the link back to the pane: first line names the token's first
+        # eight characters, exactly as Execute's `Executing (xxxxxxxx) · …` does, and the token
+        # itself rides in the entry's attrs for the GUI to draw as `relay-pane:<token>`.
+        entry = self.progress_entries()[-1]
+        self.assertEqual(entry.attrs["pane_token"], self.pane_token)
+        self.assertEqual(entry.text.splitlines()[0],
+                         f"Claimed ({self.pane_token[:8]}) · working on it from a terminal pane")
+        self.assertIn("starting on the parser", entry.text)
+        self.assertIn(f"pane_token={self.pane_token}", self.thread_text(self.card_id))
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_a_claim_is_one_undoable_write_and_one_activity_event(self):
+        before = len(self.events)
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        actions = [e for e in self.events[before:] if e.get("event") == "board_activity"]
+        self.assertEqual([e["action"] for e in actions], ["claim"])
+        undone = self.tools.undo(result["write_id"])
+        self.assertEqual(undone["id"], self.card_id)
+        card = self.board.card_by_id(self.card_id)
+        self.assertNotIn("session", card.front)
+        self.assertEqual(card.status, "inbox")
+
+    def test_claiming_a_card_this_pane_already_holds_is_idempotent(self):
+        self.tools.run("board_claim", {"id": self.card_id})
+        again = self.tools.run("board_claim", {"id": self.card_id, "note": "still me"})
+        self.assertNotIn("error", again, again)
+        self.assertEqual(again["status"], "executing")
+        self.assertEqual(again["session"], self.pane_token)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.front["session"], self.pane_token)
+        self.assertEqual(card.status, "executing")
+        self.assertEqual(again["summary"], "already claimed by this pane")
+        # Two claims, two progress entries; the card is claimed once.
+        self.assertEqual(len(self.progress_entries()), 2)
+        self.assertEqual(self.tools.claimed, [self.card_id])
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_a_card_held_by_another_session_is_refused_and_force_takes_it(self):
+        other = T.BoardTools(self.board, autonomy="auto",
+                             context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                             state_path=self.repo / ".relay" / "other.json",
+                             pane_token="9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33")
+        other.begin_turn("t-other")
+        self.assertNotIn("error", other.run("board_claim", {"id": self.card_id}))
+
+        refused = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertEqual(refused["code"], "board_claimed_elsewhere")
+        self.assertEqual(refused["session"], "9c1d77ab")
+        self.assertEqual(refused["status"], "executing")
+        self.assertTrue(refused["latest_entry"], refused)
+        self.assertIn("force", refused["error"])
+        # Nothing was written by the refused call.
+        self.assertEqual(self.board.card_by_id(self.card_id).front["session"], "9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33")
+
+        taken = self.tools.run("board_claim", {"id": self.card_id, "force": True,
+                                               "note": "the user said to take it over"})
+        self.assertNotIn("error", taken, taken)
+        self.assertEqual(taken["session"], self.pane_token)
+        self.assertEqual(self.board.card_by_id(self.card_id).front["session"], self.pane_token)
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_a_session_that_is_not_executing_does_not_hold_the_card(self):
+        # Only executing/in-progress means held: a card whose work was landed carries the
+        # session that did it, and the next request about it is claimed without force.
+        self.tools.run("board_claim", {"id": self.card_id})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-verification",
+                                           "reason": "landed"})
+        other = T.BoardTools(self.board, autonomy="auto",
+                             context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                             state_path=self.repo / ".relay" / "other.json",
+                             pane_token="9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33")
+        other.begin_turn("t-other")
+        result = other.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["session"], "9c1d77ab-2e40-4f01-8f55-6b0aa1c4de33")
+
+    def test_a_worker_with_no_pane_token_claims_without_a_session(self):
+        tools = T.BoardTools(self.board, autonomy="auto",
+                             context=T.ToolContext(actor="agent", model="x/y", pane="9"),
+                             state_path=self.repo / ".relay" / "none.json")
+        tools.begin_turn("t-none")
+        result = tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertIsNone(result["session"])
+        self.assertIn("no pane session token", result["warning"])
+        card = self.board.card_by_id(self.card_id)
+        self.assertNotIn("session", card.front)
+        self.assertEqual(card.front["assignee"], "agent")
+        self.assertEqual(card.status, "executing")
+        entry = self.progress_entries()[-1]
+        self.assertNotIn("pane_token", entry.attrs)
+        self.assertEqual(entry.text, "Claimed · working on it from a terminal pane")
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_the_result_carries_the_whole_card_block(self):
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": self.tools.run("board_read", {"id": self.card_id})["hash"],
+            "tasks": [{"text": "Write the parser"}]})
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        block = result["card"]
+        # The same block `ask {cards: [...]}` builds (19.6), so a card that arrives with the
+        # prompt and a card handed back by a claim read identically.
+        self.assertEqual(block, P.seed_block(self.board,
+                                             self.board.card_by_id(self.card_id)))
+        self.assertIn(f"[Switchboard card #{self.card_id}", block)
+        self.assertIn("--- card front matter ---", block)
+        self.assertIn(self.pane_token, block)
+        self.assertIn("Write the parser", block)
+        self.assertIn("--- thread (last", block)
+
+    def test_the_tool_takes_only_its_own_arguments(self):
+        self.assertIn("board_claim takes", self.tools.run(
+            "board_claim", {"id": self.card_id, "status": "done"})["error"])
+        self.assertIn("force must be", self.tools.run(
+            "board_claim", {"id": self.card_id, "force": "yes"})["error"])
+        self.assertEqual(self.tools.run("board_claim", {"id": "ZZZZ"})["code"], "board_not_found")
+
+    def test_a_model_can_never_type_the_session_field(self):
+        # The token is the tool's to write, from `configure`: a card cannot be taken by
+        # putting somebody else's token (or your own) in a front matter patch.
+        read = self.tools.run("board_read", {"id": self.card_id})
+        refused = self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": read["hash"], "fields": {"session": "deadbeef"}})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertEqual(refused["field"], "session")
+        self.assertNotIn("session", self.board.card_by_id(self.card_id).front)
+
+    def test_only_a_work_card_is_claimed(self):
+        plan = self.tools.run("board_create_card", {
+            "tab": "planning", "status": "draft", "type": "plan", "title": "A plan",
+            "request": "plan the thing"})
+        self.assertIn("only a work card", self.tools.run("board_claim", {"id": plan["id"]})["error"])
+
+
+class ClaimPromptTests(BoardToolsTest):
+    def test_the_prompt_names_this_session_and_the_cards_it_holds(self):
+        text = T.prompt_section(self.tools)
+        self.assertIn(f"Your session: {self.pane_token[:8]}.", text)
+        self.assertNotIn("You hold:", text)
+        card_id = self.create()
+        self.tools.run("board_claim", {"id": card_id})
+        self.assertIn(f"You hold: #{card_id}.", T.prompt_section(self.tools))
+
+    def test_a_worker_with_no_token_says_nothing_about_a_session(self):
+        tools = T.BoardTools(self.board, autonomy="auto",
+                             state_path=self.repo / ".relay" / "none.json")
+        self.assertNotIn("Your session:", T.prompt_section(tools))
+
+
+class ClaimMessageTests(BoardToolsTest):
+    """The same claim as a GUI→worker message: `board_claim` (protocol 19.3, 19.19).
+
+    Execute's hand-off (19.10) is this one message now, and its `pane_token` is the pane the card
+    was handed to — never the worker's own, since the Switchboard worker has no pane of its own.
+    """
+
+    class Turns:
+        agent = None
+        busy = False
+
+        def now_or_later(self, now, later):
+            return now()
+
+    def commands(self, request=None):
+        commands = P.BoardCommands(self.Turns(), self.events.append)
+        commands.configure(str(self.repo), request or {})
+        self.addCleanup(commands.cards.drop)
+        return commands
+
+    def send(self, commands, **request):
+        self.events.clear()
+        commands.dispatch(request)
+        return self.events
+
+    def test_the_message_claims_the_card_for_the_pane_it_names(self):
+        card_id = self.create()
+        commands = self.commands()
+        token = "b1c4e5f6-1111-4222-8333-444455556666"
+        events = self.send(commands, type="board_claim", id="x1", card=card_id,
+                           pane_token=token, text="on it")
+        written = [e for e in events if e["event"] == "board_written"]
+        self.assertEqual(len(written), 1, events)
+        self.assertEqual((written[0]["id"], written[0]["kind"], written[0]["card_id"]),
+                         ("x1", "board_claim", card_id))
+        self.assertEqual(written[0]["session"], token)
+        self.assertTrue(written[0]["write_id"])
+        # The card block is the model's; it does not go down the pipe with the reply.
+        self.assertNotIn("card", written[0])
+        # The board tells the pane the row changed, exactly as a move does.
+        self.assertTrue([e for e in events if e["event"] == "board_changed"])
+        card = self.board.card_by_id(card_id)
+        self.assertEqual((card.status, card.front["assignee"], card.front["session"]),
+                         ("executing", "agent", token))
+        entry = [e for e in self.board.thread(card_id) if e.kind == "progress"][-1]
+        self.assertEqual(entry.attrs["pane_token"], token)
+        self.assertIn("Claimed (b1c4e5f6)", entry.text)
+        self.assertIn("on it", entry.text)
+
+    def test_the_messages_token_beats_the_one_configure_gave_the_worker(self):
+        card_id = self.create()
+        commands = self.commands({"pane_token": "aaaaaaaa-0000-4000-8000-000000000000"})
+        self.send(commands, type="board_claim", card=card_id,
+                  pane_token="bbbbbbbb-0000-4000-8000-000000000000")
+        self.assertEqual(self.board.card_by_id(card_id).front["session"],
+                         "bbbbbbbb-0000-4000-8000-000000000000")
+        # And the worker keeps its own token for the turns its agent runs.
+        self.assertEqual(commands.tools.pane_token, "aaaaaaaa-0000-4000-8000-000000000000")
+
+    def test_a_card_another_session_holds_is_refused_through_the_error_event(self):
+        card_id = self.create()
+        commands = self.commands()
+        self.send(commands, type="board_claim", card=card_id,
+                  pane_token="aaaaaaaa-0000-4000-8000-000000000000")
+        events = self.send(commands, type="board_claim", id="x2", card=card_id,
+                           pane_token="bbbbbbbb-0000-4000-8000-000000000000")
+        errors = [e for e in events if e["event"] == "error"]
+        self.assertEqual(len(errors), 1, events)
+        self.assertEqual((errors[0]["id"], errors[0]["code"]), ("x2", "board_claimed_elsewhere"))
+        self.assertIn("aaaaaaaa", errors[0]["text"])
+        # …and the owner may take it over.
+        self.send(commands, type="board_claim", card=card_id, force=True,
+                  pane_token="bbbbbbbb-0000-4000-8000-000000000000")
+        self.assertEqual(self.board.card_by_id(card_id).front["session"],
+                         "bbbbbbbb-0000-4000-8000-000000000000")
+
+    def test_configure_carries_the_panes_token_into_both_halves_of_the_tools(self):
+        commands = self.commands({"pane_token": self.pane_token})
+        self.assertEqual(commands.pane_token, self.pane_token)
+        self.assertEqual(commands.tools.pane_token, self.pane_token)
+        agent = commands.agent_tools(str(self.repo), {})
+        self.assertEqual(agent.pane_token, self.pane_token)
+        # A token the entry marker could not hold is a protocol error, not a quiet drop.
+        with self.assertRaises(ValueError):
+            self.commands({"pane_token": "not a token"})
+
+
+class PaneTokenTests(unittest.TestCase):
+    def test_a_token_the_entry_marker_cannot_hold_is_refused(self):
+        for bad in ("a b", "a>b", "x" * 65):
+            with self.assertRaises(T.BoardToolError):
+                T.check_pane_token(bad)
+        self.assertIsNone(T.check_pane_token(None))
+        self.assertIsNone(T.check_pane_token("  "))
+        self.assertEqual(T.check_pane_token(" abc "), "abc")
+
+
 # ------------------------------------------------------------------------- limits
 
 class LimitTests(BoardToolsTest):
@@ -910,7 +1189,9 @@ class LimitTests(BoardToolsTest):
         self.tools.run("board_comment", {"id": card_id, "kind": "note", "text": "one"})
         result = self.tools.run("board_comment", {"id": card_id, "kind": "note", "text": "two"})
         self.assertEqual(result["code"], "board_rate_limited")
-        self.assertEqual(len(self.board.thread(card_id)), 2)
+        # The creation, the one note that fitted, and the inbox → Discussing move that note
+        # earned (#3XZV). The refused second note wrote nothing.
+        self.assertEqual(len(self.board.thread(card_id)), 3)
 
     def test_creates_are_capped_per_hour_across_panes_of_one_workspace(self):
         self.tools.limits["max_creates_per_hour"] = 2

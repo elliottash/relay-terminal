@@ -204,8 +204,11 @@ COMMON_FIELDS = ("id", "type", "status", "priority", "rank", "created", "labels"
 #: `verified_by` is the signature of the model that closed the card out of a QA lane, stamped by
 #: the worker exactly as `implemented_by` is (card #T71W): the pair is the audit trail of who
 #: wrote a card and who passed it, and the reason a closed card can still be asked "who checked this?".
+#: `session` is the pane session token of the terminal pane that holds the card (#R9G7): written
+#: by `board_claim` from the pane's own `configure` token, never typed by a model, and read by
+#: every other session as "this one is taken". A card in `executing` with a `session` is claimed.
 WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemented_by",
-               "verified_by", "label_count", "label_output", "codebook",
+               "verified_by", "session", "label_count", "label_output", "codebook",
                # The manual section a card is parked in (#3XZV): the id of a configured column
                # that collects no status. It wins over the status for as long as that column
                # exists, and a move to a status column is what clears it.
@@ -228,7 +231,8 @@ ALLOWED_FIELDS = {
 #: Emission order; anything else follows, sorted, so a new key is never dropped.
 FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind", "topic", "scope",
                "private", "labels", "component", "milestone", "workstream", "assignee",
-               "implemented_by", "verified_by", "waiting_on", "parent", "blocked_by", "aliases",
+               "implemented_by", "verified_by", "session", "waiting_on", "parent", "blocked_by",
+               "aliases",
                "paths", "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
                "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
                "acceptance", "source", "links")

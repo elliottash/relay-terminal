@@ -104,8 +104,10 @@ UNDO_SECONDS = 30
 #: (the last is where a card is parked, #3XZV); `source` is the provenance of the owner's own
 #: words; `private` would move the file between the git tree and the private root, which is the
 #: owner's decision.
+#: `session` joins them (#R9G7): the pane token that holds the card is the tool's to write, from
+#: the pane's own `configure`, so a model can neither invent one nor take a card by typing it.
 IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
-                              "section"})
+                              "section", "session"})
 
 #: Sections an agent writes freely.  Anything else in a card body is owner text: it may
 #: still be rewritten (decision 12.3) but the old and new text go into the thread.
@@ -271,6 +273,23 @@ TOOL_SPECS = [
                                         "draws it as a link that reveals that pane. At most 64 "
                                         "characters, no whitespace or '>'."}},
          ["id", "kind", "text"]),
+    spec("board_claim",
+         "Take a card: say that this terminal pane is the session working on it. One call does "
+         "what the Switchboard's Execute button does — assignee agent, status executing, the "
+         "card's `session` set to this pane's token, and a progress entry that links back to this "
+         "pane — and returns the whole card, so you have its front matter, body, tasks and recent "
+         "thread from here on without a second read. Claim before you change any code, and only a "
+         "card whose request is the one you are working on. A card another session already holds "
+         "is refused with board_claimed_elsewhere: read its thread, comment, and ask the user "
+         "before you pass force.",
+         {"id": _ID_ARG,
+          "note": {"type": "string",
+                   "description": "One or two lines on what you are about to do; appended to the "
+                                  "progress entry under the claim line."},
+          "force": {"type": "boolean",
+                    "description": "Take a card another session holds. Only when the user says to "
+                                   "take it over, or the holding session is plainly gone."}},
+         ["id"]),
 ]
 
 #: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
@@ -349,10 +368,46 @@ CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
 OWNER_TOOLS = ("board_sections",)
 ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
 WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment",
+               "board_claim",
                "board_merge_cards", "board_split_card", "board_sections", "board_import_items")
+
+#: The statuses that mean "somebody is on this" (#R9G7).  A card in one of them with a `session`
+#: is *held*: `board_claim` refuses it for anybody else without `force`, and claiming a card
+#: already in one of them leaves its status alone — `in-progress` is the same thing on a board
+#: configured before the stage statuses (#3XZV).
+CLAIMED_STATUSES = ("executing", "in-progress")
+
+#: What a claim writes as the first line of its progress entry.  The token's first 8 characters
+#: are what the GUI draws as the link, exactly as Execute's `Executing (xxxxxxxx) · …` does.
+CLAIM_LINE = "Claimed ({short}) · working on it from a terminal pane"
+CLAIM_LINE_NO_TOKEN = "Claimed · working on it from a terminal pane"
+
+#: Said in the result when this worker has no pane token: the Switchboard worker, a test, or a
+#: GUI too old to send one.  The claim still happens; it just cannot be linked to a pane.
+NO_TOKEN_NOTE = ("This worker has no pane session token, so the card records no `session` and the "
+                 "entry carries no pane link. The claim itself stands.")
 
 
 # ------------------------------------------------------------------ small helpers
+
+def check_pane_token(value, what: str = "pane_token") -> str | None:
+    """A pane session token, or None.  The one rule both `board_comment` and `configure` use.
+
+    The token persists as a thread entry attribute, inside an HTML comment: whitespace would
+    split the attribute and `>` would close the comment early, so both are refused rather than
+    quietly rewritten, and 64 characters is the cap the protocol sets (19.10, 19.19).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise BoardToolError(f"{what} must be a string.")
+    token = value.strip()
+    if not token:
+        return None
+    if len(token) > 64 or re.search(r"[\s>]", token):
+        raise BoardToolError(f"{what} is at most 64 characters, with no whitespace or '>'.")
+    return token
+
 
 def normalize_id(value, what: str = "id") -> str:
     if not isinstance(value, str):
@@ -727,6 +782,18 @@ SEARCH_SPEC = spec(
      "path": {"type": "string", "description": "Workspace-relative directory or file to search; default '.'."},
      "glob": {"type": "string", "description": "Only files whose name matches, e.g. '*.py' or '*.cpp'."}},
     ["pattern"])
+
+
+def card_block(board: B.Board, card: B.Card) -> str:
+    """The card as one text block: front matter, body (16 KiB cap), tasks and the last 10 entries.
+
+    The *same* block `ask {cards: [...]}` sends for a `#K7Q2` reference (protocol 19.6), so a card
+    that arrives with the prompt and a card `board_claim` hands back read identically. It lives in
+    `board_protocol.seed_block`, which imports this module, so the import is made here rather than
+    at the top — there is one builder, not two.
+    """
+    from . import board_protocol                       # late: it imports this module
+    return board_protocol.seed_block(board, card)
 
 
 def card_brief(mode: str) -> str:
@@ -1113,8 +1180,16 @@ class BoardTools:
                  context: ToolContext | None = None, state_path: Path | str | None = None,
                  clock: Callable[[], float] = time.time, enforce_limits: bool = True,
                  duplicate_check: bool = True, state: str = "ready", project: str | None = None,
-                 init=None):
+                 init=None, pane_token: str | None = None):
         self.board = board
+        #: This pane's session token, from `configure {pane_token}` (protocol 19.19), or None for
+        #: the Switchboard worker and for tests.  `board_claim` writes it onto the card as
+        #: `session` and onto its progress entry as `pane_token`, so the Switchboard can draw the
+        #: claim as a link that reveals the pane doing the work.
+        self.pane_token = check_pane_token(pane_token)
+        #: The cards this pane has claimed this conversation (#R9G7), newest last.  Named in the
+        #: system prompt so the model never has to remember or retype a token.
+        self.claimed: list[str] = []
         #: "ready" or "uninitialized" (protocol 19.12).  An uninitialized board is not on disk:
         #: these tools offer `board_create_card` alone, and creating a card asks the user first.
         self.state = state if state in BOARD_STATES else "ready"
@@ -1388,6 +1463,7 @@ class BoardTools:
             handler = {"board_list": self._list, "board_read": self._read,
                        "board_create_card": self._create, "board_update_card": self._update,
                        "board_move_card": self._move, "board_comment": self._comment,
+                       "board_claim": self._claim,
                        "board_merge_cards": self._merge, "board_split_card": self._split,
                        "board_sections": self._sections,
                        "board_import_items": self._import_items}[name]
@@ -2206,9 +2282,7 @@ class BoardTools:
         # The pane an Execute hand-off landed in (#HKAP): carried in the entry's attrs so the
         # GUI can draw the entry as a link that reveals that pane. Kept to what the entry
         # marker can hold — short, no whitespace, no '>' closing it early.
-        pane_token = str(args.get("pane_token") or "").strip()
-        if len(pane_token) > 64 or re.search(r"[\s>]", pane_token):
-            raise BoardToolError("pane_token is at most 64 characters, with no whitespace or '>'.")
+        pane_token = check_pane_token(args.get("pane_token")) or ""
         size = self._thread_size(card)
         before = card.path.read_bytes()
         entry = self._append(card, text, kind=kind, **({"pane_token": pane_token} if pane_token else {}))
@@ -2218,6 +2292,105 @@ class BoardTools:
         # inbox card to discussing. Relay's own move — inside, it is another write like this one.
         self.stage_advance(card.id, "discussed")
         return {"id": card.id, "entry_id": entry.entry_id, "kind": kind, "write_id": write_id}
+
+    def _claim(self, args: dict) -> dict:
+        """`board_claim`: this terminal pane takes the card, in one call (protocol 19.19, #R9G7).
+
+        The same four writes the Switchboard's Execute button makes, in the same order —
+        `assignee: agent`, status `executing`, the card's `session` set to this pane's token, and
+        a `progress` entry carrying that token so the thread draws it as a link back to this
+        pane — plus the card itself in the result, so the turn that claimed it has the front
+        matter, body, tasks and thread tail in context from here on instead of reading it again.
+
+        A card another session already holds is the case this tool exists for: it is refused with
+        `board_claimed_elsewhere`, naming that session and how old its last thread entry is, so
+        two panes cannot start the same work without one of them seeing the other.
+        """
+        allowed = {"id", "note", "force"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_claim takes {', '.join(sorted(allowed))}.")
+        card_id = normalize_id(args.get("id"))
+        note = args.get("note")
+        if note is not None and not isinstance(note, str):
+            raise BoardToolError("note must be text: a line or two on what you are about to do.")
+        note = _text(note, "note", MAX_TEXT) if (note or "").strip() else ""
+        force = args.get("force")
+        if force is not None and not isinstance(force, bool):
+            raise BoardToolError("force must be true or false.")
+        token = self.pane_token or ""
+        card = self._card(card_id)
+        if card.type != "work":
+            raise BoardToolError(f"#{card_id} is a {card.type} card; only a work card is claimed "
+                                 "and worked. Use board_comment to say something about this one.")
+        held = str(card.front.get("session") or "").strip()
+        if held and held != token and card.status in CLAIMED_STATUSES and not bool(force):
+            entries = self.board.thread(card_id, card.private)
+            latest = max((e.entry_id for e in entries), default="")
+            raise BoardToolError(
+                f"#{card_id} is held by another session ({held[:8]}): it is "
+                f"{_column_label(card.status)} with a `session` of its own, and the last entry on "
+                f"its thread is {latest or 'none'}. That session's work is not yours to take: read "
+                "the thread, say what you are doing instead in a `progress` comment, and ask the "
+                "user before you repeat this call with force: true.",
+                code="board_claimed_elsewhere", id=card_id, session=held[:8],
+                status=card.status, latest_entry=latest)
+
+        before_bytes = card.path.read_bytes()
+        base_hash = B.file_hash(card.path)
+        old_status = card.status
+        parts: list[str] = []
+        if str(card.front.get("assignee") or "").strip() != "agent":
+            card.set("assignee", "agent")
+            parts.append("assignee agent")
+        status = old_status
+        if old_status not in CLAIMED_STATUSES:
+            status = "executing"
+            card.set("status", status)
+            rank = self._rank_for(card, status, None, None)
+            if rank is not None:
+                card.set("rank", rank)
+            parts.append(f"{_column_label(old_status)} → {_column_label(status)}")
+        # The same stamp `board_move_card` makes on the way into executing (#T71W): the pane
+        # that claims the card is the one implementing it.
+        mine = self.context.signature()
+        if mine and str(card.front.get("implemented_by") or "") != mine:
+            card.set("implemented_by", mine)
+            parts.append(f"implemented_by {mine}")
+        if token:
+            if held != token:
+                card.set("session", token)
+                parts.append(f"session {token[:8]}")
+        elif held:
+            # Forced a card away from the session that held it, with no token to put in its
+            # place: leaving the old one there would tell the next pane the card is still taken.
+            card.drop("session")
+            parts.append(f"session {held[:8]} released")
+
+        category = self.board.category_of(card.path)
+        target = B.card_target_path(self.board, card, category)
+        moved_from = card.path if target is not None else None
+        if target is not None and target.exists():
+            raise BoardToolError(f"a different file already sits at {target.relative_to(self.board.repo)}.")
+        size = self._thread_size(card)
+        self.board.save(card, base_hash=base_hash)
+        if target is not None:
+            B.move_card_file(card, target)
+        self.writes_this_turn += 1
+        summary = ", ".join(parts) or "already claimed by this pane"
+        self._append(card, f"- ✦ {self.context.actor} claimed this card · {summary}", kind="event")
+        line = CLAIM_LINE.format(short=token[:8]) if token else CLAIM_LINE_NO_TOKEN
+        text = f"{line}\n\n{note}" if note else line
+        entry = self._append(card, text, kind="progress",
+                             **({"pane_token": token} if token else {}))
+        write_id = self._record("claim", card, summary, before_bytes, size, moved_from)
+        if card_id not in self.claimed:
+            self.claimed.append(card_id)
+        card = self.board.card_by_id(card_id) or card
+        return {"claimed": True, "id": card_id, "status": status,
+                "session": token or None, "entry_id": entry.entry_id,
+                "hash": B.file_hash(card.path), "write_id": write_id, "summary": summary,
+                **({} if token else {"warning": NO_TOKEN_NOTE}),
+                "card": card_block(self.board, card)}
 
     # ---- cleanup-only writes ----------------------------------------------------
     def _merge(self, args: dict) -> dict:
@@ -2781,8 +2954,14 @@ def prompt_section(tools: "BoardTools | None") -> str:
         return UNINITIALIZED_NOTE
     tabs = ", ".join(t for t in tools._tab_map())
     folder = tools.board.root.name
+    # Your own token and the cards you hold, stated every turn (#R9G7), so the model never has
+    # to remember a session token or type one: `board_claim` fills both in from here.
+    token = tools.pane_token or ""
+    mine = (f" Your session: {token[:8]}." if token else "")
+    if tools.claimed:
+        mine += " You hold: " + ", ".join(f"#{c}" for c in tools.claimed) + "."
     header = (f"\n\nSwitchboard: this project has one ({folder}/board.yaml). Tabs: {tabs}. "
               f"Autonomy: {tools.autonomy}"
               + (" — your card writes are proposals the user accepts in the Switchboard pane."
-                 if tools.autonomy == "suggest" else "") + "\n")
+                 if tools.autonomy == "suggest" else "") + mine + "\n")
     return header + text
