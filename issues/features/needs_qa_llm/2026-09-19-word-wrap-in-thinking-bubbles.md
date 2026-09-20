@@ -6,7 +6,7 @@ assignee: agent
 implemented_by: kimi/kimi-k3
 rank: zzzzzzzzzi
 created: '2026-09-19'
-links: {plans: [], commits: [121fd9a1, b6521ebc], evidence: [docs/qa_evidence/2026-09-20-word-wrap-in-thinking-bubbles/], related: [R2WQ], github: null}
+links: {plans: [], commits: [121fd9a1, b6521ebc, 029c5ed], evidence: [docs/qa_evidence/2026-09-20-word-wrap-in-thinking-bubbles/], related: [R2WQ], github: null}
 ---
 # word wrap in thinking bubbles
 
