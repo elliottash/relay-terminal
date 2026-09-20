@@ -82,3 +82,12 @@ Revoking a device posts `/v1/revoke` and closes a live channel. No shim: devices
 today pair again. Redeployed to join.relay-terminal.ai from `ee12ac1a` (26 files match main).
 The Opus session limit cut the first two wave-2 agents off mid-work; Fable subagents took over
 under the same land.py names. Phase 2.6 (pane view) still running.
+
+<!-- relay:entry 20260921T013000Z-h1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 01:30
+Phase 2.6 landed (`8e9b2e05`): Stop in the strip while a turn runs; Recap in the pane menu; the
+worker's question drawn above the prompt box with a button per choice and Skip, a typed line
+answering it agent-bound; `owner_asks` to `full` devices with Admit/Refuse, Run/Refuse, Allow/Deny,
+raced against the desktop's Sharing pane so whichever answers first wins and the other row goes
+(`request_gone`). Redeployed to join.relay-terminal.ai from `8e9b2e05`. Phase 1 and Phase 2 are
+complete; next is the headless drive against the hosted address, then the owner's iPhone.
