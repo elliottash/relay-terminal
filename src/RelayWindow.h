@@ -6356,7 +6356,7 @@ private:
     QString tabLabelText(QWidget *page, const QStringList &titles) const {
         QString title = tabLabelFor(page, titles);
         if (const int panes = int(leavesIn(page).size()); panes > 1)
-            title += QStringLiteral("  ·  %1").arg(panes);
+            title += QStringLiteral(" (%1)").arg(panes);   // "(pane count)", owner 2026-09-20
         title += tabUsageSuffix(page);
         const QFontMetrics metrics(m_tabs->tabBar()->font());
         return metrics.elidedText(title, Qt::ElideRight, 260);
