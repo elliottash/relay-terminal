@@ -1,9 +1,9 @@
 ---
 id: 6W0Z
 type: work
-status: planned
+status: executing
 labels: [bug, performance, engine]
-assignee: null
+assignee: claude-code
 rank: m4
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
