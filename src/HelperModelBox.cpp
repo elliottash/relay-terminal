@@ -37,8 +37,12 @@ QString tierModel(const QJsonArray &presets, const QJsonObject &tiers, const QSt
     if (entry.isEmpty()) return {};
     if (tier != QStringLiteral("main")
         && entry.value(QStringLiteral("using")).toString() != tier) return {};
-    return conciseModel(presets, entry.value(QStringLiteral("preset")).toString(),
-                        entry.value(QStringLiteral("model")).toString());
+    const QString model = entry.value(QStringLiteral("model")).toString();
+    // Only the Main row goes through the concise wording, because only the pane's does
+    // (Pane::roleRowModel): the Flash and Local rows print the model id the worker resolved, and
+    // "stub · local (local)" would say local twice. The rows have to match, not merely be tidy.
+    if (tier != QStringLiteral("main")) return model;
+    return conciseModel(presets, entry.value(QStringLiteral("preset")).toString(), model);
 }
 
 QString tierNote(const QJsonObject &tiers, const QString &tier)
