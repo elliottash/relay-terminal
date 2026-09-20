@@ -1492,14 +1492,22 @@ private:
     // is the pane's own business (Pane::openModelBox); this is every other prompt box in Relay —
     // the Switchboard's composer and an open card's reply box, and the panels in Options, Actions
     // and Sessions (#PK5Q, §30.7).
+    //
+    // Which prompt box the cursor is in is asked of the **keyboard**, by walking up from the focus
+    // widget, rather than of the window's idea of which leaf is active. A live run found out why:
+    // clicking into the Switchboard's composer and pressing Alt+M dropped open the *terminal
+    // pane's* box, because the window still called the terminal pane the active leaf. The widget
+    // the key actually went to cannot be wrong about this.
     QComboBox *focusedHelperModelBox() const {
-        auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
-        if (!tool) return nullptr;
-        if (auto *board = tool->board()) return board->focusedModelBox();
-        relay::HelperChatPanel *panel = nullptr;
-        if (auto *settings = tool->settings()) panel = settings->helperPanel();
-        else if (auto *sessions = sessionsViewOf(tool)) panel = sessions->helperPanel();
-        return panel && panel->composerHasFocus() ? panel->modelBox() : nullptr;
+        for (QWidget *widget = QApplication::focusWidget(); widget != nullptr; widget = widget->parentWidget()) {
+            // dynamic_cast, not qobject_cast: nothing in this stack declares Q_OBJECT.
+            if (auto *panel = dynamic_cast<relay::HelperChatPanel *>(widget)) return panel->modelBox();
+            // The card page's reply box is not inside a panel — it is the page's own (#BRD3), and
+            // the view knows which of its two boxes the cursor is next to.
+            if (auto *tool = dynamic_cast<ToolPane *>(widget))
+                return tool->board() ? tool->board()->focusedModelBox() : nullptr;
+        }
+        return nullptr;
     }
     bool helperComposerHasFocus() const { return focusedHelperModelBox() != nullptr; }
     void openHelperModelBox() {

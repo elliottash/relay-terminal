@@ -9,16 +9,36 @@ namespace relay::helpermodel {
 
 namespace {
 
+// A model id in the words a terminal pane's box uses for it (Pane::conciseModel): the service for
+// Relay Free and for a guest, whose ids name nothing a person recognises; the model id otherwise,
+// with "· local" for a server on this machine. The rows have to *read* the same, not only mean the
+// same — a live run caught the Main row saying "stub (main)" beside the pane's "stub · local
+// (main)", which is two boxes disagreeing about one model.
+QString conciseModel(const QJsonArray &presets, const QString &presetId, const QString &model)
+{
+    for (const QJsonValue &value : presets) {
+        const QJsonObject preset = value.toObject();
+        if (preset.value(QStringLiteral("id")).toString() != presetId) continue;
+        if (preset.value(QStringLiteral("group")).toString() == QStringLiteral("guest")
+            || preset.value(QStringLiteral("hosted")).toBool() || model.isEmpty())
+            return preset.value(QStringLiteral("label")).toString();
+        return model.section(QLatin1Char('/'), -1).toLower()
+             + (preset.value(QStringLiteral("local")).toBool() ? QStringLiteral(" · local") : QString());
+    }
+    return model.section(QLatin1Char('/'), -1).toLower();
+}
+
 // The model a tier landed on right now, for its role row. A tier whose provider has no key steps
 // towards Main — its `using` says so — and then the row names the role alone, with the tier's note
 // as the row's own tooltip, exactly as a terminal pane's Local row does when nothing is served.
-QString tierModel(const QJsonObject &tiers, const QString &tier)
+QString tierModel(const QJsonArray &presets, const QJsonObject &tiers, const QString &tier)
 {
     const QJsonObject entry = tiers.value(tier).toObject();
     if (entry.isEmpty()) return {};
     if (tier != QStringLiteral("main")
         && entry.value(QStringLiteral("using")).toString() != tier) return {};
-    return entry.value(QStringLiteral("model")).toString();
+    return conciseModel(presets, entry.value(QStringLiteral("preset")).toString(),
+                        entry.value(QStringLiteral("model")).toString());
 }
 
 QString tierNote(const QJsonObject &tiers, const QString &tier)
@@ -77,7 +97,7 @@ modelrows::Context context(const State &state)
     rows.now = QDateTime::currentSecsSinceEpoch();
     if (hasLocalEndpoint(state.presets)) rows.roles << QStringLiteral("local");
     for (const QString &role : std::as_const(rows.roles)) {
-        rows.roleModel.insert(role, tierModel(state.tiers, role));
+        rows.roleModel.insert(role, tierModel(state.presets, state.tiers, role));
         rows.roleNote.insert(role, tierNote(state.tiers, role));
     }
     // The entry the Main row names — the model the helper's Main tier landed on. A terminal pane
