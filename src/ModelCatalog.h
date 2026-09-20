@@ -51,6 +51,7 @@ struct Entry {
     QHash<QString, QString> effortLabels;
     QString effortLabel(const QString &level) const { return effortLabels.value(level, level); }
     bool usable = false;     // a stored key, a local server, a runnable harness, Relay Free available
+    bool openEnded = false;  // the provider lists more than a few models (OpenRouter's live list)
     bool guest = false, local = false, hosted = false, custom = false;
     // "<label> · <provider>" — one line for a row, a status bar, a tooltip.
     QString displayName() const;
@@ -96,7 +97,7 @@ QList<Sort> allSorts();
 // What the user has said, in QSettings. Every reader tolerates an absent key.
 namespace curation {
 QStringList shownKeys();
-bool isShown(const Entry &entry);                                   // absent list → usable entries
+bool isShown(const Entry &entry);                                   // absent list → usable entries, minus an open-ended provider's long tail
 // The same answer against a key list the caller has already read. `shownKeys()` builds a
 // QSettings, which re-stats the whole XDG search path, and the catalog has hundreds of entries on
 // an OpenRouter key — asking per entry is what `shown()` below used to do (card #PPR4).

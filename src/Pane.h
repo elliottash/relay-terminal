@@ -11366,10 +11366,14 @@ private:
     // with no preset picked yet it is the model id the pane last heard, and before anything is
     // heard the row is the role's name alone. The pane_state menu uses the same text.
     QString roleRowModel(const QString &role) const {
-        QString model = role == QStringLiteral("main")
-            ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : roleModelText(role);
-        if (role == QStringLiteral("main") && model.isEmpty()) model = m_model;
-        return model;
+        if (role != QStringLiteral("main")) return roleModelText(role);
+        // The model this pane is actually on, by its catalog label — not the preset's label, which
+        // is its *default* model (owner report, 2026-09-20: the box said deepseek while the turn
+        // went to meta/muse-spark-1.3 on the same key).
+        if (const relay::models::Entry *entry = modelCatalog().find(currentEntryKey()))
+            return entry->guest ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : entry->label;
+        const QString model = conciseModel(m_currentPreset, presetLabelOf(m_currentPreset));
+        return model.isEmpty() ? m_model : model;
     }
     // The wording is relay::modelrows' (#PK5Q), so a helper agent's box says it the same way.
     QString roleRowText(const QString &role) const {

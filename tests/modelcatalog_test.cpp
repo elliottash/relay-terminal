@@ -329,6 +329,24 @@ private Q_SLOTS:
         QCOMPARE(entry->effortLabel(QStringLiteral("low")), QStringLiteral("low"));   // no label: the level itself
     }
 
+    void anOpenEndedProvidersLongTailIsHiddenUntilChecked() {
+        QJsonArray rows = presets();
+        QJsonObject big = rows.at(0).toObject();   // glm-coding, given ten models
+        QJsonArray models = big.value(QStringLiteral("models")).toArray();
+        for (int i = 0; i < 8; ++i) models << model(QStringLiteral("extra-%1").arg(i), QStringLiteral("extra %1").arg(i), QString(), {});
+        big.insert(QStringLiteral("models"), models); rows.replace(0, big);
+        const Catalog catalog = catalogFrom(rows);
+        QVERIFY(catalog.find(QStringLiteral("glm-coding|extra-3"))->openEnded);
+        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|glm-5.3"))));         // a tier row
+        QVERIFY(!curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-3"))));        // the tail
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|extra-3"));
+        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-3"))));         // named by a list
+        curation::setShown(QStringLiteral("glm-coding|extra-5"), true, catalog);
+        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-5"))));         // checked by hand
+        QVERIFY(!curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-6"))));        // the rest stays hidden
+        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("kimi-code|k3"))));               // a small provider: all in
+    }
+
     void sortRoundTrips() {
         QCOMPARE(curation::sort(), Sort::Priority);
         curation::setSort(Sort::Remaining);

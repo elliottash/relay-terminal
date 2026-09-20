@@ -166,6 +166,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
                 for (auto it = labels.begin(); it != labels.end(); ++it) entry.effortLabels.insert(it.key(), it.value().toString());
             }
             entry.usable = usable;
+            entry.openEnded = models.size() > 6;
             entry.guest = guest;
             entry.local = local;
             entry.hosted = hosted;
@@ -236,12 +237,21 @@ QList<Sort> allSorts() {
 // ----- curation --------------------------------------------------------------------------------
 
 namespace curation {
+// Whether any tier list names this entry (an open-ended provider's tail shows only then).
+bool inAnyList(const QString &key);
+
 
 QStringList shownKeys() { return list(kShown); }
 
 bool isShown(const Entry &entry, const QStringList &shown) {
-    if (shown.isEmpty()) return entry.usable;
-    return entry.usable && shown.contains(entry.key);
+    if (!entry.usable) return false;
+    if (!shown.isEmpty()) return shown.contains(entry.key);
+    // No list yet: everything a provider serves — except the long tail of an open-ended one
+    // (OpenRouter's 400-odd live rows), which stays behind the id box until checked. Its tier
+    // rows, the ids you typed and anything a tier list names are in (owner report, 2026-09-20:
+    // a stray pick landed on meta/muse-spark-1.3 while the box still said deepseek).
+    if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
+    return inAnyList(entry.key);
 }
 
 bool isShown(const Entry &entry) { return isShown(entry, shownKeys()); }
@@ -251,7 +261,7 @@ void setShown(const QString &key, bool on, const Catalog &catalog) {
     if (keys.isEmpty()) {
         // First change: write down today's default so the one un-check does not hide everything.
         for (const Entry &entry : catalog.entries)
-            if (entry.usable) keys << entry.key;
+            if (isShown(entry, QStringList())) keys << entry.key;
     }
     if (on && !keys.contains(key)) keys << key;
     if (!on) keys.removeAll(key);
@@ -465,6 +475,12 @@ void setTierEffort(const QString &tier, const QString &key, const QString &effor
     QList<TierEntry> entries = tierList(tier);
     for (TierEntry &entry : entries) if (entry.key == key) entry.effort = effort;
     setTierList(tier, entries);
+}
+bool inAnyList(const QString &key) {
+    for (const QString &tier : tierIds())
+        for (const TierEntry &entry : tierList(tier))
+            if (entry.key == key) return true;
+    return false;
 }
 QString listEffortFor(const QString &key) {
     for (const QString &tier : tierIds())

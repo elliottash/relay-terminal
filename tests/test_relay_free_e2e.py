@@ -95,7 +95,7 @@ class RelayFreeEndToEnd(unittest.TestCase):
             self.complete(self.provider(session))
         self.assertEqual(caught.exception.code, "quota_exhausted")
         self.assertIsNotNone(caught.exception.resets_at)
-        self.assertIn("Options › Models › API keys", str(caught.exception))
+        self.assertIn("Options › Models", str(caught.exception))
 
     def test_a_model_that_is_not_a_role_is_refused_by_the_gateway_not_the_upstream(self):
         self.start()
