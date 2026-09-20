@@ -1050,7 +1050,13 @@ public:
         const QList<relay::models::Entry> rows = catalog.ofPreset(m_currentPreset);
         return rows.isEmpty() ? QString() : rows.first().key;
     }
-    // Ctrl+Shift+M (agent.model), /model with no argument, and the box's "more models…" row.
+    // Alt+M (agent.modelBox): the quick pick — the model box drops open where it is.
+    void openModelBox() {
+        if (!m_modelBox) return;
+        m_modelBox->setFocus(Qt::ShortcutFocusReason);
+        m_modelBox->showPopup();
+    }
+    // Ctrl+Alt+M (agent.model), /model with no argument, and the box's "more models…" row.
     void openModelPicker() {
         relay::ModelPicker::Context context;
         context.catalog = modelCatalog();
@@ -8555,15 +8561,16 @@ public:
                 QStringLiteral("tasks in this session"));
             row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("every action, in a list you can filter"));
             row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
-            row(keys.shortcutText(QStringLiteral("agent.model")).isEmpty() ? QStringLiteral("/model")
-                                                                          : keys.shortcutText(QStringLiteral("agent.model")),
-                QStringLiteral("pick a model and reasoning level"));
+            row(keys.shortcutText(QStringLiteral("agent.modelBox")).isEmpty() ? QStringLiteral("/model")
+                                                                             : keys.shortcutText(QStringLiteral("agent.modelBox")),
+                QStringLiteral("pick a model (%1: the full picker)").arg(keys.shortcutText(QStringLiteral("agent.model")).isEmpty()
+                                                                             ? QStringLiteral("/model") : keys.shortcutText(QStringLiteral("agent.model"))));
             row(keys.shortcutText(QStringLiteral("agent.resume")).isEmpty() ? QStringLiteral("/resume")
                                                                            : keys.shortcutText(QStringLiteral("agent.resume")),
                 QStringLiteral("resume a saved session"));
             row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal"));
             row(QStringLiteral("Esc"), QStringLiteral("stop the agent or the program"));
-            // Ctrl+? is Ctrl+Shift+/ on most keyboards, so the card names every key that works
+            // Ctrl+? is Ctrl+Shift+/ on most keyboards, so the popup names every key that works
             // rather than only the first spelling (#T9ZS).
             const QStringList helpKeys = keys.shortcutTexts(QStringLiteral("help.shortcuts"));
             row(helpKeys.value(0), helpKeys.size() > 1

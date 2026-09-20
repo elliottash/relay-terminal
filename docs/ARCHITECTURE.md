@@ -798,7 +798,7 @@ Default window shortcuts:
 
 The session manager (`/resume`, `agent.resume`), titled "Sessions", is Ctrl+Shift+Y, Warp's key for
 its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
-model picker (`agent.model`, 2026-09-20: "models are more central than sessions"). The key is a
+model options (`agent.modelOptions`, Options › Models, 2026-09-20: "models are more central than sessions"; the picker is Ctrl+Alt+M, the model box Alt+M). The key is a
 **toggle** (owner, 2026-09-20): pressed again with the manager focused it closes the pane, as Esc
 does; pressed while the focus is elsewhere it brings the open manager forward instead, so the key
 never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). The slash
@@ -1803,7 +1803,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   their own provider fails — off by default, per the owner: "you wouldn't want to start doing
   gpt 6 calls at PAYG"), custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
-  (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Shift+M
+  (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Alt+M
   (`agent.model`), `/model` alone and the box's "more models…": filter, sort menu, columns model ·
   provider · reasoning · intelligence · tok/s · left, the reasoning buttons for the highlighted
   row, favorites / recent sections that give way to a flat list when you type. Every pick goes
@@ -2949,7 +2949,7 @@ of the platform and of the engine itself.
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/ModelSettings.*` | the API-keys and model-roles modals (roles: "per-job models (advanced)" on Options › Models) |
 | `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |
-| `src/ModelPicker.*` | the model picker dialog (Ctrl+Shift+M, `/model`) |
+| `src/ModelPicker.*` | the model picker dialog (Ctrl+Alt+M, `/model`; Alt+M drops the model box open, Ctrl+Shift+M opens Options › Models) |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |

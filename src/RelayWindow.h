@@ -1133,7 +1133,9 @@ private:
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
-        else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Shift+M, /model
+        else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Alt+M, /model
+        else if (id == QStringLiteral("agent.modelBox")) pane->openModelBox();          // Alt+M
+        else if (id == QStringLiteral("agent.modelOptions")) openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));   // Ctrl+Shift+M, /models
         else if (id == QStringLiteral("agent.localAgent")) pane->toggleLocalAgent();   // /local
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
@@ -1951,7 +1953,7 @@ private:
                                       "it go to that provider and never touch Relay's server. Relay Free, the included "
                                       "allowance, is the one exception: its prompts go through Relay's hosted service. "
                                       "Claude Code and Codex run with your own login. /models opens this page; "
-                                      "Ctrl+Shift+M and /model open the picker.");
+                                      "Ctrl+Shift+M opens it; Alt+M drops the model box open; Ctrl+Alt+M and /model open the picker.");
         Pane *pane = m_active;
         QSettings settings;
         const QJsonArray presets = pane ? pane->allPresets() : QJsonArray();

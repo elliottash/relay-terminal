@@ -245,7 +245,7 @@ private:
         // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal
         // must not swallow it (actsInsidePrograms) — the moment a bell entry matters is exactly
         // when the user is heads-down somewhere else. No letter is left: every Ctrl+Shift letter
-        // is bound (M is agent.model, the model picker, since 2026-09-20) or
+        // is bound (M is agent.modelOptions, Options › Models, since 2026-09-20) or
         // reserved (C/V copy and paste, Q quits other terminals, U is the input method's Unicode
         // entry, D/P/Y are claimed in the preset tables), so the digit counts the walk: 1, 2, 3…
         // Free in the default table and all four presets.
@@ -324,9 +324,15 @@ private:
         // the average session is not worth claiming (the same reasoning as agent.localAgent).
         add("app.update", "window", "Update: download and install the latest Relay, then restart", {});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
-        // M for models (owner, 2026-09-20: "models are more central than sessions"): the model picker
-        // with its filter, sort and reasoning level — the same thing /model opens.
-        add("agent.model", "agent", "Models: pick this pane's model and reasoning level (/model)", {QStringLiteral("Ctrl+Shift+M")});
+        // M for models (owner, 2026-09-20: "models are more central than sessions"), three surfaces on
+        // three chords: Alt+M drops the pane's model box open (the quick pick), Ctrl+Alt+M opens
+        // the picker dialog with its filter, sort and reasoning level (what /model opens), and
+        // Ctrl+Shift+M opens the model options — Options › Models (what /models opens). The two
+        // Alt chords step aside for a program that owns the keyboard, like Alt+I; the Ctrl+Shift
+        // one does not, so the options stay reachable from inside a full-screen program.
+        add("agent.modelBox", "agent", "Models: drop this pane's model box open (the quick pick)", {QStringLiteral("Alt+M")});
+        add("agent.model", "agent", "Models: the picker — every model with filter, sort and reasoning level (/model)", {QStringLiteral("Ctrl+Alt+M")});
+        add("agent.modelOptions", "agent", "Model options: Options › Models — providers, which models the picker shows, their order (/models)", {QStringLiteral("Ctrl+Shift+M")});
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
         // claiming for a switch most panes never make (card #JH22).
         add("agent.localAgent", "agent", "Switch this pane between the Main agent and the Local agent (a model served on this machine)", {});

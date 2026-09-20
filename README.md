@@ -88,7 +88,8 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Ctrl+Shift+M | Models: pick this pane's model and reasoning level (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the full picker with filter, sort and reasoning level (`/model`) |
+| Ctrl+Shift+M | Model options: Options › Models (`/models`) |
 | Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
 | Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
 | Ctrl+T, Ctrl+N | New tab, new window |
@@ -195,7 +196,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 - **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
   (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
   limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the picker, also
-  Ctrl+Shift+M), `/models` (Options › Models), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
+  Ctrl+Alt+M), `/models` (Options › Models, also Ctrl+Shift+M), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
@@ -224,7 +225,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **The model picker.** Ctrl+Shift+M, `/model`, or **more models…** at the bottom of the pane's
+- **The model picker.** Ctrl+Alt+M, `/model`, or **more models…** at the bottom of the pane's
   model box opens one list of every model you can use — one row per model, not per provider, in
   lower case — with a filter that matches words of the model, id or provider, a **sort** menu
   (priority, a to z, intelligence, speed, most used, subscription left), the reasoning level chosen
