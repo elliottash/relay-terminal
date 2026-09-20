@@ -111,6 +111,17 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # whichever full name the running session reported (29.3).
 MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
 
+# The key test's one turn (keytest, protocol 13.8 for a guest): `--tools ""` is how `claude -p`
+# runs with no built-in tool at all, so the probe can neither read nor run anything, whatever the
+# prompt says. `for_probe()` is the constructor that adds it.
+PROBE_FLAGS = ("--tools", "")
+
+# `claude auth status` (2.1.278): JSON by default (`--json` is the documented default, `--text`
+# the other), with `loggedIn` as the one field this reads — `{"loggedIn": true, "authMethod":
+# "claude.ai", "apiProvider": "firstParty", "email": …, "subscriptionType": "max", …}`. It is
+# a free local read of the credential store, no network and no model turn.
+LOGIN_STATUS_ARGS = ("auth", "status", "--json")
+
 # One posture, one set of flags (guest_harness.PERMISSIONS).
 PERMISSION_FLAGS = {
     "bypass": ("--permission-mode", "bypassPermissions", "--dangerously-skip-permissions"),
@@ -158,6 +169,26 @@ def _spawn(cmd: list[str], cwd: str, env: dict):
     return subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, bufsize=1)
+
+
+def parse_login_status(returncode: int, stdout: str, stderr: str = "") -> bool:
+    """Whether `claude auth status --json` says the CLI is signed in.
+
+    The JSON's `loggedIn` is the answer when the output parses; a CLI that printed something else
+    (an older one answering in text) is read by its exit status, which is 0 only when signed in.
+    """
+    text = (stdout or "").strip()
+    if text:
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("loggedIn"), bool):
+            return data["loggedIn"]
+        lowered = (text + "\n" + (stderr or "")).lower()
+        if "not logged in" in lowered:
+            return False
+    return returncode == 0
 
 
 # ----- diffs -------------------------------------------------------------------------------
@@ -240,6 +271,13 @@ class ClaudeHarness:
     """
 
     guest = GUEST
+
+    @classmethod
+    def for_probe(cls, **kwargs) -> "ClaudeHarness":
+        """The harness the key test drives for its one turn: the same process, started with no
+        built-in tools (PROBE_FLAGS), so the prompt is the only thing it can answer with."""
+        extra = list(kwargs.pop("extra_args", None) or ()) + list(PROBE_FLAGS)
+        return cls(extra_args=extra, **kwargs)
 
     def __init__(self, *, settings: str | None = None, binary: str = BINARY, spawn=None,
                  extra_args: list[str] | None = None):

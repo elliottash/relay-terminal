@@ -56,10 +56,52 @@ class PresetTests(unittest.TestCase):
     def setUp(self):
         ghp._detected = None
         ghp._adapter_cache.clear()
+        ghp.reset_catalog()
         self.addCleanup(ghp._adapter_cache.clear)
+        self.addCleanup(ghp.reset_catalog)
+        # No status command and no catalogue read runs from these tests.
+        patcher = mock.patch.object(ghp, "_read_login_status", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         ghp._detected = None
+
+    def test_a_key_test_teaches_the_row_what_the_cli_proved(self):
+        # `note_login` is the one other way the worker learns the answer: a guest key test's turn
+        # ran (signed in) or was refused (signed out), and the row says so without a rescan.
+        with mock.patch.object(ghp, "installations", return_value={
+                "claude": {"installed": True, "binary": "/usr/bin/claude", "version": ""},
+                "codex": {"installed": True, "binary": "/usr/bin/codex", "version": ""}}), \
+             mock.patch.object(ghp, "_read_codex_catalog", return_value=[]):
+            ghp.note_login("claude", True)
+            ghp.note_login("codex", False)
+            ghp.note_login("gemini", True)                 # not a guest: nothing to record
+            rows = {row["id"]: row for row in ghp.preset_rows()}
+            self.assertTrue(ghp.catalog_ready.wait(5.0))
+        self.assertIs(rows["guest:claude"]["logged_in"], True)
+        self.assertIs(rows["guest:codex"]["logged_in"], False)
+        self.assertIsNone(ghp.login_status("gemini"))
+
+    def test_the_probe_harness_is_the_adapters_own_variant(self):
+        class Plain:
+            made = []
+
+            def __init__(self):
+                Plain.made.append("plain")
+
+        class WithProbe(Plain):
+            @classmethod
+            def for_probe(cls):
+                Plain.made.append("probe")
+                return cls()
+
+        with mock.patch.object(ghp, "_load_adapter", return_value=WithProbe):
+            ghp.make_harness("claude", probe=True)
+            ghp.make_harness("claude")
+        with mock.patch.object(ghp, "_load_adapter", return_value=Plain):
+            ghp.make_harness("codex", probe=True)          # no variant: the plain one
+        self.assertEqual(Plain.made, ["probe", "plain", "plain", "plain"])
 
     def test_preset_ids_and_config(self):
         self.assertEqual(ghp.preset_guest_id("guest:claude"), "claude")
@@ -111,6 +153,10 @@ class PresetTests(unittest.TestCase):
         self.assertEqual((claude["group"], claude["key_source"], claude["model"]),
                          ("guest", "guest", ""))
         self.assertFalse(claude["has_stored_key"] or claude["local"] or claude["hosted"])
+        # Whether the CLI is signed in is null until the background scan has asked it, and stays
+        # null for a guest that is not installed (there is no CLI to ask).
+        self.assertIn("logged_in", claude)
+        self.assertIsNone(rows["guest:codex"]["logged_in"])
         # The guest's own levels and its own models, so Options can offer both (owner 2026-09-19).
         self.assertEqual(claude["efforts"], ["low", "medium", "high", "xhigh", "max"])
         self.assertEqual(claude["effort_note"], "")
@@ -732,6 +778,11 @@ class CatalogueTests(unittest.TestCase):
         ghp._detected = None
         self.addCleanup(ghp.reset_catalog)
         self.addCleanup(setattr, ghp, "_detected", None)
+        # The login status commands share the scan; here they answer nothing, so the catalogue
+        # is the only thing under test.
+        patcher = mock.patch.object(ghp, "_read_login_status", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _installed(self, binary="/usr/bin/codex"):
         return mock.patch.object(ghp, "installations", return_value={
@@ -838,6 +889,10 @@ class WorkerProtocolTests(unittest.TestCase):
                  mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True), \
                  mock.patch.object(ghp, "_read_codex_catalog", return_value=[]):
                 import worker
+                # main() registers the worker's own "the scan landed" listener (a `presets`
+                # push to stdout) and nothing unregisters it; here it would fire on every
+                # later test's scan, printing the presets into the test run.
+                self.addCleanup(ghp.set_catalog_listener, None)
                 worker.main()
         return [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
 

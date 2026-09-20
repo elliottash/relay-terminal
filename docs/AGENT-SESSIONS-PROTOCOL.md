@@ -5100,10 +5100,29 @@ message kinds, and record the flags they use against the versions they were veri
 **A guest is a preset.** The worker's `presets` answer (13.7) carries one row per guest the
 registry knows, `{id: "guest:<id>", label: "<display name>", guest: "<id>", harness: <bool>,
 installed: <bool>, binary, version, group: "guest", has_stored_key: false, key_source: "guest",
-model: "", base_url: "harness://<id>", local: false, hosted: false, efforts: [], limits?}`.
-`harness` is true when the adapter exists and the binary is installed; a row with
+model: "", base_url: "harness://<id>", local: false, hosted: false, efforts: [], logged_in,
+limits?}`. `harness` is true when the adapter exists and the binary is installed; a row with
 `harness: false` is what the GUI falls back to Tier B for (29.4). `limits` is present once the
 guest has reported its subscription usage to any pane of this worker (see **Usage limits** below).
+
+**Login, and the Test button (2026-09-20).** `logged_in` is `true`/`false` when the guest's CLI
+has said whether it is signed in, and `null` until it has — always `null` for a guest that is not
+installed. The worker asks once per process, on the same background thread that reads codex's
+catalogue (never on the protocol thread, so the first `presets` answer carries `null` and the
+re-emitted one after the scan carries the answer): `claude auth status --json` (2.1.278, JSON with
+`loggedIn`) and `codex login status` (0.155.1, `Logged in using …` and exit 0, or `Not logged in`
+and exit 1). Options › Models' "test" on a guest row is the ordinary `test_key {preset:
+"guest:<id>"}` (13.8): a guest that is not installed is answered at once with `key_tested {ok:
+false, error: "claude is not installed: no `claude` on PATH"}`; otherwise, on a thread, the worker
+runs the status command (a signed-out CLI is `ok: false, error: "<id> is not logged in: change
+login first"` and nothing is spent) and then **one** minimal headless turn through the guest's own
+harness adapter — the same `claude -p … --tools ""` / `codex app-server` a pane uses, started
+read-only with no tools in an empty scratch directory, asked to reply "ok" — with a 60 s budget.
+The answer is `key_tested {preset: "guest:<id>", guest, ok: true, model: "<the model the guest
+answered on>", text: "ok", reply_chars, elapsed_ms}` or `{ok: false, model, error: "<one line:
+not logged in / timed out after 60 s / the guest's own first line>"}`; the guest's output never
+travels beyond that one trimmed line. Whichever way it went, the row's `logged_in` is updated from
+what the test proved, so a `presets` after "change login" and "test" is current without a rescan.
 
 **Configuring one.** `configure {preset: "guest:claude", guest: {model?, resume?, fork?,
 permissions?}}` (and `set_model {preset: "guest:…", guest: {…}}` from any other preset) builds a

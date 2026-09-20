@@ -238,12 +238,21 @@ _CODEX_FALLBACK_MODELS = (
 _catalog: dict[str, list[dict]] = {}
 _catalog_started: set = set()
 _catalog_lock = threading.Lock()
-# Set once the codex scan has finished, whatever it found. Tests wait on it; nothing else does.
+# Set once the background scan has finished, whatever it found. Tests wait on it; nothing else does.
 catalog_ready = threading.Event()
-# The worker's "the catalogue landed" hook, called from the scan thread once a scan has finished —
-# it re-emits `presets` so the GUI's cached copy (Options' Codex row) gets the list without a
-# re-ask. None until the worker registers one, and never called on the no-binary early path.
+# The worker's "the scan landed" hook, called from the scan thread once it has finished — it
+# re-emits `presets` so the GUI's cached copy (Options' guest rows) gets the codex list and the
+# login answers without a re-ask. None until the worker registers one, and never called when
+# there was nothing to scan (no guest installed).
 _catalog_listener = None
+
+# Whether each guest's CLI is signed in (`logged_in` on its row, 29.3): `claude auth status` /
+# `codex login status`, read **once per worker process on the same background scan** as the
+# codex catalogue — each is a subprocess of a second or so, and `presets` is answered on the
+# protocol thread, which may never wait for one. None until the scan lands, and refreshed by a
+# guest key test (`note_login`), which is the one other moment the worker learns the answer.
+CLI_STATUS_TIMEOUT = 15.0
+_login: dict[str, bool | None] = {}
 
 
 def set_catalog_listener(callback) -> None:
@@ -262,45 +271,100 @@ def _read_codex_catalog(binary: str) -> list[dict]:
     return catalog_rows(json.loads(out.stdout).get("models") or [])
 
 
-def start_catalog_scan(guest_id: str = "codex") -> None:
-    """Read this guest's catalogue behind the request, once per worker process. Never blocks."""
-    if guest_id != "codex":
+def _login_status_args(guest_id: str) -> tuple | None:
+    """The status command's arguments (after the binary), from the adapter that knows its CLI."""
+    module_name = _ADAPTERS.get(guest_id, ("", ""))[0]
+    try:
+        module = importlib.import_module(module_name) if module_name else None
+    except Exception:                                   # half-written adapter: no answer, not a crash
+        return None
+    args = getattr(module, "LOGIN_STATUS_ARGS", None)
+    return tuple(args) if args else None
+
+
+def _read_login_status(guest_id: str, binary: str) -> bool | None:
+    """Run the guest's status command and read it. The seam tests replace (as with the catalogue);
+    None when this guest's CLI has no status command Relay knows, or the run itself failed."""
+    args = _login_status_args(guest_id)
+    if args is None:
+        return None
+    module = importlib.import_module(_ADAPTERS[guest_id][0])
+    out = subprocess.run([binary, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                         timeout=CLI_STATUS_TIMEOUT, check=False)
+    return bool(module.parse_login_status(out.returncode, out.stdout or "", out.stderr or ""))
+
+
+def login_status(guest_id: str) -> bool | None:
+    """`logged_in` for a guest's row: True/False once known, None until the scan has said."""
+    with _catalog_lock:
+        return _login.get(guest_id)
+
+
+def note_login(guest_id: str, logged_in: bool | None) -> None:
+    """Record what a guest just proved about its login (a key test's turn ran, or it was refused
+    for not being signed in), so the rows say so without a second status command."""
+    if guest_id not in HARNESS_GUESTS or logged_in is None:
         return
     with _catalog_lock:
-        if guest_id in _catalog_started:
+        _login[guest_id] = bool(logged_in)
+
+
+def start_catalog_scan(guest_id: str = "codex") -> None:
+    """Start the one background scan of this worker process, if it has not started: each
+    installed guest's login status, then codex's catalogue. Never blocks, whichever guest asks.
+
+    `guest_id` is kept for the callers that name codex; the scan is the same one either way.
+    """
+    with _catalog_lock:
+        if "scan" in _catalog_started:
             return
-        _catalog_started.add(guest_id)
-    binary = (installations().get(guest_id) or {}).get("binary") or ""
-    if not binary:
+        _catalog_started.add("scan")
+    found = installations()
+    binaries = {gid: (found.get(gid) or {}).get("binary") or "" for gid in HARNESS_GUESTS}
+    if not any(binaries.values()):
         with _catalog_lock:
-            _catalog[guest_id] = []
+            _catalog["codex"] = []
         catalog_ready.set()
         return
 
     def scan():
+        for gid, binary in binaries.items():
+            if not binary:
+                continue
+            status = None
+            try:
+                status = _read_login_status(gid, binary)
+            except Exception as exc:    # a CLI that cannot be asked: the row stays "unknown"
+                _log.debug("%s login status could not be read: %s", gid, exc)
+            with _catalog_lock:
+                # A key test that finished while the scan ran has the fresher proof; it wins.
+                _login.setdefault(gid, status)
         rows: list[dict] = []
-        try:
-            rows = _read_codex_catalog(binary)
-        except Exception as exc:     # a codex that cannot be asked means the fallback menu below
-            _log.debug("codex catalogue could not be read: %s", exc)
+        if binaries["codex"]:
+            try:
+                rows = _read_codex_catalog(binaries["codex"])
+            except Exception as exc:  # a codex that cannot be asked means the fallback menu below
+                _log.debug("codex catalogue could not be read: %s", exc)
         with _catalog_lock:
-            _catalog[guest_id] = rows
+            _catalog["codex"] = rows
         catalog_ready.set()
         listener = _catalog_listener
         if listener is not None:
             try:
                 listener()          # the worker pushes a fresh `presets` now that there is a list
             except Exception:                                          # pragma: no cover
-                _log.debug("codex catalogue listener failed", exc_info=True)
+                _log.debug("guest scan listener failed", exc_info=True)
 
-    threading.Thread(target=scan, name="relay-codex-models", daemon=True).start()
+    threading.Thread(target=scan, name="relay-guest-scan", daemon=True).start()
 
 
 def reset_catalog() -> None:
-    """Forget the catalogue and the fact that it was read (tests, and a `presets` refresh)."""
+    """Forget the catalogue, the login answers and the fact that they were read (tests, and a
+    `presets` refresh)."""
     with _catalog_lock:
         _catalog.clear()
         _catalog_started.clear()
+        _login.clear()
     catalog_ready.clear()
 
 
@@ -346,6 +410,7 @@ def preset_rows() -> list[dict]:
     """One `presets` row per guest the registry knows (29.3). `harness` is what the GUI decides by:
     true means picking the row configures this pane's agent, false means the Tier B launch."""
     found = installations()
+    start_catalog_scan()             # login status for every installed guest, then codex's list
     rows = []
     for guest_id in HARNESS_GUESTS:
         state = found.get(guest_id) or {"installed": False, "binary": "", "version": ""}
@@ -355,6 +420,9 @@ def preset_rows() -> list[dict]:
                      "harness": bool(state["installed"] and adapter_available(guest_id)),
                      "installed": state["installed"], "binary": state["binary"],
                      "version": state["version"], "group": "guest",
+                     # Whether the CLI is signed in: null until the background scan has asked
+                     # it, and always null for a guest that is not installed (29.3).
+                     "logged_in": login_status(guest_id) if state["installed"] else None,
                      "has_stored_key": False, "key_source": "guest",
                      "model": "", "base_url": base_url(guest_id),
                      "local": False, "hosted": False,
@@ -409,15 +477,18 @@ def usage_limits_event(guest_id: str, data: dict) -> dict:
 # ----- starting one ------------------------------------------------------------------------------
 
 
-def make_harness(guest_id: str):
+def make_harness(guest_id: str, probe: bool = False):
     """The adapter instance for a guest. The single seam tests replace, and the only place either
-    adapter module is imported."""
+    adapter module is imported. `probe` asks for the adapter's key-test variant (`for_probe()`:
+    claude with no tools), for keytest's one turn."""
     if guest_id not in _ADAPTERS:
         raise HarnessNotAvailable(f"Relay has no harness for {guest_id!r}.")
     factory = _load_adapter(guest_id)
     if factory is None:
         raise HarnessNotAvailable(
             f"{guest.spec(guest_id).name}'s harness is not available in this build of Relay.")
+    if probe and callable(getattr(factory, "for_probe", None)):
+        return factory.for_probe()
     return factory()
 
 

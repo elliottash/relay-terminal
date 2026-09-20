@@ -1133,5 +1133,23 @@ class ApprovalDetail(unittest.TestCase):
             "item/commandExecution/requestApproval", {"command": ["rm", "-rf", "build"]}, {}))
 
 
+class LoginStatusTest(unittest.TestCase):
+    """`codex login status` (codex-cli 0.155.1), as the worker's background scan reads it (29.3)."""
+
+    def test_the_logged_in_line_and_exit_0(self):
+        self.assertIs(gh.parse_login_status(0, "Logged in using ChatGPT\n"), True)
+        self.assertIs(gh.parse_login_status(0, "Logged in using an API key - sk-***abcd\n"), True)
+
+    def test_not_logged_in_is_stderr_and_exit_1(self):
+        self.assertIs(gh.parse_login_status(1, "", "Not logged in\n"), False)
+        # A status that cannot be read is not one to launch a turn on.
+        self.assertIs(gh.parse_login_status(0, ""), False)
+        self.assertIs(gh.parse_login_status(127, "", "codex: command not found\n"), False)
+
+    def test_the_command_and_the_probe(self):
+        self.assertEqual(gh.LOGIN_STATUS_ARGS, ("login", "status"))
+        self.assertIsInstance(gh.CodexHarness.for_probe(codex_path="codex"), gh.CodexHarness)
+
+
 if __name__ == "__main__":
     unittest.main()

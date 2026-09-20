@@ -108,6 +108,11 @@ PERMISSION_MODES = {
     "deny": ("on-request", "read-only"),
 }
 
+# `codex login status` (codex-cli 0.155.1): one line on stdout and exit 0 when signed in —
+# `Logged in using ChatGPT`, or `Logged in using an API key - …` — and `Not logged in` on stderr
+# with exit 1 otherwise. A local read of `~/.codex/auth.json`; nothing is fetched.
+LOGIN_STATUS_ARGS = ("login", "status")
+
 # The config key `thread/start`'s free-form `config` map takes for the reasoning effort — the one
 # `codex -c model_reasoning_effort="high"` sets on the TUI.
 EFFORT_CONFIG_KEY = "model_reasoning_effort"
@@ -179,6 +184,13 @@ class CodexHarness:
     """One `codex app-server` process for one pane. Matches `guest_harness.Harness`."""
 
     guest = "codex"
+
+    @classmethod
+    def for_probe(cls, **kwargs) -> "CodexHarness":
+        """The harness the key test drives for its one turn. Codex has no "no tools" switch; the
+        test starts it with `permissions="deny"` (read-only sandbox, every ask refused), which is
+        as far as its own posture table goes."""
+        return cls(**kwargs)
 
     def __init__(self, *, codex_path: str | None = None, spawn=None,
                  client_version: str | None = None, request_timeout: float = 120.0,
@@ -463,6 +475,19 @@ class CodexHarness:
                 proc.kill()
             except Exception:                                             # pragma: no cover
                 pass
+        # The readers end on the pipes' EOF; only then may the streams be closed, or a descriptor
+        # is reused under a thread still reading it. A reader still alive keeps its pipe.
+        readers = [t for t in (self._reader, self._stderr_thread) if t is not None]
+        for reader in readers:
+            if reader is not threading.current_thread():
+                reader.join(self._close_timeout)
+        if not any(r.is_alive() for r in readers if r is not threading.current_thread()):
+            for stream in (getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
+                if stream is not None and not getattr(stream, "closed", True):
+                    try:
+                        stream.close()
+                    except Exception:                                     # pragma: no cover
+                        pass
         self._fail_pending(HarnessError("the codex harness was closed."))
 
     @property
@@ -1153,6 +1178,16 @@ def _spawn_codex(argv: list[str], cwd: str):
     return subprocess.Popen(argv, cwd=cwd or None, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1,
                             env=dict(os.environ))
+
+
+def parse_login_status(returncode: int, stdout: str, stderr: str = "") -> bool:
+    """Whether `codex login status` says the CLI is signed in: the `Logged in …` line and exit 0.
+    `Not logged in` (stderr, exit 1) and anything unrecognised are both "no", because a status
+    that cannot be read is not one to launch a turn on."""
+    text = ((stdout or "") + "\n" + (stderr or "")).lower()
+    if "not logged in" in text:
+        return False
+    return returncode == 0 and "logged in" in text
 
 
 def _short(text: str, limit: int = 160) -> str:

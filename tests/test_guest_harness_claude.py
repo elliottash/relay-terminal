@@ -1261,5 +1261,33 @@ class ContractTest(unittest.TestCase):
         harness.close()
 
 
+class LoginStatusTest(unittest.TestCase):
+    """`claude auth status --json` (2.1.278), as the worker's background scan reads it (29.3)."""
+
+    SIGNED_IN = json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty",
+                            "analyticsDisabled": False, "email": "u@example.com",
+                            "subscriptionType": "max"}, indent=2)
+
+    def test_the_json_field_is_the_answer(self):
+        self.assertIs(gh.parse_login_status(0, self.SIGNED_IN), True)
+        self.assertIs(gh.parse_login_status(1, self.SIGNED_IN.replace("true", "false", 1)), False)
+        # The field wins over the exit status either way.
+        self.assertIs(gh.parse_login_status(1, self.SIGNED_IN), True)
+        self.assertIs(gh.parse_login_status(0, '{"loggedIn": false}'), False)
+
+    def test_text_output_falls_back_to_the_exit_status(self):
+        self.assertIs(gh.parse_login_status(0, "Logged in as u@example.com\n"), True)
+        self.assertIs(gh.parse_login_status(1, "", "Not logged in\n"), False)
+        self.assertIs(gh.parse_login_status(0, "Not logged in. Run claude auth login.\n"), False)
+        self.assertIs(gh.parse_login_status(127, ""), False)
+
+    def test_the_command_and_the_probe_flags(self):
+        self.assertEqual(gh.LOGIN_STATUS_ARGS, ("auth", "status", "--json"))
+        harness = gh.ClaudeHarness.for_probe(spawn=Spawner(), binary="claude")
+        argv = harness._argv(model=None, session_id="s", resume=None, fork=False,
+                             permissions="deny")
+        self.assertEqual(argv[-2:], ["--tools", ""])       # no built-in tool for the key test
+
+
 if __name__ == "__main__":
     unittest.main()
