@@ -1,0 +1,10 @@
+Worker tells a resumed pane its turn was left open (#SXF1)
+
+`conv_index.turn_left_open(data)` factors the pure cut-off predicate out of
+`session_unfinished` — the last checkpoint lacks `ended`, in a session that
+carries the field at all — and `Agent.resume` reports it as
+`state_loaded {turn_open}` so a restored pane knows it may offer Continue.
+Protocol §5 and the event list document the field; tests cover the predicate,
+the finished/legacy false cases, and the resume event.
+
+Implemented-By: anthropic/claude-opus-5

@@ -7,7 +7,7 @@ assignee: agent
 implemented_by: claude-opus-4-5
 rank: zzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [86440a6], evidence: [docs/qa_evidence/2026-09-19-put-shortcuts-in-parentheses-in-switchboard/], related: [], github: null}
+links: {commits: [86440a6, b4f9f7e3, 93a3c69a], evidence: [docs/qa_evidence/2026-09-19-put-shortcuts-in-parentheses-in-switchboard/], github: null, plans: [], related: []}
 ---
 # put shortcuts in parentheses in switchboard
 

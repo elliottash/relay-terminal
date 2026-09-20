@@ -43,3 +43,28 @@ follows the palette; it can stay as it is.
 Watch: a role is per *row*, so an ink that changes mid-row (a tool line whose stats are dim) needs
 either a second role or to keep its written colour. `MarkdownAnsi` is indexed throughout and is not
 affected.
+**Checked for staleness (2026-09-19): still live, but the cheap fix has moved.**
+
+Re-verified at HEAD: `inkCode` writes 24-bit RGB for every ink but `Ask` (`src/Pane.h:11202`
+`\x1b[1;33m`; `:11211` and `:11221` `38;2`), and only two row roles exist
+(`engine/core/CellTypes.h:61`, bits 4 and 5), so a tool line, note, recap or diff already in the
+grid keeps the colours of the theme it printed under. Two things have landed since this was
+written, and both change the shape of the fix:
+
+- **#R2WQ prose blocks.** Every block `printInline` prints is now an OSC 8 `relay://prose/…` run
+  whose logical lines are handed to the engine as `FoldLine` spans carrying an *SGR index*
+  (`engine/view/ProseSpans.h`, `FoldLayer::Cell::fgPacked`), which `paintProseRow` resolves from
+  the theme at paint time (`docs/ENGINE.md`, "Prose blocks"). The layer only takes the rows over
+  while the pane's width differs from the print width, and nothing re-hands the blocks on a theme
+  switch (`setProseBlock` has one call site, `src/Pane.h:11383`), so at the printed width the old
+  colours still show.
+- **`MarkdownAnsi` is the precedent for the cheaper route** (`src/MarkdownAnsi.h`): its palette is
+  indexed throughout — "an absolute colour is burnt into the scrollback … indexed colours are
+  resolved by the engine at paint time" — which is why agent prose already follows a theme switch.
+  Printing the other inks with the palette index each one corresponds to would fix them with no
+  engine change and no new bits; a theme switch would still need the prose blocks re-handed (or
+  the replacement forced) for the re-wrapped case.
+
+So the role bits are now the expensive option: `relay_marks` is 8 bits with two free (6, 7), and
+the per-row rule still bites (a tool line whose stats are dim changes ink mid-row). Note that
+`Ink::Ask` — the question cards in the acceptance line — already follows the palette.

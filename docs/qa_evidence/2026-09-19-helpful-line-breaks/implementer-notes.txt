@@ -1,70 +1,82 @@
 --- 01-walk (body)
-To run a command as administrator (user "root"), use "sudo <command>".
+To run a command as administrator (user "“root"), use “sudo <commanda>".
 See "man sudo root" for details.
+
 ~/project $
-+ walk through the files
+
++ through the files
+
 » stub
-Let me look at the two files first, then list the directory.
-» read 2 files - 15 lines
->» ran ls -la - 5 lines - exit 0
-The listing is what I expected. alpha.py sets SMALL = 1; the edit bumps it and adds a second constant.
-» edited alpha.py - +2 -1
-@@ -1,2 +1,3 @@
--SMALL = 1
-+SMALL = 2
-+EXTRA = 3
-keep = True
-Done. alpha.py now sets SMALL to 2 and defines EXTRA.
-+ 4 tool calls - 4s (Ctrl+click)
+
+Done.
 --- 02-second (body)
-To run a command as administrator (user "root"), use "sudo <command>".
+To run a command as administrator (user "“root"), use “sudo <commanda>".
 See "man sudo root" for details.
+
 ~/project $
-+ walk through the files
+
++ through the files
+
 » stub
-Let me look at the two files first, then list the directory.
-» read 2 files - 15 lines
->» ran ls -la - 5 lines - exit 0
-The listing is what I expected. alpha.py sets SMALL = 1; the edit bumps it and adds a second constant.
-» edited alpha.py - +2 -1
 
-@@ -1,2 +1,3 @@
+Done.
 
--SMALL = 1
-
-+SMALL = 2
-
-+EXTRA = 3
-
-keep = True
-Done. alpha.py now sets SMALL to 2 and defines EXTRA.
-+ 4 tool calls - 4s (Ctrl+click)
 + second prompt, no tools
+
 » stub
+
 Done.
 --- 03-tools (body)
+To run a command as administrator (user "“root"), use “sudo <commanda>".
+See "man sudo root" for details.
+
+~/project $
+
++ through the files
+
 » stub
-Let me look at the two files first, then list the directory.
-» read 2 files - 15 lines
->» ran ls -la - 5 lines - exit 0
-The listing is what I expected. alpha.py sets SMALL = 1; the edit bumps it and adds a second constant.
-» edited alpha.py - +2 -1
 
-@@ -1,2 +1,3 @@
-
--SMALL = 1
-
-+SMALL = 2
-
-+EXTRA = 3
-
-keep = True
-Done. alpha.py now sets SMALL to 2 and defines EXTRA.
-+ 4 tool calls - 4s (Ctrl+click)
-+ second prompt, no tools
-» stub
 Done.
-+ tools first please
+
++ second prompt, no tools
+
 » stub
+
+Done.
+
++ tools first please
+
+» stub
+
 » ran echo hello from the stub - 1 line - exit 0
 Done: the command printed one line.
+
++ 1 tool call + 1s (Ctrl+click)
+--- 04-recap (body)
+To run a command as administrator (user "“root"), use “sudo <commanda>".
+See "man sudo root" for details.
+
+~/project $
+
++ through the files
+
+» stub
+
+Done.
+
++ second prompt, no tools
+
+» stub
+
+Done.
+
++ tools first please
+
+» stub
+
+» ran echo hello from the stub - 1 line - exit 0
+Done: the command printed one line.
+
++ 1 tool call + 1s (Ctrl+click)
+
+Recap - 18:45 + 18:46 - <1m

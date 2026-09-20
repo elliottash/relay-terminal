@@ -6,7 +6,7 @@ assignee: agent
 priority: 2
 rank: zzzzzzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [f78e1035], evidence: [docs/qa_evidence/2026-09-19-card-tag-in-pane-header/], related: [], github: null}
+links: {plans: [], commits: [f78e1035, 0f1d7927], evidence: [docs/qa_evidence/2026-09-19-card-tag-in-pane-header/], related: [], github: null}
 ---
 # when pane is executing a card, put the # tag in the pane header
 

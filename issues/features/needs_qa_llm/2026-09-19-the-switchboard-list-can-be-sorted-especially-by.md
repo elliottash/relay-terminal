@@ -1,13 +1,13 @@
 ---
 id: SEDZ
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature, switchboard]
 implemented_by: glm/glm-5.3
 rank: zzzzzzzzzz
 created: '2026-09-19'
 source: pane relay-terminal, 2026-09-19
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {github: null, commits: [eb6909ae], evidence: [docs/qa_evidence/2026-09-19-switchboard-sort/], plans: [], related: []}
 ---
 # The Switchboard list can be sorted, especially by time
 

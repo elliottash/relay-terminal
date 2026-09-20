@@ -104,3 +104,55 @@ Stages 6a/6b keep their names from the #JN7X staging. The cost guard is already 
 - Build with `scripts/relay-build`; run `./scripts/test.sh` and `ctest --test-dir build`.
 - Extend `tests/windowstate_test.cpp` (createPane/resolveDirectory fallbacks), `tests/projects_test.cpp` (sessions-root/keyFor helper, `loose`), `tests/test_session_protocol.py` (configure `session_dir`; the `session_refile` handler — files moved, index row's `session_dir`, reply event); hint ids in `tests/hints_test.cpp` if unit-testable.
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`, launched from project A: a new tab after `cd ~/Downloads` shows Agent workspace `~/Downloads` (cwd chip tooltip) and a `write_file ./probe.txt` lands there, not in A; its conversation is saved under `sessions/loose` and the list scopes to `~/Downloads`; opening the Switchboard attaches the tab — the open conversation's files move to `sessions/<keyFor(A)>` without a reset, and the *next* conversation configures with A as workspace; agent writes in known project B on an unattached tab attach it with reason `agent-write`; attached to A, writes in B show the hint exactly once; `relay` started in project B restores A's windows and opens one new unattached tab in B; a pane in `$HOME` still gets the recursive-walk refusal.
+
+## Freshness check against the rest of the board (2026-09-19)
+**Verdict: fresh, nothing to merge.** No card and no design doc proposes a per-pane agent
+workspace. `docs/SWITCHBOARD-DESIGN.md` (§4.1) and `docs/PROJECT-INIT-AND-IMPORT.md` only ever
+discuss the *board's* project, never the agent's sandbox, and #JN7X closed by putting the attach
+model and the pane's own workspace deliberately out of scope. What exists is neighbours whose edges
+should be named on this card.
+
+- **#JN7X** (needs-qa-llm) — fixed the *board's* project and left "the owner's attach model … and
+the agent's own workspace" to later work. This card is its stage 6. No overlap.
+- **#916B** (needs-qa-llm) — picker, chip, known projects, the Sessions Project chooser (protocol
+  14.3), and `defaultProject()` after the personal inbox was dropped. Two edges. (a) Its "loose
+  cards" are *board* filing; this card's `loose` is a *session* bucket — same word, different
+  thing, so say it once, and do not revive `projects::inbox()`. (b) 14.3 already filters the
+  Sessions list by project, so "the conversation list does not scatter" here means the *rows are
+  filed under the right workspace*, not that the filter is built. Put that in the acceptance line.
+- **#TVE1** (ready) — groups tabs and conversations by `keyFor`; this card's buckets *are*
+  `keyFor(project)`, and TVE1 asks for "one place both read the key from". The bucket helper in step
+  2 must be that one place. Acceptance split: rows filed right here, how they are grouped there.
+- **#64KE** (needs-qa-llm) — restore already saves each pane's `cwd` and `workspace` and its
+  `resolveDirectory()` falls back cwd → workspace → window workspace → `$HOME`, the same function
+  family step 1 changes and that card pinned in `tests/windowstate_test.cpp`. Its documented
+  **known gap 6** is exactly what step 6 removes: "`--workspace` implies `--fresh`. Passing a
+  workspace explicitly always opens one new window; there is no way to say 'restore *and* also open
+  this directory'." **Recommendation:** leave `--workspace` meaning `--fresh` (unchanged) and let
+  only plain `relay` gain the new tab, then correct that gap in #64KE — otherwise the two cards
+  contradict each other once this lands.
+- **#0STR** (needs-qa-llm) — the header tooltip now reads "The terminal is in …, and the agent's
+  workspace is …". That is the visible surface for this bug and the cheapest way to check step 6a
+  by eye; the Verify section already uses it.
+- **#G8DK** (aliases, needs-qa-llm) — a local alias resolves from the *workspace*
+  (`<repo>/issues/aliases/`, else `<repo>/.relay/aliases/`), so after 6a an unattached pane in
+  `~/Downloads` looks in `~/Downloads`. Right in principle, but "What the workspace feeds" lists
+  alias scope without saying what changes; one line in Verify.
+- **#E99H / #3KB7** (needs-qa-llm / in-progress) — E99H made absolute paths and `..` allowed
+  *inside* the workspace; 3KB7 states the confinement as "one directory, not a list" and offers
+  "folders the agent may read outside the workspace". This card changes which directory that is:
+  3KB7's statement stays true, but its item 5 is mostly redundant for a pane already standing in
+  `$HOME`, and its wording should be re-read when this lands. The ssh path (#S5SH) already confines
+  to "the directory their shell is in", so this makes local and remote agree rather than diverge.
+- **The docs already claim the end state.** `docs/ARCHITECTURE.md:1885` ("A pane's workspace is the
+  directory the pane is in, so a pane standing in `$HOME` or `/` gets a very wide sandbox") and
+  `docs/AGENT-SESSIONS-PROTOCOL.md:183` / `:2291` (the cost guard) describe post-6a behaviour as
+  fact, while `docs/ARCHITECTURE.md:1448` and `docs/SWITCHBOARD-DESIGN.md:152` still give "frozen at
+  creation / inherited from the launch directory" as the reason the board does not consult
+  `workspace()`. The docs contradict each other today; this card should carry the doc pass, and the
+  cost-guard sentences become true only when 6a lands.
+
+**To fold in (small, not new work):** the `--workspace` answer in #64KE; one sentence separating
+`loose` (sessions) from "loose cards" (#916B); the shared `keyFor` helper and the acceptance split
+with #TVE1; the doc pass on `ARCHITECTURE.md:1448` and `SWITCHBOARD-DESIGN.md:152`; and alias scope
+in Verify.

@@ -9,3 +9,6 @@
 
 <!-- relay:entry 20260919T212640Z-7t author=agent kind=event model=glm-5.3 pane=f74309a6 turn=bbb67966a4674b789a1238e2b26e5bd8/18461537f74944018150a85bdadf5640 -->
 - ✦ agent moved this card · In progress → Needs QA (LLM) · Landed on main as 7ef6469ffb82: every diff surface (diff pane, terminal inline diffs, folds, Activity pane, turn log, subagent transcript) now draws adds/removes as black-or-white ink on the theme's green/red fill; tests, theme drive PNGs and QA checklist are in the evidence dir. · evidence docs/qa_evidence/2026-09-19-diff-fills/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260919T233910Z-zn author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · unchanged · moved in the Switchboard

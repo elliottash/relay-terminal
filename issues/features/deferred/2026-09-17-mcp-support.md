@@ -1,7 +1,7 @@
 ---
 id: SSRQ
 type: work
-status: ready
+status: deferred
 labels: [feature]
 component: [worker]
 milestone: post-mvp

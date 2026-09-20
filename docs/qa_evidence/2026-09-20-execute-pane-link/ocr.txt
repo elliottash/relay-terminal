@@ -1,0 +1,9 @@
+fixture cards: 45MA (execute), 4QVH (verify)
+04 thread pane_token: ce8cd87c-60f2-401f-87d2-b3776eb616f0 (short ce8cd87c)
+04 screen shows Executing (ce8cd87c): yes
+05 marker typed into the pane Execute opened at x=1247: yes
+07 stale link typed nowhere past the board (x=not on screen): inert
+07 relay still alive after the stale click: yes
+11 verify thread pane_token: f24b2171-600e-425a-a20a-47c75fdede31 (short f24b2171)
+11 screen shows Verifying (f24b2171): yes
+no gui_crash in relay.log

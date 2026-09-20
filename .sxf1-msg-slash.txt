@@ -1,0 +1,8 @@
+/continue takes the slow path, so it teaches the empty-box key (#SXF1)
+
+The slash command called continueTurn() with no slowPath, so the one surface
+the plan named first — /continue — never showed the "Next time: Ctrl+Enter"
+hint. It now passes true like the ▸ Continue link and the palette row do, and
+the live Xvfb run confirms the toast.
+
+Implemented-By: anthropic/claude-opus-5

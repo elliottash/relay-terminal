@@ -1,7 +1,7 @@
 ---
 id: 5V1E
 type: work
-status: inbox
+status: deferred
 rank: zzzzzzzzy
 created: '2026-09-19'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}

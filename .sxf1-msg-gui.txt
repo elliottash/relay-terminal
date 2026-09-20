@@ -1,0 +1,15 @@
+Ctrl+Enter on an empty prompt box continues a stopped turn (#SXF1)
+
+With the box empty and the agent idle, the send-now key now means "continue"
+when the last turn stopped at its step or tool-call limit (m_limitReached,
+unchanged) or the pane was restored from a session whose last turn never
+ended: the worker reports that as state_loaded {turn_open} (previous commit)
+and the pane keeps it in m_turnCutOff, cleared wherever m_limitReached clears
+and on every done. The rule lives in relay::continueturn::sendNowContinues,
+tested headless like relay::queuesubmit; a non-empty box and a busy agent keep
+every meaning they had. Per the standing hint rule the slow paths teach the
+fast one: the /continue hint and the ▸ Continue link name agent.interrupt's
+first binding (agent.continue stays unbound), the palette row matches, and
+both Keymap descriptions now tell the truth about the empty-box path.
+
+Implemented-By: anthropic/claude-opus-5

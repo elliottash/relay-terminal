@@ -1,7 +1,7 @@
 ---
 id: FW77
 type: work
-status: ready
+status: deferred
 labels: [feature]
 component: [agent, router]
 milestone: cross-platform

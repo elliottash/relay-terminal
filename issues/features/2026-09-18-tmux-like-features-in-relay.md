@@ -6,10 +6,11 @@ labels: [feature, design]
 component: [gui, shell-integration]
 milestone: desktop-alpha
 workstream: terminal
+priority: -1
 rank: zzzzzm
 created: '2026-09-18'
-source: owner, in a Claude Code session, 2026-09-18, while deciding how #S5SH should behave inside tmux
-links: {plans: ['docs/SSH-AND-MOSH.md'], commits: [], evidence: [], related: ['S5SH', 'SPBN'], github: null}
+source: owner, in a Claude Code session, 2026-09-18, while deciding how
+links: {plans: [docs/SSH-AND-MOSH.md], commits: [], evidence: [], related: [S5SH, SPBN], github: null}
 ---
 # The parts of tmux worth having in Relay itself
 

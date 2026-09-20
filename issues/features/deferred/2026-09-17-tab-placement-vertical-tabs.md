@@ -1,7 +1,7 @@
 ---
 id: 072Z
 type: work
-status: ready
+status: deferred
 labels: [feature]
 component: [gui]
 milestone: desktop-alpha

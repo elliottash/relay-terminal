@@ -49,3 +49,36 @@ paragraph and the per-tab-themes paragraph no longer mention the ⧉ button or t
     builtin theme; `src/Theme.cpp` is modified by another session and the test never compiles
     `RelayWindow.h`.
 - `scripts/test.sh`: 3413 backend tests, all OK.
+
+## Follow-up (same day): the attached-project chip went too
+
+Owner, after the change above: "still need to remove that extra \"attached to\" bit (the little
+oval on the left)". That oval was the **project chip** (`tabProjectChip`, card #916B): a
+`QToolButton` the window put in each attached tab's `QTabBar::LeftSide` slot, showing the
+project's name, styled by `Theme.cpp` as a rounded pill (`border-radius: 8px`) and clicking to
+detach. Removed with it:
+
+- `syncTabProjectChip()` and its call in `updateTitles()`;
+- the whole left-box machinery that existed only for it — `tabLeftBox()`,
+  `isLiveTabLeftBox()`, `relayoutTabLeftBox()`, `m_tabLeftBoxes` (with it, the QTabBar
+  side-slot crash guard those comments described: nothing sets a tab side widget any more);
+- the two `QToolButton#tabProjectChip` rules in `Theme.cpp`;
+- the paragraph in `docs/ARCHITECTURE.md` that promised the chip; the palette's "Detach this
+  tab from <project>" is now the one way to detach (it was always the keyboard path).
+
+Attachment itself is untouched: `attachTab()`/`detachTab()`, the tab → project map, the saved
+`{"project", "node"}` wrapper, `projects::Registry` and the board tools all work as before; the
+tab *label* still names the project (card #T7QM).
+
+**Before / after, both on an attached tab** (`before-attached-tab-with-chip.png`,
+`after-attached-tab-without-chip.png`, transcripts in `ocr-tab-row-before-after.txt`):
+
+- before (the owner's live window, pre-change build) — `tesseract --psm 7` on the tab row:
+  `U relay-terminal » relay-terminal - 6 - cpu 14% - mem 2%` — the project name twice: once in
+  the chip pill, once as the label;
+- after (this build, `Xvfb :99`, isolated `XDG_DATA_HOME`/`XDG_CONFIG_HOME`, a saved layout with
+  `{"project": "/home/elliott/repos/relay-terminal"}` and the matching `projects.json`, so the
+  restored tab is genuinely attached): `© relay-terminal - 2 - cpu00%-memo... x +` — one name
+  only, the label; the tab row carries no pill, and the label begins right after the state icon.
+
+`scripts/relay-build --target relay` passed on this build too (47 s).

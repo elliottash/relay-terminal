@@ -1,0 +1,38 @@
+---
+id: YJG7
+type: work
+status: inbox
+labels: [bug, providers, routing]
+rank: zzzzzzzzzzzzzzzi
+created: '2026-09-20'
+source: pane, 2026-09-20
+links: {plans: [], commits: [], evidence: [], related: [VMZP, G9VE, DC4J], github: null}
+---
+# A spent Z.AI Coding Plan quota is retried as a transient 429, and the pane never says when it resets
+
+## Issue
+The `glm-coding` preset (Z.AI Coding Plan) is out of quota until the provider's reset, but Relay treats the refusal as a transient rate limit and never tells the user why or for how long.
+
+Measured on this machine, 2026-09-20:
+
+A minimal one-shot call on the stored `glm-coding` key:
+
+```
+$ curl -sS -X POST https://api.z.ai/api/coding/paas/v4/chat/completions \
+    -H "Authorization: Bearer <stored glm-coding key>" -H "Content-Type: application/json" \
+    -d '{"model":"glm-5.3-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'
+HTTP 429
+{"error":{"code":"1310","message":"Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-09-23 05:53:09"}}
+```
+
+So the provider does say exactly what is wrong and when it clears. What Relay shows instead (from `worker.log`, `provider_failover`):
+
+```
+error="Provider HTTP 429 for glm-5.3 at api.z.ai (Z.AI · GLM-5.3 · Coding Plan). Check endpoint, model access, key, quota, and parameters."
+```
+
+— a guess list that names neither the exhaustion nor the reset time.
+
+Cost of the guess: 416 `provider_http_retry status=429` lines in `~/.local/share/relay/logs/worker.log`, first at 2026-09-19T21:25:45Z and still going at 2026-09-20T12:45:19Z — ~15 hours in which every turn on a GLM pane sent 6 retries (`attempt=1..6`, waits 0.4-7.8 s each, ~20 s per turn) before failing over to Kimi. Because the quota is spent for days, not seconds, that spend repeats on every turn on every GLM pane.
+
+Related: `#VMZP` (retry transient refusals) and `#G9VE` (fail over when a provider keeps failing a turn) built the current behaviour; `#DC4J` covers not being able to switch models mid-retry.

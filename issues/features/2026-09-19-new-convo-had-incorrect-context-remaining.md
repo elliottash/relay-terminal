@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 priority: 2
 rank: zzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [ca3c8d61], evidence: [docs/qa_evidence/2026-09-20-new-convo-context-chip/], related: [], github: null}
+links: {commits: [ca3c8d61, 2967c4c0], evidence: [docs/qa_evidence/2026-09-20-new-convo-context-chip/], github: null, plans: [], related: []}
 ---
 # new convo had incorrect context remaining
 

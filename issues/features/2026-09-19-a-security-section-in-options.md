@@ -11,14 +11,13 @@ rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
-links: {plans: [], commits: [a68712d, 0b30397, 60af091, 6f8aa86], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
+links: {plans: [], commits: [a68712d, '0b30397', 60af091, 6f8aa86], evidence: [docs/qa_evidence/2026-09-19-security-section/], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
 ---
 # A Security section in Options, gathering what the agent may reach
 
 ## Issue
-
 add a security options menu with various secruity options like that, not just relay - relay, but
-more of the approvals options on warp. look at warp options for advice on that.
+more of the approvals options on warp. look at warp options for advice on that
 
 ## What Warp does
 
