@@ -5392,6 +5392,21 @@ public:
         view->onOpenFile = [guard](const QString &path) {
             if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
         };
+        // The links in the page agent's answers that leave the board (#FEJQ, §30.4): the helper
+        // here is the same agent the Options and Sessions panels ask, so an answer about a setting
+        // or a conversation should be one click from it, as `card:` already is.
+        view->onOpenOption = [guard](const QString &section, const QString &row) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->openSettingsPane(relay::SettingsPane::Mode::Options, section);
+            if (ToolPane *pane = w->settingsPaneIn(w->m_tabs->currentWidget(),
+                                                   relay::SettingsPane::Mode::Options);
+                pane && pane->settings())
+                pane->settings()->revealOption(section, row);
+        };
+        view->onOpenSession = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openSessions(QString(), id);
+        };
         // A thread entry's pane link (#HKAP): the token names a pane Execute opened — the manager
         // looks in every window, so a pane dragged into its own window still comes back.
         view->onFocusPane = [guard](const QString &token) {

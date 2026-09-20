@@ -68,6 +68,13 @@ public:
     std::function<void(const QString &data)> onModelPick;
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
+    // The two link schemes the helper answers with that are not the board's (#FEJQ, §30.4):
+    // `option:<section>/<row>` reveals that row in Options, `session:<id>` opens that
+    // conversation in the manager. The agent answering here is the tab's helper, so an answer
+    // about a setting or a session is as ordinary as one about a card, and should be one click
+    // from what it names. `card:` and a file path are the view's own and stay above.
+    std::function<void(const QString &sectionId, const QString &rowId)> onOpenOption;
+    std::function<void(const QString &sessionId)> onOpenSession;
     // A thread entry's pane link (#HKAP): reveal the pane with this session token, in whatever
     // window it lives in. No pane has it (closed, or another machine's board) → inert.
     std::function<void(const QString &token)> onFocusPane;

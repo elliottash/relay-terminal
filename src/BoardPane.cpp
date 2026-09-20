@@ -3429,6 +3429,14 @@ void BoardView::buildChatPanel(QVBoxLayout *layout)
         m_selected = id;
         openSelected();
     };
+    m_chat->onOpenOption = [this](const QString &section, const QString &row) {
+        if (onOpenOption)
+            onOpenOption(section, row);
+    };
+    m_chat->onOpenSession = [this](const QString &id) {
+        if (onOpenSession)
+            onOpenSession(id);
+    };
     m_chat->setWorkspace(m_workspace);
 
     // Clean up leaves the filter row for the panel's button row, beside the Check the panel
