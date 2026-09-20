@@ -1700,16 +1700,37 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   is two picks and no typing, and changing the default provider keeps an override that names a
   different provider.
 - GUI: `src/ModelSettings.*` (the `relay-modelsettings` library, so the dialogs are testable
-  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog` (default provider, the three tier rows,
-  an Advanced disclosure with one row per job showing the model it resolves to). Reached from Options › Models,
-  the palette (`agent.modelRoles`) and the ⚙ entry at the bottom of the pane's model box. Plus
+  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog` (default provider, the tier rows high /
+  main / flash / lite / local, an Advanced disclosure with one row per job showing the model it
+  resolves to). Reached from Options › Models ("per-job models (advanced)") and the palette
+  (`agent.modelRoles`). The high tier (owner, 2026-09-20) is plan mode's default: Main at max
+  reasoning unless `tiers.high` names a model. Plus
   "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands.
+- **The model catalog and the picker (owner, 2026-09-20).** `src/ModelCatalog.*`
+  (`relay::models`, library `relay-modelcatalog`, `tests/modelcatalog_test.cpp`) turns the worker's
+  preset rows — each carries `models`, the per-model catalog of `presets.py MODEL_CATALOG` — into
+  one flat list of entries keyed `<preset>|<model>`, and keeps what the user said about them in
+  QSettings under `models/*`: shown, priority (rank 1 is Main and writes `provider/preset` +
+  `provider/model` for new panes; rank 2 is the fallback, kept as `models/fallback/*` and sent as
+  the `fallback` request option so failover tries it first), custom ids, favorites, recent, sort,
+  a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
+  (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Shift+M
+  (`agent.model`), `/model` alone and the box's "more models…": filter, sort menu, columns model ·
+  provider · reasoning · intelligence · tok/s · left, the reasoning buttons for the highlighted
+  row, favorites / recent sections that give way to a flat list when you type. Every pick goes
+  through `Pane::selectEntry(key, effort)`, which is `selectModel(preset, model)` plus the level;
+  `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
+  is the one page: providers and keys (through the pane's `storeKey` / `testKey` / `removeKey`),
+  the per-provider checklist with "add a model by id", the priority list, the defaults; it replaced
+  the API keys and Model roles doors and the "Claude Code and Codex" page (a guest's permission
+  posture sits under its models). Labels are lower-case throughout, per the owner.
 - The pane's model box (`Pane::refreshPickers`) is one flat list, roles first (owner, 2026-09-19:
   no separate Main / Flash / Local section — `model (main)`, `model (flash)`, and `model (local)`
-  when this machine serves one, `role:<id>`; `Pane::chooseAgentRole`), then the other stored
-  presets, then the guest rows (26.9) and the ⚙ gear (`gear:modelOptions`) behind separators.
+  when this machine serves one, `role:<id>`; `Pane::chooseAgentRole`), then the catalog's shown
+  entries in rank order (`entry:<key>`), then the Tier B guest rows (26.9), then "more models…"
+  (`gear:picker`) and "⚙ customize…" (`gear:modelOptions`, Options › Models) behind separators.
   There are no ticks: the collapsed box sits on the live row, which says it, and it hugs that
   row's text — `CurrentTextComboBox` sizes the closed box to the current item and lets the open
   list grow to its widest row instead of `AdjustToContents`' widest-row box. Only a preset row is
@@ -2801,7 +2822,9 @@ of the platform and of the engine itself.
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
-| `src/ModelSettings.*` | the API-keys and model-roles modals |
+| `src/ModelSettings.*` | the API-keys and model-roles modals (roles: "per-job models (advanced)" on Options › Models) |
+| `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |
+| `src/ModelPicker.*` | the model picker dialog (Ctrl+Shift+M, `/model`) |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |

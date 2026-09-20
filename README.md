@@ -62,11 +62,13 @@ that conflict.
 
 ## Quick start
 
-1. Start Relay and open **Options › Models › API keys…** (Ctrl+, , the gear at the bottom of the
-   model box, or Actions › API keys…). Add a key for one provider — or click **Import from Warp** or
-   **Import from Claude Code / Codex**. **Test** checks the key reaches the provider.
-   Then open **Model roles…** and pick your default provider; GLM Coding Plan + OpenRouter and
-   Kimi Code + OpenRouter are the recommended pairs.
+1. Start Relay and open **Options › Models** (`/models`, Ctrl+Shift+O, or ⚙ customize… at the
+   bottom of the model box). The page reads top to bottom the way it is set up: **providers** —
+   add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
+   Codex**; **test** checks the key reaches the provider) — then **models in the picker**, a
+   checklist of each provider's models, then **priority**: rank 1 is Main, what new panes start
+   on; rank 2 is the fallback `/swap` and failover go to. Claude Code and Codex, when installed,
+   are providers there like any other.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.
 
@@ -190,7 +192,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   history and your shell history file; Actions › Command suggestions from history turns it off.
 - **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
   (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
-  limit). Type `/` in the prompt box for commands: `/new`, `/model`, `/effort`, `/compact [focus]`,
+  limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the picker, also
+  Ctrl+Shift+M), `/models` (Options › Models), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
@@ -219,10 +222,17 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **Model roles: Main, Flash, Lite.** Options › Models › **Model roles…** (also the ⚙ at the bottom
-  of the model box, or Actions › Model roles…) asks for one thing: your default provider. Everything
-  else follows from it as three models — **Main** for agent turns and subagents, **Flash** for driving
-  programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
+- **The model picker.** Ctrl+Shift+M, `/model`, or **more models…** at the bottom of the pane's
+  model box opens one list of every model you can use — one row per model, not per provider, in
+  lower case — with a filter that matches words of the model, id or provider, a **sort** menu
+  (priority, a to z, intelligence, speed, most used, subscription left), the reasoning level chosen
+  beside the model and remembered per model, ★ favorites and the ten most recent picks above the
+  rest, and each provider's subscription windows ("5h 62% left, resets 14:30") under the list.
+  `/model <name>` switches without the dialog. The box itself lists the same rows in priority order.
+- **Model roles: High, Main, Flash, Lite.** Options › Models › **per-job models (advanced)** asks
+  for one thing: your default provider. Everything else follows from it — **High** for plan mode
+  (Main at max reasoning unless you pick a model), **Main** for agent turns and subagents,
+  **Flash** for driving programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
   glm-5.3 / glm-5.3-flash / Gemini 3.8 Flash; Kimi gives kimi-k3 / kimi-k2.7-code-highspeed / Gemini
   3.8 Flash; Anthropic gives Opus 5 / Sonnet 5 / Haiku 4.5. Each row is editable, and the rows can name
   a **different provider** than the default one: point Flash at Z.AI while Main stays on Kimi and you
@@ -382,7 +392,7 @@ regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never se
   OpenAI-compatible endpoint.
 - **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
   or environment variables such as `RELAY_KIMI_API_KEY` (`RELAY_KEYRING=off` skips the keyring). Keys are passed on stdin, never on a
-  command line, in settings files or logs. Options › Models › **API keys…** shows, per provider,
+  command line, in settings files or logs. Options › Models shows, per provider,
   whether the key is in the keyring, comes from `RELAY_*_API_KEY` or is missing; **Test** makes one
   two-word call and reports ok or the HTTP status without ever printing the key. **Import from Warp**
   copies Warp's custom-endpoint keys; **Import from Claude Code / Codex** copies an API key out of
