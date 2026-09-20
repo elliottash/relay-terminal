@@ -1,0 +1,7 @@
+2026-09-20T02:43:09.615Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.22H.03 pid=1913288 level=info
+2026-09-20T02:43:09.666Z INFO relay.gui worker_start pane=43e756ec workspace_set=1
+2026-09-20T02:43:09.736Z INFO relay.gui event type=ready pane=43e756ec
+2026-09-20T02:43:09.769Z INFO relay.gui event type=configured pane=43e756ec model=stub
+2026-09-20T02:43:18.208Z INFO relay.gui board_state pane=43e756ec board=/tmp/relay-qg60.XeEc11/home/project/issues state=ready
+2026-09-20T02:43:29.280Z INFO relay.gui gui_quit reason=signal
+2026-09-20T02:43:29.320Z ERROR relay.gui worker_exit pane=43e756ec code=0 crashed=0

@@ -1,0 +1,6 @@
+2026-09-20T02:43:29.616Z INFO relay.worker pane=0b16bcdf worker_start version=0.1.0 pid=1914178 level=info
+2026-09-20T02:43:29.650Z INFO relay.worker pane=0b16bcdf configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=9aff312d945b49ab8eb4150c0f42cd90
+2026-09-20T02:43:38.046Z INFO relay.worker pane=switchboard worker_start version=0.1.0 pid=1914465 level=info
+2026-09-20T02:43:38.059Z INFO relay.worker pane=switchboard configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=9dc65396f7814e868cbbbbb0bf783b7f
+2026-09-20T02:43:50.156Z INFO relay.worker pane=switchboard worker_stop pid=1914465
+2026-09-20T02:43:50.171Z INFO relay.worker pane=0b16bcdf worker_stop pid=1914178

@@ -1,0 +1,7 @@
+2026-09-20T02:28:22.634Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.21H.02 pid=1860884 level=info
+2026-09-20T02:28:22.691Z INFO relay.gui worker_start pane=8de6d415 workspace_set=1
+2026-09-20T02:28:22.772Z INFO relay.gui event type=ready pane=8de6d415
+2026-09-20T02:28:22.813Z INFO relay.gui event type=configured pane=8de6d415 model=stub
+2026-09-20T02:28:31.187Z INFO relay.gui board_state pane=8de6d415 board=/tmp/relay-qg60.6TOjzG/home/project/issues state=ready
+2026-09-20T02:28:35.105Z INFO relay.gui gui_quit reason=signal
+2026-09-20T02:28:35.146Z ERROR relay.gui worker_exit pane=8de6d415 code=0 crashed=0
