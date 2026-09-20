@@ -140,6 +140,7 @@ private slots:
     // ---- the pane
     void theFoldRowAppearsFoldsAndIsHiddenWhenThereAreNoSignals();
     void aSignalRowOpensItsPageAndEachActionSendsItsMessage();
+    void theBoardAsksForTheSignalsWhenItOpens();
     void aRefusalLandsOnThePagesErrorLine();
     void whichSignalFoldsAreOpenRidesTheLayoutNode();
     void aPromotedCardsPageWearsTheSignalStrip();
@@ -512,6 +513,20 @@ void SignalsTests::aSignalRowOpensItsPageAndEachActionSendsItsMessage()
     QVERIFY(page->isHidden());
 }
 
+// A board that has just opened asks what the machine has against it (§32.2): the worker pushes
+// after every change, and every change so far happened before this pane existed.
+void SignalsTests::theBoardAsksForTheSignalsWhenItOpens()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({card(QStringLiteral("AAA1"), QStringLiteral("inbox"))}));
+    QStringList types;
+    for (const QJsonObject &message : sent)
+        types << message.value(QStringLiteral("type")).toString();
+    QVERIFY(types.contains(QStringLiteral("signals_list")));
+}
+
 void SignalsTests::aRefusalLandsOnThePagesErrorLine()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -542,6 +557,16 @@ void SignalsTests::aRefusalLandsOnThePagesErrorLine()
 
     // The next action clears it: a refusal never outlives the thing it refused.
     page->promote();
+    QVERIFY(page->error().isEmpty());
+
+    // The worker's own shape for a refusal is the write's event with `error` and `code` on it
+    // (`tests_protocol._signals_write`), and it lands in the same place.
+    view.handleEvent(QJsonObject{{"event", "signals_written"}, {"kind", "claim"},
+                                 {"key", "ctest:panelayout"},
+                                 {"code", "board_claimed_elsewhere"},
+                                 {"error", "ctest:panelayout is held by another session (9f8e7d6c)."}});
+    QVERIFY(page->error().contains(QStringLiteral("9f8e7d6c")));
+    page->claim();
     QVERIFY(page->error().isEmpty());
 
     // An error this pane did not ask for leaves the page alone.

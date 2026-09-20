@@ -5037,7 +5037,18 @@ void BoardView::handleEvent(const QJsonObject &event)
         const QString kind = event.value(QStringLiteral("kind")).toString();
         const QString key = event.value(QStringLiteral("key")).toString();
         const QString card = event.value(QStringLiteral("card")).toString();
+        const QString failed = event.value(QStringLiteral("error")).toString();
         m_signalRequests.remove(requestId);
+        // A refusal comes back as the write's own event with `error` and `code` on it, which is
+        // how the worker answers (`tests_protocol._signals_write`): the page that pressed the
+        // action says so on its error line, exactly as it does for the `error` event below.
+        if (!failed.isEmpty()) {
+            if (signalOpen() && (key.isEmpty() || m_signalDetail->key() == key))
+                m_signalDetail->showError(failed);
+            else
+                showNotice(failed, true);
+            return;
+        }
         if (mine || m_signalRequests.isEmpty()) {
             const QString what = kind == QStringLiteral("claim") ? QStringLiteral("Claimed %1")
                                  : kind == QStringLiteral("release") ? QStringLiteral("Released %1")
@@ -5135,6 +5146,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         // A pane reopened with words already in its filter asks about them again: the answer it
         // holds is about the cards of a moment ago (#7M6E).
         startSearch();
+        // And what the machine has open against this board (#AQ6X, §32.2): the worker pushes
+        // `signals_changed` after every change, but a pane that has just opened has missed every
+        // change so far, so it asks once. A worker too old to know the message refuses it, and the
+        // refusal is a `signals_written` with no key — which draws nothing.
+        send({{QStringLiteral("type"), QStringLiteral("signals_list")}});
         if (hadFocus)
             focusInput();
         showProblems(event.value(QStringLiteral("problems")).toArray());
