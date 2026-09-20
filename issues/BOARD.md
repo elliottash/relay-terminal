@@ -207,12 +207,12 @@
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#WMXN` | [the phone's recap button errors: it sends reason "remote", which the worker rejects](changes/2026-09-20-phone-recap-button-errors-the-worker-rejects.md) | inbox |  |  |  |
 | `#SFP6` | [edit_file's over-size refusal reuses read_file wording and gives no way out](changes/2026-09-19-edit-file-s-over-size-refusal-reuses-read-file-w.md) | inbox |  |  | [7](threads/SFP6.md) |
 | `#E6XC` | [board_update_card can never match #SP4N and #5PY9: their file hashes are not 64 characters](changes/2026-09-19-board-update-card-can-never-match-sp4n-and-5py9.md) | inbox |  |  | [1](threads/E6XC.md) |
 | `#QAJQ` | [tabProjectChip stylesheet sits under the 9pt font floor (buttonfit fails at HEAD)](changes/2026-09-19-tabprojectchip-stylesheet-sits-under-the-9pt-fon.md) | inbox |  |  | [2](threads/QAJQ.md) |
 | `#T9K3` | [buttonfit: theme stylesheet 8.5pt under the 9pt floor](changes/2026-09-19-buttonfit-theme-stylesheet-8-5pt-under-the-9pt-f.md) | inbox |  |  | [2](threads/T9K3.md) |
 | `#5C4Z` | [bug: dragging cards between sections didnt work](changes/2026-09-19-bug-dragging-cards-between-sections-didnt-work.md) | inbox |  |  | [6](threads/5C4Z.md) |
+| `#WMXN` | [the phone's recap button errors: it sends reason "remote", which the worker rejects](changes/2026-09-20-phone-recap-button-errors-the-worker-rejects.md) | inbox |  |  |  |
 | `#ZGF5` | [board_busy from the page agent's own turn is shown as "already working on" the running cards](changes/2026-09-20-board-busy-from-the-page-agent-s-own-turn-is-sho.md) | inbox |  |  | [2](threads/ZGF5.md) |
 | `#W8PC` | [A pane drew one theme's palette on another theme's ground](changes/2026-09-19-a-pane-drew-one-themes-palette-on-anothers.md) | discussing | owner |  |  |
 | `#09HE` | [`cd..` reads as a sentence: the router calls a mistyped command an agent request and drops its note](changes/2026-09-19-cd-reads-as-a-sentence-the-router-calls-a-mistyp.md) | discussing |  |  | [6](threads/09HE.md) |
