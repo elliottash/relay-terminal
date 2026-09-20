@@ -5226,11 +5226,19 @@ Card `#FEJQ`, owner 2026-09-20: one helper system, not three features that happe
 An agent can change an option, run a safe action, search the session manager, and open or zoom
 Options, Actions, Sessions and the Switchboard down to a row, a query or a card; and each of those
 panes carries a helper agent, which is the Switchboard's page agent (19.18) answering for another
-pane of the same worker. Backend: `backend/relay_core/app_tools.py` — `AppTools`, attached to the
-agent as `agent.app` exactly as `BoardTools` is attached as `agent.board` — with the catalog parsed
-in `backend/worker.py`; GUI: `src/RelayWindow.h` (builds the catalog from `settingsSections()` and
-`searchableActions()`, and executes every command), `src/Pane.h` (`onAppCommand`),
-`src/BoardWorker.{h,cpp}` (the per-tab helper). Tests: `tests/test_app_tools.py`.
+pane of the same worker.
+
+Backend: `backend/relay_core/app_tools.py` — `AppTools`, attached to the agent as `agent.app`
+exactly as `BoardTools` is attached as `agent.board`, plus `AppCatalog`, `AppBridge` and
+`AppCommands` (the worker's half) — with `backend/worker.py` holding one `AppCommands` per worker;
+`backend/relay_core/activity_tools.py` (30.5); `backend/relay_core/board_chat.py` and
+`board_protocol.py` (the helper's panes and briefs, 30.7). GUI: `src/AppCommands.{h,cpp}`
+(`relay::AppCommands` — the catalog, the executor, the change log; a small library tested headless),
+`src/RelayWindow.h` (supplies `settingsSections()` and `searchableActions()`, mints the tab id,
+sends the catalogs, opens the panes), `src/Pane.h` (`app_command` in, `app_command_result` out),
+`src/HelperChat.{h,cpp}` and `src/BoardChat.h` (the panel), `src/BoardWorker.{h,cpp}` (the per-tab
+helper worker). Tests: `tests/test_app_tools.py`, `tests/test_activity_tools.py`,
+`tests/test_board_chat.py`, `tests/appcommands_test.cpp`.
 
 All additive. A worker that gets no `app` block has no app tools at all, which is what every worker
 did before this section.
@@ -5240,11 +5248,15 @@ did before this section.
 ```
 GUI    → configure {..., app: {tab, writes_enabled, options: [...], actions: [...]}}
 GUI    → app_catalog {app: {...}}                     whenever the catalog changes
+worker → app_catalog_updated {id, options, actions, writes_enabled}
 model  → app_option_set {id, value}                   (or app_action_run, app_open, app_undo)
-worker → app_command {id, command: "set_option", id: "...", value: ...}
+worker → app_command {id, command: "set_option", row, value}
 GUI    → app_command_result {id, ok, previous, value, change_id}
           … the tool result says before → after; the GUI logs the change and offers Undo …
 ```
+
+`id` on an `app_command` is the **request** id, the one the result is matched by; the row the
+command is about travels as `row` (30.3), because no JSON object can carry `id` twice.
 
 `app_option_list`, `app_option_get`, `app_action_list`, `app_sessions_search` and `app_changes` are
 answered by the worker alone — from the catalog it was configured with, or, for sessions, the index
@@ -5256,14 +5268,20 @@ busy. Only the four tools that *do* something reach the GUI.
 `configure` gains an optional `app`, and the new message `app_catalog {app}` re-sends exactly that
 block whenever the GUI's catalogs change. That is the `keybindings` message's pattern
 (`backend/worker.py`) and it is here for the same reason: the catalog carries current *values*, so
-a setting the person changes by hand must reach the agent that is about to describe it.
+a setting the person changes by hand must reach the agent that is about to describe it. The worker
+acknowledges it with **`app_catalog_updated {id, options, actions, writes_enabled}`** — the counts
+it now holds and the gate as it now stands, so a catalog that arrived malformed or empty is visible
+on the wire. `id` echoes the message's own id, which the GUI does not send today, so it is normally
+null. A live agent whose tool list changes because of it (the first catalog, or a catalog
+withdrawn) has `agent.app` re-pointed and its system prompt rewritten in place, without a new
+conversation — `set_board`'s rule (19.11).
 
 | field | meaning |
 |---|---|
-| `tab` | the tab's persistent id — the one that restores its panes. It keys the helper worker (30.7); a pane agent is sent its own tab's id too, so the two agree about which Options pane "open Options" means. |
-| `writes_enabled` | Options › Agent, "Agents may change options and run actions": the one toggle that gates the helper and the pane agent together (owner, 2026-09-20). `false` keeps every read tool and refuses every write. |
+| `tab` | the tab's persistent id — the one that restores its panes (30.7). It keys the helper worker; a pane agent is sent its own tab's id too, so the two agree about which Options pane "open Options" means. |
+| `writes_enabled` | Options › Agent, "Agents may change options and run actions" (`agent/app_writes`, on by default): the one toggle that gates the helper and the pane agent together (owner, 2026-09-20). `false` keeps every read tool and refuses every write. |
 | `options` | the option catalog: one row per row of the Options pane, in the pane's own order |
-| `actions` | the action catalog: one row per row of the Actions pane |
+| `actions` | the action catalog: one row per row of the Actions pane, **plus one entry per button of an Options row** (see below) |
 
 An option row:
 
@@ -5275,8 +5293,8 @@ An option row:
 | `kind` | `toggle` \| `choice` \| `text` \| `number` \| `button` \| `buttons` \| `info` \| `heading` |
 | `value` | the current value — a bool, a string, a number. **Omitted entirely for a secret row**, and for the kinds that hold none. |
 | `choices` | `choice` only: `[{value, label}]`. These are the values `app_option_set` accepts. |
-| `min`, `max` | `number` only, when the row is bounded |
-| `settable` | whether an agent may write it: every value row except a secret (owner decision 1), `false` on `button`, `buttons`, `info` and `heading` |
+| `min`, `max` | `number` only, and only when the row is really bounded (`maximum > minimum`; a row written with the two equal is unbounded) |
+| `settable` | whether an agent may write it: every value row except a secret (owner decision 1), `false` on `button`, `buttons`, `info` and `heading`. The worker takes it to mean settable **and** a value kind **and** not secret, whatever the GUI marked. |
 | `secret` | the keyring holds it (an API key, a token). Its `value` is never sent and `settable` is `false`. |
 
 `button`, `buttons`, `info` and `heading` rows are listed although nothing can be set on them,
@@ -5285,59 +5303,109 @@ heading a row sits under, cannot say where a setting is or open the pane at it.
 
 An action row: `key` (the `ActionItem` key, what `app_action_run` names), `section`, `label`,
 `detail`, and `agent_safe` — opt-in per action (owner decision 2), the line being "undoable in one
-click". `true` to start with on opening or revealing anything, testing a key, refreshing or
-detecting local servers, copying a page, reordering models and undo; `false` on resetting to
-defaults, removing a key or a server, deleting a session, pairing and sharing, quit and restart.
+click".
+
+**A Button or Buttons row of Options is in the `actions` array too.** Owner decision 1 makes a
+button an action rather than a value, and `agent_safe` is what an action carries, so the Test-key
+button, Local models' Refresh, Find servers and Detect, "copy this page" and the model reorder
+arrows are reachable through `run_action` and nowhere else. Their keys are
+**`row:<section>/<id>`**, with `#<n>` appended for the *n*th button of a `buttons` row (`n > 0`;
+the first button and a lone `button` row have no suffix), their `section` is the section's **title**
+rather than its id, their `label` is the row's label and the button's text joined with `·`, and
+their `agent_safe` comes from the row's own per-button marking. The row itself stays in `options`
+with `settable: false`, so an agent can still name it and open the pane at it. A submenu of the
+actions palette is listed with its children, one level deep, exactly as the Actions pane draws
+them; the submenu itself has no `run` and cannot be run.
+
+`agent_safe` is `true` today on: opening or revealing a pane (Options, Actions, the Switchboard,
+the session manager, the closed list, the explorer, ⓘ, Activity, requests, subagents, thinking, the
+agents menu, the shortcuts page, find-in-view, link stepping, jumping to a notification), moving
+the focus between panes, tabs and windows, and re-reading a file already on disk
+(`keybindings.reload`, `theme.reload`, `agents.reload`); and on the row buttons that test a key,
+refresh, detect or find local servers, and reorder models. It is `false` on everything else —
+including every action added after the table was written, which is what opt-in has to mean:
+resetting to defaults, removing a key or a server, deleting a session, pairing and sharing, quit
+and restart. The table lives in `appcommands::actionIsAgentSafe()`; an `ActionItem` may also carry
+its own `agentSafe`, and either is enough.
 
 A row or action that is missing from a later catalog has gone from the app: the tools answer
 `unknown_row` / `unknown_action` for it from then on, and nothing is cached across an `app_catalog`.
+The catalog is bounded — at most 2000 option rows, 1000 actions, 200 choices per row, 200
+characters of label, 1000 of detail — and a block that breaks its shape is refused with the code
+`catalog` (30.4).
 
 ### 30.3 `app_command` (worker → GUI) and `app_command_result` (GUI → worker)
 
 `app_command {id, command, …}` is the worker's request and `app_command_result {id, ok, error?,
-previous?, value?, change_id?}` the GUI's answer, matched by `id`. The command travels down the
-worker's own pipe, so there is no routing field: a pane agent's commands come out of that pane's
-worker and the helper's out of its tab's.
+message?, previous?, value?, change_id?}` the GUI's answer, matched by `id`. The command travels
+down the worker's own pipe, so there is no routing field: a pane agent's commands come out of that
+pane's worker and the helper's out of its tab's. `id` is the request id (`ac-1`, `ac-2`, … per
+worker) and nothing a command carries may take that name from it.
 
 | `command` | fields | what the GUI does |
 |---|---|---|
-| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard`; `section?`, `row?`, `query?`, `card?` | `openSettingsPane(mode, tab, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(tab, query)`; `openBoardCard(card)` |
-| `set_option` | `id`, `value` | finds the row and invokes its writer |
-| `run_action` | `key` | finds the `ActionItem` and runs it |
+| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard`; `section?`, `row?`, `query?`, `card?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named |
+| `set_option` | **`row`**, `value` | finds the row and invokes its writer |
+| `run_action` | `key` | finds the `ActionItem` — or the Options row button behind a `row:` key — and runs it |
 | `undo` | `change_id` | reverts that entry of the change log (30.6) |
 
+The row id is **`row`**, not `id`. The GUI is forgiving about where it finds it — `row`, then
+`option`, then the same two inside an `args` object — and `run_action` and `undo` likewise accept
+`key`/`action` and `change_id`/`change`; `row`, `key` and `change_id` are the canonical names and
+are what the worker sends.
+
 The pane answers within 20 s or the tool returns `no_reply` — 22.4's deadline, for a channel with
-22.4's shape. A successful `set_option` or `undo` carries `previous` and `value` (the row's value
-before and after, read back from the row, not echoed from the request) and `change_id`, the change
-log's entry for it. `open` and `run_action` carry neither.
+22.4's shape. Stop ends a wait too: the bridge watches the agent's `cancel_event`, and a
+`configure` that replaces the agent answers everything still parked with `no_reply` rather than
+leaving it on a pane that has gone. A late or unmatched `app_command_result` is dropped.
+
+A successful `set_option` or `undo` carries `previous` and `value` (the row's value before and
+after, **read back from the row**, not echoed from the request, so a writer that clamps or
+normalises is reported as what is now in force) and `change_id`, the change log's entry for it.
+`open` and `run_action` carry `ok` alone: this GUI logs an action but offers no undo for one, so
+there is no `change_id` to send back. The worker will record one, and a `detail` sentence, if a
+future GUI answers with them.
 
 `error` is one of `unknown_row`, `unknown_action`, `unknown_target`, `unknown_change`,
 `not_settable`, `secret`, `writes_disabled`, `invalid_value`, `not_agent_safe`, `busy`, `failed`
-(with a sentence for the transcript) or `no_reply`. The worker refuses `not_settable`, `secret`,
-`writes_disabled`, `not_agent_safe` and `invalid_value` **from the catalog, without asking the
-pane**, the way 22.3 refuses a command `bash -n` rejects; the GUI checks them again, because the
-catalog it sent is a snapshot and the row is the truth.
+or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
+reads `text` or `detail`, and treats an unrecognised `error` string as the sentence itself). An
+unknown `command` is answered `unknown_target`, with the command name in `message`.
+
+The worker refuses `not_settable`, `secret`, `writes_disabled`, `not_agent_safe` and
+`invalid_value` **from the catalog, without asking the pane**, the way 22.3 refuses a command
+`bash -n` rejects; the GUI checks them again, because the catalog it sent is a snapshot and the row
+is the truth. A pane whose window has gone answers `failed` at once — "This pane has no window to
+act in." — rather than letting the tool sit out the 20 seconds.
 
 ### 30.4 The tools (`AppTools`, `agent.app`)
 
-The same tool set is attached to the helper worker and to every pane agent. What differs between
-them is the brief (30.7) and the `settable` / `agent_safe` markers in the catalog — never the tool
-list.
+The same tool set is attached to the helper worker and to every pane agent — and to a card's own
+agent (19.16), which shares the pane worker's `AppTools`, so the change log is the worker's. What
+differs between them is the brief (30.7) and the `settable` / `agent_safe` markers in the catalog —
+never the tool list.
 
 | Tool | Arguments | |
 |---|---|---|
-| `app_option_list` | `section?`, `search?` | the catalog's rows, filtered by section id and by a fuzzy match over label, detail and id. Values included, secrets shown as a row with no value. |
-| `app_option_get` | `id` | one row, in full |
-| `app_option_set` | `id`, `value` | refused when the row is `secret`, when `settable` is `false`, when `writes_enabled` is `false`, and when the value does not fit the kind: a bool for `toggle`, one of `choices[].value` for `choice`, a number within `min`/`max` for `number`, a string with no control characters for `text`. Otherwise `app_command {command: "set_option"}`; the result names before → after and the `change_id`. |
-| `app_action_list` | `search?` | the action catalog, `agent_safe` on each row, so the agent can name an action it may not run and tell the person where the button is |
+| `app_option_list` | `section?`, `search?` | the catalog's rows, filtered by section id or section heading and by a case-insensitive match over id, label, section and detail. At most 60 rows, with `count`, `total`, the `sections` list and `writes_enabled` beside them. Values included, secrets shown as a row with no value. |
+| `app_option_get` | `id` | one row, in full: the listing shape plus `detail`, and `choices` or `min`/`max` for the kinds that have them |
+| `app_option_set` | `id`, `value` | refused when the row is `secret`, when `settable` is `false`, when `writes_enabled` is `false`, and when the value does not fit the kind: a bool for `toggle`, one of `choices[].value` for `choice` (a label, or a differently-cased value, is corrected rather than refused), a number within `min`/`max` for `number`, a string of at most 4096 characters with no control characters for `text`. Otherwise `app_command {command: "set_option"}`; the result names before → after and the `change_id`. |
+| `app_action_list` | `search?` | the action catalog, at most 60 entries, `agent_safe` on each row and `runnable` counting them, so the agent can name an action it may not run and tell the person where the button is |
 | `app_action_run` | `key` | `agent_safe` actions only, and only with `writes_enabled` |
-| `app_sessions_search` | `query`, `limit?` | worker-side, through the session index of section 14 (`SessionIndex.search`, the same query language as 14.2) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane |
-| `app_open` | `target`, `section?`, `row?`, `query?`, `card?` | `app_command {command: "open"}`; returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
-| `app_changes` | — | the writes this worker has made so far, newest first: `{change_id, id, label, previous, value, when}` for an option and `{change_id, key, label, when}` for an action, built from the results it received, not from the GUI's log |
-| `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes |
+| `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane |
+| `app_open` | `target`, `section?`, `row?`, `query?`, `card?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
+| `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
+| `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
+
+A refusal is a tool *result*, not an exception: `{error: "<sentence>", code: "<word>"}` with the
+codes of 30.3, plus `catalog` for an `app` block that broke its shape. A worker with no catalog at
+all answers every tool with `failed` and one sentence ("This pane cannot see Relay's own
+settings…"), rather than pretending the app is empty.
 
 `app_changes` is the worker's own memory of what it did in this conversation, which is why it can
 be answered without the GUI; the durable log, and the one the person sees, is the GUI's (30.6).
+It outlives each `configure` — the `AppCommands` object holds the `AppTools`, so a model switch or
+a workspace change rebuilds the agent and keeps the change log.
 `app_undo` is allowed even when `writes_enabled` has since been turned off: it can only revert a
 change this worker itself made, and putting a setting back is not a new write — the toggle exists
 so an agent cannot change the app, never so a change it made cannot be taken back.
@@ -5346,22 +5414,29 @@ so an agent cannot change the app, never so a change it made cannot be taken bac
 
 Info and Activity get no helper agent of their own (owner, 2026-09-20): those panes are about the
 pane's **own** agent, and a second agent reading a ledger about the first is the roundabout way to
-answer "why was that turn slow". The pane agent gets two read tools instead, and the panes get an
-Ask row that prefills that pane's composer.
+answer "why was that turn slow". The pane agent gets two read tools instead
+(`activity_tools.ActivityTools.attach`, on a pane agent and nowhere else), and the panes get an Ask
+row that prefills that pane's composer.
 
 - **`session_info {}`** — no arguments, this pane's live session, the same shape the `session_info`
-  event of 25.3 answers with for `kind: "session"`. One deliberate difference: `history` is the
-  last 20 turns rather than every turn, with `turns` still the true count, because a tool result
-  that grows with the conversation is exactly what this tool is asked about. The few figures that
-  exist only in the GUI (the pane id, its tab, the share state) ride on `configure` when they are
-  there and are simply absent otherwise; the tool never guesses one.
+  event of 25.3 answers with for `kind: "session"` (`event` and `id` stripped, since a tool result
+  is not an event). One deliberate difference: `history` is the last 20 turns rather than every
+  turn, with `turns` still the true count, because a tool result that grows with the conversation is
+  exactly what this tool is asked about. When it was cut, **`history_truncated`** says how many
+  turns were dropped and `note` says so in a sentence that points at `activity`. The few figures
+  that exist only in the GUI (the pane id, its tab, the share state) ride on `configure` when they
+  are there and are simply absent otherwise; the tool never guesses one. A worker that cannot build
+  the payload answers `failed` in one sentence.
 - **`activity {turns?, turn?, slowest?}`** — a windowed digest of what this worker already holds:
-  its own turn events, tool calls and timings. `turns` (default 3, maximum 20) digests the last N
-  turns: for each, the prompt's first line, the model, wall time, token usage, the tool calls by
-  name with counts and total time, and how it ended. `turn` takes one turn id and digests that one
-  in more detail (each call, its label of section 23, its duration). `slowest` (maximum 20) lists
-  the slowest tool calls in the window. The whole ledger is never returned: answering "why is my
-  context low" must not be what lowers it.
+  its own turn events, tool calls and timings (`Agent.turn_log`). `turns` (default 3, maximum 20)
+  digests the last N turns: for each, the turn id, the prompt's first line (200 characters), the
+  model, wall time and thinking time, token usage, the tool calls rolled up by name with counts,
+  total time and failures — the 12 slowest names, with `tools_omitted` for the rest — and how it
+  ended. `turn` takes one turn id and digests that one in more detail (up to 40 calls, each with its
+  label of section 23, its duration and its outcome), and answers `unknown_turn` with the ids it
+  does hold when the turn has fallen out of the log. `slowest` (maximum 20) lists the slowest tool
+  calls in the window. Every answer carries a `note` saying what was left out. The whole ledger is
+  never returned: answering "why is my context low" must not be what lowers it.
 
 Both are read-only, neither needs the GUI, and both are on the pane agent only — the helper worker
 has no pane of its own to report.
@@ -5371,14 +5446,20 @@ has no pane of its own to report.
 Owner, 2026-09-20: "it should be clear what's changed / done and reversion / undo should be easy."
 
 - **The GUI owns the change log and performs the undo.** Each successful `set_option` and
-  `run_action` becomes an entry with a `change_id`, which the result carries back. Undo is the
-  GUI's own operation over that entry, so it works with no agent in the loop, after the worker has
-  stopped, and after the conversation is gone.
-- **A change announces itself**: a notification reading `Agent changed <label>: <before> → <after>
-  · Undo`, with Undo as its action, and the tool result in the transcript says the same words, so
-  the pane and the notification never disagree about what happened.
+  `run_action` becomes an entry (`relay::AppChange`, at most 200 kept per window) with a
+  `change_id`; a `set_option`'s is carried back in the result. Undo is the GUI's own operation over
+  that entry, so it works with no agent in the loop, after the worker has stopped, and after the
+  conversation is gone. It is itself logged, so "who put this back, and when" is answerable too.
+- **An action is logged but not undone.** Only an option has a value to put back; an `undo` naming
+  an action — or a change already undone — is refused `unknown_change`, and the notification for an
+  action offers no Undo button rather than one that cannot keep its promise.
+- **A change announces itself**: a notification reading `Agent changed <label>` / `<before> →
+  <after>`, with Undo as its action, and the tool result in the transcript says the same words, so
+  the pane and the notification never disagree about what happened. Taking the Undo amends that
+  same notification to `Undone: <label>`. An action's notification reads `Agent ran <label>`.
 - **The row is marked.** An option row an agent changed carries a marker in the Options pane until
-  the person touches it, so "what did it do to my settings" is answerable by looking.
+  the person touches it (`SettingsPane::markAgentChanged`), so "what did it do to my settings" is
+  answerable by looking, and every open Options pane redraws at once (`SettingsWatch`).
 - `app_changes` and `app_undo` (30.4) are the agent's view of the same log — a convenience, not the
   mechanism.
 
@@ -5388,19 +5469,38 @@ The helper is the board worker (`src/BoardWorker.{h,cpp}`, `agent_role: "switchb
 generalised, not a sibling of it:
 
 - **One worker per tab**, keyed by the tab's persistent id, configured with that tab's workspace.
+  The id is minted lazily by `RelayWindow::tabIdOf(page)` — `t` and twelve hex digits, kept on the
+  page widget and written into the saved layout as `tab_id`, so it survives a restart and a tab
+  being moved or renumbered. It is not the share id (`tab-…`), which is deliberately not saved.
+  It rides twice on the helper's `configure`: as `app.tab` (30.2), which is the canonical field and
+  reaches pane agents too, and as a **top-level `tab`** beside `workspace`, which is what the board
+  side is to key its conversation by without reaching into the app block. *The backend does not read
+  the top-level field yet* (30.8).
   Switchboards are per tab, so the same project open in two tabs gets two helpers with two
   conversations over **one** set of board files; only the conversation and the queue are the tab's
-  own. The conversation is persisted per (project, tab) under that id, so a restart brings each
-  tab's helper back with its own history.
-- **Started on the first ask**, not when the tab opens (owner decision 5). A tab with no project
-  attached gets a **board-less** helper: the `app` block and the app tools, no `board` block and no
-  `board_*` tools. Closing the tab stops its worker.
+  own.
+- **Started on the first ask**, not when the tab opens (owner decision 5), and it lives as long as
+  the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. A tab
+  with no project attached gets a **board-less** helper: the `app` block and the app tools, no
+  `board` block and no `board_*` tools (`configure` with an empty `workspace`; the page agent is
+  built with `board=None` and takes the pane agent's workspace).
 - **`board_chat` gains `pane`**: `"switchboard"` (the default, and what a client that does not send
-  the field means), `"options"`, `"actions"` or `"sessions"`. It picks the brief that goes in front
-  of the turn — the board roster and the page agent's job for `switchboard` (19.18), and for the
-  others a paragraph about that pane and the catalog rows or the query that are on screen. The
-  conversation is one: a question in Options and the next one on the board are consecutive turns of
-  the same agent, which is the point of a single helper.
+  the field means), `"options"`, `"actions"` or `"sessions"`; anything else is an error. It picks
+  the brief that goes in front of the turn — the board roster and the page agent's job for
+  `switchboard` (19.18), and for the others a paragraph about that pane, headed with the panel's own
+  title. The conversation is one: a question in Options and the next one on the board are
+  consecutive turns of the same agent, which is the point of a single helper.
+- **`board_chat` also takes `context`**: an optional string, cut at 2000 characters, saying what is
+  on screen in the asking pane — the rows being read, the search that is in the box. It is a hint,
+  not a context dump, and the catalog itself is never pasted in: the agent reads the rows live with
+  the app tools, because a settings list pasted into a prompt is stale the moment the person changes
+  one. It reaches the turn as an "On screen now:" line under the brief.
+- **A `switchboard` ask in a tab with no board is refused in a sentence**, not with a protocol
+  error nobody can act on: "This tab has no Switchboard, so there is nothing for the Switchboard
+  pane to talk about. Attach a project to the tab, or ask from Options, Actions or Sessions."
+  (`board_protocol.NO_BOARD_CHAT_ERROR`). The other three panes are about the app, not about a
+  board, and run exactly as usual. `board_chat {survey: true}` still needs the board and still
+  refuses without one.
 - **The answer is the existing turn events.** `board_chat_started`, `board_chat_queued`,
   `board_chat_state` and every `chat: true` turn event now also carry `pane`, so the panel that
   asked draws the answer and the others do not. Queueing, stop and the queue ops of 19.18 are
@@ -5409,7 +5509,7 @@ generalised, not a sibling of it:
 The `switchboard` role keeps its protocol name — settings, the model box (#BRD3), its Options ›
 Models row and its Main default are untouched — and is **labelled "Helper agent"** in the UI (owner
 decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "Options helper",
-"Sessions helper".
+"Actions helper", "Sessions helper".
 
 ### 30.8 Notes and deviations
 
@@ -5421,9 +5521,22 @@ decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "O
   one: it knows exactly what the last `configure` or `app_catalog` said. A value the agent reports
   is therefore as fresh as the last catalog, which is why the GUI resends on every change rather
   than on a timer.
+- **The request id and the row id cannot both be `id`.** The first draft of 30.1 and 30.3 wrote
+  them that way; one JSON object cannot carry the name twice, so the row travels as `row` and the
+  request id keeps `id`, which is what the result is matched by.
 - **Not an approval prompt.** "No per-action tool approvals" stands (22.7). `writes_enabled`,
   `settable` and `agent_safe` are a standing policy set once in Options, not a question asked per
-  call, and the safety net is that every change is announced and undoable (30.6).
+  call, and the safety net is that every change is announced and undoable (30.6). Nor is the policy
+  ever by *who*: the GUI is told which agent asked only so the log and the notification can say so.
 - **Secrets never cross this channel in either direction.** A secret row's value is not in the
   catalog, `app_option_get` will not produce one, and `app_option_set` refuses it before the
   request is built. Keys are the keystore's, as everywhere else (13.2).
+- **Not built yet, and the section says so rather than describing it:**
+  - **The helper worker's `app_command` is not answered.** The GUI routes a *pane* worker's
+    `app_command` to the window's executor (`src/Pane.h`), but a `BoardWorker`'s events go to the
+    board views and the helper panels, neither of which executes one, so the helper's
+    `app_option_set`, `app_action_run`, `app_open` and `app_undo` wait out the 20 s deadline and
+    answer `no_reply`. Its read tools — the ones that never leave the worker — are unaffected.
+  - **The helper's conversation does not survive a restart.** It lives as long as its worker, which
+    lives as long as the tab; nothing writes it under the tab id, and the top-level `tab` on its
+    `configure` is carried for that purpose but not yet read by the backend.
