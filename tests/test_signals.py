@@ -13,6 +13,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -703,6 +704,113 @@ class WireTests(unittest.TestCase):
     def test_a_flaky_signals_section_says_twenty(self):
         signal = S.Signal(key="ctest:a", kind="flaky", state="open")
         self.assertIn("20 consecutive passing executions", S.signal_section(signal))
+
+
+# --------------------------------------------------------------------------- the guest's path
+
+class ScriptTests(unittest.TestCase):
+    """`scripts/relay-board.py signals`: the same rules, for an agent with no tools (step 8).
+
+    Run as a subprocess, because that is how a guest reaches it: a bare `python3` with no
+    `PYTHONPATH`, from inside the checkout.
+    """
+
+    script = REPO / "scripts" / "relay-board.py"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="sb-", dir="/tmp")
+        self.project = Path(self.tmp.name).resolve()
+        self.root = self.project / "issues"
+        (self.root / "changes").mkdir(parents=True)
+        (self.root / "board.yaml").write_text(
+            "version: 1\n"
+            "tabs: [{id: features, folder: features}, {id: bugs, folder: changes}]\n"
+            "columns: [inbox, executing, needs-verification, done]\n"
+            "agent: {autonomy: auto}\n", encoding="utf-8")
+        H.append([ex(day(1), "ctest:panelayout", "fail", message="AssertionError: 3 != 17"),
+                  ex(day(2), "ctest:panelayout", "fail", run="r2", commit="c2",
+                     message="AssertionError: 3 != 17")],
+                 H.default_path(self.project))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_it(self, *args):
+        import subprocess
+        return subprocess.run([sys.executable, str(self.script), "--board", str(self.root),
+                               "signals", *args], capture_output=True, text=True,
+                              cwd=str(self.project), timeout=120)
+
+    def test_the_list_names_the_open_signal_and_what_is_wrong(self):
+        done = self.run_it()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("ctest:panelayout", done.stdout)
+        self.assertIn("open", done.stdout)
+        self.assertIn("AssertionError", done.stdout)
+
+    def test_a_claim_needs_a_name_because_a_guest_has_no_pane_token(self):
+        refused = self.run_it("claim", "ctest:panelayout")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("--as", refused.stderr)
+        done = self.run_it("claim", "ctest:panelayout", "--as", "claude-code")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("2 consecutive passing executions", done.stdout)
+        signals = S.state(self.project)
+        self.assertEqual(signals["ctest:panelayout"].session, "claude-code")
+
+    def test_a_signal_somebody_else_holds_is_refused_until_force(self):
+        self.run_it("claim", "ctest:panelayout", "--as", "codex")
+        refused = self.run_it("claim", "ctest:panelayout", "--as", "claude-code")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("held by codex", refused.stderr)
+        taken = self.run_it("claim", "ctest:panelayout", "--as", "claude-code", "--force")
+        self.assertEqual(taken.returncode, 0, taken.stderr)
+
+    def test_the_guest_dismissal_is_the_agents_two_reasons_and_a_week(self):
+        far = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+        soon = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+        for args in (("--reason", "wont-fix", "--comment", "c", "--until", soon),
+                     ("--reason", "environmental", "--until", soon),
+                     ("--reason", "environmental", "--comment", "c"),
+                     ("--reason", "environmental", "--comment", "c", "--until", far)):
+            with self.subTest(args=args):
+                refused = self.run_it("dismiss", "ctest:panelayout", *args)
+                self.assertEqual(refused.returncode, 2, refused.stdout)
+        done = self.run_it("dismiss", "ctest:panelayout", "--reason", "flaky-known",
+                           "--comment", "known socket flake", "--until", soon)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(S.state(self.project)["ctest:panelayout"].state, "dismissed")
+
+    def test_a_release_that_gave_up_files_the_bug_card(self):
+        self.run_it("claim", "ctest:panelayout", "--as", "claude-code")
+        done = self.run_it("release", "ctest:panelayout", "--reason", S.GAVE_UP,
+                           "--as", "claude-code")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("is now card #", done.stdout)
+        signal = S.state(self.project)["ctest:panelayout"]
+        self.assertTrue(signal.card)
+        self.assertEqual(signal.session, "")
+
+    def test_a_promotion_by_hand_writes_one_card_and_says_so_the_second_time(self):
+        first = self.run_it("promote", "ctest:panelayout")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        again = self.run_it("promote", "ctest:panelayout")
+        self.assertIn("already has card", again.stdout)
+
+    def test_an_unknown_key_and_a_missing_key_are_refused_by_name(self):
+        self.assertEqual(self.run_it("claim").returncode, 2)
+        missing = self.run_it("claim", "ctest:nothing", "--as", "x")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("no open signal", missing.stderr)
+
+    def test_the_policy_tells_a_guest_the_rules_it_cannot_read_from_a_tool(self):
+        from relay_core import board as B
+        text = B.policy_text(B.Board(self.root, self.project))
+        for phrase in ("relay-board.py signals", "second consecutive failing execution",
+                       "environmental", "flaky-known", "needs-verification",
+                       "## Signal"):
+            self.assertIn(phrase, text)
+
 
 
 if __name__ == "__main__":                                       # pragma: no cover

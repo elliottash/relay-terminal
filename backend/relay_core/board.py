@@ -2189,6 +2189,27 @@ def _appendix(board: "Board") -> str:
                            "the change (rule 5). Nothing is ever deleted: a card is closed by "
                            "moving it to `done` or `dropped` (both in `done/`) with the reason in "
                            "the thread.", indent="")
+    signals_paragraph = "\n".join([
+        _wrap("A **signal** is one keyed item per failing check — a test, a build, a `check` "
+              "problem — that a machine opens on its second consecutive failing execution and "
+              "closes only when that check passes again (card #AQ6X). It is not a card and not in "
+              f"git: it is folded out of `{folder}/.private/`, which is local to this machine, so "
+              "there is nothing here to edit by hand and no file of yours to commit. You cannot "
+              "mark one fixed; you run the check.", indent=""), "",
+        _wrap("`python3 scripts/relay-board.py signals` lists the open ones. `signals claim <key> "
+              "--as <your name>` says you are on one, and a signal somebody else holds is refused "
+              "— read it, say what you are doing instead, and take it over only when the user says "
+              "to. `signals release <key> --reason gave-up` files it as a bug card when you could "
+              "not fix it; any other reason simply frees it. `signals dismiss <key> --reason "
+              "environmental|flaky-known --comment '…' --until YYYY-MM-DD` hides one you have "
+              "*shown* is not the code's fault, for at most a week: `wont-fix`, `expected` and a "
+              "longer expiry are the user's, and every dismissal expires. `signals promote <key>` "
+              "files the bug card by hand.", indent=""), "",
+        _wrap("Two rules to know before you land work. A card cannot leave `needs-verification` "
+              "while a signal it is answerable for is open, and closing the card does not close "
+              "the signal — the machine's state wins. And a card a signal was promoted from "
+              "carries a `## Signal` section that Relay rewrites in place: leave it alone, like "
+              "`implemented_by`.", indent="")])
     format_paragraph = _wrap("Everything above names Relay's `board_*` tools. You do not have them "
                              "— they are the worker's, and a guest session reaches the board by "
                              "editing files. Here is each call as a file edit. The bytes are "
@@ -2282,6 +2303,10 @@ a value typed by hand is what makes the audit trail a lie.
 ### Move it — `board_move_card`
 
 {move_paragraph}
+
+### Signals — the faults the machine is tracking
+
+{signals_paragraph}
 
 ### Check what you wrote
 

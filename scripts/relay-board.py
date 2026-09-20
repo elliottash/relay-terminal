@@ -10,6 +10,7 @@ Never calls a model and never uses the network.
   relay-board.py policy [--stdout]
   relay-board.py migrate [--apply]
   relay-board.py verifier <ID> [--json]
+  relay-board.py signals [list|claim|release|dismiss|promote] [KEY] [--as NAME] ...
 """
 import argparse
 import json
@@ -148,6 +149,97 @@ def cmd_verifier(args, board: board_mod.Board) -> int:
     return 0 if result.get('recommended') else 1
 
 
+def cmd_signals(args, board: board_mod.Board) -> int:
+    """The faults the machine is tracking, for an agent with no `board_signals` tool (#AQ6X).
+
+    A *signal* is folded out of `<board>/.private/` — the run history plus an append-only log of
+    actions — so this is the only honest way to reach one from a shell: there is no card file to
+    edit, the store is local to this machine, and nothing here is committed.
+
+    A guest has no pane session token, so `--as` is the name that goes in the claim (`claude-code`,
+    `codex`, whatever names you in a thread), exactly as `assignee` is on a card.  Everything else
+    is the same rule the tool enforces, from the same module: `environmental` and `flaky-known`
+    only, a comment, and an expiry at most a week out.
+    """
+    from relay_core import signals as sig
+    action = (args.action or 'list').lower()
+    signals = sig.state(board.repo, board.root)
+    if action == 'list':
+        rows = [s for s in sig.sort_signals(signals.values())
+                if s.state in ('open', 'pending', 'dismissed')]
+        if args.json:
+            print(json.dumps([s.to_dict() for s in rows], indent=2))
+            return 0
+        if not rows:
+            print('no signals: every check this project records is passing')
+            return 0
+        for one in rows:
+            marks = ''.join(m for m in (' regressed' if one.regressed else '',
+                                        ' stale' if one.stale else ''))
+            held = f" held by {one.session}" if one.session else ''
+            card = f" card #{one.card}" if one.card else ''
+            print(f"{one.state:9} {one.kind:7} {one.key}  {one.count} failure(s), "
+                  f"last {one.last_seen}{marks}{held}{card}")
+            if one.message:
+                print(f"            {one.message[:160]}")
+        return 0
+    key = (args.key or '').strip()
+    if not key:
+        print(f"signals {action} needs the signal's key, as `signals` lists it", file=sys.stderr)
+        return 2
+    one = signals.get(key)
+    if one is None or one.state in ('resolved', 'removed'):
+        print(f"no open signal {key!r} (a signal resolves by its check passing)", file=sys.stderr)
+        return 2
+    path = sig.default_path(board.repo, board.root)
+    who = (args.who or '').strip()
+    if action == 'claim':
+        if not who:
+            print('signals claim needs --as <name>: a guest has no pane token, so the name in '
+                  'the claim is what tells the next agent who is on it', file=sys.stderr)
+            return 2
+        if one.session and one.session != who and not args.force:
+            print(f"{key} is held by {one.session}: read its history, say what you are doing "
+                  "instead, and pass --force only when the user says to take it over",
+                  file=sys.stderr)
+            return 2
+        sig.append_event({'action': 'claim', 'key': key, 'session': who}, path)
+        print(f"{key} claimed by {who}; it resolves on "
+              f"{sig.RESOLVE_PASSES.get(one.kind, 2)} consecutive passing executions and on "
+              "nothing else")
+        return 0
+    if action == 'release':
+        sig.append_event({'action': 'release', 'key': key, 'session': who,
+                          'reason': args.reason or ''}, path)
+        print(f"{key} released")
+        if (args.reason or '') != sig.GAVE_UP:
+            return 0
+        action = 'promote'                      # gave up: it is a person's problem now
+    if action == 'dismiss':
+        try:
+            dismissal = sig.check_dismissal(args.reason, args.comment, args.until, by_agent=True)
+        except sig.SignalError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        sig.append_event({'action': 'dismiss', 'key': key, 'by': who, **dismissal}, path)
+        print(f"{key} dismissed as {dismissal['reason']} until {dismissal['until']}; it keeps "
+              'counting underneath and blocks no card')
+        return 0
+    from relay_core import board_tools as bt
+    tools = bt.BoardTools(board, autonomy='auto', enforce_limits=False, duplicate_check=False,
+                          context=bt.ToolContext(actor=who or 'agent'))
+    result = tools.promote_signal(key, args.reason or 'by hand')
+    if result.get('error'):
+        print(str(result['error']), file=sys.stderr)
+        return 2
+    if not result.get('promoted'):
+        print(f"{key} already has card #{result.get('card') or '?'}")
+        return 0
+    print(f"{key} is now card #{result['card']} ({result['path']}); the signal stays open until "
+          'its check passes')
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -180,6 +272,25 @@ def main(argv=None) -> int:
     verifier.add_argument('id', help='the card id, e.g. K7Q2')
     verifier.add_argument('--json', action='store_true')
     verifier.set_defaults(func=cmd_verifier)
+
+    signals = sub.add_parser('signals', help='the faults the machine is tracking (card #AQ6X): '
+                                             'list them, or claim, release, dismiss or promote one')
+    signals.add_argument('action', nargs='?', default='list',
+                         choices=['list', 'claim', 'release', 'dismiss', 'promote'])
+    signals.add_argument('key', nargs='?', help="the signal's key, e.g. ctest:panelayout")
+    signals.add_argument('--as', dest='who', default='',
+                         help='the name that holds the claim (a guest has no pane token)')
+    signals.add_argument('--reason', default='',
+                         help='on release, `gave-up` files it as a bug card; on dismiss, '
+                              'environmental or flaky-known')
+    signals.add_argument('--comment', default='', help='on dismiss: what you checked, and why '
+                                                       "this is not the code's fault")
+    signals.add_argument('--until', default='', help='on dismiss: the date it comes back, at most '
+                                                     'a week out')
+    signals.add_argument('--force', action='store_true',
+                         help='on claim: take one another session holds')
+    signals.add_argument('--json', action='store_true')
+    signals.set_defaults(func=cmd_signals)
 
     args = parser.parse_args(argv)
     issues = args.issues or default_board_dir()
