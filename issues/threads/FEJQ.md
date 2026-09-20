@@ -56,3 +56,6 @@ Owner, 2026-09-20, three decisions folded into the card: (1) **one joint system*
 
 <!-- relay:entry 20260920T141153Z-eb author=agent kind=decision pane=switchboard -->
 Correction (owner, 2026-09-20): the helper worker is **per tab**, not per window — Switchboards are per tab, and `RelayWindow::boardWorker(workspace)` already holds one per attached project, which is per tab because a tab holds one project. Options/Actions/Sessions in a tab ask the tab's worker; a tab with no project gets a board-less worker on its first ask. Goal, Decisions and step 6 corrected.
+
+<!-- relay:entry 20260920T141302Z-ar author=agent kind=decision pane=switchboard -->
+Owner, 2026-09-20: the same project in two tabs gets two Switchboards with two separate agents. So the helper worker is keyed by the **tab**, not the workspace (`boardWorker(workspace)` today would share one worker and one conversation between them): tab → worker, each configured with its tab's project, board files shared, conversation and queue the tab's own, persisted per (project, tab) under the tab's persistent id. Decisions and step 6 updated.
