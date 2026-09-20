@@ -1,8 +1,7 @@
 ---
 id: GMCF
 type: work
-status: discussing
-waiting_on: owner
+status: executing
 labels: [feature, performance]
 assignee: claude-code
 rank: m8
@@ -24,3 +23,12 @@ faults with one right answer; each trades something. The questions and recommend
 thread.
 
 ## Decisions
+Owner, 2026-09-20, answering the five questions in the thread by number:
+
+1. Worker per pane, started lazily: "1 ok. 220MB seems like a good trade for the isolation"
+2. Slimmer system prompt: "2 yes, and you can also deploy a fable subagent to propose further pruning / distillation of the system prompt components. or have a short version for local models / short context windows"
+3. Keep the session file format, coalesce the saves: "3 ok"
+4. Qt6 CI job now, keep shipping Qt6 on 26.04, flip CMake AUTO after #7M6E is verified on Qt6: "4 ok"
+5. Asynchronous `systemd-run` probe: "5 yes"
+
+And: "if there are other useful findings or fixes or tweaks, go ahead and do them"
