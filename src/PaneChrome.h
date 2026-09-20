@@ -37,6 +37,7 @@
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QJsonObject>
+#include <QResizeEvent>
 #include <QShowEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -641,6 +642,7 @@ public:
         raise();
         syncHeaderInset();
         placeBackdrop();
+        applyShape();
     }
 
     // Repaints every pane's type band, status glyph and remote marks in every window: after
@@ -798,6 +800,49 @@ public:
 protected:
     void showEvent(QShowEvent *event) override { QFrame::showEvent(event); syncHeaderInset(); }
     void hideEvent(QHideEvent *event) override { QFrame::hideEvent(event); syncHeaderInset(); }
+    void resizeEvent(QResizeEvent *event) override {
+        QFrame::resizeEvent(event);
+        applyShape();   // the child boxes are live here; queued again below for the first layout
+        QMetaObject::invokeMethod(this, [this] { applyShape(); }, Qt::QueuedConnection);
+    }
+
+    // The buttons' panel is the shape of the buttons, not of the rectangle around them (owner,
+    // 2026-09-20: "an L-shaped polyform of the buttons rather than a rectangle"): with the share
+    // button hanging below the row's last button, the bottom-left of the card is cut away and the
+    // pane shows through. The theme still paints its rounded, bordered card — for its material
+    // gradients as much as its colours — and the mask trims the silhouette; paintEvent then gives
+    // the two cut edges the same 1 px border the other three sides carry, so the L reads as one
+    // outlined shape rather than a rectangle with a bite taken out. A pane without a share button
+    // (every non-terminal pane) is one row high and keeps the plain card.
+    void applyShape() {
+        const QRect foot = m_share && m_share->isVisibleTo(this) ? m_share->geometry() : QRect();
+        // The share button is a foot only when it hangs below the row (it sat in the row until
+        // 2026-09-20, and a session whose tree still has it there must get the plain card back).
+        int rowBottom = 0;
+        for (QToolButton *b : findChildren<QToolButton *>())
+            if (b != m_share) rowBottom = std::max(rowBottom, b->geometry().bottom());
+        const int cutY = foot.top() - 1;      // the row's bottom edge: the top band ends here
+        const int footLeft = foot.left() - 2; // the foot hugs the share button, with a 2 px ledge
+        if (foot.width() <= 0 || foot.top() <= rowBottom || cutY <= 4 || footLeft <= 4
+            || foot.bottom() > height()) {
+            if (m_cutY) { m_cutY = 0; clearMask(); }   // not laid out yet, or no foot at all
+            return;
+        }
+        m_cutY = cutY; m_footLeft = footLeft;
+        setMask(QRegion(rect()).subtracted(QRegion(0, cutY, footLeft, height() - cutY)));
+    }
+
+    void paintEvent(QPaintEvent *event) override {
+        QFrame::paintEvent(event);   // the theme's card; the mask above clips it to the L
+        if (m_cutY <= 0) return;
+        // The cut rows themselves are behind the mask, so the lines sit on the last visible
+        // pixel of each edge: the band's underside at m_cutY - 1, the foot's left edge at m_footLeft.
+        QPainter p(this);
+        p.setPen(relay::theme::Border);
+        p.drawLine(0, m_cutY - 1, m_footLeft, m_cutY - 1);
+        p.drawLine(m_footLeft, m_cutY, m_footLeft, height() - 1);
+    }
+
 
 public:
     void refreshTooltips() {
@@ -1268,5 +1313,6 @@ private:
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;
     QString m_remoteHost;
+    int m_cutY = 0, m_footLeft = 0;   // the L's cut: below m_cutY only columns from m_footLeft remain
 };
 
