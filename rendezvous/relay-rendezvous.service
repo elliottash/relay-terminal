@@ -5,10 +5,18 @@
 # code's PIN never reaches it (CPace). What it keeps is ciphertext in flight and metadata — desktop
 # ids and public keys, rooms on their own ttl, code-to-room maps on theirs, never the 7-day log.
 #
-# Install (the runbook for elliott-main-1 has the whole procedure):
+# First install on a new box:
 #   rsync the repo's remote/, rendezvous/ and app/ to /opt/relay-rendezvous/ (root-owned)
+#   useradd --system --no-create-home --shell /usr/sbin/nologin relay-rendezvous
 #   cp rendezvous/relay-rendezvous.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl enable --now relay-rendezvous
+#
+# Afterwards it is `rendezvous/deploy.sh` and nothing by hand: it deploys a clean export of a
+# revision (never the shared checkout's working tree), keeps the previous tree in
+# /opt/relay-rendezvous.prev, restarts this unit, and checks that every file the site serves is
+# the one on main. `--check` compares without deploying, `--rollback` puts .prev back, and
+# `--install-unit` copies this file over when it has changed. docs/RELEASING.md says when to run
+# it: on any change under app/, remote/ or rendezvous/.
 # The Cloudflare Tunnel routes join.relay-terminal.ai straight to 127.0.0.1:8791, as it routes
 # api.relay-terminal.ai to the gateway: no nginx vhost, so nothing here can touch the shared nginx.
 
