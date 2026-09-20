@@ -508,7 +508,8 @@ private slots:
         if (auto *app = qobject_cast<QApplication *>(QCoreApplication::instance()))
             relay::theme::applyTheme(*app);
         TestSuitesPane pane;
-        pane.resize(1180, 780);
+        const int width = qEnvironmentVariableIntValue("RELAY_TESTSUITES_SHOT_WIDTH");
+        pane.resize(width > 0 ? width : 1180, 780);
         pane.handleEvent(listEvent(fixture(), QJsonObject{
             {"line", "30 tests · 26 passed (2 slow, 2 flaky) · 1 failed · 3 never run · 41.2 s"}}));
         pane.show();

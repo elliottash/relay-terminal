@@ -401,13 +401,18 @@ class RecordsAndSummaryTests(unittest.TestCase):
         self.assertIn("5 tests", out["line"])
         self.assertIn("2 passed", out["line"])
         self.assertIn("1 never run", out["line"])
-        self.assertTrue(out["line"].endswith(" s"))
+        self.assertRegex(out["line"], r" (ms|s|m)$")
         self.assertIn(" · ", out["line"])
+
+    def test_summary_line_never_says_zero_seconds(self):
+        self.assertEqual(H.format_seconds(0.004), "4 ms")
+        self.assertEqual(H.format_seconds(1.44), "1.4 s")
+        self.assertEqual(H.format_seconds(150), "2.5 m")
 
     def test_summary_of_nothing(self):
         out = H.summary([])
         self.assertEqual(out["total"], 0)
-        self.assertEqual(out["line"], "0 tests · 0 passed · 0.0 s")
+        self.assertEqual(out["line"], "0 tests · 0 passed · 0 ms")
 
     def test_records_are_json_serialisable(self):
         out = H.records([discovered("ctest:a", file="tests/a_test.cpp", line=3)],

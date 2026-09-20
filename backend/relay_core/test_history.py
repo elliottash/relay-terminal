@@ -609,6 +609,17 @@ def _mark_slow(out: Sequence[dict]) -> None:
         record.pop("_regressed", None)
 
 
+def format_seconds(seconds: float) -> str:
+    """`"4 ms"`, `"1.4 s"`, `"2.1 m"` — never `"0.0 s"`, which reads as "did not run" rather
+    than "was fast"; a whole suite is minutes and one test is often under a millisecond."""
+    value = max(0.0, float(seconds))
+    if value < 1.0:
+        return f"{value * 1000:.0f} ms"
+    if value < 120.0:
+        return f"{value:.1f} s"
+    return f"{value / 60.0:.1f} m"
+
+
 def summary(records_list: Sequence[dict]) -> dict:
     """The suite header: counts plus nextest's ready-made `line`.
 
@@ -635,7 +646,7 @@ def summary(records_list: Sequence[dict]) -> dict:
         parts.append(f"{skipped} skipped")
     if never:
         parts.append(f"{never} never run")
-    parts.append(f"{duration:.1f} s")
+    parts.append(format_seconds(duration))
     return {"total": total, "passed": passed, "failed": failed, "skipped": skipped,
             "never_run": never, "slow": slow, "flaky": flaky, "duration": duration,
             "line": " · ".join(parts)}

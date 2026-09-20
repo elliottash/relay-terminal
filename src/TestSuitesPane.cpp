@@ -32,6 +32,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <iterator>
 
 namespace relay::tests {
 
@@ -542,6 +543,52 @@ void TestSuitesPane::refreshTheme() {
 void TestSuitesPane::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
     if (m_summary) updateHeader();
+    fitGridColumn();
+}
+
+// Two things give way as the pane narrows, in this order: the run grid shrinks to whole cells
+// (never fewer than five), then the numeric columns leave from the least telling end — p50,
+// Runs, Cards, Last run, p95 — until the Name column keeps a readable minimum. At the pane's
+// default width (half the Switchboard's share) twenty cells and seven columns had every name
+// eliding to "adde...lows". A column the user hid in the Display menu stays hidden; a column
+// this hid comes back on its own when the room is there again. The delegate already paints
+// only the cells that fit.
+void TestSuitesPane::fitGridColumn() {
+    if (!m_table || !m_table->horizontalHeader()) return;
+    QHeaderView *header = m_table->horizontalHeader();
+    constexpr int kNameMinimum = 170;
+    constexpr int kMinCells = 5;
+    const int cellStride = kCellWidth + kCellGap;
+    static const int yieldOrder[] = {ColP50, ColRuns, ColCards, ColLastRun, ColP95};
+    auto others = [&]() {
+        int width = 0;
+        for (int column = ColReliability; column < ColCount; ++column)
+            if (!header->isSectionHidden(column)) width += header->sectionSize(column);
+        return width;
+    };
+    const int available = m_table->viewport()->width() - kNameMinimum - 10;
+    if (m_table->viewport()->width() < 200) return;   // not laid out yet; nothing to fit
+    // Bring back what this function hid, widest need last, while the room allows it.
+    for (int i = int(std::size(yieldOrder)) - 1; i >= 0; --i) {
+        const int column = yieldOrder[i];
+        if (!m_autoHidden.contains(column)) continue;
+        m_table->setColumnHidden(column, false);
+        if (others() + kMinCells * cellStride + 10 > available) {
+            m_table->setColumnHidden(column, true);
+            break;
+        }
+        m_autoHidden.remove(column);
+    }
+    for (int column : yieldOrder) {
+        if (others() + kMinCells * cellStride + 10 <= available) break;
+        if (header->isSectionHidden(column) || m_userSet.contains(column)) continue;
+        m_table->setColumnHidden(column, true);
+        m_autoHidden.insert(column);
+    }
+    const int room = available - others();
+    const int cells = std::clamp(room / cellStride, kMinCells, kGridCells);
+    const int width = cells * cellStride + 10;
+    if (header->sectionSize(ColGrid) != width) m_table->setColumnWidth(ColGrid, width);
 }
 
 // ----- events in ------------------------------------------------------------------------------
@@ -732,7 +779,11 @@ void TestSuitesPane::selectRow(int index) {
 bool TestSuitesPane::columnVisible(int column) const { return !m_table->isColumnHidden(column); }
 
 void TestSuitesPane::setColumnVisible(int column, bool visible) {
+    // The user's choice, so it is no longer this pane's to bring back or take away.
+    m_autoHidden.remove(column);
+    m_userSet.insert(column);
     m_table->setColumnHidden(column, !visible);
+    fitGridColumn();
 }
 
 // ----- sorting ---------------------------------------------------------------------------------

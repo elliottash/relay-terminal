@@ -21,6 +21,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QSet>
 #include <QWidget>
 #include <functional>
 
@@ -99,6 +100,7 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void fitGridColumn();
     bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
@@ -122,6 +124,8 @@ private:
     QStackedWidget *m_stack = nullptr;
     QSplitter *m_split = nullptr;
     QTableView *m_table = nullptr;
+    QSet<int> m_autoHidden;   // columns fitGridColumn() hid for room, not the user
+    QSet<int> m_userSet;      // columns the Display menu decided; fitGridColumn() leaves them
     QTextBrowser *m_detail = nullptr;
     QLabel *m_empty = nullptr;
     QPushButton *m_emptyRun = nullptr;
