@@ -1364,7 +1364,29 @@ def format_run(result: dict) -> str:
         lines.append(f"  skipped (not runnable from here): {value}")
     if result.get("state") == "timed-out":
         lines.append("  the run passed its timeout and was stopped")
+    lines += _opened_lines(result)
     return "\n".join(lines)
+
+
+def _opened_lines(result: dict) -> list[str]:
+    """What this run put on the board, and whose it is (#AQ6X step 7a, decision 9).
+
+    The pane that ran the tests is told in the *same* turn, because it is the one agent who knows
+    what it just changed: a signal its own run opened is its own to fix before it reports, and
+    nobody else picks one up until it has been unclaimed for longer than one fold
+    (`relay_core.signal_threads`).  The sentence is here rather than in the board policy because
+    it is only true of the run in front of it — a rule on every turn would be a rule about a
+    situation that is not happening.
+    """
+    opened = [str(key) for key in (result.get("opened") or []) if key]
+    if not opened:
+        return []
+    shown = ", ".join(opened[:10])
+    return [f"  signals this run opened: {shown}",
+            "  A signal your own run opened is yours: claim it with board_signals "
+            "{action: claim}, fix it in this turn before you report, then run the test again so "
+            "it resolves (two consecutive passes of that key, and nothing else, close it). If "
+            "you cannot fix it, release it with reason gave-up, which files it as a bug card."]
 
 
 # ------------------------------------------------------------------- the card's `## Tests` body

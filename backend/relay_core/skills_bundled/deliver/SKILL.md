@@ -95,6 +95,12 @@ working). Anything smaller: go straight to work.
   (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
   `manual: <evidence path>`). Run `tests_check` on the card before you move it to
   `needs-verification`, and fix what it names.
+- **A signal your own run opened is yours.** `tests_run`'s result lists them as "signals this run
+  opened" (#AQ6X): claim one with `board_signals {action: "claim", key: …}`, fix it in this turn
+  before you report, and run the test again so it resolves — two consecutive passes of that key,
+  and nothing else, close it. If you cannot fix it, `board_signals {action: "release", reason:
+  "gave-up"}`, which files it as a bug card. Leave it unclaimed and Relay starts its own agent
+  thread on it after the next fold.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
