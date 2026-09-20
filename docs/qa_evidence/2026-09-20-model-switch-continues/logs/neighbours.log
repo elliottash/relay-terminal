@@ -1,0 +1,12 @@
+...........................................
+  guest reconcile over 120 synthetic claude sessions: cold 29 ms, warm 1 ms
+........................../usr/lib/python3.12/unittest/case.py:638: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 34039)>
+  self.doCleanups()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..................................................................sys:1: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..................................................
+----------------------------------------------------------------------
+Ran 185 tests in 11.147s
+
+OK

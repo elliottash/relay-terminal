@@ -6,7 +6,7 @@ assignee: agent
 priority: 1
 rank: zzzzzzzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-20-model-switch-continues/'], related: [], github: null}
+links: {plans: [], commits: ['9628872d'], evidence: ['docs/qa_evidence/2026-09-20-model-switch-continues/'], related: [], github: null}
 ---
 # bug: when i switched models from claude to glm, it stopped relaying and i had to…
 
