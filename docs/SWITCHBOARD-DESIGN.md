@@ -743,7 +743,9 @@ deletes converted paragraphs and logs a thread event per card. `TODO:` comments 
   shared layer of a request ledger (policy rule 1); a within-turn todo list (Claude Code tasks, opencode `todowrite`)
   still covers steps inside a turn and must not create cards. Reconcile when that research lands.
 - **Plans.** `/plan` in a card runs plan mode in the board worker; `plan_written` adds `links.plans` and a thread event;
-  Execute runs in a chosen terminal pane with `cards: [{id}]`. `.relay/plans` is not gitignored; see question 4.
+  Execute runs in a chosen terminal pane with `cards: [{id}]`. A plan big enough to split may carry an Orchestration
+  block (subagents, parallel and dependent steps) and the Execute task says to follow it (#K3TY). `.relay/plans` is not
+  gitignored; see question 4.
 - **QA lanes.** Same semantics; the Needs QA column is the lane. QA sweeps use `board_list {status: needs-qa-llm}` and
   `board_move_card`, so the worker, not memory, enforces the verdict contract (any pane may
   close once the verdict is there — owner, 2026-09-20, #76DJ).

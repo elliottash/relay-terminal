@@ -300,6 +300,10 @@ class ToolListTests(unittest.TestCase):
     def test_plan_mode_tells_the_planner_to_ask_before_it_writes_the_plan(self):
         self.assertIn("ask_user", PLAN_MODE_NOTE)
         self.assertLess(PLAN_MODE_NOTE.index("ask_user"), PLAN_MODE_NOTE.index("write_plan"))
+        # #K3TY: a plan big enough to split also says how it is executed — the Orchestration
+        # block, named in the write_plan instruction itself.
+        self.assertIn("Orchestration", PLAN_MODE_NOTE)
+        self.assertLess(PLAN_MODE_NOTE.index("numbered steps"), PLAN_MODE_NOTE.index("Orchestration"))
 
     def test_both_modes_hand_the_agent_the_tool(self):
         with tempfile.TemporaryDirectory() as root:

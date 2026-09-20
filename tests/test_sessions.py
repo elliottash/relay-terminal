@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from relay_core import attachments, checkpoints, suggestions
+from relay_core import attachments, checkpoints, planning, suggestions
 from relay_core.agent import Agent
 from relay_core.context import SUMMARY_MARKER, ContextTracker, limit_tokens
 from relay_core.provider import ProviderConfig
@@ -427,6 +427,15 @@ class PlanModeTests(Base):
         self.assertEqual(path.read_text(), '# Refactor the Parser!\n\n## Steps\n1. do it\n')
         results = [e for e in self.of('tool_result')]
         self.assertIn('not available in plan mode', results[0]['result']['error'])
+
+    def test_the_execute_prompt_follows_the_plans_orchestration_block(self):
+        # #K3TY: an Orchestration block in a plan is the plan's own decision about how the work
+        # runs, so every Execute prompt carries one standing line telling the executor to follow it.
+        prompt = planning.execution_prompt('/tmp/plan.md', '## Steps\n1. do it')
+        self.assertTrue(prompt.startswith('Execute the plan in /tmp/plan.md:'))
+        self.assertIn('## Steps', prompt)
+        self.assertIn('Orchestration block, follow it', prompt)
+        self.assertIn('name any deviation', prompt)
 
     def test_default_plans_dir_and_build_mode_refuses_write_plan(self):
         provider = ScriptedProvider([tools_msg(call('write_plan', {'title': 't', 'content': 'c'})), text('x')])

@@ -1,5 +1,5 @@
-<!-- Switchboard Plan brief v1 (#XS6Q, protocol 19.10). Sent at the head of every Plan turn on
-     a card, after the card itself on the first one. `{card}` is the card's id and
+<!-- Switchboard Plan brief v2 (#K3TY, protocol 19.10; v1 #XS6Q). Sent at the head of every Plan
+     turn on a card, after the card itself on the first one. `{card}` is the card's id and
      `{plan_heading}` the section it writes (`Plan`; SWITCHBOARD-DESIGN 12.4: plan mode writes
      the plan onto the card). -->
 
@@ -19,6 +19,10 @@ the owner presses **Execute**, so write it for that reader.
    - **Goal** — one or two sentences, in terms of the card's issue and its `acceptance` if it has one.
    - **Findings** — what the code does today, with exact paths (and functions).
    - **Steps** — numbered, each one change a reviewer can check.
+   - **Orchestration** — only when the work is big enough to split across subagents: each subagent
+     (its type and a one-line task), which steps run in parallel, and which wait for which. Only
+     steps that touch no shared files may run in parallel; writes stay with the main agent that
+     Execute hands the card to. A small plan gets no block.
    - **Risks** — what could break, and anything the owner has to decide (as a question).
    - **Verify** — the tests to run or add, and how to see it working.
 4. **Nothing else changes.** You cannot run commands, write files, or change another card, and

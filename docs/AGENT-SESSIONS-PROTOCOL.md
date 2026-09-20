@@ -111,8 +111,8 @@ the finish time is unknown.
 - Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
   reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
   so in the pane.
-- Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane.
-- The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first.
+- Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane. A plan big enough to split across subagents carries an **Orchestration** block — which steps go to which subagent type, which run in parallel, which wait (#K3TY); small plans get none.
+- The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first. The Execute prompt appends one standing line: where the plan has an Orchestration block, follow it (start the listed subagents, independent ones together, wait before dependent waves) and name any deviation in the final reply.
 
 ## 7. Instructions and agent definitions
 
@@ -2369,7 +2369,9 @@ When no pane could be opened the entry keeps the plain `Execute · …` wording 
 `pane_token`. The task text
 (`relay::board::executeTask`) names the card, says to set `implemented_by`, to put `#ID` in every
 commit message and add each commit's hash to `links.commits` with `board_update_card`, to post
-progress with `board_comment`, and to land in `needs-verification` per the policy (#3XZV): the
+progress with `board_comment`, and, where the plan carries an Orchestration block, to follow it
+(parallel steps to subagents started together, dependent waves in order; #K3TY), and to land in
+`needs-verification` per the policy (#3XZV): the
 verifier then moves it on to `needs-qa-llm`, or back to the stage the failure warrants. The stage
 moves up to that point are the board's own: `board_ask` moves an inbox card to `discussing` on the
 thread's first entry and to `planning` when a Plan turn starts, a finished Plan turn that left its

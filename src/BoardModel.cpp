@@ -367,9 +367,13 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
     QString what = QStringLiteral("The Switchboard card %1 is attached");
     if (hasPlan && hasAcceptance)
         what += QStringLiteral(" with its issue, its `## Plan` and its acceptance. Carry out the plan "
-                               "until the acceptance holds.");
+                               "until the acceptance holds. Where the plan has an Orchestration "
+                               "block, follow it: parallel steps to subagents started together, "
+                               "dependent waves in order.");
     else if (hasPlan)
-        what += QStringLiteral(" with its issue and its `## Plan`. Carry out the plan.");
+        what += QStringLiteral(" with its issue and its `## Plan`. Carry out the plan. Where the "
+                               "plan has an Orchestration block, follow it: parallel steps to "
+                               "subagents started together, dependent waves in order.");
     else if (hasAcceptance)
         what += QStringLiteral(" with its issue and its acceptance. It has no plan: read the code "
                                "first, then implement it until the acceptance holds.");

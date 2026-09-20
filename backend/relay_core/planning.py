@@ -18,7 +18,7 @@ PLAN_MODE_NOTE = """
 
 PLAN MODE is active. Investigate before proposing changes: you may read files, list directories, load skills and run commands, but commands must be read-only (no edits, installs, git commits, deletions, or writes of any kind). Do not modify the workspace.
 Ask the user clarifying questions with ask_user rather than making large assumptions about what they want. Once you have read enough to know what is actually ambiguous — which of two directions, how far the change goes, a trade-off worth their opinion, wording only they can choose — ask it, in one call, before you write the plan. Give options when the decision has a few known branches and leave them out when it does not; an open question is better than three invented choices. Do not ask what the code can tell you, and do not ask whether the plan is any good: write it and let them edit it.
-When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. Then reply with a two-sentence summary. The user reviews and edits the plan file before anything is executed."""
+When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. When the work is big enough to split across subagents, the plan also carries an Orchestration block: each subagent (its type and a one-line task), which steps run in parallel, and which wait for which. Only steps that touch no shared files may run in parallel, and writes stay with the main agent; a small plan gets no block. Then reply with a two-sentence summary. The user reviews and edits the plan file before anything is executed."""
 
 WRITE_PLAN_SPEC = {"type": "function", "function": {
     "name": "write_plan",
@@ -91,5 +91,13 @@ def read_plan(path) -> str:
     return data.decode("utf-8")
 
 
+# Appended to every Execute prompt (#K3TY): an Orchestration block in the plan is the plan's own
+# decision about how the work is executed, so the executing agent follows it rather than re-planning.
+ORCHESTRATION_NOTE = (
+    "Where the plan carries an Orchestration block, follow it: start the subagents it lists "
+    "(independent ones in one response, so they run concurrently), wait before dependent waves, do "
+    "yourself only what it assigns to the main agent, and name any deviation from it in your final reply.")
+
+
 def execution_prompt(path: str, content: str) -> str:
-    return f"Execute the plan in {path}:\n\n{content}"
+    return f"Execute the plan in {path}:\n\n{content}\n\n{ORCHESTRATION_NOTE}"

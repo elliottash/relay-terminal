@@ -900,6 +900,8 @@ class ModeTests(ProtocolTest):
         prompt = self.cards.prompts[-1]["prompt"]
         self.assertIn(f"[Plan · #{card_id}]", prompt)
         self.assertIn("## Plan", prompt)
+        # The Plan brief (v2, #K3TY) tells the planner when a plan carries an Orchestration block.
+        self.assertIn("Orchestration", prompt)
         self.assertIn(f"[Switchboard card #{card_id}", prompt)      # seeded first
         self.assertEqual(self.scope(card_id).mode, "plan")
         self.assertEqual(self.scope(card_id).card_id, card_id)
