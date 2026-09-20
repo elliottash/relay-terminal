@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "BoardChat.h"
+#include "HelperChat.h"
 
 #include "CopyOnSelect.h"
 #include "RichEditor.h"
@@ -23,9 +23,11 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QResizeEvent>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSizePolicy>
@@ -44,6 +46,24 @@
 #include <utility>
 
 namespace relay {
+
+// "Switchboard agent" on the board and "<Pane> helper" everywhere else (#FEJQ decision 4: the
+// `switchboard` role is relabelled "Helper agent" — label only — and "each panel's header says
+// where it is"). An unknown pane name gets the plain label rather than an empty head, because a
+// pane added later must not make the panel look broken before this list is updated.
+QString helperpane::title(const QString &pane)
+{
+    if (pane == options())
+        return QStringLiteral("Options helper");
+    if (pane == actions())
+        return QStringLiteral("Actions helper");
+    if (pane == sessions())
+        return QStringLiteral("Sessions helper");
+    if (pane == switchboard() || pane.isEmpty())
+        return QStringLiteral("Switchboard agent");
+    return QStringLiteral("Helper agent");
+}
+
 namespace {
 
 // The turn's clock. `chat.seconds` is what the *worker* has already spent on the turn before this
@@ -97,14 +117,40 @@ QString clockText(qint64 seconds)
     return QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
 }
 
+// What a `card:`, `option:` or `session:` link names, however the model spelled it. `card:K7Q2`
+// has no authority, so Qt puts K7Q2 in the path; `card://K7Q2` puts it in the host. Both are
+// written by hand in an answer, so both have to arrive somewhere.
+// The composer's fallbacks, widest first: the board says "the board", a helper says "this pane"
+// (#FEJQ, and the same words as its collapsed row). RichEditor picks the widest that fits.
+QStringList askPlaceholders(const QString &pane)
+{
+    const QString about = pane == helperpane::switchboard() ? QStringLiteral("the board")
+                                                            : QStringLiteral("this pane");
+    return {QStringLiteral("Ask about %1 — Enter sends, a second prompt queues").arg(about),
+            QStringLiteral("Ask about %1 — Enter sends").arg(about),
+            QStringLiteral("Ask about %1…").arg(about),
+            QStringLiteral("Ask…")};
+}
+
+QString linkTarget(const QUrl &url)
+{
+    QString target = url.host();
+    if (!url.path().isEmpty())
+        target += url.path();
+    while (target.startsWith(QLatin1Char('/')))
+        target.remove(0, 1);
+    return target;
+}
+
 // The header line: who this is, and — while it turns — how long it has been turning. The state
 // word stays out of the *pane's* header (owner, 2026-09-19, "Header and Activity decisions"); this
-// is the panel's own head, where a running clock is the whole point.
-void drawHead(QLabel *head, bool running, bool survey, qint64 seconds)
+// is the panel's own head, where a running clock is the whole point. `title` is where the panel
+// is (#FEJQ decision 4): one worker answers four panels, so the panel has to say which it is.
+void drawHead(QLabel *head, const QString &title, bool running, bool survey, qint64 seconds)
 {
     if (head == nullptr)
         return;
-    QString text = QStringLiteral("Switchboard agent");
+    QString text = title;
     if (running)
         text += QStringLiteral(" · ") + clockText(seconds);
     if (running && survey)
@@ -320,11 +366,63 @@ static QIcon micIcon(const QColor &ink)
     return QIcon(pixmap);
 }
 
-BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
+HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
+    : QWidget(parent), m_pane(pane.isEmpty() ? helperpane::switchboard() : pane)
 {
     setObjectName(QStringLiteral("boardChatPanel"));
     setAttribute(Qt::WA_StyledBackground);
-    auto *layout = new QVBoxLayout(this);
+
+    // The Switchboard's panel is the page it sits on, and it is built exactly as it always was:
+    // its own layout is the column of rows, with no holder and no ask row above it. Every other
+    // pane gets the collapsed row first and the column inside a holder, so folding it away is
+    // one call and cannot miss a row added later (#FEJQ).
+    QVBoxLayout *layout = nullptr;
+    if (isBoard()) {
+        layout = new QVBoxLayout(this);
+    } else {
+        auto *outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, 0, 0, 0);
+        outer->setSpacing(0);
+
+        // ---- collapsed: the one row the panel is until it is asked for --------------------
+        // It is a button and not a label so the keyboard can reach it, and reaching it is
+        // enough: a Tab that lands here meant to ask something, so the focus goes on into the
+        // composer.
+        m_askRow = new QWidget(this);
+        m_askRow->setObjectName(QStringLiteral("boardChatAskRow"));
+        auto *askLine = new QHBoxLayout(m_askRow);
+        askLine->setContentsMargins(10, 6, 10, 6);
+        askLine->setSpacing(6);
+        m_ask = new QToolButton(m_askRow);
+        m_ask->setObjectName(QStringLiteral("boardChatAsk"));
+        m_ask->setText(QStringLiteral("Ask about this pane"));
+        m_ask->setCursor(Qt::PointingHandCursor);
+        m_ask->setFocusPolicy(Qt::StrongFocus);
+        m_ask->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        m_ask->installEventFilter(this);
+        askLine->addWidget(m_ask, 0);
+        auto *askKeys = new QLabel(m_askRow);
+        askKeys->setObjectName(QStringLiteral("boardChatAskKeys"));
+        // The key line wears the head's muted ink, set here rather than in the stylesheet: the
+        // qss hooks for this panel live in src/Theme.cpp, which this library deliberately does
+        // not carry (see micIcon above for the same trade), and one label is not worth that edge.
+        QPalette muted = askKeys->palette();
+        muted.setColor(QPalette::WindowText, theme::TextMuted);
+        askKeys->setPalette(muted);
+        QFont small = askKeys->font();
+        small.setPointSizeF(qMax(theme::FloorPt, small.pointSizeF() * 0.9));
+        askKeys->setFont(small);
+        askLine->addWidget(askKeys, 0);
+        askLine->addStretch(1);
+        outer->addWidget(m_askRow);
+        QObject::connect(m_ask, &QToolButton::clicked, this, [this] { expand(); });
+
+        // ---- expanded: every row below, in one holder ------------------------------------
+        m_body = new QWidget(this);
+        m_body->setObjectName(QStringLiteral("boardChatBody"));
+        outer->addWidget(m_body);
+        layout = new QVBoxLayout(m_body);
+    }
     layout->setContentsMargins(10, 8, 10, 8);
     layout->setSpacing(6);
 
@@ -338,28 +436,48 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     m_toolRow = new QHBoxLayout;
     m_toolRow->setSpacing(6);
     headRow->addLayout(m_toolRow, 0);
+    // The way back to one row, for a panel that has one (#FEJQ). At the end of the head, where a
+    // pane's own chrome buttons are, and out of the tab order: the composer is what Shift+Tab
+    // should reach from here, not the control that would throw the answer off screen.
+    if (!isBoard()) {
+        m_fold = new QToolButton(this);
+        m_fold->setObjectName(QStringLiteral("boardChatFold"));
+        m_fold->setText(QStringLiteral("⌄"));
+        m_fold->setToolTip(QStringLiteral("Fold the helper back to one row. The conversation is "
+                                          "kept — it opens where you left it."));
+        m_fold->setCursor(Qt::PointingHandCursor);
+        m_fold->setFocusPolicy(Qt::NoFocus);
+        m_fold->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        headRow->addWidget(m_fold, 0);
+        QObject::connect(m_fold, &QToolButton::clicked, this, [this] { collapse(); });
+    }
     layout->addLayout(headRow);
 
     // Check, beside Clean up: the board's own format check over every card, deterministic and
     // free, whose findings draft a fix request into this composer. The panel builds it because the
     // panel is where it belongs; a board that brings its own (BoardView::buildChatPanel reparents
     // one in) replaces this one rather than standing beside it — see addToolWidget().
-    m_check = new QToolButton(this);
-    m_check->setObjectName(QStringLiteral("boardChatCheck"));
-    m_check->setText(QStringLiteral("Check"));
-    m_check->setToolTip(QStringLiteral("Re-run the board's format check over every card — ids, "
-                                       "front matter, threads — and list what is wrong. Click a "
-                                       "finding to draft a fix for the agent. Nothing is written "
-                                       "and no model is called."));
-    m_check->setCursor(Qt::PointingHandCursor);
-    m_check->setFocusPolicy(Qt::NoFocus);
-    m_check->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    m_toolRow->addWidget(m_check);
-    QObject::connect(m_check, &QToolButton::clicked, this, [this] {
-        send({{QStringLiteral("type"), QStringLiteral("board_check")}});
-        if (onStatus)
-            onStatus(QStringLiteral("Checking every card…"));
-    });
+    //
+    // The board's, and only the board's: a check over every card has nothing to say in Options or
+    // Sessions (#FEJQ: "the Switchboard keeps … the survey, the queue and Check/Clean up").
+    if (isBoard()) {
+        m_check = new QToolButton(this);
+        m_check->setObjectName(QStringLiteral("boardChatCheck"));
+        m_check->setText(QStringLiteral("Check"));
+        m_check->setToolTip(QStringLiteral("Re-run the board's format check over every card — ids, "
+                                           "front matter, threads — and list what is wrong. Click a "
+                                           "finding to draft a fix for the agent. Nothing is written "
+                                           "and no model is called."));
+        m_check->setCursor(Qt::PointingHandCursor);
+        m_check->setFocusPolicy(Qt::NoFocus);
+        m_check->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        m_toolRow->addWidget(m_check);
+        QObject::connect(m_check, &QToolButton::clicked, this, [this] {
+            send({{QStringLiteral("type"), QStringLiteral("board_check")}});
+            if (onStatus)
+                onStatus(QStringLiteral("Checking every card…"));
+        });
+    }
 
     // ---- findings: what a Check or a section's triage turned up ------------------------------
     m_findings = new QWidget(this);
@@ -372,14 +490,18 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_findings);
 
     // ---- the survey's offer (19.18): what the project already tracks, and the import ---------
-    m_survey = new QWidget(this);
-    m_survey->setObjectName(QStringLiteral("boardChatSurvey"));
-    m_survey->setAttribute(Qt::WA_StyledBackground);
-    m_surveyLayout = new QVBoxLayout(m_survey);
-    m_surveyLayout->setContentsMargins(0, 0, 0, 0);
-    m_surveyLayout->setSpacing(3);
-    m_survey->hide();
-    layout->addWidget(m_survey);
+    // A fresh *board*'s opening turn, so it exists only on the board; `handleEvent` drops a
+    // `board_survey` that reaches any other panel, and every method here is null-guarded.
+    if (isBoard()) {
+        m_survey = new QWidget(this);
+        m_survey->setObjectName(QStringLiteral("boardChatSurvey"));
+        m_survey->setAttribute(Qt::WA_StyledBackground);
+        m_surveyLayout = new QVBoxLayout(m_survey);
+        m_surveyLayout->setContentsMargins(0, 0, 0, 0);
+        m_surveyLayout->setSpacing(3);
+        m_survey->hide();
+        layout->addWidget(m_survey);
+    }
 
     // ---- the conversation ---------------------------------------------------------------------
     m_log = new QTextBrowser(this);
@@ -395,6 +517,24 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
             const QString id = (url.path().isEmpty() ? url.host() : url.path()).toUpper();
             if (onOpenCard && !id.isEmpty())
                 onOpenCard(id);
+            return;
+        }
+        // The two schemes the helper answers with (#FEJQ): `option:agent/allow_writes` reveals
+        // that row in Options, `session:0f3a…` opens that conversation. An answer that names a
+        // thing the app can show should be one click from showing it, the way `card:` already is.
+        if (url.scheme() == QStringLiteral("option")) {
+            const QString target = linkTarget(url);
+            const int slash = target.indexOf(QLatin1Char('/'));
+            const QString section = slash < 0 ? target : target.left(slash);
+            const QString row = slash < 0 ? QString() : target.mid(slash + 1);
+            if (onOpenOption && !section.isEmpty())
+                onOpenOption(section, row);
+            return;
+        }
+        if (url.scheme() == QStringLiteral("session")) {
+            const QString id = linkTarget(url);
+            if (onOpenSession && !id.isEmpty())
+                onOpenSession(id);
             return;
         }
         if (!url.scheme().isEmpty() && url.scheme() != QStringLiteral("file")) {
@@ -436,14 +576,20 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     QObject::connect(m_stop, &QToolButton::clicked, this, [this] { stopTurn(); });
 
     // ---- the queue (19.18): worker-side, in delivery order ------------------------------------
-    m_queueBox = new QWidget(this);
-    m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
-    m_queueBox->setAttribute(Qt::WA_StyledBackground);
-    m_queueLayout = new QVBoxLayout(m_queueBox);
-    m_queueLayout->setContentsMargins(0, 0, 0, 0);
-    m_queueLayout->setSpacing(2);
-    m_queueBox->hide();
-    layout->addWidget(m_queueBox);
+    // The board's box (#FEJQ). The FIFO itself is the worker's and serves every panel — a second
+    // ask from any pane queues exactly as it always did — but the rows that *reorder* it are a
+    // page the board has room for, and a helper folded to one row has nowhere to draw them. A
+    // helper's queued ask is reported on the pane's status line instead, from `board_chat_queued`.
+    if (isBoard()) {
+        m_queueBox = new QWidget(this);
+        m_queueBox->setObjectName(QStringLiteral("boardChatQueue"));
+        m_queueBox->setAttribute(Qt::WA_StyledBackground);
+        m_queueLayout = new QVBoxLayout(m_queueBox);
+        m_queueLayout->setContentsMargins(0, 0, 0, 0);
+        m_queueLayout->setSpacing(2);
+        m_queueBox->hide();
+        layout->addWidget(m_queueBox);
+    }
 
     // ---- the composer -------------------------------------------------------------------------
     // The shape a pane's prompt box has (src/Pane.h): the box is a row of its own and fills the
@@ -458,11 +604,7 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     m_composer = new RichEditor(this);
     m_composer->setObjectName(QStringLiteral("boardChatComposer"));
     m_composer->setAutoHeight(1, 6);
-    m_composer->setPlaceholders({QStringLiteral("Ask about the board — Enter sends, a second "
-                                                "prompt queues"),
-                                 QStringLiteral("Ask about the board — Enter sends"),
-                                 QStringLiteral("Ask about the board…"),
-                                 QStringLiteral("Ask…")});
+    m_composer->setPlaceholders(askPlaceholders(m_pane));
     m_composer->installEventFilter(this);
     // Every route sends: this box has one destination (owner's words to the page agent), so the
     // chords that mean "terminal" or "agent" in a pane must not silently do nothing here.
@@ -526,28 +668,113 @@ BoardChatPanel::BoardChatPanel(QWidget *parent) : QWidget(parent)
     clock->setInterval(1000);
     QObject::connect(clock, &QTimer::timeout, this, [this] {
         const double base = property(kClockBase).toDouble();
-        drawHead(m_head, m_running, m_surveyTurn,
+        drawHead(m_head, helperpane::title(m_pane), m_running, m_surveyTurn,
                  qint64(base) + (m_clock.isValid() ? m_clock.elapsed() / 1000 : 0));
     });
 
     updateVoiceChip();
     setRunning(false);
     rebuildLog();
+
+    // The Switchboard is the page it is on and stays open; every other panel starts as its one
+    // row (owner, 2026-09-20: "the Switchboard's 320 px of log plus composer is most of a small
+    // pane").
+    m_collapsed = !isBoard();
+    updateAskRow();
+    applyCollapsed();
 }
 
 // ------------------------------------------------------------------------------- wiring
 
-void BoardChatPanel::send(QJsonObject message)
+// Every message this panel sends carries the name of the pane it is in (#FEJQ). One helper worker
+// serves the whole tab, so `pane` is what picks the brief on the worker's side and what the turn
+// events coming back are tagged with; without it, the Sessions helper's question would be
+// answered as if it had been asked on the board.
+void HelperChatPanel::send(QJsonObject message)
 {
     if (!message.contains(QStringLiteral("id")) && nextRequestId)
         message.insert(QStringLiteral("id"), nextRequestId());
+    message.insert(QStringLiteral("pane"), m_pane);
     if (onSend)
         onSend(message);
 }
 
+// ------------------------------------------------------------------------------- collapsed
+
+// One row, or the whole panel. Nothing is destroyed either way: a helper folded back keeps its
+// conversation, its draft and its queue, so opening it again is where you left it.
+void HelperChatPanel::applyCollapsed()
+{
+    if (m_askRow != nullptr)
+        m_askRow->setVisible(m_collapsed);
+    if (m_body != nullptr)
+        m_body->setVisible(!m_collapsed);
+    if (!m_collapsed)
+        updateLogHeight();
+}
+
+void HelperChatPanel::updateAskRow()
+{
+    if (m_ask == nullptr)
+        return;
+    m_ask->setToolTip(m_askKeys.isEmpty()
+        ? QStringLiteral("Ask the helper agent about this pane.")
+        : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+    if (auto *keys = findChild<QLabel *>(QStringLiteral("boardChatAskKeys")))
+        keys->setText(m_askKeys);
+}
+
+// The log is sized to the pane it is in, not to the board's list page (#FEJQ): at most ~40 % of
+// the pane's height, and never less than three lines — below that an answer is a slot, not a
+// conversation. The board keeps its 320, which is what the page was built around.
+void HelperChatPanel::updateLogHeight()
+{
+    if (m_log == nullptr)
+        return;
+    if (isBoard()) {
+        m_log->setMaximumHeight(320);
+        return;
+    }
+    const int line = QFontMetrics(m_log->font()).lineSpacing();
+    const int floor = 3 * line + 2 * int(m_log->document()->documentMargin());
+    const QWidget *pane = parentWidget() != nullptr ? parentWidget() : this;
+    m_log->setMaximumHeight(qMin(320, qMax(floor, pane->height() * 2 / 5)));
+}
+
+void HelperChatPanel::expand()
+{
+    if (m_collapsed) {
+        m_collapsed = false;
+        applyCollapsed();
+    }
+    focusComposer();
+}
+
+void HelperChatPanel::collapse()
+{
+    if (isBoard() || m_collapsed)      // the board's panel is the page; it has nowhere to fold to
+        return;
+    m_collapsed = true;
+    applyCollapsed();
+}
+
+void HelperChatPanel::setAskShortcut(const QString &hintId, const QString &keys)
+{
+    m_askHint = hintId;
+    m_askKeys = keys;
+    updateAskRow();
+}
+
+void HelperChatPanel::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (!m_collapsed)
+        updateLogHeight();
+}
+
 // Clean up and Check. The widgets belong to whoever made them — BoardView owns Clean up, its
 // Stop/Clean up text and its run (19.9) — and this only gives them a home.
-void BoardChatPanel::addToolWidget(QWidget *widget)
+void HelperChatPanel::addToolWidget(QWidget *widget)
 {
     if (widget == nullptr || m_toolRow == nullptr)
         return;
@@ -569,7 +796,7 @@ void BoardChatPanel::addToolWidget(QWidget *widget)
 
 // The model box, once #BRD3 has landed one: among the chips, left of the microphone, where a
 // pane's is. Never at the end — Send is the last thing on the row and stays there.
-void BoardChatPanel::addComposerWidget(QWidget *widget)
+void HelperChatPanel::addComposerWidget(QWidget *widget)
 {
     if (widget == nullptr || m_composerRow == nullptr)
         return;
@@ -586,7 +813,7 @@ void BoardChatPanel::addComposerWidget(QWidget *widget)
 
 // The whole panel from one `chat` block, so a pane opened mid-conversation catches up from one
 // event and a queue op's answer is drawn from the worker's own list rather than from a guess here.
-void BoardChatPanel::setChatState(const QJsonObject &chat)
+void HelperChatPanel::setChatState(const QJsonObject &chat)
 {
     if (chat.isEmpty())
         return;
@@ -638,7 +865,7 @@ void BoardChatPanel::setChatState(const QJsonObject &chat)
 // Send or Stop, one button. A property and not a font: a stylesheet rule with a pseudo-state that
 // changed the font would paint one width and measure another (tests/buttonfit_test.cpp, and the
 // same comment on BoardView::updateCleanupButton).
-void BoardChatPanel::setRunning(bool running)
+void HelperChatPanel::setRunning(bool running)
 {
     // A sync takes the board's busy guard (19.14), which this conversation holds while it turns:
     // the look waits rather than coming back as a refusal the owner has to read.
@@ -664,11 +891,11 @@ void BoardChatPanel::setRunning(bool running)
             clock->stop();
     }
     const double base = property(kClockBase).toDouble();
-    drawHead(m_head, running, m_surveyTurn,
+    drawHead(m_head, helperpane::title(m_pane), running, m_surveyTurn,
              qint64(base) + (running && m_clock.isValid() ? m_clock.elapsed() / 1000 : 0));
 }
 
-void BoardChatPanel::setProgress(const QString &line)
+void HelperChatPanel::setProgress(const QString &line)
 {
     m_progress = line;
     if (m_busyWhat == nullptr)
@@ -679,14 +906,14 @@ void BoardChatPanel::setProgress(const QString &line)
     m_busyWhat->setVisible(m_running && !line.isEmpty());
 }
 
-void BoardChatPanel::appendDelta(const QString &text)
+void HelperChatPanel::appendDelta(const QString &text)
 {
     m_streamed += text;
     if (!m_render->isActive())
         m_render->start();
 }
 
-void BoardChatPanel::appendThinking(const QString &text)
+void HelperChatPanel::appendThinking(const QString &text)
 {
     if (m_thinking.size() < 200000)      // the terminal's own cap (src/Pane.h)
         m_thinking += text;
@@ -694,7 +921,7 @@ void BoardChatPanel::appendThinking(const QString &text)
         m_render->start();
 }
 
-void BoardChatPanel::finishThinking(qint64 ms)
+void HelperChatPanel::finishThinking(qint64 ms)
 {
     m_thinkingDone = true;
     m_thinkingMs = ms;
@@ -707,7 +934,7 @@ void BoardChatPanel::finishThinking(qint64 ms)
 // later `board_chat_state` simply replaces it with the same text. The reasoning goes in with it,
 // which is the one thing the worker's history does not keep: it stays readable under the answer it
 // produced until a state event refreshes the log.
-void BoardChatPanel::settleTurn(const QString &how)
+void HelperChatPanel::settleTurn(const QString &how)
 {
     const QString answer = m_streamed.trimmed();
     const QString trace = m_thinking.trimmed();
@@ -745,7 +972,7 @@ void BoardChatPanel::settleTurn(const QString &how)
 
 // ------------------------------------------------------------------------------- the log
 
-void BoardChatPanel::rebuildLog()
+void HelperChatPanel::rebuildLog()
 {
     if (m_log == nullptr)
         return;
@@ -835,12 +1062,12 @@ void BoardChatPanel::rebuildLog()
     bar->setValue(m_running || atBottom ? bar->maximum() : was);
 }
 
-QString BoardChatPanel::transcript() const
+QString HelperChatPanel::transcript() const
 {
     return m_log != nullptr ? m_log->document()->toPlainText() : QString();
 }
 
-QString BoardChatPanel::draft() const
+QString HelperChatPanel::draft() const
 {
     return m_composer != nullptr ? m_composer->toPlainText() : QString();
 }
@@ -850,7 +1077,7 @@ QString BoardChatPanel::draft() const
 // 19.18: a second prompt **queues**, it is not refused. The page agent never refuses its own
 // prompt (#N8VK's FIFO semantics, the pane's rule), so nothing here checks `m_running` first — the
 // worker answers with `board_chat_queued` and the queue row appears from that.
-void BoardChatPanel::sendPrompt()
+void HelperChatPanel::sendPrompt()
 {
     if (m_composer == nullptr)
         return;
@@ -863,7 +1090,7 @@ void BoardChatPanel::sendPrompt()
     m_composer->remember(text);
 }
 
-void BoardChatPanel::stopTurn()
+void HelperChatPanel::stopTurn()
 {
     if (!m_running)
         return;
@@ -875,7 +1102,7 @@ void BoardChatPanel::stopTurn()
 // A draft, never a send (owner, 2026-09-19: "draft you confirm"). A clicked finding, a clicked
 // problem in the banner over the list and anything else that wants the agent to do something all
 // land here, in the box, with the cursor after them.
-void BoardChatPanel::prefill(const QString &text)
+void HelperChatPanel::prefill(const QString &text)
 {
     if (m_composer == nullptr)
         return;
@@ -883,30 +1110,40 @@ void BoardChatPanel::prefill(const QString &text)
     focusComposer();
 }
 
-void BoardChatPanel::focusComposer()
+void HelperChatPanel::focusComposer()
 {
     if (m_composer == nullptr)
         return;
+    // Asking for the cursor is asking for the panel: a shortcut, a clicked finding or a prefilled
+    // draft all mean the box has to be there to type in (#FEJQ).
+    if (m_collapsed) {
+        m_collapsed = false;
+        applyCollapsed();
+    }
     m_composer->setFocus(Qt::OtherFocusReason);
     QTextCursor cursor = m_composer->textCursor();
     cursor.movePosition(QTextCursor::End);
     m_composer->setTextCursor(cursor);
 }
 
-bool BoardChatPanel::composerHasFocus() const
+bool HelperChatPanel::composerHasFocus() const
 {
     return m_composer != nullptr && m_composer->hasFocus();
 }
 
 // The slow path into this box is the mouse (WARP.md's standing hint rule): clicking into the
 // composer teaches the key that would have put the cursor here. BoardView registers Ctrl+/.
-bool BoardChatPanel::eventFilter(QObject *object, QEvent *event)
+bool HelperChatPanel::eventFilter(QObject *object, QEvent *event)
 {
     if (object == m_composer && event->type() == QEvent::FocusIn) {
         auto *focus = static_cast<QFocusEvent *>(event);
-        if (focus->reason() == Qt::MouseFocusReason && onHint)
-            onHint(QStringLiteral("board.chat"), QStringLiteral("Ctrl+/"));
+        if (focus->reason() == Qt::MouseFocusReason && onHint && !m_askKeys.isEmpty())
+            onHint(m_askHint, m_askKeys);
     }
+    // A collapsed panel expands on focus as well as on a click (#FEJQ): Tab reaching the ask row
+    // is the keyboard saying the same thing the click says, and it lands in the composer.
+    if (object == m_ask && event->type() == QEvent::FocusIn)
+        expand();
     return QWidget::eventFilter(object, event);
 }
 
@@ -916,7 +1153,7 @@ bool BoardChatPanel::eventFilter(QObject *object, QEvent *event)
 // click sends `board_chat_queue_remove` / `board_chat_queue_move` and waits for the
 // `board_chat_state` that answers it. Nothing here mutates `m_queue`, so a row can never show an
 // order the worker does not have — which is what would happen the first time a move was refused.
-void BoardChatPanel::rebuildQueue()
+void HelperChatPanel::rebuildQueue()
 {
     if (m_queueBox == nullptr)
         return;
@@ -1015,7 +1252,7 @@ void BoardChatPanel::rebuildQueue()
 //
 // "Nothing to fix" is shown too, and that is deliberate: a button that answers silently when all is
 // well is a button the reader believes is broken.
-int BoardChatPanel::showFindings(const QJsonArray &items, const QString &section)
+int HelperChatPanel::showFindings(const QJsonArray &items, const QString &section)
 {
     if (m_findings == nullptr)
         return 0;
@@ -1105,7 +1342,7 @@ int BoardChatPanel::showFindings(const QJsonArray &items, const QString &section
 // The GitHub corpus is a link and nothing else until #GDQN (the engine) and #ZKR0 (its Switchboard
 // surface) land. Nothing here fetches or syncs, and the block says so in a sentence rather than
 // leaving the reader to wonder why the link does not do more.
-void BoardChatPanel::showSurvey(const QJsonObject &event)
+void HelperChatPanel::showSurvey(const QJsonObject &event)
 {
     if (m_survey == nullptr)
         return;
@@ -1319,7 +1556,7 @@ void BoardChatPanel::showSurvey(const QJsonObject &event)
 // `forge_sync_plan` (19.14): what a sync between this board and its GitHub issues *would* do.
 // It is a dry run by construction — the protocol says it "writes to neither side" — so this is
 // safe to offer on a board the owner has only just made, which is exactly when the survey asks.
-void BoardChatPanel::lookForIssues()
+void HelperChatPanel::lookForIssues()
 {
     if (m_forgeRepo.isEmpty() || !m_forgeRequest.isEmpty())
         return;
@@ -1346,7 +1583,7 @@ static void settleForgeButton(QToolButton *button)
     button->setEnabled(true);
 }
 
-void BoardChatPanel::showForgePlan(const QJsonObject &event)
+void HelperChatPanel::showForgePlan(const QJsonObject &event)
 {
     m_forgeRequest.clear();
     settleForgeButton(m_forgeLook);
@@ -1381,7 +1618,7 @@ void BoardChatPanel::showForgePlan(const QJsonObject &event)
                                                  "as ordinary cards."));
 }
 
-void BoardChatPanel::showForgeError(const QJsonObject &event)
+void HelperChatPanel::showForgeError(const QJsonObject &event)
 {
     m_forgeRequest.clear();
     settleForgeButton(m_forgeLook);
@@ -1403,7 +1640,7 @@ void BoardChatPanel::showForgeError(const QJsonObject &event)
     m_forgeResult->setText(text + QStringLiteral("  Nothing was written on either side."));
 }
 
-void BoardChatPanel::hideSurvey()
+void HelperChatPanel::hideSurvey()
 {
     m_forgeLook = nullptr;
     m_forgeResult = nullptr;
@@ -1418,7 +1655,7 @@ void BoardChatPanel::hideSurvey()
 // `board_import_apply {keys}` (19.13), the same message the import dialog sends. The keys are
 // re-derived from the project on the worker side and never trusted from here, so a stale tick
 // cannot create a card twice.
-void BoardChatPanel::applyImport()
+void HelperChatPanel::applyImport()
 {
     m_importKeys = tickedKeys(m_survey);
     if (m_importKeys.isEmpty()) {
@@ -1441,7 +1678,7 @@ void BoardChatPanel::applyImport()
 
 // ------------------------------------------------------------------------------- the context chip
 
-void BoardChatPanel::updateContextChip(const QJsonObject &event)
+void HelperChatPanel::updateContextChip(const QJsonObject &event)
 {
     if (m_context == nullptr)
         return;
@@ -1474,7 +1711,7 @@ void BoardChatPanel::updateContextChip(const QJsonObject &event)
 
 // ------------------------------------------------------------------------------- the microphone
 
-void BoardChatPanel::toggleVoice()
+void HelperChatPanel::toggleVoice()
 {
     if (m_capture != nullptr && m_capture->recording())
         stopVoice();
@@ -1482,7 +1719,7 @@ void BoardChatPanel::toggleVoice()
         startVoice();
 }
 
-void BoardChatPanel::startVoice()
+void HelperChatPanel::startVoice()
 {
     const auto say = [this](const QString &text) {
         if (onStatus)
@@ -1516,7 +1753,7 @@ void BoardChatPanel::startVoice()
     say(QStringLiteral("Listening… click the microphone again to transcribe."));
 }
 
-void BoardChatPanel::stopVoice()
+void HelperChatPanel::stopVoice()
 {
     if (m_capture == nullptr || !m_capture->recording())
         return;
@@ -1526,7 +1763,7 @@ void BoardChatPanel::stopVoice()
     updateVoiceChip();
 }
 
-void BoardChatPanel::ensureCapture()
+void HelperChatPanel::ensureCapture()
 {
     if (m_capture != nullptr)
         return;
@@ -1554,7 +1791,7 @@ void BoardChatPanel::ensureCapture()
     QObject::connect(m_capture, &voice::Capture::elapsed, this, [this] { updateVoiceChip(); });
 }
 
-void BoardChatPanel::onTranscribed(const QJsonObject &event)
+void HelperChatPanel::onTranscribed(const QJsonObject &event)
 {
     // The clip has done its work; Relay keeps no audio.
     if (!m_voiceClip.isEmpty()) {
@@ -1595,7 +1832,7 @@ void BoardChatPanel::onTranscribed(const QJsonObject &event)
     m_composer->setFocus(Qt::OtherFocusReason);
 }
 
-void BoardChatPanel::updateVoiceChip()
+void HelperChatPanel::updateVoiceChip()
 {
     if (m_mic == nullptr)
         return;
@@ -1622,7 +1859,7 @@ void BoardChatPanel::updateVoiceChip()
 
 // The openrouter row of the worker's `presets` event. Before it arrives nothing is known, and the
 // worker answers with the `no_key` code instead of this guess.
-bool BoardChatPanel::voiceKeyStored() const
+bool HelperChatPanel::voiceKeyStored() const
 {
     if (m_presets.isEmpty())
         return true;
@@ -1634,7 +1871,7 @@ bool BoardChatPanel::voiceKeyStored() const
     return false;
 }
 
-void BoardChatPanel::offerVoiceKey()
+void HelperChatPanel::offerVoiceKey()
 {
     if (onStatus)
         onStatus(QStringLiteral("Voice needs an OpenRouter key."));
@@ -1662,8 +1899,24 @@ void BoardChatPanel::offerVoiceKey()
 // 19.18's events, kept away from any card thread exactly as a cleanup's are (the `cleanup: true`
 // precedent): they carry `chat: true` and a `turn_id`, and never a `card_id`. Anything this
 // returns false for is somebody else's — a card's turn, the pane's own — and must go on unread.
-bool BoardChatPanel::handleEvent(const QString &type, const QJsonObject &event)
+bool HelperChatPanel::handleEvent(const QString &type, const QJsonObject &event)
 {
+    // Whose answer is this? One helper worker serves the whole tab (#FEJQ), so every panel sees
+    // every turn event and only one of them may take it. The worker tags what it sends with the
+    // pane that asked; an event with no tag is the board's, because that is what the worker sent
+    // before there were other panes and the Switchboard is the panel that was there then.
+    //
+    // Only the conversation is filtered this way: `transcribed` is already told apart by the
+    // request id it answers (a phone's clip and a terminal pane's carry their own), and so is the
+    // forge look below.
+    const QJsonValue chatValue = event.value(QStringLiteral("chat"));
+    if (type.startsWith(QStringLiteral("board_chat")) || chatValue.toBool()
+        || chatValue.isObject()) {
+        const QString from = event.value(QStringLiteral("pane")).toString();
+        if (!from.isEmpty() ? from != m_pane : !isBoard())
+            return false;
+    }
+
     if (type == QStringLiteral("board_chat_started")) {
         m_streamed.clear();
         m_thinking.clear();
@@ -1711,6 +1964,8 @@ bool BoardChatPanel::handleEvent(const QString &type, const QJsonObject &event)
         return true;
     }
     if (type == QStringLiteral("board_survey")) {
+        if (!isBoard())
+            return false;            // a fresh board's opening turn; no other pane has one
         // The narration turn starts immediately after this event and carries no `survey` flag of
         // its own, so the head is told here; `settleTurn` and the next `chat` block clear it.
         m_surveyTurn = true;
