@@ -62,6 +62,7 @@
 #include "RemoteShare.h"
 #include "SharingPane.h"
 #include "RemotePane.h"   // Relay-to-Relay: a pane another desktop shares, opened here
+#include "TestSuitesPane.h"   // the Test suites pane, beside the Switchboard (card #7BM4)
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -94,7 +95,9 @@
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QLabel>
+#include <QDialogButtonBox>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
@@ -1104,6 +1107,7 @@ private:
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
+        else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
         else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
         else if (id == QStringLiteral("project.pick")) openProjectPicker(m_active, QString());
@@ -1656,6 +1660,16 @@ private:
         std::function<void(const QJsonObject &)> handle;
     };
     QList<HelperListener> m_helperListeners;
+    // The board writes the Test suites pane has in flight (#7BM4): request id -> what to do with
+    // the answer. Two steps each, because a `## Tests` line needs the card's `base_hash`.
+    struct TestsCardWrite {
+        QPointer<ToolPane> pane;
+        QString section;      // the `## Tests` line to append once a hash is in hand; empty = done
+        QString note;         // what to say in the status bar when it lands
+        bool reveal = false;  // open the card afterwards (a card this pane just created)
+    };
+    QHash<QString, TestsCardWrite> m_testsWrites;
+    quint64 m_testsWriteSeq = 0;
     // What each tab's helper last said about its own model (#BRD3): `configured`, `model_roles`
     // and `presets`. A panel opened into a tab whose worker has been running for an hour would
     // otherwise show an empty box until the next reconfigure, because those events are sent once.
@@ -3777,6 +3791,16 @@ private:
             board.aliases = QStringLiteral("board issues cards todo trello kanban scratchpad tickets tracker");
             items << board;
         }
+        {
+            // The Switchboard's tooling sibling (card #7BM4): the project's tests, their history
+            // and their runs. No key of its own — Ctrl+Shift+T is New tab everywhere — so the
+            // palette and the board's Tests button are how it is reached.
+            PaletteItem tests = actionItem(panes, QStringLiteral("Test suites"),
+                                           QStringLiteral("This project's tests, their history and their runs, beside the Switchboard"),
+                                           QStringLiteral("tests.open"));
+            tests.aliases = QStringLiteral("tests test suites ctest unittest flaky slow failing suite coverage runs");
+            items << tests;
+        }
         // Offered only while this tab is attached to a project (#JN7X): with no project there is
         // nothing to detach from, and the quiet state must not advertise itself. No shortcut —
         // detaching is rare, so there is no fast path to teach and no hint entry.
@@ -4418,6 +4442,262 @@ public:
         if (!owner || internalsPaneOf(owner)) { closePane(tool, false); return; }
         linkInternalsPane(tool, owner);
     }
+
+    // ----- the Test suites pane (card #7BM4, design item (b)) -----------------------------------
+    // The Switchboard's tooling sibling: every test this project has, the history behind it and
+    // the runs, in a splitter pane beside the board and never an overlay. It is attached exactly
+    // as the Activity pane is, but to the **tab's board worker** (§31, §30.7) — the five `tests_*`
+    // requests are the board helper's, not a terminal pane's — so a tab holds one of these, on the
+    // same helper its Switchboard and its Options panel ask.
+    static ToolPane *testSuitesPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::TestSuites)
+                return tool;
+        return nullptr;
+    }
+    static relay::tests::TestSuitesPane *testSuitesViewOf(ToolPane *tool) {
+        return tool ? dynamic_cast<relay::tests::TestSuitesPane *>(tool->hosted()) : nullptr;
+    }
+
+    // `tests.open`, and the Tests button on the Switchboard's tool row. The tab's own pane comes
+    // forward and re-asks for the inventory; there is never a second one.
+    void openTestSuitesPane() {
+        QWidget *page = m_tabs->currentWidget();
+        if (!page) return;
+        if (ToolPane *open = testSuitesPaneIn(page)) {
+            if (auto *view = testSuitesViewOf(open)) view->requestList();
+            setActiveLeaf(open);
+            focusLeaf(open);
+            updateTitles();
+            return;
+        }
+        // Beside the Switchboard when the tab has one — this pane is the board's sibling, and the
+        // two are read together — and otherwise beside whatever is active. Below it instead when
+        // the anchor is too narrow to share its width, exactly as the Activity pane places itself.
+        QWidget *anchor = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) { anchor = tool; break; }
+        if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        ToolPane *tool = createTestSuitesPane(boardWorkspaceOfTab(page));
+        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        else if (page->layout()) page->layout()->addWidget(tool);
+        linkTestSuitesPane(tool);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
+    ToolPane *createTestSuitesPane(const QString &cwd) {
+        auto *view = new relay::tests::TestSuitesPane;
+        auto *tool = new ToolPane(ToolPane::Kind::TestSuites, view, view, cwd);
+        tool->setProperty("paneType", QStringLiteral("testsuites"));   // pane-type header colours
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        return tool;
+    }
+
+    // The five seams of src/TestSuitesPane.h, wired to this window. Called once the pane is in a
+    // page, because every one of them asks which tab it is in.
+    void linkTestSuitesPane(ToolPane *tool) {
+        relay::tests::TestSuitesPane *view = testSuitesViewOf(tool);
+        QWidget *page = view ? pageOf(tool) : nullptr;
+        if (!page) return;
+        QPointer<ToolPane> guard(tool);
+        // Out: `tests_list`, `tests_run`, `tests_stop`, `tests_history` on the tab's helper, which
+        // is started by the first one of them (§30.7). A tab attached to no project has no board,
+        // so nothing is sent and no worker is started for it: the pane keeps its "No worker is
+        // attached yet" empty state rather than spawning a helper that could only refuse.
+        view->onSend = [guard](const QJsonObject &request) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            QWidget *page = w->pageOf(guard);
+            if (!page || w->boardWorkspaceOfTab(page).isEmpty()) return;
+            w->sendToHelper(page, QString(), request);
+        };
+        // In: every event of that helper. The pane keeps the `tests_*` ones and ignores the rest,
+        // and `ready` — a worker that has just started or restarted — is what makes it ask again,
+        // so a pane that outlived its worker fills itself back in without being touched.
+        QPointer<relay::tests::TestSuitesPane> viewGuard(view);
+        listenToHelper(page, view, [this, guard, viewGuard](const QJsonObject &event) {
+            relay::tests::TestSuitesPane *pane = viewGuard.data();
+            if (!pane) return;
+            const QString type = event.value(QStringLiteral("event")).toString();
+            if (type == QStringLiteral("ready")) { pane->requestList(); return; }
+            // The two board writes this pane makes are answered on the same connection; they are
+            // this window's, keyed by a request id the Switchboard's own prefix cannot collide with.
+            if (handleTestsCardReply(guard, event)) return;
+            pane->handleEvent(event);
+        });
+        // A test's source, at its line: the same opener a `src/Pane.h:120` in the output uses. The
+        // worker sends project-relative paths, and the project is the tab's board root.
+        view->onOpenFile = [guard](const QString &path, int line) {
+            auto *w = windowOf(guard);
+            if (!w || path.isEmpty()) return;
+            const QString root = w->boardWorkspaceOfTab(w->pageOf(guard));
+            w->openPath(root.isEmpty() ? path : QDir(root).absoluteFilePath(path), line, guard);
+        };
+        // A `#ID` in the row's cards column: reveal it in this tab's Switchboard, opening the
+        // board first if the tab put it away.
+        view->onOpenCard = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openBoardCard(id);
+        };
+        view->onMakeCard = [guard](const relay::tests::TestRow &row) {
+            if (auto *w = windowOf(guard)) w->makeCardForTest(guard, row);
+        };
+        view->onAttachToCard = [guard](const relay::tests::TestRow &row) {
+            if (auto *w = windowOf(guard)) w->attachTestToCard(guard, row);
+        };
+        view->requestList();
+    }
+
+    // A saved Test suites pane (buildNode) is wired once the page it belongs to exists.
+    void linkRestoredTestSuitesPane(ToolPane *tool) {
+        if (!tool) return;
+        if (!pageOf(tool)) { closePane(tool, false); return; }
+        linkTestSuitesPane(tool);
+    }
+
+    // ----- the two board writes the Test suites pane makes (#7BM4, §31) -------------------------
+    // Both are two steps, because `board_create` takes no section and `board_update` takes a
+    // `base_hash`: ask for the card (or create it), then append one line to its `## Tests` against
+    // the hash that answer carried. What is in flight is kept here, keyed by the request id.
+    QString nextTestsWriteId() { return QStringLiteral("ts%1-").arg(quintptr(this), 0, 36) + QString::number(++m_testsWriteSeq); }
+
+    // One `## Tests` line, in the shape section 31.5 writes down: the invocation in backticks,
+    // then the source file after an em dash when the worker knows one.
+    static QString testsSectionLine(const relay::tests::TestRow &row) {
+        const QString what = row.invocation.isEmpty() ? row.id : row.invocation;
+        QString line = QStringLiteral("- `%1`").arg(what);
+        if (!row.file.isEmpty()) line += QStringLiteral(" — ") + row.file;
+        return line;
+    }
+
+    // "Make a card" on a row: a bug card whose issue text is why the row is worth a card — the
+    // last failure's message, verbatim — and whose `## Tests` section already names the test, so
+    // the card arrives with the thing that proves it (policy rule 6) rather than needing it added.
+    void makeCardForTest(ToolPane *tool, const relay::tests::TestRow &row) {
+        QWidget *page = pageOf(tool);
+        if (!page || boardWorkspaceOfTab(page).isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("This tab is not attached to a project, so there is no board to file a card on."), 9000);
+            return;
+        }
+        const QString kind = row.flaky ? QStringLiteral("Flaky test") : QStringLiteral("Failing test");
+        QString text = QStringLiteral("%1: %2\n\n`%3`").arg(kind, row.name, row.invocation.isEmpty() ? row.id : row.invocation);
+        if (row.hasLastFailure && !row.failureMessage.isEmpty())
+            text += QStringLiteral("\n\nThe last failure said:\n\n%1").arg(row.failureMessage.trimmed());
+        const QString id = nextTestsWriteId();
+        m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
+                                                QStringLiteral("Filed a card for %1.").arg(row.name), true});
+        sendToHelper(page, QString(),
+                     {{QStringLiteral("type"), QStringLiteral("board_create")},
+                      {QStringLiteral("id"), id},
+                      {QStringLiteral("tab"), QStringLiteral("changes")},
+                      {QStringLiteral("status"), QStringLiteral("inbox")},
+                      {QStringLiteral("card_type"), QStringLiteral("work")},
+                      {QStringLiteral("labels"), QJsonArray{QStringLiteral("bug"), QStringLiteral("tests")}},
+                      {QStringLiteral("title"), QStringLiteral("%1: %2").arg(kind, row.name)},
+                      {QStringLiteral("source"), QStringLiteral("the Test suites pane")},
+                      {QStringLiteral("text"), text}});
+    }
+
+    // "Attach to card": the card picker — the board's own fuzzy ranking, the one the composer's
+    // `#` uses (relay::board::Model::search) — and then the invocation appended to that card's
+    // `## Tests`.
+    void attachTestToCard(ToolPane *tool, const relay::tests::TestRow &row) {
+        QWidget *page = pageOf(tool);
+        if (!page) return;
+        ToolPane *board = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *found = dynamic_cast<ToolPane *>(leaf); found && found->board()) { board = found; break; }
+        if (!board) {
+            statusBar()->showMessage(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
+            return;
+        }
+        const QString card = pickCard(board->board()->model(),
+                                      QStringLiteral("Attach %1 to a card").arg(row.name));
+        if (card.isEmpty()) return;
+        const QString id = nextTestsWriteId();
+        m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
+                                                QStringLiteral("Added %1 to #%2.").arg(row.name, card), false});
+        sendToHelper(page, QString(),
+                     {{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                      {QStringLiteral("id"), id},
+                      {QStringLiteral("card"), card}});
+    }
+
+    // The `#` picker as a dialog: the same ranking, filtered as you type, Enter picks. Empty when
+    // the person cancelled.
+    QString pickCard(const relay::board::Model &model, const QString &title) {
+        QDialog dialog(this);
+        dialog.setWindowTitle(title);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *filter = new QLineEdit(&dialog);
+        filter->setPlaceholderText(QStringLiteral("Filter by id or title"));
+        layout->addWidget(filter);
+        auto *list = new QListWidget(&dialog);
+        list->setUniformItemSizes(true);
+        list->setMinimumSize(520, 320);
+        layout->addWidget(list, 1);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        const auto fill = [&model, list](const QString &query) {
+            list->clear();
+            for (const relay::board::Card &card : model.search(query, 40)) {
+                auto *item = new QListWidgetItem(
+                    QStringLiteral("#%1  %2  ·  %3").arg(card.id, card.title, relay::board::statusTitle(card.status)), list);
+                item->setData(Qt::UserRole, card.id);
+            }
+            if (list->count() > 0) list->setCurrentRow(0);
+        };
+        fill(QString());
+        connect(filter, &QLineEdit::textChanged, &dialog, [fill](const QString &text) { fill(text); });
+        connect(list, &QListWidget::itemActivated, &dialog, [&dialog](QListWidgetItem *) { dialog.accept(); });
+        filter->setFocus(Qt::OtherFocusReason);
+        relay::theme::polishWindow(&dialog);
+        if (dialog.exec() != QDialog::Accepted) return {};
+        QListWidgetItem *chosen = list->currentItem();
+        return chosen ? chosen->data(Qt::UserRole).toString() : QString();
+    }
+
+    // The worker's answer to one of those two writes. Returns true when the event was this
+    // window's, so the Test suites pane never sees a board reply it has no use for.
+    bool handleTestsCardReply(const QPointer<ToolPane> &tool, const QJsonObject &event) {
+        const QString requestId = event.value(QStringLiteral("id")).toString();
+        if (requestId.isEmpty() || !m_testsWrites.contains(requestId)) return false;
+        const TestsCardWrite pending = m_testsWrites.take(requestId);
+        const QString type = event.value(QStringLiteral("event")).toString();
+        if (type == QStringLiteral("error")) {
+            statusBar()->showMessage(QStringLiteral("The board refused that: ") + event.value(QStringLiteral("text")).toString(), 9000);
+            return true;
+        }
+        const QString card = event.value(QStringLiteral("card_id")).toString();
+        const QString hash = event.value(QStringLiteral("hash")).toString();
+        QWidget *page = tool ? pageOf(tool) : nullptr;
+        // Step two: the card is there and its hash is in hand, so the `## Tests` line goes on.
+        if (!pending.section.isEmpty() && !card.isEmpty() && hash.size() == 64 && page) {
+            const QString next = nextTestsWriteId();
+            m_testsWrites.insert(next, TestsCardWrite{pending.pane, QString(), pending.note, pending.reveal});
+            sendToHelper(page, QString(),
+                         {{QStringLiteral("type"), QStringLiteral("board_update")},
+                          {QStringLiteral("id"), next},
+                          {QStringLiteral("card"), card},
+                          {QStringLiteral("base_hash"), hash},
+                          {QStringLiteral("patch"),
+                           QJsonObject{{QStringLiteral("append_section"),
+                                        QJsonObject{{QStringLiteral("heading"), QStringLiteral("Tests")},
+                                                    {QStringLiteral("text"), pending.section}}}}}});
+            return true;
+        }
+        if (!pending.note.isEmpty()) statusBar()->showMessage(pending.note, 9000);
+        // The card's `## Tests` names one more test, so the pane's `cards` column is a fold out of
+        // date: one fresh inventory puts it right.
+        if (auto *view = testSuitesViewOf(pending.pane.data())) view->requestList();
+        if (pending.reveal && !card.isEmpty()) openBoardCard(card);
+        return true;
+    }
+
 
     // One unified diff, in a pane beside the terminal: what a write or an edit of more than 12
     // changed lines opens (#TK9C, protocol § 23.6). A splitter pane, never an overlay — and one
@@ -5645,6 +5925,11 @@ public:
         view->onOpenSession = [guard](const QString &id) {
             if (auto *w = windowOf(guard)) w->openSessions(QString(), id);
         };
+        // The Tests button on the panel's tool row (#7BM4): the Test suites pane is the window's,
+        // a splitter pane beside this one on the same tab's worker.
+        view->onOpenTestSuites = [guard] {
+            if (auto *w = windowOf(guard)) w->openTestSuitesPane();
+        };
         // A thread entry's pane link (#HKAP): the token names a pane Execute opened — the manager
         // looks in every window, so a pane dragged into its own window still comes back.
         view->onFocusPane = [guard](const QString &token) {
@@ -6096,6 +6381,13 @@ private:
             QPointer<ToolPane> guard(tool);
             const QString owner = saved.value(QStringLiteral("owner")).toString();
             QTimer::singleShot(0, tool, [guard, owner] { if (auto *w = windowOf(guard)) w->linkRestoredInternalsPane(guard, owner); });
+            return tool;
+        }
+        if (node.contains(QStringLiteral("testsuites"))) {   // card #7BM4: empty until its worker answers
+            const QJsonObject saved = node.value(QStringLiteral("testsuites")).toObject();
+            ToolPane *tool = createTestSuitesPane(saved.value(QStringLiteral("cwd")).toString());
+            QPointer<ToolPane> guard(tool);
+            QTimer::singleShot(0, tool, [guard] { if (auto *w = windowOf(guard)) w->linkRestoredTestSuitesPane(guard); });
             return tool;
         }
         if (node.contains(QStringLiteral("subagents"))) {   // card #WD83: the tabs' text, then its owner

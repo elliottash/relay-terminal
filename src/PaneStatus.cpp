@@ -285,6 +285,10 @@ const QList<Kind> &kinds() {
         // the violet and the turn pane's bubble.
         {QStringLiteral("internals"), QStringLiteral("Activity"), QStringLiteral("agents"), Glyph::Turn},
         {QStringLiteral("board"), QStringLiteral("Switchboard"), QStringLiteral("tools"), Glyph::Switchboard},
+        // The Test suites pane (card #7BM4): the project's tests and their history, opened beside
+        // the Switchboard and answered by the same worker. A tool surface, like the board it
+        // hangs off; no glyph of its own yet, so the generic tool mark.
+        {QStringLiteral("testsuites"), QStringLiteral("Test suites"), QStringLiteral("tools"), Glyph::Tool},
         // The Settings pane splits into Options and Actions (2026-09-18); "settings" is styled as
         // Options until nothing sets it any more.
         {QStringLiteral("options"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},

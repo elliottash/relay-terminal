@@ -258,6 +258,11 @@ private:
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
         add("board.open", "pane", "Switchboard: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
+        // The Test suites pane (card #7BM4): the project's tests, their history and the runs, in a
+        // pane beside the Switchboard. **No default key.** The obvious one, Ctrl+Shift+T, is New
+        // tab in the default table and in all four presets, and a tests pane is not worth taking a
+        // key every terminal user already knows; the palette and the board's Tests button open it.
+        add("tests.open", "pane", "Test suites: this project's tests, their history and their runs, beside the Switchboard", {});
         // The helper agent's ask key (#FEJQ, protocol §30.7). **One** key for Options, Actions and
         // Sessions, because it is one helper — the tab's — wherever it is asked; the panel it
         // opens is the Switchboard's own panel, and the Switchboard keeps the bare `a` its list

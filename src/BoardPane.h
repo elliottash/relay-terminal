@@ -75,6 +75,10 @@ public:
     // from what it names. `card:` and a file path are the view's own and stay above.
     std::function<void(const QString &sectionId, const QString &rowId)> onOpenOption;
     std::function<void(const QString &sessionId)> onOpenSession;
+    // The Tests button on the helper panel's tool row (card #7BM4, design 4.13: board-wide
+    // buttons live in that row). The pane it opens is the window's — a splitter pane beside this
+    // one, on the same tab's board worker — so the view only says that it was pressed.
+    std::function<void()> onOpenTestSuites;
     // A thread entry's pane link (#HKAP): reveal the pane with this session token, in whatever
     // window it lives in. No pane has it (closed, or another machine's board) → inert.
     std::function<void(const QString &token)> onFocusPane;

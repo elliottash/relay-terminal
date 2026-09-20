@@ -3668,6 +3668,24 @@ void BoardView::buildChatPanel(QVBoxLayout *layout)
             m_toolsWrap->removeWidget(m_cleanup);
         m_chat->addToolWidget(m_cleanup);
     }
+    // Tests (#7BM4), beside Check and Clean up: board-wide buttons live in this row (design 4.13),
+    // and this one opens the Test suites pane — a splitter pane of the window's, on the same tab's
+    // worker. The view owns the button and nothing else about the pane.
+    {
+        auto *tests = new QToolButton(m_chat);
+        tests->setObjectName(QStringLiteral("boardTests"));
+        tests->setText(QStringLiteral("Tests"));
+        tests->setToolTip(QStringLiteral("Test suites: this project's tests, their history and "
+                                         "their runs, in a pane beside the board"));
+        tests->setCursor(Qt::PointingHandCursor);
+        tests->setFocusPolicy(Qt::NoFocus);
+        tests->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        connect(tests, &QToolButton::clicked, this, [this] {
+            if (onOpenTestSuites)
+                onOpenTestSuites();
+        });
+        m_chat->addToolWidget(tests);
+    }
     layout->addWidget(m_chat);
     // The model box (#BRD3) belongs in this composer row — composer parity with the main panes
     // (#8YQ9 t:6m) — left of the microphone, so Send stays last. Built with the list tools

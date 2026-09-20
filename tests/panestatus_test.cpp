@@ -384,6 +384,14 @@ private Q_SLOTS:
         QCOMPARE(mystery.label, QStringLiteral("Db browser"));
         QCOMPARE(mystery.glyph, Glyph::Tool);
         QCOMPARE(typeStyle(QStringLiteral("sessions"), ColourMode::ByType, t, QStringLiteral("Resume")).label, QStringLiteral("Resume"));
+        // The Test suites pane (card #7BM4) is a registered kind, so its band says "Test suites"
+        // and not the "Testsuites" an unregistered type would be titled into, and it is a tool
+        // surface like the Switchboard it opens beside.
+        const TypeStyle tests = typeStyle(QStringLiteral("testsuites"), ColourMode::ByType, t);
+        QVERIFY(tests.band);
+        QCOMPARE(tests.label, QStringLiteral("Test suites"));
+        QCOMPARE(tests.group, QStringLiteral("tools"));
+        QCOMPARE(tests.fill, typeStyle(QStringLiteral("board"), ColourMode::ByGroup, t).fill);
     }
 
     void byTypeDiffersByGroupShares() {

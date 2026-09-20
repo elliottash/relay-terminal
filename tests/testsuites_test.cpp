@@ -43,6 +43,7 @@ QJsonObject record(const QString &id, const QJsonObject &extra = {}) {
     QJsonObject test{{"id", id},
                      {"name", id.section(QLatin1Char(':'), 1)},
                      {"runner", id.section(QLatin1Char(':'), 0, 0)},
+                     {"invocation", QStringLiteral("ctest -R ") + id.section(QLatin1Char(':'), 1)},
                      {"file", "tests/panelayout_test.cpp"},
                      {"line", 12},
                      {"labels", QJsonArray{"panes"}},
@@ -168,6 +169,9 @@ private slots:
         QCOMPARE(row.id, QStringLiteral("ctest:panelayout"));
         QCOMPARE(row.name, QStringLiteral("panelayout"));
         QCOMPARE(row.runner, QStringLiteral("ctest"));
+        // The invocation is what a person types, not the id's tail (#7BM4): it is what a card's
+        // `## Tests` line is made of, so the fold keeps it rather than reconstructing it.
+        QCOMPARE(row.invocation, QStringLiteral("ctest -R panelayout"));
         QCOMPARE(row.file, QStringLiteral("tests/panelayout_test.cpp"));
         QVERIFY(row.hasLine);
         QCOMPARE(row.line, 12);
@@ -191,6 +195,9 @@ private slots:
         TestSuitesModel model;
         model.handle(listEvent({QJsonObject{{"id", "ctest:brand-new"}, {"name", "brand-new"}}}));
         const TestRow &row = model.rows().first();
+        // An older worker that sends no invocation: the name is a better answer than an empty
+        // `## Tests` line, and it is often runnable as it stands.
+        QCOMPARE(row.invocation, QStringLiteral("brand-new"));
         QCOMPARE(row.p50Text(), kDash);
         QCOMPARE(row.p95Text(), kDash);
         QCOMPARE(row.reliabilityText(), kDash);

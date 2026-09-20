@@ -170,6 +170,10 @@ bool TestSuitesModel::handle(const QJsonObject &event) {
             row.name = str(item, "name");
             if (row.name.isEmpty()) row.name = row.id;
             row.runner = str(item, "runner");
+            // The worker always sends one (it falls back to the name), but an older one may not:
+            // the name is a runnable line often enough to be a better answer than nothing.
+            row.invocation = str(item, "invocation");
+            if (row.invocation.isEmpty()) row.invocation = row.name;
             row.file = str(item, "file");
             double n = 0;
             row.hasLine = number(item, "line", &n);

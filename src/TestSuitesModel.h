@@ -54,6 +54,10 @@ struct TestRow {
     QString id;        // "<runner>:<invocation>", the stable key
     QString name;
     QString runner;    // "ctest" | "unittest" | "manual"
+    // What a person types to run just this one (§31.3): `ctest -R panelayout`,
+    // `tests/test_board.py::CardTests::test_roundtrip`. It is **not** the id's tail — the id is
+    // `ctest:panelayout` — and it is this, not the id, that goes into a card's `## Tests` section.
+    QString invocation;
     QString file;      // repo-relative, "" when unknown
     int line = 0;
     bool hasLine = false;

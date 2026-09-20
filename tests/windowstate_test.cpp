@@ -189,6 +189,12 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"settings", QJsonObject{{"mode", "actions"}, {"search", "theme"}}}}));
         QVERIFY(isUsableNode(QJsonObject{{"settings", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"settings", "options"}}));
+        // The Test suites pane (card #7BM4) restores empty and asks its tab's board worker again,
+        // so a saved node holds only the project it was opened on — and an empty one still comes
+        // back, exactly as an Options pane does.
+        QVERIFY(isUsableNode(QJsonObject{{"testsuites", QJsonObject{{"cwd", "/repo"}}}}));
+        QVERIFY(isUsableNode(QJsonObject{{"testsuites", QJsonObject{}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"testsuites", "/repo"}}));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path

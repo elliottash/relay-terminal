@@ -173,6 +173,9 @@ bool isUsableNode(const QJsonObject &node, int depth) {
     // An Options or Actions pane (card #XAME) restores with whatever the catalog holds then; a
     // saved tab or row id that no longer exists is simply not revealed.
     if (node.contains(QStringLiteral("settings"))) return node.value(QStringLiteral("settings")).isObject();
+    // The Test suites pane (card #7BM4) restores empty and asks its tab's board worker for the
+    // inventory again, so the object may hold nothing but the project it was opened on.
+    if (node.contains(QStringLiteral("testsuites"))) return node.value(QStringLiteral("testsuites")).isObject();
     // A subagent pane (card #WD83) comes back with its tabs' text; one with no tabs is not saved.
     if (node.contains(QStringLiteral("subagents"))) {
         const QJsonObject subagents = node.value(QStringLiteral("subagents")).toObject();

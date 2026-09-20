@@ -288,6 +288,15 @@ class GuiDefaultsTests(unittest.TestCase):
             for key in re.findall(r'QStringLiteral\("([^"]+)"\)', block):
                 self.assertNotIn(key, claimed, f'{action} collides with help.shortcuts on {key}')
 
+    def test_the_test_suites_pane_action_exists_and_binds_no_key(self):
+        # #7BM4: the Test suites pane is reached from the palette and from the Switchboard's Tests
+        # button. The obvious chord, Ctrl+Shift+T, is New tab in the default table and in all four
+        # presets, so the action ships unbound rather than taking a key every terminal user knows.
+        self.assertEqual(self.defaults('tests.open'), [])
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        for preset in re.findall(r'"tests\.open"\s*:\s*\[', source):
+            self.fail('a preset binds tests.open; it ships with no default key')
+
     def test_every_registered_action_id_is_one_the_worker_accepts(self):
         # The GUI sends the whole registry with `configure`; one id the worker refuses fails the
         # configure, and then no agent runs in any pane (2026-09-18: `ssh.split_same_host`, #S5SH).
