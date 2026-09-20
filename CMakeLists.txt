@@ -53,13 +53,16 @@ target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
     src/BoardSections.cpp src/BoardSections.h
-    src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h)
+    src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h
+    src/BoardChat.cpp src/BoardChat.h)   # the Switchboard page agent's panel (#8YQ9, 19.18)
 target_include_directories(relay-board PUBLIC src)
 # relay-toollabel: the cleanup run's progress line is the call's concise line (protocol section 23).
 # relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
 # so the GUI's walk and the registry's can never disagree (#JN7X). The dependency only goes this
 # way; relay-projects stays QtCore-only and knows nothing about panes.
-target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects ${RELAY_QT}::Widgets)
+# relay-voice: the page agent's composer has the same microphone chip as a terminal pane's
+# (#8YQ9) — the capture process and where a transcript lands in the text, nothing else.
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-voice ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the

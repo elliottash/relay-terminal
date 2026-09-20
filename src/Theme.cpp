@@ -671,6 +671,49 @@ QWidget#boardCleanupPanel[failed="true"] { border-color: @error; }
 QLabel#boardCleanupHead { color: @text; }
 QTextBrowser#boardCleanupBody { background: transparent; color: @text; border: none; }
 QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
+/* The Switchboard page agent's panel (#8YQ9, protocol 19.18): the conversation about the whole
+   board, pinned under the list on the list page. It reads as part of the page — a hairline over
+   it and the board's own face behind it — rather than as a card or a floating strip, because the
+   list above it is what it is talking about. */
+QWidget#boardChatPanel { background: transparent; border-top: 1px solid @boardMetalDim; }
+QLabel#boardChatHead { color: @muted; font-family: "@mono"; font-size: 9pt; }
+QToolButton#boardChatCheck { background: @raised; color: @muted; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardChatCheck:hover { color: @text; border-color: @accent; }
+QTextBrowser#boardChatLog { background: transparent; color: @text; border: none; }
+QTextBrowser#boardChatLog QScrollBar:vertical { width: 8px; margin: 0; }
+/* Violet while the agent is turning, as everywhere else on the board: amber is reserved for what
+   is waiting on a person (docs/ARCHITECTURE.md, "What the colours mean"). Colour and border only
+   — a rule that changed the font would paint one width and measure another. */
+QWidget#boardChatBusy { background: transparent; }
+QLabel#boardChatBusyWhat { color: @muted; font-family: "@mono"; font-size: 9pt; }
+QToolButton#boardChatStop { color: @agent; background: transparent; border: 1px solid @agentBorder; border-radius: 4px; padding: 2px 8px; }
+QToolButton#boardChatStop:hover { border-color: @agent; }
+/* The queue, in delivery order (19.18's FIFO): one muted row per waiting prompt, the same idiom
+   as a terminal pane's queue strip, so a prompt that is waiting looks the same in both places. */
+QWidget#boardChatQueue { background: transparent; }
+QWidget#boardChatQueueRow { background: @raised; border: 1px solid @border; border-radius: 6px; }
+QLabel#boardChatQueueText { color: @muted; font-size: 9pt; }
+/* Check and triage findings, and the survey's import offer: lists in the page that a click turns
+   into a draft in the composer below them. */
+QWidget#boardChatFindings, QWidget#boardChatSurvey { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QLabel#boardChatFindingsHead, QLabel#boardChatSurveyHead { color: @text; }
+QLabel#boardChatFinding { color: @warning; }
+QLabel#boardChatFinding:hover { color: @text; }
+QCheckBox#boardChatProposal { color: @text; spacing: 5px; }
+QToolButton#boardChatImport { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardChatImport:hover { border-color: @accent; }
+/* The composer: the same furniture as a terminal pane's — the box, the microphone chip and the
+   context-left chip — so the two composers are one thing the owner has learned once. */
+QPlainTextEdit#boardChatComposer { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 4px 6px; }
+QPlainTextEdit#boardChatComposer:focus { border-color: @accentBorder; }
+QToolButton#boardChatMic { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; color: @muted; }
+QToolButton#boardChatMic:hover { color: @text; border-color: @accent; }
+QToolButton#boardChatMic[recording="true"] { color: @error; border-color: @error; }
+QLabel#boardChatContext { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 2px 6px; }
+QLabel#boardChatContext[warn="true"] { color: @warning; }
+QToolButton#boardChatSend { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardChatSend:hover { border-color: @accent; }
+QToolButton#boardChatSend[running="true"] { color: @agent; border-color: @agentBorder; }
 /* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
    a hairline over the rows; the pane's header carries nothing but the way back from a card. */
 QWidget#boardListTools { background: transparent; border-bottom: 1px solid @boardMetalDim; }

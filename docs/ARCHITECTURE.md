@@ -1478,6 +1478,19 @@ record and nothing else) and the declined ones (Undo).
   Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on the board folder (the
   one the `board` event named, else `projects::boardDirOf()`) turns any write — this window, a pane
   agent, an editor, a `git pull` — into one debounced `board_refresh`.
+- **`src/BoardChat.{h,cpp}`**: `relay::BoardChatPanel`, the **page agent's** panel at the bottom
+  of the list page (card #8YQ9, protocol 19.18) — the conversation about the whole board, for the
+  questions that are about the board rather than one card. A log of the conversation, the
+  worker-side FIFO queue drawn in delivery order, and a composer whose Enter sends and whose
+  second prompt *queues* rather than being refused (#N8VK's rule, the same as a terminal pane's).
+  The board's two whole-board buttons live in its row — **Clean up**, moved down out of the filter
+  row (owner, 2026-09-19), and **Check**, the board's own format check over every card; each
+  section header carries a hover ⚠ that checks that section alone (`board_check {section}`).
+  A finding, and the problems banner over the list, **draft** a fix request into the composer and
+  focus it — never sent, because the owner confirms it (owner, 2026-09-19: "draft you confirm").
+  Ctrl+/ puts the keyboard there from anywhere on the board, the pair of `/` for the filter.
+  It holds no process: `BoardView` feeds it the `chat` block of the `board` event and every
+  `chat: true` turn event, exactly as it feeds a card thread `card_id` events.
 - **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **window**, configured with
   `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
   lazily on the first open and answers every `board_*` message of protocol 17.

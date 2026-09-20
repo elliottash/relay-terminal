@@ -6,11 +6,13 @@
 
 #include "Projects.h"
 #include "BoardPane.h"
+#include "BoardChat.h"   // the page agent's panel (#8YQ9, protocol 19.18)
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QFocusEvent>
 #include <QFrame>
+#include <QKeyEvent>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -184,6 +186,16 @@ private slots:
     void nothingIsMovedIntoVerifiedAndMovingOutIsOrdinary();
     void theBriefsAskForTheExactModelAndTheGuestHarness();
     void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
+    // The Switchboard page agent's panel (#8YQ9, protocol 19.18)
+    void thePanelSeedsItselfFromTheBoardEventsChatBlock();
+    void aPromptSendsBoardChatAndASecondOneQueuesInsteadOfBeingRefused();
+    void theQueueRowsRemoveAndReorderThroughTheWorker();
+    void cleanUpMovedIntoThePageAgentsRowBesideCheck();
+    void checkIsUnscopedAndASectionsTriageNamesItsSection();
+    void aProblemDraftsAFixInTheComposerWithoutSendingIt();
+    void theSurveysImportButtonSendsBoardImportApply();
+    void theContextChipFollowsTheConversation();
+    void thePageAgentsEventsNeverReachACardThread();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -2555,6 +2567,344 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
     QVERIFY(line->text().contains(QStringLiteral("Verify with Codex (installed)")));
     QVERIFY2(line->text().contains(weak.toHtmlEscaped()), qPrintable(line->text()));
     QVERIFY(button(view, QStringLiteral("Verify"))->isEnabled());
+}
+
+// ------------------------------------------- the page agent's panel (#8YQ9, protocol 19.18)
+
+namespace {
+
+// The `chat` block of a `board` event or a `board_chat_*` answer: what the worker's PageAgent
+// reports as its state (board_chat.py, `PageAgent.state()`).
+QJsonObject chatState(bool running, const QJsonArray &queue = {}, const QJsonArray &history = {})
+{
+    return QJsonObject{{"running", running}, {"turn_id", running ? "chat-9f1c2a" : QJsonValue()},
+                       {"model", QJsonValue()}, {"survey", false}, {"seconds", 0.0},
+                       {"queue", queue}, {"history", history}};
+}
+
+// A `board` event that also carries the conversation, the way the worker sends it (19.18).
+QJsonObject openedWithChat(const QList<QJsonObject> &cards, const QJsonObject &chat)
+{
+    QJsonObject event = opened(cards);
+    event.insert(QStringLiteral("chat"), chat);
+    return event;
+}
+
+// One turn event of the page agent: `chat: true` and a `turn_id`, never a `card_id` (19.18).
+QJsonObject chatEvent(const QString &type, const QJsonObject &extra = {})
+{
+    QJsonObject out{{"event", type}, {"chat", true}, {"turn_id", "chat-9f1c2a"}};
+    for (auto it = extra.begin(); it != extra.end(); ++it)
+        out.insert(it.key(), it.value());
+    return out;
+}
+
+QWidget *chatPanel(relay::BoardView &view)
+{
+    return view.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
+}
+
+QPlainTextEdit *composerOf(relay::BoardView &view)
+{
+    return view.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+}
+
+QTextBrowser *chatLog(relay::BoardView &view)
+{
+    return view.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+}
+
+QList<QWidget *> queueRows(relay::BoardView &view)
+{
+    return view.findChildren<QWidget *>(QStringLiteral("boardChatQueueRow"));
+}
+
+// Type into the composer and press Enter, the way the owner asks a question.
+void ask(relay::BoardView &view, const QString &text)
+{
+    QPlainTextEdit *box = composerOf(view);
+    QVERIFY(box);
+    box->setPlainText(text);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QApplication::sendEvent(box, &enter);
+}
+
+QJsonObject problem(const QString &path, const QString &message)
+{
+    return QJsonObject{{"code", "bad_front_matter"}, {"path", path}, {"message", message},
+                       {"severity", "error"}};
+}
+
+}  // namespace
+
+// A pane opened while the agent is half way through an answer draws the whole panel from the one
+// `board` event: the conversation so far, the queue behind it, and the fact that it is running.
+void BoardModelTests::thePanelSeedsItselfFromTheBoardEventsChatBlock()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QVERIFY(chatPanel(view));
+    const QJsonArray history{QJsonObject{{"role", "owner"}, {"text", "merge the two voice cards"}},
+                             QJsonObject{{"role", "agent"}, {"text", "They are #K7Q2 and #M3XJ."}}};
+    const QJsonArray queue{QJsonObject{{"id", "c1"}, {"text", "then sort Inbox"}}};
+    view.handleEvent(openedWithChat({row("K7Q2", "inbox", "features")},
+                                    chatState(true, queue, history)));
+    QVERIFY(view.chatRunning());
+    QTextBrowser *log = chatLog(view);
+    QVERIFY(log);
+    QVERIFY(log->toPlainText().contains(QStringLiteral("merge the two voice cards")));
+    QVERIFY(log->toPlainText().contains(QStringLiteral("They are #K7Q2 and #M3XJ.")));
+    QCOMPARE(queueRows(view).size(), 1);
+}
+
+// #N8VK's rule, which the page agent takes from the terminal panes: a second prompt typed while a
+// turn runs is *queued*, never refused. The panel sends it exactly like the first — the worker
+// owns the queue — and the row appears from the event the worker sends back.
+void BoardModelTests::aPromptSendsBoardChatAndASecondOneQueuesInsteadOfBeingRefused()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    sent.clear();
+
+    ask(view, QStringLiteral("what is in Inbox?"));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("what is in Inbox?"));
+    QVERIFY(!sent.last().value("id").toString().isEmpty());
+    QVERIFY(composerOf(view)->toPlainText().isEmpty());     // the box is cleared on send
+
+    view.handleEvent(QJsonObject{{"event", "board_chat_started"}, {"turn_id", "chat-9f1c2a"},
+                                 {"model", "switchboard"}, {"chat", chatState(true)}});
+    QVERIFY(view.chatRunning());
+
+    // The answer streams in. The log re-renders on a timer — at most 25 times a second, so a
+    // fast stream does not repaint per token — so this waits for it rather than for one event.
+    view.handleEvent(chatEvent(QStringLiteral("delta"), {{"text", "Two cards."}}));
+    QTRY_VERIFY(chatLog(view)->toPlainText().contains(QStringLiteral("Two cards.")));
+
+    // A second prompt while it runs: still one `board_chat`, no refusal anywhere in the panel.
+    sent.clear();
+    ask(view, QStringLiteral("then sort it"));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
+    QCOMPARE(queueRows(view).size(), 0);                    // nothing is queued until the worker says so
+    view.handleEvent(QJsonObject{{"event", "board_chat_queued"}, {"id", "c1"}, {"position", 1},
+                                 {"text", "then sort it"}, {"chat", true}});
+    QCOMPARE(queueRows(view).size(), 1);
+
+    // While a turn runs the send button is Stop, and it stops that turn and not the queue.
+    auto *send = view.findChild<QToolButton *>(QStringLiteral("boardChatSend"));
+    QVERIFY(send);
+    QCOMPARE(send->text(), QStringLiteral("Stop"));
+    sent.clear();
+    send->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
+
+    view.handleEvent(QJsonObject{{"event", "board_chat_cancelled"}, {"stopped", true},
+                                 {"chat", chatState(false, QJsonArray{
+                                     QJsonObject{{"id", "c1"}, {"text", "then sort it"}}})}});
+    QVERIFY(!view.chatRunning());
+    QCOMPARE(send->text(), QStringLiteral("Send"));
+    QCOMPARE(queueRows(view).size(), 1);                    // the queue survived the stop
+}
+
+// The worker's queue is authoritative (19.18): a click sends the op and the redraw comes back as
+// `board_chat_state`. The panel never reorders its own rows optimistically.
+void BoardModelTests::theQueueRowsRemoveAndReorderThroughTheWorker()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    const QJsonArray queue{QJsonObject{{"id", "c1"}, {"text", "first"}},
+                           QJsonObject{{"id", "c2"}, {"text", "second"}}};
+    view.handleEvent(openedWithChat({row("K7Q2", "inbox", "features")}, chatState(true, queue)));
+    QCOMPARE(queueRows(view).size(), 2);
+
+    sent.clear();
+    QList<QToolButton *> removes;
+    for (QWidget *rowWidget : queueRows(view))
+        for (QToolButton *button : rowWidget->findChildren<QToolButton *>())
+            if (button->text() == QStringLiteral("×"))
+                removes << button;
+    QCOMPARE(removes.size(), 2);
+    removes.first()->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_queue_remove"));
+    QCOMPARE(sent.last().value("item").toString(), QStringLiteral("c1"));
+    QCOMPARE(queueRows(view).size(), 2);                    // not until the worker answers
+
+    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
+                                 {"chat", chatState(true, QJsonArray{queue.at(1)})}});
+    QCOMPARE(queueRows(view).size(), 1);
+}
+
+// Owner, 2026-09-19: "put the clean up button down there" — beside the page agent, with the other
+// board-wide button the survey of that row turned up. It keeps all of its own behaviour.
+void BoardModelTests::cleanUpMovedIntoThePageAgentsRowBesideCheck()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    QWidget *panel = chatPanel(view);
+    QToolButton *cleanup = cleanupButton(view);
+    auto *check = view.findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
+    QVERIFY(panel && cleanup && check);
+    QVERIFY(panel->isAncestorOf(cleanup));
+    QVERIFY(panel->isAncestorOf(check));
+    // It is out of the filter row for good, not shown in both places.
+    QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
+    QVERIFY(tools && !tools->isAncestorOf(cleanup));
+    // And it still runs a preview first (19.9).
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    cleanup->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QCOMPARE(sent.last().value("dry_run").toBool(), true);
+}
+
+// Check is the whole board; a section's ⚠ is that section alone (`board_check {section}`). A
+// scoped answer is drawn as that section's triage and is never allowed to rewrite the banner over
+// the list, which counts the board-level problems a scoped check leaves out.
+void BoardModelTests::checkIsUnscopedAndASectionsTriageNamesItsSection()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
+
+    sent.clear();
+    view.findChild<QToolButton *>(QStringLiteral("boardChatCheck"))->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    QVERIFY(!sent.last().contains(QStringLiteral("section")));
+    const QString unscoped = sent.last().value("id").toString();
+
+    view.handleEvent(QJsonObject{{"event", "board_problems"}, {"id", unscoped},
+                                 {"items", QJsonArray{problem("issues/features/a.md", "no id")}},
+                                 {"section", QJsonValue()}});
+    auto *findings = view.findChild<QWidget *>(QStringLiteral("boardChatFindings"));
+    QVERIFY(findings && !findings->isHidden());
+
+    // The ⚠ on the Ready header. The rect it is clicked in is the delegate's; what it does is this.
+    sent.clear();
+    view.requestCheck(QStringLiteral("ready"));
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    QCOMPARE(sent.last().value("section").toString(), QStringLiteral("ready"));
+    const QString scoped = sent.last().value("id").toString();
+
+    auto *banner = view.findChild<QLabel *>(QStringLiteral("boardProblems"));
+    QVERIFY(banner);
+    const QString bannerBefore = banner->text();
+    view.handleEvent(QJsonObject{{"event", "board_problems"}, {"id", scoped},
+                                 {"items", QJsonArray{}}, {"section", "ready"}});
+    QCOMPARE(banner->text(), bannerBefore);       // a scoped check never rewrites the banner
+    // "nothing to fix" is still an answer: a click that says nothing looks broken.
+    QVERIFY(findings->findChildren<QLabel *>().size() > 0);
+}
+
+// Owner, 2026-09-19: "if there are problems, when you click on them, it sends a fix note to the
+// switchboard agent" — and "draft you confirm". So a click fills the composer and stops there.
+void BoardModelTests::aProblemDraftsAFixInTheComposerWithoutSendingIt()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QJsonObject event = opened({row("K7Q2", "inbox", "features")});
+    event.insert(QStringLiteral("problems"),
+                 QJsonArray{problem("issues/features/2026-09-19-broken.md", "front matter has no id")});
+    view.handleEvent(event);
+
+    auto *banner = view.findChild<QLabel *>(QStringLiteral("boardProblems"));
+    QVERIFY(banner && !banner->isHidden());
+    sent.clear();
+    banner->linkActivated(QStringLiteral("issues/features/2026-09-19-broken.md"));
+
+    QPlainTextEdit *box = composerOf(view);
+    QVERIFY(box);
+    QVERIFY(box->toPlainText().contains(QStringLiteral("2026-09-19-broken.md")));
+    QVERIFY(box->toPlainText().contains(QStringLiteral("front matter has no id")));
+    QVERIFY(sent.isEmpty());                      // a draft, never a send
+}
+
+// The survey is the page agent's opening turn on a board that was just created (19.18). Its
+// proposals are an offer: nothing is written until the owner ticks and presses the button, which
+// goes through the same never-twice import path as everything else (19.13).
+void BoardModelTests::theSurveysImportButtonSendsBoardImportApply()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({}));
+    sent.clear();
+
+    view.handleEvent(QJsonObject{
+        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
+        {"hints", QJsonArray{QJsonObject{{"kind", "vendor"}, {"message", "node_modules/ is left alone"}}}},
+        {"counts", QJsonObject{{"items", 2}}},
+        {"proposals", QJsonArray{
+            QJsonObject{{"title", "Fix the flaky test"},
+                        {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                               {"key", "todo-md:TODO.md#0"}}}},
+            QJsonObject{{"title", "Ship the board"},
+                        {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                               {"key", "todo-md:TODO.md#1"}}}}}},
+        {"git", QJsonObject{{"is_repo", true}, {"primary", "origin"}, {"forge", "github"},
+                            {"owner", "relay"}, {"repo", "relay-terminal"},
+                            {"url", "git@github.com:relay/relay-terminal.git"}}}});
+
+    auto *survey = view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"));
+    QVERIFY(survey && !survey->isHidden());
+    QVERIFY(sent.isEmpty());                      // the survey writes nothing by itself
+
+    const QList<QCheckBox *> proposals = survey->findChildren<QCheckBox *>();
+    QCOMPARE(proposals.size(), 2);
+    for (QCheckBox *box : proposals)
+        QVERIFY(box->isChecked());                // ticked by default; untick to leave one out
+    proposals.at(1)->setChecked(false);
+
+    auto *import = view.findChild<QToolButton *>(QStringLiteral("boardChatImport"));
+    QVERIFY(import);
+    import->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_import_apply"));
+    const QJsonArray keys = sent.last().value("keys").toArray();
+    QCOMPARE(keys.size(), 1);
+    QCOMPARE(keys.first().toString(), QStringLiteral("todo-md:TODO.md#0"));
+    QVERIFY(survey->isHidden());
+}
+
+// `context` rides along tagged `chat: true` (19.18) so the page's chip follows the conversation
+// exactly as a terminal pane's follows its own.
+void BoardModelTests::theContextChipFollowsTheConversation()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    auto *chip = view.findChild<QLabel *>(QStringLiteral("boardChatContext"));
+    QVERIFY(chip);
+    view.handleEvent(chatEvent(QStringLiteral("context"),
+                               {{"used", 48000}, {"window", 200000}, {"limit", 180000},
+                                {"percent", 24.0}}));
+    QVERIFY(!chip->isHidden());
+    QVERIFY(chip->text().contains(QStringLiteral("76")));
+    QVERIFY(chip->text().contains(QStringLiteral("left")));
+}
+
+// The same rule a cleanup's events keep (19.9), for the same reason: the page agent can write any
+// card, and a card that happens to be open must never see its chatter in its thread.
+void BoardModelTests::thePageAgentsEventsNeverReachACardThread()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(view.detailOpen());
+    auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(document);
+    const QString before = document->toPlainText();
+
+    view.handleEvent(chatEvent(QStringLiteral("delta"), {{"text", "reorganising the board"}}));
+    view.handleEvent(chatEvent(QStringLiteral("tool_started"), {{"tool", "board_read"}}));
+    view.handleEvent(chatEvent(QStringLiteral("done")));
+
+    QCOMPARE(document->toPlainText(), before);
+    QVERIFY(!document->toPlainText().contains(QStringLiteral("reorganising the board")));
+    QTRY_VERIFY(chatLog(view)->toPlainText().contains(QStringLiteral("reorganising the board")));
 }
 
 QTEST_MAIN(BoardModelTests)

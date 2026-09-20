@@ -35,6 +35,7 @@ class RichEditor;
 
 namespace relay {
 
+class BoardChatPanel;
 class CardDetail;
 class ColumnHeader;
 class RowList;
@@ -127,6 +128,15 @@ public:
     // While a run is going the same button is Stop and sends `cancel`.
     void requestCleanup();
     bool cleanupRunning() const { return !m_cleanupRun.isEmpty(); }
+    // The Switchboard page agent (#8YQ9, protocol 19.18): the conversation about the whole board,
+    // at the bottom of the list page. Ctrl+/ puts the keyboard in its composer from anywhere on
+    // the board; the Check button and every section's ⚠ run the board's own `check()` and show
+    // what they find as lines that pre-fill that composer with a fix request.
+    void focusChat();
+    // `board_check {section}` — a section's ⚠ — or the unscoped Check button when `columnId` is
+    // empty. The answer arrives as `board_problems {items, section}`.
+    void requestCheck(const QString &columnId = QString());
+    bool chatRunning() const;
     void moveSelected();            // the `m` popup
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
@@ -157,6 +167,15 @@ private:
     // The cleanup's result, in the list page itself rather than over it: outcome, counts, every
     // change with its card as a link, the refusals, the agent's report and the changelog.
     void buildCleanupPanel(QVBoxLayout *layout);
+    // The page agent's panel (19.18), pinned under the list. It holds no process: it is fed the
+    // `chat: true` events through handleChatEvent and speaks through the same `onSend` the view
+    // does. Clean up moves into its button row (owner, 2026-09-19: "put the clean up button down
+    // there"), where a Check button joins it.
+    void buildChatPanel(QVBoxLayout *layout);
+    // A page-agent event (19.18: `chat: true`, or one of the `board_chat_*` answers). Returns
+    // true when the panel took it, so a card thread never sees one — the `cleanup: true`
+    // precedent below.
+    bool handleChatEvent(const QString &type, const QJsonObject &event);
     void startCleanup(bool dryRun);
     void endCleanup();                        // the run is over, whatever ended it
     void updateCleanupButton();
@@ -272,6 +291,9 @@ private:
     QLabel *m_count = nullptr;
     QLineEdit *m_filter = nullptr;
     QLabel *m_problems = nullptr;
+    // The fix request the problems banner drafts when it is clicked (#8YQ9): the first error's
+    // card or file and its message, ready for the page agent's composer.
+    QString m_problemFix;
     QFrame *m_notice = nullptr;
     QLabel *m_noticeText = nullptr;
     QToolButton *m_noticeUndo = nullptr;
@@ -285,6 +307,9 @@ private:
     QWidget *m_quickAddRow = nullptr;
     QPointer<QLineEdit> m_quickAdd;
     QString m_quickAddColumn;
+
+    // ---- the page agent's panel (protocol 19.18), under the list on the list page.
+    BoardChatPanel *m_chat = nullptr;
 
     // ---- the cleanup run (protocol 19.9). One at a time, on the whole board.
     QWidget *m_cleanupPanel = nullptr;      // the result, in the list page

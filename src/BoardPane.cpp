@@ -3,6 +3,8 @@
 #include "Projects.h"   // which folder of a project is its board: `switchboard/`, else `issues/`
 #include "ToolLabel.h"
 
+#include "BoardChat.h"   // the Switchboard page agent's panel (#8YQ9, protocol 19.18)
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -293,7 +295,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
 
 // A section header: a chevron, the status name, its count, and a `+` that adds into it.
 struct SectionShape {
-    QRect chevronRect, titleRect, addRect;
+    QRect chevronRect, titleRect, addRect, triageRect;
     int height = 0;
 };
 
@@ -306,10 +308,17 @@ SectionShape sectionShape(const QFont &font, int width, bool first, bool canAdd)
     int x = kRowPadX;
     shape.chevronRect = QRect(x, top, 12, metrics.height());
     x += 14;
-    shape.titleRect = QRect(x, top, qMax(20, width - x - kRowPadX - (canAdd ? kAddWidth : 0)),
-                            metrics.height());
-    shape.addRect = canAdd ? QRect(width - kRowPadX - kAddWidth, top, kAddWidth, metrics.height())
-                           : QRect();
+    // The triage ⚠ (#8YQ9) sits inside the `+`, at the row's end: every section can be checked,
+    // including Done, so unlike the `+` its room is reserved on every header rather than only on
+    // the ones that take new cards. Both are drawn on hover only — a header at rest is a name.
+    int right = width - kRowPadX;
+    if (canAdd) {
+        shape.addRect = QRect(right - kAddWidth, top, kAddWidth, metrics.height());
+        right -= kAddWidth;
+    }
+    shape.triageRect = QRect(right - kAddWidth, top, kAddWidth, metrics.height());
+    right -= kAddWidth;
+    shape.titleRect = QRect(x, top, qMax(20, right - x), metrics.height());
     return shape;
 }
 
@@ -371,6 +380,17 @@ public:
             return QRect();
         return sectionShape(m_list->font(), rowWidth(), rowIndex == 0, true)
             .addRect.translated(itemRect.topLeft());
+    }
+
+    // The ⚠ of the header at `rowIndex` (#8YQ9), given that row's rect, or an empty rect. Every
+    // section has one — a section that takes no new cards can still hold a malformed card.
+    QRect triageRectOf(int rowIndex, const QRect &itemRect) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Section)
+            return QRect();
+        return sectionShape(m_list->font(), rowWidth(), rowIndex == 0, adds(row->columnId))
+            .triageRect.translated(itemRect.topLeft());
     }
 
     // The flag at the left of a card row (#VKFV), given that row's rect: the box the ring or the
@@ -435,6 +455,15 @@ private:
             painter->setPen(theme::Text);
             painter->drawText(shape.addRect.translated(origin), Qt::AlignCenter,
                               QStringLiteral("+"));
+        }
+        // Triage (#8YQ9): the board's own `check()`, scoped to this section's cards. It is
+        // deterministic and free — not an agent turn — so it is a click on the header rather
+        // than a sentence to the page agent, and what it finds is clickable in its turn.
+        if (hover) {
+            painter->setFont(smaller(option.font, 0.95));
+            painter->setPen(theme::TextMuted);
+            painter->drawText(shape.triageRect.translated(origin), Qt::AlignCenter,
+                              QStringLiteral("\u26A0"));
         }
     }
 
@@ -788,10 +817,13 @@ public:
     std::function<void(const QString &, const QString &, const QString &, const QString &)> onDropped;
     std::function<void(bool)> onDragging;   // a drag from this list started (true) or ended
     std::function<void(const QString &columnId)> onToggleSection, onAddInSection;
+    // The ⚠ on a section header (#8YQ9): check that section's cards and show what it found.
+    std::function<void(const QString &columnId)> onTriageSection;
     // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
     // one (#VKFV). The pane clamps at −1…+3 and writes it through `board_priority`.
     std::function<void(const QString &cardId, int step)> onPriority;
-    std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf;
+    std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf,
+        triageRectOf;
     static QString dragging;
 
 protected:
@@ -834,9 +866,14 @@ protected:
         }
         if (row && row->kind == board::Row::Section && event->button() == Qt::LeftButton) {
             const QRect add = addRectOf ? addRectOf(index.row(), visualRect(index)) : QRect();
+            const QRect triage = triageRectOf ? triageRectOf(index.row(), visualRect(index))
+                                              : QRect();
             if (add.isValid() && add.adjusted(-5, -5, 5, 5).contains(at)) {
                 if (onAddInSection)
                     onAddInSection(row->columnId);
+            } else if (triage.isValid() && triage.adjusted(-5, -5, 5, 5).contains(at)) {
+                if (onTriageSection)
+                    onTriageSection(row->columnId);
             } else if (onToggleSection) {
                 onToggleSection(row->columnId);
             }
@@ -2456,7 +2493,16 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_problems->setObjectName(QStringLiteral("boardProblems"));
     m_problems->setTextFormat(Qt::RichText);
     m_problems->hide();
+    // Clicking a problem hands it to the page agent as a **draft** (owner, 2026-09-19: "if there
+    // are problems, when you click on them, it sends a fix note to the switchboard agent" — and
+    // "draft you confirm"). Nothing is sent: the request lands in the composer with the keyboard
+    // in it, so the owner reads it before pressing Enter. Opening the file stays on `o`, which is
+    // why the tooltip says so.
     connect(m_problems, &QLabel::linkActivated, this, [this](const QString &path) {
+        if (m_chat && !m_problemFix.isEmpty()) {
+            m_chat->prefill(m_problemFix);
+            return;
+        }
         if (onOpenFile && !path.isEmpty())
             onOpenFile(QDir(m_workspace).absoluteFilePath(path));
     });
@@ -2536,6 +2582,11 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
         quickAddIn(columnId);
     };
+    m_list->triageRectOf = [delegate](int rowIndex, const QRect &itemRect) {
+        return delegate->triageRectOf(rowIndex, itemRect);
+    };
+    // The ⚠ on a section header (#8YQ9): the board's own check, scoped to that section's cards.
+    m_list->onTriageSection = [this](const QString &columnId) { requestCheck(columnId); };
     m_list->onDropped = [this](const QString &card, const QString &columnId, const QString &before,
                                const QString &after) {
         if (onHint)
@@ -2587,6 +2638,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->installEventFilter(this);
     syncColumnHeader();
     listLayout->addWidget(m_list, 1);
+    buildChatPanel(listLayout);
     m_splitter->addWidget(m_listPane);
 
     m_detail = new CardDetail(m_splitter);
@@ -2941,6 +2993,86 @@ void BoardView::buildCleanupPanel(QVBoxLayout *layout)
     });
 }
 
+// --------------------------------------------------------- the page agent (#8YQ9, protocol 19.18)
+
+// The conversation about the whole board, pinned under the list on the list page. It is a panel
+// in the page, not a window over it and not a second pane (owner's standing rule: a new surface
+// is a pane or in-pane, never a floating strip), and it is built only once — an open card hides
+// the whole list page, panel and all, so a card is never looking at the board's conversation.
+//
+// Clean up comes down here with it (owner, 2026-09-19: "put the clean up button down there, or
+// see if there should be other buttons"), and the other button that belongs beside an agent that
+// reorganizes the board is **Check**: the board's own format check over every card, deterministic
+// and free, whose findings pre-fill this composer with a fix request. The button keeps every bit
+// of its cleanup machinery — BoardView still owns it, its text, its run and its Stop — so moving
+// it is a reparent and nothing else.
+void BoardView::buildChatPanel(QVBoxLayout *layout)
+{
+    m_chat = new BoardChatPanel(m_listPane);
+    m_chat->onSend = [this](const QJsonObject &message) { send(message); };
+    m_chat->nextRequestId = [this] { return nextRequestId(); };
+    m_chat->onHint = [this](const QString &id, const QString &keys) {
+        if (onHint)
+            onHint(id, keys);
+    };
+    m_chat->onStatus = [this](const QString &text) {
+        if (onStatus)
+            onStatus(text);
+    };
+    m_chat->onOpenFile = [this](const QString &path) {
+        if (onOpenFile && !path.isEmpty())
+            onOpenFile(QDir(m_workspace).absoluteFilePath(path));
+    };
+    m_chat->onOpenCard = [this](const QString &id) {
+        selectCard(id);
+        m_selected = id;
+        openSelected();
+    };
+    m_chat->setWorkspace(m_workspace);
+
+    // Clean up leaves the filter row for the panel's button row, beside the Check the panel
+    // builds for itself. Taken out of its old layout by hand rather than left for addWidget to
+    // move it, which does that with a warning on the console.
+    if (m_cleanup) {
+        if (m_listTools)
+            m_listTools->removeWidget(m_cleanup);
+        if (m_toolsWrap)
+            m_toolsWrap->removeWidget(m_cleanup);
+        m_chat->addToolWidget(m_cleanup);
+    }
+    layout->addWidget(m_chat);
+}
+
+void BoardView::focusChat()
+{
+    if (m_chat)
+        m_chat->focusComposer();
+}
+
+bool BoardView::chatRunning() const
+{
+    return m_chat && m_chat->running();
+}
+
+// `board_check`, scoped to a section (a header's warning mark) or to the whole board. The panel's
+// own Check button sends the unscoped one itself; it is the same message, and both answers come
+// back carrying this pane's request prefix, which is how `board_problems` below tells a check
+// somebody asked for from the board's own refresh.
+void BoardView::requestCheck(const QString &columnId)
+{
+    QJsonObject message{{QStringLiteral("type"), QStringLiteral("board_check")}};
+    if (!columnId.isEmpty())
+        message.insert(QStringLiteral("section"), columnId);
+    send(message);
+}
+
+// 19.18's events, kept away from any card thread exactly as a cleanup's are: they carry
+// `chat: true` and a `turn_id` and never a `card_id`.
+bool BoardView::handleChatEvent(const QString &type, const QJsonObject &event)
+{
+    return m_chat && m_chat->handleEvent(type, event);
+}
+
 // The label chips follow the labels the board carries right now — every label on a card, plus
 // any the board's own config names — rather than a hard-coded list. Rebuilt only when that set
 // changes, so ticking one does not delete the chip under the pointer.
@@ -3006,7 +3138,9 @@ void BoardView::layoutListTools()
     m_toolsWrapped = wrap;
     QHBoxLayout *from = wrap ? m_listTools : m_toolsWrap;
     QHBoxLayout *to = wrap ? m_toolsWrap : m_listTools;
-    for (QToolButton *button : {m_add, m_cleanup}) {
+    // Only "+ New card" wraps now: Clean up moved down into the page agent's button row
+    // (#8YQ9, owner 2026-09-19) and is no longer part of this row's width problem.
+    for (QToolButton *button : {m_add}) {
         from->removeWidget(button);
         to->addWidget(button);
     }
@@ -3280,6 +3414,14 @@ void BoardView::handleEvent(const QJsonObject &event)
     }
     if (type == QStringLiteral("board")) {
         m_open = true;
+        // The page agent's conversation rides on this event (19.18), so a pane opened while the
+        // agent is half way through an answer draws the panel — history, queue and all — from it.
+        if (m_chat) {
+            m_chat->setWorkspace(event.value(QStringLiteral("workspace")).toString().isEmpty()
+                                     ? m_workspace
+                                     : event.value(QStringLiteral("workspace")).toString());
+            m_chat->setChatState(event.value(QStringLiteral("chat")).toObject());
+        }
         m_config = event.value(QStringLiteral("config")).toObject();
         m_model.setConfig(m_config);
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
@@ -3396,7 +3538,22 @@ void BoardView::handleEvent(const QJsonObject &event)
         return;
     }
     if (type == QStringLiteral("board_problems")) {
-        showProblems(event.value(QStringLiteral("items")).toArray());
+        const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+        // A check this pane asked for — the panel's Check button, or a section header's warning
+        // mark — answers in the panel as a clickable list (#8YQ9). Every other `board_problems`
+        // is the board's own refresh and belongs in the banner over the list, where it has always
+        // been. A scoped check is never allowed to rewrite that banner: it leaves out the
+        // problems that belong to no one section (the worker's rule), so it would under-report
+        // the board.
+        const QString section = event.value(QStringLiteral("section")).toString();
+        if (mine) {
+            if (m_chat)
+                m_chat->showFindings(items, section);
+            if (section.isEmpty())
+                showProblems(items);
+            return;
+        }
+        showProblems(items);
         return;
     }
     if (type == QStringLiteral("board_written") && mine) {
@@ -3434,7 +3591,20 @@ void BoardView::handleEvent(const QJsonObject &event)
                        .arg(event.value(QStringLiteral("card_id")).toString()), false);
         return;
     }
-    // A cleanup's events first, and whole: they are tagged `cleanup: true` with a run id and no
+    // The provider rows the composer's microphone reads before it offers to store an OpenRouter
+    // key (protocol 16). The event carries on rather than being consumed: whoever else wants the
+    // same rows — the model box of #BRD3 — still gets them. Nothing in this pane asks for them
+    // yet, and until something does the microphone assumes a key is stored and lets the worker
+    // answer `ok: false` with the reason, which is exactly what a terminal pane does before its
+    // own `presets` arrives.
+    if (type == QStringLiteral("presets") && m_chat)
+        m_chat->setPresets(event.value(QStringLiteral("presets")).toArray());
+    // The page agent's events (19.18) before everything else: they are tagged `chat: true` with a
+    // turn id and no card id, and an open card's thread must never see one of them — the same
+    // rule, and the same shape, as a cleanup's below.
+    if (handleChatEvent(type, event))
+        return;
+    // A cleanup's events, and whole: they are tagged `cleanup: true` with a run id and no
     // card id (19.9), and an open card's thread must never see one of them.
     if (handleCleanupEvent(type, event))
         return;
@@ -3590,8 +3760,11 @@ void BoardView::showProblems(const QJsonArray &problems)
         }
     }
     m_problems->setVisible(errors > 0);
-    if (errors == 0)
+    if (errors == 0) {
+        m_problemFix.clear();
         return;
+    }
+    m_problemFix = board::fixRequest(path, first, errors);
     // The file first (it is the link that fixes it), then the message.
     QString text = QStringLiteral("⚠ %1").arg(errors == 1 ? QStringLiteral("1 problem")
                                                          : QStringLiteral("%1 problems").arg(errors));
@@ -3602,7 +3775,10 @@ void BoardView::showProblems(const QJsonArray &problems)
     text += QStringLiteral(" · ") + first.toHtmlEscaped();
     m_problems->setText(text);
     m_problems->setToolTip(path + QStringLiteral(": ") + first
-                           + QStringLiteral("\n\npython3 scripts/relay-board.py check lists every problem."));
+                           + QStringLiteral("\n\nClick to draft a fix for the Switchboard agent — "
+                                            "it is put in its composer, not sent. `o` opens the "
+                                            "file; python3 scripts/relay-board.py check lists "
+                                            "every problem."));
 }
 
 // ------------------------------------------------------------------------ rendering
@@ -4509,6 +4685,15 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     const auto mods = key->modifiers() & ~Qt::KeypadModifier;
     if (mods == Qt::ControlModifier && key->key() == Qt::Key_Z) {
         undoLast();
+        return true;
+    }
+    // Ctrl+/ puts the keyboard in the page agent's composer from anywhere on the board (#8YQ9).
+    // It is the pair of `/`, which goes to the filter: one key for narrowing the list, one for
+    // asking about it. An open card goes back first, because the panel is the list page's.
+    if (mods == Qt::ControlModifier && key->key() == Qt::Key_Slash) {
+        if (detailOpen() && m_listPane->isHidden())
+            closeDetail();
+        focusChat();
         return true;
     }
     if (mods != Qt::NoModifier && mods != Qt::ShiftModifier)
