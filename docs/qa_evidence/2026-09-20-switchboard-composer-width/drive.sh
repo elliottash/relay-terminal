@@ -4,8 +4,10 @@
 # checkout's other in-flight edits.
 set -uo pipefail
 root=/home/elliott/repos/relay-terminal
-scratch=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ecadf05c-bcd3-4b55-9d02-afb94525471c/scratchpad
-bin=$scratch/relay
+# $RELAY_BIN is the binary to drive; the shots here were taken with the one land.py built from
+# the exact tree it committed (/tmp/claude-1000/land/<me>/verify/build/relay), because this shared
+# checkout's build/relay would not compile at the time on another session's half-written code.
+bin=${RELAY_BIN:-$root/build/relay}
 out=${1:-$root/docs/qa_evidence/2026-09-20-switchboard-composer-width}
 width=1440 height=900
 mkdir -p "$out"
