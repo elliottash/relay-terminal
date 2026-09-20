@@ -846,6 +846,189 @@ class SignatureTests(BoardToolsTest):
         self.assertNotIn("qa", row)
 
 
+# ------------------------------------------------- the self-close marker the done list folds on
+
+class SelfCloseTests(BoardToolsTest):
+    """Card #93WR: a *medium* card (`board_policy.md` v3) is one the agent closes itself, straight
+    to `done` from a stage before QA. Relay marks that by stamping `verified_by` with the closing
+    pane's own signature, so **self-closed is `verified_by` == `implemented_by`** — the one thing
+    the done lists fold on, and the reason the equality has to hold exactly when one pane both
+    wrote and closed the card, and never otherwise."""
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+
+    def sign(self, preset, model):
+        self.tools.context.preset, self.tools.context.model = preset, model
+
+    def front(self):
+        return self.board.card_by_id(self.card_id).front
+
+    def row(self):
+        return next(r for r in self.tools.run("board_list", {})["cards"]
+                    if r["id"] == self.card_id)
+
+    def test_an_agent_close_from_executing_stamps_verified_by_with_its_own_signature(self):
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        self.assertEqual(self.front()["implemented_by"], "anthropic/claude-opus-5")
+        self.assertIsNone(self.front().get("verified_by"))
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                   "reason": "landed in abc1234"})
+        self.assertNotIn("error", result)
+        front = self.front()
+        self.assertEqual(front["status"], "done")
+        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(front["verified_by"], front["implemented_by"])   # i.e. self-closed
+        self.assertIn("verified_by anthropic/claude-opus-5", self.thread_text(self.card_id))
+        # And the row the GUI folds on carries both, with nothing else to ask for.
+        row = self.row()
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(row["verified_by"], "anthropic/claude-opus-5")
+        # It is not a broken card: it never entered a QA lane, so there is nothing to report.
+        self.assertEqual(self.board.check(), [])
+
+    def test_in_progress_closes_the_same_way(self):
+        # `in-progress` is the older spelling of the same stage and is still valid (#3XZV).
+        self.sign("glm-coding", "glm-5.3")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
+                                           "reason": "starting"})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "landed"})
+        front = self.front()
+        self.assertEqual(front["verified_by"], "glm/glm-5.3")
+        self.assertEqual(front["verified_by"], front["implemented_by"])
+
+    def test_a_card_the_agent_created_and_closed_without_claiming_gets_both_stamps(self):
+        # A small card written and finished inside one stretch of work never passed through
+        # `executing`, so it has no implementer: the close is what gives it one, and the two
+        # stamps still match, which is what makes it fold.
+        self.sign("openai", "gpt-6-astra")
+        self.assertIsNone(self.front().get("implemented_by"))
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "done in this turn"})
+        front = self.front()
+        self.assertEqual(front["implemented_by"], "openai/gpt-6-astra")
+        self.assertEqual(front["verified_by"], "openai/gpt-6-astra")
+        thread = self.thread_text(self.card_id)
+        self.assertIn("implemented_by openai/gpt-6-astra", thread)
+        self.assertIn("verified_by openai/gpt-6-astra", thread)
+
+    def test_a_card_another_pane_implemented_is_not_self_closed(self):
+        # The equality is the whole marker, so a cross-pane close must break it: the implementer
+        # keeps its signature and only `verified_by` is this pane's. This card stays an ordinary
+        # done card and is never folded away.
+        self.sign("openai", "gpt-6-astra")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "finished it off"})
+        front = self.front()
+        self.assertEqual(front["implemented_by"], "openai/gpt-6-astra")
+        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5")
+        self.assertNotEqual(front["verified_by"], front["implemented_by"])
+
+    def test_the_owners_hand_close_from_the_switchboard_stamps_nothing(self):
+        # The owner-side tools are `actor="owner"` and never learn a preset or a model
+        # (`board_protocol._build` versus `Agent.sign_board`), so a drag onto Done leaves the card
+        # unsigned and unfolded. Both halves of the test matter: with no signature *and* with one,
+        # in case an owner-side context ever learns its model.
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        self.tools.context.actor = T.OWNER_ACTOR
+        self.sign(None, None)
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "moved in the Switchboard"})
+        self.assertIsNone(self.front().get("verified_by"))
+        self.assertNotIn("verified_by", self.thread_text(self.card_id))
+        # Reopened and hand-closed again by an owner who does have a signature: still unstamped.
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                          "reason": "reopened in the Switchboard"})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "moved in the Switchboard"})
+        self.assertIsNone(self.front().get("verified_by"))
+
+    def test_dropping_a_card_stamps_nothing(self):
+        # A dropped card verifies nothing — it was abandoned, not shipped — here as in the QA
+        # branch, where `dropped` has never been stamped either.
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "dropped",
+                                           "reason": "the owner does not want it"})
+        self.assertEqual(self.front()["status"], "dropped")
+        self.assertIsNone(self.front().get("verified_by"))
+
+    def test_a_close_with_no_signature_at_all_stamps_nothing(self):
+        # A guest CLI writing through the bridge knows neither preset nor model, so there is
+        # nothing to stamp and nothing is guessed (#T71W).
+        self.sign(None, None)
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "landed"})
+        self.assertIsNone(self.front().get("verified_by"))
+
+    def test_undo_takes_the_stamp_back_with_the_status(self):
+        # The stamp rides the status change's own write, so Ctrl+Z on the move puts both back —
+        # there is no way to be left `executing` and verified, or `done` and not.
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                   "reason": "landed"})
+        self.assertEqual(self.front()["verified_by"], "anthropic/claude-opus-5")
+        self.tools.undo(result["write_id"])
+        front = self.front()
+        self.assertEqual(front["status"], "executing")
+        self.assertIsNone(front.get("verified_by"))
+        self.assertEqual(front["implemented_by"], "anthropic/claude-opus-5")   # the earlier write
+
+    def test_a_qa_lane_close_is_unchanged_and_the_verdict_gate_still_holds(self):
+        # The self-close branch is reached only when the card did *not* come out of a QA lane, so
+        # nothing here can be used to close a QA card without a verdict.
+        self.sign("openai", "gpt-6-astra")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
+                                           "reason": "landed", "evidence": "docs/qa_evidence/x/"})
+        self.sign("glm-coding", "glm-5.3")
+        refused = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                     "reason": "passed"})
+        self.assertEqual(refused["requires"], "verdict")
+        self.assertIsNone(self.front().get("verified_by"))
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                             "append_section": {"heading": "Verdict", "text": "pass"}})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "verified"})
+        front = self.front()
+        self.assertEqual(front["implemented_by"], "openai/gpt-6-astra")
+        self.assertEqual(front["verified_by"], "glm/glm-5.3")
+
+    def test_a_self_closed_card_is_no_qa_violation_and_still_gets_a_recommendation(self):
+        # Nothing in `board.check()` or in the `qa` block treats "verified by the implementer" as
+        # a fault: a self-closed card never entered a QA lane, and the recommendation is advice
+        # about who *could* look at it, which is still worth answering.
+        patch = unittest.mock.patch.object(
+            QA, "availability",
+            lambda *a, **k: {"installed_guests": {"codex"}, "keys": {}, "local_models": ()})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.sign("anthropic", "claude-opus-5")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
+                                           "reason": "taking it"})
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                           "reason": "landed"})
+        self.assertEqual(self.board.check(), [])
+        block = self.tools.run("board_read", {"id": self.card_id})["qa"]
+        self.assertEqual(block["implementer_family"], "anthropic")
+        self.assertEqual(block["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(block["verifier_family"], "anthropic")
+        self.assertEqual(block["recommended"]["runner"], "guest:codex")
+
+
 # ------------------------------------------------------------------------ comment
 
 class CommentTests(BoardToolsTest):

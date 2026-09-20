@@ -166,6 +166,19 @@ outside the range is clamped on every write.
   (`anthropic/claude-opus-5 (pane 2)`), which is how the hand-typed values written before 2026-09-19
   keep working. The pair is what `relay-board.py verifier <ID>` answers from. `verified_by` is never `relay-free/…`: verifying is
   not available on the free plan (owner, 2026-09-19), and a close signed by it is refused.
+- A **self-closed** card (2026-09-20, `#93WR`) is one whose status is `done` and whose `verified_by`
+  is non-empty and **equal to its `implemented_by`**: one pane both wrote the card and closed it,
+  with no QA lane in between. That is the *medium* tier of `backend/relay_core/board_policy.md` — a
+  card too big for one turn but needing no decision, which the agent closes itself — and it is the
+  only thing that marks it: no new field and no new type, because the fold is presentation and a
+  self-closed card is ordinary work in the done lane. `board_move_card` stamps it whenever the
+  **agent's own** tools move a card to `done` from a status before QA (`executing`, `in-progress`
+  or any earlier stage), and gives the card an `implemented_by` in the same write when it has none
+  — a small card the agent created and closed without ever claiming it. The **owner's** hand-close
+  from the Switchboard is never stamped, so it never reads as self-closed: the owner-side tools
+  carry `actor: owner` and no model of their own. `dropped` is never stamped either — nothing was
+  shipped. Where done cards are listed, Relay folds the self-closed ones into a single
+  "N closed by the agent" row.
 - `session` (2026-09-20, #R9G7) is the **pane session token of the session that holds the card**:
   the terminal pane doing the work. Only a claim writes it — the Switchboard's **Execute** button
   (`board_claim` with the token of the pane it just opened) or the pane agent's own `board_claim`

@@ -122,6 +122,13 @@ AGENT_SECTIONS = frozenset({
 #: closer's model family). Relay Free still may not verify (owner, 2026-09-19).
 QA_STATUSES = ("needs-qa-llm", "needs-qa-human")
 
+#: The `ToolContext.actor` of the person at the keyboard.  `board_protocol` builds the owner's half
+#: of the tools with it and restores it after every message it relabels with a `author` (its
+#: `_build` and `_write`), so it is what a write from the Switchboard pane carries and an agent
+#: turn never does.  Read where a write must know which side asked for it: the self-close stamp of
+#: `_move` (#93WR) is the owner's hand-close and stays unstamped.
+OWNER_ACTOR = "owner"
+
 COMMENT_KINDS = ("note", "question", "decision", "evidence", "progress")
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -1630,8 +1637,11 @@ class BoardTools:
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
                 "implemented_by": card.front.get("implemented_by"),
-                # Who closed it out of the QA lane (#T71W). The row stays light on purpose: the
-                # `qa` recommendation is computed per card in `board_read`, not for every row.
+                # Who closed it: out of a QA lane (#T71W), or — when this equals `implemented_by` —
+                # the pane that both wrote and closed the card, which is what makes it **self-
+                # closed** and folds it into one row of the done list (#93WR). Both signatures are
+                # on every row so that fold needs no second request. The row stays light otherwise:
+                # the `qa` recommendation is computed per card in `board_read`, not for every row.
                 "verified_by": card.front.get("verified_by"),
                 # Which pane holds the card (#R9G7): the Switchboard draws the token's first eight
                 # characters as a link to that pane, and an agent listing the board sees from the
@@ -2088,6 +2098,37 @@ class BoardTools:
             if status == "done" and mine:
                 verified = mine
                 card.set("verified_by", mine)
+        elif status == "done" and mine and self.context.actor != OWNER_ACTOR:
+            # A **self-close** (#93WR; the *medium* tier of `board_policy.md` v3, where a card the
+            # agent sized as medium goes straight to `done`). The card never entered a QA lane —
+            # the branch above owns that path — so the pane that did the work is also the only
+            # thing that checked it, and `verified_by` records exactly that: the closer's own
+            # signature, in the same canonical form as `implemented_by`.
+            #
+            # **Self-closed is `verified_by` == `implemented_by`, and nothing else.** That equality
+            # is the whole marker the done lists fold on, so the two stamps must be the same
+            # string when and only when one pane both wrote and closed the card. A card the agent
+            # created and closed inside one stretch of work has no implementer yet (nothing moved
+            # it through `executing`), so it gets one here too; a card somebody else implemented
+            # keeps *their* signature and only gains a `verified_by`, the two differ, and it stays
+            # an ordinary done card — which is the point: a cross-pane close is not a self-close.
+            #
+            # The owner's hand-close from the Switchboard is never stamped, so it never folds.
+            # Two independent things say it is the owner, and either alone would do: the
+            # owner-side tools are built with `actor="owner"` (`board_protocol._build`) and, unlike
+            # the agent's, never learn a preset or a model — only `Agent.sign_board` sets those, on
+            # the agent's own instance — so `mine` is "" on that path anyway. The actor is checked
+            # as well so that an owner-side context which one day does know its model cannot start
+            # stamping the owner's closes by accident. A guest writing through the bridge has no
+            # signature either and is likewise left alone.
+            #
+            # `dropped` verifies nothing — the work was abandoned, not shipped — so it is left
+            # unstamped here exactly as it is in the QA branch above.
+            verified = mine
+            card.set("verified_by", mine)
+            if not str(card.front.get("implemented_by") or "").strip():
+                stamped = mine
+                card.set("implemented_by", mine)
 
         if args.get("evidence"):
             links = dict(card.front.get("links") or {})

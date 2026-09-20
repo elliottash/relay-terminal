@@ -2179,7 +2179,10 @@ priority, path, thread_entries, tasks_done, tasks_total, created, updated, miles
 implemented_by, verified_by, session, text}` — enough to draw a card without reading the file.
 `session` (2026-09-20, #R9G7) is the pane session token holding the card (19.19): the pane draws
 its first eight characters as a chip that reveals that pane, and an agent's `board_list` sees from
-the row alone that a card is taken. `section` (2026-09-20,
+the row alone that a card is taken. `implemented_by` and `verified_by` are the signatures of 19.15,
+on every row so that a pane can tell a **self-closed** card (`done`, `verified_by` non-empty and
+equal to `implemented_by`) from the rest without reading a file; either is null when unset.
+`section` (2026-09-20,
 #3XZV) is the manual section the card is parked in — the id of a configured column that collects
 nothing — or null for a card that sits in its status's own section. (Until 2026-09-18
 `board_tools._row` sent only the first eleven, so the pane's age and `☑ done/total` badges had
@@ -2782,12 +2785,35 @@ ignored, so the older hand-typed `Claude Opus 5 (pane 2)` still reads as `anthro
 The **worker writes it**, from its own preset and model (`ToolContext.preset`/`.model`, set each
 turn by `Agent.sign_board`): `board_move_card` stamps `implemented_by` when a card enters
 `executing`, `in-progress`, `needs-verification` or a QA lane, and `verified_by` when it leaves a
-QA lane to `done`. The agent's own
+QA lane to `done` — **or when the agent's own tools close a card to `done` from a status before QA**
+(2026-09-20, card `#93WR`), which also gives the card an `implemented_by` in the same write if it
+has none. The agent's own
 `implemented_by` argument is accepted only when the worker has no signature at all — a guest CLI
 writing through the bridge — and is otherwise overwritten, because a typed provider name is a
 guess and the worker's is not. Both fields are ordinary work-card front matter
 (`docs/SWITCHBOARD-FORMAT.md` 2.2) and both appear on every board row; the same-family refusal on
 closing a QA card is unchanged, except that it now reads the family through this table.
+
+**Self-closed** (2026-09-20, card `#93WR`). A card is self-closed when its status is `done` and its
+`verified_by` is non-empty and **equal to its `implemented_by`**: one pane both wrote the card and
+closed it, with nothing independent in between. That is the *medium* tier of
+`backend/relay_core/board_policy.md` v3 — work too big for one turn but needing no decision, which
+the agent closes itself rather than sending to QA — and the equality is the *only* marker: no new
+field, no new status and no new card type, because the fold is presentation. `board_move_card`
+stamps `verified_by` whenever the **agent's** tools move a card to `done` from a status before QA
+(`executing`, `in-progress` or any earlier stage) and the pane has a signature, and stamps
+`implemented_by` with the same value when the card has none — a small card the agent created and
+closed without ever claiming it. A card somebody else implemented keeps *their* `implemented_by`
+and only gains a `verified_by`, so the two differ and it is an ordinary done card: a cross-pane
+close is not a self-close. The **owner's** hand-close from the Switchboard pane (`board_move`,
+19.3) stamps nothing and therefore never folds — the owner-side tools run with `actor: "owner"` and,
+unlike the agent's, never learn a preset or a model, so they have no signature to stamp. `dropped`
+is not stamped on either path: nothing was shipped, so nothing was verified. The stamp rides the
+status change's own write, so Undo takes it back with the status. A self-closed card is **not** a QA
+violation — it never entered a QA lane — and `relay-board.py check` says nothing about it; its `qa`
+block still recommends who *could* look at it, with `verifier_family` equal to
+`implementer_family`. Both signatures are on every board row (19.2), so the panes fold the done
+list from the rows they already have.
 
 **Relay Free never verifies.** Owner, 2026-09-19: *"relay free is never used for verifying — so
 verifying is not available on the free plan."* It is not in `VERIFIER_RANK`, it is never
