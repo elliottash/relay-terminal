@@ -1386,6 +1386,19 @@ class SessionCommands:
         event["id"] = request.get("id")
         self.emit(event)
 
+    def live_info(self) -> dict:
+        """The `session_info` payload for this pane's own live session (25.3), for the pane
+        agent's `session_info` tool (protocol 30.5).
+
+        The tool and the ⓘ pane answer from the same call on purpose: two readers of one session
+        that computed their own figures would disagree about the token count the moment one of
+        them was changed, and the pane is the one the person checks the agent against.
+        """
+        agent = self.turns.agent
+        if agent is None or agent.store is None:
+            raise ValueError("Configure a provider and workspace first.")
+        return self._live_session_info(agent)
+
     def _session_fields(self, store: SessionStore, data: dict) -> dict:
         session_id = data["id"]
         threads = store.threads(session_id)

@@ -19,6 +19,8 @@ from . import logs
 from . import route_assist
 from . import titles as session_titles
 from . import approvals
+from . import activity_tools
+from . import app_tools
 from . import board_tools
 from . import todos as todo_tool
 from . import security
@@ -366,7 +368,7 @@ class Agent:
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
-                 roles=None, board=None, security_options: dict | None = None,
+                 roles=None, board=None, app=None, security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
         self.cancel_event = threading.Event()
@@ -404,6 +406,14 @@ class Agent:
         # Switchboard tools (relay_core.board_tools.BoardTools) or None when the workspace has no
         # issues/board.yaml or its autonomy is off. Protocol 17.
         self.board = board
+        # The app tools (relay_core.app_tools.AppTools) or None when the GUI sent no `app` block:
+        # options, actions, the sessions index and navigation, attached exactly as `board` is
+        # (protocol 30.4, card #FEJQ). The helper worker's agents get the same instance.
+        self.app = app
+        # The pane agent's read tools over its own session (relay_core.activity_tools), set by
+        # `ActivityTools.attach` after construction because they need the finished agent. Only a
+        # pane agent has them: the helper worker has no pane of its own to report on (30.5).
+        self.activity = None
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
         # Keystrokes the agent may send into the visible program in one turn (protocol 17).
@@ -652,8 +662,12 @@ class Agent:
         plan = PLAN_MODE_NOTE if self.mode == "plan" else ""
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
         board_rules = board_tools.prompt_section(getattr(self, "board", None))
+        # Protocol 30: driving the app, and reading this pane's own session. Both are "" for an
+        # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
+        app_rules = app_tools.prompt_section(getattr(self, "app", None))
+        own_rules = activity_tools.prompt_section(getattr(self, "activity", None))
         return (SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions
-                + todo_rules + board_rules + plan)
+                + todo_rules + board_rules + app_rules + own_rules + plan)
 
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
@@ -669,13 +683,23 @@ class Agent:
     def tools(self) -> list[dict]:
         scope = getattr(self.board, "card_scope", None)
         if scope is not None:
-            # A Switchboard card's Discuss or Plan turn (protocol 19.10): read-only files + the board.
-            return scope.tool_specs(self.executor.tools())
+            # A Switchboard card's Discuss or Plan turn (protocol 19.10), or the helper agent's
+            # own turn (19.18): read-only files + the board. The app tools ride alongside the
+            # scope rather than inside it — the helper answering in Options is the agent that
+            # needs them most, and protocol 30.4 is that the tool set is the same everywhere.
+            return scope.tool_specs(self.executor.tools()) + (
+                self.app.tool_specs() if self.app is not None else [])
         tools = self.executor.tools()
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
         if self.board is not None:
             # Plan mode keeps the Switchboard reads but not its writes (see PLAN_BLOCKED_TOOLS).
             extra = extra + self.board.tool_specs()
+        # Protocol 30: the app tools and, on a pane agent, its own session's read tools. Plan
+        # mode keeps both — a plan that has read the settings it is about is a better plan — and
+        # the writes among them are refused below, the way the board's are.
+        for side in (self.app, self.activity):
+            if side is not None:
+                extra = extra + side.tool_specs()
         if self.mode == "plan":
             # Subagents may write files, so plan mode does not offer them either.
             return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
@@ -1097,6 +1121,10 @@ class Agent:
             self._last_usage = event["usage"]
             sessions_usage.add_usage(self.usage_totals, event["usage"])
             sessions_usage.note_model(self.models_used, self.config.model)
+            # The same report, also against the turn it belongs to (30.5). A turn makes several
+            # provider calls, so it accumulates exactly as the session totals do.
+            if self._turn_record is not None and isinstance(self._turn_record.get("usage"), dict):
+                sessions_usage.add_usage(self._turn_record["usage"], event["usage"])
         record = self._turn_record
         if record is not None and kind in ("thinking_delta", "thinking_done"):
             event = {**event, "turn_id": record["turn_id"]}
@@ -1110,8 +1138,13 @@ class Agent:
 
     # ----- turn records (protocol 11) ---------------------------------------------
     def _begin_record(self, turn_id: str, prompt: str) -> dict:
+        # `model` and `usage` are here for the `activity` digest (protocol 30.5), which reads
+        # this record rather than keeping a second one: the model can change between turns (a
+        # role switch, a failover), and the totals in `usage_totals` are the session's, not the
+        # turn's, so "which turn spent the tokens" is answerable nowhere else.
         record = {"turn_id": turn_id, "started": time.monotonic(), "prompt": prompt, "thinking_ms": 0,
                   "thinking_chars": 0, "thinking_open": False, "tools": OrderedDict(), "messages": [],
+                  "model": self.config.model, "usage": sessions_usage.empty_usage(),
                   "elapsed_ms": None, "outcome": None}
         with self._lock:
             self.turn_log[turn_id] = record
@@ -1126,7 +1159,10 @@ class Agent:
                      diff: str | None = None) -> None:
         ok = isinstance(result, dict) and "error" not in result and result.get("exit_code") in (None, 0) \
             and not result.get("timed_out")
-        entry = {"call_id": call_id, "name": name, "preview": preview, "result": result, "ok": ok}
+        # `ms` was logged and thrown away until protocol 30.5: `activity`'s "why was that turn
+        # slow" is this number, and it is already measured by the caller.
+        entry = {"call_id": call_id, "name": name, "preview": preview, "result": result, "ok": ok,
+                 "ms": int(ms) if isinstance(ms, (int, float)) else None}
         if isinstance(result, dict) and isinstance(result.get("exit_code"), int):
             entry["exit_code"] = result["exit_code"]
         # The concise line (protocol 23) and what the fold behind it needs. In memory only, like
@@ -2341,7 +2377,10 @@ class Agent:
 
     def _prepare(self, name: str, args) -> Prepared:
         scope = getattr(self.board, "card_scope", None)
-        if scope is not None and not scope.allows(name):
+        app_tool = self.app is not None and self.app.handles(name)
+        if scope is not None and not scope.allows(name) and not app_tool:
+            # The board's scopes do not know the app tools' names, and they are offered with
+            # every scope (30.4), so they are asked about before the scope refuses.
             raise ValueError(scope.refusal(name))
         if self.board is not None and self.board.handles(name):
             if not isinstance(args, dict):
@@ -2349,6 +2388,13 @@ class Agent:
             if self.mode == "plan" and name in board_tools.WRITE_TOOLS:
                 raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
             return Prepared(name, args, self.board.preview(name, args))
+        for side, writes in ((self.app, app_tools.WRITE_TOOLS), (self.activity, ())):
+            if side is not None and side.handles(name):
+                if not isinstance(args, dict):
+                    raise ValueError("Tool arguments must be an object.")
+                if self.mode == "plan" and name in writes:
+                    raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
+                return Prepared(name, args, side.preview(name, args))
         if name == "update_todos" and self._todos_enabled():
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")
@@ -2375,6 +2421,9 @@ class Agent:
             return self.executor.questions.execute(prepared.arguments, ctx.get("turn_id"))
         if self.board is not None and self.board.handles(prepared.name):
             return self.board.run(prepared.name, prepared.arguments)
+        for side in (self.app, self.activity):
+            if side is not None and side.handles(prepared.name):
+                return side.run(prepared.name, prepared.arguments)
         if prepared.name == "update_todos":
             ctx = self._turn_ctx or {"turn_id": None, "opening": [], "requests": []}
             items = self.todos.replace(prepared.arguments, self.requests.ids(), ctx["turn_id"], ctx["opening"])

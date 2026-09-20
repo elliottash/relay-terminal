@@ -13,7 +13,7 @@ from pathlib import Path
 from relay_core import (__version__, board_protocol, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
-from relay_core import agents_defs, guest_harness_provider
+from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS
@@ -67,6 +67,13 @@ def main():
     # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
     # appends the agent's answer to the card thread, so it is created before the supervisor.
     board = board_protocol.BoardCommands(None, emit)
+
+    # The agent drives the app (protocol 30, card #FEJQ): the GUI's Options and actions catalog,
+    # the `app_command` round trip and this worker's change log. Created before the supervisor
+    # for the same reason the board is — it outlives every `configure`, so what the agent has
+    # already changed is still listed after the pane's model or workspace changes.
+    app = app_tools.AppCommands(emit, sessions=lambda: sessions.index(),
+                                agent=lambda: turns.agent)
 
     def turn_emit(obj: dict):
         obj = board.observe(obj)
@@ -180,6 +187,9 @@ def main():
                 agent_role = model_roles.validate_role(request.get("agent_role") or "main")
                 options = session_protocol.agent_options(request, workspace)
                 options["board"] = board.agent_tools(board_workspace, request)
+                # Protocol 30.2: the `app` block, or None for a GUI that sent none — then this
+                # worker has no app tools at all, which is what every worker had before 30.
+                options["app"] = app.configure(request, workspace)
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),
                                                     tiers=tier_table)
@@ -229,6 +239,11 @@ def main():
                 # Protocol 19.12: the "initialize a Switchboard here?" round trip watches this
                 # agent's cancel_event, so Stop ends a turn that is waiting on the dialog.
                 board.bind_agent(agent)
+                # Protocol 30.3: Stop ends an `app_command` this agent is waiting on. And 30.5:
+                # `session_info` and `activity` are the *pane* agent's, so they are attached
+                # here and nowhere else — the helper worker's agents never get them.
+                app.bind_agent(agent)
+                activity_tools.ActivityTools.attach(agent, live_info=sessions.live_info)
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
                 # --- end subagents ---
@@ -488,6 +503,9 @@ def main():
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---
+            # --- the agent drives the app (protocol section 30) ---
+            elif app.handles(kind):
+                app.dispatch(request)
             elif sessions.handles(kind):
                 sessions.handle(kind, request)
             elif observe.handles(kind):
@@ -510,6 +528,7 @@ def main():
     # The guest is a process of this worker's (protocol 29.3): it goes when the worker goes.
     if turns.agent is not None:
         guest_harness_provider.detach(turns.agent)
+    app.shutdown()       # nothing is left parked on a pane that has gone (protocol 30.3)
     subagents.shutdown()
     observe.shutdown()
     turns.shutdown(timeout=1)

@@ -450,5 +450,54 @@ class DispatchTest(unittest.TestCase):
             commands.dispatch({"type": "app_command_result", "ok": True})
 
 
+class AgentWiringTest(unittest.TestCase):
+    """`agent.app`: the tools reach the model the way `agent.board` does (§30.4)."""
+
+    def setUp(self):
+        import tempfile
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.gui = FakeGui(lambda command: {"ok": True, "previous": False, "value": True,
+                                            "change_id": "c1"})
+        self.tools = self.gui.build()
+        self.agent = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""),
+                           self.temp.name, lambda event: None, app=self.tools)
+
+    def test_the_specs_are_in_the_tool_list(self):
+        names = [t["function"]["name"] for t in self.agent.tools()]
+        for name in A.TOOL_NAMES:
+            self.assertIn(name, names)
+
+    def test_a_call_is_prepared_and_executed_through_the_tools(self):
+        prepared = self.agent._prepare("app_option_set", {"id": "agent.app_writes", "value": True})
+        self.assertIn("RELAY OPTION SET", prepared.preview)
+        result = self.agent._execute(prepared, {})
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.gui.last["command"], "set_option")
+
+    def test_plan_mode_keeps_the_reads_and_refuses_the_writes(self):
+        self.agent.set_mode("plan")
+        names = [t["function"]["name"] for t in self.agent.tools()]
+        self.assertIn("app_option_list", names)
+        with self.assertRaises(ValueError):
+            self.agent._prepare("app_option_set", {"id": "agent.app_writes", "value": True})
+        self.agent._prepare("app_open", {"target": "options"})
+
+    def test_the_brief_is_in_the_system_prompt(self):
+        self.assertIn("app_option_list", self.agent.system_prompt())
+
+    def test_an_agent_with_no_app_block_is_unchanged(self):
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+        bare = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), self.temp.name,
+                     lambda event: None)
+        self.assertIsNone(bare.app)
+        names = [t["function"]["name"] for t in bare.tools()]
+        self.assertNotIn("app_option_list", names)
+        self.assertNotIn("app_option_list", bare.system_prompt())
+
+
 if __name__ == "__main__":
     unittest.main()

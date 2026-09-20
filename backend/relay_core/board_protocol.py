@@ -434,6 +434,9 @@ class BoardCommands:
                       skills=getattr(main.executor, "skills", None),
                       preset_id=main.preset.id if main.preset else None,
                       roles=main.roles, board=tools, effort=getattr(main, "effort", None),
+                      # Protocol 30.4: one tool set. A card turn drives the app through the same
+                      # `AppTools` the pane agent holds, so the change log is the worker's.
+                      app=getattr(main, "app", None),
                       track_requests=False, todo_tool=False, completion_check=False,
                       stall_timeout_s=main.stall_timeout_s,
                       first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
@@ -479,6 +482,9 @@ class BoardCommands:
                       max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
                       skills=getattr(main.executor, "skills", None),
                       preset_id=preset_id, roles=main.roles, board=tools, effort=effort,
+                      # Protocol 30.4/30.7: the helper agent is the one that most needs the app
+                      # tools — a question asked in Options is answered by this agent.
+                      app=getattr(main, "app", None),
                       track_requests=False, todo_tool=False, completion_check=False,
                       stall_timeout_s=main.stall_timeout_s,
                       first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),

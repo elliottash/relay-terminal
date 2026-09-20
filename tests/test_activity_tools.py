@@ -198,5 +198,51 @@ class SessionInfoTest(unittest.TestCase):
         self.assertIn("no saved sessions", tools.run("session_info", {})["error"])
 
 
+class RealAgentTest(unittest.TestCase):
+    """The digest reads the record a real turn leaves (`Agent.turn_log`), not a second one."""
+
+    def test_a_real_turn_is_digested_from_its_own_record(self):
+        import json
+        import tempfile
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+
+        class FakeProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def complete(self, messages, tools, emit, cancel):
+                self.calls += 1
+                if self.calls == 1:
+                    emit({"event": "usage", "usage": {"prompt_tokens": 120,
+                                                      "completion_tokens": 8}})
+                    return {"role": "assistant", "content": "", "tool_calls": [
+                        {"id": "call-1", "type": "function", "function": {
+                            "name": "run_command",
+                            "arguments": json.dumps({"command": "printf hi"})}}]}
+                emit({"event": "delta", "text": "Done."})
+                return {"role": "assistant", "content": "Done."}
+
+            def cancel(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as root:
+            agent = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), root,
+                          lambda event: None, provider=FakeProvider())
+            tools = T.ActivityTools.attach(agent)
+            agent.ask("print hi")
+            turn = tools.run("activity", {})["turns"][0]
+            self.assertEqual(turn["request"], "print hi")
+            self.assertEqual(turn["outcome"], "done")
+            self.assertEqual(turn["model"], "mock")
+            self.assertEqual(turn["tokens"]["prompt_tokens"], 120)
+            self.assertEqual([row["tool"] for row in turn["tools"]], ["run_command"])
+            self.assertIsInstance(turn["tools"][0]["ms"], int)
+            detail = tools.run("activity", {"turn": turn["turn_id"]})
+            self.assertEqual(detail["calls"][0]["tool"], "run_command")
+            self.assertIsNotNone(detail["calls"][0]["ms"])
+            self.assertIn("printf hi", detail["calls"][0]["what"])
+
+
 if __name__ == "__main__":
     unittest.main()
