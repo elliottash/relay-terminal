@@ -4,9 +4,17 @@
 The GUI owns the action registry and sends the catalog (ids, descriptions, current keys)
 plus the path of its keybindings.json. The agent may rebind one action at a time; each
 change is written atomically to that single file, which the GUI reloads.
+
+The catalog stays on this side of the wire: it is what `prepare` validates against and what
+`app_action_list` answers from, and since #GMCF it is **not** in the tool schema. Listing all
+91 actions with their keys there cost 9,837 bytes (2,592 tokens) of every pane request, and it
+changed whenever the user rebound a key — which throws away the provider's prompt cache and,
+on the Local tier, re-prefills the whole prefix. The model finds an id with `app_action_list`
+instead, and an id it guesses wrong comes back with the closest ones (`suggest`).
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -139,24 +147,68 @@ class KeybindingCatalog:
         return result
 
     # ----- tool -------------------------------------------------------------
+    #: Four lines, the same four for every user and every binding: nothing here changes when the
+    #: catalog does, so the tool list is byte-identical across a session and caches (#GMCF).
+    TOOL_DESCRIPTION = (
+        "Change the keyboard shortcut for one Relay action, in Relay itself.\n"
+        "Keys are Qt portable text: 'Ctrl+Shift+P', 'Alt+Left', 'F5'; at most "
+        f"{MAX_KEYS}, and an empty list unbinds the action.\n"
+        "Find the action id with app_action_list, which gives every action with its current "
+        "keys; an id that is not one of Relay's is refused with the closest ones.\n"
+        "It writes only Relay's keybindings.json, which Relay reloads automatically.")
+
     def tool_spec(self) -> dict:
-        lines = [f"{a.id}: {a.description} [{', '.join(a.keys) or 'unbound'}]" for a in self.actions.values()]
-        description = ("Change the keyboard shortcut for one Relay action. Keys use Qt portable format, "
-                       "for example 'Ctrl+Shift+P', 'Alt+Left', 'F5'. An empty keys list unbinds the action. "
-                       "Writes only Relay's keybindings.json, which Relay reloads automatically.\n"
-                       "Actions (id: description [current keys]):\n" + "\n".join(lines))
-        return {"type": "function", "function": {"name": "set_keybinding", "description": description,
+        return {"type": "function", "function": {"name": "set_keybinding",
+                "description": self.TOOL_DESCRIPTION,
                 "parameters": {"type": "object", "properties": {
-                    "action": {"type": "string", "enum": list(self.actions)},
-                    "keys": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_KEYS}},
+                    "action": {"type": "string",
+                               "description": "The action id, such as pane.splitRight."},
+                    "keys": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_KEYS,
+                             "description": "The keys to bind it to, or [] to unbind it."}},
                     "required": ["action", "keys"], "additionalProperties": False}}}
+
+    def suggest(self, action, limit: int = 5) -> list[str]:
+        """The ids closest to one the model guessed, best first (#GMCF).
+
+        With the 91-entry enum gone from the schema this is how a wrong guess recovers in one
+        step, so it is deliberately generous: the whole id, the part after the dot, a substring
+        either way round, and finally the words of the action's description.
+        """
+        text = action.strip().lower() if isinstance(action, str) else ""
+        if not text:
+            return []
+        tail = text.rsplit(".", 1)[-1]
+        scored = []
+        for candidate in self.actions:
+            lowered = candidate.lower()
+            score = max(difflib.SequenceMatcher(None, text, lowered).ratio(),
+                        difflib.SequenceMatcher(None, tail, lowered.split(".", 1)[-1]).ratio())
+            if text in lowered or lowered in text:
+                score = max(score, 0.9)
+            scored.append((score, candidate))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        near = [candidate for score, candidate in scored[:limit] if score >= 0.45]
+        if near:
+            return near
+        # "close the pane" is not close to any id as text, but it is what pane.close is called.
+        words = [word for word in re.split(r"[^a-z0-9]+", text) if len(word) > 2]
+        return [a.id for a in self.actions.values()
+                if words and all(word in a.description.lower() for word in words)][:limit]
+
+    def unknown_action(self, action) -> KeybindingError:
+        near = self.suggest(action)
+        return KeybindingError(
+            f"Relay has no action {action!r}."
+            + (f" Did you mean {', '.join(near)}?" if near else "")
+            + " app_action_list gives every action id with its current keys.")
 
     def prepare(self, args: dict) -> tuple[dict, str]:
         if set(args) - {"action", "keys"} or "action" not in args or "keys" not in args:
             raise KeybindingError("set_keybinding takes exactly 'action' and 'keys'.")
         action = args["action"]
+        # The schema no longer carries the enum, so this is the only check there is (#GMCF).
         if not isinstance(action, str) or action not in self.actions:
-            raise KeybindingError(f"Unknown action {action!r}. Choose one of the listed action ids.")
+            raise self.unknown_action(action)
         keys = _check_keys(args["keys"], where=action)
         preview = f"SET KEYBINDING\n\n{action}: {', '.join(keys) if keys else 'unbound'}"
         return {"action": action, "keys": keys}, preview

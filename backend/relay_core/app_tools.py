@@ -16,7 +16,9 @@ What the GUI sends and what this module owns:
   keybinding catalog does (`keybindings.KeybindingCatalog.from_request`).  Nothing here reads a
   settings file: the GUI owns the settings and this is its description of them, as fresh as the
   last message.  Nothing is cached across a refresh — a row that is missing from the new catalog
-  has gone from the app.
+  has gone from the app.  Since #GMCF `app_action_list` answers from the **keybinding** catalog
+  too: it gives each action's current keys, and the registry entries that have no palette row,
+  because `set_keybinding`'s schema stopped listing them.
 * the **policy** is in the catalog too, because it is the GUI's to decide: `writes_enabled`
   (Options › Agent, "Agents may change options and run actions" — owner decision 3 of
   2026-09-20), `settable` per row and `agent_safe` per action (decisions 1 and 2: every value
@@ -551,9 +553,10 @@ TOOL_SPECS = [
                                    "choice, a number inside its range, or a single line of text."}},
          ["id", "value"]),
     spec("app_action_list",
-         "List the actions Relay offers — the entries of its actions palette. `agent_safe` says "
-         "whether you may run one: only the actions the person can undo in a click are, and the "
-         "rest are listed so you can say where the button is.",
+         "List the actions Relay offers — the entries of its actions palette, and the shortcuts "
+         "it can bind. `agent_safe` says whether you may run one: only the actions the person can "
+         "undo in a click are, and the rest are listed so you can say where the button is. `keys` "
+         "is the shortcut the action is on now, and the key set_keybinding takes.",
          {"search": {"type": "string", "description": "Case-insensitive text matched against the key, label and section."}},
          []),
     spec("app_action_run",
@@ -610,9 +613,15 @@ class AppTools:
 
     def __init__(self, catalog: AppCatalog | None, bridge: AppBridge, *,
                  sessions: Callable[[], object] | None = None, workspace: str | None = None,
+                 keybindings: Callable[[], object] | None = None,
                  clock: Callable[[], float] = time.time):
         self.catalog = catalog
         self.bridge = bridge
+        #: Returns the live `keybindings.KeybindingCatalog`, or None where there is none.  Since
+        #: #GMCF `set_keybinding`'s schema no longer lists the actions, so `app_action_list` is
+        #: where an id and its current keys are found; it is read through a callable because a
+        #: `keybindings` message replaces the catalog without replacing these tools.
+        self.keybindings = keybindings
         #: Returns the shared `conv_index.ConversationIndex`, or None where there is none (a bare
         #: Agent in a test, `RELAY_INDEX=off`).
         self.sessions = sessions
@@ -728,11 +737,47 @@ class AppTools:
     # ---- actions ---------------------------------------------------------------
     def _action_list(self, args: dict) -> dict:
         catalog = self._need_catalog()
-        actions = catalog.matching_actions(args.get("search"))
-        return {"actions": [a.row() for a in actions], "count": len(actions),
-                "total": len(catalog.actions),
-                "runnable": sum(1 for a in actions if a.agent_safe),
-                "writes_enabled": catalog.writes_enabled}
+        bindable = self._bindable()
+        # #GMCF: `set_keybinding` no longer lists the action registry in its schema, so this is
+        # where an id and its keys are found. Of the 92 registry entries a real window sends, 31
+        # have no palette row at all — the focus moves, the window cycle, the shortcuts overlay —
+        # so they are listed here too, and room is kept for them in a listing that has no search.
+        extra = self._shortcut_rows(catalog, bindable, args.get("search"))
+        limit = MAX_LIST_ROWS - min(len(extra), MAX_LIST_ROWS // 3)
+        rows = [a.row() for a in catalog.matching_actions(args.get("search"), limit=limit)]
+        if bindable is not None:
+            for row in rows:
+                action = bindable.actions.get(row["key"])
+                if action is not None:
+                    row["keys"] = list(action.keys)
+            rows += extra[:MAX_LIST_ROWS - len(rows)]
+        total = len(catalog.actions) + sum(1 for action_id in (bindable.actions if bindable else ())
+                                           if action_id not in catalog.actions)
+        result = {"actions": rows, "count": len(rows), "total": total,
+                  "runnable": sum(1 for row in rows if row["agent_safe"]),
+                  "writes_enabled": catalog.writes_enabled}
+        if len(rows) < total:
+            result["note"] = f"{len(rows)} of {total} actions; pass a search to see the rest."
+        return result
+
+    def _bindable(self):
+        """The live keybinding catalog (`keybindings.KeybindingCatalog`), or None (#GMCF)."""
+        return self.keybindings() if self.keybindings is not None else None
+
+    @staticmethod
+    def _shortcut_rows(catalog: AppCatalog, bindable, search) -> list[dict]:
+        """The bindable actions the palette has no row for, matched the way the palette rows are.
+
+        No `agent_safe`: there is no palette entry to run, only a shortcut to rebind (#GMCF).
+        """
+        if bindable is None:
+            return []
+        needle = (search or "").strip().lower()[:MAX_SEARCH] if isinstance(search, str) else ""
+        return [{"key": action.id, "section": "Shortcuts", "label": action.description,
+                 "agent_safe": False, "keys": list(action.keys)}
+                for action in bindable.actions.values()
+                if action.id not in catalog.actions
+                and (not needle or needle in f"{action.id} {action.description}".lower())]
 
     def _action_run(self, args: dict) -> dict:
         catalog = self._need_writes("running an action")
@@ -933,12 +978,22 @@ class AppCommands:
             return None
         if self.tools is None:
             self.tools = AppTools(catalog, self.bridge, sessions=self._sessions,
-                                  workspace=workspace)
+                                  workspace=workspace, keybindings=self._keybindings)
         else:
             self.tools.set_catalog(catalog)
             if workspace is not None:
                 self.tools.workspace = workspace
         return self.tools
+
+    def _keybindings(self):
+        """The worker's keybinding catalog, read through the live agent (#GMCF).
+
+        Through the agent and not a captured object, because a `keybindings` message replaces
+        `executor.keybindings` in place — `app_action_list` has to show the keys as they are now,
+        since `set_keybinding`'s schema no longer shows them at all.
+        """
+        agent = self._agent() if self._agent is not None else None
+        return getattr(getattr(agent, "executor", None), "keybindings", None)
 
     def bind_agent(self, agent) -> None:
         """`configure` built a new Agent: its Stop ends a command that is waiting for the GUI."""

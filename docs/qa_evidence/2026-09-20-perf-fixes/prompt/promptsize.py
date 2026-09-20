@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -28,9 +29,21 @@ from relay_core import activity_tools, app_tools, board as board_mod, board_tool
 from relay_core import instructions as instructions_mod, skills as skills_mod  # noqa: E402
 from relay_core.agent import Agent  # noqa: E402
 from relay_core.context import estimate_tokens  # noqa: E402
+from relay_core.keybindings import KeybindingCatalog  # noqa: E402
 from relay_core.provider import ProviderConfig  # noqa: E402
 
 CONFIG = ProviderConfig("http://127.0.0.1:12345/v1", "mock", "")
+#: The `app` block a pane sends (§30.2): a few rows of each kind, which is all the tool list
+#: depends on — the schemas are fixed and only the counts in the app rules follow the catalog.
+APP = {"tab": "t1", "writes_enabled": True,
+       "options": [{"id": "appearance.theme", "section": "appearance", "section_label": "Appearance",
+                    "label": "Theme", "kind": "choice", "value": "dark", "settable": True,
+                    "choices": [{"value": "dark", "label": "Dark"}, {"value": "light", "label": "Light"}]},
+                   {"id": "agent.turn_limit", "section": "agent", "section_label": "Agent",
+                    "label": "Turn limit", "kind": "number", "value": 40, "min": 1, "max": 200,
+                    "settable": True}],
+       "actions": [{"key": "settings.open", "section": "Relay", "label": "Open settings",
+                    "agent_safe": True}]}
 BOARD_CONFIG = """tabs:
   - id: features
     title: Features
@@ -45,17 +58,33 @@ def nbytes(text: str) -> int:
     return len(text.encode("utf-8"))
 
 
-def make_agent(workspace: Path, *, skills_dirs, board_root: Path | None, with_instructions: bool):
+def keybinding_catalog(path: Path) -> KeybindingCatalog:
+    """The catalog the GUI sends with `configure`: `src/Keymap.h`'s registry, keys and all.
+
+    A pane's `configure` carries it, so an Agent built without one is missing a tool — before
+    #GMCF the largest of them all (9,837 B), which is exactly why this fixture now builds it.
+    """
+    source = (ROOT / "src" / "Keymap.h").read_text(encoding="utf-8")
+    actions = [{"id": match.group(1), "description": match.group(2),
+                "keys": re.findall(r'QStringLiteral\("([^"]+)"\)', match.group(3))}
+               for match in re.finditer(
+                   r'^\s*add\("([^"]+)",\s*"[^"]*",\s*"((?:[^"\\]|\\.)*)",\s*\{(.*?)\}\);',
+                   source, re.M)]
+    return KeybindingCatalog(str(path / "relay" / "keybindings.json"), actions)
+
+
+def make_agent(workspace: Path, *, skills_dirs, board_root: Path | None, with_instructions: bool,
+               keybindings: KeybindingCatalog | None = None):
     """A pane agent with the sections a real pane has: skills, todos, app, activity, maybe a board."""
-    agent = Agent(CONFIG, str(workspace), lambda event: None, provider=_NullProvider())
+    agent = Agent(CONFIG, str(workspace), lambda event: None, provider=_NullProvider(),
+                  keybindings=keybindings)
     agent.executor.skills = skills_mod.SkillIndex.load(skills_dirs, skills_mod.DEFAULT_EXCLUDE,
                                                        defaults=True)
     if with_instructions:
         agent.instructions = instructions_mod.load({"project_auto": True}, str(workspace))
     agent.app = app_tools.AppTools(
-        app_tools.AppCatalog.from_request({"tab": "t1", "writes_enabled": True,
-                                           "options": [], "actions": []}),
-        app_tools.AppBridge(lambda event: None))
+        app_tools.AppCatalog.from_request(APP), app_tools.AppBridge(lambda event: None),
+        keybindings=lambda: agent.executor.keybindings)
     agent.activity = activity_tools.ActivityTools(agent)
     if board_root is not None:
         board = board_mod.Board(board_root / "issues", board_root)
@@ -145,13 +174,14 @@ def main() -> int:
         dirs = ([Path(d) for d in args.skills_dir] if args.skills_dir
                 else skills_mod.default_directories(str(workspace)))
 
+        keys = keybinding_catalog(Path(temp))
         results = []
         for name, root, mode in (("no board, build mode", None, "build"),
                                  ("no board, plan mode", None, "plan"),
                                  ("board attached, build mode", board_root, "build"),
                                  ("board attached, plan mode", board_root, "plan")):
             agent = make_agent(workspace, skills_dirs=dirs, board_root=root,
-                               with_instructions=args.instructions)
+                               with_instructions=args.instructions, keybindings=keys)
             agent.set_mode(mode)
             results.append(scenario(agent, name))
 

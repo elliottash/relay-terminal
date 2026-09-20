@@ -830,6 +830,11 @@ setting is now a control in the pane, found by the same search.
 **Agent-editable shortcuts.** Each worker receives the action catalog at configure time and
 after every reload. The `set_keybinding` tool (`backend/relay_core/keybindings.py`) validates
 the action id and key strings, then rewrites only that binding atomically. The watcher reloads it.
+The catalog stays on the worker's side: the tool's *schema* is four fixed lines with no action
+list and no enum, because listing all 92 actions with their keys cost 9,960 bytes of every pane
+request and changed whenever a key was rebound — throwing away the provider's prompt cache
+(#GMCF). The model finds an id with `app_action_list`, which gives every action with its current
+keys, and an id it guesses wrong comes back with the closest ones.
 
 ## 5. Composer and routing
 

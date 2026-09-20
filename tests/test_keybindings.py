@@ -85,13 +85,43 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(self.path.parent.is_dir())
         self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode) & 0o077, 0)
 
-    def test_tool_spec_lists_catalog(self):
+    def test_the_schema_carries_no_catalog_at_all(self):
+        # #GMCF: the 91-action listing and the 91-entry enum were 9,837 bytes of every pane
+        # request and moved whenever a key was rebound. The schema is now four fixed lines, so
+        # a rebind leaves the tool list byte-identical and the provider's cache intact.
         spec = self.catalog.tool_spec()['function']
         self.assertEqual(spec['name'], 'set_keybinding')
-        self.assertEqual(spec['parameters']['properties']['action']['enum'], ['pane.close', 'pane.splitRight', 'tab.new'])
-        self.assertIn('pane.close: Close pane, tab, or window [Ctrl+W]', spec['description'])
+        self.assertNotIn('enum', spec['parameters']['properties']['action'])
+        text = json.dumps(spec)
+        for action in ACTIONS:
+            self.assertNotIn(action['description'], text)
+            for key in action['keys']:
+                self.assertNotIn(key, text)
+        # One id as an example of the shape is not a catalog; two would be the start of one.
+        self.assertLessEqual(len([a for a in ACTIONS if a['id'] in text]), 1, text)
+        self.assertIn('app_action_list', spec['description'])
+        self.assertLess(len(json.dumps(spec).encode('utf-8')), 800)
+        before = json.dumps(self.catalog.tool_spec())
+        self.catalog.apply(self.catalog.prepare({'action': 'tab.new', 'keys': ['Ctrl+Alt+T']})[0])
+        self.assertEqual(json.dumps(self.catalog.tool_spec()), before)
 
-    def test_enum_enforced(self):
+    def test_an_unknown_id_is_refused_with_the_closest_ones(self):
+        # With no enum in the schema a model may guess; one step is all it should cost to recover.
+        for guess, expected in (('pane.splitright', 'pane.splitRight'),   # the case it invented
+                                ('splitRight', 'pane.splitRight'),        # no prefix
+                                ('pane.split_right', 'pane.splitRight'),  # the other spelling
+                                ('tab.create', 'tab.new'),                # a near name
+                                ('close pane', 'pane.close')):            # what the action is called
+            with self.assertRaises(KeybindingError) as caught:
+                self.catalog.prepare({'action': guess, 'keys': ['Ctrl+Q']})
+            self.assertIn(expected, str(caught.exception), guess)
+            self.assertIn('app_action_list', str(caught.exception))
+        # Nothing close: still the one sentence that says where the ids are.
+        with self.assertRaises(KeybindingError) as caught:
+            self.catalog.prepare({'action': 'zzzz.qqqq', 'keys': []})
+        self.assertIn('app_action_list', str(caught.exception))
+
+    def test_the_action_is_still_checked_worker_side(self):
         with self.assertRaises(KeybindingError): self.catalog.prepare({'action': 'window.explode', 'keys': []})
         with self.assertRaises(KeybindingError): self.catalog.prepare({'action': 'tab.new', 'keys': ['Ctrl+T'], 'extra': 1})
         with self.assertRaises(KeybindingError): self.catalog.prepare({'action': 'tab.new'})
@@ -137,6 +167,18 @@ class AgentToolTests(unittest.TestCase):
         self.assertNotIn('set_keybinding', [t['function']['name'] for t in fake.tools])
         self.assertIn('error', json.loads(fake.messages[-1]['content']))
         self.assertFalse(any(e['event'] == 'tool_started' for e in events))
+
+    def test_a_guessed_id_comes_back_to_the_model_with_the_closest_ones(self):
+        # The refusal is the schema's replacement (#GMCF), so it has to reach the model as the
+        # tool's result — the step it recovers in.
+        path = self.root / 'guess' / 'keybindings.json'
+        catalog = KeybindingCatalog(str(path), json.loads(json.dumps(ACTIONS)))
+        fake = FakeProvider(tool_call({'action': 'pane.split_right', 'keys': ['Ctrl+Shift+E']}))
+        Agent(CONFIG, self.temp.name, lambda e: None, provider=fake, keybindings=catalog).ask('split key')
+        error = json.loads(fake.messages[-1]['content'])['error']
+        self.assertIn('pane.splitRight', error)
+        self.assertIn('app_action_list', error)
+        self.assertFalse(path.exists())
 
     def test_agent_sets_keybinding(self):
         path = self.root / 'cfg' / 'keybindings.json'
@@ -249,8 +291,12 @@ class WorkerTests(unittest.TestCase):
         # request, so pick the last request that carried tools.
         last = [r for r in Handler.requests if r.get('tools')][-1]
         self.assertIn('first', [m.get('content') for m in last['messages']])
+        # #GMCF: the new catalog reaches the worker, but *not* the schema — the tool list is
+        # byte-identical before and after the reload, so the provider's prompt cache survives it.
+        first = [r for r in Handler.requests if r.get('tools')][0]
+        self.assertEqual(json.dumps(last['tools']), json.dumps(first['tools']))
         spec = [t for t in last['tools'] if t['function']['name'] == 'set_keybinding'][0]
-        self.assertIn('pane.close: Close pane, tab, or window [Ctrl+Q]', spec['function']['description'])
+        self.assertNotIn('Ctrl+Q', json.dumps(spec))
 
     def test_keybindings_update_requires_agent(self):
         events = self.run_worker([{'type': 'keybindings', 'path': str(self.root / 'keybindings.json'), 'actions': ACTIONS}],

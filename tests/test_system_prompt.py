@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from unittest import mock
 from relay_core import activity_tools, app_tools, board as board_mod, board_tools
 from relay_core import instructions as instructions_mod, skills as skills_mod
 from relay_core.agent import Agent
+from relay_core.keybindings import KeybindingCatalog
 from relay_core.provider import ProviderConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +37,34 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes}]
 columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]
 agent: {autonomy: auto, max_creates_per_turn: 5}
 """
-APP = {"tab": "t1", "writes_enabled": True, "options": [], "actions": []}
+# The `app` block a pane sends (§30.2) — rows and actions, not the empty one a bare Agent has:
+# the tool list is measured here, and an empty catalog hides what a pane really carries.
+APP = {"tab": "t1", "writes_enabled": True,
+       "options": [{"id": "appearance.theme", "section": "appearance", "section_label": "Appearance",
+                    "label": "Theme", "kind": "choice", "value": "dark", "settable": True,
+                    "choices": [{"value": "dark", "label": "Dark"}, {"value": "light", "label": "Light"}]},
+                   {"id": "agent.turn_limit", "section": "agent", "section_label": "Agent",
+                    "label": "Turn limit", "kind": "number", "value": 40, "min": 1, "max": 200,
+                    "settable": True}],
+       "actions": [{"key": "settings.open", "section": "Relay", "label": "Open settings",
+                    "agent_safe": True}]}
 PANE_TOKEN = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'
+
+
+def keybinding_catalog(root: Path) -> KeybindingCatalog:
+    """The catalog every pane's `configure` carries: `src/Keymap.h`'s registry, keys and all.
+
+    Built from the real registry, not a stub of three, because this file measures the tool list
+    and `set_keybinding` used to *be* that registry — 9,837 bytes of it, invisible to a fixture
+    that left `keybindings` out (#GMCF). `docs/qa_evidence/2026-09-20-perf-fixes/prompt/promptsize.py`
+    reads it the same way.
+    """
+    source = (ROOT / 'src' / 'Keymap.h').read_text(encoding='utf-8')
+    actions = [{'id': m.group(1), 'description': m.group(2),
+                'keys': re.findall(r'QStringLiteral\("([^"]+)"\)', m.group(3))}
+               for m in re.finditer(
+                   r'^\s*add\("([^"]+)",\s*"[^"]*",\s*"((?:[^"\\]|\\.)*)",\s*\{(.*?)\}\);', source, re.M)]
+    return KeybindingCatalog(str(root / 'conf' / 'keybindings.json'), actions)
 
 
 def write(path: Path, text: str):
@@ -67,12 +95,15 @@ def make_workspace(root: Path) -> tuple[Path, Path, Path]:
 
 
 def build_agent(workspace: Path, repo: Path, library: Path, *, board: bool = True) -> Agent:
-    """A pane agent carrying every section `Agent.system_prompt` can put in the prompt."""
-    agent = Agent(CONFIG, str(workspace), lambda event: None)
+    """A pane agent carrying every section `Agent.system_prompt` can put in the prompt, and
+    every tool a pane's `configure` brings with it: the app block and the keybinding catalog."""
+    agent = Agent(CONFIG, str(workspace), lambda event: None,
+                  keybindings=keybinding_catalog(repo))
     agent.executor.skills = skills_mod.SkillIndex.load([library])
     agent.instructions = instructions_mod.load({'project_auto': True}, str(workspace))
     agent.app = app_tools.AppTools(app_tools.AppCatalog.from_request(APP),
-                                   app_tools.AppBridge(lambda event: None))
+                                   app_tools.AppBridge(lambda event: None),
+                                   keybindings=lambda: agent.executor.keybindings)
     agent.activity = activity_tools.ActivityTools(agent)
     if board:
         agent.board = board_tools.BoardTools(

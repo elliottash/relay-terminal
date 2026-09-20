@@ -164,6 +164,39 @@ class ReadToolsTest(unittest.TestCase):
                          {"settings.open": True, "keys.reset_all": False})
         self.assertEqual(result["runnable"], 1)
 
+    def test_action_list_carries_the_keys_and_the_actions_only_a_shortcut_has(self):
+        # #GMCF: `set_keybinding`'s schema stopped listing the 91 actions with their keys, so
+        # this is where the model finds an id — including the registry entries that have no
+        # palette row of their own (here: pane.focusLeft).
+        from relay_core.keybindings import KeybindingCatalog
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            keys = KeybindingCatalog(
+                temp + "/relay/keybindings.json",
+                [{"id": "settings.open", "description": "Open settings", "keys": ["Ctrl+,"]},
+                 {"id": "pane.focusLeft", "description": "Focus the pane on the left",
+                  "keys": ["Alt+Left"]}])
+            tools = self.gui.build(keybindings=lambda: keys)
+            rows = {a["key"]: a for a in tools.run("app_action_list", {})["actions"]}
+            self.assertEqual(rows["settings.open"]["keys"], ["Ctrl+,"])
+            self.assertNotIn("keys", rows["keys.reset_all"])     # a palette row, not a shortcut
+            self.assertEqual(rows["pane.focusLeft"]["keys"], ["Alt+Left"])
+            self.assertFalse(rows["pane.focusLeft"]["agent_safe"])
+            self.assertEqual(tools.run("app_action_list", {})["total"], 3)
+            # The search reaches the shortcut-only rows by id and by description.
+            found = tools.run("app_action_list", {"search": "focus the pane"})["actions"]
+            self.assertEqual([a["key"] for a in found], ["pane.focusLeft"])
+            # A rebind is visible at once: the catalog is read through the callable, not copied.
+            keys.apply(keys.prepare({"action": "pane.focusLeft", "keys": ["Ctrl+Alt+H"]})[0])
+            rows = {a["key"]: a for a in tools.run("app_action_list", {})["actions"]}
+            self.assertEqual(rows["pane.focusLeft"]["keys"], ["Ctrl+Alt+H"])
+
+    def test_action_list_without_a_keybinding_catalog_is_unchanged(self):
+        result = self.tools.run("app_action_list", {})
+        self.assertEqual(result["total"], 2)
+        for row in result["actions"]:
+            self.assertNotIn("keys", row)
+
     def test_reads_need_no_round_trip(self):
         self.tools.run("app_option_list", {})
         self.tools.run("app_action_list", {})
