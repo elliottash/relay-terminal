@@ -11,7 +11,7 @@ rank: 6c
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session'
 acceptance: from the iPhone, over any network, all day and without touching the desktop, the owner opens the app and sees every pane on the desktop with who needs him, reads what an agent did, steers or stops it, answers its question, switches model, starts a new conversation, and gets a lock-screen notification when a turn finishes or an agent waits; the desktop keeps working through drops and sleep of the phone; content stays end-to-end encrypted
-links: {plans: [], commits: [80706293, 38cf319b], evidence: [docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
+links: {plans: [], commits: [80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a], evidence: [docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
 ---
 # Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone
 
@@ -207,8 +207,8 @@ evidence, which is the acceptance.
 
 ## Tasks
 
-- [ ] Phase 1.1 Remote control switch in Options › Remote; sidecar at launch; hosted registration remembered <!-- t:a1 -->
-- [ ] Phase 1.2 Own devices get every pane automatically; chrome indicator and Disconnect all <!-- t:a2 -->
+- [x] Phase 1.1 Remote control switch in Options › Remote; sidecar at launch; hosted registration remembered <!-- t:a1 -->
+- [x] Phase 1.2 Own devices get every pane automatically; chrome indicator and Disconnect all (desktop half; sidecar half pending) <!-- t:a2 -->
 - [ ] Phase 1.3 Per-device connect tokens (waits on question 4) <!-- t:a3 -->
 - [x] Phase 1.4 `rendezvous/deploy.sh`, deployed; served app equals main; PNG icons <!-- t:a4 -->
 - [ ] Phase 2.5 Inbox status chips, needs-you order, badge <!-- t:b5 -->

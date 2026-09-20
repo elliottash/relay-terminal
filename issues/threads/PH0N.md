@@ -40,3 +40,13 @@ against elliott-main-1; join.relay-terminal.ai now serves exactly main (24 files
 maskable and apple-touch icons from the one `app/icon.svg`; `tests/test_web_manifest.py` (12).
 The previous hand deploy had stripped trailing newlines from every served file. The push icon line
 in `app/sw.js` was routed to the phone-app agent, who owns that file.
+
+<!-- relay:entry 20260920T231500Z-d1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 23:15
+Desktop half of Phase 1.1/1.2 landed (`2c59a720`, `f39cb626`, `8fc8d60b`, evidence `baebd13a`):
+Options › Remote (switch + address, `remote/alwaysOn`, `remote/address`), sidecar at launch, every
+pane published on open and withdrawn on close, the plug menu's status line, dot and "Disconnect
+all" (turns the switch off; the sidecar has no drop-devices message). `start` now carries
+`always` and `address`; `remote_state` is parsed. #WMXN fixed on the way (`reason: "manual"`).
+Found and fixed: a SIGSEGV at quit whenever a pane was shared (`~RelayWindow` now disconnects
+from `RemoteShare`). Sidecar half still running.
