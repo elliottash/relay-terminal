@@ -2407,7 +2407,9 @@ private:
                     QList<relay::models::Entry> offered;
                     for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
                         if ((tier == QStringLiteral("local")) != entry.local) continue;      // local models in local, the rest elsewhere
-                        if (tier != QStringLiteral("main") && entry.guest) continue;         // a guest can only be a pane's own agent
+                        // A guest is a whole agent of its own: it can be a pane's own agent (main) or run a
+                        // plan turn (high, owner 2026-09-20: "codex planning at xhigh"), never a side call.
+                        if (entry.guest && tier != QStringLiteral("main") && tier != QStringLiteral("high")) continue;
                         bool already = false;
                         for (const auto &item : list) already = already || item.key == entry.key;
                         if (already) continue;
