@@ -295,14 +295,17 @@ struct Row {
     QString title;            // Section: the status name. Fold: "3 closed by the agent".
                               // SignalFold: "5 signals". Signal: the signal's key
     QString cardId;           // Card: the card
-    QString signalKey;        // Signal: the signal's key (`ctest:panelayout`), never a card id
     int count = 0;            // Section: how many cards it holds, after the filter.
                               // Fold: how many self-closed cards it stands for.
                               // SignalFold/DismissedFold: how many signals. Signal: its failures
-    int indent = 0;           // Signal: 1 for a member of a group, or a dismissed signal under
-                              // its toggle — the row is drawn one step in from its parent
     bool collapsed = false;   // Section, Fold, SignalFold, DismissedFold: its rows are not in the list
     bool showStatus = false;  // Card: its section holds several statuses, so the row names this one
+    // The signal fields come last on purpose: a `Row{Row::Card, "ready", {}, "A", 0, false,
+    // false}` in a test names its members by position, so a field inserted above would silently
+    // shift what those braces mean.
+    QString signalKey;        // Signal: the signal's key (`ctest:panelayout`), never a card id
+    int indent = 0;           // Signal: 1 for a member of a group, or a dismissed signal under
+                              // its toggle — the row is drawn one step in from its parent
 };
 
 // The card rows of one section, top to bottom.
