@@ -1,13 +1,15 @@
 ---
 id: Z4HR
 type: work
-status: planned
+status: needs-verification
 labels: [feature, switchboard, docs]
-assignee: ''
+assignee: agent
+implemented_by: kimi/kimi-k3
+session: c23ba862-e892-4727-9209-756300e67ff0
 rank: m
 created: '2026-09-20'
-source: 'conversation, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [VQ8T], github: null}
+source: conversation, 2026-09-20
+links: {plans: [], commits: [fdb662d6], evidence: [docs/qa_evidence/2026-09-20-one-section-per-stage/], related: [VQ8T], github: null}
 ---
 # One section per stage: a card's body follows the workflow
 

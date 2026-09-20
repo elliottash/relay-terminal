@@ -85,3 +85,24 @@ that ages out. Recorded in full on #7BM4, whose `t:ea` owns profiling.
 Worth keeping in mind for the section set generally: a section earns its place when it records what
 a **stage produced**, which is a fact that stays true. A section that would have to be kept
 *current* against the code does not belong on a card at all.
+
+<!-- relay:entry 20260920T212617Z-26 author=owner kind=event pane=switchboard -->
+- ✦ owner claimed this card · assignee agent, Planned → Executing, session c23ba862
+
+<!-- relay:entry 20260920T212617Z-66 author=owner kind=progress pane=switchboard pane_token=c23ba862-e892-4727-9209-756300e67ff0 -->
+Claimed (c23ba862) · working on it from a terminal pane
+
+<!-- relay:entry 20260920T214955Z-5k author=agent kind=event model=kimi-k3 pane=c23ba862 turn=6e530e9ab34243e791c8418791929218/02d27f062bc140f88cf49815c21f08d3 -->
+- ✦ agent updated this card · appended to `## Execution Summary`; tasks: 6/6 done
+
+<!-- relay:entry 20260920T215009Z-fb author=agent kind=event model=kimi-k3 pane=c23ba862 turn=6e530e9ab34243e791c8418791929218/02d27f062bc140f88cf49815c21f08d3 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260920T215026Z-bd author=agent kind=event model=kimi-k3 pane=c23ba862 turn=6e530e9ab34243e791c8418791929218/02d27f062bc140f88cf49815c21f08d3 -->
+- ✦ agent updated this card · appended to `## QA checklist`
+
+<!-- relay:entry 20260920T215645Z-rh author=agent kind=event model=kimi-k3 pane=c23ba862 turn=6e530e9ab34243e791c8418791929218/02d27f062bc140f88cf49815c21f08d3 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["VQ8T"], "github": null… → {"plans": [], "commits": ["fdb662d6"], "evidence": ["docs/qa_evidence/2026-09-20…
+
+<!-- relay:entry 20260920T215657Z-yp author=agent kind=event model=kimi-k3 pane=c23ba862 turn=6e530e9ab34243e791c8418791929218/02d27f062bc140f88cf49815c21f08d3 -->
+- ✦ agent moved this card · Executing → Needs verification · All six plan tasks landed in fdb662d6: CARD_SECTIONS schema, AGENT_SECTIONS derived from it, the verdict gate takes a verdict only, check warns (never errors) on unknown_section, policy rule 10, deliver skill and docs. 370 board tests pass; live board checks with 0 errors. · evidence docs/qa_evidence/2026-09-20-one-section-per-stage/ · implemented_by kimi/kimi-k3
