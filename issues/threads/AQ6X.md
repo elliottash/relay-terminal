@@ -59,3 +59,6 @@ there is no dry run in it. Use `commit --dry-run` to look.
 
 <!-- relay:entry 20260920T222823Z-vx author=agent kind=progress -->
 All three phases landed (29 commits); moved to needs-verification with the QA checklist. Open: protocol §32 waits on #7BM4's §31.9 in the same hunk. Commit 6abcbe7e carries the placeholder message `x` (a review commit that landed; main had moved before it could be replaced): it is verify_signal, the worker running the key itself before judging a thread's fix.
+
+<!-- relay:entry 20260920T224607Z-rz author=agent kind=decision -->
+Owner: "override the 7bm4 session". §31.9 (profile session, #7BM4), §32 and §32.10 landed together in 134068fe. The working-tree copy of all three had been overwritten by another session at 18:40; restored from land.py's marker snapshots, byte-identical to the last state the claims had seen.

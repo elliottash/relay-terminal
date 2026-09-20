@@ -7,7 +7,7 @@ assignee: agent
 rank: i1
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [e3ca0447, 2048e4f6, 143d4943, 7503201d, fab65016, fe697501, d70e8306, 45353fbf, c489ae32, 1431abe8, 1efe81e8, 61c2f5a4, 444ec3e5, c8895fec, 13181dfa, '0beeadfc', b3275c21, 9e52957c, 190ca050, 72d830f9, 1e937bcc, 9cef1ab9, 8034facd, 5fde2cd5, bc471570, 567733ae, 6abcbe7e, b07a32ba, b9756872], evidence: [docs/qa_evidence/2026-09-20-signals-gui, docs/qa_evidence/2026-09-20-signal-threads], related: [R9G7, 7BM4], github: null}
+links: {plans: [], commits: [e3ca0447, 2048e4f6, 143d4943, 7503201d, fab65016, fe697501, d70e8306, 45353fbf, c489ae32, 1431abe8, 1efe81e8, 61c2f5a4, 444ec3e5, c8895fec, 13181dfa, '0beeadfc', b3275c21, 9e52957c, 190ca050, 72d830f9, 1e937bcc, 9cef1ab9, 8034facd, 5fde2cd5, bc471570, 567733ae, 6abcbe7e, b07a32ba, b9756872, 134068fe], evidence: [docs/qa_evidence/2026-09-20-signals-gui, docs/qa_evidence/2026-09-20-signal-threads], related: [R9G7, 7BM4], github: null}
 ---
 # Signals: a card type for machine-written faults such as failed tests
 
@@ -96,7 +96,7 @@ Still to tune against real history once #7BM4's file exists: the group threshold
 - [x] Phase 1: signals.py fold and store, tree_digest, promotion and the move gate, signals_* messages, board_signals, re-run rule, guest path, tests
 - [x] Phase 2: the fold row and dismissed toggle on the bugs tab, signal page with four actions, `## Signal` strip, live evidence
 - [x] Phase 3: signal threads for orphaned signals, verify_signal, notification with open-thread action, Sessions row, Options row, board.yaml `signals.auto_work`
-- [ ] Protocol §32 and §32.10 (written in the working tree; blocked behind another session's §31.9 in the same hunk)
+- [x] Protocol §32 and §32.10, landed with #7BM4's §31.9 in 134068fe on the owner's instruction
 
 ## QA checklist
 
