@@ -637,12 +637,18 @@ class TierTests(unittest.TestCase):
     def test_validate_tiers(self):
         self.assertEqual(model_roles.validate_tiers(None), {})
         self.assertEqual(model_roles.validate_tiers({"flash": None}), {})
+        # One object per tier, the form of before 2026-09-20, is a one-element list and is as
+        # strict as it was; the list form and what it drops are tests/test_tier_lists.py.
         self.assertEqual(model_roles.validate_tiers({"lite": {"preset": "openrouter", "effort": "low"}}),
-                         {"lite": {"preset": "openrouter", "effort": "low"}})
+                         {"lite": [{"preset": "openrouter", "effort": "low"}]})
         self.assertEqual(model_roles.validate_tiers({"high": {"preset": "glm", "model": "glm-5.3"}}),
-                         {"high": {"preset": "glm", "model": "glm-5.3"}})
+                         {"high": [{"preset": "glm", "model": "glm-5.3"}]})
         self.assertEqual(model_roles.validate_tiers({"high": None}), {})
-        for bad in ({"main": {"preset": "glm"}}, {"turbo": {"preset": "glm"}}, {"flash": {"preset": "nope"}},
+        # Main is a list like the others now (the order a failing Main turn walks), and a tier
+        # name Relay does not know is ignored rather than refused.
+        self.assertEqual(model_roles.validate_tiers({"main": {"preset": "glm"}}), {"main": [{"preset": "glm"}]})
+        self.assertEqual(model_roles.validate_tiers({"turbo": {"preset": "glm"}}), {})
+        for bad in ({"flash": {"preset": "nope"}},
                     {"flash": {"model": "m"}}, {"flash": {"zzz": 1}}, {"flash": 3}, [1]):
             with self.assertRaises(ValueError):
                 model_roles.validate_tiers(bad)

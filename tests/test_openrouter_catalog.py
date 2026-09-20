@@ -18,12 +18,15 @@ from relay_core import presets as P
 
 LISTING = {"data": [
     {"id": "deepseek/deepseek-v4.1-flash", "name": "DeepSeek: DeepSeek V4.1 Flash",
-     "context_length": 1048576, "supported_parameters": ["reasoning", "tools"]},
+     "context_length": 1048576, "supported_parameters": ["reasoning", "tools"],
+     "pricing": {"prompt": "0.00000015", "completion": "0.0000006"}},     # per token, as strings
     {"id": "z-ai/glm-5.3", "name": "Z.AI: GLM 5.3", "context_length": 1310720,
-     "supported_parameters": ["reasoning", "tools", "include_reasoning"]},
+     "supported_parameters": ["reasoning", "tools", "include_reasoning"],
+     "pricing": {"prompt": "0.00000091", "completion": "0.00000286"}},
     {"id": "mistralai/mistral-small-4", "name": "Mistral: Mistral Small 4", "context_length": 128000,
      "supported_parameters": ["tools", "temperature"]},                    # no reasoning knob
-    {"id": "openrouter/auto", "name": "Auto Router", "top_provider": {"context_length": 200000}},
+    {"id": "openrouter/auto", "name": "Auto Router", "top_provider": {"context_length": 200000},
+     "pricing": {"prompt": "-1", "completion": "-1"}},                     # priced by where it lands
     {"id": "meta/no-window", "name": "  "},                                 # blank name, no window
     {"name": "no id at all"}, "junk", None,
     {"id": "z-ai/glm-5.3", "name": "a repeat"},
@@ -64,9 +67,20 @@ class OpenRouterCatalogTests(unittest.TestCase):
                           "openrouter/auto", "meta/no-window"])
         levels = P.effort_levels("openrouter")
         self.assertEqual(rows[0], {"id": "deepseek/deepseek-v4.1-flash", "label": "deepseek: deepseek v4.1 flash",
-                                   "tier": None, "efforts": levels, "intelligence": None, "openrouter": None,
-                                   "context_window": 1048576})
+                                   "tier": None, "efforts": levels,
+                                   # OpenRouter's own word for each level: max is sent as "xhigh".
+                                   "effort_labels": {"low": "low", "medium": "medium", "high": "high",
+                                                     "max": "xhigh"},
+                                   "intelligence": None, "openrouter": None,
+                                   "context_window": 1048576,
+                                   # Dollars per million tokens, from the API's per-token strings.
+                                   "price_prompt_per_mtok": 0.15, "price_completion_per_mtok": 0.6})
+        self.assertEqual(rows[1]["price_completion_per_mtok"], 2.86)
         self.assertEqual(rows[2]["efforts"], [])                           # says it takes no reasoning
+        self.assertEqual(rows[2]["effort_labels"], {})
+        # No pricing at all, and OpenRouter's "-1" for a router row: neither is a price.
+        self.assertIsNone(rows[2]["price_completion_per_mtok"])
+        self.assertIsNone(rows[3]["price_completion_per_mtok"])
         self.assertEqual(rows[3]["context_window"], 200000)                # from top_provider
         self.assertEqual((rows[4]["label"], rows[4]["context_window"]),
                          ("meta/no-window", P.DEFAULT_CONTEXT_WINDOW))    # the slug stands in for a blank name
@@ -129,6 +143,22 @@ class OpenRouterCatalogTests(unittest.TestCase):
         self.assertTrue(oc.ready.is_set())
         self.assertEqual(calls, [])
         self.assertIn("z-ai/glm-5.3", [r["id"] for r in P.catalog_rows("openrouter")])
+
+    def test_a_cache_from_before_the_prices_is_served_and_refreshed(self):
+        """tier_list_defaults decides by price, so a day-old cache written before the rows carried
+        one would keep every twin out of Main and High until it expired. It counts as stale."""
+        old = [{key: value for key, value in row.items() if not key.startswith("price_")}
+               for row in oc.parse_rows(LISTING)]
+        self.cache().parent.mkdir(parents=True)
+        self.cache().write_text(json.dumps({"fetched_at": time.time() - 60, "rows": old}))
+        self.assertEqual([r["id"] for r in oc.rows()], [r["id"] for r in old])     # served first
+        self.assertTrue(oc.stale())
+        fetcher, calls = self.fetched()
+        self.assertTrue(oc.start_refresh(fetcher))
+        self.assertTrue(oc.ready.wait(5))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(oc.rows()[0]["price_completion_per_mtok"], 0.6)
+        self.assertFalse(oc.stale())
 
     def test_a_stale_cache_is_served_first_and_replaced_when_the_fetch_lands(self):
         old = [{"id": "old/model", "label": "old model", "tier": None, "efforts": [], "intelligence": None,

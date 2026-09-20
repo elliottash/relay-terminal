@@ -137,6 +137,9 @@ class Preset:
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "max_output": self.max_output,
                 "efforts": effort_levels(self.effort_style),
+                # What each of those levels is called by the provider (effort_labels below): the
+                # GUI shows the label and stores the Relay level.
+                "effort_labels": effort_labels(self.effort_style),
                 "effort_note": effort_note(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
@@ -324,6 +327,11 @@ RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
 #                order; a model no tier names carries None.
 #   efforts      the Relay levels this model accepts, or None for "whatever the preset's effort
 #                style offers" (effort_levels). The value the GUI sees is always a list.
+#   effort_labels {<relay level>: <the word the provider's API takes for it>} for exactly the levels
+#                in `efforts`, from EFFORT_MAP (owner, 2026-09-20: "for codex planning you pick
+#                xhigh, not max; for glm 5.3 you pick max"). The GUI *displays* the label and
+#                *stores* the Relay level: openai and openrouter show "xhigh" for max, everything
+#                else shows the level's own name, and a model with no levels carries {}.
 #   intelligence INTELLIGENCE[id], or None.
 #
 # `efforts` is only ever narrowed below what the preset offers: Kimi documents reasoning_effort
@@ -481,11 +489,14 @@ def catalog_rows(preset_id) -> list[dict]:
     if preset is None:
         return []
     default = effort_levels(preset.effort_style)
-    out = [{"id": row["id"], "label": row["label"], "tier": row["tier"],
-            "efforts": list(default if row["efforts"] is None else row["efforts"]),
-            "intelligence": INTELLIGENCE.get(row["id"]),
-            "openrouter": openrouter_twin(row["id"])}
-           for row in MODEL_CATALOG.get(preset_id, [])]
+    out = []
+    for row in MODEL_CATALOG.get(preset_id, []):
+        efforts = list(default if row["efforts"] is None else row["efforts"])
+        out.append({"id": row["id"], "label": row["label"], "tier": row["tier"],
+                    "efforts": efforts,
+                    "effort_labels": effort_labels(preset.effort_style, efforts),
+                    "intelligence": INTELLIGENCE.get(row["id"]),
+                    "openrouter": openrouter_twin(row["id"])})
     if preset_id == "openrouter":
         from . import openrouter_catalog          # here, not at the top: it imports this module
         known = {row["id"] for row in out}
@@ -535,6 +546,175 @@ def tier_fallbacks(tier: str) -> tuple[str, ...]:
         return (tier, "main")
     order = PROVIDER_TIERS[:PROVIDER_TIERS.index(tier) + 1]
     return tuple(reversed(order))
+
+
+def model_extra(preset_id, model: str) -> dict:
+    """The request extras a provider's model runs with when nothing says otherwise: the extras of
+    the tier row that names it (GLM's Flash model runs at low reasoning, Kimi's high-speed model
+    carries no effort field at all), else the preset's own.
+
+    A tier *list* entry names a model rather than a tier (protocol 13.7), so the extras cannot be
+    read off the tier it sits in: glm-5.3-flash is the same request whether the user ranked it under
+    Flash, under Main or under High.
+    """
+    table = TIER_DEFAULTS.get(preset_id or "", {})
+    for tier in PROVIDER_TIERS:
+        entry = table.get(tier)
+        if entry is not None and entry[0] == preset_id and entry[1] == model:
+            return dict(entry[2])
+    preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
+    return dict(preset.extra) if preset is not None else {}
+
+
+def model_efforts(preset_id, model: str) -> list[str] | None:
+    """The Relay levels a catalog model takes, or None when the catalog does not name the model
+    (then the preset's effort style decides, as it always has). [] means the model has no effort
+    knob — Kimi's high-speed models — and a level asked of it is not sent."""
+    preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
+    if preset is None:
+        return None
+    for row in MODEL_CATALOG.get(preset_id, []):
+        if row["id"] == model:
+            return list(effort_levels(preset.effort_style) if row["efforts"] is None else row["efforts"])
+    return None
+
+
+# --- the two default tier lists (owner, 2026-09-20) ---------------------------------------------
+# Options › Models holds five ordered lists — main, high, flash, lite, local — and two buttons that
+# fill them. What the buttons fill them *with* is computed here, from the providers usable right
+# now, so the GUI only applies it (`tier_list_defaults` in the `presets` event, protocol 13.7).
+#
+# "openrouter twins are after the subscription models, and are cost sensitive" (owner): a twin is
+# pay-as-you-go spending the user did not choose model by model, so the `openrouter` default only
+# appends a twin whose completion price, as OpenRouter's live listing gives it, is at or under this
+# many US dollars per million tokens. On 2026-09-20 that admits z-ai/glm-5.3 ($2.86),
+# minimax/minimax-m3 ($1.20) and the flash models, and leaves out moonshotai/kimi-k3 ($8.50),
+# openai/gpt-6-astra and anthropic/claude-opus-5 ($25-50). A twin whose price is unknown (no
+# listing fetched yet) is left out of Main and High, where a wrong guess is expensive, and kept in
+# Flash and Lite, where every twin there is cheap.
+OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
+
+# Claude Code names its models by family ("fable", "opus"); INTELLIGENCE is keyed by API id. Only
+# the default lists' ordering reads this, so a family nobody mapped simply sorts as unknown.
+GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5",
+                       "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
+
+_MAIN_GROUP_ORDER = {"guest": 0, "subscription": 0, "payg": 1, "aggregator": 1, "custom": 1,
+                     "included": 2}
+
+
+def _top_level(levels: list[str]) -> str | None:
+    """The highest level of a model's own list, which is what High runs a model at: max where the
+    provider has one, "high" on Gemini, "medium" on Relay Free, None with no knob at all."""
+    return levels[-1] if levels else None
+
+
+def _list_entry(preset_id: str, model: str, effort: str | None) -> dict:
+    entry = {"preset": preset_id, "model": model}
+    if effort:
+        entry["effort"] = effort
+    return entry
+
+
+def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) -> dict:
+    """``{"plain": {tier: [entry…]}, "openrouter": {tier: [entry…]}}``: what Options › Models' two
+    default buttons fill the five lists with, from what can take a turn right now.
+
+    ``usable`` is the built-in preset ids that can (a stored key; Relay Free where it works);
+    ``local`` the saved endpoints and ``custom`` the keyed custom providers, each as
+    ``(id, model)``; ``guests`` the guest rows of the same ``presets`` event
+    (guest_harness_provider.preset_rows), of which the usable ones — the harness runs here and the
+    CLI has not said it is signed out — are subscriptions too, and sit with them, each on the
+    first model its own list names (none yet: the guest's own default) at that model's own
+    default level, in the CLI's words. ``listing`` is OpenRouter's live rows
+    (openrouter_catalog.rows(), the default), read for each twin's ``price_completion_per_mtok``
+    and for whether it takes a reasoning level at all. Every entry is
+    ``{"preset", "model", "effort"?}``, the shape ``tiers`` takes, with ``effort`` a Relay level
+    and absent where the model has no knob or the provider's default is no level at all.
+
+    plain — `main`: each provider's Main-tier model; subscriptions (and guests) first, then
+    pay-as-you-go, Relay Free last; by INTELLIGENCE descending within a group, unknown last; each
+    at the provider's own default level. `high`: the same models at their top level, without the
+    guests (a guest serves a pane, never a per-turn swap). `flash` / `lite`: each provider's Flash
+    model, and its Lite model when that is on the provider itself. `local`: the saved endpoints.
+
+    openrouter — the plain lists, then, only with an `openrouter` key, the OpenRouter twins of each
+    list's models *after all of them*, cost-sensitive ones only
+    (OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK). `lite` starts with the OpenRouter model Relay
+    already runs chores on (_LITE_VIA_OPENROUTER), ahead of the providers' own: chores and
+    transcription are where the owner wants OpenRouter first. Without the key the two are equal.
+    """
+    usable = [p for p in PRESETS if p in set(usable)]             # PRESETS order, built-ins only
+    ranked: list[tuple[tuple, str, str, str | None, bool]] = []    # (sort key, preset, model, effort, guest)
+    order = 0
+    for row in guests:
+        if not (isinstance(row, dict) and row.get("harness") and row.get("logged_in") is not False
+                and isinstance(row.get("id"), str)):
+            continue
+        first = next((m for m in row.get("models") or [] if isinstance(m, dict) and m.get("id")), {})
+        model = first.get("id") or ""
+        score = INTELLIGENCE.get(GUEST_MODEL_ALIASES.get(model, model))
+        ranked.append(((0, -(score or -1), order), row["id"], model, first.get("default_effort") or None, True))
+        order += 1
+    for preset_id in usable:
+        preset = PRESETS[preset_id]
+        entry = tier_default(preset_id, "main") or (preset_id, preset.model, preset.extra)
+        effort = infer_effort(preset.effort_style, entry[2]) if model_efforts(preset_id, entry[1]) != [] else None
+        ranked.append(((_MAIN_GROUP_ORDER.get(preset.group, 1), -(INTELLIGENCE.get(entry[1]) or -1), order),
+                       preset_id, entry[1], effort, False))
+        order += 1
+    for preset_id, model in custom:
+        ranked.append(((1, 1, order), preset_id, model or "", None, False))
+        order += 1
+    ranked.sort(key=lambda item: item[0])
+    providers = [item[1] for item in ranked if item[1] in PRESETS]
+
+    main = [_list_entry(preset_id, model, effort) for _, preset_id, model, effort, _ in ranked]
+    high = []
+    for _, preset_id, model, effort, guest in ranked:
+        if guest:
+            continue
+        levels = model_efforts(preset_id, model)
+        high.append(_list_entry(preset_id, model, _top_level(levels) if levels is not None else None))
+    flash, lite = [], []
+    for preset_id in providers:
+        for tier, out in (("flash", flash), ("lite", lite)):
+            entry = tier_default(preset_id, tier)
+            if entry is None or entry[0] != preset_id:
+                continue              # Lite through OpenRouter is OpenRouter's row, not this one's
+            made = _list_entry(preset_id, entry[1],
+                               infer_effort(PRESETS[preset_id].effort_style, entry[2]))
+            if made not in out:
+                out.append(made)
+    plain = {"main": main, "high": high, "flash": flash, "lite": lite,
+             "local": [_list_entry(endpoint_id, model or "", None) for endpoint_id, model in local]}
+
+    routed = {tier: [dict(entry) for entry in entries] for tier, entries in plain.items()}
+    if "openrouter" in usable:
+        if listing is None:
+            from . import openrouter_catalog      # here, not at the top: it imports this module
+            listing = openrouter_catalog.rows()
+        live = {row["id"]: row for row in listing if isinstance(row, dict) and isinstance(row.get("id"), str)}
+        first = _list_entry(_LITE_VIA_OPENROUTER[0], _LITE_VIA_OPENROUTER[1], None)
+        routed["lite"] = [first] + [entry for entry in routed["lite"] if entry != first]
+        for tier in ("main", "high", "flash", "lite"):
+            have = {(entry["preset"], entry["model"]) for entry in routed[tier]}
+            for entry in plain[tier]:
+                slug = openrouter_twin(entry["model"])
+                if slug is None or ("openrouter", slug) in have:
+                    continue
+                price = (live.get(slug) or {}).get("price_completion_per_mtok")
+                price = price if isinstance(price, (int, float)) and not isinstance(price, bool) else None
+                if price is None and tier in ("main", "high"):
+                    continue
+                if price is not None and price > OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK:
+                    continue
+                have.add(("openrouter", slug))
+                # High runs the twin at max too, unless the listing says it takes no level.
+                takes_level = (live.get(slug) or {}).get("efforts") != []
+                routed[tier].append(_list_entry("openrouter", slug,
+                                                "max" if tier == "high" and takes_level else None))
+    return {"plain": plain, "openrouter": routed}
 
 
 def normalize_url(url: str) -> str:
@@ -603,6 +783,25 @@ def _effort_groups(style: str) -> dict[str, list[str]]:
     for level in EFFORTS:
         groups.setdefault(EFFORT_MAP[style][level], []).append(level)
     return groups
+
+
+def effort_labels(style: str, levels=None) -> dict[str, str]:
+    """``{<relay level>: <what is sent for it>}`` for the levels a picker offers (owner,
+    2026-09-20: reasoning levels are shown in the provider's own words everywhere).
+
+    Relay stores four level names; a provider's API has its own. OpenAI and OpenRouter take
+    "xhigh" where Relay says max, Gemini's top is "high", and Kimi, GLM and the rest use Relay's
+    words as they are. ``effort_levels`` already keeps, for each request a provider can make, the
+    level whose own name *is* the value sent, so a label differs from its level only where the
+    provider has no such name (max on OpenAI and OpenRouter). ``levels`` narrows the answer to a
+    model's own list (a catalog row's ``efforts``); the "none" style, and a model with no levels,
+    get {}. The GUI displays the label and stores the Relay level — the level is what
+    ``configure`` / ``set_effort`` / a ``tiers`` entry take.
+    """
+    if style not in EFFORT_MAP or style == "none":
+        return {}
+    offered = effort_levels(style) if levels is None else [l for l in levels if l in EFFORTS]
+    return {level: EFFORT_MAP[style][level] for level in offered}
 
 
 def effort_note(style: str) -> str:

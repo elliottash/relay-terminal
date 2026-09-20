@@ -17,7 +17,7 @@ from relay_core import activity_tools, agents_defs, app_tools, guest_harness_pro
 from relay_core import tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
-from relay_core.presets import PRESETS
+from relay_core.presets import PRESETS, tier_list_defaults
 from relay_core.queue import TurnSupervisor
 from relay_core.router import classify
 
@@ -124,8 +124,18 @@ def main():
         # served from the day-old cache now, fetched on its own thread once per process when
         # that is stale, and re-pushed below when the fetch lands. Never on this thread.
         openrouter_catalog.start_refresh()
+        # The two default fillings of Options › Models' five lists (owner, 2026-09-20; 13.7),
+        # computed from what can take a turn right now so the GUI's two buttons only apply them.
+        guest_rows = guest_harness_provider.preset_rows()
+        custom_rows = customproviders.rows()
+        list_defaults = tier_list_defaults(
+            [p for p in PRESETS if sources.get(p) or (PRESETS[p].hosted and relay_free.get("available"))],
+            local=[(e.id, e.model) for e in localmodels.catalog().values()],
+            custom=[(row["id"], row.get("model") or "") for row in custom_rows if row.get("has_stored_key")],
+            guests=guest_rows)
         emit({"event": "presets", "id": request_id, "warp_default": keystore.warp_default_preset(),
               "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
+              "tier_list_defaults": list_defaults,
               "presets": [{**p.to_dict(), **(relay_free if p.hosted else
                                              {"has_stored_key": bool(sources[p.id]),
                                               "key_source": sources[p.id]})}
@@ -136,10 +146,10 @@ def main():
                  for e in localmodels.catalog().values()]
               # Custom providers (protocol 28.6): a key under the entry's own id, so
               # has_stored_key and key_source are read like a built-in row's.
-              + customproviders.rows()
+              + custom_rows
               # Guest agents on this machine (protocol 29.3): no key either, and `harness`
               # is what makes the row this pane's agent rather than a Tier B launch.
-              + guest_harness_provider.preset_rows()})
+              + guest_rows})
 
     # The codex catalogue lands after the first `presets` answer (the scan must not delay it,
     # 29.3), and nothing re-asks — so the worker pushes a fresh `presets` when it does, and

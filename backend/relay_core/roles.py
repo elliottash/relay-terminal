@@ -16,9 +16,9 @@ import copy
 import urllib.parse
 from dataclasses import dataclass, replace
 
-from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
-                      openrouter_twin, provider_tier_model, tier_default, tier_fallbacks,
-                      validate_effort, validate_tier)
+from .presets import (EFFORTS, PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
+                      model_efforts, model_extra, openrouter_twin, provider_tier_model, tier_default,
+                      tier_fallbacks, validate_effort, validate_tier)
 from .provider import ProviderConfig
 from . import customproviders, hosted, localmodels
 
@@ -248,57 +248,138 @@ def validate_roles(raw) -> dict[str, dict]:
     return out
 
 
-def validate_tiers(raw) -> dict[str, dict]:
-    """Normalize the ``tiers`` object from configure / set_agent_options (protocol 13.7).
+MAX_TIER_ENTRIES = 32
+GUEST_PRESET_PREFIX = "guest:"      # guest_harness_provider.PRESET_PREFIX, not imported: it pulls in the guest stack
 
-    Each of ``high``, ``flash``, ``lite`` and ``local`` may name a preset (with an optional model,
-    extra and effort) or a custom ``base_url``/``model``. ``main`` is rejected: it is the pane's own
-    model, set with ``configure`` / ``set_model``. ``null`` restores the built-in default for that
-    tier — for ``high``, the pane's own model at max reasoning.
+
+def is_guest_preset(preset_id) -> bool:
+    """Whether a preset id names a guest harness (Claude Code, Codex; protocol 29.3)."""
+    return isinstance(preset_id, str) and preset_id.startswith(GUEST_PRESET_PREFIX) \
+        and len(preset_id) > len(GUEST_PRESET_PREFIX)
+
+
+def validate_tiers(raw) -> dict[str, list[dict]]:
+    """Normalize the ``tiers`` object from configure / set_agent_options (protocol 13.7) into
+    ``{tier: [entry…]}``, each tier an ordered priority list (owner, 2026-09-20).
+
+    ``{"main": […], "high": […], "flash": […], "lite": […], "local": […]}`` with
+    ``entry = {"preset": id, "model": id or "", "effort": level or absent}``. A tier resolves to
+    its first usable entry, and a failover walks the list the turn is on, so order is the meaning.
+    The GUI sends whatever sits in its lists, so **a list never raises**: an entry that cannot be
+    read — not an object, no preset, a preset nobody knows, a Local entry that is not on this
+    machine — is dropped, an effort that is not a level is dropped from its entry, an entry
+    repeated lower down is dropped (it could never be reached), and an empty list is the same as
+    no list. A tier name Relay does not know is ignored. ``main`` is a list like the others, but
+    it never picks the pane's model (``configure`` / ``set_model`` do): it is the order a failing
+    Main turn walks.
+
+    The form before 2026-09-20 — one object per tier, ``{"flash": {"preset": "glm"}}`` — is still
+    accepted and is a one-element list. It stays as strict as it was (an unknown preset or field
+    is a ``ValueError``), because the GUIs that send it show that sentence; ``null`` restores the
+    tier's built-in default — for ``high``, the pane's own model at max reasoning.
     """
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise ValueError("tiers must be an object.")
-    out: dict[str, dict] = {}
+    out: dict[str, list[dict]] = {}
     for name, value in raw.items():
-        validate_tier(name)
-        if name == "main":
-            raise ValueError('The "main" tier is the pane\'s own model; set it with configure or set_model.')
-        if value is None:
+        if name not in TIERS or value is None:
             continue
-        if not isinstance(value, dict):
-            raise ValueError(f"tiers.{name} must be an object or null.")
-        unknown = set(value) - {"preset", "base_url", "model", "extra", "effort"}
-        if unknown:
-            raise ValueError(f"tiers.{name}: unknown field {sorted(unknown)[0]!r}.")
-        entry: dict = {}
-        if value.get("preset") is not None:
-            preset = _text(value["preset"], f"{name}.preset", 64)
-            if preset and _preset(preset) is None:
-                raise ValueError(f"tiers.{name}: unknown preset {preset!r}.")
-            if preset:
-                entry["preset"] = preset
-        if value.get("base_url") is not None:
-            entry["base_url"] = _text(value["base_url"], f"{name}.base_url", MAX_URL)
-        if value.get("model") is not None:
-            entry["model"] = _text(value["model"], f"{name}.model", MAX_MODEL)
-        if value.get("extra") is not None:
-            if not isinstance(value["extra"], dict):
-                raise ValueError(f"tiers.{name}.extra must be an object.")
-            entry["extra"] = copy.deepcopy(value["extra"])
-        if value.get("effort") is not None:
-            entry["effort"] = validate_effort(value["effort"])
-        if not entry:
-            continue
-        if "preset" not in entry and not (entry.get("base_url") and entry.get("model")):
-            raise ValueError(f"tiers.{name}: give a preset, or both base_url and model.")
-        if name == "local" and not _is_local_endpoint(entry):
-            raise ValueError("tiers.local must name a model server on this machine: a saved local "
-                             "endpoint id, or a plain http:// base_url on localhost, 127.0.0.1 or "
-                             "::1 with its model.")
-        out[name] = entry
+        if isinstance(value, (list, tuple)):
+            entries: list[dict] = []
+            for item in value[:MAX_TIER_ENTRIES * 4]:
+                entry = _list_entry(name, item)
+                if entry is not None and _same_target(entry) not in [_same_target(e) for e in entries]:
+                    entries.append(entry)
+            entries = entries[:MAX_TIER_ENTRIES]
+        elif isinstance(value, dict):
+            entry = _strict_entry(name, value)
+            entries = [entry] if entry else []
+        else:
+            raise ValueError(f"tiers.{name} must be a list, an object or null.")
+        if entries:
+            out[name] = entries
     return out
+
+
+def _same_target(entry: dict) -> tuple:
+    """What makes two entries of one list the same place to send a turn: the level is not part of
+    it, because a provider is asked once per turn whatever level the second mention names."""
+    return entry.get("preset"), entry.get("base_url"), entry.get("model", "")
+
+
+def _list_entry(tier: str, value) -> dict | None:
+    """One entry of a tier list, or None when it cannot be read. Never raises (validate_tiers)."""
+    if not isinstance(value, dict):
+        return None
+    preset = value.get("preset")
+    preset = preset.strip() if isinstance(preset, str) else ""
+    if len(preset) > 64:
+        return None
+    model = value.get("model")
+    model = model.strip() if isinstance(model, str) else ""
+    base_url = value.get("base_url")
+    base_url = base_url.strip() if isinstance(base_url, str) else ""
+    if len(model) > MAX_MODEL or len(base_url) > MAX_URL:
+        return None
+    guest = is_guest_preset(preset)
+    entry: dict = {}
+    if preset:
+        if not guest and _preset(preset) is None:
+            return None                     # a key since deleted is fine; an id nobody knows is not
+        entry["preset"] = preset
+        entry["model"] = model
+    elif base_url and model:
+        entry["base_url"], entry["model"] = base_url, model
+    else:
+        return None
+    if isinstance(value.get("extra"), dict) and not guest:
+        entry["extra"] = copy.deepcopy(value["extra"])
+    effort = value.get("effort")
+    if guest:
+        # A guest's levels are its CLI's own words (claude: "max", codex: "xhigh"; 29.3), not
+        # Relay's four, so they are kept as written rather than checked against EFFORTS.
+        if isinstance(effort, str) and 0 < len(effort.strip()) <= 32:
+            entry["effort"] = effort.strip()
+    elif isinstance(effort, str) and effort in EFFORTS:
+        entry["effort"] = effort
+    if tier == "local" and not _is_local_endpoint(entry):
+        return None
+    return entry
+
+
+def _strict_entry(name: str, value: dict) -> dict:
+    """The one-object-per-tier form of before 2026-09-20, validated as it always was."""
+    unknown = set(value) - {"preset", "base_url", "model", "extra", "effort"}
+    if unknown:
+        raise ValueError(f"tiers.{name}: unknown field {sorted(unknown)[0]!r}.")
+    entry: dict = {}
+    if value.get("preset") is not None:
+        preset = _text(value["preset"], f"{name}.preset", 64)
+        if preset and _preset(preset) is None and not is_guest_preset(preset):
+            raise ValueError(f"tiers.{name}: unknown preset {preset!r}.")
+        if preset:
+            entry["preset"] = preset
+    if value.get("base_url") is not None:
+        entry["base_url"] = _text(value["base_url"], f"{name}.base_url", MAX_URL)
+    if value.get("model") is not None:
+        entry["model"] = _text(value["model"], f"{name}.model", MAX_MODEL)
+    if value.get("extra") is not None:
+        if not isinstance(value["extra"], dict):
+            raise ValueError(f"tiers.{name}.extra must be an object.")
+        entry["extra"] = copy.deepcopy(value["extra"])
+    if value.get("effort") is not None:
+        entry["effort"] = validate_effort(value["effort"])
+    if not entry:
+        return {}
+    if "preset" not in entry and not (entry.get("base_url") and entry.get("model")):
+        raise ValueError(f"tiers.{name}: give a preset, or both base_url and model.")
+    if name == "local" and not _is_local_endpoint(entry):
+        raise ValueError("tiers.local must name a model server on this machine: a saved local "
+                         "endpoint id, or a plain http:// base_url on localhost, 127.0.0.1 or "
+                         "::1 with its model.")
+    return entry
 
 
 def _is_local_endpoint(entry: dict) -> bool:
@@ -422,39 +503,60 @@ class RoleResolver:
         return self._build(role, preset_id, base_url, model, extra, entry.get("effort"), "configured")
 
     # ----- tiers (protocol 13.7) ---------------------------------------------------------
-    def _tier_entry(self, tier: str) -> tuple[str | None, str, str, dict, str | None] | None:
-        """(preset, base_url, model, extra, effort) for one tier: the user's override if there is one,
-        otherwise the default provider's built-in tier. None when the provider has no tier table."""
-        override = self.tiers.get(tier)
-        if override:
-            preset = _preset(override.get("preset"))
-            base_url = override.get("base_url") or (preset.base_url if preset else "")
-            model = override.get("model") or ""
-            extra = override["extra"] if override.get("extra") is not None else None
-            if preset and not model:
-                # An override that names a provider and no model means that provider's model *for this
-                # tier* (presets.provider_tier_model): "Flash on Z.AI" is glm-5.3-flash, not glm-5.3.
-                model, tier_extra = provider_tier_model(preset.id, tier)
-                if extra is None:
-                    extra = tier_extra
-            if not model and preset:
-                model = preset.model
+    def _list_target(self, entry: dict, tier: str) -> tuple[str | None, str, str, dict, str | None]:
+        """(preset, base_url, model, extra, effort) for one entry of a tier list."""
+        preset = _preset(entry.get("preset"))
+        base_url = entry.get("base_url") or (preset.base_url if preset else "")
+        model = entry.get("model") or ""
+        extra = entry["extra"] if entry.get("extra") is not None else None
+        if preset and not model:
+            # An entry that names a provider and no model means that provider's model *for this
+            # tier* (presets.provider_tier_model): "Flash on Z.AI" is glm-5.3-flash, not glm-5.3.
+            # High and Main have no smaller model to mean, so they get the provider's Main one.
+            try:
+                model, tier_extra = provider_tier_model(preset.id, "main" if tier == "high" else tier)
+            except KeyError:        # a custom provider has no tier table: its own model
+                model, tier_extra = preset.model, dict(preset.extra)
             if extra is None:
-                extra = dict(preset.extra) if preset else {}
-            match = match_preset(base_url, model)
-            return (preset.id if preset else (match.id if match else None)), base_url, model, extra, override.get("effort")
+                extra = tier_extra
+        if not model and preset:
+            model = preset.model
+        if extra is None:
+            # The extras that model runs with wherever it is ranked (presets.model_extra): the
+            # user picks a model and a level, never a request body.
+            extra = model_extra(preset.id, model) if preset and preset.id in PRESETS else \
+                (dict(preset.extra) if preset else {})
+        match = match_preset(base_url, model)
+        preset_id = preset.id if preset else (match.id if match else None)
+        effort = entry.get("effort")
+        if effort is not None and model_efforts(preset_id, model) == []:
+            effort = None           # a model with no effort knob (Kimi's high-speed ones): not sent
+        return preset_id, base_url, model, extra, effort
+
+    def _tier_entries(self, tier: str) -> list[tuple[str | None, str, str, dict, str | None]]:
+        """The (preset, base_url, model, extra, effort) candidates of one tier, in order: the
+        user's list when there is one (protocol 13.7), otherwise the one built-in default — the
+        default provider's row of TIER_DEFAULTS, or the first saved endpoint for Local. [] when
+        there is neither. Guest entries are left out: a guest harness can be a pane's own agent,
+        never a per-turn swap or a side call, and Main is the only list that may name one."""
+        listed = [entry for entry in self.tiers.get(tier) or []
+                  if not is_guest_preset(entry.get("preset"))]
+        if listed:
+            return [self._list_target(entry, tier) for entry in listed]
+        if self.tiers.get(tier):
+            return []               # a list of nothing but guests: nothing this tier can run on
         if tier == "local":
             # The Local tier belongs to no provider, so there is no TIER_DEFAULTS row to read: with
-            # no override it is the first saved endpoint, so one saved server just works.
+            # no list it is the first saved endpoint, so one saved server just works.
             endpoint = next(iter(localmodels.catalog().values()), None)
             if endpoint is None:
-                return None
-            return endpoint.id, endpoint.base_url, endpoint.model, dict(endpoint.extra), None
+                return []
+            return [(endpoint.id, endpoint.base_url, endpoint.model, dict(endpoint.extra), None)]
         entry = tier_default(self.main_preset_id, tier)
         if entry is None:
-            return None
+            return []
         preset_id, model, extra = entry
-        return preset_id, PRESETS[preset_id].base_url, model, dict(extra), None
+        return [(preset_id, PRESETS[preset_id].base_url, model, dict(extra), None)]
 
     def _high_default(self, role: str, source: str, effort: str | None = None) -> Resolved:
         """The High tier with no ``tiers.high`` override: the pane's own model pushed to max reasoning
@@ -475,37 +577,54 @@ class RoleResolver:
         return self._main(role, tier="high")
 
     def _tier(self, role: str, tier: str, source: str, effort: str | None = None) -> Resolved:
-        """A tier's model for one role. A tier whose provider has no stored key steps one tier towards
-        Main (Lite → Flash → Main); the Main tier is the pane's own model, so this never hard-fails.
-        High with no override is the main model at max reasoning (_high_default); with one it is
-        resolved like any other tier, and a missing key steps straight down to Main."""
+        """A tier's model for one role: the **first usable entry** of the tier's list, at that
+        entry's level (protocol 13.7) — usable meaning a stored key, a model server on this machine
+        or Relay Free where it works. With no list the tier is its one built-in default.
+
+        A tier with nothing usable steps one tier towards Main (Lite → Flash → Main); the Main tier
+        is the pane's own model, so this never hard-fails. High with no list is the main model at
+        max reasoning (_high_default); with one it is resolved like any other tier, and a list
+        with nothing usable steps straight down to Main."""
         validate_tier(tier)
+        if tier == "main":
+            # The pane's own model, whatever `tiers.main` lists: that list is the order a failing
+            # Main turn walks (failover_chain), never a pick.
+            return self._main(role, "main", tier="main")
         if tier == "high" and not self.tiers.get("high"):
             return self._high_default(role, source, effort)
         for candidate in tier_fallbacks(tier):
             if candidate == "main":
                 break
-            entry = self._tier_entry(candidate)
-            if entry is None:
-                break
-            preset_id, base_url, model, extra, tier_effort = entry
-            resolved = self._build(role, preset_id, base_url, model, extra,
-                                   effort if effort is not None else tier_effort, source, candidate)
-            if resolved.source == "fallback":
-                continue          # no key for that provider: try the next tier towards Main
-            if candidate != tier:
-                # Expected and harmless: a Lite/Flash model on a provider with no key steps towards
-                # Main. Shown inline by the roles modal, never raised as a protocol warning.
-                resolved.note = (f"No stored key for the {TIER_LABELS[tier]} model; "
-                                 f"using {TIER_LABELS[candidate]}.")
-            return resolved
+            entries = self._tier_entries(candidate)
+            if not entries and not self.tiers.get(candidate):
+                break               # no list and no built-in default: nothing further down either
+            for skipped, (preset_id, base_url, model, extra, tier_effort) in enumerate(entries):
+                try:
+                    resolved = self._build(role, preset_id, base_url, model, extra,
+                                           effort if effort is not None else tier_effort, source,
+                                           candidate)
+                except ValueError:
+                    if len(entries) == 1:
+                        raise           # the one-model form has always said what is wrong with it
+                    continue            # one bad entry must not cost the list the ones below it
+                if resolved.source == "fallback":
+                    continue            # no key for that provider: the next entry, then the next tier
+                if candidate != tier:
+                    # Expected and harmless: a Lite/Flash model on a provider with no key steps towards
+                    # Main. Shown inline by the roles modal, never raised as a protocol warning.
+                    resolved.note = (f"No stored key for the {TIER_LABELS[tier]} model; "
+                                     f"using {TIER_LABELS[candidate]}.")
+                elif skipped:
+                    resolved.note = (f"The first {skipped} of the {TIER_LABELS[tier]} list cannot be "
+                                     f"used right now (no stored key); using {model}.")
+                return resolved
         if tier == "local":
             # Nothing set up rather than no key, and Local is not a step on the ladder: it falls
             # straight back to Main, with the note the roles modal shows inline.
             return self._main(role, "main", tier="main", note="No local model is set up; using Main.")
         return self._main(role, "main", tier="main",
                           note=(f"No stored key for the {TIER_LABELS[tier]} model; using Main."
-                                if self._tier_entry(tier) is not None else None))
+                                if self.tiers.get(tier) or self._tier_entries(tier) else None))
 
     def _default(self, role: str) -> Resolved:
         tier = ROLE_TIERS.get(role)
@@ -533,13 +652,17 @@ class RoleResolver:
         return self._main(role)
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
-    def fallback_candidate(self, fallback, tier: str, exclude, hosts=()) -> Resolved | None:
+    def fallback_candidate(self, fallback, tier: str, exclude, hosts=(), role: str = "main") -> Resolved | None:
         """One entry of the Options › Models priority list as a failover target (owner,
         2026-09-20), or None when it cannot take this turn.
 
-        ``fallback`` is one element of the ``fallbacks`` option: ``{"preset", "model"}``, a preset
-        id and the model id the user ranked below the pane's own — the list `/swap` walks. The
-        agent tries the entries in the user's order and this builds each one on the same terms as
+        ``fallback`` is one entry of the list the turn is on (`failover_chain`): a ``tiers`` list
+        entry ``{"preset", "model", "effort"?}``, or one element of the older ``fallbacks`` option,
+        which is the same thing without the level. An entry's level is the level the spare runs
+        at; without one it runs at the model's own default, on every tier — a High entry means the
+        same thing whether it is the first usable one or the one a failing plan turn reaches (the
+        default lists give every High entry its top level, so "max" is said, not implied). ``role`` is the role the result is built for (a side call's; "main" for a turn).
+        The agent tries the entries in the user's order and this builds each one on the same terms as
         any candidate: the key comes from the same lookup, the failing preset and its hostname are
         skipped (an entry that names the pane's own provider, or another key on the same host, is
         nothing to move to), and so is a preset already asked this turn. Relay Free is a target
@@ -547,7 +670,8 @@ class RoleResolver:
         it (`hosted.available`); there is no pane-wide switch for it any more. A model server on
         this machine is allowed for the same reason: the user ranked it, so its answers are what
         they asked for. A guest harness or an unknown id is not a provider this resolver can
-        build, and gets None. A missing model means the preset's own.
+        build, and gets None: a guest can be a pane's own agent, never a per-turn swap. A missing
+        model means the provider's own model for the tier the turn is on.
 
         None here means "skip this entry", never an error: a stale entry (a key since deleted, an
         endpoint since removed) must not cost the turn the entries below it.
@@ -567,16 +691,70 @@ class RoleResolver:
         skip_hosts.discard("")
         if _hostname(preset.base_url) in skip_hosts:
             return None
-        model = fallback.get("model")
-        model = model.strip() if isinstance(model, str) and model.strip() else preset.model
         tier = validate_tier(tier)
-        effort = "max" if tier == "high" else None
         try:
-            resolved = self._build("main", preset_id, preset.base_url, model, dict(preset.extra),
-                                   effort, "failover", tier)
-        except ValueError:
+            # Built the way the tier itself resolves an entry (_list_target): a missing model is
+            # the provider's own for this tier, and the extras are that model's.
+            _, base_url, model, extra, effort = self._list_target(
+                {"preset": preset_id, "model": fallback.get("model") if isinstance(fallback.get("model"), str) else "",
+                 "effort": fallback.get("effort") if fallback.get("effort") in EFFORTS else None,
+                 **({"extra": fallback["extra"]} if isinstance(fallback.get("extra"), dict) else {})},
+                tier)
+            resolved = self._build(role, preset_id, base_url, model, extra, effort, "failover", tier)
+        except (ValueError, KeyError):
             return None                 # a preset whose config will not validate: not a spare
         return None if resolved.source == "fallback" else resolved
+
+    def failover_chain(self, tier: str, preset_id, model, fallbacks=()) -> list[dict]:
+        """Where a failing turn may go next, in order: **the rest of the list the turn is on**
+        (owner, 2026-09-20; protocol 15.2.2). Entries only — whether each can take the turn is
+        `fallback_candidate`'s question, asked when its moment comes.
+
+        ``tier`` is the list: "main" for a pane's own turns, "high" for a plan turn, "flash" /
+        "lite" / "local" for a pane or a side call running on that tier. ``preset_id`` / ``model``
+        are what the turn is running on now. When that pair is in the list the chain is the
+        entries *after* it — the ones above it were ranked higher and the user chose not to be on
+        them — and when it is not (a model picked by hand, off the list) the chain is the whole
+        list from the top.
+
+        The Main list is ``tiers.main`` when one was sent, else the ``fallbacks`` option of
+        earlier the same day, which is the same list minus the levels. A Flash, Lite or Local turn
+        with no list of its own walks the Main list, as it did before there were lists; High with
+        no list has no chain (its default is the pane's own model, and `Agent._drop_routing`
+        returns the turn to it).
+        """
+        tier = validate_tier(tier)
+        entries = list(self.tiers.get(tier) or [])
+        if not entries and tier != "high":
+            entries = list(self.tiers.get("main") or []) or [dict(e) for e in (fallbacks or [])
+                                                             if isinstance(e, dict)]
+        for index, entry in enumerate(entries):
+            if self._is_entry(entry, preset_id, model, tier):
+                return entries[index + 1:]
+        return entries
+
+    def _is_entry(self, entry: dict, preset_id, model, tier: str) -> bool:
+        """Whether a list entry names the (preset, model) a turn is running on."""
+        if not preset_id or entry.get("preset") != preset_id:
+            return False
+        named = entry.get("model") or ""
+        if named:
+            return named == model
+        if is_guest_preset(preset_id):
+            return True             # a guest entry without a model is the guest, whatever it runs
+        try:
+            return self._list_target(entry, tier)[2] == model
+        except KeyError:
+            return False
+
+    def turn_tier(self, preset_id, model, default: str = "main") -> str:
+        """Which list a pane running (preset, model) is on, for its failover: Main when the Main
+        list names it, else the Flash or Local list that does, else ``default`` — the agent's own
+        reading of the provider's tier table, which is all there was before the lists."""
+        for tier in ("main", "flash", "local"):
+            if any(self._is_entry(entry, preset_id, model, tier) for entry in self.tiers.get(tier) or []):
+                return tier
+        return default
 
     def openrouter_twin_candidate(self, model, tier: str, exclude, hosts=()) -> Resolved | None:
         """The same model on OpenRouter (owner, 2026-09-20), as the failover target after every
@@ -636,7 +814,9 @@ class RoleResolver:
         then left on the guest, still with a note, and the caller says the one sentence
         ``guest_harness_provider.helper_refusal`` gives it.
         """
-        for entry in (fallbacks or []):
+        # The Main list when one was sent, else the `fallbacks` option: the same order a failing
+        # Main turn walks, from the top, because a guest is never where the helper already is.
+        for entry in self.failover_chain("main", None, None, fallbacks):
             spare = self.fallback_candidate(entry, "main", ())
             if spare is None:
                 continue
@@ -701,7 +881,7 @@ class RoleResolver:
         self.warnings.clear()
 
     def set_tiers(self, tiers: dict) -> None:
-        """Replace the High/Flash/Lite/Local tier overrides (protocol 13.7); applies from the next call."""
+        """Replace the tier lists (protocol 13.7, the output of validate_tiers); applies from the next call."""
         self.tiers = dict(tiers or {})
         self._cache.clear()
         self.warnings.clear()
@@ -725,7 +905,8 @@ class RoleResolver:
             if tier == "main":
                 out[tier] = {"tier": tier, "label": label, "model": self.main_config.model,
                              "preset": self.main_preset_id, "base_url": self.main_config.base_url,
-                             "effort": self.main_effort, "source": "main"}
+                             "effort": self.main_effort, "source": "main",
+                             "list": self._list_summary(tier)}
                 if self.main_note:
                     # A helper worker that left a guest (leave_guest): the Main tier is not the
                     # model the window names, and the row says so where the roles modal shows it.
@@ -737,10 +918,33 @@ class RoleResolver:
                      "preset": resolved.preset_id, "base_url": resolved.config.base_url,
                      "effort": resolved.effort,
                      "source": "configured" if tier in self.tiers else "default",
-                     "using": resolved.tier or "main"}
+                     "using": resolved.tier or "main",
+                     # The tier's list as stored, each entry with whether it can take a call right
+                     # now, so the GUI can grey the ones resolution and failover will skip.
+                     "list": self._list_summary(tier)}
             if resolved.note:
                 entry["note"] = resolved.note
             out[tier] = entry
+        return out
+
+    def _list_summary(self, tier: str) -> list[dict]:
+        """A tier's stored list with ``usable`` per entry: a stored key, a local endpoint or
+        Relay Free where it works — and, for a guest, being in the Main list, the only one a
+        guest can serve. One key lookup per preset, however many entries name it."""
+        known: dict[str, bool] = {}
+        out = []
+        for entry in self.tiers.get(tier) or []:
+            preset_id = entry.get("preset")
+            if is_guest_preset(preset_id):
+                usable = tier == "main"
+            elif preset_id:
+                if preset_id not in known:
+                    known[preset_id] = bool(localmodels.find(preset_id)) or self.has_key(preset_id)
+                usable = known[preset_id]
+            else:
+                usable = localmodels.loopback_http(entry.get("base_url") or "")
+            out.append({"preset": preset_id or "", "model": entry.get("model") or "",
+                        "effort": entry.get("effort"), "usable": usable})
         return out
 
     def event(self, agent_role: str = "main", request_id=None) -> dict:
@@ -756,5 +960,5 @@ class RoleResolver:
         return copy.deepcopy(self.roles)
 
     def stored_tiers(self) -> dict:
-        """The High/Flash/Lite/Local overrides as sent by the GUI (for `agent_options`)."""
+        """The five tier lists as validated — ``{tier: [entry…]}`` — for `agent_options`."""
         return copy.deepcopy(self.tiers)

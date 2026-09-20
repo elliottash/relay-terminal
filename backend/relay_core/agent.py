@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import json
@@ -106,6 +107,56 @@ def _with_first_token(transport, seconds: float):
     if seconds and callable(setter):
         setter(seconds)
     return transport
+
+
+class _SideChain:
+    """A side call's transport plus the spares behind it: the rest of the tier list the call is on.
+
+    It quacks like the one provider a side call is handed (`complete`, `cancel`, `config`, and
+    everything else by delegation to whichever link is serving). A `ProviderError` from one link
+    asks ``spare()`` for the next; when there is none the *first* error is raised, because it is
+    the role's own model the user can do something about. A truncated answer is a budget problem
+    and a cancel is a cancel: neither moves the call.
+
+    `sidecall.call` narrows the retry budget of a real `ChatProvider` by type, which this is not,
+    so each link is narrowed here to the same budget: a side call has nowhere to show a wait.
+    """
+    serves_side_calls = True
+
+    def __init__(self, first, spare):
+        self._current, self._spare, self._cancelled = first, spare, False
+
+    @property
+    def config(self):
+        return self._current.config
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        cancel = getattr(self._current, "cancel", None)
+        if callable(cancel):
+            cancel()
+
+    def complete(self, messages, tools, emit, cancel):
+        from . import provider as transport, sidecall
+        first_error = None
+        while True:
+            link = self._current
+            narrow = (link.limit_retry_budget(sidecall.RETRY_BUDGET_S)
+                      if isinstance(link, transport.ChatProvider) else contextlib.nullcontext())
+            try:
+                with narrow:
+                    return link.complete(messages, tools, emit, cancel)
+            except ProviderTruncated:
+                raise
+            except ProviderError as exc:
+                first_error = first_error or exc
+                following = None if (self._cancelled or cancel.is_set()) else self._spare()
+                if following is None:
+                    raise first_error
+                self._current = following
+
+    def __getattr__(self, name):
+        return getattr(self._current, name)
 
 
 def _error_text(event: dict) -> str | None:
@@ -451,7 +502,10 @@ class Agent:
         # The Options › Models priority list below the pane's own model, in order — a list of
         # `{"preset", "model"}` — which is the whole of where a failover may go (owner,
         # 2026-09-20): "the 2nd model is the main fallback, but there are multiple, as many as
-        # you want, according to priority". There is no catalog chain after it and no pane-wide
+        # you want, according to priority". Since the five tier lists of later the same day it
+        # is the Main chain only when no `tiers.main` list was sent (`_failover_chain`); the
+        # lists themselves live in the role resolver, which subagents share, so they inherit
+        # them with it. There is no catalog chain after it and no pane-wide
         # Relay Free switch: Relay Free is a fallback when the list names it. `fallback`
         # singular is the one-entry shape from earlier the same day, kept for older callers, and
         # `failover_hosted` is accepted and ignored for the same reason.
@@ -1137,9 +1191,14 @@ class Agent:
         if resolved is not None and not resolved.is_main:
             # A role's model was picked for this job: its own params (and its effort, already applied
             # by the resolver) stand, so "cheap" only caps the output budget.
-            config = resolved.config
-            extra = copy.deepcopy(config.extra)
-            limit = min(config.max_tokens, 4096) if cheap else config.max_tokens
+            # replace(), not a fresh ProviderConfig, for the reason given at the end of this method.
+            def build(config):
+                limit = min(config.max_tokens, 4096) if cheap else config.max_tokens
+                made = make(dataclasses.replace(config, extra=copy.deepcopy(config.extra), max_tokens=limit))
+                if max_tokens is not None:
+                    made.config.max_tokens = max(1, min(int(max_tokens), made.config.max_tokens))
+                return made
+            return self._side_chain(role, resolved, build)
         elif declines:
             return self.provider
         elif not cheap:
@@ -1155,6 +1214,44 @@ class Agent:
         if max_tokens is not None:
             provider.config.max_tokens = max(1, min(int(max_tokens), provider.config.max_tokens))
         return provider
+
+    def _side_chain(self, role: str, resolved, build):
+        """A side call's provider, with the rest of its tier's list behind it (owner, 2026-09-20).
+
+        A role that follows a tier runs on the first usable entry of that tier's list; when that
+        model will not answer, the call goes on to the next entries of the same list
+        (`RoleResolver.failover_chain`), skipping what a failover skips, and then fails as it
+        always did. With no list, one entry, a role pinned to its own endpoint or "Fall over to a
+        working provider" off, this is exactly the provider it was before.
+        """
+        first = build(resolved.config)
+        chain = getattr(self.roles, "failover_chain", None)
+        if not (self.failover and resolved.tier in ("high", "flash", "lite", "local") and callable(chain)):
+            return first
+        try:
+            # Only a list the user sent: a Flash role with no Flash list has nowhere of its own to
+            # go, and a title is not worth walking the Main list for.
+            entries = ([dict(entry) for entry in chain(resolved.tier, resolved.preset_id, resolved.config.model)]
+                       if self.roles.stored_tiers().get(resolved.tier) else [])
+        except Exception:                                   # a side call must never fail on this
+            entries = []
+        if not entries:
+            return first
+        tried = {resolved.preset_id} if resolved.preset_id else set()
+        hosts = {_host(resolved.config.base_url)}
+
+        def spare():
+            while entries:
+                target = self.roles.fallback_candidate(entries.pop(0), resolved.tier, tried, hosts, role=role)
+                if target is not None:
+                    tried.add(target.preset_id)
+                    hosts.add(_host(target.config.base_url))
+                    logs.event(_log, "side_call_failover", session=self.session_id, role=role,
+                               tier=resolved.tier, to_model=target.config.model,
+                               to_preset=target.preset_id or "", host=_host(target.config.base_url))
+                    return build(target.config)
+            return None
+        return _SideChain(first, spare)
 
     def role_model(self, role: str) -> str:
         """The model id a role resolves to (the main model when roles are unset)."""
@@ -1919,15 +2016,17 @@ class Agent:
 
         Everything the failing provider can do for itself happens inside: the transport's six
         retries of a refused request (card #VMZP), then the stall and truncation retries below.
-        Only when it still fails does the turn move — down the Options › Models priority list
-        (`fallbacks`) in order, then to the same model on OpenRouter where the user opted in, each
-        asked once — and `_end_failover` puts the pane's own provider back when the turn ends. A
-        truncated step is a budget problem, not a provider that will not answer, so it is never
-        failed over.
+        Only when it still fails does the turn move — down **the list the turn is on** (owner,
+        2026-09-20; Options › Models' Main list for a pane's own turns, which is `tiers.main` or
+        the `fallbacks` option), in order, then to the same model on OpenRouter where the user
+        opted in, each asked once — and `_end_failover` puts the pane's own provider back when the
+        turn ends. A truncated step is a budget problem, not a provider that will not answer, so
+        it is never failed over.
 
-        A step running on a *routed* model (plan mode's, or an image turn's vision model) takes one
-        step back before any of that: the routing ends and the rest of the turn runs on the pane's
-        own model (`_drop_routing`). Only if that model fails too does the ordinary chain start.
+        A plan turn is on the High list, so it walks that first (`_next_plan_model`). A step
+        running on a *routed* model (plan mode's once its list is spent, or an image turn's vision
+        model) then takes one step back: the routing ends and the rest of the turn runs on the
+        pane's own model (`_drop_routing`). Only if that model fails too does the Main list start.
         """
         while True:
             try:
@@ -1935,6 +2034,8 @@ class Agent:
             except ProviderTruncated:
                 raise
             except ProviderError as exc:
+                if self._next_plan_model(exc, record, step):
+                    continue
                 if self._drop_routing(exc, record, step):
                     continue
                 if not self._begin_failover(exc, record, step):
@@ -1951,12 +2052,19 @@ class Agent:
         answer "flash" for a Main pane and hand the turn to other providers' Flash models.
         """
         preset = self.preset
+        own = "main"
         if preset is not None:
             entry = tier_default(preset.id, "flash")
             if (entry is not None and entry[0] == preset.id and entry[1] == self.config.model
                     and entry[1] != preset.model):
-                return "flash"
-        return "main"
+                own = "flash"
+        # The tier lists have the first word (owner, 2026-09-20): a pane running a model the Main
+        # list names is a Main turn, one the Flash or Local list names is on that list, and only a
+        # model no list names is read off the provider's own tier table as above.
+        turn_tier = getattr(self.roles, "turn_tier", None)
+        if callable(turn_tier) and preset is not None:
+            return turn_tier(preset.id, self.config.model, own)
+        return own
 
     def _drop_routing(self, exc: Exception, record: dict, step: int) -> bool:
         """A routed step whose provider will not answer finishes the turn on the pane's own model.
@@ -2017,6 +2125,90 @@ class Agent:
         self.emit({"event": "status", "text": f"{failed_name} failed · continuing on {own_name}"})
         return True
 
+    def _failover_chain(self, tier: str) -> list[dict]:
+        """The entries a failing turn may move to, in order: what is left of the list it is on.
+
+        The resolver holds the tier lists and answers (`RoleResolver.failover_chain`); a resolver
+        that predates them - a test double - gets the `fallbacks` option as it always was.
+        """
+        chain = getattr(self.roles, "failover_chain", None)
+        if not callable(chain):
+            return [dict(entry) for entry in self.fallbacks]
+        return [dict(entry) for entry in
+                chain(tier, self.preset.id if self.preset else None, self.config.model, self.fallbacks)]
+
+    def _next_plan_model(self, exc: Exception, record: dict, step: int) -> bool:
+        """A plan turn whose model will not answer moves to the next entry of the High list.
+
+        A plan turn is on the High list (protocol 13.7), so that is the list it walks (owner,
+        2026-09-20): from the entry after the one it is running on, skipping what cannot take it -
+        no key, the failing host, a preset already asked this turn, a guest. It stays a plan turn:
+        the swap that remembers the pane's own model is kept and only the model under it changes,
+        so `plan_route_ended` still puts the pane back. When the list has nothing left the routing
+        is dropped as before (`_drop_routing`): the turn finishes on the pane's own model, and
+        only if that fails too does the Main list start.
+
+        Refused on a failover's terms - this *is* a move to another provider - and while an image
+        swap nests inside the plan one, whose model was picked for a different reason.
+        """
+        swap = self._planning
+        if (swap is None or self._vision or not self.failover or self.roles is None
+                or not swap.get("adopted") or self._injected_provider or self._produced_output
+                or self.cancel_event.is_set() or not isinstance(exc, ProviderError)):
+            return False
+        chain = getattr(self.roles, "failover_chain", None)
+        if not callable(chain):
+            return False
+        failed_preset = self.preset.id if self.preset else ""
+        failed_host = _host(self.config.base_url)
+        try:
+            if "chain" not in swap:
+                # Read once per turn, like the Main walk: what is left of the High list below the
+                # entry the turn started on. The pane's own provider is not excluded - it has
+                # not been asked this turn, the plan model has.
+                swap["chain"] = [dict(entry) for entry in chain("high", failed_preset, self.config.model)]
+                swap["tried"], swap["hosts"], swap["moves"] = set(), set(), 0
+                swap["max_moves"] = len(swap["chain"])
+            if failed_preset:
+                swap["tried"].add(failed_preset)
+            if failed_host:
+                swap["hosts"].add(failed_host)
+            target = None
+            while target is None and swap["chain"]:
+                target = self.roles.fallback_candidate(swap["chain"].pop(0), "high", swap["tried"],
+                                                       swap["hosts"], role="planning")
+        except Exception as bad:                            # a failover must never break the turn
+            logs.event(_log, "provider_failover_unavailable", level_name="error",
+                       session=self.session_id, turn=record["turn_id"], step=step,
+                       model=self.config.model, preset=failed_preset,
+                       error=f"{type(bad).__name__}: {bad}"[:200])
+            return False
+        if target is None:
+            return False
+        from_model = self.config.model
+        from_name = _provider_name(from_model, self.preset)
+        self._ensure_no_open_response(record["turn_id"], "failover")
+        self._close_thinking(record)
+        # A Main failover later in this turn must not offer the model that just refused.
+        self._dropped_routes.append((failed_preset, failed_host))
+        swap["moves"] += 1
+        swap["model"] = target.config.model
+        swap["to_preset"] = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
+        self._route_to(swap, target)
+        to_name = _provider_name(target.config.model, swap["to_preset"])
+        record["retries"] = record.get("retries", 0) + 1
+        text = f"Planning model {from_name} keeps failing; continuing this plan turn on {to_name}."
+        logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
+                   step=step, from_model=from_model, from_preset=failed_preset,
+                   to_model=target.config.model, to_preset=target.preset_id or "", tier="high",
+                   host=_host(target.config.base_url), error=str(exc)[:160])
+        self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "failover",
+                   "attempt": swap["moves"], "max_attempts": swap["max_moves"], "tier": "high",
+                   "from_model": from_model, "to_model": target.config.model,
+                   "to_preset": target.preset_id or "", "step": step, "text": text})
+        self.emit({"event": "status", "text": f"{from_name} failed · planning on {to_name}"})
+        return True
+
     def _begin_failover(self, exc: Exception, record: dict, step: int) -> bool:
         """Move this turn to the next failover provider. False when there is nowhere to go.
 
@@ -2051,12 +2243,8 @@ class Agent:
                     # the walk has gone. The twin comes after the last entry, once, and only for
                     # the model that failed first (`from_model`), which is why it is decided here
                     # and not against whichever spare is serving by the second move.
-                    "fallbacks": [dict(entry) for entry in self.fallbacks], "next": 0,
+                    "fallbacks": [], "next": 0,
                     "twin": self.config.model in self.failover_openrouter,
-                    # How many moves this turn can make at most, for the notes: every entry of
-                    # the list, plus the twin when the failed model was opted in.
-                    "max_attempts": len(self.fallbacks)
-                                    + (1 if self.config.model in self.failover_openrouter else 0),
                     # Hostnames already asked, the pane's own first. The preset ids in `tried` say
                     # nothing about a pane on a base URL that matches no preset (`self.preset is
                     # None`) - and that pane's own host is exactly the one a failover must not
@@ -2066,6 +2254,14 @@ class Agent:
                     # What the turn's error says if the list also runs out: the model that failed
                     # first, its exception, and the names of the providers tried after it.
                     "from_model": self.config.model, "first_error": exc, "names": []}
+            # The list the turn is on (owner, 2026-09-20; 15.2.2): the Main list for a pane's own
+            # turns - `tiers.main`, or the `fallbacks` option when no list was sent - and the
+            # Flash or Local list for a pane on that tier. From the entry after the pane's own
+            # model when the list names it, from the top for a model picked by hand.
+            swap["fallbacks"] = self._failover_chain(swap["tier"])
+            # How many moves this turn can make at most, for the notes: every entry of the
+            # chain, plus the twin when the failed model was opted in.
+            swap["max_attempts"] = len(swap["fallbacks"]) + (1 if swap["twin"] else 0)
         try:
             # Down the list in the user's order (owner, 2026-09-20). Each entry is built on the
             # same terms as any candidate, and one that cannot take the turn — no key, the failing
@@ -2108,7 +2304,12 @@ class Agent:
         self.provider = self._hook_preempt(_with_first_token(_provider_for(target.config, self.stall_timeout_s),
                                                              self.first_token_timeout_s))
         # Not `self.config = ...`: the new provider also needs the history in its own dialect, its
-        # own context window and this pane's effort in its own words.
+        # own context window and this pane's effort in its own words. An entry that names its own
+        # level (a `tiers` list entry: a model *and* a level) runs at that level instead - the
+        # resolver has already written it into the config, so it is read back out of it, the way a
+        # routed turn's is (`_route_to`); `_end_failover` puts the pane's own level back.
+        if target.effort is not None:
+            self.effort = None
         self._adopt_model(target.config, target_preset)
         to_name = _provider_name(target.config.model, target_preset)
         swap["names"].append(to_name)

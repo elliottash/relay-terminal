@@ -18,11 +18,17 @@ Rules, in the order they matter:
 - **The worker is told when it lands** (`set_listener`), so it can push a fresh `presets` the way
   it does when the codex catalogue lands (guest_harness_provider.start_catalog_scan).
 
-Row shape, the same keys `catalog_rows` gives a built-in row plus `context_window`:
-``{"id", "label", "tier": None, "efforts", "intelligence": None, "openrouter": None,
-"context_window"}``. `label` is the API's `name` lower-cased (Warp style, like every label the
-GUI shows); `efforts` is the openrouter effort style's levels, narrowed to `[]` for a model whose
-`supported_parameters` says it takes no `reasoning`.
+Row shape, the same keys `catalog_rows` gives a built-in row plus `context_window` and the two
+prices: ``{"id", "label", "tier": None, "efforts", "effort_labels", "intelligence": None,
+"openrouter": None, "context_window", "price_prompt_per_mtok", "price_completion_per_mtok"}``.
+`label` is the API's `name` lower-cased (Warp style, like every label the GUI shows); `efforts` is
+the openrouter effort style's levels, narrowed to `[]` for a model whose `supported_parameters`
+says it takes no `reasoning`, and `effort_labels` names each of them in OpenRouter's own words
+(max is "xhigh"; presets.effort_labels). The prices are US dollars per million tokens, from the
+API's per-token `pricing.prompt` / `pricing.completion` strings, or None when the listing gives
+no usable number; `presets.tier_list_defaults` reads the completion price to decide which
+OpenRouter twins are cheap enough to be offered as defaults. A cache written before the prices
+were carried has none on any row, and counts as stale so the next worker refreshes it.
 """
 from __future__ import annotations
 
@@ -66,7 +72,7 @@ def set_listener(callback) -> None:
 def parse_rows(payload) -> list[dict]:
     """The API's ``{"data": [...]}`` (or the list itself) as catalog rows. Entries without a
     string id are dropped; the rest never raise, whatever shape a field turns out to be."""
-    from .presets import DEFAULT_CONTEXT_WINDOW, effort_levels
+    from .presets import DEFAULT_CONTEXT_WINDOW, effort_labels, effort_levels
     entries = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(entries, list):
         return []
@@ -90,9 +96,28 @@ def parse_rows(payload) -> list[dict]:
             window = top.get("context_length") if isinstance(top, dict) else None
         if not isinstance(window, int) or window <= 0:
             window = DEFAULT_CONTEXT_WINDOW
+        pricing = entry.get("pricing") if isinstance(entry.get("pricing"), dict) else {}
         out.append({"id": slug, "label": label, "tier": None, "efforts": efforts,
-                    "intelligence": None, "openrouter": None, "context_window": int(window)})
+                    "effort_labels": effort_labels("openrouter", efforts),
+                    "intelligence": None, "openrouter": None, "context_window": int(window),
+                    "price_prompt_per_mtok": _per_mtok(pricing.get("prompt")),
+                    "price_completion_per_mtok": _per_mtok(pricing.get("completion"))})
     return out
+
+
+def _per_mtok(per_token) -> float | None:
+    """The API's per-token price (a decimal string, "0.00000286") as dollars per million tokens.
+
+    None for anything that is not a finite number at or above zero: OpenRouter writes "-1" for a
+    router row whose price depends on where the request lands, and that is not a price.
+    """
+    try:
+        value = float(per_token)
+    except (TypeError, ValueError):
+        return None
+    if value != value or value in (float("inf"), float("-inf")) or value < 0:
+        return None
+    return round(value * 1_000_000, 6)
 
 
 def _read_cache() -> tuple[list[dict], float]:
@@ -140,7 +165,9 @@ def stale(now: float | None = None) -> bool:
     """Whether the rows in hand are older than the TTL (or there are none)."""
     with _lock:
         _load_locked()
-        return not _rows or (now if now is not None else time.time()) - _fetched_at >= CACHE_TTL_S
+        if not _rows or not any("price_completion_per_mtok" in row for row in _rows):
+            return True             # nothing, or a cache from before the prices were carried
+        return (now if now is not None else time.time()) - _fetched_at >= CACHE_TTL_S
 
 
 def fetch(url: str = URL, timeout: float = FETCH_TIMEOUT_S):

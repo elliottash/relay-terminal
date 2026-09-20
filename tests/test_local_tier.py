@@ -83,12 +83,15 @@ class TierTableTests(unittest.TestCase):
 # ----- validation ----------------------------------------------------------------------------
 class ValidateTests(Case):
     def test_a_saved_endpoint_is_accepted(self):
+        # One object per tier is the form of before 2026-09-20: it is a one-element list now.
         self.assertEqual(validate_tiers({'local': {'preset': 'local:bonsai'}}),
-                         {'local': {'preset': 'local:bonsai'}})
+                         {'local': [{'preset': 'local:bonsai'}]})
+        self.assertEqual(validate_tiers({'local': [{'preset': 'local:bonsai', 'model': ''}]}),
+                         {'local': [{'preset': 'local:bonsai', 'model': ''}]})
 
     def test_a_loopback_endpoint_is_accepted(self):
         table = validate_tiers({'local': {'base_url': 'http://127.0.0.1:9999/v1', 'model': 'm'}})
-        self.assertEqual(table['local']['base_url'], 'http://127.0.0.1:9999/v1')
+        self.assertEqual(table['local'][0]['base_url'], 'http://127.0.0.1:9999/v1')
 
     def test_a_hosted_preset_is_refused_with_a_sentence(self):
         with self.assertRaises(ValueError) as caught:
@@ -102,7 +105,15 @@ class ValidateTests(Case):
             validate_tiers({'local': {'preset': 'local:missing'}})
 
     def test_the_other_tiers_still_take_a_hosted_preset(self):
-        self.assertEqual(validate_tiers({'flash': {'preset': 'glm'}}), {'flash': {'preset': 'glm'}})
+        self.assertEqual(validate_tiers({'flash': {'preset': 'glm'}}), {'flash': [{'preset': 'glm'}]})
+
+    def test_a_local_list_drops_what_is_not_on_this_machine(self):
+        """A list never raises (protocol 13.7): the entry that is not local is dropped, the rest stand."""
+        table = validate_tiers({'local': [{'preset': 'kimi', 'model': 'kimi-k3'},
+                                          {'preset': 'local:missing', 'model': 'm'},
+                                          {'preset': 'local:bonsai', 'model': ''}]})
+        self.assertEqual(table, {'local': [{'preset': 'local:bonsai', 'model': ''}]})
+        self.assertEqual(validate_tiers({'local': [{'preset': 'kimi', 'model': 'kimi-k3'}]}), {})
 
     def test_a_role_may_follow_the_local_tier(self):
         self.assertEqual(validate_roles({'summaries': {'tier': 'local'}}),
