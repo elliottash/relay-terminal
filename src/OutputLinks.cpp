@@ -97,7 +97,7 @@ struct Claim {
 };
 
 void addPath(QVector<Candidate> &out, Claim &claim, int start, int length, const QString &text,
-             const QString &path, int line, int column, bool allowSpaces)
+             const QString &path, int line, int column, bool allowSpaces, bool bare = false)
 {
     if (length <= 0 || !claim.free(start, length))
         return;
@@ -111,6 +111,7 @@ void addPath(QVector<Candidate> &out, Claim &claim, int start, int length, const
     c.path = path;
     c.line = line;
     c.column = column;
+    c.bare = bare;
     out.append(c);
     claim.take(start, length);
 }
@@ -252,11 +253,16 @@ QVector<Candidate> candidates(const QString &text)
                 length = m.capturedEnd() + tail.capturedLength() - at;
             }
         }
-        addPath(out, claim, at, length, inner, path, line, column, true);
+        // Quoted without a `/` is as bare as an unquoted word (#SFZC): 'src' in prose is a
+        // folder reference the same way `src` is. Tracebacks (stage 3) and file(line,col)
+        // (stage 4) are program forms and keep their terminal rule.
+        addPath(out, claim, at, length, inner, path, line, column, true, !path.contains(QLatin1Char('/')));
     }
 
     // 6. Bare tokens: ls output, gcc/clang/cargo `file:line:column`, pytest node ids,
-    //    stack frames inside parentheses (the brackets are boundaries).
+    //    stack frames inside parentheses (the brackets are boundaries). A token with no `/`
+    //    is marked `bare`: in prose (#SFZC) it may link only to a file, never to the
+    //    directory an English word happens to name — resolve() holds that rule.
     int i = 0;
     while (i < text.size()) {
         if (isBoundary(text[i]) || !claim.free(i, 1)) {
@@ -276,7 +282,8 @@ QVector<Candidate> candidates(const QString &text)
         QString path;
         int line = -1, column = -1;
         if (!token.isEmpty() && splitLocation(token, &path, &line, &column))
-            addPath(out, claim, i, token.size(), token, path, line, column, true);
+            addPath(out, claim, i, token.size(), token, path, line, column, true,
+                    !path.contains(QLatin1Char('/')));
         i = end;
     }
 
@@ -285,7 +292,7 @@ QVector<Candidate> candidates(const QString &text)
 }
 
 Target resolve(const Candidate &candidate, const QString &cwd, const QString &home, const Probe &probe,
-               const CardLookup &cards)
+               const CardLookup &cards, Mode mode)
 {
     Target target;
     target.kind = candidate.kind;
@@ -342,6 +349,13 @@ Target resolve(const Candidate &candidate, const QString &cwd, const QString &ho
         const Entry entry = probe(absolute);
         if (entry == Entry::Missing)
             continue;
+        // #SFZC: in prose a bare word — one with no `/` — names a folder far too often by
+        // accident (`tests`, `docs`, `remote` are all directories relative to the pane) to
+        // link; there a folder carries its slash (`tests/`). A bare *file* name keeps its
+        // link (owner, 2026-09-20: "file names still link") — it is the commonest openable
+        // thing in a reply, and no false positive was ever a file.
+        if (mode == Mode::Prose && candidate.bare && entry == Entry::Directory)
+            continue;
         target.valid = true;
         target.target = absolute;
         target.directory = entry == Entry::Directory;
@@ -353,11 +367,11 @@ Target resolve(const Candidate &candidate, const QString &cwd, const QString &ho
 }
 
 QVector<Found> scan(const QString &text, const QString &cwd, const QString &home, const Probe &probe,
-                    const CardLookup &cards)
+                    const CardLookup &cards, Mode mode)
 {
     QVector<Found> found;
     for (const Candidate &candidate : candidates(text)) {
-        const Target target = resolve(candidate, cwd, home, probe, cards);
+        const Target target = resolve(candidate, cwd, home, probe, cards, mode);
         if (target.valid)
             found.append({candidate, target});
     }

@@ -41,6 +41,7 @@ struct Candidate {
     QString path;      // Path: the span without the :line:column suffix. Card: the id, upper-cased.
     int line = -1;     // 1-based, -1 when the span carries none
     int column = -1;
+    bool bare = false; // Path: a bare-token stage find with no `/` in it — see Mode::Prose
 };
 
 // What the filesystem says about an absolute path.
@@ -48,6 +49,19 @@ enum class Entry {
     Missing = -1,
     File = 0,
     Directory = 1,
+};
+
+// Where the scanned line came from (#SFZC). `Program` is a program's own output, where a bare
+// name that resolves against the pane's directory is a link on purpose — an `ls` of
+// extension-less folders is the commonest link-bearing line there is. `Prose` is a line Relay
+// printed itself (an agent message inside a relay://prose/ block, #R2WQ), where the same rule
+// lights up every English word that happens to name a directory: `tests`, `docs`, `remote`.
+// There a bare token — one with no `/` — is a link only when it resolves to a *file*; a folder
+// in prose carries its slash (`tests/`, `src/Pane.h`). Only the bare-token stage is affected:
+// quoted paths, `file:line` forms and URLs behave the same in both modes.
+enum class Mode {
+    Program,
+    Prose,
 };
 
 using Probe = std::function<Entry(const QString &absolutePath)>;
@@ -90,9 +104,10 @@ QVector<Candidate> candidates(const QString &text);
 
 // `candidate` against a pane's directory and board. `cwd` resolves relative paths, `home`
 // expands `~`. A path the probe does not find is not a link, and neither is a card id `cards`
-// does not know (`Target::valid` stays false in both cases).
+// does not know (`Target::valid` stays false in both cases). `mode` follows the surface the
+// line was printed on (see `Mode`): in `Mode::Prose` a bare candidate links only to a file.
 Target resolve(const Candidate &candidate, const QString &cwd, const QString &home, const Probe &probe,
-               const CardLookup &cards = {});
+               const CardLookup &cards = {}, Mode mode = Mode::Program);
 
 struct Found {
     Candidate candidate;
@@ -101,7 +116,7 @@ struct Found {
 
 // The candidates of one line that resolve, in reading order.
 QVector<Found> scan(const QString &text, const QString &cwd, const QString &home, const Probe &probe,
-                    const CardLookup &cards = {});
+                    const CardLookup &cards = {}, Mode mode = Mode::Program);
 
 // The keyboard cursor over an ordered list of links (#GWXM). Index 0 is the oldest link,
 // count-1 the newest (nearest the prompt).

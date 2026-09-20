@@ -1785,8 +1785,14 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     }
     if (idx < 0 || idx >= logical.text.size())
         return false;
+    // The row under the pointer is Relay-printed prose when its cells carry the block's
+    // relay://prose/ anchor (#R2WQ; `uri` is empty at an unlinked cell, and a non-prose
+    // hyperlink returned above). Prose scans in Prose mode (#SFZC): a bare folder word is
+    // plain text there, a folder links only with its slash.
+    const links::Mode mode = FoldLayer::isProseUri(uri) ? links::Mode::Prose : links::Mode::Program;
     for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(),
-                                                 m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup)) {
+                                                 m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup,
+                                                 mode)) {
         const int s = found.candidate.start;
         const int e = s + found.candidate.length - 1;
         if (idx < s || idx > e || e >= int(logical.cellOf.size()))
@@ -1837,13 +1843,29 @@ void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
         m_restLinks.clear();
     if (m_restLinks.isEmpty())
         m_restLinksAge.start();
+    // #SFZC: a Relay prose row — every cell of the block's rows carries its relay://prose/
+    // anchor (#R2WQ) — is scanned in Prose mode, where a bare folder word stays plain text.
+    // Program rows keep today's rule: an `ls` of extension-less folders is the commonest
+    // link-bearing line there is.
+    bool prose = false;
+    for (int col = 0; col < int(line.cells.size()); ++col) {
+        if (!line.cells[size_t(col)].link)
+            continue;
+        prose = FoldLayer::isProseUri(m_session->withCore(
+            [&](VtCore &core) { return core.hyperlinkAt(frameRow, col); }));
+        break;
+    }
     const QString cwd = currentDirectory();
-    const QString key = cwd + QLatin1Char('\n') + logical.text;
+    // The mode is part of the key: the same text is a link on a program row and plain on a
+    // prose one, and the cache must not carry the answer of one to the other.
+    const QString key = (prose ? QStringLiteral("prose\n") : QStringLiteral("out\n")) + cwd + QLatin1Char('\n')
+                        + logical.text;
     auto it = m_restLinks.constFind(key);
     if (it == m_restLinks.constEnd()) {
         QVector<QPair<int, int>> spans;
         for (const links::Found &found : links::scan(logical.text, cwd, QDir::homePath(),
-                                                     m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup))
+                                                     m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup,
+                                                     prose ? links::Mode::Prose : links::Mode::Program))
             spans.append({found.candidate.start, found.candidate.start + found.candidate.length - 1});
         it = m_restLinks.insert(key, spans);
     }
@@ -1883,13 +1905,24 @@ void TerminalView::collectLinks()
     m_linkWalk.clear();
     QStringList rows;
     int historyRows = 0, columns = 80;
+    std::vector<VtCore::HyperlinkRun> proseRuns;
     m_session->withCore([&](VtCore &core) {
         historyRows = core.historyRows();
         columns = std::max(1, core.columns());
         rows = core.historyText(kWalkScrollbackLines);
         const QString screen = core.screenText();
         rows += screen.split(QLatin1Char('\n'));
+        // The rows Relay printed as prose blocks (#R2WQ): they scan in Prose mode (#SFZC),
+        // where a bare folder word is not a link. One walk per keypress, not per frame,
+        // which is the pace hyperlinkRuns() asks for.
+        proseRuns = core.hyperlinkRuns(QString::fromLatin1(kProsePrefix));
     });
+    auto rowIsProse = [&proseRuns](int row) {
+        for (const VtCore::HyperlinkRun &run : proseRuns)
+            if (row >= run.startRow && row <= run.endRow)
+                return true;
+        return false;
+    };
     // historyText() returns the newest lines, so the first row it gave us sits this far
     // down the scrollback; screen row k follows at historyRows + k.
     const int firstRow = std::max(0, historyRows - int(rows.size()));
@@ -1906,7 +1939,14 @@ void TerminalView::collectLinks()
             ++last;
             text += rows[last];
         }
-        for (const links::Found &found : links::scan(text, cwd, home, probe, cardLookup)) {
+        // A logical line any of whose rows sits inside a prose block scans as prose; the
+        // block's rows all carry the anchor, so the soft-wrapped tail of a prose line does
+        // too. Program output around it keeps the terminal rule.
+        bool prose = false;
+        for (int r = i; r <= last && !prose; ++r)
+            prose = rowIsProse(firstRow + r);
+        for (const links::Found &found : links::scan(text, cwd, home, probe, cardLookup,
+                                                     prose ? links::Mode::Prose : links::Mode::Program)) {
             WalkLink walk;
             const int s = found.candidate.start;
             const int e = s + found.candidate.length - 1;

@@ -33,6 +33,7 @@ Probe probe()
         QStringLiteral("/home/dev/project/Makefile"),
         QStringLiteral("/home/dev/project/my file.txt"),
         QStringLiteral("/home/dev/project/tests/test_links.py"),
+        QStringLiteral("/home/dev/project/src/Pane.h"),
         QStringLiteral("/home/dev/project/weird:name"),
         QStringLiteral("/home/dev/.bashrc"),
         QStringLiteral("/etc/hosts"),
@@ -41,6 +42,9 @@ Probe probe()
         QStringLiteral("/home/dev/project"),
         QStringLiteral("/home/dev/project/src"),
         QStringLiteral("/home/dev/project/tests"),
+        QStringLiteral("/home/dev/project/remote"), // the #SFZC false positives: common
+        QStringLiteral("/home/dev/project/build"),  // English words that name a directory
+        QStringLiteral("/home/dev/project/data"),
         QStringLiteral("/home/dev"),
         QStringLiteral("/etc"),
     };
@@ -84,6 +88,19 @@ QStringList targets(const QString &text)
 {
     QStringList out;
     for (const Found &f : found(text)) out << f.target.target;
+    return out;
+}
+
+// The same line scanned the way an agent message is (#SFZC): Mode::Prose.
+QVector<Found> proseFound(const QString &text)
+{
+    return scan(text, kCwd, kHome, probe(), cards(), Mode::Prose);
+}
+
+QStringList proseTargets(const QString &text)
+{
+    QStringList out;
+    for (const Found &f : proseFound(text)) out << f.target.target;
     return out;
 }
 
@@ -345,6 +362,61 @@ private slots:
     {
         QVERIFY(found(QStringLiteral("choose either a/b or c/d")).isEmpty());
         QVERIFY(found(QStringLiteral("the src/missing.cpp file was deleted")).isEmpty());
+    }
+
+    // ---- prose mode (#SFZC): Relay-printed agent messages ----------------------------------
+    //
+    // An agent reply is prose (a relay://prose/ block, #R2WQ), and there a folder links only
+    // when the token carries a `/`: every false positive — tests, docs, remote — is a bare
+    // English word that happens to name a directory relative to the pane. A bare *file*
+    // name keeps its link (owner, 2026-09-20: "file names still link").
+
+    void proseBareFolderWordsAreNotLinks()
+    {
+        const QString line = QStringLiteral("the tests and build folders, and the remote one, stay plain text");
+        // Program output: the same words are links — an `ls` of extension-less folders is
+        // the commonest link-bearing line there is.
+        QCOMPARE(found(line).size(), 3);
+        // Prose: none of them is.
+        QVERIFY(proseFound(line).isEmpty());
+    }
+
+    void proseFolderWithItsSlashLinks()
+    {
+        const auto links = proseFound(QStringLiteral("see tests/ and src/Pane.h for the rest"));
+        QCOMPARE(links.size(), 2);
+        QCOMPARE(links[0].target.target, QStringLiteral("/home/dev/project/tests"));
+        QVERIFY(links[0].target.directory);
+        QCOMPARE(links[1].target.target, QStringLiteral("/home/dev/project/src/Pane.h"));
+        QVERIFY(!links[1].target.directory);
+    }
+
+    void proseBareFileNamesKeepTheirLinks()
+    {
+        const QStringList bare = proseTargets(QStringLiteral("fixed notes.txt and the Makefile"));
+        QCOMPARE(bare.size(), 2);
+        QCOMPARE(bare.at(0), QStringLiteral("/home/dev/project/notes.txt"));
+        QCOMPARE(bare.at(1), QStringLiteral("/home/dev/project/Makefile"));
+        // file:line works in prose as it does in a compiler's output.
+        QCOMPARE(proseTargets(QStringLiteral("notes.txt:42 explains it")),
+                 {QStringLiteral("/home/dev/project/notes.txt")});
+    }
+
+    void proseQuotedFolderNeedsItsSlashToo()
+    {
+        QVERIFY(!found(QStringLiteral("look in 'src' first")).isEmpty()); // terminal: a quoted folder links
+        QVERIFY(proseFound(QStringLiteral("look in 'src' first")).isEmpty());
+        QCOMPARE(proseTargets(QStringLiteral("look in 'src/' first")),
+                 {QStringLiteral("/home/dev/project/src")});
+    }
+
+    void proseTracebacksAndUrlsKeepTheirRule()
+    {
+        // A traceback pasted into a reply is a program form: it links as in terminal output.
+        QCOMPARE(proseTargets(QStringLiteral("  File \"code.py\", line 3, in main")),
+                 {QStringLiteral("/home/dev/project/code.py")});
+        QCOMPARE(proseTargets(QStringLiteral("docs at https://relay.test/x")),
+                 {QStringLiteral("https://relay.test/x")});
     }
 
     // ---- resolution and probing ---------------------------------------------------------

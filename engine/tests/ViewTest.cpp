@@ -392,6 +392,54 @@ private slots:
         QCOMPARE(links.size(), 3);
     }
 
+    // #SFZC: a bare folder word in Relay's own prose (a relay://prose/ run, #R2WQ) is not a
+    // link — not under the pointer, not at rest, not for the walk — while the same word in
+    // program output keeps linking (an `ls` row), and in prose a folder named with its slash
+    // and a bare file name still link.
+    void proseBareFolderWordsAreNotLinks()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir;
+        { QFile f(dir.filePath(QStringLiteral("notes.txt"))); QVERIFY(f.open(QIODevice::WriteOnly)); }
+        QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("tests")));
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        t.backend->resizeTerminal(12, 100);
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.link = QColor(0x12, 0x34, 0xab); // a colour nothing else on the screen has
+        t.view->setColorScheme(scheme);
+        const QByteArray osc7 = "\x1b]7;file://" + QUrl::toPercentEncoding(dir.path(), "/") + "\x07";
+        // Row 0 is program output. Rows 1-2 are prose, one relay://prose/ run over both:
+        // the bare folder word is row 1, the forms that keep linking are row 2.
+        t.backend->writeToDisplay(osc7 + QByteArray("tests\r\n"));
+        t.backend->writeToDisplay(QByteArray("\x1b[97m\x1b]8;;relay://prose/t/9\x1b\\")
+                                  + QByteArray("the tests folder\r\n")
+                                  + QByteArray("see tests/ and notes.txt\r\n")
+                                  + QByteArray("\x1b]8;;\x1b\\\x1b[0m"));
+        QVERIFY(t.waitScreen(QStringLiteral("notes.txt")));
+        QTest::qWait(60);
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        const QString folder = QFileInfo(dir.filePath(QStringLiteral("tests"))).absoluteFilePath();
+        // Hover: the program row's bare word links; the prose word does not; the slashed
+        // folder and the file name on the prose row do.
+        QCOMPARE(t.view->linkAtPoint(QPoint(2 + 2 * cw + cw / 2, 2 + ch / 2)).target, folder);
+        QVERIFY(t.view->linkAtPoint(QPoint(2 + 6 * cw + cw / 2, 2 + ch + ch / 2)).target.isEmpty());
+        QCOMPARE(t.view->linkAtPoint(QPoint(2 + 6 * cw + cw / 2, 2 + 2 * ch + ch / 2)).target, folder);
+        QVERIFY(t.view->linkAtPoint(QPoint(2 + 19 * cw + cw / 2, 2 + 2 * ch + ch / 2))
+                    .target.endsWith(QStringLiteral("notes.txt")));
+        // The walk steps the three links, not the prose word.
+        TerminalView::Link link;
+        QVERIFY(t.view->stepLink(-1, &link));
+        QCOMPARE(t.view->linkWalkCount(), 3);
+        QVERIFY(link.target.endsWith(QStringLiteral("notes.txt")));
+        t.view->endLinkWalk();
+        // At rest: the bare folder word wears the link colour on the program row and does
+        // not on the prose row; the slashed form on the prose row does.
+        const QImage img = t.grab();
+        QVERIFY2(rowHasColor(img, 0, ch, scheme.link), "the program row's folder word lost the link colour");
+        QVERIFY2(!rowHasColor(img, 1, ch, scheme.link), "a bare folder word in prose is coloured as a link");
+        QVERIFY2(rowHasColor(img, 2, ch, scheme.link), "the slashed folder in prose lost the link colour");
+    }
+
     void pathTokenParsing()
     {
         QString path;
