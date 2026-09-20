@@ -1,14 +1,14 @@
 ---
 id: 7BM4
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, tests, profiling]
 component: [gui, worker]
 assignee: claude-code
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/], related: [R9G7, SDXE, PF4K], github: null}
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/], related: [R9G7, SDXE, PF4K], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -220,5 +220,22 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 - [x] GUI: Test suites pane with headless model, grid, columns, detail, row actions, registration <!-- t:xe -->
 - [x] Worker protocol §31: tests_list / tests_run / tests_history / tests_check, agent tools, policy lines <!-- t:pg -->
 - [x] Card: `## Tests` section strip, Check button, dated `### Check` block, three actions, verification gate <!-- t:q5 -->
-- [ ] Profile: scripts/relay-profile, button, streamed run, table pane, evidence under qa_evidence <!-- t:ea -->
-- [ ] Docs and QA: SWITCHBOARD-DESIGN §4.14, VALIDATION inventory pointer, protocol §31, QA checklist <!-- t:em -->
+- [x] Profile: scripts/relay-profile, button, streamed run, table pane, evidence under qa_evidence <!-- t:ea -->
+- [x] Docs and QA: SWITCHBOARD-DESIGN §4.14, VALIDATION inventory pointer, protocol §31, QA checklist <!-- t:em -->
+
+## QA checklist
+Implementer's checks (Claude Fable 5.1 orchestrating Opus subagents, 2026-09-20). Each line names
+the command or the screenshot that proves it; the verifier re-runs them on a clean export.
+
+- [ ] Both runners pass the setup: `scripts/relay-tooling-setup` on spark and `ssh sphinxpad.local 'bash -s' < scripts/relay-tooling-setup` end in `0 needed tool(s) missing, 0 smoke test(s) failed`.
+- [ ] `scripts/relay-remote-tests --qt 6 -R '^(jobs|board)$'` builds on sphinxpad and leaves `ctest.xml`, `meta.json` and `ninja_log` under `issues/.private/tests/incoming/sphinxpad-*/`.
+- [ ] Backend suites: `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_test_probe tests.test_test_history tests.test_junit_runner tests.test_tests_protocol tests.test_profile_protocol tests.test_relay_profile` — all pass (87 + 90 + 34 cases); the same three store modules pass under Python 3.14 on sphinxpad.
+- [ ] GUI suites: `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(testsuites|cardtests|profilepane|windowstate|panestatus|appcommands)$'` — all pass.
+- [ ] Test suites pane, live (`docs/qa_evidence/2026-09-20-test-suites-pane/implementer-live-0{1,2,3}-*.png`): the row's Tests button opens it beside the Switchboard; Run all through the real board worker marks the failing row red; the detail shows the card, commit and host; the palette row `Test suites` opens it and an unattached tab shows "No worker attached".
+- [ ] Pane width: at 560 px the names read in full and p50, Runs and Cards have yielded (`RELAY_TESTSUITES_SHOT=<png> RELAY_TESTSUITES_SHOT_WIDTH=560 ./build/relay-testsuites-tests`).
+- [ ] Card page (`docs/qa_evidence/2026-09-20-card-tests-check/implementer-0{1,2,3,4}-*.png`): the `## Tests` strip and Check; two findings (gone, failing) and the `### Check <date>` block written into the body; the move to Done refused with the tests named and the picker put back; Override… asks a reason and the `decision` entry quotes it.
+- [ ] Profile (`docs/qa_evidence/2026-09-20-profile-button/`): the four-entry menu; a build profile's result pane with the table, share column and evidence path; Attach to card… adds a `## Profile` section and the evidence path to `links.evidence`; `scripts/relay-profile tests tests.test_test_history` writes `tests.speedscope.json` and `summary.md`.
+- [ ] `scripts/relay-speedscope --print-url <any profile>` prints a `file://…/index.html#localProfilePath=` URL and the bundle opens it offline.
+- [ ] Docs: `docs/PROFILING.md`, `docs/SWITCHBOARD-TOOLING-RESEARCH.md`, `docs/SWITCHBOARD-DESIGN.md` §4.14, `docs/SWITCHBOARD-FORMAT.md` §2.6, `docs/AGENT-SESSIONS-PROTOCOL.md` §31 (31.9 Profile still to land — see the thread), `docs/VALIDATION.md` inventory pointer.
+- [ ] Not done, by decision: the app profile target has no screenshot (it profiles a second Relay someone must drive); the agent-facing `tests_check` tool writes no block (§31.6's contract — the owner's call); coverage and test-impact analysis are out of scope.
+

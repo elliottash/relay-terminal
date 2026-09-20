@@ -794,6 +794,61 @@ and every other box in the app is that control:
 
 Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`.
 
+### 4.14 The tool row is the project's tooling hub: Tests, Check and Profile (#7BM4, owner 2026-09-20)
+
+The owner's direction, agreed 2026-09-20 (card #7BM4, research in
+[`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md)): the Switchboard is not only
+the tracker but the project's control panel. Every recurring engineering activity is a button in
+the helper panel's row (4.13) or a sibling pane beside the board, never a pane-header control and
+never an overlay, and **what it produces is written into cards**, so the agents that claim cards
+and the QA sessions that verify them read the same numbers the owner sees. Three surfaces ship
+first; the row is capped at four buttons (Check · Clean up · Tests · Profile), past which it
+becomes a menu.
+
+- **`## Tests` on a card, and Check.** A Markdown list, one line per test — an invocation and an
+  optional ` — path` (`` `ctest -R panelayout` — tests/panelayout_test.cpp ``,
+  `` `tests/test_board.py::CardTests::test_roundtrip` ``, `manual: docs/qa_evidence/…`); the bytes
+  are in [`SWITCHBOARD-FORMAT.md`](SWITCHBOARD-FORMAT.md) §2.6. The card page shows a strip above
+  the body (how many listed, the last check's verdict) with **Check**, which *lists, never runs*:
+  gone, never run, skipped forever and orphaned come from collection and git; slow, flaky and
+  failing from the history. The findings render as rows, with at most three actions — Run these,
+  Add the tests this card's commits touched, Open the failing one — and the worker appends a dated
+  `### Check` block under `## Tests` (one per card per hour), so the verdict is a durable artefact
+  and not a toast. **The check is a gate:** a card in `needs-verification` cannot move to a QA
+  lane or `done` while a listed test is gone, never run or failing; the notice offers **Override…**,
+  and the reason typed there is recorded as a `decision` entry. A card with no `## Tests` section
+  is not gated — the finding for that case is advice. Protocol §31.
+- **The Test suites pane** (`relay::tests::TestSuitesPane`, layout node `testsuites`, palette
+  `tests.open`, no default key since Ctrl+Shift+T is New tab everywhere): opened from the row's
+  **Tests** button beside the Switchboard, attached to the tab's board worker. TestGrid's grid —
+  rows are tests, the last executions newest-left as coloured cells — then Buildkite's columns
+  trimmed to reliability, p50, p95, runs, last run and cards; nextest's summary line
+  (`68 tests · 64 passed (2 slow, 1 flaky) · 3 never run · 12.4 s`); sort by flake score, p95,
+  name, last failure or last run; the filter takes `is:slow is:flaky is:failed is:never is:stale`.
+  A row's detail holds its history (result, duration, commit, **host** — spark's and sphinxpad's
+  runs sit side by side), the last failure's excerpt, the file and the cards naming it. Row
+  actions: Run, Rerun until fail, Open source, **Make a card** (Trunk's one-issue-per-flaky-test,
+  filed in the bugs tab with a `## Tests` section) and Attach to card. As the pane narrows the grid
+  gives up cells and then p50, Runs, Cards, Last run and p95 leave, so a name never elides first.
+  Execution history is a store, not source: `<board>/.private/tests/history.jsonl`, gitignored,
+  fed by every run and by `scripts/relay-remote-tests`' fetched JUnit; the numbers that matter are
+  what Check writes into the card.
+- **Profile.** One button that **asks** — Build (this machine), Build (sphinxpad), Python tests,
+  The app — because "profile the project" is three different things here, and the build ships
+  first (one translation unit is three quarters of a cold build). `scripts/relay-profile` does the
+  work and writes the snapshot under `docs/qa_evidence/<date>-profile-<target>/`; the result is a
+  transient pane with the **table before any flame graph** (every profiling product's order), an
+  "Open flame graph" that hands the speedscope JSON to the local bundle in the system browser
+  (`scripts/relay-speedscope`, offline, nothing uploaded — Relay has no QtWebEngine), and
+  **Attach to card…**, which appends the top rows as a `## Profile` table and the evidence path to
+  `links.evidence`. The commands behind every target are in [`PROFILING.md`](PROFILING.md).
+
+What comes next on the same row, in the order the owner chose: flaky tests become cards on their
+own and close when they recover; a Renovate-shaped `dependencies.md` where a checkbox is the only
+verb; release notes from cards; churn hotspots; TODO mining with the card id written back.
+Evidence: `docs/qa_evidence/2026-09-20-test-suites-pane/`, `…-card-tests-check/`,
+`…-profile-button/`.
+
 ## 5. Referencing cards from the terminal
 
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker

@@ -29,6 +29,15 @@ reports, and it has not been re-run here). `ctest` registers **56** tests, not 2
 them. The three rows above are the 2026-09-17 snapshot; the two commands are the source of
 truth for pass/fail.
 
+**Since 2026-09-20 the live inventory is the Test suites pane** (card #7BM4, Switchboard tool
+row → Tests): it discovers every ctest and unittest test in the checkout in about half a second
+(`relay_core.test_probe`), shows each one's runs, reliability, p50/p95 and last failure from the
+execution store `issues/.private/tests/history.jsonl` (`relay_core.test_history`, gitignored),
+and lists the cards that name it. `scripts/relay-remote-tests --qt 6` runs a committed revision
+on sphinxpad and its JUnit XML lands in the same store with `host: sphinxpad`. The tables below
+are the last hand-taken snapshot and are kept for the record; the pane, `./scripts/test.sh` and
+`ctest --test-dir build` are the source of truth.
+
 The per-suite inventory below now names **every** module under `tests/` and `engine/tests/`
 (2026-09-19): 99 Python modules, 54 Qt suites and 7 engine suites, no module left out. It is
 generated rather than hand-kept, so it can be re-taken instead of edited:
