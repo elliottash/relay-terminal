@@ -44,3 +44,19 @@ only in the thread as `kind=decision` comments, which is where they are already 
 the body has no digest of why the card is shaped the way it is.
 
 Status `discussing`, `waiting_on: owner`.
+
+<!-- relay:entry 20260920T200244Z-h1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 20:02
+Owner answered all three, 2026-09-20: *"ah yes, QA checklist is needed, its created by execute and
+could be adjusted by verify, and the as yet implemented QA support agent."* and *"OK for tasks and
+decisions as well."*
+
+All three recommendations taken. The QA checklist gains a detail that was not in the question: it
+has **three authors** across two stages — the implementer writes it at executing, and both the
+verifier and a **QA support agent that does not exist yet** may adjust it at verify.
+
+Eleven sections, in body order, are in the card's `## Decisions`. Moved to `planned` with the
+plan on it. The one judgement call I made rather than asked: **no bulk migration** — 190 cards
+carry a what-was-built heading in 40 spellings, and rewriting them all in a checkout with twenty
+live sessions is a bigger risk than the inconsistency. The checker warns instead, so the backlog
+is visible and countable, and cards convert as they are touched.
