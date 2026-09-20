@@ -2380,11 +2380,13 @@ private:
                     row.onButton = [tier, key = item.key, curated](int) { relay::models::curation::removeFromTier(tier, key); curated(); };
                 } else {
                     row.kind = relay::SettingRow::Choice;
-                    QStringList labels;
-                    for (const QString &level : levels) labels << entry->effortLabel(level);
-                    row.options = levels;
+                    // An entry with no level of its own runs at the model's default, and says so —
+                    // not at the top level, which is what a lite row looked like it was set to.
+                    QStringList options{QString()}, labels{QStringLiteral("default")};
+                    for (const QString &level : levels) { options << level; labels << entry->effortLabel(level); }
+                    row.options = options;
                     row.optionLabels = labels;
-                    row.current = levels.contains(item.effort) ? item.effort : levels.last();
+                    row.current = levels.contains(item.effort) ? item.effort : QString();
                     row.onChoose = [tier, key = item.key, curated](const QString &level) {
                         relay::models::curation::setTierEffort(tier, key, level);
                         curated();
