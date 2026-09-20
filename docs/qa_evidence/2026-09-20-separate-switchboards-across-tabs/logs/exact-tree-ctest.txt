@@ -1,0 +1,10 @@
+Internal ctest changing into directory: /tmp/ttyb-tree2-build
+Test project /tmp/ttyb-tree2-build
+    Start 50: board
+1/2 Test #50: board ............................   Passed    0.95 sec
+    Start 53: boardpane
+2/2 Test #53: boardpane ........................   Passed    0.08 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   1.04 sec

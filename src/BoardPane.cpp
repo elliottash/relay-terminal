@@ -3689,7 +3689,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         return;
     }
-    if (type == QStringLiteral("board_card")) {
+    // The answer to one pane's own `board_card_get`: the worker echoes the requester's id, but the
+    // window fans every event out to every board pane of the workspace, so without this check a
+    // card opened in one tab opens in them all (#TTYB). Only the card *details* are scoped — the
+    // broadcasts above (`board`, `board_changed`) still reach every pane, so the rows move together.
+    if (type == QStringLiteral("board_card") && mine) {
         QStringList statuses;
         const QList<board::Column> sections = m_model.sections();
         for (const board::Column &column : sections)

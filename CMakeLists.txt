@@ -720,6 +720,13 @@ if(BUILD_TESTING)
     target_compile_definitions(relay-boardworkspace-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME boardworkspace COMMAND relay-boardworkspace-tests)
     set_tests_properties(boardworkspace PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Two Switchboard panes on one workspace (#TTYB): the worker's events reach every board pane,
+    # so a `board_card` answer is opened only by the pane whose request it answers — the panes'
+    # navigation is independent while their data stays shared.
+    add_executable(relay-boardpane-tests tests/boardpane_test.cpp)
+    target_link_libraries(relay-boardpane-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardpane COMMAND relay-boardpane-tests)
+    set_tests_properties(boardpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The project model: candidate projects, the board folder, the key the backend's workspace
     # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
     add_executable(relay-projects-tests tests/projects_test.cpp)

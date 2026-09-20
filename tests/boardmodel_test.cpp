@@ -115,6 +115,27 @@ QJsonObject card(const QString &id, const QString &title, const QString &issue, 
                        {"thread", QJsonArray{}}, {"thread_total", 0}};
 }
 
+// #TTYB: the worker answers a `board_card_get` by echoing that request's id, and the window hands
+// every event to every board pane of the workspace, so a pane shows the card only when the id is
+// its own. `openCard` is that handshake as one call: the pane selects and asks, and the answer is
+// delivered under the id it coined. A card whose detail is already open is not asked for again
+// (`BoardView::openSelected`), so the id echoed is the pane's latest coin — the re-read a change
+// asks for reuses that same id, which is exactly what the worker echoes back.
+void openCard(relay::BoardView &view, QList<QJsonObject> &sent, QJsonObject event)
+{
+    view.selectCard(event.value(QStringLiteral("card_id")).toString());
+    view.openSelected();
+    if (sent.isEmpty()) {
+        // The list was cleared since the ask that opened this card; ask again so the answer can
+        // carry a request id this pane coined.
+        view.closeDetail();
+        view.openSelected();
+    }
+    QVERIFY(!sent.isEmpty());
+    event.insert(QStringLiteral("id"), sent.constLast().value(QStringLiteral("id")));
+    view.handleEvent(event);
+}
+
 // The pane's one list.
 QListWidget *listOf(relay::BoardView &view)
 {
@@ -1112,6 +1133,8 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
 void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 600);          // narrow enough that an open card takes the whole pane
     view.handleEvent(opened({row("K7Q2", "ready", "features")}));
 
@@ -1129,7 +1152,7 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 
     // With a card open in a narrow pane the list is gone, tools and all, and the header says the
     // one thing there is to say.
-    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
                                  {"status", "ready"}, {"tab", "features"}, {"body", "text"},
                                  {"thread", QJsonArray{}}, {"thread_total", 0}});
     QVERIFY(view.detailOpen());
@@ -1148,8 +1171,7 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 
     // "Clean up" has its room in that row and starts a preview run (19.9); the run itself is
     // walked in aCleanupPreviewsFirstAndItsEventsNeverReachACardThread below.
-    QList<QJsonObject> sent;
-    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    sent.clear();
     view.findChild<QToolButton *>(QStringLiteral("boardCleanup"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
     QCOMPARE(sent.last().value("dry_run").toBool(), true);
@@ -1162,6 +1184,8 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 void BoardModelTests::escOnTheMainPageGoesToTheFilterBar()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.setCollapsedSections(QJsonArray{});
     view.handleEvent(opened({row("K7Q2", "ready", "features")}));
 
@@ -1195,7 +1219,7 @@ void BoardModelTests::escOnTheMainPageGoesToTheFilterBar()
     QCOMPARE(view.focusWidget(), static_cast<QWidget *>(list));
 
     // A card that has the pane goes back first; the next Esc is the filter bar.
-    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
                                  {"title", "K7Q2 card"}, {"status", "ready"}, {"tab", "features"},
                                  {"body", "text"}, {"thread", QJsonArray{}}, {"thread_total", 0}});
     QVERIFY(view.detailOpen());
@@ -1282,7 +1306,7 @@ void BoardModelTests::theOpenCardRefetchesOnlyForItsOwnChanges()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
-    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
                                  {"status", "inbox"}, {"tab", "features"}, {"body", "# K7Q2 card\ntext"},
                                  {"thread", QJsonArray{}}, {"thread_total", 0}});
     QVERIFY(view.detailOpen());
@@ -1314,7 +1338,7 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
                                  {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
                                  {"thread", QJsonArray{}}, {"thread_total", 0}});
     auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
@@ -1347,7 +1371,7 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
                            {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
                            {"thread", QJsonArray{}}, {"thread_total", 0}};
     };
-    view.handleEvent(cardArrived(QStringLiteral("K7Q2")));
+    openCard(view, sent, cardArrived(QStringLiteral("K7Q2")));
     auto *doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
     QVERIFY(doc);
     const auto text = [doc] { return doc->toPlainText(); };
@@ -1386,12 +1410,12 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
     view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
                                  {"text", QStringLiteral("The plan: render it in the thread.")}});
     QTest::qWait(120);
-    view.handleEvent(cardArrived(QStringLiteral("M3XJ")));   // another card, no turn on it
+    openCard(view, sent, cardArrived(QStringLiteral("M3XJ")));   // another card, no turn on it
     QVERIFY(!text().contains(QStringLiteral("\u2726 thought for 4 s")));
     QVERIFY(!text().contains(QStringLiteral("The plan: render it in the thread.")));
     auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
     QVERIFY(strip && strip->isHidden());
-    view.handleEvent(cardArrived(QStringLiteral("K7Q2")));
+    openCard(view, sent, cardArrived(QStringLiteral("K7Q2")));
     QVERIFY(strip && !strip->isHidden());
     QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
     QVERIFY(text().contains(QStringLiteral("The plan: render it in the thread.")));
@@ -1471,7 +1495,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
     QVERIFY(document);
@@ -1595,7 +1619,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
     auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
     QVERIFY(reply && error);
@@ -1636,7 +1660,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
     QList<QJsonObject> mine;
     third.onSend = [&mine](const QJsonObject &message) { mine << message; };
     third.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    third.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(third, mine, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     auto *box = third.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
     box->setPlainText(QStringLiteral("Still relevant?"));
     QTest::keyClick(box, Qt::Key_Return);
@@ -1683,6 +1707,8 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
 void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 700);          // narrow: an open card takes the whole pane
     view.show();                    // the placement is geometry, so the layout has to have run
     QVERIFY(QTest::qWaitForWindowExposed(&view));
@@ -1695,7 +1721,7 @@ void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
     QVERIFY2(notice->y() > view.height() / 2, qPrintable(QString::number(notice->y())));
 
     // With the card on top of it, the line sits clear of the reply box and the Ask button.
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     QCoreApplication::processEvents();
     view.rebuild();                 // any pending layout, then the notice is placed again
@@ -1754,7 +1780,7 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     QCOMPARE(sent.last().value("card").toString(), QStringLiteral("N3W1"));
     // The worker seeds the new card's `## Issue` with the line that was typed, because that line
     // is the owner's own words and the card format keeps them verbatim.
-    view.handleEvent(card("N3W1", "clickable paths in the output",
+    openCard(view, sent, card("N3W1", "clickable paths in the output",
                           "clickable paths in the output", "h1"));
     auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardIssueEditor"));
     auto *titleField = view.findChild<QLineEdit *>(QStringLiteral("boardCardTitleEdit"));
@@ -1795,7 +1821,7 @@ void BoardModelTests::theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWor
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("clicking a path"),
+    openCard(view, sent, card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("clicking a path"),
                           QString(64, QLatin1Char('a'))));
     view.selectCard(QStringLiteral("K7Q2"));
 
@@ -1863,7 +1889,7 @@ void BoardModelTests::anEditIsKeptWhenTheCardChangedUnderIt()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("the ask"),
+    openCard(view, sent, card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("the ask"),
                           QString(64, QLatin1Char('a'))));
     view.selectCard(QStringLiteral("K7Q2"));
     view.editSelected();
@@ -1889,7 +1915,7 @@ void BoardModelTests::anEditIsKeptWhenTheCardChangedUnderIt()
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
 
     // The re-read hands over the new hash and the version on disk, and still keeps the text.
-    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("someone else's words"),
+    openCard(view, sent, card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("someone else's words"),
                           QString(64, QLatin1Char('b'))));
     QCOMPARE(issue->toPlainText(), QStringLiteral("the ask, in better words"));
     QVERIFY(!error->isHidden());
@@ -1922,7 +1948,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     // Discuss and Comment are what the box does, so they have no buttons; what is left on the row
     // is Plan and the two that leave the board.
     QVERIFY(!button(view, QStringLiteral("Discuss")));
@@ -1992,7 +2018,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
         QJsonObject{{"entry_id", "20260918T100100Z-a2"}, {"author", "agent"}, {"kind", "comment"},
                     {"attrs", QJsonObject{{"mode", "discuss"}, {"model", "glm-5"}}}, {"text", "Retitled it."}}});
     withThread.insert("thread_total", 2);
-    view.handleEvent(withThread);
+    openCard(view, sent, withThread);
     auto *browser = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
     const QString doc = browser->toPlainText();
     QVERIFY2(doc.contains(QStringLiteral("owner  Plan")), qPrintable(doc));
@@ -2035,7 +2061,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
 
     // Plan #K7Q2, and watch it read the repository: the strip says what it is doing, which is
     // what a Plan does for minutes before it says a word.
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     view.cardAction(QStringLiteral("plan"));
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
     view.handleEvent(QJsonObject{{"event", "status"}, {"card_id", "K7Q2"}, {"mode", "plan"},
@@ -2046,7 +2072,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
                                  {"text", "Reading the completion code."}});
 
     // Open #M3XJ while that one runs: this card is idle, and its own Plan is offered.
-    view.handleEvent(card("M3XJ", "M3XJ card", "another issue", "h2"));
+    openCard(view, sent, card("M3XJ", "M3XJ card", "another issue", "h2"));
     QVERIFY(strip->isHidden());
     QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
     view.cardAction(QStringLiteral("plan"));
@@ -2059,7 +2085,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
 
     // Back to #K7Q2: it finished while it was off screen, so it is idle again — and its answer
     // is in the thread, which the worker appended.
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(strip->isHidden());
 
     // Back to #M3XJ: still planning, and the strip has its answer so far and its step back.
@@ -2067,7 +2093,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
                                  {"text", "Requesting model · step 2/256"}});
     view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "M3XJ"}, {"mode", "plan"},
                                  {"text", "Looking at the header."}});
-    view.handleEvent(card("M3XJ", "M3XJ card", "another issue", "h2"));
+    openCard(view, sent, card("M3XJ", "M3XJ card", "another issue", "h2"));
     QVERIFY(!strip->isHidden());
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
     QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 2/256"));
@@ -2364,7 +2390,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QString hintId, hintKeys;
     view.onHint = [&](const QString &id, const QString &keys) { hintId = id; hintKeys = keys; };
     view.handleEvent(::opened({row("K7Q2", "needs-qa-llm", "features")}));
-    view.handleEvent(qaCard(qaBlock()));
+    openCard(view, sent, qaCard(qaBlock()));
 
     // The line sits under the fields, in the muted ink, and says the whole recommendation.
     auto *line = view.findChild<QLabel *>(QStringLiteral("boardCardVerifyLine"));
@@ -2422,7 +2448,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QCOMPARE(opened, 3);
 
     // A card the worker sent no `qa` for: no line, and nothing to press.
-    view.handleEvent(qaCard(QJsonObject()));
+    openCard(view, sent, qaCard(QJsonObject()));
     QVERIFY(line->isHidden());
     QVERIFY(!verify->isEnabled());
     sent.clear();
@@ -2432,7 +2458,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QVERIFY(sent.isEmpty());
 
     // And a card that is not in a QA lane at all does not offer it: there is nothing to verify yet.
-    view.handleEvent(card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
+    openCard(view, sent, card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
     QVERIFY(line->isHidden());
     QVERIFY(verify->isHidden());
     QVERIFY(!verify->isEnabled());
@@ -2575,9 +2601,11 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
     QCOMPARE(relay::board::verifyLine(none), free);        // the whole line, not a list of reasons
 
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(::opened({row("K7Q2", "needs-qa-llm", "features")}));
     QJsonObject card = qaCard(none);
-    view.handleEvent(card);
+    openCard(view, sent, card);
     auto *line = view.findChild<QLabel *>(QStringLiteral("boardCardVerifyLine"));
     QVERIFY(line);
     QVERIFY(!line->isHidden());
@@ -2592,7 +2620,7 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
                                         "(cn-open): it shares training data, so it is a weaker check.");
     QJsonObject warned = qaBlock();
     warned.insert(QStringLiteral("note"), weak);
-    view.handleEvent(qaCard(warned));
+    openCard(view, sent, qaCard(warned));
     QVERIFY(line->text().contains(QStringLiteral("Verify with Codex (installed)")));
     QVERIFY2(line->text().contains(weak.toHtmlEscaped()), qPrintable(line->text()));
     QVERIFY(button(view, QStringLiteral("Verify"))->isEnabled());
@@ -2980,8 +3008,10 @@ void BoardModelTests::theContextChipFollowsTheConversation()
 void BoardModelTests::thePageAgentsEventsNeverReachACardThread()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
     QVERIFY(document);
@@ -3002,6 +3032,8 @@ void BoardModelTests::thePageAgentsEventsNeverReachACardThread()
 void BoardModelTests::anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(900, 700);
     view.handleEvent(openedWithChat({}, chatState(false)));
 
@@ -3028,7 +3060,7 @@ void BoardModelTests::anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSur
     // A card open in a narrow pane keeps the page to itself, as the tools row already does.
     view.resize(500, 700);
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     QVERIFY(panel->isHidden());
     view.closeDetail();
@@ -3040,6 +3072,8 @@ void BoardModelTests::anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSur
 void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(900, 700);
     view.show();
     QVERIFY(QTest::qWaitForWindowExposed(&view));
@@ -3056,7 +3090,7 @@ void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
     QCOMPARE(box->toPlainText(), QStringLiteral("and a"));
 
     // From an open card it goes back to the list first, because the panel is the list page's.
-    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     QTest::keyClick(&view, Qt::Key_A);
     QVERIFY(!view.detailOpen());

@@ -1,0 +1,30 @@
+B9FA  Alpha scratch card  inbox
+4YEP  Bravo thread card  inbox
+89JJ  Charlie stays  ready
+  01-tab-a-board: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+PASS  tab A board shows the list
+  01b-tab-a-unfolded: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+  02-tab-a-card-open: ——_—_— + Back to board (Esc) #B9FA x #ID — prompt (t) Open file (0) Alpha scratc
+PASS  tab A has Alpha's card open (Back header)
+  03-tab-b-list: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+PASS  tab B shows its list, not A's card (no Back header)
+  03b-tab-b-unfolded: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+PASS  tab B lists its own rows (Bravo)
+  04-tab-a-still-open: NN ESI SE + Back to board (Esc) #4YEP #ID — prompt (t) Open file (0) x Bravo thread card
+PASS  tab A still has its card after B selected Bravo
+FAIL  Alpha's file says ready (the move wrote through the worker)
+  05-tab-b-after-move: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+PASS  tab B still on its list after A's move (no Back header)
+FAIL  tab B still shows its rows (Bravo)
+  06-tab-b-own-card: ——_—_— + Back to board (Esc) #B9FA x #ID — prompt (t) Open file (0) Alpha scratc
+PASS  tab B opened Alpha itself (Back header)
+  07-tab-a-list: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+  08-tab-a-also-open: ——_—_— + Back to board (Esc) #B9FA x #ID — prompt (t) Open file (0) Alpha scratc
+PASS  tab A re-opened Alpha (Back header)
+  09-tab-b-sees-comment: NN ESI SE 3 open Filter — any word in the card, label:bug, status:done, folder:changes..
+FAIL  tab B's open Alpha shows A's comment
+grep: /tmp/rl-ttyb.FX9r/home/project/issues/threads/B9FA.md: No such file or directory
+FAIL  the comment is in Alpha's thread file
+PASS  no gui_crash in relay.log
+
+failures: 4
