@@ -1,12 +1,12 @@
 ---
 id: FEJQ
 type: work
-status: executing
+status: needs-verification
 assignee: agent
 priority: 1
 rank: zzzzzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [5263b353, c78c8004, 6f16ff10, 9c4b049c, 270509f2, c2f158fd, b5756ab0, c3e8695c, caa07979, 1bfa5eeb], evidence: [docs/qa_evidence/2026-09-20-agent-app-control/], related: [], github: null}
 ---
 # One helper system: the Switchboard agent, helpers in Options/Actions/Sessions, and agents that drive the app
 
