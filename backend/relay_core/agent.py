@@ -492,6 +492,10 @@ class Agent:
         if self._announce:
             self.emit(self.title_event())
             self.emit(self.summary_event())
+            # The fresh conversation's numbers, so the context chip does not keep the previous
+            # conversation's reading until the next turn (issue 5PY9). Every other path that
+            # replaces the conversation (load_state, resume, rewind, set_model) emits it too.
+            self.emit(self.context_event())
 
     # ----- requests and todos ------------------------------------------------------
     def _requests_changed(self) -> None:

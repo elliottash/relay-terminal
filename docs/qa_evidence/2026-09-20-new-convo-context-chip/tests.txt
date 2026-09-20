@@ -1,0 +1,127 @@
+# limited test runs, 2026-09-20T00:37:30-04:00 — files that exercise Agent.reset_conversation / the worker reset request
+
+$ cd tests && XDG_DATA_HOME=$(mktemp -d) RELAY_KEYRING=off RELAY_LOCAL_MODELS=/nonexistent.json PYTHONPATH=../backend python3 -m unittest test_agent test_session_protocol test_sessions
+test_cancel_while_command_runs (test_agent.AgentTests.test_cancel_while_command_runs) ... ok
+test_command_runs_without_approval (test_agent.AgentTests.test_command_runs_without_approval) ... ok
+test_file_tools_still_confined_to_workspace (test_agent.AgentTests.test_file_tools_still_confined_to_workspace) ... ok
+test_reset_conversation_emits_the_fresh_context (test_agent.AgentTests.test_reset_conversation_emits_the_fresh_context) ... ok
+test_unknown_tool_is_not_executed (test_agent.AgentTests.test_unknown_tool_is_not_executed) ... ok
+test_write_runs_without_approval_and_shows_diff (test_agent.AgentTests.test_write_runs_without_approval_and_shows_diff) ... ok
+test_context_note_is_labelled_and_prepended (test_agent.ContextTests.test_context_note_is_labelled_and_prepended) ... ok
+test_control_characters_stripped_from_program (test_agent.ContextTests.test_control_characters_stripped_from_program) ... ok
+test_invalid_context_rejected (test_agent.ContextTests.test_invalid_context_rejected) ... ok
+test_no_context_leaves_prompt_unchanged (test_agent.ContextTests.test_no_context_leaves_prompt_unchanged) ... ok
+test_terminal_directory_alone_is_still_context (test_agent.ContextTests.test_terminal_directory_alone_is_still_context) ... ok
+test_worker_passes_context_to_queue (test_agent.ContextTests.test_worker_passes_context_to_queue) ... ok
+test_a_second_stall_fails_the_turn_and_keeps_the_request_open (test_agent.StallRetryTests.test_a_second_stall_fails_the_turn_and_keeps_the_request_open) ... ok
+test_a_started_answer_is_not_retried (test_agent.StallRetryTests.test_a_started_answer_is_not_retried) ... ok
+test_retried_once_and_the_second_try_sends_the_same_conversation (test_agent.StallRetryTests.test_retried_once_and_the_second_try_sends_the_same_conversation) ... ok
+test_stall_timeout_is_an_agent_option (test_agent.StallRetryTests.test_stall_timeout_is_an_agent_option) ... ok
+test_the_first_token_may_be_given_longer_than_the_gaps_between_chunks (test_agent.StallRetryTests.test_the_first_token_may_be_given_longer_than_the_gaps_between_chunks)
+Options › "Wait longer for the first token": prefill on a big prompt is not a stall. ... ok
+test_replies_are_asked_for_in_markdown (test_agent.SystemPromptTests.test_replies_are_asked_for_in_markdown) ... ok
+test_a_failed_call_says_why (test_agent.ToolLabelEventTests.test_a_failed_call_says_why) ... ok
+test_a_write_carries_its_diff_and_the_summary_carries_the_label (test_agent.ToolLabelEventTests.test_a_write_carries_its_diff_and_the_summary_carries_the_label) ... ok
+test_an_edit_says_what_changed (test_agent.ToolLabelEventTests.test_an_edit_says_what_changed) ... ok
+test_run_command_events_carry_the_label (test_agent.ToolLabelEventTests.test_run_command_events_carry_the_label) ... ok
+test_the_stored_detail_of_a_write_is_its_diff (test_agent.ToolLabelEventTests.test_the_stored_detail_of_a_write_is_its_diff) ... ok
+test_the_stored_output_gains_a_detail_and_keeps_everything_else (test_agent.ToolLabelEventTests.test_the_stored_output_gains_a_detail_and_keeps_everything_else) ... ok
+test_a_filtered_response_is_not_retried (test_agent.TruncationRetryTests.test_a_filtered_response_is_not_retried) ... ok
+test_a_second_cut_off_fails_the_turn_and_keeps_the_request_open (test_agent.TruncationRetryTests.test_a_second_cut_off_fails_the_turn_and_keeps_the_request_open) ... ok
+test_an_answer_that_started_is_not_retried_but_is_kept (test_agent.TruncationRetryTests.test_an_answer_that_started_is_not_retried_but_is_kept) ... ok
+test_retried_once_with_a_note_that_says_why (test_agent.TruncationRetryTests.test_retried_once_with_a_note_that_says_why) ... ok
+test_agent_requires_config (test_agent.WorkerTests.test_agent_requires_config) ... ok
+test_configuration_does_not_contact_provider_or_echo_key (test_agent.WorkerTests.test_configuration_does_not_contact_provider_or_echo_key) ... ok
+test_malformed_request_does_not_crash (test_agent.WorkerTests.test_malformed_request_does_not_crash) ... ok
+test_route_without_any_provider (test_agent.WorkerTests.test_route_without_any_provider) ... ok
+test_a_guest_id_is_accepted_where_relays_own_shape_is_not (test_session_protocol.GuestSessionRows.test_a_guest_id_is_accepted_where_relays_own_shape_is_not) ... ok
+test_a_guest_session_is_listed_with_its_own_resume_command (test_session_protocol.GuestSessionRows.test_a_guest_session_is_listed_with_its_own_resume_command) ... ok
+test_a_rescan_is_not_queued_per_keystroke (test_session_protocol.GuestSessionRows.test_a_rescan_is_not_queued_per_keystroke)
+The pane queries on every keystroke; the guests' files do not change that fast, so a ... ok
+test_a_row_whose_transcript_went_away_is_pruned (test_session_protocol.GuestSessionRows.test_a_row_whose_transcript_went_away_is_pruned) ... ok
+test_a_tier_a_pane_tails_the_session_its_harness_holds (test_session_protocol.GuestSessionRows.test_a_tier_a_pane_tails_the_session_its_harness_holds)
+29.3: the pane's agent *is* the guest, and the harness knows which of the guest's own ... ok
+test_a_tier_b_guest_is_tailed_without_waiting_for_a_reconcile (test_session_protocol.GuestSessionRows.test_a_tier_b_guest_is_tailed_without_waiting_for_a_reconcile)
+The guest runs in the pane's own shell, so the worker hears of it only through ... ok
+test_a_warm_reconcile_reads_nothing (test_session_protocol.GuestSessionRows.test_a_warm_reconcile_reads_nothing)
+Measured on a synthetic home, not the owner's: the first pass parses every transcript, ... 
+  guest reconcile over 120 synthetic claude sessions: cold 646 ms, warm 1 ms
+ok
+test_an_unknown_source_is_refused_by_name (test_session_protocol.GuestSessionRows.test_an_unknown_source_is_refused_by_name) ... ok
+test_delete_drops_the_row_and_leaves_the_guests_transcript (test_session_protocol.GuestSessionRows.test_delete_drops_the_row_and_leaves_the_guests_transcript) ... ok
+test_indexing_the_guests_is_a_setting_that_rides_the_listing (test_session_protocol.GuestSessionRows.test_indexing_the_guests_is_a_setting_that_rides_the_listing)
+Options › Privacy (GT7X review, B1): the pane sends `index_guests` with every listing. ... ok
+test_indexing_the_guests_off_means_no_tail (test_session_protocol.GuestSessionRows.test_indexing_the_guests_off_means_no_tail)
+Options > Privacy (review B1): off, Relay opens nothing of the guests' — including the ... ok
+test_only_a_request_that_names_a_guest_lists_one (test_session_protocol.GuestSessionRows.test_only_a_request_that_names_a_guest_lists_one) ... ok
+test_rename_and_pin_stay_in_the_index_and_survive_a_rescan (test_session_protocol.GuestSessionRows.test_rename_and_pin_stay_in_the_index_and_survive_a_rescan) ... ok
+test_the_guest_leaving_stops_the_tail (test_session_protocol.GuestSessionRows.test_the_guest_leaving_stops_the_tail) ... ok
+test_the_reconcile_runs_behind_the_answer (test_session_protocol.GuestSessionRows.test_the_reconcile_runs_behind_the_answer)
+The listing may never wait on the guests' files: the first run over a long claude ... ok
+test_the_row_moves_while_nobody_is_typing (test_session_protocol.GuestSessionRows.test_the_row_moves_while_nobody_is_typing)
+The Sessions pane re-lists when the user touches it, not on a timer. A guest answering ... ok
+test_two_claudes_in_one_directory_tail_their_own_sessions (test_session_protocol.GuestSessionRows.test_two_claudes_in_one_directory_tail_their_own_sessions)
+Why the session id is not optional (GT7X review, B7): two claudes in one project write ... ok
+test_instructions_in_system_prompt (test_session_protocol.InstructionTests.test_instructions_in_system_prompt) ... ok
+test_project_auto_first_per_directory_with_imports_and_cap (test_session_protocol.InstructionTests.test_project_auto_first_per_directory_with_imports_and_cap) ... ok
+test_scan_covers_conventions (test_session_protocol.InstructionTests.test_scan_covers_conventions) ... ok
+test_synthesize_writes_target_with_backup (test_session_protocol.InstructionTests.test_synthesize_writes_target_with_backup) ... ok
+test_warp_files_preferred_and_cap_configurable (test_session_protocol.InstructionTests.test_warp_files_preferred_and_cap_configurable) ... ok
+test_context_windows (test_session_protocol.PresetTests.test_context_windows) ... ok
+test_effort_table (test_session_protocol.PresetTests.test_effort_table) ... ok
+test_a_failed_suggestion_is_reported_as_a_suggestion (test_session_protocol.ProtocolHandlerTests.test_a_failed_suggestion_is_reported_as_a_suggestion) ... ok
+test_busy_refusals_and_effort_while_idle (test_session_protocol.ProtocolHandlerTests.test_busy_refusals_and_effort_while_idle) ... ok
+test_compact_resume_recap_and_plan_execute (test_session_protocol.ProtocolHandlerTests.test_compact_resume_recap_and_plan_execute) ... ok
+test_hooks_for_model_switch_and_replaced_conversation (test_session_protocol.ProtocolHandlerTests.test_hooks_for_model_switch_and_replaced_conversation) ... ok
+test_suggest_and_set_mode (test_session_protocol.ProtocolHandlerTests.test_suggest_and_set_mode) ... ok
+test_no_tools_key_for_side_calls (test_session_protocol.ProviderUsageTests.test_no_tools_key_for_side_calls) ... ok
+test_usage_inside_choice_emitted_once (test_session_protocol.ProviderUsageTests.test_usage_inside_choice_emitted_once) ... ok
+test_configure_fields_scan_and_attachments (test_session_protocol.WorkerSubprocessTests.test_configure_fields_scan_and_attachments) ... ok
+test_reset_is_preceded_by_the_new_conversations_context (test_session_protocol.WorkerSubprocessTests.test_reset_is_preceded_by_the_new_conversations_context) ... /usr/lib/python3.12/unittest/case.py:638: ResourceWarning: unclosed <socket.socket fd=30, family=2, type=1, proto=0, laddr=('127.0.0.1', 44207)>
+  self.doCleanups()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_attachment_errors_and_caps (test_sessions.AttachmentTests.test_attachment_errors_and_caps) ... ok
+test_attachment_prepended (test_sessions.AttachmentTests.test_attachment_prepended) ... ok
+test_checkpoints_list_files_per_turn (test_sessions.CheckpointTests.test_checkpoints_list_files_per_turn) ... ok
+test_conflict_is_skipped (test_sessions.CheckpointTests.test_conflict_is_skipped) ... ok
+test_rewind_conversation_after_compaction_uses_snapshot (test_sessions.CheckpointTests.test_rewind_conversation_after_compaction_uses_snapshot) ... ok
+test_rewind_conversation_truncates_and_notes_next_turn (test_sessions.CheckpointTests.test_rewind_conversation_truncates_and_notes_next_turn) ... ok
+test_rewind_files_both_turns (test_sessions.CheckpointTests.test_rewind_files_both_turns) ... ok
+test_rewind_undoes_an_edit_file (test_sessions.CheckpointTests.test_rewind_undoes_an_edit_file) ... ok
+test_rewind_unknown_turn (test_sessions.CheckpointTests.test_rewind_unknown_turn) ... ok
+test_auto_compaction_summarizes_and_keeps_tool_groups_intact (test_sessions.ContextTests.test_auto_compaction_summarizes_and_keeps_tool_groups_intact) ... ok
+test_context_event_uses_usage_or_estimate (test_sessions.ContextTests.test_context_event_uses_usage_or_estimate) ... ok
+test_limit_formula (test_sessions.ContextTests.test_limit_formula) ... ok
+test_manual_compact_with_focus (test_sessions.ContextTests.test_manual_compact_with_focus) ... ok
+test_effort_applied_per_provider_style (test_sessions.ModelAndEffortTests.test_effort_applied_per_provider_style) ... ok
+test_history_adapted_for_kimi_after_openrouter (test_sessions.ModelAndEffortTests.test_history_adapted_for_kimi_after_openrouter) ... ok
+test_set_model_keeps_conversation (test_sessions.ModelAndEffortTests.test_set_model_keeps_conversation) ... ok
+test_default_plans_dir_and_build_mode_refuses_write_plan (test_sessions.PlanModeTests.test_default_plans_dir_and_build_mode_refuses_write_plan) ... ok
+test_plan_mode_hides_subagent_tools (test_sessions.PlanModeTests.test_plan_mode_hides_subagent_tools) ... ok
+test_plan_mode_tools_and_write_plan (test_sessions.PlanModeTests.test_plan_mode_tools_and_write_plan) ... ok
+test_turns_are_stamped_and_the_recap_carries_the_span (test_sessions.RecapSpanAgentTests.test_turns_are_stamped_and_the_recap_carries_the_span) ... ok
+test_format_elapsed (test_sessions.RecapSpanTests.test_format_elapsed) ... ok
+test_format_span_today_and_dated (test_sessions.RecapSpanTests.test_format_span_today_and_dated) ... ok
+test_span_absent_without_stamps (test_sessions.RecapSpanTests.test_span_absent_without_stamps) ... ok
+test_span_fields (test_sessions.RecapSpanTests.test_span_fields) ... ok
+test_span_picks_first_start_and_last_end (test_sessions.RecapSpanTests.test_span_picks_first_start_and_last_end) ... ok
+test_a_running_turn_is_written_so_it_can_be_found (test_sessions.SessionTests.test_a_running_turn_is_written_so_it_can_be_found)
+The file the sessions list and the full-text index are built from appears mid-turn. ... ok
+test_autosave_list_resume (test_sessions.SessionTests.test_autosave_list_resume) ... ok
+test_fork_and_load_state (test_sessions.SessionTests.test_fork_and_load_state) ... ok
+test_fork_without_store_embeds_messages (test_sessions.SessionTests.test_fork_without_store_embeds_messages) ... ok
+test_recap (test_sessions.SessionTests.test_recap) ... ok
+test_reset_starts_new_session (test_sessions.SessionTests.test_reset_starts_new_session) ... ok
+test_resume_rejects_bad_id (test_sessions.SessionTests.test_resume_rejects_bad_id) ... ok
+test_resume_reports_a_turn_left_open (test_sessions.SessionTests.test_resume_reports_a_turn_left_open)
+`state_loaded` carries `turn_open` so a restored pane may offer Continue (#SXF1). ... ok
+test_the_file_is_not_rewritten_on_every_tool_call (test_sessions.SessionTests.test_the_file_is_not_rewritten_on_every_tool_call)
+The throttle keeps a long turn from rewriting a large session file on every call. ... ok
+test_next_command (test_sessions.SuggestionTests.test_next_command) ... ok
+test_next_prompt (test_sessions.SuggestionTests.test_next_prompt) ... ok
+
+----------------------------------------------------------------------
+Ran 101 tests in 8.779s
+
+OK

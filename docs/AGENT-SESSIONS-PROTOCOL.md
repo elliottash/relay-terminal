@@ -77,6 +77,11 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 
 - After every model response the worker emits `context {used_tokens, window, percent, threshold, estimated: bool}` (provider `usage` when present, else an estimate).
 - `context` message → same event on demand.
+- Every path that replaces the conversation emits the new one's `context` too: `load_state`,
+  `resume`, a conversation `rewind`, `set_model` and `reset` (new conversation: `/new`, deleting the
+  conversation the pane is showing, "execute in fresh context"). For `reset` it is emitted before
+  the `reset` event, so the context chip never goes on showing the previous conversation's reading
+  until the next turn (issue 5PY9).
 - Auto-compaction when `percent >= threshold` at a step boundary (never between a tool call and its results): emits `compaction_started {reason: "auto"|"manual"}` then `compacted {before_tokens, after_tokens, summary_chars}`. Order: drop/trim old tool outputs first, then summarize older turns with a no-tools model call, keeping the system prompt, instructions, the last N turns and the current task.
 - `compact {focus?: string}` → manual compaction.
 

@@ -85,6 +85,26 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(calls, results)
         self.assertIn('not finished', agent.messages[-1]['content'])
 
+    def test_reset_conversation_emits_the_fresh_context(self):
+        # Issue 5PY9: /new left the context chip on the previous conversation's percentage,
+        # because reset_conversation rebuilt the session without ever emitting a context event.
+        # Fresh still means the system prompt and tool schemas, so it is a few thousand tokens
+        # (a few percent of the window), never zero.
+        events = []
+        fake = FakeProvider(tool('run_command', {'command': 'printf HELLO'}))
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=fake)
+        agent.ask('run something')
+        during = [e for e in events if e.get('event') == 'context']
+        self.assertTrue(during)
+        used = during[-1]['used_tokens']
+        agent.reset_conversation()
+        after = [e for e in events if e.get('event') == 'context']
+        self.assertEqual(len(after), len(during) + 1)   # the reset emits exactly one
+        fresh = after[-1]
+        self.assertLess(fresh['used_tokens'], used)
+        self.assertLess(fresh['percent'], 10.0)
+        self.assertEqual(fresh['window'], during[-1]['window'])
+
 class SystemPromptTests(unittest.TestCase):
     def test_replies_are_asked_for_in_markdown(self):
         # The GUI renders agent replies as Markdown in the terminal (src/MarkdownAnsi.cpp).

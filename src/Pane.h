@@ -6644,6 +6644,13 @@ private:
             // A new conversation has a new id (protocol 25); an older worker does not say it, and
             // then the old one must not be taken for what this pane still holds.
             m_sessionId = event.value(QStringLiteral("session_id")).toString();
+            // The context event that reset_conversation emitted just before this one already
+            // carries the new conversation's numbers, so those are not touched here (issue 5PY9) —
+            // but a switch still waiting to land, or a compaction the old conversation started,
+            // must not survive into the new one's chip.
+            clearNextContext();
+            m_compacting = false;
+            updateContextLabel();
             if (m_reconfigureOnNewChat) {
                 m_reconfigureOnNewChat = false;
                 QTimer::singleShot(0, this, [this] { if (!m_agentBusy) configurePreset(m_currentPreset, false); });

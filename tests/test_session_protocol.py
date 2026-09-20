@@ -371,6 +371,82 @@ class WorkerSubprocessTests(unittest.TestCase):
             self.assertTrue(any(e.get('id') == 'att' and 'not found' in e['text'] for e in errors))
             self.assertTrue(any('compact_threshold' in e['text'] for e in errors))
 
+    def test_reset_is_preceded_by_the_new_conversations_context(self):
+        # Issue 5PY9, end to end: the worker must emit the fresh conversation's `context` before
+        # the `reset` event, or the pane's context chip keeps the previous conversation's reading
+        # until the next turn.
+        class Model(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length') or 0)
+                json.loads(self.rfile.read(length) or b'{}')
+                body = json.dumps({'id': 'm', 'object': 'chat.completion', 'model': 'mock',
+                                   'choices': [{'index': 0, 'finish_reason': 'stop',
+                                                'message': {'role': 'assistant', 'content': 'Done.'}}]}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Model)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        with tempfile.TemporaryDirectory() as temp:
+            ws = Path(temp) / 'ws'
+            ws.mkdir()
+            env = {**os.environ, 'HOME': temp, 'XDG_DATA_HOME': str(Path(temp) / 'data'),
+                   'PYTHONPATH': str(ROOT / 'backend')}
+            proc = subprocess.Popen([sys.executable, '-S', str(ROOT / 'backend/worker.py')],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True, cwd=ROOT, env=env)
+            events = []
+
+            def reader():
+                for line in proc.stdout:
+                    events.append(json.loads(line))
+            threading.Thread(target=reader, daemon=True).start()
+
+            def send(msg):
+                proc.stdin.write(json.dumps(msg) + '\n')
+                proc.stdin.flush()
+
+            def wait_for(kind):
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    if any(e['event'] == kind for e in events):
+                        return True
+                    time.sleep(0.05)
+                return False
+            try:
+                send({'type': 'configure', 'base_url': 'http://127.0.0.1:%d/v1' % server.server_address[1],
+                      'model': 'mock', 'api_key': '', 'workspace': str(ws)})
+                self.assertTrue(wait_for('configured'), 'worker configured')
+                first_session = next(e['session_id'] for e in events if e['event'] == 'configured')
+                send({'type': 'ask', 'text': 'hello', 'id': 'a1'})
+                self.assertTrue(wait_for('agent_finished'), 'turn ran')
+                during = [e for e in events if e['event'] == 'context']
+                self.assertTrue(during)          # the turn's own context events
+                send({'type': 'reset'})
+                self.assertTrue(wait_for('reset'), 'reset handled')
+                kinds = [e['event'] for e in events]
+                self.assertIn('context', kinds[kinds.index('agent_finished'):kinds.index('reset')])
+                fresh = [e for e in events if e['event'] == 'context'][-1]
+                self.assertLess(fresh['used_tokens'], during[-1]['used_tokens'])
+                self.assertLess(fresh['percent'], 10.0)   # system prompt + tool schemas, no turns
+                reset = next(e for e in events if e['event'] == 'reset')
+                self.assertNotEqual(reset.get('session_id'), first_session)
+            finally:
+                send({'type': 'shutdown'})
+                try:
+                    proc.wait(5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                proc.stdout.close()
+                proc.stdin.close()
+
 
 if __name__ == '__main__':
     unittest.main()
