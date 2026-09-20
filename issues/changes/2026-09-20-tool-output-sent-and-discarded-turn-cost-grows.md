@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m6
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7, 5a76d136], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
+links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7, 5a76d136, 5a4fb702, cf8934bd, 5544922e, f64f037c, 557ced32, 6ec4b0fc, ac567e76], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
 ---
 # Tool output is sent to the GUI and thrown away; per-turn GUI cost grows with the conversation
 
@@ -46,3 +46,20 @@ Evidence and the commands: [docs/qa_evidence/2026-09-20-perf-fixes/toolout/](../
 7. **Subagents.** Ask for a background subagent that runs something noisy and open its tab: its transcript is unaffected (subagent payloads are never trimmed).
 8. **An old worker.** Nothing to do here beyond: after any of the above, `~/.local/share/relay/logs` must have no repeated `set_agent_options` (the pane asks once per change, not once per chunk).
 9. **The turn-start hitch.** Start a turn in a pane with a large model catalog (an OpenRouter key, Options › Models showing many rows): the first frame of the turn should not visibly drop. Then check Options › Models still lists exactly the models it did, and that un-checking one still hides only that one.
+
+## Result, items 2 and 3 (2026-09-20, later)
+The fold-anchor walks were made provably cheap (b8e91fe3) and the curve did not move; the growth was
+the `requests` event: the whole ledger, 2 KB → 143 KB per turn, three times a turn, 95.8 % of
+worker→GUI bytes. It now travels as a delta (protocol 12.11, f64f037c/557ced32): 9.0 MB → 0.59 MB
+over 120 turns, ms/turn at 25/125/225 42.7/52.2/67.3 → 49.2/48.4/62.6 on a loaded spark (±15 %;
+re-measure on a quiet machine). The Activity pane renders the reasoning block a chunk at a time
+(5a4fb702): 84 % of a core → 7 % at 200 KB, 26.8 s → 4.0 s for the whole block. Evidence:
+`docs/qa_evidence/2026-09-20-perf-fixes/growth/`.
+
+## QA checklist, items 2 and 3
+- [ ] Tasks chip and `/tasks` count and list exactly as before through a long conversation; earlier task lists still under "Earlier" <!-- t:p6 -->
+- [ ] New chat, resume, rewind, fork: the task list resets or returns whole <!-- t:p7 -->
+- [ ] A re-ask from the task panel still shows as waiting in the queue <!-- t:p8 -->
+- [ ] Activity pane open while the agent thinks: the reasoning renders live with the same markdown, the header becomes "thought for N s" <!-- t:p9 -->
+- [ ] Switch tabs mid-block and back: the block is whole and in order, tool rows below it <!-- t:pa -->
+- [ ] Change theme mid-stream: the streaming block takes the new colours; rows above keep theirs <!-- t:pb -->

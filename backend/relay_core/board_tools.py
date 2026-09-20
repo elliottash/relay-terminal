@@ -210,7 +210,7 @@ TOOL_SPECS = [
          "that already has a card updates that one. A fuzzy duplicate check can refuse the create "
          "and return possible_duplicates; repeat the call with not_duplicate_of to override it.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml (features, bugs, design, marketing, planning)."},
-          "status": {"type": "string", "description": "inbox for raw capture, discussing when you need an answer, ready when agreed."},
+          "status": {"type": "string", "description": "inbox for raw capture, discussing when you need an answer, planned when agreed."},
           "section": {"type": "string", "description": "Park the new card in this manual section (a "
                                                     "column that collects nothing) instead of its "
                                                     "status's own."},

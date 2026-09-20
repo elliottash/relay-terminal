@@ -33,3 +33,7 @@ Decision 1 closed: the owner, shown the lazy-worker mapping (`docs/qa_evidence/2
 <!-- relay:entry 20260920T202624Z-c7 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-20 20:26
 The owner on the nine distillation decisions: "1-9 all seem good to me". Implementers: text (2, 3, 6), board policy (8), assembly then short profile then on-demand tools (4, 7, 9), cached-token counts (5); 1 was already in progress.
+
+<!-- relay:entry 20260920T212011Z-c8 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-20 21:20
+everything landed: the five decisions and the nine distillation decisions; commits in links.commits, results and the QA checklist in the body, three questions left open for the owner. Moved to needs-verification.

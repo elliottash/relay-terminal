@@ -41,3 +41,7 @@ that same profile the GUI thread's top symbols are `qHash(QString)` 2.6 %, `oper
 2.0 %, `QListWidgetItem::~QListWidgetItem` 1.6 %, `statx` 1.8 %, `malloc`+`_int_free` 3.3 %
 (late.perf-symbols.txt beside it). Whoever holds item 1 owns `src/Pane.h` and is best placed to
 take that on; a `QListWidgetItem` destructor 200 turns in looks like a list rebuilt per turn.
+
+<!-- relay:entry 20260920T212011Z-c9 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-20 21:20
+items 2 and 3 landed (the ledger delta and the chunked reasoning render; commits added to links.commits, results and six QA items in the body); the card stays in needs-verification.
