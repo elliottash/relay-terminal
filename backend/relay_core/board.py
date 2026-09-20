@@ -1412,6 +1412,18 @@ class Board:
     def write_index(self, include_private: bool = False) -> Path:
         path = self.root / BOARD_INDEX
         _atomic_write(path, self.index_markdown(include_private))
+        # Both files in the board are generated, so regenerating one refreshes the other -- but
+        # only when it is already there: creating `POLICY.md` writes a project's instruction files
+        # too (`policy_files`), which is the scaffold's job and needs the user's yes behind it.
+        policy = self.root / POLICY_FILE
+        if policy.is_file():
+            want = policy_text(self)
+            try:
+                stale = policy.read_text(encoding="utf-8") != want
+            except (OSError, UnicodeDecodeError):          # pragma: no cover - unreadable file
+                stale = False
+            if stale:
+                _atomic_write(policy, want)
         return path
 
 
@@ -1951,6 +1963,434 @@ def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
     return FolderMove(old=old, new=target, root=str(destination), method=method, hidden=hidden,
                       files=files)
 
+
+# ------------------------------------------------------------------- the policy file
+#
+# A guest agent -- Claude Code or Codex started in a Relay pane -- never sees the worker's system
+# prompt and has no `board_*` tools (card #4NXH), so nothing above reaches it: what a guest reads
+# is the project's own instruction files.  `<board>/POLICY.md` is the Switchboard's rules written
+# out as a file in the board, and a marked block in `CLAUDE.md` / `AGENTS.md` is the pointer at it
+# (card #R9G7; the owner's words: "tell claude md and agents md to read the relay system prompt").
+# Both are generated: `policy_text` is the only author, `scaffold_files` rewrites a copy that has
+# gone stale exactly as it would a missing one, and `scripts/relay-board.py policy` regenerates
+# them on a board that already exists.
+
+POLICY_FILE = "POLICY.md"
+#: The rules, the same bytes the worker puts in its own system prompt (`board_tools.policy_text`).
+POLICY_SOURCE = "board_policy.md"
+#: The procedure rule 1 points at, as the bundled skill a pane agent loads with `/deliver`.
+DELIVER_SKILL = "deliver"
+
+#: The instruction-file block's fences.  What is between them is generated and replaced in place;
+#: what is outside them is the project's own text and is never read, moved or rewritten.
+POINTER_START = "<!-- relay:switchboard-policy start -->"
+POINTER_END = "<!-- relay:switchboard-policy end -->"
+#: Where the pointer goes: the two instruction files the guest CLIs read.  `AGENTS.md` is created
+#: when it is missing (`_new_agents_text`); `CLAUDE.md` is only ever appended to.  **WARP.md is
+#: never touched.**  It is first in `instructions.PROJECT_ORDER`, so it is the file Relay's own
+#: agent loads -- and that agent already has the policy in its system prompt and the tools to go
+#: with it, so a block there would be the one edit that changes what Relay itself reads.
+POINTER_TARGETS = ("CLAUDE.md", "AGENTS.md")
+
+
+def _package_text(name: str) -> str:
+    return (Path(__file__).resolve().parent / name).read_text(encoding="utf-8")
+
+
+def _bundled_skill_text(name: str) -> str:
+    """A skill Relay ships, through `relay_core.skills` so there is one definition of where they live."""
+    try:
+        from . import skills
+        root = skills.bundled_dir()
+    except Exception:                                      # pragma: no cover - packaging slip
+        root = Path(__file__).resolve().parent / "skills_bundled"
+    return (Path(root) / name / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _without_frontmatter(text: str) -> str:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text.strip("\n")
+    for index in range(1, len(lines)):
+        if lines[index].strip() in ("---", "..."):
+            return "\n".join(lines[index + 1:]).strip("\n")
+    return text.strip("\n")                                # pragma: no cover - unterminated
+
+
+def _strip_html_comments(text: str) -> str:
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip("\n").strip()
+
+
+def _demote_headings(text: str) -> str:
+    """Every ATX heading one level deeper, so a whole document nests under a `##` of ours.
+
+    Fenced blocks are left alone -- a `# comment` line in a shell example is not a heading.
+    """
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(r"^#{1,5} ", line):
+            line = "#" + line
+        out.append(line)
+    return "\n".join(out)
+
+
+def _in_this_board(text: str, folder: str) -> str:
+    """The policy is written against `issues/`; a board may be `.switchboard/` or `switchboard/`."""
+    return text if folder == LEGACY_BOARD_FOLDER else text.replace(LEGACY_BOARD_FOLDER + "/", folder + "/")
+
+
+def _lane_folders() -> list[tuple[str, str]]:
+    """`(status, folder)` for the work statuses whose file lives in a state subfolder."""
+    return [(s, f) for s, f in WORK_STATUS_FOLDER.items() if f]
+
+
+def _stage_statuses() -> list[str]:
+    return [s for s, f in WORK_STATUS_FOLDER.items() if not f]
+
+
+def _wrap(text: str, indent: str = "  ", width: int = 96) -> str:
+    """One paragraph of generated prose, wrapped like hand-written Markdown.
+
+    The appendix interpolates lists of statuses, folders and kinds into its sentences; without
+    this the file would carry 400-character lines, which is not what anyone reading it in a
+    terminal wants.
+    """
+    import textwrap
+    return textwrap.fill(" ".join(text.split()), width=width, initial_indent="",
+                         subsequent_indent=indent, break_long_words=False, break_on_hyphens=False)
+
+
+def _relay_script(board: "Board") -> str:
+    """How to run `relay-board.py` from this project, as far as this project can know.
+
+    In Relay's own checkout the script is right there; in any other project it is not, and saying
+    "run it from a Relay checkout, or skip it" is more use than a path that does not exist.
+    """
+    folder = board.root.name
+    script = board.repo / "scripts" / "relay-board.py"
+    arg = "" if folder == LEGACY_BOARD_FOLDER else f" --board {folder}"
+    if script.is_file():
+        return (_wrap(f"- `python3 scripts/relay-board.py{arg} check` validates every card, task "
+                      "marker and thread in this board: folder against status, the front matter "
+                      "fields, the ids, the ranks, the entry ids. Run it before you commit, and "
+                      "`--fix` repairs what it can.") + "\n"
+                + _wrap(f"- `python3 scripts/relay-board.py{arg} index` regenerates "
+                        f"`{folder}/BOARD.md` after you add or move a card.") + "\n")
+    return (_wrap("- `scripts/relay-board.py` ships with Relay, not with this project. From a "
+                  "Relay checkout: `python3 <relay>/scripts/relay-board.py --board <this "
+                  f"project>/{folder} check` validates every card, task marker and thread in this "
+                  "board, and `index` regenerates its `BOARD.md`.") + "\n"
+            + _wrap("- Without a Relay checkout, skip it and follow the format above by hand: "
+                    "Relay revalidates the board and regenerates the index the next time it opens "
+                    "the project.") + "\n")
+
+
+def _format_reference(board: "Board") -> str:
+    doc = "docs/SWITCHBOARD-FORMAT.md"
+    if (board.repo / doc).is_file():
+        return f"`{doc}`"
+    return f"`{doc}` in Relay's own repository"
+
+
+def _appendix(board: "Board") -> str:
+    folder = board.root.name
+    tabs = tab_folders(board)
+    tab_list = ", ".join(f"{tab} → `{name}/`" for tab, name in tabs.items()) or "none configured"
+    lanes = ", ".join(f"`{f}/`" for f in dict.fromkeys(f for _, f in _lane_folders()))
+    lane_pairs = ", ".join(f"`{s}` → `{f}/`" for s, f in _lane_folders())
+    stages = ", ".join(f"`{s}`" for s in _stage_statuses())
+    kinds = ", ".join(f"`{k}`" for k in ENTRY_KINDS)
+    hidden = ""
+    if folder.startswith("."):
+        hidden = _wrap(f"- **`{folder}/` is a hidden folder and `rg` skips hidden folders by "
+                       "default**, so a bare `rg` over this project finds no cards at all and it "
+                       "is easy to conclude there is no board. Use `rg --hidden`, or `grep -r`, "
+                       "or read the files by path.") + "\n"
+    tab_bullet = _wrap(f"- This board's tabs are {tab_list}; plan cards are in `planning/`, "
+                       "memory cards in `memory/`.")
+    id_bullet = _wrap(f"- `id`: four characters of `{ID_ALPHABET}` with at least one letter, and "
+                      f"not one this board already uses — check `{folder}/BOARD.md`.")
+    lane_bullet = _wrap("4. Move the file only if the status you are moving to has a folder of its "
+                        f"own ({lane_pairs}). The stage statuses — {stages} — live in the tab "
+                        "folder itself, so a claim moves no file.", indent="   ")
+    entry_id_bullet = _wrap("- The entry id is `YYYYMMDDTHHMMSSZ-xx`: UTC to the second, then two "
+                            f"characters of `{ITEM_ALPHABET}`. It must sort after every id already "
+                            "in the file.")
+    kinds_bullet = _wrap(f"- `kind` is one of {kinds}. A question for the user is `kind=question` "
+                         "— numbered, each with your recommendation — and the card goes to "
+                         "`status: discussing` with `waiting_on: owner` (rule 3). A decision the "
+                         "user made is `kind=decision`, quoting their own words (rule 4).")
+    move_paragraph = _wrap(f"Set `status:` and put the file where that status belongs ({lane_pairs}"
+                           "; every other status stays in the tab folder). Landing work means "
+                           "the status `needs-verification`, the evidence path in `links.evidence`, "
+                           "and a `## QA checklist` section in the body — in the same commit as "
+                           "the change (rule 5). Nothing is ever deleted: a card is closed by "
+                           "moving it to `done` or `dropped` (both in `done/`) with the reason in "
+                           "the thread.", indent="")
+    format_paragraph = _wrap("Everything above names Relay's `board_*` tools. You do not have them "
+                             "— they are the worker's, and a guest session reaches the board by "
+                             "editing files. Here is each call as a file edit. The bytes are "
+                             f"specified in {_format_reference(board)}; invent no field and no "
+                             "heading that is not there.", indent="")
+    return f"""## Without the board tools
+
+{format_paragraph}
+
+### Read the board — `board_list`, `board_read`, `board_card_get`
+
+- `{folder}/BOARD.md` is the generated index: one table per tab, ordered by status then rank, with
+  each card's id, its title linked to its file, status, assignee, task progress and thread link.
+{hidden}- A card is one file, `{folder}/<tab>/[<lane>/]<YYYY-MM-DD-slug>.md`, and its conversation and
+  audit trail is `{folder}/threads/<ID>.md`. Read both before you decide a card is the one you
+  want — a title match is not a match.
+{tab_bullet}
+
+### File a card — `board_create_card`
+
+A new file in the tab's folder, named `YYYY-MM-DD-<slug>.md`:
+
+```markdown
+---
+id: K7Q2
+type: work
+status: inbox
+labels: [feature, switchboard]
+assignee: claude-code
+rank: m
+created: '2026-09-20'
+source: 'Claude Code in a Relay pane, 2026-09-20'
+links: {{plans: [], commits: [], evidence: [], related: [], github: null}}
+---
+# A title of your own
+
+## Issue
+the user's words, verbatim
+```
+
+{id_bullet}
+- `labels`: exactly one of `bug` or `feature`, plus the obvious area labels.
+- `rank`: a string of `[0-9a-z]` that does not end in `0`, ordering the card in its column; `m`
+  is the middle and anything the column is not using will do.
+- `created` is today's date, single-quoted as in the example; `source` says where the request
+  came from.
+- `## Issue` is the user's request **verbatim** (rule 2). The `# ` title is yours, and there is
+  exactly one of them.
+- `{folder}/BOARD.md` is stale the moment you write the file: regenerate it (below), or leave it
+  to Relay.
+
+### Claim it — `board_claim`
+
+1. Read the card first. A card in `executing` or `in-progress` that carries a `session:` is held
+   by a Relay pane, and one with someone else in `assignee` is their work: comment on it, and take
+   it over only when the user says to.
+2. In the front matter set `status: executing` and `assignee: <your name>` — `claude-code`,
+   `codex`, whatever names you in the thread.
+3. Do **not** write `session:`. That is Relay's *pane* session token, written only by the pane that
+   holds the card; it is immutable, so a patch naming one is refused. A guest has no pane token and
+   does not need one: your `assignee` and your claim entry in the thread are what tell the next
+   agent the card is taken.
+{lane_bullet}
+5. Append a `progress` entry to `{folder}/threads/<ID>.md` saying what you are about to do.
+
+### Comment — `board_comment`, and every write you make
+
+Append one self-contained entry to `{folder}/threads/<ID>.md`, never rewriting an earlier one:
+
+```markdown
+<!-- relay:entry 20260920T141203Z-c3 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 14:12
+claimed this card; starting on backend/relay_core/board.py
+```
+
+{entry_id_bullet}
+{kinds_bullet}
+- The file is append-only and merges with `merge=union`: add at the end, and never reflow or
+  re-sort what is there.
+- Every card write gets an entry. The card body is the document a verifier reads; the thread is
+  the record of who did what.
+
+### Change a card — `board_update_card`
+
+Edit the file: a front-matter value, or the `## Heading` section in the body the change belongs in
+(a plan goes in `## Plan`, a checklist in `## QA checklist`, tasks in `## Tasks` as
+`- [ ] text <!-- t:xx -->`). Leave every other byte alone, and append a thread entry saying what
+you changed. Never touch `implemented_by`, `verified_by` or `session`: Relay stamps all three, and
+a value typed by hand is what makes the audit trail a lie.
+
+### Move it — `board_move_card`
+
+{move_paragraph}
+
+### Check what you wrote
+
+{_relay_script(board)}
+"""
+
+
+def policy_text(board: "Board") -> str:
+    """`<board>/POLICY.md`: the Switchboard's rules for an agent that has no `board_*` tools.
+
+    Generated, like `BOARD.md`, and from three sources: `board_policy.md` (the block the worker
+    puts in its own system prompt, so a guest and a pane agent are told the same thing), the
+    bundled `deliver` skill (the procedure rule 1 points at) and an appendix that maps each tool
+    the two of them name onto the file edit that does the same job.  The board's own folder name is
+    substituted throughout, because the policy is written against `issues/`.
+    """
+    folder = board.root.name
+    rules = _in_this_board(_strip_html_comments(_package_text(POLICY_SOURCE)), folder)
+    skill = _in_this_board(_demote_headings(_without_frontmatter(_bundled_skill_text(DELIVER_SKILL))),
+                           folder)
+    what = _wrap("These are the rules Relay gives its own terminal-pane agents in their system "
+                 "prompt, written out for an agent working this project **without** Relay's "
+                 "`board_*` tools: Claude Code, Codex, or anyone reading the repository. They "
+                 "apply to you. The board is this project's record of what was asked and what was "
+                 "done, so work goes through a card.", indent="")
+    where = _wrap(f"The board is `{folder}/`: plain Markdown in git, one file per card, one "
+                  f"append-only thread per card under `{folder}/threads/`, and a generated index "
+                  f"in `{folder}/BOARD.md`. Below are the rules; then the procedure they point at; "
+                  "then an appendix that says how to make each `board_*` call by editing files, "
+                  "which is how you will make all of them.", indent="")
+    return f"""<!-- Generated by relay_core.board.policy_text (`relay-board.py policy`). Never hand-edited:
+     every Switchboard scaffold rewrites it from backend/relay_core/board_policy.md and the bundled
+     `deliver` skill, the way {folder}/BOARD.md is regenerated from the cards. Change those. -->
+# Switchboard policy — `{folder}/`
+
+{what}
+
+{where}
+
+## The rules
+
+{rules}
+
+{skill}
+
+{_appendix(board)}"""
+
+
+def pointer_text(board: "Board") -> str:
+    """The marked block that points an instruction file at `POLICY.md`."""
+    folder = board.root.name
+    return f"""{POINTER_START}
+## Switchboard (Relay)
+
+This project has a Relay Switchboard in `{folder}/`: its cards are the record of what was asked and
+what was done, in plain Markdown in git.
+
+**Before doing work, read `{folder}/POLICY.md`** and follow it: check whether the request is already
+done, find the card that asks for it or file one, claim it, plan on it if it needs a plan, do the
+work, then land it in needs-verification with its evidence. The policy is the same one Relay's own
+agents get in their system prompt; `{folder}/POLICY.md` also says how to do each of their `board_*`
+tool calls by editing files, which is what you have.
+
+<!-- Generated by Relay (relay_core.board.pointer_text): this block is replaced whenever the
+     Switchboard scaffold runs. Edit around it, not inside it. -->
+{POINTER_END}"""
+
+
+def _with_pointer(text: str, block: str) -> str | None:
+    """`text` with the pointer block appended or replaced in place.
+
+    None when the file is already right, and None when it holds half a block -- one marker without
+    the other is somebody's hand edit, and guessing which of their lines the block replaces is how
+    a generator eats a file.
+    """
+    start, end = text.find(POINTER_START), text.find(POINTER_END)
+    if start >= 0 and end > start:
+        new = text[:start] + block + text[end + len(POINTER_END):]
+    elif start >= 0 or end >= 0:
+        return None
+    else:
+        new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block + "\n"
+    return None if new == text else new
+
+
+def _new_agents_text(board: "Board", block: str) -> str:
+    """A project's first `AGENTS.md`: the pointer, over an import of what it must not shadow.
+
+    `instructions.py` loads the **first** hit per directory in `PROJECT_ORDER` (WARP.md,
+    AGENTS.override.md, AGENTS.md, CLAUDE.md, ...), so an `AGENTS.md` created beside a project's
+    `CLAUDE.md` would stop Relay's own agent reading that CLAUDE.md.  A CLAUDE-style `@path` import
+    on the first line is the fix: Relay resolves it (`instructions._imports`), and so do Claude Code
+    and Codex, so the project's instructions still reach every prompt.
+    """
+    imports = [name for name in ("CLAUDE.md", "CLAUDE.local.md") if (board.repo / name).is_file()]
+    lines = ["# Agent instructions", ""]
+    if imports:
+        lines += [f"@{name}" for name in imports]
+        lines += ["",
+                  "<!-- The import(s) above are this project's own instructions. They are imported"
+                  " rather than repeated because a tool that reads AGENTS.md instead of CLAUDE.md"
+                  " would otherwise miss them (Relay: relay_core.instructions.PROJECT_ORDER takes"
+                  " the first instruction file it finds per directory). -->", ""]
+    else:
+        lines += ["Instructions for any coding agent working in this project.", ""]
+    rules = sorted(p.name for p in (board.repo / ".claude" / "rules").glob("*.md")) \
+        if (board.repo / ".claude" / "rules").is_dir() else []
+    if rules:
+        lines += ["Also read " + ", ".join(f"`.claude/rules/{name}`" for name in rules) + ".", ""]
+    lines += [block, ""]
+    return "\n".join(lines)
+
+
+def pointer_files(board: "Board") -> list[tuple[str, str]]:
+    """The instruction files that need the pointer block, as (path, whole new content) pairs.
+
+    `CLAUDE.md` and `AGENTS.md` get the block when they exist, and `AGENTS.md` is created when it
+    does not -- a project with only a `CLAUDE.md` gets one too, because the owner's decision is
+    that both files point at the policy (#R9G7).  Nothing outside the markers is changed, and
+    `WARP.md` is never written (`POINTER_TARGETS`).
+    """
+    block = pointer_text(board)
+    out: list[tuple[str, str]] = []
+    for name in POINTER_TARGETS:
+        path = board.repo / name
+        if not path.is_file():
+            continue
+        try:
+            new = _with_pointer(path.read_text(encoding="utf-8"), block)
+        except (OSError, UnicodeDecodeError):              # pragma: no cover - unreadable file
+            continue
+        if new is not None:
+            out.append((str(path), new))
+    agents = board.repo / "AGENTS.md"
+    if not agents.exists():
+        out.append((str(agents), _new_agents_text(board, block)))
+    return out
+
+
+def policy_files(board: "Board") -> list[tuple[str, str]]:
+    """`POLICY.md` when it is missing or stale, plus the instruction files that need the pointer."""
+    out: list[tuple[str, str]] = []
+    path = board.root / POLICY_FILE
+    want = policy_text(board)
+    try:
+        current = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        current = None
+    if current != want:
+        out.append((str(path), want))
+    out.extend(pointer_files(board))
+    return out
+
+
+def write_policy(board: "Board") -> list[str]:
+    """Regenerate `POLICY.md` and the instruction-file pointers; the paths written, repo-relative."""
+    files = policy_files(board)
+    for target, text in files:
+        _atomic_write(Path(target), text)
+    return [_repo_relative(board, target) for target, _ in files]
+
+
+def _repo_relative(board: "Board", target: str) -> str:
+    try:
+        return str(Path(target).relative_to(board.repo))
+    except ValueError:                                     # pragma: no cover - outside the project
+        return target
+
+
 def scaffold_files(board: Board) -> list[tuple[str, str]]:
     """The files a new board needs beside its cards, as (path, content) pairs.
 
@@ -1958,6 +2398,12 @@ def scaffold_files(board: Board) -> list[tuple[str, str]]:
     names this board's own folder (`.switchboard/`, `switchboard/` or `issues/`), so a board gets
     the union-merge rule for the folder it actually has -- and keeps it when
     `rename_board_folder()` hides or shows that folder.
+
+    Then `POLICY.md` and the instruction-file pointers (`policy_files`), which are the only entries
+    here that are rewritten rather than merely created: both are generated, so a stale copy is a
+    missing one.  That is how a board gets the rules for the agents that have no `board_*` tools --
+    every new board, since `board_tools.create_board` scaffolds -- and how
+    `relay-board.py policy` refreshes an old one.
     """
     out: list[tuple[str, str]] = []
     if not board.config_path.exists():
@@ -1977,6 +2423,7 @@ def scaffold_files(board: Board) -> list[tuple[str, str]]:
         header = "# Card threads are append-only; a union merge keeps both sides' entries.\n"
         out.append((str(attributes), (existing.rstrip("\n") + "\n\n" if existing.strip() else "")
                     + header + line + "\n"))
+    out.extend(policy_files(board))
     return out
 
 

@@ -1635,8 +1635,11 @@ class InitTests(AttachTest):
         self.assertEqual(created[0]["root"], str(project / B.DEFAULT_BOARD_FOLDER))
         self.assertEqual(created[0]["workspace"], str(project))
         self.assertEqual(created[0]["project"], str(project))
+        # POLICY.md and AGENTS.md are the guest path's half of #R9G7: the rules as a file in the
+        # board, and the instruction file that points at them (`board.policy_files`).
         self.assertEqual(created[0]["files"], [".switchboard/board.yaml", ".switchboard/.gitignore",
-                                               ".switchboard/threads/.gitkeep", ".gitattributes"])
+                                               ".switchboard/threads/.gitkeep", ".gitattributes",
+                                               ".switchboard/POLICY.md", "AGENTS.md"])
         # The card the user typed is not lost: the parked write is replayed.
         written = self.of("board_written")
         self.assertEqual(written[0]["id"], "w1")
@@ -1727,7 +1730,7 @@ class InitTests(AttachTest):
         self.assertTrue(state["board"]["exists"])
         self.assertEqual(state["board"]["state"], "ready")
         self.assertEqual(sorted(p.name for p in (project / B.DEFAULT_BOARD_FOLDER).iterdir()),
-                         [".gitignore", "board.yaml", "survey-state.json", "threads"])
+                         [".gitignore", "POLICY.md", "board.yaml", "survey-state.json", "threads"])
         # A board created now owes the page agent's survey (19.18): the marker says "pending"
         # until the first `board_open` on it runs the survey turn.
         marker = project / B.DEFAULT_BOARD_FOLDER / "survey-state.json"
