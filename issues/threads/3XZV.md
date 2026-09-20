@@ -175,3 +175,6 @@ Execute · handed to a new terminal pane beside the Switchboard, whose agent wor
 
 <!-- relay:entry 20260920T031617Z-ye author=agent kind=progress model=glm-5.3 pane=6a4eefda turn=f4c62ab8e34947aebe8d463e3838fe67/f37d755e3c1e49af81f48729cf670477 -->
 Landed and moved to needs QA. Commit 4f5acd43 (34 files, Implemented-By: glm/glm-5.3) carries the worker, GUI, docs and this board's migration; board.py's statuses and `section` field are on main inside 81ff60f8, swept there by the #VKFV session's land while uncommitted. Three cards were left out of the migration on purpose — #EH98's word-wrap (already in a QA lane) and #BRD3/#8YQ9 (live-executing in another pane's worktree); their ready/in-progress → planned/executing rename rides their own sessions' lands. Evidence: docs/qa_evidence/2026-09-20-switchboard-sections/. Pre-existing and not mine: `bad_id BVL1` (the bevel-stylesheet card's id is not Crockford base32, referenced by two other cards) — filed separately.
+
+<!-- relay:entry 20260920T031656Z-b8 author=agent kind=event model=glm-5.3 pane=6a4eefda turn=f4c62ab8e34947aebe8d463e3838fe67/f37d755e3c1e49af81f48729cf670477 -->
+- ✦ agent updated this card · links: {"commits": ["4f5acd43"], "evidence": ["docs/qa_evidence/2026-09-20-switchboard-… → {"commits": ["4f5acd43", "d7aebe6f"], "evidence": ["docs/qa_evidence/2026-09-20-…

@@ -6,7 +6,7 @@ assignee: agent
 implemented_by: glm/glm-5.3
 rank: zzzzzzzzzzz
 created: '2026-09-19'
-links: {commits: [4f5acd43], evidence: [docs/qa_evidence/2026-09-20-switchboard-sections/], github: null, plans: [], related: []}
+links: {commits: [4f5acd43, d7aebe6f], evidence: [docs/qa_evidence/2026-09-20-switchboard-sections/], github: null, plans: [], related: []}
 ---
 # improve switchboard sections
 
