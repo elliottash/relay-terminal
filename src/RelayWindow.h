@@ -2053,6 +2053,10 @@ private:
             const QJsonObject preset = value.toObject();
             const QString id = str(preset, "id");
             if (id.isEmpty() || preset.value(QStringLiteral("local")).toBool()) continue;   // Options › Local models
+            // Relay Free is not a provider you set up (owner, 2026-09-20: "don't show relay free in
+            // the providers list"): it has no key, no login and nothing to test into. Its models
+            // still sit in the checklist and the priority list like any other.
+            if (preset.value(QStringLiteral("hosted")).toBool()) continue;
             const bool guest = id.startsWith(QStringLiteral("guest:"));
             const bool usable = preset.value(QStringLiteral("has_stored_key")).toBool()
                 || preset.value(QStringLiteral("custom")).toBool()
