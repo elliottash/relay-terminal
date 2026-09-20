@@ -1041,6 +1041,10 @@ void SessionManager::refresh() { requery(); }
 
 void SessionManager::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
+    // An ask row that does nothing is worse than no ask row, so the helper's panel is there only
+    // once the window has given it somewhere to send (the Ask row on the ⓘ view does the same with
+    // `onAskOwner`). By the time the pane is on screen the wiring has happened or it never will.
+    if (m_helper) m_helper->setVisible(bool(onHelperSend));
     // Opening the list must show the sessions without the user typing anything.
     requery();
 }

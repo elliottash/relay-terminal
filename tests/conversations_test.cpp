@@ -1298,6 +1298,7 @@ private slots:
 
         // One row, and the pane's own list is still the pane.
         auto *panel = manager.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
+        QVERIFY(panel && panel->isVisible());
         auto *ask = manager.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
         auto *body = manager.findChild<QWidget *>(QStringLiteral("boardChatBody"));
         QVERIFY(panel && ask && body);
@@ -1346,6 +1347,14 @@ private slots:
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         QVERIFY(tree && tree->currentItem());
         QCOMPARE(tree->currentItem()->text(0), QStringLiteral("Voice work"));
+
+        // A pane whose window never wired the helper shows no ask row at all: a row that sends
+        // nowhere is worse than no row.
+        SessionManager unwired;
+        unwired.onQuery = [](const QJsonObject &) {};
+        unwired.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&unwired));
+        QVERIFY(!unwired.findChild<QWidget *>(QStringLiteral("boardChatPanel"))->isVisible());
     }
 };
 
