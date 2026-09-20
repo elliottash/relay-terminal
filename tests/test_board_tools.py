@@ -104,7 +104,10 @@ class SpecTests(unittest.TestCase):
         # `needs-qa-llm` left rule 5 with the owner's decision of 2026-09-20 (any pane may close
         # a card once the verdict is on it): the policy now names the lane the implementer lands
         # in and calls the rest "a QA lane".
-        for phrase in ("verbatim", "board_rate_limited", "needs-verification", "discussing"):
+        # `board_claim` and the `deliver` skill are rules 1 and 5 since v2 (#R9G7): the policy is
+        # the only place a pane agent is told that work goes through a card it holds.
+        for phrase in ("verbatim", "board_rate_limited", "needs-verification", "discussing",
+                       "board_claim", "deliver"):
             self.assertIn(phrase, text)
 
     def test_model_family_tells_providers_apart(self):
